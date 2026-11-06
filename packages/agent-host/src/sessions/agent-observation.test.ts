@@ -102,7 +102,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
       const { owner, observer, child } = await start()
       const controller = new AbortController()
       const waiting = w.mgr.agentSession(observer, { sessionId: child, action: 'wait' }, controller.signal)
-      if (cancel === 'stop caller') w.mgr.interrupt(observer)
+      if (cancel === 'stop caller') w.mgr.inputs.interrupt(observer)
       controller.abort()
       expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
       expect(handle(child).interrupted).toBe(0)
@@ -157,7 +157,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
   it("an observation does not turn the normal owner's background child into an owned wait", async () => {
     const { owner, observer, child } = await start()
     const observation = w.mgr.agentSession(observer, { sessionId: child, action: 'wait' })
-    w.mgr.interrupt(owner)
+    w.mgr.inputs.interrupt(owner)
     expect(handle(child).interrupted).toBe(0)
     handle(child).answer('background child finished')
     expect(await observation).toMatchObject({ ok: true, state: 'done' })

@@ -30,8 +30,8 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
     const orc = await mgr.orchestrator()
     // The names it saw: a user-folder app (still given) and a project's root app (given before #1205)
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ '_user/timer': 'app-timer', 'p1/board': 'app-board' }))
-    await mgr.send(orc.id, 'what is on the board?')
-    await mgr.send(orc.id, 'and now?')
+    await mgr.inputs.send(orc.id, 'what is on the board?')
+    await mgr.inputs.send(orc.id, 'and now?')
     const sent = adapter.handleOf(orc.id)!.sent
     expect(sent[0]).toBe(`${LINE}\n\nwhat is on the board?`)
     expect(sent[1]).toBe('and now?')
@@ -63,10 +63,10 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
   it('is not said to an orchestrator that had only user-folder apps, nor later when it attaches a root app itself', async () => {
     const orc = await mgr.orchestrator()
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ '_user/timer': 'app-timer' }))
-    await mgr.send(orc.id, 'hello')
+    await mgr.inputs.send(orc.id, 'hello')
     // It attaches a root app with attach_app, which writes its name in the book: that is not a root app it lost
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ '_user/timer': 'app-timer', 'p1/board': 'app-board' }))
-    await mgr.send(orc.id, 'again')
+    await mgr.inputs.send(orc.id, 'again')
     expect(adapter.handleOf(orc.id)!.sent).toEqual(['hello', 'again'])
   })
 
@@ -77,7 +77,7 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
     const { id: projectId } = (await rpc('projects.add', { path: cwd })) as { id: string }
     const worker = (await rpc('agents.createSession', { projectId, cwd, tool: 'claude' })) as SessionInfo
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${worker.id}`, JSON.stringify({ 'p2/board': 'app-board' }))
-    await mgr.send(worker.id, 'hi')
+    await mgr.inputs.send(worker.id, 'hi')
     expect(adapter.handleOf(worker.id)!.sent).toEqual(['hi'])
   })
 })

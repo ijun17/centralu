@@ -75,7 +75,7 @@ describe('a script starts a session with a first message', () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.answer('Exported 12 files')
     await w.until(() => settledOf(s.id) === 'reported')
-    await w.mgr.send(s.id, 'and the second one')
+    await w.mgr.inputs.send(s.id, 'and the second one')
     handleOf(s.id)!.answer('Done too')
     await new Promise((r) => setTimeout(r, 30))
     expect(reportsOf(s.id)).toHaveLength(1)
@@ -133,7 +133,7 @@ describe('a script starts a session with a first message', () => {
   it('a turn the person starts while the task is still open is theirs, not the work’s: nothing is reported', async () => {
     const s = await start({}, 'limited')
     personTask(s.id)
-    await w.mgr.send(s.id, 'what is the state?')
+    await w.mgr.inputs.send(s.id, 'what is the state?')
     handleOf(s.id)!.answer('Still going')
     await new Promise((r) => setTimeout(r, 30))
     expect(reportsOf(s.id)).toEqual([])
@@ -143,7 +143,7 @@ describe('a script starts a session with a first message', () => {
   it('a message sent into the first turn joins it: the turn is still the work’s, and reported', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     // The first turn is still going when the person writes into it: it joins that turn
-    await w.mgr.send(s.id, 'also use the new folder')
+    await w.mgr.inputs.send(s.id, 'also use the new folder')
     handleOf(s.id)!.answer('Exported 12 files')
     await w.until(() => reportsOf(s.id).length > 0)
     expect(settledOf(s.id)).toBe('reported')
@@ -240,9 +240,9 @@ describe('a script that sends later is the script too (3.8b)', () => {
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
-    expect(w.mgr.reportOwed(child)).not.toBeNull()
+    expect(w.mgr.inputs.reportOwed(child)).not.toBeNull()
     await send(child, { intent: 'takeover' }, 'limited')
-    expect(w.mgr.reportOwed(child)).not.toBeNull()
+    expect(w.mgr.inputs.reportOwed(child)).not.toBeNull()
   })
 })
 
@@ -261,7 +261,7 @@ describe('what is not a script’s work', () => {
   it('a script’s session with no first message has no work to report: nothing is written down', async () => {
     const s = await start({}, 'limited')
     expect(taskOf(s.id)).toBeUndefined()
-    await w.mgr.send(s.id, 'now a message')
+    await w.mgr.inputs.send(s.id, 'now a message')
     handleOf(s.id)!.answer('ok')
     await new Promise((r) => setTimeout(r, 30))
     expect(personTasks()).toEqual([])

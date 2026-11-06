@@ -75,7 +75,7 @@ describe('new work sent by mail after the first was reported', () => {
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: more.id })
-    expect(w.mgr.reportOwed(helper)?.callerId).toBe(owner)
+    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(owner)
 
     await turnEnds(helper, 'two files written')
     await w.until(() => outcomes(more.id).length === 1)
@@ -98,13 +98,13 @@ describe('new work sent by mail after the first was reported', () => {
     m.service.send(addr(bystander), { to: [addr(helper)], text: 'just an aside' })
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
-    expect(w.mgr.reportOwed(helper)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: null })
     expect(outcomes(taskOf(owner, helper).id)).toEqual(['finished'])
   })
 
   it('a parent whose child sent more by mail is told waiting while that task is owed, and finished at the real end', async () => {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const a = await w.callerSession()
     const b = await startAgent(a, 'build X')
@@ -128,7 +128,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(c, 'Z done')
     await w.until(() => outcomes(z.id).length === 1)
     expect(read.taskRow(z.id, c)).toMatchObject({ settled: 'reported' })
-    expect(w.mgr.reportOwed(c)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(c)).toBeNull()
     expect(read.taskRow(x.id, b)).toMatchObject({ settled: null })
     handleOf(b).acceptsAtOnce = true
     await due(b)
@@ -146,7 +146,7 @@ describe('new work sent by mail after the first was reported', () => {
     handleOf(helper).sendTracked = (): Promise<void> => Promise.reject(new Error('the tool failed'))
     const more = mailTask(owner, helper, 'Now write TWO files')
     await due(helper)
-    expect(w.mgr.reportOwed(helper)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
     expect(outcomes(more.id)).toEqual([])
     expect(read.taskRow(more.id, helper)).toMatchObject({ settled: null })
   })
@@ -162,7 +162,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(helper, 'server started')
     const forA = taskOf(a, helper)
     await w.until(() => outcomes(forA.id).includes('paused'))
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
     const earlier = m.service.task(addr(b), addr(helper), { text: 'write the docs', origin: 'send_to_session', delivered: true })
     m.service.report(earlier.id, { outcome: 'finished', body: '[Centralu] The session ended its turn.' })
     return { a, b, helper, forA }
@@ -184,8 +184,8 @@ describe('new work sent by mail after the first was reported', () => {
     expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'reported' })
     expect(outcomes(forA.id)).toEqual(['paused'])
     expect(read.taskRow(forA.id, helper)).toMatchObject({ settled: null })
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
-    expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(a)
   })
 
   it('A’s paused work ending during B’s turn is settled when that turn ends: nothing else would start its timer (#1474)', async () => {
@@ -212,7 +212,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(helper, 'stopped')
     await new Promise((r) => setTimeout(r, 30))
     expect(outcomes(forA.id)).toEqual(['paused'])
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
     expect(outcomes(forB.id)).toEqual([])
     expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'withdrawn' })
     expect(handleOf(b).sent.filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
@@ -235,8 +235,8 @@ describe('the person closing a chain whose work is going, over the real manager 
         const turn = s && inTurn(s.state) ? m.turns.current(id) : undefined
         return turn && { work: turn.messageId ?? turn.starter }
       },
-      tellsNow: (id) => w.mgr.tellsMailNow(id),
-      tell: (id, text) => w.mgr.tellMailNow(id, text),
+      tellsNow: (id) => w.mgr.mail.tellsMailNow(id),
+      tell: (id, text) => w.mgr.mail.tellMailNow(id, text),
     })
   /** A session at work on the person's task, which the mailbox delivered and started its turn with */
   async function working() {
@@ -273,7 +273,7 @@ describe('the person closing a chain whose work is going, over the real manager 
     const { helper, task } = await working()
     // Codex starts a turn for any input
     Object.defineProperty(w.adapters.get('claude')!, 'quietInput', { value: false })
-    expect(w.mgr.tellsMailNow(helper)).toBe(false)
+    expect(w.mgr.mail.tellsMailNow(helper)).toBe(false)
     personOf().close(task.id, 'dropped')
     await new Promise((r) => setTimeout(r, 30))
     expect(handleOf(helper).quiet).toEqual([])

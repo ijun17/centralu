@@ -149,7 +149,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     const s = await session()
     await startRunning(s, 'a job')
     const tools = handleOf(s)!.opts.orchestratorTools!
-    w.mgr.setUiPreferences({ sessionTools: false })
+    w.mgr.prefs.setUiPreferences({ sessionTools: false })
     const r = await runOrchestratorTool(tools, 'agent_session', { action: 'list' }, { sessionId: s, profile: 'reader' })
     expect(r.isError).toBeFalsy()
     expect(r.text).not.toContain('Turned off in Settings')

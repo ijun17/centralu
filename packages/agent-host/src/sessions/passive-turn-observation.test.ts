@@ -27,7 +27,7 @@ describe("observing a person's turn never owns it", () => {
       tool: 'claude',
       permissionPreset: 'normal',
     })
-    await w.mgr.send(target.id, 'the person starts work')
+    await w.mgr.inputs.send(target.id, 'the person starts work')
     return { observer: observer.id, target: target.id }
   }
 
@@ -38,11 +38,11 @@ describe("observing a person's turn never owns it", () => {
       const result = w.mgr.agentSession(observer, { sessionId: target, action })
       if (action === 'status')
         expect(await result).toMatchObject({ ok: true, state: 'working', reported: false })
-      w.mgr.interrupt(observer)
+      w.mgr.inputs.interrupt(observer)
       expect(handle(target).interrupted).toBe(0)
       expect(w.mgr.listSessions().find((s) => s.id === target)?.state).toBe('working')
-      expect(w.mgr.waitsOn(observer)).toEqual([])
-      expect(await w.mgr.sleepSession(observer)).toBe(true)
+      expect(w.mgr.processes.waitsOn(observer)).toEqual([])
+      expect(await w.mgr.processes.sleepSession(observer)).toBe(true)
       handle(target).answer("the person's answer")
       if (action === 'wait')
         expect(await result).toMatchObject({
@@ -61,8 +61,8 @@ describe("observing a person's turn never owns it", () => {
     controller.abort()
     expect(await result).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
     expect(handle(target).interrupted).toBe(0)
-    expect(w.mgr.waitsOn(observer)).toEqual([])
-    expect(await w.mgr.sleepSession(observer)).toBe(true)
+    expect(w.mgr.processes.waitsOn(observer)).toEqual([])
+    expect(await w.mgr.processes.sleepSession(observer)).toBe(true)
     handle(target).answer('still finished')
     expect(w.mgr.listSessions().find((s) => s.id === target)?.state).toBe('waiting_input')
   })
@@ -74,8 +74,8 @@ describe("observing a person's turn never owns it", () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await result).toMatchObject({ ok: true, state: 'working', reported: false })
     vi.useRealTimers()
-    expect(w.mgr.waitsOn(observer)).toEqual([])
-    expect(await w.mgr.sleepSession(observer)).toBe(true)
+    expect(w.mgr.processes.waitsOn(observer)).toEqual([])
+    expect(await w.mgr.processes.sleepSession(observer)).toBe(true)
     expect(handle(target).interrupted).toBe(0)
     handle(target).answer('later answer')
     expect(handle(observer).sent).toEqual([])
@@ -97,7 +97,7 @@ describe("observing a person's turn never owns it", () => {
     expect(handle(target).interrupted).toBe(0)
     handle(target).answer("both readers' answer")
     expect(await retained).toMatchObject({ ok: true, state: 'done', answer: "both readers' answer" })
-    expect(w.mgr.waitsOn(other.id)).toEqual([])
+    expect(w.mgr.processes.waitsOn(other.id)).toEqual([])
   })
 
   it('captures the observed answer before a subscriber starts an unrelated turn', async () => {
@@ -112,9 +112,9 @@ describe("observing a person's turn never owns it", () => {
   it("deleting the observed session ends its reader without stopping the reader's session", async () => {
     const { observer, target } = await setup()
     const waiting = w.mgr.agentSession(observer, { sessionId: target, action: 'wait' })
-    await w.mgr.trashSession(target)
+    await w.mgr.trash.trashSession(target)
     expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('deleted') })
     expect(handle(observer).interrupted).toBe(0)
-    expect(w.mgr.waitsOn(observer)).toEqual([])
+    expect(w.mgr.processes.waitsOn(observer)).toEqual([])
   })
 })

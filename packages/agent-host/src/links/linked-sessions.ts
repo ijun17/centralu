@@ -18,7 +18,7 @@ const notRouted: RpcHandler = async (method) => {
  * The linked machines' sessions as the hub's orchestrator reads them (#82 phase 4, docs/plans/remote-hub.md §12).
  *
  * Each machine answers for its own sessions with the orchestrator's own code (`host.sessions`, `host.readSession`,
- * `host.recall`, the manager's `hostReader`), so a row, a conversation and a hit read the same from any machine. This
+ * `host.recall`, `LinkedHost.hostReader`), so a row, a conversation and a hit read the same from any machine. This
  * side asks every machine at once, qualifies what comes back, and names the machine on it.
  *
  * **What a machine says is fenced here, not trusted.** The orchestrator acts on this host, and a machine is the side

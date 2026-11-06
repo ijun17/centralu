@@ -142,7 +142,7 @@ describe('cards in a delegated turn (#676)', () => {
     cards.ask('q-1')
     await w.until(() => notices(parent, child).length === 1)
     const shown = await handleIn(parent, child, 'q-1')
-    w.mgr.answerQuestion(child, 'q-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
+    w.mgr.inputs.answerQuestion(child, 'q-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
     const late = await w.mgr.agentSession(parent, { sessionId: child, action: 'answer', card: shown, text: 'SQLite' })
     expect(late).toMatchObject({ ok: false, error: expect.stringContaining('no longer stands') })
     expect(cards.answered).toEqual([{ requestId: 'q-1', answers: [{ question: QUESTION.question, answers: ['Postgres'] }] }])
@@ -185,7 +185,7 @@ describe('cards in a delegated turn (#676)', () => {
     const { parent, child, cards } = await parentAndChild()
     handleOf(child).answer('schema written')
     await w.until(() => notices(parent, child).length === 1)
-    await w.mgr.send(child, 'now also add an index')
+    await w.mgr.inputs.send(child, 'now also add an index')
     cards.ask('q-person')
     await new Promise((r) => setTimeout(r, 30))
     expect(notices(parent, child)).toHaveLength(1)
@@ -233,7 +233,7 @@ describe('cards in a delegated turn (#676)', () => {
     const orch = await w.mgr.orchestrator()
     const worker = await session()
     const cards = answering(handleOf(worker))
-    await w.mgr.send(worker, 'the person\'s own work')
+    await w.mgr.inputs.send(worker, 'the person\'s own work')
     const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): import('../adapters/contract.js').OrchestratorTools }).orchestratorToolsFor(orch.id)
     await tools.sendToSession(worker, 'also this', false)
     cards.ask('q-p')
@@ -338,7 +338,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const cards = answering(handleOf(target))
-      await w.mgr.send(target, "the person's own work")
+      await w.mgr.inputs.send(target, "the person's own work")
       let settled = false
       void w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this', ifBusy: 'note' }).then(() => { settled = true })
       await w.until(() => handleOf(target).sent.length === 2)
@@ -365,7 +365,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       handleOf(child).answer('first done')
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       const before = toldOf(parent, child).length
-      await w.mgr.send(child, "the person's own work")
+      await w.mgr.inputs.send(child, "the person's own work")
       expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'a note' })).toMatchObject({ ok: true })
       const cards = answering(handleOf(child))
       cards.approval('a-person')
@@ -392,7 +392,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       cards.ask('req-1')
       await w.until(() => toldOf(parent, child).length === 1)
       const read = (await cardsOf(parent, child))[0]!.card
-      w.mgr.answerQuestion(child, 'req-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
+      w.mgr.inputs.answerQuestion(child, 'req-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
       // A new process asks something else under the same id
       cards.ask('req-1', [OTHER])
       await w.until(() => toldOf(parent, child).length === 2)
@@ -410,7 +410,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       cards.ask('req-1')
       await w.until(() => toldOf(parent, child).length === 1)
       const read = (await cardsOf(parent, child))[0]!.card
-      w.mgr.answerQuestion(child, 'req-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
+      w.mgr.inputs.answerQuestion(child, 'req-1', [{ question: QUESTION.question, answers: ['Postgres'] }])
       handleOf(child).answer('schema written')
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       const next = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the index' })

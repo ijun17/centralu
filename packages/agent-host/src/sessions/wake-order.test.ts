@@ -34,7 +34,7 @@ describe('a send while the session wakes (#839)', () => {
     const { t, held } = await asleep()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     // The screen wakes it with nothing to send
-    const waking = w.mgr.resumeSession(t)
+    const waking = w.mgr.processes.resumeSession(t)
     for (let i = 0; i < 50 && !held.reading; i++) await vi.advanceTimersByTimeAsync(0)
     expect(held.reading).toBe(true)
     // The wake stops waiting for it
@@ -53,9 +53,9 @@ describe('a send while the session wakes (#839)', () => {
 
   it('goes in after the message that woke it, in the order they were sent', async () => {
     const { t, held } = await asleep()
-    const first = w.mgr.send(t, 'first')
+    const first = w.mgr.inputs.send(t, 'first')
     await w.until(() => held.reading)
-    const second = w.mgr.send(t, 'second')
+    const second = w.mgr.inputs.send(t, 'second')
     // Everything the second send does before it waits runs within these turns of the loop
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
     held.release([])

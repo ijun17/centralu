@@ -113,7 +113,7 @@ describe.skipIf(keeperless)('a session put to sleep under the keeper (#568)', ()
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     await until(() => keeper!.alive('c1'))
 
-    expect(await a.mgr.sleepSession(s.id)).toBe(true)
+    expect(await a.mgr.processes.sleepSession(s.id)).toBe(true)
     // Ended through the keeper, not let go of: stdin closed, signalled, gone
     await until(() => !keeper!.alive('c1'))
     expect(keeper!.ops('close_stdin').some((r) => r.id === 'c1')).toBe(true)
@@ -128,7 +128,7 @@ describe.skipIf(keeperless)('a session put to sleep under the keeper (#568)', ()
     expect(keeper!.ops('spawn')).toHaveLength(1)
 
     // A message wakes it there: a new child, resuming the same conversation
-    await b.mgr.send(s.id, 'still there?')
+    await b.mgr.inputs.send(s.id, 'still there?')
     await until(() => keeper!.ops('spawn').length === 2)
     await until(() => keeper!.alive('c2'))
     expect(adapter.created.at(-1)!.opts.resumeExternalId).toBe('ext-1')

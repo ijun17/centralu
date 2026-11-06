@@ -163,7 +163,7 @@ describe('worktree sessions', () => {
     a.toolHistory = [{ role: 'user', text: 'something said in the worktree terminal' }]
     const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
     restarted.prLookup = async () => null
-    await restarted.resumeSession(s.id)
+    await restarted.processes.resumeSession(s.id)
 
     const texts = store.messages.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
     expect(texts).toContain('something said in the worktree terminal')
@@ -254,7 +254,7 @@ describe('worktree sessions', () => {
   it('leaves no worktree or branch behind when a step before the tool starts throws (#774)', async () => {
     const branches = () =>
       execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
-    const sink = vi.spyOn(wtMgr as unknown as { handleSink: () => unknown }, 'handleSink').mockImplementation(() => {
+    const sink = vi.spyOn(wtMgr.processes, 'handleSink').mockImplementation(() => {
       throw new Error('no sink')
     })
     try {
@@ -347,12 +347,12 @@ describe('worktree sessions', () => {
     const isolated = await create(true)
     expect(isolated.parentSessionId).toBeNull()
     expect(wtMgr.listSessions().map((x) => x.name)).not.toContain('Worktree manager')
-    expect(wtMgr.toolProfileOf(isolated.id)).toBe('reader')
+    expect(wtMgr.tools.toolProfileOf(isolated.id)).toBe('reader')
     const parent = await create(false)
     const child = await wtMgr.createSession({ projectId: project.id, cwd: repo, tool: 'claude', permissionPreset: 'normal', worktree: true, askedBy: parent.id })
     expect(child.parentSessionId).toBe(parent.id)
     // Having a worktree child no longer turns a session into anything else
-    expect(wtMgr.toolProfileOf(parent.id)).toBe('reader')
+    expect(wtMgr.tools.toolProfileOf(parent.id)).toBe('reader')
   })
 
   it('choosing a branch name makes it both the branch name and the session name (#69)', async () => {
@@ -1027,8 +1027,8 @@ describe('worktree sessions', () => {
       const deletion = remove(s, managerId)
       await waiting
       expect(existsSync(s.worktree!.path)).toBe(true)
-      await expect(wtMgr.send(s.id, 'keep working')).rejects.toThrow('being removed')
-      await expect(wtMgr.resumeSession(s.id)).rejects.toThrow('being removed')
+      await expect(wtMgr.inputs.send(s.id, 'keep working')).rejects.toThrow('being removed')
+      await expect(wtMgr.processes.resumeSession(s.id)).rejects.toThrow('being removed')
       release()
       expect((await deletion).isError).not.toBe(true)
     })
@@ -1108,7 +1108,7 @@ describe('worktree sessions', () => {
       expect(existsSync(s.worktree!.path)).toBe(true)
       expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(true)
-      await wtMgr.trashSession(helper.id)
+      await wtMgr.trash.trashSession(helper.id)
       expect((await remove(s, managerId)).isError).not.toBe(true)
       expect(existsSync(s.worktree!.path)).toBe(false)
     })
@@ -1126,7 +1126,7 @@ describe('worktree sessions', () => {
         expect(r.text).toContain('"helper" is still in the worktree')
         expect(existsSync(s.worktree!.path)).toBe(true)
         expect(store.trash.isTrashed(s.id)).toBe(false)
-        await next.trashSession(helper.id)
+        await next.trash.trashSession(helper.id)
         expect((await next.runOrchestratorTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })).isError).not.toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(false)
       } finally {
@@ -1139,7 +1139,7 @@ describe('worktree sessions', () => {
       writeFileSync(join(s.worktree!.path, 'wip'), 'local\n')
       const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
       wtMgr.rename(helper.id, 'helper')
-      await wtMgr.trashSession(helper.id)
+      await wtMgr.trash.trashSession(helper.id)
       const recoveryModule = await import('../dev-services/worktree-recovery.js')
       const save = recoveryModule.saveWorktreeRecovery
       let release!: () => void
@@ -1151,7 +1151,7 @@ describe('worktree sessions', () => {
       const agent = remove(s, managerId)
       await vi.waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
       await wtMgr.trash.restoreSession(helper.id)
-      await expect(wtMgr.send(helper.id, 'wake up in the folder')).rejects.toThrow('worktree is being removed')
+      await expect(wtMgr.inputs.send(helper.id, 'wake up in the folder')).rejects.toThrow('worktree is being removed')
       expect(wtMgr.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
       release()
       const r = await agent
@@ -1179,9 +1179,9 @@ describe('worktree sessions', () => {
       const { s, managerId } = await makeChild('feat/occupant-after-trash')
       const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
       wtMgr.rename(helper.id, 'helper')
-      await wtMgr.trashSession(helper.id)
-      const trash = wtMgr.trashSession.bind(wtMgr)
-      vi.spyOn(wtMgr, 'trashSession').mockImplementationOnce(async (...args) => {
+      await wtMgr.trash.trashSession(helper.id)
+      const trash = wtMgr.trash.trashSession.bind(wtMgr.trash)
+      vi.spyOn(wtMgr.trash, 'trashSession').mockImplementationOnce(async (...args) => {
         await trash(...args)
         await wtMgr.trash.restoreSession(helper.id)
       })
@@ -1281,7 +1281,7 @@ describe('worktree sessions', () => {
       let release!: () => void
       const gate = new Promise<void>((resolve) => { release = resolve })
       const dispose = vi.spyOn(adapter.handleOf(s.id)!, 'dispose').mockImplementation(() => gate)
-      const sidebar = wtMgr.trashSession(s.id)
+      const sidebar = wtMgr.trash.trashSession(s.id)
       await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
       const agent = remove(s, managerId)
       release()
@@ -1571,7 +1571,7 @@ describe('worktree sessions', () => {
       projectId: project.id, cwd: repo, tool: 'claude', permissionPreset: 'normal', worktree: true, worktreeBranch: 'feat/pin', askedBy: parent.id,
     })
     writeFileSync(join(worked.worktree!.path, 'w.txt'), 'x\n')
-    await expect(wtMgr.trashSession(parent.id)).resolves.toBeUndefined()
+    await expect(wtMgr.trash.trashSession(parent.id)).resolves.toBeUndefined()
     const left = wtMgr.listSessions().find((x) => x.id === worked.id)!
     expect(left.askedBy).toBe(parent.id)
     expect(existsSync(join(worked.worktree!.path, 'w.txt'))).toBe(true)
@@ -1726,7 +1726,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     store.sessions.upsertSession(wtRow('other', p.id, { worktree: null }))
     const m2 = boot()
 
-    expect(m2.toolProfileOf('old-mgr')).toBe('reader')
+    expect(m2.tools.toolProfileOf('old-mgr')).toBe('reader')
     // Its name stays what it was; nothing renames it now
     expect(m2.listSessions().find((s) => s.id === 'old-mgr')?.name).toBe('Worktree manager')
     // It reaches its child through agent_session, and nobody else's
@@ -1739,9 +1739,9 @@ describe('after the worktree manager (#561 part 3)', () => {
     await expect(m2.runOrchestratorTool('old-mgr', 'propose_worktree_session', { branch: 'feat/x' })).rejects.toThrow(/Not a tool of this session/)
     await expect(m2.runOrchestratorTool('old-mgr', 'send_to_session', { sessionId: 'wt-a', text: 'x' })).rejects.toThrow(/Not a tool of this session/)
     // The trunk its slot held is still the project's
-    expect((await m2.listProjects()).find((x) => x.id === p.id)?.worktreeManager?.baseBranch).toBe('main')
+    expect((await m2.projectRegistry.listProjects()).find((x) => x.id === p.id)?.worktreeManager?.baseBranch).toBe('main')
 
-    await expect(m2.trashSession('old-mgr')).resolves.toBeUndefined()
+    await expect(m2.trash.trashSession('old-mgr')).resolves.toBeUndefined()
     expect(m2.listSessions().some((s) => s.id === 'wt-a')).toBe(true)
   })
 
@@ -1752,15 +1752,15 @@ describe('after the worktree manager (#561 part 3)', () => {
     store.sessions.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
     store.sessions.upsertSession(wtRow('stranger', p.id, { worktree: null }))
     const m2 = boot()
-    expect(m2.waitsOn('old-mgr')).toEqual([])
-    await m2.send('wt-a', 'keep going')
+    expect(m2.processes.waitsOn('old-mgr')).toEqual([])
+    await m2.inputs.send('wt-a', 'keep going')
     await new Promise((res) => setTimeout(res, 0))
-    expect(m2.waitsOn('old-mgr')).toEqual(['wt-a'])
+    expect(m2.processes.waitsOn('old-mgr')).toEqual(['wt-a'])
     // Owning is askedBy, not being in the same project
-    expect(m2.waitsOn('stranger')).toEqual([])
+    expect(m2.processes.waitsOn('stranger')).toEqual([])
     adapter.handleOf('wt-a')!.finishTurn()
     await new Promise((res) => setTimeout(res, 0))
-    expect(m2.waitsOn('old-mgr')).toEqual([])
+    expect(m2.processes.waitsOn('old-mgr')).toEqual([])
   })
 
   it('a directive and attachment the orchestrator sends to an ordinary session arrive intact in the adapter turn', async () => {
@@ -1768,7 +1768,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     store.sessions.upsertSession(wtRow('worker', p.id, { worktree: null }))
     const m2 = boot()
     const orc = await m2.orchestrator()
-    expect(m2.toolProfileOf('worker')).toBe('reader')
+    expect(m2.tools.toolProfileOf('worker')).toBe('reader')
 
     const directive = 'REVIEW_DIRECTIVE\nKeep the review order unchanged.'
     const result = await m2.runOrchestratorTool(orc.id, 'send_to_session', { sessionId: 'worker', text: directive })
@@ -1781,7 +1781,7 @@ describe('after the worktree manager (#561 part 3)', () => {
       { kind: 'file', path: 'docs/review.md', name: 'review.md' },
       { kind: 'file', path: 'docs/review notes.md', name: 'review notes.md' },
     ]
-    await m2.send('worker', directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
+    await m2.inputs.send('worker', directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
 
     expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/review.md\n@docs/review notes.md`)
   })

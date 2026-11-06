@@ -60,7 +60,7 @@ describe('a session another machine starts, at the depth it gives (#1038)', () =
     const child = (await rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal', agentDepth: 1 })) as { id: string }
     expect(store.settings.appSetting(`agent_depth:${child.id}`)).toBe('1')
     // The default setting lets only the person's own sessions start agents
-    const host = { meta: new Map(mgr.listSessions().map((s) => [s.id, s])), children: { delegations: new Map() }, uiPreferences: () => mgr.uiPreferences(), store }
+    const host = { meta: new Map(mgr.listSessions().map((s) => [s.id, s])), children: { delegations: new Map() }, uiPreferences: () => mgr.prefs.uiPreferences(), store }
     expect(agentDepthRefusal(host, child.id, 'start agents')).toContain('1 level below')
     // One the person makes there has none
     const own = (await rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })) as { id: string }
@@ -115,7 +115,7 @@ describe('a session a linked computer starts, under the preset it carries (#1273
   it('takes the switch from the hub, and answers it as it now reads', async () => {
     expect(await rpc('host.setHubAuto', { allowed: false })).toEqual({ allowed: false })
     expect(await rpc('host.hubAuto', {})).toEqual({ allowed: false })
-    expect(mgr.uiPreferences().hubAuto).toBe(false)
+    expect(mgr.prefs.uiPreferences().hubAuto).toBe(false)
     expect(await rpc('host.setHubAuto', { allowed: true })).toEqual({ allowed: true })
     expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })).toMatchObject({ permissionPreset: 'auto' })
   })

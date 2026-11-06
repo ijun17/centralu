@@ -39,7 +39,7 @@ async function host() {
   })
   const dir = mkdtempSync(join(tmpdir(), 'cc-settings-events-'))
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
-  const project = await mgr.addProject(dir)
+  const project = await mgr.projectCreation.addProject(dir)
   return { port, project }
 }
 

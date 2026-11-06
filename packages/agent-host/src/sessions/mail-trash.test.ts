@@ -77,7 +77,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
   it('a mailbox that fails does not undo the move to the trash, and says so', async () => {
     const worker = await create()
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
-    world.mgr.useMail({
+    world.mgr.mail.useMail({
       sessionGone: () => {
         throw new Error('disk full')
       },
@@ -174,7 +174,7 @@ describe('archiving a session that looks idle', () => {
   it('asks when the mailbox cannot be read, since what it holds there is not known', async () => {
     const worker = await create()
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
-    world.mgr.useMail({
+    world.mgr.mail.useMail({
       sessionGone: () => {},
       openWork: () => {
         throw new Error('database is locked')

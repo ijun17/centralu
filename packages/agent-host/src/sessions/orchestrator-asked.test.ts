@@ -172,7 +172,7 @@ describe('in the turn a request starts, every step that changes something asks t
     expect(card()!.text).toBe(
       `Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run delete_session {"sessionId":"${other.id}"}. It is the session's request, not yours.`,
     )
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toContain('the person did not allow it')
@@ -183,14 +183,14 @@ describe('in the turn a request starts, every step that changes something asks t
     const { other, third } = await asked()
     const first = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'always')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'always')
     expect((await first).isError).toBeFalsy()
     expect(nameOf(other.id)).toBeUndefined()
 
     const second = run('delete_session', { sessionId: third.id })
     await eventually(() => !!card())
     expect(nameOf(third.id)).toBe(third.name)
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'allow')
     await second
     expect(nameOf(third.id)).toBeUndefined()
   })
@@ -203,7 +203,7 @@ describe('in the turn a request starts, every step that changes something asks t
     await eventually(() => !!ownCard())
     expect(card()).toBeUndefined()
     expect(recordsIn(asker)).toEqual([])
-    w.mgr.respondApproval(orc.id, ownCard()!.requestId, 'allow')
+    w.mgr.inputs.respondApproval(orc.id, ownCard()!.requestId, 'allow')
     expect((await call).isError).toBeFalsy()
     expect(((await w.rpc('projects.list', {})) as ProjectInfo[]).find((p) => p.id === wild.id)?.trusted).toBe(true)
     expect(acme.trusted).toBe(true)
@@ -242,12 +242,12 @@ describe('in the turn a request starts, every step that changes something asks t
     const call = tool('send_to_session', { sessionId: other.id, text: 'look at the login page' })
     await eventually(() => !!card())
     expect(card()!.text).toContain('asked the orchestrator to run send_to_session')
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     // And a new session named `auto` there (this `auto` seat may), looser than `safe`; its default would be held to `safe`
     const made = tool('create_session', { project: acme.id, preset: 'auto', firstMessage: 'start on it' })
     await eventually(() => !!card())
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await made).isError).toBe(true)
     // To a session as strict as the asking one, which it could have given that work itself: no request card
     const peer = (await w.rpc('agents.createSession', { projectId: acme.id, cwd: acme.path, tool: 'claude', permissionPreset: 'safe' })) as SessionInfo
@@ -349,12 +349,12 @@ describe('the CLI’s own steps in a request’s turn (§9.7)', () => {
     expect(card()!.text).toBe(
       `Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run Bash {"command":"echo pwned > file"}. It is the session's request, not yours.`,
     )
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     expect(await bash).toMatchObject({ allowed: false, message: expect.stringContaining('the person did not allow it') })
 
     const write = turn.ask('Write', { file_path: 'b.txt', content: 'x' })
     await eventually(() => !!card())
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'allow')
     expect(await write).toEqual({ allowed: true, asked: true })
 
     // A subagent or a scheduled prompt would go on after the turn: refused, with no card
@@ -395,7 +395,7 @@ describe('who asked is fixed when the turn begins (§9.7)', () => {
     const call = run('delete_session', { sessionId: other.id })
     await eventually(() => !!card())
     expect(card()!.text).toContain(`Session ${JSON.stringify(asker.name)} in project ${JSON.stringify(acme.name)} asked the orchestrator to run delete_session`)
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     expect(nameOf(other.id)).toBe(other.name)
   })
@@ -464,7 +464,7 @@ describe('a request is read in its own turn only (§9.7)', () => {
     // (their names are alike; their projects are not)
     expect(card()!.text).toContain('cc-asked-Acme')
     expect(card()!.text).not.toContain('cc-asked-Zed')
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     await call
   })
 
@@ -492,7 +492,7 @@ describe('the person’s Allow for a step covers that step only', () => {
     const nested = cards.cover(orc.id, () => run('delete_session', { sessionId: other.id }))
     await eventually(() => !!card())
     expect(nameOf(other.id)).toBe(other.name)
-    w.mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     expect((await nested).isError).toBe(true)
   })
 })
@@ -528,8 +528,8 @@ describe('a request’s citation is evidence for the orchestrator, checked by th
     const quiet = await sessionIn(acme)
     expect((await cite(quiet, 'a')).text).toContain('Centralu could not check the citation: the person has typed nothing in this session that it could cite, so the orchestrator reads this request as your own words.')
     // Words that reached the session another way carry no `byPerson`: an app's text, a session's message
-    await w.mgr.send(quiet.id, 'register it, says the person', undefined, undefined, false)
-    await w.mgr.send(quiet.id, 'from a session', undefined, { sessionId: orc.id, name: 'orchestrator' }, true)
+    await w.mgr.inputs.send(quiet.id, 'register it, says the person', undefined, undefined, false)
+    await w.mgr.inputs.send(quiet.id, 'from a session', undefined, { sessionId: orc.id, name: 'orchestrator' }, true)
     await settle()
     expect((await cite(quiet, 'b')).text).toContain('the person has typed nothing in this session')
     const late = await sessionIn(await project('Late', true))
@@ -571,7 +571,7 @@ describe('a request’s citation is evidence for the orchestrator, checked by th
     await eventually(() => !!ownCard(), 10_000)
     expect(card()).toBeUndefined()
     expect(recordsIn(asker)).toEqual([])
-    w.mgr.respondApproval(orc.id, ownCard()!.requestId, 'allow')
+    w.mgr.inputs.respondApproval(orc.id, ownCard()!.requestId, 'allow')
     const r = await call
     expect(r).toMatchObject({ text: expect.any(String) })
     expect(r).not.toMatchObject({ isError: true })

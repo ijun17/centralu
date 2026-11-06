@@ -41,7 +41,7 @@ describe('cancellation and the record for a chain', () => {
     const handle = await until(() => w.claude.handles.get(agent!.id), (h) => h !== undefined && h.sent.length === 1)
     expect(handle!.interrupted).toBe(false)
 
-    w.mgr.interrupt(caller.id)
+    w.mgr.inputs.interrupt(caller.id)
     const out = await pending
     expect(out.isError).toBe(true)
     expect(handle!.interrupted).toBe(true)

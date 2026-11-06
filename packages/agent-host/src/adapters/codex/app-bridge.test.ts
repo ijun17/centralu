@@ -117,7 +117,7 @@ beforeEach(async () => {
   // The host's own wiring (main.ts): each session's bridge gets its own credential, not TOKEN
   mgr = new SessionManager(store, adapters, () => {}, (sessionId) => bridgeAddress(undefined, port, TOKEN, sessionId))
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], runs: storeRunLedger(store) })
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   call = (m, p) => rpc(m as never, p)
   server = new HostServer({ port: 0, token: TOKEN, onRpc: (m, p) => rpc(m as never, p) })

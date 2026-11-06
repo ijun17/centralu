@@ -40,10 +40,10 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
       await gate
       return detect()
     }
-    const switching = w.mgr.switchTool(id, 'codex')
+    const switching = w.mgr.processes.switchTool(id, 'codex')
     void switching.catch(() => {})
     await w.until(() => checking)
-    await w.mgr.trashSession(id)
+    await w.mgr.trash.trashSession(id)
     const events = w.events.length
     release()
     await expect(switching).rejects.toMatchObject({ code: 'session_not_found' })
@@ -63,9 +63,9 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
         return 'ext-fork'
       },
     })
-    const fork = w.mgr.forkConversation(id)
+    const fork = w.mgr.processes.forkConversation(id)
     await w.until(() => forking)
-    await w.mgr.trashSession(id)
+    await w.mgr.trash.trashSession(id)
     release()
     expect(await fork).toMatchObject({ resumed: false })
     expect(w.store.trash.trashedSession(id)?.session.externalId).toBe('ext-1')

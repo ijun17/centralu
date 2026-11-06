@@ -41,7 +41,7 @@ describe('requests to a busy session (#677)', () => {
     handleOf(a).externalId = 'ext-a'
     handleOf(a).answer('first job done')
     await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-    await w.mgr.send(a, "the person's own work")
+    await w.mgr.inputs.send(a, "the person's own work")
     return { a, b }
   }
   /**
@@ -182,7 +182,7 @@ describe('requests to a busy session (#677)', () => {
     const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const asker = await w.callerSession()
-    await w.mgr.send(target, "the person's own work")
+    await w.mgr.inputs.send(target, "the person's own work")
     expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it' })).toMatchObject({ ok: true, state: 'busy' })
     expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued', position: 1 })
     expect(await w.mgr.askProject(asker, { project: w.target.id, session: target })).toMatchObject({ ok: true, state: 'queued' })
@@ -207,7 +207,7 @@ describe('requests to a busy session (#677)', () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const asker = await w.callerSession()
-      await w.mgr.send(target, "the person's own work")
+      await w.mgr.inputs.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
       return { target, asker }
     }
@@ -288,7 +288,7 @@ describe('requests to a busy session (#677)', () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       const asker = await w.callerSession()
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
-      await w.mgr.send(target, "the person's own work")
+      await w.mgr.inputs.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
       return { target, asker }
     }
@@ -296,7 +296,7 @@ describe('requests to a busy session (#677)', () => {
     const autoSend = async () => {
       const other = await session()
       const sender = await session('auto')
-      await w.mgr.send(other, "the person's own work")
+      await w.mgr.inputs.send(other, "the person's own work")
       expect(await w.mgr.agentSession(sender, { sessionId: other, action: 'send', text: 'tidy up', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
       return { other, sender }
     }
@@ -330,7 +330,7 @@ describe('requests to a busy session (#677)', () => {
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const asker = await w.callerSession()
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
-      await w.mgr.send(target, "the person's own work")
+      await w.mgr.inputs.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
       w.mgr.consents.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
       // Kept, as auto's reach is
@@ -392,7 +392,7 @@ describe('requests to a busy session (#677)', () => {
 
   it('a note from send_to_session needs an auto orchestrator', async () => {
     const worker = await session()
-    await w.mgr.send(worker, "the person's own work")
+    await w.mgr.inputs.send(worker, "the person's own work")
     const orch = await w.mgr.orchestrator()
     const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
     expect(await tools.sendToSession(worker, 'also this', false, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('auto') })
@@ -504,7 +504,7 @@ describe('requests to a busy session (#677)', () => {
       w.mgr.setProjectTrusted(w.caller.id, false)
       expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       w.mgr.setProjectTrusted(w.caller.id, true)
-      w.mgr.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       // B's earlier child is at rest; one running child fills a ceiling of one
       const runner = await w.mgr.startAgent(b, { task: 'keep busy', wait: false })
       expect(runner).toMatchObject({ ok: true })
@@ -518,7 +518,7 @@ describe('requests to a busy session (#677)', () => {
      */
     it('follows the agent depth: a requester at it is refused fork and fork_read under auto, and allowed once it is raised', async () => {
       w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       const top = await session('auto')
       const middle = await w.mgr.startAgent(top, { task: 'middle job', wait: false })
       if (!middle.ok) throw new Error(middle.error)
@@ -529,9 +529,9 @@ describe('requests to a busy session (#677)', () => {
       handleOf(a).externalId = 'ext-a'
       handleOf(a).answer('first job done')
       await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-      await w.mgr.send(a, "the person's own work")
+      await w.mgr.inputs.send(a, "the person's own work")
 
-      w.mgr.setUiPreferences({ agentDepth: 1 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 1 })
       const setting = 'How deep agents may start agents'
       expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x' })).toMatchObject({
         choices: expect.arrayContaining([{ choice: 'fork', available: false, why: expect.stringContaining(setting) }]),
@@ -544,7 +544,7 @@ describe('requests to a busy session (#677)', () => {
       }
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
 
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read it', ifBusy: 'fork_read' })
       await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
       const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
@@ -552,10 +552,10 @@ describe('requests to a busy session (#677)', () => {
       handleOf(fork.id).answer('read')
       expect(await forking).toMatchObject({ ok: true, via: 'fork', forkedFrom: a })
       // The fork is two levels down, and keeps that when B is deleted
-      w.mgr.setUiPreferences({ agentDepth: 3 })
-      await w.mgr.trashSession(b)
+      w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+      await w.mgr.trash.trashSession(b)
       expect(await w.mgr.startAgent(fork.id, { task: 'deeper', wait: false })).toMatchObject({ ok: true })
-      w.mgr.setUiPreferences({ agentDepth: 2 })
+      w.mgr.prefs.setUiPreferences({ agentDepth: 2 })
       expect(await w.mgr.startAgent(fork.id, { task: 'deeper still', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
     })
 
@@ -579,7 +579,7 @@ describe('requests to a busy session (#677)', () => {
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       // Taken away at the store, so only the read after the answer can see it
       w.store.projects.setProjectTrusted(w.caller.id, false)
-      w.mgr.respondApproval(b, info(b).pendingApproval!.requestId, 'allow')
+      w.mgr.inputs.respondApproval(b, info(b).pendingApproval!.requestId, 'allow')
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       expect(forks).toEqual([])
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
@@ -655,7 +655,7 @@ describe('requests to a busy session (#677)', () => {
 
     it('two forks at once take one place under a ceiling of one', async () => {
       const { a, b } = await busyChild()
-      w.mgr.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       const calls = [
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'one', ifBusy: 'fork_read' }),
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'two', ifBusy: 'fork_read' }),
@@ -701,7 +701,7 @@ describe('a queued request across a host swap (#677)', () => {
     w.adapters.get('claude')!.handles.get(a)!.externalId = 'ext-a'
     w.adapters.get('claude')!.handles.get(a)!.answer('done')
     await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-    await w.mgr.send(a, "the person's own work")
+    await w.mgr.inputs.send(a, "the person's own work")
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'queued work', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     return { a, b }
   }
@@ -730,7 +730,7 @@ describe('a queued request across a host swap (#677)', () => {
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
       // A conversation the next host can resume
       w.adapters.get('claude')!.handles.get(target)!.externalId = 'ext-t'
-      await w.mgr.send(target, "the person's own work")
+      await w.mgr.inputs.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
       await w.mgr.detachAll()
       // Lowered where no settings change ran on a host that held the queue (as when it was lowered mid-delivery)
@@ -809,7 +809,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
   const queuedBehindThePerson = async () => {
     const a = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     handleOf(a).externalId = 'ext-a'
-    await w.mgr.send(a, "the person's own work")
+    await w.mgr.inputs.send(a, "the person's own work")
     const orch = await w.mgr.orchestrator()
     expect(await toolsOf(w.mgr, orch.id).sendToSession(a, 'first', false, 'queue')).toMatchObject({ ok: true, busy: { state: 'queued', position: 1 } })
     return { a, orch: orch.id }

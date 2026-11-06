@@ -101,7 +101,7 @@ beforeEach(async () => {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readShared(store.settings, ref) })
-  mgr.useExternalApps(rt, { toolListWaitMs: 10_000 })
+  mgr.apps.useExternalApps(rt, { toolListWaitMs: 10_000 })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   alpha = ((await rpc('projects.add', { path: a })) as { id: string }).id
   beta = ((await rpc('projects.add', { path: b })) as { id: string }).id
@@ -256,14 +256,14 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     const once = await create(alpha, 'claude')
     const pending = tool(once.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(once.id))
-    mgr.respondApproval(once.id, card(once.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(once.id, card(once.id)!.requestId, 'allow')
     expect((await pending).text).toContain('Attached: beta/board')
     const onceOpts = claude.last()
     // The person says "always" for the pair afterwards, in another session of the same project
     const always = await create(alpha, 'claude')
     const asked = tool(always.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(always.id))
-    mgr.respondApproval(always.id, card(always.id)!.requestId, 'always')
+    mgr.inputs.respondApproval(always.id, card(always.id)!.requestId, 'always')
     await asked
     const alwaysOpts = claude.last()
     expect([servers(onceOpts), servers(alwaysOpts)]).toEqual([['app-board'], ['app-board']])
@@ -281,7 +281,7 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     const s = await create(alpha, 'claude')
     await tool(s.id, 'attach_app', { app: 'beta/board' })
-    await mgr.restartSession(s.id)
+    await mgr.processes.restartSession(s.id)
     expect(claude.seen).toHaveLength(2)
     expect(servers(claude.last())).toEqual(['app-board'])
   })
@@ -296,7 +296,7 @@ describe('consent per pair of projects, through the card', () => {
     expect(card(s.id)!.detail).toMatchObject({ access: 'apps', from: { id: alpha }, to: { id: beta }, app: { appId: 'board' } })
     // Not attached while the person has not answered
     expect(servers(claude.last())).toEqual([])
-    mgr.respondApproval(s.id, card(s.id)!.requestId, 'always')
+    mgr.inputs.respondApproval(s.id, card(s.id)!.requestId, 'always')
     expect((await pending).text).toContain('Attached: beta/board')
     const first = claude.last()
     expect(servers(first)).toEqual(['app-board'])
@@ -323,7 +323,7 @@ describe('consent per pair of projects, through the card', () => {
     const s = await create(alpha, 'claude')
     const pending = tool(s.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(s.id))
-    mgr.respondApproval(s.id, card(s.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(s.id, card(s.id)!.requestId, 'deny')
     const r = await pending
     expect(r.isError).toBe(true)
     expect(r.text).toContain('did not allow')
@@ -382,7 +382,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
   it('when the original is removed, the successor holds the apps under its own trust', async () => {
     const s = await withTwoApps('claude')
     const heir = await handOff(s, 'claude', true)
-    await mgr.trashSession(s.id)
+    await mgr.trash.trashSession(s.id)
     expect(claude.startServers.get(heir.id)).toEqual(['app-board', 'app-ledger'])
     // Revoking the pair's consent takes them from the successor as from any session that attached them
     await rpc('projectConsents.revoke', { fromProjectId: alpha, toProjectId: beta, kind: 'apps' })
@@ -396,7 +396,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
     const s = await create(alpha, 'claude')
     const pending = tool(s.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(s.id))
-    mgr.respondApproval(s.id, card(s.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(s.id, card(s.id)!.requestId, 'allow')
     expect((await pending).text).toContain('Attached: beta/board')
     return s
   }
@@ -414,7 +414,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
     // Attaching it there asks the person
     const again = tool(heir.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(heir.id))
-    mgr.respondApproval(heir.id, card(heir.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(heir.id, card(heir.id)!.requestId, 'deny')
     expect((await again).isError).toBe(true)
     // The original keeps its own
     expect(servers(claude.seen.find((o) => o.sessionId === s.id)!)).toEqual(['app-board'])
@@ -423,7 +423,7 @@ describe('a handoff carries the attached apps (#1638)', () => {
   it('copies an "Allow once" answer when the original goes: it is a move', async () => {
     const s = await withOnceApp()
     const heir = await handOff(s, 'claude', true)
-    await mgr.trashSession(s.id)
+    await mgr.trash.trashSession(s.id)
 
     expect(claude.startServers.get(heir.id)).toEqual(['app-board'])
     expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)

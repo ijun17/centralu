@@ -89,7 +89,7 @@ beforeEach(async () => {
   claude = new Adapter()
   const other = Object.assign(new Adapter(), { tool: 'claude-two' as ToolName })
   mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, tmpdir(), { processes })
-  projectId = (await mgr.addProject(tmpdir())).id
+  projectId = (await mgr.projectCreation.addProject(tmpdir())).id
 })
 afterEach(async () => {
   await mgr.disposeAll()
@@ -135,7 +135,7 @@ describe('a host leaving (#839)', () => {
     await session()
     const live = claude.last
     const release = holdNextStart()
-    const waking = mgr.resumeSession(id)
+    const waking = mgr.processes.resumeSession(id)
     const left = leaveHeld(live, leave)
     release()
     const r = await waking
@@ -165,7 +165,7 @@ describe('a host leaving (#839)', () => {
   it('a turn that ends during a handover does not apply a deferred restart', async () => {
     const id = await session()
     const kept = claude.last
-    await mgr.send(id, 'work')
+    await mgr.inputs.send(id, 'work')
     // A model change mid-turn waits for the turn's end (#164)
     await mgr.updateSettings(id, { model: 'other' })
     let release!: () => void
@@ -183,7 +183,7 @@ describe('a host leaving (#839)', () => {
   it('a kept process offered while a wake is under way is stopped, not left running beside it', async () => {
     const id = await asleep()
     const release = holdNextStart()
-    const waking = mgr.resumeSession(id)
+    const waking = mgr.processes.resumeSession(id)
     const kept = new FakeProcess()
     const adopting = mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
     release()
@@ -219,8 +219,8 @@ describe('a host leaving (#839)', () => {
   })
 
   it.each([
-    ['a restart (the settings, a proposal)', (id: string) => mgr.restartSession(id)],
-    ['a tool switch', (id: string) => mgr.switchTool(id, 'claude-two' as ToolName)],
+    ['a restart (the settings, a proposal)', (id: string) => mgr.processes.restartSession(id)],
+    ['a tool switch', (id: string) => mgr.processes.switchTool(id, 'claude-two' as ToolName)],
   ] as const)('%s asked during a handover is refused, and leaves the kept process alone', async (_, act) => {
     const id = await session()
     const kept = claude.last

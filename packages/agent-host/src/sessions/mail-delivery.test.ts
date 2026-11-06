@@ -84,8 +84,8 @@ describe('a session at rest is woken by mail', () => {
     // A tool whose sessions can sleep (as app-notice.test.ts puts one to sleep)
     Object.assign(w.adapter.capabilities, { backgroundTasks: true })
     const worker = await create()
-    expect(await w.mgr.sleepSession(worker.id)).toBe(true)
-    expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false, auto: false })
+    expect(await w.mgr.processes.sleepSession(worker.id)).toBe(true)
+    expect(w.mgr.mail.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false, auto: false })
     personTask(worker.id, 'wake up')
     await due(worker.id)
     expect(handleOf(worker.id).sent.some((t) => t.includes('> wake up'))).toBe(true)
@@ -185,7 +185,7 @@ describe('a session restored from the trash', () => {
 describe('what a session is to the delivery', () => {
   it('working is a turn, a standing card a card, a turn’s end is ready for its next message, gone is gone, idle is ready with whether it is live and takes quiet input', async () => {
     const s = await create()
-    const port = w.mgr.mailSessions()
+    const port = w.mgr.mail.mailSessions()
     expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: false, auto: false })
     ;(w.adapter as { quietInput?: boolean }).quietInput = true
     expect(port.receiver(s.id)).toEqual({ kind: 'ready', live: true, quiet: true, auto: false })
@@ -207,11 +207,11 @@ describe('what a session is to the delivery', () => {
     const before = h.sent.length
     await w.mgr.detachAll()
     const input = { text: 'mail', quiet: false, line: '✉ 1 message' }
-    await expect(w.mgr.mailSessions().deliver(worker.id, input)).rejects.toThrow()
-    await expect(w.mgr.mailSessions().deliver(worker.id, { ...input, quiet: true })).rejects.toThrow()
+    await expect(w.mgr.mail.mailSessions().deliver(worker.id, input)).rejects.toThrow()
+    await expect(w.mgr.mail.mailSessions().deliver(worker.id, { ...input, quiet: true })).rejects.toThrow()
     expect(h.sent.length).toBe(before)
     // And it says it is not at rest, so the delivery does not even try
-    expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'busy', why: 'turn' })
+    expect(w.mgr.mail.mailSessions().receiver(worker.id)).toEqual({ kind: 'busy', why: 'turn' })
   })
 
   it('a failure the tool tells after the wait for it ran out reaches the delivery, through the manager’s port', async () => {
@@ -226,7 +226,7 @@ describe('what a session is to the delivery', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const late = vi.fn()
-      const delivered = w.mgr.mailSessions().deliver(worker.id, { text: 'mail', quiet: false, line: '✉ 1 message' }, late)
+      const delivered = w.mgr.mail.mailSessions().deliver(worker.id, { text: 'mail', quiet: false, line: '✉ 1 message' }, late)
       await vi.advanceTimersByTimeAsync(MAIL_ACCEPT_MS + 1_000)
       await delivered
       observer.fail(new Error('the session closed with it queued'))
@@ -242,7 +242,7 @@ describe('what a session is to the delivery', () => {
     const sent = send(addressOf(giver.id), worker.id, 'x')
     await w.rpc('agents.deleteSession', { sessionId: worker.id })
     await due(worker.id)
-    expect(w.mgr.mailSessions().receiver(worker.id)).toEqual({ kind: 'gone' })
+    expect(w.mgr.mail.mailSessions().receiver(worker.id)).toEqual({ kind: 'gone' })
     expect(read.row(sent.id, addressOf(worker.id))).toMatchObject({ deliveredAt: null, settled: null })
   })
 })

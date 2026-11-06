@@ -52,8 +52,8 @@ const turnEnds = async (child: string, text: string) => {
 }
 /** The owner's seat cannot read mail */
 const scoped = (parent: string) => {
-  const real = w.mgr.toolProfileOf.bind(w.mgr)
-  vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+  const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+  vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
 }
 
 describe('a turn ends, the owner reads mail', () => {
@@ -121,7 +121,7 @@ describe('a turn ends, the owner reads mail', () => {
 
   it('the person writing into the turn is a fact of the report, never their words', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.send(child, 'also use Chromium, said the person')
+    await w.mgr.inputs.send(child, 'also use Chromium, said the person')
     await turnEnds(child, 'all merged')
     const [report] = reportsIn(parent, child)
     expect(report?.facts).toMatchObject({ outcome: 'finished', personNote: true })
@@ -153,7 +153,7 @@ describe('an owner in a turn is told by the mail alone (3.9)', () => {
   it('no relayed message goes into its turn and nothing is kept for it: the report waits in its mailbox for the turn’s end', async () => {
     const { parent, child } = await parentAndChild()
     // The owner is in a turn of its own
-    await w.mgr.send(parent, 'a long job of the owner’s own')
+    await w.mgr.inputs.send(parent, 'a long job of the owner’s own')
     expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
     const sentBefore = handleOf(parent)!.sent.length
     await turnEnds(child, 'all merged')
@@ -165,7 +165,7 @@ describe('an owner in a turn is told by the mail alone (3.9)', () => {
     expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: null })
     expect(later().drain(addr(parent), {}).messageIds).toContain(report!.id)
     // A message the person sends meanwhile does not bring a kept notice with it: there is none
-    await w.mgr.send(parent, 'and one more thing')
+    await w.mgr.inputs.send(parent, 'and one more thing')
     expect(oldReports(parent, child)).toEqual([])
   })
 })
@@ -188,7 +188,7 @@ describe('the old way tells when the mailbox cannot', () => {
     const parent = await w.callerSession()
     const child = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', askedBy: parent })).id
     ;(w.mgr as unknown as { children: { markReport(c: string, o: string): void } }).children.markReport(child, parent)
-    await w.mgr.send(child, 'a task nobody wrote down', undefined, { sessionId: parent, name: 'parent' })
+    await w.mgr.inputs.send(child, 'a task nobody wrote down', undefined, { sessionId: parent, name: 'parent' })
     handleOf(child)!.answer('done')
     await w.until(() => oldReports(parent, child).length === 1)
     expect(tasksOf(parent, child)).toEqual([])
@@ -209,12 +209,12 @@ describe('the old way tells when the mailbox cannot', () => {
 describe('the seats of the mailbox’s policy', () => {
   it('the mail tool is the seat’s; the orchestrator’s command form is the orchestrator’s alone, and only when the command is there', async () => {
     const { parent } = await parentAndChild()
-    expect(w.mgr.mailSeats(() => true).mailTool(parent)).toBe(true)
-    expect(w.mgr.mailSeats(() => true).mailCommand(parent)).toBe(false)
-    const real = w.mgr.toolProfileOf.bind(w.mgr)
-    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'orchestrator' : real(id)))
-    expect(w.mgr.mailSeats(() => true).mailCommand(parent)).toBe(true)
-    expect(w.mgr.mailSeats(() => false).mailCommand(parent)).toBe(false)
+    expect(w.mgr.mail.mailSeats(() => true).mailTool(parent)).toBe(true)
+    expect(w.mgr.mail.mailSeats(() => true).mailCommand(parent)).toBe(false)
+    const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'orchestrator' : real(id)))
+    expect(w.mgr.mail.mailSeats(() => true).mailCommand(parent)).toBe(true)
+    expect(w.mgr.mail.mailSeats(() => false).mailCommand(parent)).toBe(false)
   })
 })
 
@@ -278,7 +278,7 @@ describe('an owner whose seat cannot read mail', () => {
     })
     await turnEnds(child, 'all merged')
     expect(oldReports(parent, child)).toEqual([])
-    await w.mgr.send(parent, 'an ordinary message of the person’s')
+    await w.mgr.inputs.send(parent, 'an ordinary message of the person’s')
     await w.until(() => oldReports(parent, child).length === 1)
     const [report] = reportsIn(parent, child)
     expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number) })
@@ -288,7 +288,7 @@ describe('an owner whose seat cannot read mail', () => {
 describe('work handed on', () => {
   /** The parent's child hands a part of its work on to a child of its own, without waiting */
   async function handOn() {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild()
     const started = await w.mgr.startAgent(child, { task: 'write the tests', wait: false })
     const grandchild = started.ok ? started.sessionId : ''
@@ -319,10 +319,10 @@ describe('work handed on', () => {
     const { parent, child, grandchild } = await handOn()
     await turnEnds(child, 'handed the tests on')
     expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'waiting' })])
-    await w.mgr.trashSession(grandchild)
+    await w.mgr.trash.trashSession(grandchild)
     expect(read.taskRow(taskOf(child, grandchild).id, grandchild)).toMatchObject({ settled: 'gone' })
     // It wrote the files itself, in a turn the owner started
-    await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
+    await w.mgr.inputs.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     handleOf(child)!.answer('wrote the tests myself')
     await w.until(() => asReports(parent, child).length === 2)
@@ -340,7 +340,7 @@ describe('work handed on', () => {
     handleOf(parent)!.answer('noted')
     await w.until(() => w.mgr.sessionInfo(parent)?.state !== 'working')
     // The session goes on in a turn the owner started, hands a second helper on, and ends its turn
-    await w.mgr.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
+    await w.mgr.inputs.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     const second = await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
     expect(second.ok).toBe(true)
@@ -361,7 +361,7 @@ describe('work handed on', () => {
     expect(oldReports(parent, child)).toHaveLength(1)
     // The first notice started a turn of the owner's, which is still going
     expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
-    await w.mgr.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
+    await w.mgr.inputs.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
     handleOf(child)!.answer('handed the docs on')
@@ -372,8 +372,8 @@ describe('work handed on', () => {
     const { parent, child, grandchild } = await handOn()
     scoped(parent)
     await turnEnds(child, 'handed the tests on')
-    await w.mgr.trashSession(grandchild)
-    await w.mgr.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
+    await w.mgr.trash.trashSession(grandchild)
+    await w.mgr.inputs.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     handleOf(child)!.answer('wrote the tests myself')
     await w.until(() => oldReports(parent, child).length === 2)
@@ -382,12 +382,12 @@ describe('work handed on', () => {
   })
 
   it('a helper sent more in the work is that work’s: the owner is not told finished while it works', async () => {
-    w.mgr.setUiPreferences({ agentDepth: 3 })
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild()
     await turnEnds(child, 'first')
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
     // The person has the session start a helper in a turn of their own: it is no work's
-    await w.mgr.send(child, 'start a helper for the person')
+    await w.mgr.inputs.send(child, 'start a helper for the person')
     const started = await w.mgr.startAgent(child, { task: 'a part', wait: false })
     const helper = started.ok ? started.sessionId : ''
     expect(taskOf(child, helper)).toMatchObject({ causeId: null })
@@ -491,7 +491,7 @@ describe('the person takes the session over', () => {
 
   it('told the owner in a turn, it is mail like any report: nothing is relayed into its turn', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.send(parent, 'a long job of the owner’s own')
+    await w.mgr.inputs.send(parent, 'a long job of the owner’s own')
     const reports = (w.mgr as unknown as { reports: { personTookOver(id: string): Promise<void> } }).reports
     await reports.personTookOver(child)
     expect(oldReports(parent, child)).toEqual([])
@@ -516,21 +516,21 @@ describe('the work ends with the session that did it', () => {
     handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
     await turnEnds(child, 'watcher started')
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    await w.mgr.trashSession(child)
+    await w.mgr.trash.trashSession(child)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'gone' })
     expect(reportsIn(parent, child).map((x) => x.facts.outcome)).toEqual(['paused'])
   })
 
   it('archiving a child at work stops its turn, and that end is not reported as the work finished: the task is gone', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.trashSession(child)
+    await w.mgr.trash.trashSession(child)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'gone' })
     expect(reportsIn(parent, child)).toEqual([])
   })
 
   it('the person archiving the caller: its task is withdrawn and the child goes on', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.trashSession(parent)
+    await w.mgr.trash.trashSession(parent)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'withdrawn' })
     expect(w.mgr.sessionInfo(child)).toBeDefined()
   })

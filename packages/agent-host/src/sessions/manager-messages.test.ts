@@ -313,7 +313,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     const { s, h } = await openSession()
     h.emitDelta('what it was saying')
     await new Promise((r) => setTimeout(r, 0))
-    await mgr.send(s.id, 'stop, do this first')
+    await mgr.inputs.send(s.id, 'stop, do this first')
     h.emitDelta('new answer')
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
@@ -410,7 +410,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-att-'))
     const img = join(dir, 'shot.png')
     writeFileSync(img, Buffer.from('PNG bytes'))
-    await mgr.send(s.id, 'take a look at this screen', [
+    await mgr.inputs.send(s.id, 'take a look at this screen', [
       { kind: 'image', path: img, name: 'shot.png', mime: 'image/png', bytes: 9 },
       // A file removed by the 500MB cap cleanup — only the path remains, and the screen shows it as a name
       // chip.
@@ -423,7 +423,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(rawAtts.map((a) => a.data)).toEqual([undefined, undefined])
 
     // Only a file that still exists gets its bytes attached when served to the screen.
-    const served = (await mgr.loadMessages(s.id, 50)).find((r) => r.role === 'user')!
+    const served = (await mgr.record.loadMessages(s.id, 50)).find((r) => r.role === 'user')!
     const atts = (served.payload as { attachments: { name: string; data?: string }[] }).attachments
     expect(atts[0]?.data).toBe(Buffer.from('PNG bytes').toString('base64'))
     expect(atts[1]?.data).toBeUndefined()
@@ -449,7 +449,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     expect(unread).toMatchObject({ data: '', path: '/elsewhere/gone.png', name: '/elsewhere/gone.png', note: 'the file is gone' })
 
     // What a reload serves: the bytes read back from the copy, and the reason as it was
-    const served = (await mgr.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
+    const served = (await mgr.record.loadMessages(s.id, 50)).filter((r) => r.kind === 'image').map((r) => r.payload as { data?: string; note?: string })
     expect(served[0]?.data).toBe(PNG)
     expect(served[1]).toMatchObject({ data: '', note: 'the file is gone' })
   })
@@ -520,8 +520,8 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
 
     // The orchestrator's own tool calls are not carried into its next process's prompt either
     adapter.handleOf(orc.id)!.emitToolRecord('c-orc', 'npm run build', input, output)
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
     expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 })
@@ -648,8 +648,8 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 
     // The orchestrator's own subagent is not carried into its next process's prompt either
     for (const e of subagentWork(orc.id)) adapter.handleOf(orc.id)!.emitEvent(e)
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
     expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 

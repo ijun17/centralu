@@ -143,9 +143,9 @@ describe('a host restart under the keeper', () => {
       expect(adopted.opts.processSource?.adopt?.process).toBe(kept)
       expect(b.mgr.listSessions().find((s) => s.id === session.id)?.state).toBe(working ? 'working' : 'idle')
       expect(store.settings.appSetting(key)).toBe(oldFingerprint)
-      const restart = vi.spyOn(b.mgr, 'restartSession')
+      const restart = vi.spyOn(b.mgr.processes, 'restartSession')
 
-      await b.mgr.refreshToolDefinitions()
+      await b.mgr.launches.refreshToolDefinitions()
       if (working) {
         expect(adopted.disposed).toBe(false)
         adopted.emit({ type: 'turn_complete', sessionId: session.id })
@@ -164,7 +164,7 @@ describe('a host restart under the keeper', () => {
         expect(store.settings.appSetting(key)).toBe(oldFingerprint)
       }
       const live = b.claude.last
-      await b.mgr.refreshToolDefinitions()
+      await b.mgr.launches.refreshToolDefinitions()
       expect(b.claude.last).toBe(live)
       expect(restart).toHaveBeenCalledTimes(!current && preset !== 'safe' ? 1 : 0)
     } finally {

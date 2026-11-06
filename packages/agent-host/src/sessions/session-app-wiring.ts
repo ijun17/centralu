@@ -39,7 +39,7 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     /** A session's row, or `session_not_found` */
     sessionOf: (sessionId: string) => SessionInfo
     readonly appSessions: Pick<AppSessions, 'appHostData' | 'runAppAgent' | 'agentRunEnded'>
-    /** An app's notice into a session that called it (#1161 item 1) — `SessionManager.appNotice` */
+    /** An app's notice into a session that called it (#1161 item 1) — `TurnInputs.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
     readonly hostCards: Pick<HostCards, 'askCapability'>
     migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']

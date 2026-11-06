@@ -935,7 +935,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1 })
 
     // A restart that says why (a Codex thread restarted for its apps) is named by that reason, not as a new process
-    await mgr.restartSession(s.id, 'thread_restart')
+    await mgr.processes.restartSession(s.id, 'thread_restart')
     await rebuild()
     expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1, thread_restart: 1 })
   })
@@ -1020,7 +1020,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
 
   it('says so when the adapter does not support it — quietly deleting only our side would be half a delete', async () => {
     const { m, s } = await setupWith(new FakeAdapter())
-    await expect(m.trashSession(s.id, false, true)).rejects.toThrow(/does not support/)
+    await expect(m.trash.trashSession(s.id, false, true)).rejects.toThrow(/does not support/)
     expect(m.listSessions().some((x) => x.id === s.id)).toBe(true)
   })
 

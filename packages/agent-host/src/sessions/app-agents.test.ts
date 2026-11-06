@@ -227,12 +227,12 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     if (action === 'cancel') {
       controller.abort()
       expect(await observation).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
-    } else mgr.interrupt(observer.id)
+    } else mgr.inputs.interrupt(observer.id)
     const h = claude.handles.get(child.id)!
     expect(h.interrupted).toBe(false)
-    expect(mgr.waitsOn(observer.id)).toEqual([])
+    expect(mgr.processes.waitsOn(observer.id)).toEqual([])
     Object.assign(claude.capabilities, { backgroundTasks: true, sleep: true })
-    expect(await mgr.sleepSession(observer.id)).toBe(true)
+    expect(await mgr.processes.sleepSession(observer.id)).toBe(true)
     h.say('The app still gets its answer.')
     h.done()
     if (action === 'wait') expect(await observation).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.', readable: [] })
@@ -413,7 +413,7 @@ describe('run_agent — stopping and cancellation', () => {
     const agent = await until(() => agentSessions()[0], (s) => s !== undefined && claude.handles.get(s.id)?.sent.length === 1)
     const h = claude.handles.get(agent!.id)!
     h.say('Working on it')
-    mgr.interrupt(agent!.id)
+    mgr.inputs.interrupt(agent!.id)
     // Like a Codex interrupt: it comes back saying the turn ended — that end is not an answer
     h.done()
     expect(brokerSaid(await pending)).toMatchObject({ isError: true, text: 'run_agent failed: the person stopped the agent before it finished' })
@@ -629,7 +629,7 @@ describe('run_agent — a finished session goes, its record stays in the session
     const verdict = sessions.agentRunEnded.bind(sessions)
     // Not the person: a message from another session (an orchestrator's send_to_session) is not "taking part"
     vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
-      await mgr.send(run.sessionId, 'one more thing', undefined, { sessionId: caller.id, name: caller.name })
+      await mgr.inputs.send(run.sessionId, 'one more thing', undefined, { sessionId: caller.id, name: caller.name })
       return verdict(run as Parameters<typeof verdict>[0])
     })
     expect(brokerSaid(await callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).isError).toBe(false)

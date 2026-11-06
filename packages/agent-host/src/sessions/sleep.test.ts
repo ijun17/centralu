@@ -15,6 +15,7 @@ import {
   sleepDecision,
   sleepOverrideFrom,
   storedSleepSetting,
+  type SleepProcesses,
   type SleepSessions,
 } from './sleep.js'
 import { sdk } from '../adapters/claude/sdk-message.test-helpers.js'
@@ -64,7 +65,7 @@ describe('the rule, as data', () => {
 function fakeSessions() {
   const rows = new Map<string, { s: SessionInfo; idle: SessionIdle; waitsOn: string[] }>()
   const slept: string[] = []
-  const sessions: SleepSessions = {
+  const sessions: SleepSessions & SleepProcesses = {
     listSessions: () => [...rows.values()].map((r) => r.s),
     sessionIdle: (id) => rows.get(id)!.idle,
     waitsOn: (id) => rows.get(id)!.waitsOn,
@@ -88,7 +89,7 @@ describe('the sleeper', () => {
     const f = fakeSessions()
     f.add('a')
     f.add('b')
-    const sleeper = new SessionSleeper({ sessions: f.sessions, canSleep: () => true, now: clock })
+    const sleeper = new SessionSleeper({ sessions: f.sessions, processes: f.sessions, canSleep: () => true, now: clock })
     now += 10 * MIN
     sleeper.observe({ type: 'message_delta', sessionId: 'b', role: 'assistant', text: 'still here' })
     now += 5 * MIN - 1
@@ -110,7 +111,7 @@ describe('the sleeper', () => {
     f.add('codex', 'codex')
     f.rows.get('turn')!.idle = { idle: false, reason: 'turn' }
     f.rows.get('parent')!.waitsOn = ['child']
-    const sleeper = new SessionSleeper({ sessions: f.sessions, canSleep: (tool) => tool === 'claude', now: clock })
+    const sleeper = new SessionSleeper({ sessions: f.sessions, processes: f.sessions, canSleep: (tool) => tool === 'claude', now: clock })
     now += 60 * MIN
     expect(await sleeper.sweep()).toEqual([])
     expect(sleeper.decide(f.rows.get('codex')!.s)).toEqual({ sleep: false, why: 'unsupported' })
@@ -123,7 +124,7 @@ describe('the sleeper', () => {
     const f = fakeSessions()
     f.add('a')
     const saved: (number | null)[] = []
-    const sleeper = new SessionSleeper({ sessions: f.sessions, canSleep: () => true, now: clock, readAfterMinutes: () => 30, writeAfterMinutes: (m) => saved.push(m) })
+    const sleeper = new SessionSleeper({ sessions: f.sessions, processes: f.sessions, canSleep: () => true, now: clock, readAfterMinutes: () => 30, writeAfterMinutes: (m) => saved.push(m) })
     expect(sleeper.policy()).toEqual({ afterMinutes: 30 })
     now += 20 * MIN
     expect(await sleeper.sweep()).toEqual([])
@@ -134,7 +135,7 @@ describe('the sleeper', () => {
     expect(saved).toEqual([null, 5])
     expect(await sleeper.sweep()).toEqual(['a'])
     sleeper.stop()
-    const fast = new SessionSleeper({ sessions: fakeSessions().sessions, canSleep: () => true, readAfterMinutes: () => 15, overrideMs: 2000 })
+    const fast = new SessionSleeper({ sessions: fakeSessions().sessions, processes: fakeSessions().sessions, canSleep: () => true, readAfterMinutes: () => 15, overrideMs: 2000 })
     expect(fast.afterMs()).toBe(2000)
   })
 })
@@ -226,7 +227,7 @@ describe('a session put to sleep, on the manager', () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     // One finished turn, so there is a conversation to resume
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     adapter.last.emit({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'hi' })
     adapter.last.emit({ type: 'turn_complete', sessionId: s.id })
     return s.id
@@ -236,12 +237,12 @@ describe('a session put to sleep, on the manager', () => {
   it('ends the process, lists the session as asleep and says so; the next message resumes the same conversation', async () => {
     const id = await idleSession()
     const first = adapter.last
-    expect(await mgr.sleepSession(id)).toBe(true)
+    expect(await mgr.processes.sleepSession(id)).toBe(true)
     expect(first.disposed).toBe(true)
     expect(live(id)).toBe(false)
     expect(events).toContainEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
 
-    await mgr.send(id, 'are you there?')
+    await mgr.inputs.send(id, 'are you there?')
     expect(adapter.created).toHaveLength(2)
     expect(adapter.last.opts.resumeExternalId).toBe(`ext-${id}`)
     expect(adapter.last.sent).toEqual(['are you there?'])
@@ -254,16 +255,16 @@ describe('a session put to sleep, on the manager', () => {
     const id = await idleSession()
     const h = adapter.last
     h.emit({ type: 'state_change', sessionId: id, state: 'working' })
-    expect(await mgr.sleepSession(id)).toBe(false)
+    expect(await mgr.processes.sleepSession(id)).toBe(false)
     h.emit({ type: 'approval_request', sessionId: id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    expect(await mgr.sleepSession(id)).toBe(false)
+    expect(await mgr.processes.sleepSession(id)).toBe(false)
     h.emit({ type: 'approval_resolved', sessionId: id, requestId: 'r1', decision: 'allow' })
     h.emit({ type: 'turn_complete', sessionId: id })
     h.emit({ type: 'background_tasks', sessionId: id, live: [{ id: 't1', kind: 'shell', description: 'npm run dev', status: 'running' }] })
-    expect(await mgr.sleepSession(id)).toBe(false)
+    expect(await mgr.processes.sleepSession(id)).toBe(false)
     expect(h.disposed).toBe(false)
     h.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ id: 't1', kind: 'shell', description: 'npm run dev', status: 'completed' }] })
-    expect(await mgr.sleepSession(id)).toBe(true)
+    expect(await mgr.processes.sleepSession(id)).toBe(true)
   })
 
   it('a session whose /loop has scheduled its next wake-up stays awake until it is due, as the Claude adapter reports it', async () => {
@@ -277,8 +278,8 @@ describe('a session put to sleep, on the manager', () => {
     ]
     for (const m of turn) for (const e of stream.push(sdk(m))) h.emit(e)
     h.emit({ type: 'turn_complete', sessionId: id })
-    expect(mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
-    expect(await mgr.sleepSession(id)).toBe(false)
+    expect(mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
+    expect(await mgr.processes.sleepSession(id)).toBe(false)
     expect(h.disposed).toBe(false)
     // The loop stopped: it may sleep
     for (const m of [
@@ -286,14 +287,14 @@ describe('a session put to sleep, on the manager', () => {
       { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w2', content: 'stopped' }] }, tool_use_result: { stopped: true } },
     ]) for (const e of stream.push(sdk(m))) h.emit(e)
     h.emit({ type: 'turn_complete', sessionId: id })
-    expect(await mgr.sleepSession(id)).toBe(true)
+    expect(await mgr.processes.sleepSession(id)).toBe(true)
   })
 
   it('a message arriving while the process is still going down waits for it, and starts exactly one new process', async () => {
     const id = await idleSession()
     adapter.holdDispose()
-    const sleeping = mgr.sleepSession(id)
-    const sent = mgr.send(id, 'quick question')
+    const sleeping = mgr.processes.sleepSession(id)
+    const sent = mgr.inputs.send(id, 'quick question')
     await new Promise((r) => setTimeout(r, 20))
     // Not beside the old one
     expect(adapter.created).toHaveLength(1)
@@ -306,12 +307,12 @@ describe('a session put to sleep, on the manager', () => {
 
   it('stays asleep on the next host (a restart or a swap) and wakes there on a message', async () => {
     const id = await idleSession()
-    await mgr.sleepSession(id)
+    await mgr.processes.sleepSession(id)
     // The next host opens the same store; nothing of this one's carries over
     const next = build(store)
     expect(next.m.listSessions().find((s) => s.id === id)!.live).toBe(false)
     expect(adapter.created).toHaveLength(1)
-    await next.m.send(id, 'back again')
+    await next.m.inputs.send(id, 'back again')
     expect(adapter.last.opts.resumeExternalId).toBe(`ext-${id}`)
     expect(adapter.last.sent).toEqual(['back again'])
     await next.m.disposeAll()
@@ -321,7 +322,7 @@ describe('a session put to sleep, on the manager', () => {
     let now = 0
     const a = await idleSession()
     const b = await idleSession()
-    const sleeper = new SessionSleeper({ sessions: mgr, canSleep: (tool) => !!adapter.capabilities.sleep && tool === 'claude', now: () => now })
+    const sleeper = new SessionSleeper({ sessions: mgr, processes: mgr.processes, canSleep: (tool) => !!adapter.capabilities.sleep && tool === 'claude', now: () => now })
     for (const e of events) sleeper.observe(e)
     now += 15 * MIN
     adapter.created.find((h) => h.sessionId === b)!.emit({ type: 'session_title', sessionId: b, title: 'still in use', auto: true })
@@ -348,12 +349,12 @@ describe('a session put to sleep, on the manager', () => {
   it('a wake starts the process with the options it was created with, and the conversation to resume', async () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', model: 'm1', effort: 'high' })) as { id: string }
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     adapter.last.emit({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'hi' })
     adapter.last.emit({ type: 'turn_complete', sessionId: s.id })
     const created = adapter.last.opts
-    expect(await mgr.sleepSession(s.id)).toBe(true)
-    await mgr.send(s.id, 'again')
+    expect(await mgr.processes.sleepSession(s.id)).toBe(true)
+    await mgr.inputs.send(s.id, 'again')
     const woken = adapter.last.opts
     expect(woken).not.toBe(created)
 
@@ -386,17 +387,17 @@ describe('a parent and the agents it started (start_agent, #561)', () => {
     const child = r.ok ? r.sessionId : ''
     await w.until(() => !!w.adapters.get('claude')!.handles.get(child)?.sent.length)
 
-    expect(w.mgr.waitsOn(parent)).toEqual([child])
-    expect(await w.mgr.sleepSession(parent)).toBe(false)
+    expect(w.mgr.processes.waitsOn(parent)).toEqual([child])
+    expect(await w.mgr.processes.sleepSession(parent)).toBe(false)
     // The child is working: not idle
-    expect(await w.mgr.sleepSession(child)).toBe(false)
+    expect(await w.mgr.processes.sleepSession(child)).toBe(false)
 
     w.adapters.get('claude')!.handles.get(child)!.answer('Parser done.')
     // The report reaches the parent as a message, which runs a turn there; it ends
-    await w.until(() => w.mgr.waitsOn(parent).length === 0)
+    await w.until(() => w.mgr.processes.waitsOn(parent).length === 0)
     await new Promise((res) => setTimeout(res, 20))
     w.adapters.get('claude')!.handles.get(parent)!.event({ type: 'turn_complete', sessionId: parent })
-    expect(await w.mgr.sleepSession(child)).toBe(true)
-    expect(await w.mgr.sleepSession(parent)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(child)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(parent)).toBe(true)
   })
 })

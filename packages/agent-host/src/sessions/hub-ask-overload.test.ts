@@ -90,7 +90,7 @@ const info = (id: string) => mgr.listSessions().find((s) => s.id === id) as Sess
 
 async function taskFromHub() {
   const s = (await rpc('agents.createSession', { projectId, cwd: root, tool: 'codex' })) as SessionInfo
-  await mgr.sendFromHub(s.id, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 2 })
+  await mgr.linkedHost.sendFromHub(s.id, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 2 })
   await vi.advanceTimersByTimeAsync(1)
   turnBegins('turn-1')
   return s.id

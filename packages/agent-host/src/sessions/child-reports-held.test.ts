@@ -61,7 +61,7 @@ describe('notices kept for a session that could not be woken', () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     const forget = vi.spyOn((mgr as unknown as { reports: ChildReports }).reports, 'forgetHeld')
-    await mgr.trashSession(s.id)
+    await mgr.trash.trashSession(s.id)
     expect(forget).toHaveBeenCalledWith(s.id)
     await mgr.disposeAll()
   })

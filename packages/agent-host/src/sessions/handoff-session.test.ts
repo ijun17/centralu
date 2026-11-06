@@ -121,11 +121,11 @@ const named = (name: string) => mgr.listSessions().filter((s) => s.name === name
  * that is above `safe`, asks
  */
 async function world(preset: 'safe' | 'normal' | 'auto' = 'normal', targetPreset: 'safe' | 'normal' | 'auto' = 'normal') {
-  const project = await mgr.addProject(root)
+  const project = await mgr.projectCreation.addProject(root)
   mgr.setProjectTrusted(project.id, true)
   const target = (await mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: targetPreset, model: 'opus' })).id
   mgr.rename(target, 'Long run')
-  await mgr.send(target, 'Build the parser')
+  await mgr.inputs.send(target, 'Build the parser')
   claude.handles.get(target)!.answer('Parser half done; tests in parser.test.ts')
   const orch = (await mgr.orchestrator()).id
   if (preset !== 'normal') await mgr.updateSettings(orch, { permissionPreset: preset })
@@ -189,7 +189,7 @@ describe('handoff_session (#694)', () => {
     expect(card.detail).toMatchObject({ kind: 'other', about: SESSION_HANDOFF })
     expect((card.detail as { raw: string }).raw).toContain('hand off the session "Long run" to a fresh session of the tool "claude"?')
     expect((card.detail as { raw: string }).raw).toContain('under the auto preset')
-    mgr.respondApproval(orch, card.requestId, 'deny')
+    mgr.inputs.respondApproval(orch, card.requestId, 'deny')
     const denied = await call
     expect(denied).toMatchObject({ isError: true })
     expect(denied.text).toContain('did not allow')
@@ -197,7 +197,7 @@ describe('handoff_session (#694)', () => {
 
     const again = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
     expect((await again).isError).toBeFalsy()
     const heir = named('Long run').find((s) => s.id !== target)!
     // The same tool keeps the original's settings
@@ -226,7 +226,7 @@ describe('handoff_session (#694)', () => {
       const call = handoff(orch, { sessionId: target })
       await eventually(() => !!info(orch).pendingApproval)
       expect(named('Long run')).toHaveLength(1)
-      mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+      mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
       expect((await call).isError).toBe(true)
       expect(named('Long run')).toHaveLength(1)
     },
@@ -234,7 +234,7 @@ describe('handoff_session (#694)', () => {
 
   it('a session mid-turn is still refused with no card, in the card-free case too', async () => {
     const { target, orch } = await world('normal')
-    await mgr.send(target, 'Keep going')
+    await mgr.inputs.send(target, 'Keep going')
     const busy = await handoff(orch, { sessionId: target })
     expect(busy.text).toContain('is mid-turn (working)')
     expect(info(orch).pendingApproval).toBeFalsy()
@@ -245,7 +245,7 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('normal', 'auto')
     const first = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
     expect((await first).isError).toBeFalsy()
     const r = await handoff(orch, { sessionId: target })
     expect(r.isError).toBeFalsy()
@@ -254,7 +254,7 @@ describe('handoff_session (#694)', () => {
 
   it('refuses a session mid-turn without asking anyone, and checks again after the card', async () => {
     const { target, orch } = await world('normal', 'auto')
-    await mgr.send(target, 'Keep going')
+    await mgr.inputs.send(target, 'Keep going')
     const busy = await handoff(orch, { sessionId: target })
     expect(busy).toMatchObject({ isError: true })
     expect(busy.text).toContain('is mid-turn (working)')
@@ -264,8 +264,8 @@ describe('handoff_session (#694)', () => {
     // A turn that starts while the card stands is not cut short by the allowance
     const call = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
-    await mgr.send(target, 'One more thing')
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
+    await mgr.inputs.send(target, 'One more thing')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'allow')
     const late = await call
     expect(late).toMatchObject({ isError: true })
     expect(late.text).toContain('is mid-turn')
@@ -400,7 +400,7 @@ describe('handoff_session (#694)', () => {
     const raw = (info(orch).pendingApproval!.detail as { raw: string }).raw
     expect(raw).toContain('of the tool "codex"?')
     expect(raw).toContain(`"${'x'.repeat(400)}" (cut here; 450 characters in all`)
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
     await call
   })
 
@@ -408,13 +408,13 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('normal', 'auto')
     const call = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
-    await mgr.send(target, 'A turn starts while the card stands')
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
+    await mgr.inputs.send(target, 'A turn starts while the card stands')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
     expect((await call).text).toContain('is mid-turn')
     claude.handles.get(target)!.answer('done')
     const next = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
-    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+    mgr.inputs.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
     expect((await next).text).toContain('did not allow')
   })
 

@@ -89,17 +89,17 @@ beforeEach(async () => {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   // Where an app made without a project goes (#1141): this test's ~/Centralu
-  mgr.useProjectsHome(() => join(root, 'Centralu'))
+  mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))
   rt = new ExternalApps({
     projects: () => store.projects.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     // The same seam as the host's main (C-4) — the manager knows whether the building session is mid-turn
-    builderBusy: (ref) => mgr.builderBusy(ref),
+    builderBusy: (ref) => mgr.appSessions.builderBusy(ref),
     timing: { turnEndDebounceMs: 50, reloadQuietMs: 300 },
   })
   rt.refresh()
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
@@ -162,7 +162,7 @@ describe('creating an app stands up its building session', () => {
   it('the role prompt is loaded again even after a resume', async () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     claude.seen = []
-    await mgr.restartSession(builder!.id)
+    await mgr.processes.restartSession(builder!.id)
     expect(claude.seen).toHaveLength(1)
     expect(claude.last().systemPromptAppend).toBe(builder!.roleAppend)
     expect(claude.last().cwd).toBe(repo)
@@ -238,7 +238,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(o.toolProfile).toBe('builder')
     expect(o.orchestratorTools).toBeDefined()
     expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
-    expect(mgr.toolProfileOf(builder!.id)).toBe('builder')
+    expect(mgr.tools.toolProfileOf(builder!.id)).toBe('builder')
     // The list the bridge (Codex) asks for is the same profile
     const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
     expect(tools.map((t) => t.name)).toEqual(['check'])
@@ -253,7 +253,7 @@ describe('a building session tries out its own app (C-3)', () => {
     plantApp(join(app.dir, ...PROJECT_APPS), 'extra', { server: { command: 'node', args: ['server.mjs'] } })
     rt.refresh()
     claude.seen = []
-    expect((await mgr.restartSession(builder!.id)).resumed).toBe(true)
+    expect((await mgr.processes.restartSession(builder!.id)).resumed).toBe(true)
     expect(servers(claude.last())).toEqual(['app-extra', 'app-timer'])
     expect(claude.last().toolProfile).toBe('builder')
     // Actually calls the attached app's tool — the template's increment
@@ -279,7 +279,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     // An ordinary session has the reader set (#320) — read-only, and no check in it
-    expect(mgr.toolProfileOf(worker.id)).toBe('reader')
+    expect(mgr.tools.toolProfileOf(worker.id)).toBe('reader')
     expect(claude.last().toolProfile).toBe('reader')
     expect(((await rpc('orchestrator.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     await expect(mgr.runOrchestratorTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)
@@ -293,7 +293,7 @@ describe('the app restarts at the end of its building session\'s turn (C-4)', ()
     await rt.tools(ref)
     const emit = claude.sinks.get(builder!.id)!
     emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
-    expect(mgr.builderBusy(ref)).toBe(true)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(true)
     const server = join(app.dir, 'server.mjs')
     writeFileSync(
       server,
@@ -307,10 +307,10 @@ describe('the app restarts at the end of its building session\'s turn (C-4)', ()
     expect(rt.knownTools(ref)!.map((t) => t.name)).not.toContain('added')
     // Waiting on approval also counts as mid-turn
     emit({ type: 'approval_request', sessionId: builder!.id, requestId: 'r1', detail: { kind: 'command', command: 'ls' } } as never)
-    expect(mgr.builderBusy(ref)).toBe(true)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(true)
     emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
     emit({ type: 'turn_complete', sessionId: builder!.id })
-    expect(mgr.builderBusy(ref)).toBe(false)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(false)
     await until(() => rt.knownTools(ref)?.map((t) => t.name) ?? [], (names) => names.includes('added'))
   })
 })

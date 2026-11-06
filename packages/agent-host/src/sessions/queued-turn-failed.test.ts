@@ -30,7 +30,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(a).externalId = 'ext-a'
     handleOf(a).answer('first job done')
     await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-    await w.mgr.send(a, "the person's own work")
+    await w.mgr.inputs.send(a, "the person's own work")
     return { a, b }
   }
   /** The reports of A's work that B was given */
@@ -66,7 +66,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   it("an ask queued into another project's busy session is reported as failed once, and the person's next turn is not", async () => {
     const t = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     handleOf(t).externalId = 'ext-t'
-    await w.mgr.send(t, "the person's own work")
+    await w.mgr.inputs.send(t, "the person's own work")
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     refuses(t, 'export the sprites', { type: 'error', sessionId: t, error: { code: 'internal', message: 'the API refused the request', retryable: false } })
@@ -74,7 +74,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(t).answer("the person's answer")
     await w.until(() => told(s, t).length === 1)
     expect(told(s, t)[0]).toContain('The assigned work failed')
-    await w.mgr.send(t, "the person's next thing")
+    await w.mgr.inputs.send(t, "the person's next thing")
     handleOf(t).answer("the person's next answer")
     await new Promise((r) => setImmediate(r))
     expect(told(s, t)).toHaveLength(1)
@@ -83,7 +83,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   it("a queued ask that could not be delivered is said once, and the person's next turn is not reported as it", async () => {
     const t = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     handleOf(t).externalId = 'ext-t'
-    await w.mgr.send(t, "the person's own work")
+    await w.mgr.inputs.send(t, "the person's own work")
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     expect(await w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
@@ -100,7 +100,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     expect(read).toContain('Reason, by kind: other')
     for (const outside of ['TOOL_TEXT_SENTINEL', 'Person:']) expect(read).not.toContain(outside)
     adapter.createSession = start
-    await w.mgr.send(t, "the person's next thing")
+    await w.mgr.inputs.send(t, "the person's next thing")
     handleOf(t).answer("the person's next answer")
     await new Promise((r) => setImmediate(r))
     expect(told(s, t)).toEqual([])
@@ -124,7 +124,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(a).answer('done this time')
     expect(await r).toMatchObject({ ok: true, state: 'done', answer: 'done this time' })
     // The person's later turn there is not reported as that work either
-    await w.mgr.send(a, "the person's next thing")
+    await w.mgr.inputs.send(a, "the person's next thing")
     handleOf(a).answer("the person's next answer")
     await new Promise((r) => setImmediate(r))
     expect(told(b, a)).toHaveLength(before + 1)

@@ -57,7 +57,7 @@ const store = new Store(values.db!)
 const adapters = values.agent === 'replay' ? replayAdapters() : scriptedAdapters()
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
 // A new project's ~/Centralu (#515) is the one in this host's temporary HOME, never the home of whoever runs the suite
-mgr.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
+mgr.projectCreation.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
 let up = false
 const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
   if (up) server.pushTerminal(f)
@@ -110,8 +110,8 @@ const links = new Links({
   log: (line) => console.error(line),
   retryMs: [300, 2000],
 })
-mgr.useLinkedSessions((id) => links.knowsSession(id))
-mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
+mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
+mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
 const allowedOrigins = (process.env.CC_HOST_ALLOWED_ORIGINS ?? '').split(',').filter(Boolean)
 /*
  * Apps and their views, composed as `main.ts` composes them (remote-hub.md §11): the real runtime (an app is a real
@@ -131,7 +131,7 @@ externalApps.refresh()
 onExternalAppListChanged(externalApps, () => {
   if (up) server.broadcast({ type: 'external_apps_changed' })
 })
-mgr.useExternalApps(externalApps)
+mgr.apps.useExternalApps(externalApps)
 const httpSecret = randomBytes(32).toString('base64url')
 let port = 0
 const views: ViewHost = new ViewHost({

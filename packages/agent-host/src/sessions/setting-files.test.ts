@@ -127,7 +127,7 @@ beforeEach(async () => {
     ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.appSessions.builderBusy(ref) })
   rt.refresh()
   openManager()
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
@@ -137,7 +137,7 @@ beforeEach(async () => {
 function openManager(): void {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
 }
 
@@ -185,7 +185,7 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
     const id = plantOldCoordinator(store, { name: 'Crew', memberSessionIds: [member.id], roleAppend: 'Coordinating session', tool })
     await mgr.disposeAll()
     openManager()
-    await mgr.resumeSession(id)
+    await mgr.processes.resumeSession(id)
     return id
   },
   worker: async (tool) => ((await rpc('agents.createSession', { projectId, cwd: repo, tool })) as SessionInfo).id,
@@ -302,7 +302,7 @@ describe.each(['claude', 'codex'] as const)('%s — the session\'s kind decides 
       for (const preset of PRESETS) {
         await mgr.updateSettings(id, { permissionPreset: preset })
         // Trust only takes effect the next time it launches — relaunch through the wake path (resumeSession)
-        expect((await mgr.restartSession(id)).resumed).toBe(true)
+        expect((await mgr.processes.restartSession(id)).resumed).toBe(true)
         await settle()
         seen.push(launched(tool, id, preset))
         want.push(expected(tool, kind, trusted, preset, 'resume'))

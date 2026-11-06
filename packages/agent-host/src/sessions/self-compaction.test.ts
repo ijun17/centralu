@@ -1717,7 +1717,7 @@ describe('on the session manager (#1451)', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir('compact-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     const tools = adapter.lastOrchestratorTools!
     const h = adapter.last!
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     h.emitContext(150_000, 200_000)
     return { id: s.id, h, tools }
   }
@@ -1850,7 +1850,7 @@ describe('on the session manager (#1451)', () => {
     // The person types while the compact turn runs: the tool queues it behind the compact
     let queued = 0
     h.queuedInputs = () => queued
-    await world.mgr.send(id, 'wait, use the other branch', undefined, undefined, true)
+    await world.mgr.inputs.send(id, 'wait, use the other branch', undefined, undefined, true)
     queued = 1
     h.finishTurn()
     // The tool starts the queued message’s turn late, past any guess; nothing is sent beside it
@@ -1868,14 +1868,14 @@ describe('on the session manager (#1451)', () => {
     const { id, h } = await inCompactTurn()
     // Mail for the session waits in the mailbox as the compact turn ends (the mailbox’s debounce has not made it due yet)
     let mailWaiting = true
-    world.mgr.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, waiting: () => mailWaiting })
+    world.mgr.mail.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, waiting: () => mailWaiting })
     h.queuedInputs = () => 0
     h.finishTurn()
     await vi.advanceTimersByTimeAsync(THEN_SETTLE_MS + 500)
     expect(h.sent).toEqual(['hello', '/compact'])
     // The mailbox delivers it; its turn runs; the step follows its end
     mailWaiting = false
-    await world.mgr.mailSessions().deliver(id, { text: '[mail] from another session: the build is green', quiet: false, line: '✉ mail' })
+    await world.mgr.mail.mailSessions().deliver(id, { text: '[mail] from another session: the build is green', quiet: false, line: '✉ mail' })
     h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
     expect(h.sent).toEqual(['hello', '/compact', '[mail] from another session: the build is green'])
     h.finishTurn()
@@ -1941,7 +1941,7 @@ describe('on the session manager (#1451)', () => {
     expect(world.mgr.listSessions().find((s) => s.id === id)).toBeDefined()
 
     // Off: a second session at rest is left alone
-    world.mgr.setUiPreferences({ autoCompact: { controlled: false } })
+    world.mgr.prefs.setUiPreferences({ autoCompact: { controlled: false } })
     h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
     h.emitEvent({ type: 'compaction', sessionId: id, failed: false })
     h.finishTurn()

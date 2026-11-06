@@ -73,7 +73,7 @@ describe('a child that waits on its own background work (#721)', () => {
   /** The caller ends the turn the paused notice gave it, and is put to sleep */
   async function callerSleeps(caller: string) {
     handleOf(caller)!.answer('Noted.')
-    expect(await w.mgr.sleepSession(caller)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(caller)).toBe(true)
     expect(w.mgr.listSessions().find((s) => s.id === caller)!.live).toBe(false)
   }
 
@@ -93,7 +93,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(paused).toContain('A final report follows only if that work ends; agent_session(action="stop") on it stops that work and ends the wait.')
     expect(paused).toContain('Waiting for verify to finish.')
     // A child paused on its own work does not keep its caller awake; the final report wakes it
-    expect(w.mgr.waitsOn(caller)).toEqual([])
+    expect(w.mgr.processes.waitsOn(caller)).toEqual([])
     await callerSleeps(caller)
 
     verifyEndsAndChildFinishes(child)
@@ -212,7 +212,7 @@ describe('a child that waits on its own background work (#721)', () => {
     await w.until(() => reportsTo(caller, child).length === 1)
     const h = handleOf(child)!
     // Their turn, begun at rest by their message
-    await w.mgr.send(child, 'how is it going?')
+    await w.mgr.inputs.send(child, 'how is it going?')
     const mine = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })
     expect(mine).toMatchObject({ ok: false, error: expect.stringContaining('No note to') })
     h.answer('Still waiting for verify.')
@@ -224,7 +224,7 @@ describe('a child that waits on its own background work (#721)', () => {
     const before0 = h.sent.length
     expect(await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'first note', ifBusy: 'note' })).toMatchObject({ ok: true })
     expect(h.sent.slice(before0).join(' ')).toContain('first note')
-    await w.mgr.send(child, 'also the lint please')
+    await w.mgr.inputs.send(child, 'also the lint please')
     const before = h.sent.length
     const typed = await w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'use staging', ifBusy: 'note' })
     expect(typed).toMatchObject({ ok: false })
@@ -233,8 +233,8 @@ describe('a child that waits on its own background work (#721)', () => {
 
   describe('a turn another message starts while the child is paused is not the own continuation of the tool (#1576)', () => {
     const cases = [
-      ['a session of another computer (from)', (child: string) => w.mgr.send(child, 'from afar', undefined, { sessionId: 'hub-x', name: 'Hub' })],
-      ['a script (fromScript)', (child: string) => w.mgr.send(child, 'from a script', undefined, undefined, false, 'ask', { credential: 'cred-1' })],
+      ['a session of another computer (from)', (child: string) => w.mgr.inputs.send(child, 'from afar', undefined, { sessionId: 'hub-x', name: 'Hub' })],
+      ['a script (fromScript)', (child: string) => w.mgr.inputs.send(child, 'from a script', undefined, undefined, false, 'ask', { credential: 'cred-1' })],
     ] as const
     it.each(cases)('%s: a note is refused', async (_name, start) => {
       const { caller, child } = await started()
@@ -299,16 +299,16 @@ describe('a child that waits on its own background work (#721)', () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
       await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.send(child, '/compact')
+      await w.mgr.inputs.send(child, '/compact')
       handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'compact crashed', retryable: false } })
       await settle()
       expect(reportsTo(caller, child)).toHaveLength(1)
       // Open, in memory and in the store
       expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
       expect(w.store.settings.appSetting(`report_paused:${child}`)).not.toBeNull()
-      expect(w.mgr.reportOwed(child)).toMatchObject({ callerId: caller })
+      expect(w.mgr.inputs.reportOwed(child)).toMatchObject({ callerId: caller })
       // Their turn ends well too, and again nothing is reported
-      await w.mgr.send(child, 'how is it going?')
+      await w.mgr.inputs.send(child, 'how is it going?')
       handleOf(child)!.answer('Still waiting for verify.')
       await settle()
       expect(reportsTo(caller, child)).toHaveLength(1)
@@ -326,7 +326,7 @@ describe('a child that waits on its own background work (#721)', () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
       for (let i = 0; i < 50 && reportsTo(caller, child).length < 1; i++) await vi.advanceTimersByTimeAsync(0)
-      await w.mgr.send(child, 'how is it going?')
+      await w.mgr.inputs.send(child, 'how is it going?')
       // The task ends while their turn runs, and the settle wait passes with the turn still running
       handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
       await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
@@ -345,7 +345,7 @@ describe('a child that waits on its own background work (#721)', () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
       await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.send(child, 'quick question')
+      await w.mgr.inputs.send(child, 'quick question')
       handleOf(child)!.answer('An answer for the person.')
       await settle()
       const sent = w.mgr.agentSession(caller, { sessionId: child, action: 'send', text: 'Go on without waiting for verify.' })
@@ -372,7 +372,7 @@ describe('a child that waits on its own background work (#721)', () => {
       // The work's turn runs (the tasks ended), and the person writes meanwhile
       handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
       handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      await w.mgr.send(child, 'and after that, tell me a joke')
+      await w.mgr.inputs.send(child, 'and after that, tell me a joke')
       handleOf(child)!.answer('PR #9 opened; verify passed.')
       await w.until(() => reportsTo(caller, child).length === 2)
       expect(reportsTo(caller, child)[1]).toContain('[Centralu] The session ended its turn.')
@@ -385,7 +385,7 @@ describe('a child that waits on its own background work (#721)', () => {
 
     it('row 5: the person writes into a turn the work started: the work\'s, reported, saying so', async () => {
       const { caller, child } = await started()
-      await w.mgr.send(child, 'also check the lint')
+      await w.mgr.inputs.send(child, 'also check the lint')
       handleOf(child)!.answer('Done, lint included.')
       await w.until(() => reportsTo(caller, child).length === 1)
       expect(reportsTo(caller, child)[0]).toContain('[Centralu] The session ended its turn.')
@@ -411,7 +411,7 @@ describe('a child that waits on its own background work (#721)', () => {
       it("the person's message not folded into the work's turn is their own turn after it: not the work's, and not noted on it", async () => {
         const { caller, child } = await started()
         tracking(child)
-        await w.mgr.send(child, 'and tell me a joke')
+        await w.mgr.inputs.send(child, 'and tell me a joke')
         const id = lastId(child)
         // Named with Centralu's mark, as every input Centralu writes, so its transcript line reads back as Centralu's (#1618 review)
         expect(isCentraluInputId(id)).toBe(true)
@@ -439,7 +439,7 @@ describe('a child that waits on its own background work (#721)', () => {
       it("the person's message folded into the work's turn is noted on it, and no turn of theirs follows", async () => {
         const { caller, child } = await started()
         tracking(child)
-        await w.mgr.send(child, 'also check the lint')
+        await w.mgr.inputs.send(child, 'also check the lint')
         taken = [lastId(child)]
         handleOf(child)!.answer('Done, lint included.')
         await w.until(() => reportsTo(caller, child).length === 1)
@@ -450,9 +450,9 @@ describe('a child that waits on its own background work (#721)', () => {
       it('a message among several: only the one the turn took in is noted, and the other starts their turn', async () => {
         const { caller, child } = await started()
         tracking(child)
-        await w.mgr.send(child, 'first')
+        await w.mgr.inputs.send(child, 'first')
         const first = lastId(child)
-        await w.mgr.send(child, 'second')
+        await w.mgr.inputs.send(child, 'second')
         taken = [first]
         handleOf(child)!.answer('Done.')
         await w.until(() => reportsTo(caller, child).length === 1)
@@ -467,7 +467,7 @@ describe('a child that waits on its own background work (#721)', () => {
       it("a CLI that cannot name the inputs it took (older): the message is the next turn's, never noted on the work's", async () => {
         const { caller, child } = await started()
         handleOf(child)!.turnInputs = () => null
-        await w.mgr.send(child, 'and tell me a joke')
+        await w.mgr.inputs.send(child, 'and tell me a joke')
         pauseOnVerify(child)
         await w.until(() => reportsTo(caller, child).length === 1)
         expect(reportsTo(caller, child)[0]).not.toContain('The person wrote')
@@ -482,9 +482,9 @@ describe('a child that waits on its own background work (#721)', () => {
         tracking(child)
         pauseOnVerify(child)
         await w.until(() => reportsTo(caller, child).length === 1)
-        await w.mgr.send(child, 'first question')
+        await w.mgr.inputs.send(child, 'first question')
         const first = lastId(child)
-        await w.mgr.send(child, 'second question')
+        await w.mgr.inputs.send(child, 'second question')
         taken = [first]
         handleOf(child)!.answer('First answered.')
         handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
@@ -498,7 +498,7 @@ describe('a child that waits on its own background work (#721)', () => {
 
     it('"Just asking" is the default, also when the person writes into the work\'s turn: it stays the work\'s, with the note', async () => {
       const { caller, child } = await started()
-      await w.mgr.send(child, 'quick question', undefined, undefined, true, 'ask')
+      await w.mgr.inputs.send(child, 'quick question', undefined, undefined, true, 'ask')
       handleOf(child)!.answer('Done.')
       await w.until(() => reportsTo(caller, child).length === 1)
       expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
@@ -508,7 +508,7 @@ describe('a child that waits on its own background work (#721)', () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
       await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.send(child, 'Also add a changelog line.', undefined, undefined, true, 'task')
+      await w.mgr.inputs.send(child, 'Also add a changelog line.', undefined, undefined, true, 'task')
       verifyEndsAndChildFinishes(child, 'PR #9 opened with a changelog line.')
       await w.until(() => reportsTo(caller, child).length === 2)
       expect(reportsTo(caller, child)[1]).toContain('[Centralu] The session ended its turn.')
@@ -519,12 +519,12 @@ describe('a child that waits on its own background work (#721)', () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
       await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.send(child, '/compact', undefined, undefined, true, 'takeover')
+      await w.mgr.inputs.send(child, '/compact', undefined, undefined, true, 'takeover')
       await w.until(() => takeovers(caller, child).length === 1)
       expect(takeovers(caller, child)[0]).toContain('its later turns are theirs, and none of them will be reported to you')
       expect(w.store.children.listReportMarks()).toEqual([])
       expect(w.store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-      expect(w.mgr.reportOwed(child)).toBeNull()
+      expect(w.mgr.inputs.reportOwed(child)).toBeNull()
       failedTurn(child)
       verifyEndsAndChildFinishes(child)
       await settle()
@@ -533,7 +533,7 @@ describe('a child that waits on its own background work (#721)', () => {
 
     it('"Take it over" while the work\'s turn is running: the running turn is theirs from here', async () => {
       const { caller, child } = await started()
-      await w.mgr.send(child, 'I will do this myself', undefined, undefined, true, 'takeover')
+      await w.mgr.inputs.send(child, 'I will do this myself', undefined, undefined, true, 'takeover')
       await w.until(() => takeovers(caller, child).length === 1)
       expect(takeovers(caller, child)[0]).toContain('The work you assigned was still running')
       handleOf(child)!.answer('Done by me.')
@@ -624,17 +624,17 @@ describe('a child that waits on its own background work (#721)', () => {
     const one = await started()
     pauseOnVerify(one.child)
     await w.until(() => reportsTo(one.caller, one.child).length === 1)
-    await w.mgr.trashSession(one.child)
+    await w.mgr.trash.trashSession(one.child)
     expect(w.store.children.listReportMarks()).toEqual([])
 
     const two = await started()
     pauseOnVerify(two.child)
     await w.until(() => reportsTo(two.caller, two.child).length === 1)
-    await w.mgr.trashSession(two.caller)
+    await w.mgr.trash.trashSession(two.caller)
     expect(w.store.children.listReportMarks()).toEqual([])
     verifyEndsAndChildFinishes(two.child)
     await settle()
-    expect(w.mgr.waitsOn(two.caller)).toEqual([])
+    expect(w.mgr.processes.waitsOn(two.caller)).toEqual([])
   })
 
   it('a turn that fails while its task runs is reported as it ended, not held as paused', async () => {

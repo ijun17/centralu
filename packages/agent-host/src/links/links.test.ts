@@ -139,7 +139,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
     broadcast: (e) => {
       server.broadcast(e)
-      mgr.observeLinked(e)
+      mgr.linkedHost.observeLinked(e)
     },
     terminal: (f) => server.pushTerminal(f),
     mirror: storeMirror(store),
@@ -147,11 +147,11 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
     tunnelFor: () => new DirectTunnel(line),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
-    ownerOf: (sessionId) => mgr.remoteAgentParent(sessionId),
+    ownerOf: (sessionId) => mgr.linkedHost.remoteAgentParent(sessionId),
     ...extra,
   })
-  mgr.useLinkedSessions((id) => links.knowsSession(id))
-  mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
+  mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
+  mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
   // As main.ts wires it: the orchestrator's list_machines reads what machines.list answers (#1220)
   mgr.useMachineList(() => links.list())
@@ -215,7 +215,7 @@ describe('a hub linked to another host (#82)', () => {
    */
   it('refuses "always" for a linked machine\'s card the hub could not read, and passes allow on', async () => {
     const remote = await remoteHost()
-    await remote.mgr.addProject(folder())
+    await remote.mgr.projectCreation.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
@@ -230,11 +230,11 @@ describe('a hub linked to another host (#82)', () => {
     warn.mockRestore()
     expect(u.events().find((e) => e.requestId === 'r-newer')!.detail).toMatchObject({ kind: 'other', about: 'unknown_card' })
     const answered: [string, string][] = []
-    const real = remote.mgr.respondApproval.bind(remote.mgr)
-    remote.mgr.respondApproval = ((id: string, requestId: string, decision: string, ...rest: unknown[]) => {
+    const real = remote.mgr.inputs.respondApproval.bind(remote.mgr.inputs)
+    remote.mgr.inputs.respondApproval = ((id: string, requestId: string, decision: string, ...rest: unknown[]) => {
       answered.push([requestId, decision])
       return (real as (...a: unknown[]) => unknown)(id, requestId, decision, ...rest)
-    }) as typeof remote.mgr.respondApproval
+    }) as typeof remote.mgr.inputs.respondApproval
     await expect(u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-newer', decision: 'always' })).rejects.toThrow(/cannot be allowed always/)
     // A card the hub read is answered "always" as before
     await u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-known', decision: 'always' }).catch(() => {})
@@ -245,9 +245,9 @@ describe('a hub linked to another host (#82)', () => {
 
   it('works a remote session end to end: lists, create, send, approve, with ids qualified and events under the hub’s numbers', async () => {
     const remote = await remoteHost()
-    const remoteProject = await remote.mgr.addProject(folder())
+    const remoteProject = await remote.mgr.projectCreation.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
-    await hub.mgr.addProject(folder())
+    await hub.mgr.projectCreation.addProject(folder())
     await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
 
@@ -356,7 +356,7 @@ describe('a hub linked to another host (#82)', () => {
   it('answers for a machine that went away from the mirror, keeps its grid panel, and says when it is back', async () => {
     const remoteStore = new Store()
     const remote = await remoteHost(0, remoteStore)
-    const p = await remote.mgr.addProject(folder())
+    const p = await remote.mgr.projectCreation.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
@@ -1885,9 +1885,9 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       const a = auto(false)
       const { hub, ran, remote } = await waiting({ deps: a.deps, old: a.old })
       // A real session there waiting on an approval: in a turn, as host.sessions says
-      const project = await remote().mgr.addProject(mkdtempSync(join(tmpdir(), 'cc-1618-')))
+      const project = await remote().mgr.projectCreation.addProject(mkdtempSync(join(tmpdir(), 'cc-1618-')))
       const s = await remote().mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
-      await remote().mgr.send(s.id, 'approve this')
+      await remote().mgr.inputs.send(s.id, 'approve this')
       await eventually(() => remote().mgr.listSessions().find((x) => x.id === s.id)?.state === 'waiting_approval')
       a.state.on = true
       hub.links.followHub()
@@ -2250,10 +2250,10 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
    */
   it('a turn end the hub hears late is not the report of the instruction the machine took after it (#1082)', async () => {
     const { tool, remote, hub } = await rig()
-    const hear = hub.mgr.observeLinked.bind(hub.mgr)
+    const hear = hub.mgr.linkedHost.observeLinked.bind(hub.mgr.linkedHost)
     const late: Parameters<typeof hear>[0][] = []
     let heldOne = false
-    hub.mgr.observeLinked = (e) => {
+    hub.mgr.linkedHost.observeLinked = (e) => {
       if (e.sessionId === 'm1.w1' && e.type === 'turn_complete' && !heldOne) return void ((heldOne = true), late.push(e))
       if (e.sessionId === 'm1.w1' && e.type === 'user_message' && e.text === 'and now the restore') for (const held of late.splice(0)) hear(held)
       hear(e)
@@ -2270,7 +2270,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
 
   it('reaches a machine’s session that has children (a former worktree manager, #561) as an instruction, not as someone else’s words (step 2)', async () => {
     const { tool, remote } = await rig({ worktreeChild: true })
-    expect(remote.mgr.toolProfileOf('w1')).toBe('reader')
+    expect(remote.mgr.tools.toolProfileOf('w1')).toBe('reader')
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'merge the branch' })
     await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: merge the branch'))
   })
@@ -2292,7 +2292,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     await eventually(() => remote.store.messages.loadMessages(s.id, 5).some((m) => (m.payload as { text?: string }).text === 'echo: hello there'))
 
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
-    const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
+    const name = (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === 'p-remote')!.name
     expect((await tool('create_session', { project: name })).text).toMatch(/^Created: .+ \[m1\./)
     hub.store.projects.addProject({ id: 'p-dup', path: folder(), name })
     const both = await tool('create_session', { project: name })
@@ -2326,11 +2326,11 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const card = hub.mgr.listSessions().find((s) => s.id === 'hub-orch')!.pendingApproval!
     expect(card.detail).toEqual({ kind: 'project_create', name: 'fresh', path: join(parent, 'fresh'), machine: 'Remote box' })
     // Nothing is made before the answer
-    expect((await remote.mgr.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(false)
-    await hub.mgr.respondApproval('hub-orch', card.requestId, 'allow')
+    expect((await remote.mgr.projectRegistry.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(false)
+    await hub.mgr.inputs.respondApproval('hub-orch', card.requestId, 'allow')
     const r = await pending
     expect(r.text).toMatch(/^Made the project "fresh" \[m1\.[^\]]+\], an empty folder at ".+" on Remote box\./)
-    expect((await remote.mgr.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(true)
+    expect((await remote.mgr.projectRegistry.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(true)
     expect(hub.store.projects.listProjects().some((p) => p.path === join(parent, 'fresh'))).toBe(false)
 
     expect(await tool('create_project', { name: 'x', machine: 'Nowhere' })).toMatchObject({
@@ -2343,7 +2343,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const { store } = seeded([['long', 'worker', true]])
     talk(store, 'long', Array.from({ length: 150 }, (_, i): [string, string] => [`ask ${i} quokka`, `answer ${i} quokka`]))
     const remote = await remoteHost(0, store)
-    const reader = remote.mgr.hostReader()
+    const reader = remote.mgr.linkedHost.hostReader()
     for (const [asked, got] of [[1, 1], [40, 40], [199, 199], [200, 200], [201, 200], [5000, 200]] as const) {
       expect((await reader.read('long', asked, { maxChars: 40_000 })).lines).toHaveLength(got)
     }
@@ -2365,7 +2365,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const long = 'z'.repeat(120_000)
     talk(store, 'w1', [['write it all', long]])
     const remote = await remoteHost(0, store)
-    const reader = remote.mgr.hostReader()
+    const reader = remote.mgr.linkedHost.hostReader()
     const seq = store.messages.loadMessages('w1', 10).find((m) => m.role === 'assistant')!.seq
     for (const [asked, got] of [[undefined, 100_000], [1, 1], [5000, 5000], [100_000, 100_000], [200_000, 100_000]] as const) {
       expect(await reader.lastAnswer('w1', asked)).toEqual({ text: long.slice(0, got), length: 120_000, seq })
@@ -2403,13 +2403,13 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     hub.mgr.setProjectTrusted('p-hub', true)
     await eventually(() => status(hub) === 'connected')
-    const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
+    const name = (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === 'p-remote')!.name
     const ask = (opts: { project: string; session?: string; task?: string }) => hub.mgr.askProject('h1', opts)
     const card = () => hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval
     const answer = async (decision: 'allow' | 'always' | 'deny') => {
       await eventually(() => !!card())
       const c = card()!
-      await hub.mgr.respondApproval('h1', c.requestId, decision)
+      await hub.mgr.inputs.respondApproval('h1', c.requestId, decision)
       // The next card is a new one: this one is gone before the caller asks again
       await eventually(() => card()?.requestId !== c.requestId)
       return c
@@ -2458,8 +2458,8 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
 
   it('says the answer could not be read there, rather than answering empty (#1186)', async () => {
     const { remote, name, ask, answer } = await rig()
-    const real = remote.mgr.hostReader.bind(remote.mgr)
-    vi.spyOn(remote.mgr, 'hostReader').mockImplementation(() => ({ ...real(), lastAnswer: async () => { throw new Error('the store is busy') } }))
+    const real = remote.mgr.linkedHost.hostReader.bind(remote.mgr.linkedHost)
+    vi.spyOn(remote.mgr.linkedHost, 'hostReader').mockImplementation(() => ({ ...real(), lastAnswer: async () => { throw new Error('the store is busy') } }))
     const call = ask({ project: name, task: 'say hello' })
     await answer('allow')
     const r = await call
@@ -2470,7 +2470,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
   // The machine counts its session one level below the hub's caller while it works on the task (#838 item 12)
   it('tells the machine the depth its session works at, which ends with the turn', async () => {
     const { remote, name, ask, answer } = await rig()
-    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
+    const sent = vi.spyOn(remote.mgr.linkedHost, 'sendFromHub')
     const call = ask({ project: name, task: 'say hello' })
     await answer('allow')
     expect(await call).toMatchObject({ ok: true, state: 'done' })
@@ -2543,7 +2543,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     // The same caller asking again with a task is told to wait, not to start a second one
     expect(await ask({ project: name, task: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('still working on your last task') })
     await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
-    await remote.mgr.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
+    await remote.mgr.inputs.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
     expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
   })
   it('sends nothing when the person started a turn in the session while the question stood', async () => {
@@ -2551,7 +2551,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const call = ask({ project: name, task: 'say hello' })
     await eventually(() => !!card())
     // The person works in that session there while the card is up: a turn that waits on them
-    await remote.mgr.send('w1', 'please approve my command')
+    await remote.mgr.inputs.send('w1', 'please approve my command')
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
@@ -2633,7 +2633,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const answer = async (decision: 'allow' | 'always' | 'deny') => {
       await eventually(() => !!card())
       const c = card()!
-      await hub.mgr.respondApproval('h1', c.requestId, decision)
+      await hub.mgr.inputs.respondApproval('h1', c.requestId, decision)
       return c
     }
     const start = (opts: Partial<Parameters<SessionManager['startAgent']>[1]> = {}) =>
@@ -2642,7 +2642,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
-    const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
+    const nameOf = async (id: string) => (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === id)!.name
     const told = () => hub.store.messages.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
     const reports = () => told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t)).length
     const records = () => JSON.parse(hub.store.settings.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
@@ -2654,7 +2654,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const control = async (mgr: SessionManager = hub.mgr) => {
       const call = mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', wait: false })
       await eventually(() => !!mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
-      await mgr.respondApproval('h1', mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+      await mgr.inputs.respondApproval('h1', mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
       const r = await call
       if (!r.ok) throw new Error(r.error)
       // Its own report, not any: a wrongful one coming in meanwhile must not end the wait
@@ -2665,7 +2665,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
   it("starts it in the machine's checkout of the same repository, behind a card that names the machine, and waits for its answer", async () => {
     const { remote, remoteStore, hub, answer, start, agent, list, nameOf } = await rig()
-    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
+    const sent = vi.spyOn(remote.mgr.linkedHost, 'sendFromHub')
     const call = start()
     const c = await answer('allow')
     expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', project: { id: 'm1.p-app', name: await nameOf('p-app') }, preset: 'normal' })
@@ -2694,13 +2694,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   // #1161 item 2: the machine's own instructions (its paths, its shell), not the hub's copy of the project's
   it("carries the instructions of the machine's copy of the project after the task, not the hub's", async () => {
     const { remote, hub, card, answer, start } = await rig()
-    hub.mgr.setAgentInstructions('p-hub', 'Work in /Users/me/wt.')
-    remote.mgr.setAgentInstructions('p-app', 'An older text.')
-    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
+    hub.mgr.projectRegistry.setAgentInstructions('p-hub', 'Work in /Users/me/wt.')
+    remote.mgr.projectRegistry.setAgentInstructions('p-app', 'An older text.')
+    const sent = vi.spyOn(remote.mgr.linkedHost, 'sendFromHub')
     const call = start()
     await eventually(() => !!card())
     // Changed there while the card stands (#1161 review): the child reads them as they are when it is made
-    remote.mgr.setAgentInstructions('p-app', 'Work in C:\\wt. The shell is PowerShell.')
+    remote.mgr.projectRegistry.setAgentInstructions('p-app', 'Work in C:\\wt. The shell is PowerShell.')
     await answer('allow')
     expect(await call).toMatchObject({ ok: true })
     const task = sent.mock.calls[0]![1]
@@ -2787,7 +2787,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       await eventually(() => !!card())
       expect(card()!.detail).toMatchObject({ kind: 'agent_start', preset: 'normal' })
       expect((card()!.detail as { autoWithheld?: string }).autoWithheld).toBeUndefined()
-      await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+      await hub.mgr.inputs.respondApproval('h1', card()!.requestId, 'allow')
       const normal = await call
       if (!normal.ok) throw new Error(normal.error)
       expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === normal.sessionId)).toMatchObject({ permissionPreset: 'normal', startedFromHub: true })
@@ -2795,7 +2795,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
     it("asks with the card and runs it under normal where the machine's switch is off, and says why", async () => {
       const { remote, hub, answer, start } = await rig()
-      remote.mgr.setUiPreferences({ hubAuto: false })
+      remote.mgr.prefs.setUiPreferences({ hubAuto: false })
       await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
       const call = start()
       const c = await answer('allow')
@@ -2812,13 +2812,13 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const u = await ui(hub.port)
       expect(await u.call('machines.hubAuto', { machineId: 'm1' })).toEqual({ state: 'on' })
       expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: false })).toEqual({ state: 'off' })
-      expect(remote.mgr.uiPreferences().hubAuto).toBe(false)
+      expect(remote.mgr.prefs.uiPreferences().hubAuto).toBe(false)
       await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
       const call = start()
       expect((await answer('allow')).detail).toMatchObject({ preset: 'normal', autoWithheld: 'machine_off' })
       expect(await call).toMatchObject({ ok: true })
       expect(await u.call('machines.hubAuto', { machineId: 'm1', allowed: true })).toEqual({ state: 'on' })
-      expect(remote.mgr.uiPreferences().hubAuto).toBe(true)
+      expect(remote.mgr.prefs.uiPreferences().hubAuto).toBe(true)
     })
 
     // #1273 review: any failure there read as the link being down
@@ -2884,7 +2884,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const pending = card()!
       expect(pending.detail).toMatchObject({ preset: 'normal' })
       await hub.mgr.updateSettings('h1', { permissionPreset: 'safe' })
-      await hub.mgr.respondApproval('h1', pending.requestId, 'allow')
+      await hub.mgr.inputs.respondApproval('h1', pending.requestId, 'allow')
       expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('now runs under safe, below the normal the child would have run under') })
       expect(remote.mgr.listSessions().filter((s) => s.startedFromHub)).toEqual([])
     })
@@ -2909,7 +2909,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
       const create = remote.mgr.createSession.bind(remote.mgr)
       vi.spyOn(remote.mgr, 'createSession').mockImplementation(async (...a) => {
-        remote.mgr.setUiPreferences({ hubAuto: false })
+        remote.mgr.prefs.setUiPreferences({ hubAuto: false })
         return create(...a)
       })
       const r = await unasked(hub, card)
@@ -2955,7 +2955,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     if (!r.ok) throw new Error(r.error)
     const id = r.sessionId.slice('m1.'.length)
     // Someone at that machine starts a turn of their own, which stays open
-    await remote.mgr.send(id, 'a long job: by hand')
+    await remote.mgr.inputs.send(id, 'a long job: by hand')
     // Its turn is open once it has said so: ended before that, its first words would come after its end
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'working on it…'))
     const note = 'use the staging data'
@@ -3019,7 +3019,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const { remote, agent, r, id } = await followUp()
       // The caller's note is taken into the follow-up turn; then the person types into it
       expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
-      await remote.mgr.send(id, 'my own thing, please approve the command')
+      await remote.mgr.inputs.send(id, 'my own thing, please approve the command')
       await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'my own thing, please approve the command'))
       expect(await agent(r.sessionId, 'send', 'and this', undefined, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
     })
@@ -3150,7 +3150,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: false, error: expect.stringContaining('before deleting it') })
     // The person answers there: the turn ends, and its report comes
-    await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    await remote.mgr.inputs.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
   })
 
@@ -3244,7 +3244,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => status(hub) !== 'connected')
     // Trashed there while the hub could not see it
     const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
-    await there.trashSession(a.sessionId.slice('m1.'.length))
+    await there.trash.trashSession(a.sessionId.slice('m1.'.length))
     await there.disposeAll()
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
@@ -3278,7 +3278,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   it("tells the caller of an approval there once, and leaves it to the person, as the caller's preset does not cross machines", async () => {
     const { remote, hub, answer, start, agent, told } = await rig()
     // An auto caller whose child runs normal there (#1273: that machine does not take auto), so the child asks there
-    remote.mgr.setUiPreferences({ hubAuto: false })
+    remote.mgr.prefs.setUiPreferences({ hubAuto: false })
     await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
     const call = start({ task: 'please approve the command', wait: false })
     await answer('allow')
@@ -3308,7 +3308,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
     // The person starts a turn there: not the caller's to add to
-    await remote.mgr.send(id, 'please approve my own command')
+    await remote.mgr.inputs.send(id, 'please approve my own command')
     await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
     expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
   })
@@ -3333,7 +3333,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => status(hub) !== 'connected')
     const back = await remoteHost(remote.port, remoteStore, {
       beforeListen: async (mgr) => {
-        await mgr.send(id, 'a question for you')
+        await mgr.inputs.send(id, 'a question for you')
         await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
       },
     })
@@ -3357,15 +3357,15 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // The machine holds the note until the person has answered there and the turn has ended
     let release!: () => void
     const held = new Promise<void>((resolve) => (release = resolve))
-    const deliver = remote.mgr.sendFromHub.bind(remote.mgr)
-    const reached = vi.spyOn(remote.mgr, 'sendFromHub').mockImplementation(async (...a) => {
+    const deliver = remote.mgr.linkedHost.sendFromHub.bind(remote.mgr.linkedHost)
+    const reached = vi.spyOn(remote.mgr.linkedHost, 'sendFromHub').mockImplementation(async (...a) => {
       await held
       return deliver(...a)
     })
     const note = agent(r.sessionId, 'send', 'use the staging data')
     await eventually(() => reached.mock.calls.length === 1)
     const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
-    remote.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    remote.mgr.inputs.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
     await eventually(() => reports() === 1)
     release()
     expect(await note).toMatchObject({ ok: true, state: 'working', reported: true })
@@ -3393,15 +3393,15 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     let answerIt!: () => void
     const taken = new Promise<void>((resolve) => (take = resolve))
     const answered = new Promise<void>((resolve) => (answerIt = resolve))
-    const deliver = remote.mgr.sendFromHub.bind(remote.mgr)
-    vi.spyOn(remote.mgr, 'sendFromHub').mockImplementation(async (...a) => {
+    const deliver = remote.mgr.linkedHost.sendFromHub.bind(remote.mgr.linkedHost)
+    vi.spyOn(remote.mgr.linkedHost, 'sendFromHub').mockImplementation(async (...a) => {
       await taken
       await deliver(...a)
       await answered
     })
     const note = agent(r.sessionId, 'send', 'use the staging data')
     const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
-    remote.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    remote.mgr.inputs.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
     await eventually(() => reports() === 1)
     take()
     // The note's turn runs there: the caller stops it before the send has answered
@@ -3426,7 +3426,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
       return id
     }
-    const allow = (id: string) => remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    const allow = (id: string) => remote.mgr.inputs.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
     const endsWhileDown = await begin('please approve the command')
     const endsAfter = await begin('please approve this one as well')
     await hub.links.stop()
@@ -3476,7 +3476,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // The machine's host comes back, and before the hub can reach it the person asks the child a question there
     const back = await remoteHost(remote.port, remoteStore, {
       beforeListen: async (mgr) => {
-        await mgr.send(id, 'a question for you')
+        await mgr.inputs.send(id, 'a question for you')
         await eventually(() => mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length === 1)
       },
     })
@@ -3485,7 +3485,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => lastRead || (readAt > 0 && Date.now() - readAt > 1_500))
     // The person answers there: that turn's end is theirs, not the caller's report
     const q = back.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
-    back.mgr.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
+    back.mgr.inputs.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
     await eventually(() => ['idle', 'waiting_input'].includes(back.mgr.listSessions().find((s) => s.id === id)?.state ?? ''))
     // A report of the person's turn would have come before the next child's
     await control()
@@ -3496,7 +3496,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   // #1038: a child on another machine counted under no ceiling, so a project's sessions could set any number going there
   it("counts a working child on the machine under its parent's project ceiling, and frees the place when its turn ends", async () => {
     const { remote, hub, answer, start, agent } = await rig()
-    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    hub.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
     // A turn that waits on the person there keeps working
     const call = start({ task: 'please approve the command', wait: false })
     await answer('allow')
@@ -3509,7 +3509,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // The person answers there: the turn ends, its report comes, and the place is free again
     const id = r.sessionId.slice('m1.'.length)
     await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
-    await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    await remote.mgr.inputs.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
     await eventually(() => (hub.mgr as unknown as { delegationFlow: { remote: { workingIn(p: string): number } } }).delegationFlow.remote.workingIn('p-hub') === 0)
     // New work for it counts again: a send at rest is refused while another child holds the one place
     const again = start({ task: 'please approve this one too', wait: false })
@@ -3522,7 +3522,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   // #1038 review: a child deleted there while the link was down, or on a removed machine, kept its place for good
   it('frees the place of a child deleted on its machine while the link was down, and of a removed machine\'s child', async () => {
     const { remote, remoteStore, hub, answer, start, records } = await rig()
-    hub.mgr.setUiPreferences({ agentCeiling: 1 })
+    hub.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
     const ceiling = () => (hub.mgr as unknown as { delegationFlow: { starts: { agentCeilingError(c: string, p: string): string | null } } }).delegationFlow.starts.agentCeilingError('h1', 'p-hub')
     const begin = async (task: string) => {
       const call = start({ task, wait: false })
@@ -3536,7 +3536,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await remote.close()
     await eventually(() => status(hub) !== 'connected')
     const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
-    await there.trashSession(a.slice('m1.'.length))
+    await there.trash.trashSession(a.slice('m1.'.length))
     await there.disposeAll()
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
@@ -3561,7 +3561,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await row()).toMatchObject({ askedBy: 'h1', projectId: 'm1.p-app', machine: 'm1' })
     // A row the windows already hold from the machine's own event moves too
     await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === 'h1'))
-    await hub.mgr.trashSession('h1')
+    await hub.mgr.trash.trashSession('h1')
     await eventually(() => u.events().some((e) => e.type === 'session_owner' && e.sessionId === r.sessionId && e.askedBy === null))
     expect((await row()).askedBy ?? null).toBeNull()
   })
@@ -3574,7 +3574,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const r = await call
     if (!r.ok) throw new Error(r.error)
     expect(records()).toHaveLength(1)
-    await hub.mgr.trashSession('h1')
+    await hub.mgr.trash.trashSession('h1')
     expect(records()).toEqual([])
     expect(remote.mgr.listSessions().some((s) => `m1.${s.id}` === r.sessionId)).toBe(true)
   })
@@ -3647,7 +3647,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // The parent starts a child there on a long job, not waited on: its report is owed
     const call = hub.mgr.startAgent('h1', { task: 'a long job: migrate the tests', machine: 'Remote box', wait: false })
     await eventually(() => !!hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
-    hub.mgr.respondApproval('h1', hub.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    hub.mgr.inputs.respondApproval('h1', hub.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
     const r = await call
     if (!r.ok) throw new Error(r.error)
     const id = r.sessionId.slice('m1.'.length)
@@ -3765,7 +3765,7 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     expect(remote.store.projects.listProjects()).toEqual([])
     expect(hub.store.projects.listProjects()).toEqual([])
 
-    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
+    hub.mgr.inputs.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     const [kept] = remote.store.projects.listProjects()
@@ -3784,7 +3784,7 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     const call = addProject(hub, orc.id, { path: plain, machine: 'm1' })
     await eventually(() => !!addCard(hub, orc.id))
     expect(addCard(hub, orc.id)!.detail).toMatchObject({ machine: 'Remote box', git: false, origin: null })
-    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'deny')
+    hub.mgr.inputs.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     expect(remote.store.projects.listProjects()).toEqual([])
   })
@@ -3793,7 +3793,7 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     const { remote, hub, orc } = await linked()
     const dir = folder()
     writeFileSync(join(dir, 'notes.txt'), 'a file')
-    const kept = await remote.mgr.addProject(join(dir))
+    const kept = await remote.mgr.projectCreation.addProject(join(dir))
     for (const [path, reason] of [
       [join(dir, 'nowhere'), /Nothing is at .* on Remote box/],
       [join(dir, 'notes.txt'), /is a file, not a folder/],
@@ -3815,8 +3815,8 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
     const call = addProject(hub, orc.id, { path: site, machine: 'Remote box' })
     await eventually(() => !!addCard(hub, orc.id))
     // Someone added it there meanwhile: that machine's projects.add would hand back the project it already has
-    const meanwhile = await remote.mgr.addProject(site)
-    hub.mgr.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
+    const meanwhile = await remote.mgr.projectCreation.addProject(site)
+    hub.mgr.inputs.respondApproval(orc.id, addCard(hub, orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/already the project .* changed while the card stood/)
@@ -3869,40 +3869,40 @@ describe('the machine commands on a real hub (#1219)', () => {
 
     const denied = run(hub, orc.id, 'reconnect_machine', { machine: 'remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
-    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
+    hub.mgr.inputs.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
     expect((await denied).isError).toBe(true)
     expect(status(hub)).toBe('disconnected')
 
     const allowed = run(hub, orc.id, 'reconnect_machine', { machine: 'remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
-    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    hub.mgr.inputs.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
     expect((await allowed).isError).toBeFalsy()
     await eventually(() => status(hub) === 'connected')
 
     const on = run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: true })
     await eventually(() => !!machineCard(hub, orc.id))
     expect(hub.links.list()[0]!.autoReconnect).toBe(false)
-    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    hub.mgr.inputs.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
     expect((await on).isError).toBeFalsy()
     expect(hub.links.list()[0]!.autoReconnect).toBe(true)
   })
 
   it("removes a machine only after the card, and its projects leave the hub's list", async () => {
     const remote = await remoteHost()
-    await remote.mgr.addProject(folder())
+    await remote.mgr.projectCreation.addProject(folder())
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
     const u = await ui(hub.port)
     expect((await u.call('projects.list')).length).toBe(1)
     // A session of the machine the person let ask a project of this computer (#550)
-    const here = await hub.mgr.addProject(folder())
+    const here = await hub.mgr.projectCreation.addProject(folder())
     hub.store.machines.setLinkedMachineAsks('m1', true)
     expect(hub.store.machines.setMachineAskConsent({ machineId: 'm1', sessionId: 's-there', sessionName: 'worker', projectId: here.id })).toBe(true)
     const orc = await hub.mgr.orchestrator()
     const call = run(hub, orc.id, 'remove_machine', { machine: 'Remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
     expect(hub.links.list().length).toBe(1)
-    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
+    hub.mgr.inputs.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'allow')
     expect((await call).isError).toBeFalsy()
     expect(hub.links.list()).toEqual([])
     expect((await u.call('projects.list')).map((p: { id: string }) => p.id)).toEqual([here.id])
@@ -3934,7 +3934,7 @@ describe('the machine commands on a real hub (#1219)', () => {
     // Connecting it again is the person's (#1341)
     const back = run(hub, orc.id, 'reconnect_machine', { machine: 'Remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
-    hub.mgr.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
+    hub.mgr.inputs.respondApproval(orc.id, machineCard(hub, orc.id)!.requestId, 'deny')
     expect((await back).isError).toBe(true)
     expect(status(hub)).toBe('disconnected')
   })

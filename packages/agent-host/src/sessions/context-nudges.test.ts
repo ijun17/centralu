@@ -300,7 +300,7 @@ describe('on the session manager (#1492)', () => {
     const p = (await rpc('projects.add', { path: dir('nudge-') })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir('nudge-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     const h = adapter.last!
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     // The reading of the turn before gives the window; the turn then grows past the share on its own
     h.emitContext(20_000, window, undefined, Math.round(window * 0.6))
     h.finishTurn()
@@ -352,10 +352,10 @@ describe('on the session manager (#1492)', () => {
 
   it('says nothing with the notices off, and takes the shares from the preferences', async () => {
     const { id, h } = await session()
-    world.mgr.setUiPreferences({ autoCompact: { nudge: false } })
+    world.mgr.prefs.setUiPreferences({ autoCompact: { nudge: false } })
     request(h, id, 400_000)
     expect(h.nudges).toEqual([])
-    world.mgr.setUiPreferences({ autoCompact: { nudge: true, nudgeFirst: 0.5 } })
+    world.mgr.prefs.setUiPreferences({ autoCompact: { nudge: true, nudgeFirst: 0.5 } })
     request(h, id, 400_000)
     expect(h.nudges).toEqual([])
     request(h, id, 510_000)

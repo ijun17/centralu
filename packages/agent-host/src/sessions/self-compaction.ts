@@ -111,13 +111,13 @@ export type ThenKeep = {
 export type SelfCompactionHost = {
   sessions(): SessionInfo[]
   session(sessionId: string): SessionInfo | undefined
-  /** `SessionManager.sessionIdle`: in a turn, a card, a question or background work make it not idle */
+  /** `SessionProcesses.sessionIdle`: in a turn, a card, a question or background work make it not idle */
   idle(sessionId: string): SessionIdle
   /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`, #1553): the record for this tool and model, which a floor is never written to */
   window(session: SessionInfo): number | null
   /** Whether a process of the session runs */
   running(sessionId: string): boolean
-  /** Whether the session can be given a turn now: between turns, no card or limit standing, and this host not leaving (`SessionManager.mailReceiver`'s `ready`; a session with no process is ready, it is woken) */
+  /** Whether the session can be given a turn now: between turns, no card or limit standing, and this host not leaving (`MailSessionsView.mailReceiver`'s `ready`; a session with no process is ready, it is woken) */
   ready(sessionId: string): boolean
   setting(): AutoCompact
   /**

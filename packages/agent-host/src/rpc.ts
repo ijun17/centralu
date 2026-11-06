@@ -296,18 +296,18 @@ export function createRpcHandler(
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
       const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined
-      await mgr.send(sessionId, text, attachments, undefined, true, intent, fromScript)
+      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, fromScript)
       return { ok: true as const }
     },
-    'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(p.sessionId) }),
-    'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.respondApproval(sessionId, requestId, decision, scope, matcher)),
-    'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.answerQuestion(sessionId, requestId, answers)),
+    'agents.reportOwed': async (p) => ({ owed: mgr.inputs.reportOwed(p.sessionId) }),
+    'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.inputs.respondApproval(sessionId, requestId, decision, scope, matcher)),
+    'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.inputs.answerQuestion(sessionId, requestId, answers)),
     'agents.models': async (p) => mgr.toolQueries.listModels(p.tool),
-    'agents.interrupt': async (p) => ack(mgr.interrupt(p.sessionId)),
+    'agents.interrupt': async (p) => ack(mgr.inputs.interrupt(p.sessionId)),
     'agents.stopBackgroundTask': async ({ sessionId, taskId }) => ack(await mgr.sessionSettings.stopBackgroundTask(sessionId, taskId)),
     'agents.clearBackgroundTasks': async (p) => ack(mgr.sessionSettings.clearBackgroundTasks(p.sessionId)),
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
-    'agents.deleteSession': async ({ sessionId, deleteWorktree, deleteExternal }) => ack(await mgr.trashSession(sessionId, deleteWorktree, deleteExternal)),
+    'agents.deleteSession': async ({ sessionId, deleteWorktree, deleteExternal }) => ack(await mgr.trash.trashSession(sessionId, deleteWorktree, deleteExternal)),
     // The window's archive of a session that looks idle: only when nothing is lost (#1512)
     'agents.archiveIfAtRest': async ({ sessionId, deleteExternal }) => {
       return mgr.trash.archiveIfAtRest(sessionId, deleteExternal)
@@ -329,7 +329,7 @@ export function createRpcHandler(
     'agents.autoCompact': async (p) => mgr.autoCompactFor(p.sessionId),
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(p.sessionId),
-    'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
+    'agents.mcpProposals': async () => ({ proposals: mgr.orchestratorSlot.mcpProposals() }),
     'agents.resolveMcpProposal': async ({ name, approve }) => {
       const r = await mgr.orchestratorSlot.resolveMcpProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
@@ -351,11 +351,11 @@ export function createRpcHandler(
       return mgr.externals.listExternalSessions(projectId, tool, limit)
     },
     'agents.restartSession': async (p) =>
-      mgr.restartSession(p.sessionId),
+      mgr.processes.restartSession(p.sessionId),
     'agents.resumeSession': async (p) =>
-      mgr.resumeSession(p.sessionId),
+      mgr.processes.resumeSession(p.sessionId),
     'agents.forkConversation': async (p) =>
-      mgr.forkConversation(p.sessionId),
+      mgr.processes.forkConversation(p.sessionId),
     'agents.updateSettings': async (p) => {
       /*
        * **Fields are never pulled out one at a time.**
@@ -366,11 +366,11 @@ export function createRpcHandler(
        */
       const { sessionId, by, ...settings } = p
       // `by` comes only from a hub's orchestrator, which directs no orchestrator nor coordinator here (#1941 review)
-      if (by) mgr.directedFromHub(sessionId)
+      if (by) mgr.linkedHost.directedFromHub(sessionId)
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {
-      return mgr.switchTool(sessionId, tool)
+      return mgr.processes.switchTool(sessionId, tool)
     },
     'agents.capabilities': async ({ tool }) => {
       const a = adapters.get(tool)
@@ -453,7 +453,7 @@ export function createRpcHandler(
     'workspace.load': async () => mgr.prefs.loadWorkspace(),
     // The orchestrator's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
     'projects.add': async (p) => {
-      const info = await mgr.addProject(p.path)
+      const info = await mgr.projectCreation.addProject(p.path)
       externalApps?.refresh()
       return info
     },
@@ -519,7 +519,7 @@ export function createRpcHandler(
       const ref = owner?.ref ?? views?.describe(instanceId)?.app ?? null
       if (!ref) throw rpcError('This app view is not open')
       const name = externalApps?.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)?.name
-      await mgr.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
+      await mgr.inputs.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
     },
     'apps.readResource': async ({ appId, projectId, uri, instanceId }) => {
@@ -581,7 +581,7 @@ export function createRpcHandler(
       const apps = requireExternalApps()
       // A user-folder app, or a root app outside git (#1141): the copies Centralu keeps. Otherwise git's history
       if (apps.keepsVersions({ appId, projectId })) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
-      const project = (await mgr.listProjects()).find((x) => x.id === projectId)
+      const project = (await mgr.projectRegistry.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
       if (!project || !app) throw rpcError(noSuchAppText({ projectId, appId }))
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
@@ -623,14 +623,14 @@ export function createRpcHandler(
     },
     'apps.sendError': async ({ appId, projectId, at }) => {
       return sendErrorToBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
         { appId, projectId },
         at,
       )
     },
     'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }) => {
       return askBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
         { ref: { appId, projectId }, text, attachments, instanceId },
       )
     },
@@ -638,7 +638,7 @@ export function createRpcHandler(
       // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
       if (!sessionId) return orchestratorToolSchemas('orchestrator')
       // A session with no bundle is offered nothing — the full list here would advertise tools its calls are refused
-      const profile = mgr.toolProfileOf(sessionId)
+      const profile = mgr.tools.toolProfileOf(sessionId)
       return profile ? orchestratorToolSchemas(profile) : []
     },
     'orchestrator.tool': async ({ sessionId, name, args }) => {
@@ -663,7 +663,7 @@ export function createRpcHandler(
     },
     'processes.stop': async (p) =>
       stopStrays(p.pids, mgr.projectRegistry.folderRoots(), process.pid, await heldOrUnknown()),
-    'projects.list': async () => mgr.listProjects(),
+    'projects.list': async () => mgr.projectRegistry.listProjects(),
     'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(p.projectId) }),
     'projects.reorder': async (p) =>
       mgr.projectRegistry.reorderProjects(p.orderedIds),
@@ -719,7 +719,7 @@ export function createRpcHandler(
       return mgr.projectRegistry.setProjectCommands(projectId, commands)
     },
     'worktrees.setTrunk': async ({ projectId, baseBranch }) => ack(await mgr.projectRegistry.setWorktreeTrunk(projectId, baseBranch)),
-    'projects.setAgentInstructions': async ({ projectId, text }) => ack(mgr.setAgentInstructions(projectId, text)),
+    'projects.setAgentInstructions': async ({ projectId, text }) => ack(mgr.projectRegistry.setAgentInstructions(projectId, text)),
     'projects.setWorktreeSetup': async ({ projectId, setup }) => ack(mgr.projectRegistry.setWorktreeSetup(projectId, setup)),
     'sessions.reorder': async ({ projectId, orderedIds }) => {
       return mgr.layout.reorderSessions(projectId, orderedIds)
@@ -734,13 +734,13 @@ export function createRpcHandler(
     },
     'sessions.markRead': async ({ sessionId, seq }) => ack(mgr.sessionSettings.markRead(sessionId, seq)),
     'messages.load': async ({ sessionId, limit, beforeSeq }) => {
-      return mgr.loadMessages(sessionId, limit, beforeSeq)
+      return mgr.record.loadMessages(sessionId, limit, beforeSeq)
     },
     'messages.image': async ({ sessionId, path }) => {
       return mgr.record.messageImage(sessionId, path)
     },
     'messages.subagent': async ({ sessionId, parentCallId, afterSeq, limit }) => {
-      return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
+      return mgr.record.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },
     'messages.subagentTrashed': async ({ sessionId, parentCallId }) => {
       return mgr.trash.subagentTrashed(sessionId, parentCallId)
@@ -783,10 +783,10 @@ export function createRpcHandler(
       return { run: requireCommands().log(mgr.cwdOfProject(projectId), command) }
     },
     'commands.resize': async ({ projectId, command, cols, rows }) => ack(requireCommands().resize(mgr.cwdOfProject(projectId), command, cols, rows)),
-    'prefs.get': async () => mgr.uiPreferences(),
+    'prefs.get': async () => mgr.prefs.uiPreferences(),
     'prefs.set': async (p) => {
       const patch = p.patch
-      const saved = mgr.setUiPreferences(patch)
+      const saved = mgr.prefs.setUiPreferences(patch)
       // The hub's setting governs the machines it links (#1376): they are told at once, and at every connect
       if (patch.autoCompact) void machines?.offerAutoCompact?.()
       return saved
@@ -884,9 +884,9 @@ export function createRpcHandler(
       return activity()
     },
     // What a hub's orchestrator reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
-    'host.sessions': async () => mgr.hostReader().sessions(),
+    'host.sessions': async () => mgr.linkedHost.hostReader().sessions(),
     'host.readSession': async ({ sessionId, limit, around, tools, offset, toolLines, maxChars, before, from }) => {
-      return mgr.hostReader().read(sessionId, limit, {
+      return mgr.linkedHost.hostReader().read(sessionId, limit, {
         around,
         tools: toolLines ?? tools,
         ...(offset !== undefined ? { offset } : {}),
@@ -896,17 +896,17 @@ export function createRpcHandler(
       })
     },
     'host.lastAnswer': async ({ sessionId, maxChars, turn, since }) => {
-      return mgr.hostReader().lastAnswer(sessionId, maxChars, turn, since)
+      return mgr.linkedHost.hostReader().lastAnswer(sessionId, maxChars, turn, since)
     },
     'host.recall': async ({ query, limit }) => {
-      return mgr.hostReader().recall(query, limit)
+      return mgr.linkedHost.hostReader().recall(query, limit)
     },
     // Whether a hub's auto session's child here runs auto (#1273): the hub reads it before it decides on its card
-    'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.uiPreferences()) }),
+    'host.hubAuto': async () => ({ allowed: hubAutoOf(mgr.prefs.uiPreferences()) }),
     // Who else holds full access here (#1405): the hub's machine row reads it between links
     // The hub's Settings → Machines sets it for a machine with no window of its own (#1273 review)
-    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.setUiPreferences({ hubAuto: p.allowed })) }),
-    'host.send': async ({ sessionId, text, from, ask }) => ack(await mgr.sendFromHub(sessionId, text, from.name, ask)),
+    'host.setHubAuto': async (p) => ({ allowed: hubAutoOf(mgr.prefs.setUiPreferences({ hubAuto: p.allowed })) }),
+    'host.send': async ({ sessionId, text, from, ask }) => ack(await mgr.linkedHost.sendFromHub(sessionId, text, from.name, ask)),
     'updates.setAutoApply': async (p) => {
       const enabled = p.enabled
       const status = requireUpdates().setAutoApply(enabled)

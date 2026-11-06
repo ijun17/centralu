@@ -73,7 +73,7 @@ beforeEach(async () => {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok', credential: 'ccs1-cred' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'] })
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
@@ -125,7 +125,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
    * under auto the CLI never asks about it. The gate is in the call itself, so it holds on both CLIs and under every preset.
    */
   it('in a session’s request an app tool of the orchestrator asks the person, naming the session, and a refused call never reaches the app', async () => {
-    mgr.useMail({ askedBy: () => ({ messageId: 'hub-aaaaaaaa.m_01', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 1, at: Date.now() } }), sessionGone: () => {}, sessionChanged: () => {} })
+    mgr.mail.useMail({ askedBy: () => ({ messageId: 'hub-aaaaaaaa.m_01', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 1, at: Date.now() } }), sessionGone: () => {}, sessionChanged: () => {} })
     const orc = await mgr.orchestrator()
     const apps = adapter.last().apps!
     const card = () => {
@@ -135,7 +135,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     const call = apps.call('app-helper', 'poke', { to: 1 })
     await eventually(() => !!card())
     expect(card()!.text).toBe(`Session "Fix login" in project "Acme" asked the orchestrator to run app-helper.poke {"to":1}. It is the session's request, not yours.`)
-    mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     const refused = await call
     expect(refused.isError).toBe(true)
     expect(JSON.stringify(refused.content)).toContain('the person did not allow it')
@@ -143,7 +143,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     // Allowed, it runs; and a tool that only reads is not asked about
     const allowed = apps.call('app-helper', 'poke', { to: 2 })
     await eventually(() => !!card())
-    mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card()!.requestId, 'allow')
     expect(await allowed).toMatchObject({ isError: false, content: [{ type: 'text', text: 'poked 2' }] })
     await apps.tools('app-helper')
     expect((await apps.call('app-helper', 'peek', {})).isError).toBe(false)
@@ -153,7 +153,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
   it('attaches apps on resume too — a session whose process was swapped out does not lose its apps', async () => {
     const s = await create()
     adapter.seen = []
-    await mgr.restartSession(s.id)
+    await mgr.processes.restartSession(s.id)
     expect(adapter.seen).toHaveLength(1)
     expect(servers(adapter.last())).toEqual(['app-notes'])
   })

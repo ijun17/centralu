@@ -43,7 +43,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
 
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
 async function parentAndChild(h: ReturnType<typeof host>) {
-  const project = await h.mgr.addProject(root)
+  const project = await h.mgr.projectCreation.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -105,7 +105,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(store.children.listReportMarks()).toEqual([])
-    expect(b.mgr.waitsOn(parent)).not.toContain(child)
+    expect(b.mgr.processes.waitsOn(parent)).not.toContain(child)
     // The answer it finished with is there for the parent to read
     expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
     await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
@@ -115,7 +115,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     // Not called finished: a turn that had not started yet would look the same
     expect(stored(parent)).toEqual([])
     // The person's own turn in the child afterwards is the child's, not the assigned work
-    await b.mgr.send(child, 'person work')
+    await b.mgr.inputs.send(child, 'person work')
     b.claude.handles.get(child)!.answer('person answer')
     await new Promise((r) => setTimeout(r, 20))
     expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
@@ -130,7 +130,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const c = host()
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
     expect(store.children.listReportMarks()).toEqual([])
-    expect(c.mgr.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
+    expect(c.mgr.processes.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
   })
 
   it('held over the child\'s own background work (#721), it stays owed in the next host, which tells the work\'s end', async () => {
@@ -165,11 +165,11 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
   it('held over the work of an asked session (ask_project, #1460), it stays owed in the next host, which tells the end once', async () => {
     const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
     const a = host()
-    const here = await a.mgr.addProject(root)
+    const here = await a.mgr.projectCreation.addProject(root)
     await a.mgr.setProjectTrusted(here.id, true)
     const otherRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cc-report-marks-target-')))
     onTestFinished(() => rmSync(otherRoot, { recursive: true, force: true }))
-    const there = await a.mgr.addProject(otherRoot)
+    const there = await a.mgr.projectCreation.addProject(otherRoot)
     store.permissions.setProjectConsent(here.id, there.id, 'delegate')
     const parent = (await a.mgr.createSession({ projectId: here.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const child = (await a.mgr.createSession({ projectId: there.id, cwd: otherRoot, tool: 'claude', permissionPreset: 'normal' })).id
@@ -209,7 +209,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     // The person writes while it is at rest: their turn starts, and is in flight when this host lets go
-    await a.mgr.send(child, 'a question of the person')
+    await a.mgr.inputs.send(child, 'a question of the person')
     expect(a.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'person' })
@@ -259,19 +259,19 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const c = host()
     expect(store.children.listReportMarks()).toEqual([])
     expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-    expect(c.mgr.waitsOn(parent)).toEqual([])
+    expect(c.mgr.processes.waitsOn(parent)).toEqual([])
   })
 
   it('goes with the child or the parent when either is trashed', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    await a.mgr.trashSession(child)
+    await a.mgr.trash.trashSession(child)
     expect(store.children.listReportMarks()).toEqual([])
 
     const second = await parentAndChild(a)
     expect(store.children.listReportMarks()).toEqual([{ sessionId: second.child, callerSessionId: second.parent }])
-    await a.mgr.trashSession(second.parent)
+    await a.mgr.trash.trashSession(second.parent)
     expect(store.children.listReportMarks()).toEqual([])
-    expect(a.mgr.waitsOn(parent)).toEqual([])
+    expect(a.mgr.processes.waitsOn(parent)).toEqual([])
   })
 })
