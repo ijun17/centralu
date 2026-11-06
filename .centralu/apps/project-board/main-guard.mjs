@@ -232,10 +232,10 @@ async function noteFlakes({ repo, runs, g, update }) {
 /**
  * The run a finished hunt filed a revert or an issue for, when it has since passed on a later attempt than the one that failed
  * (#2082: a person reran main's run after the guard blamed a commit, and the same job passed); null while it has not, or when
- * there is nothing filed, or the retraction is done. A newer run that passes says nothing: the commit may be what a later one fixed.
+ * there is nothing filed, or the retraction is done, or the failure came again and again (`repeats`: a rerun that passes is what it always does). A newer run that passes says nothing: the commit may be what a later one fixed.
  */
 export function passedAfterBlame({ hunt, runs }) {
-  if (!hunt?.endedAt || hunt.retracted?.done || (hunt.issue == null && !hunt.revert?.pr)) return null
+  if (!hunt?.endedAt || hunt.retracted?.done || hunt.repeats || (hunt.issue == null && !hunt.revert?.pr)) return null
   const run = runs.find((r) => String(r.id) === String(hunt.run))
   return run && run.status === 'completed' && run.conclusion === 'success' && (run.attempt ?? 1) > (hunt.attempt ?? 1) ? run : null
 }

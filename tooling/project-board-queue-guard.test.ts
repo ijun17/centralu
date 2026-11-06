@@ -1203,6 +1203,21 @@ describe("the main guard takes back its revert and issue when the run it blamed 
     expect(passedAfterBlame({ hunt, runs: [run({ id: 991 })] })).toBeNull()
     expect(passedAfterBlame({ hunt: { ...hunt, retracted: { done: 'x' } }, runs: [run({})] })).toBeNull()
     expect(passedAfterBlame({ hunt: { ...hunt, endedAt: undefined }, runs: [run({})] })).toBeNull()
+    // A blame that rested on the failure coming again and again is not taken back by one rerun that passes: that is what it always does
+    expect(passedAfterBlame({ hunt: { ...hunt, repeats: { times: 3, window: 10 } }, runs: [run({})] })).toBeNull()
     expect(passedAfterBlame({ hunt, runs: [run({})] })).toMatchObject({ id: 990 })
+  })
+
+  it('does not take a revert it could not read for gone: GitHub failing on the read is tried again, so the revert is still closed', async () => {
+    const { repo, c2 } = await blamed()
+    // The next two reads of any pull request are dropped connections, not GitHub saying the revert does not exist
+    patchGh((s) => {
+      s.viewLost = { n: 2 }
+      s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
+    })
+    await until(() => !!guardOnDisk().hunt?.retracted?.done || guardOnDisk().hunt === null, 'the retraction')
+    expect(closes()).toEqual([['close', '600', expect.stringContaining('passed when its jobs were run again')]])
+    expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'not_planned' })
+    expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)
   })
 })

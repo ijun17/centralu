@@ -5,7 +5,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeIssue, closePr, createIssue, createPr, GitHubError, postComment, prsWithHead, readPr, readRepo } from './github.mjs'
+import { closeIssue, closePr, createIssue, createPr, GitHubError, isOutage, postComment, prsWithHead, readPr, readRepo } from './github.mjs'
 import { config } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
 import { dequeue, enqueue, pushEvent } from './queue.mjs'
@@ -217,6 +217,9 @@ export async function actOnRed(dir, found, { now = clock(), ref, update, renew =
  * open with a comment, since putting a commit back is a person's call. Each step is written down as it is done, so a try that
  * stopped half way carries on and posts nothing twice. Answers null when it no longer holds the lease.
  */
+/** What gh says of a pull request that does not exist */
+const MISSING_PR = /could not resolve|not found|no pull requests? found|HTTP 404/i
+
 export async function retractRed(hunt, run, { now = clock(), ref, update, renew = () => true }) {
   const repo = config.repository
   const at = new Date(now).toISOString()
@@ -237,8 +240,9 @@ export async function retractRed(hunt, run, { now = clock(), ref, update, renew 
     try {
       open = await readPr(repo, hunt.revert.pr)
     } catch (e) {
-      // A pull request that cannot be read is gone; a broken connection or a limit is tried again at the next step
-      if (!(e instanceof GitHubError) || e.kind !== 'not-found') throw e
+      // Only GitHub saying there is no such pull request makes it gone: a 5xx, a dropped connection or a limit is tried again at the next
+      // step, or the revert stays open in the queue and lands on a commit the guard has just cleared
+      if (!(e instanceof GitHubError) || e.kind !== 'not-found' || isOutage(e) || !MISSING_PR.test(e.message)) throw e
     }
     revert = !open || open.state === 'CLOSED' ? 'gone' : open.state === 'MERGED' ? 'landed' : 'closed'
     if (revert === 'closed') {
