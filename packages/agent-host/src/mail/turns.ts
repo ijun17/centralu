@@ -11,10 +11,10 @@ export type TurnGuardOptions = {
    */
   keepOpen?: (sessionId: string) => boolean
   /**
-   * Whose request a turn read back after a restart is: the work message's sender when the session is the orchestrator and the message one of its
-   * requests (§7.6). A turn the delivery begins is told its asker
+   * The session whose request the turn is, read from the store's rows of that turn (`MessageService.requestsIn`, docs/plans/turn-owned-by-no-one.md
+   * §4.2), or null. Nothing of it is kept here: a restart or a swap reads it from the same rows
    */
-  askerOf?: (sessionId: string, messageId: string) => string | undefined
+  askerIn?: (sessionId: string, turn: TurnRead) => string | null
 }
 
 const STARTED_BY: readonly TurnStartedBy[] = ['mail', 'person', 'caller', 'cli', 'report', 'app']
@@ -34,8 +34,11 @@ export type TurnSource = 'caller' | 'report' | 'app'
 /** Who started a turn: the mailbox's delivery, the person, a caller's message, or the CLI on its own */
 export type TurnStartedBy = 'mail' | 'person' | 'caller' | 'cli' | 'report' | 'app'
 
-/** A session's turn now (§8.2 step 6), read from its row so a restart or an update's continue keeps it; `asker` is an address */
-export type TurnNow = { turnSeq: number; by: TurnStartedBy; starter: string | null; messageId: string | null; asker: string | null; startedAt: number }
+/** What a turn's rows are read by: its number, who started it and its work message */
+export type TurnRead = { turnSeq: number; by: TurnStartedBy; messageId: string | null }
+
+/** A session's turn now (§8.2 step 6), read from its row so a restart or an update's continue keeps it; `asker` is an address, from the store (`askerIn`) */
+export type TurnNow = TurnRead & { starter: string | null; asker: string | null; startedAt: number }
 
 type LastTurn = {
   seq: number
@@ -52,8 +55,6 @@ type Open = LastTurn & {
   starter: string | null
   /** The caller whose work the turn is, when it is */
   owner?: string
-  /** The address of the session whose request the turn is (§7.6), fixed when the turn began */
-  asker?: string
 }
 
 /**
@@ -62,7 +63,7 @@ type Open = LastTurn & {
  * (`hostTurns`). Both are counted from the store, so a restart does not reset them. Nothing here holds or defers mail.
  *
  * **A turn continued after a restart or an update is not mail-started** (§8.2 step 6): nothing begins it here, its row is read back (`closeStale`
- * with `keepOpen`), so `current` gives the original turn's starter and asker, and it adds no row either count could count.
+ * with `keepOpen`), so `current` gives the original turn's starter and work message, and it adds no row either count could count.
  */
 /** What started a turn the mailbox did not: the person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it */
 const causeOf = (by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null): string | null => (by === 'caller' ? messageId : null)
@@ -82,15 +83,13 @@ export class MailTurns {
 
   /**
    * Turns the previous host left open: the ones of sessions still in that turn (kept by the keeper, or continued after an update cut them) go
-   * on and are read back with their work message, starter and asker; the rest can never end and are closed `lost`. Returns those closed
+   * on and are read back with their work message and starter; the rest can never end and are closed `lost`. Returns those closed
    */
   closeStale(): { sessionId: string; turnSeq: number }[] {
     const lost: { sessionId: string; turnSeq: number }[] = []
     for (const row of this.records.openTurns()) {
       if (this.opts.keepOpen?.(row.sessionId) && !this.open.has(row.sessionId)) {
-        const by = turnStartedBy(row.startedBy)
-        const asker = by === 'mail' && row.messageId !== null ? this.opts.askerOf?.(row.sessionId, row.messageId) : undefined
-        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, by, messageId: row.messageId, starter: row.starterId, ...(asker ? { asker } : {}) })
+        this.open.set(row.sessionId, { seq: row.turnSeq, startedAt: row.startedAt, acted: false, by: turnStartedBy(row.startedBy), messageId: row.messageId, starter: row.starterId })
       } else {
         this.records.endTurn(row.sessionId, row.turnSeq, this.now(), 'lost')
         lost.push({ sessionId: row.sessionId, turnSeq: row.turnSeq })
@@ -99,13 +98,13 @@ export class MailTurns {
     return lost
   }
 
-  /** Mail is about to start a turn of the session: its work message (or null), the message that starts it, and for the orchestrator its asker. The turn's number */
-  begin(sessionId: string, turn: { workMessage: string | null; starter: string | null; asker?: string | null }): number {
+  /** Mail is about to start a turn of the session: its work message (or null) and the message that starts it. The turn's number */
+  begin(sessionId: string, turn: { workMessage: string | null; starter: string | null }): number {
     this.end(sessionId, 'lost')
     const seq = this.records.nextTurnSeq(sessionId)
     const startedAt = this.now()
     this.records.startTurn({ sessionId, turnSeq: seq, messageId: turn.workMessage, starterId: turn.starter, startedBy: 'mail', startedAt })
-    this.open.set(sessionId, { seq, startedAt, acted: false, by: 'mail', messageId: turn.workMessage, starter: turn.starter, ...(turn.asker ? { asker: turn.asker } : {}) })
+    this.open.set(sessionId, { seq, startedAt, acted: false, by: 'mail', messageId: turn.workMessage, starter: turn.starter })
     return seq
   }
 
@@ -156,7 +155,9 @@ export class MailTurns {
   /** The turn going in the session (§8.2 step 6); none when no turn is recorded */
   current(sessionId: string): TurnNow | undefined {
     const t = this.open.get(sessionId)
-    return t && { turnSeq: t.seq, by: t.by, starter: t.starter, messageId: t.messageId, asker: t.asker ?? null, startedAt: t.startedAt }
+    if (!t) return undefined
+    const read = { turnSeq: t.seq, by: t.by, messageId: t.messageId }
+    return { ...read, starter: t.starter, asker: this.opts.askerIn?.(sessionId, read) ?? null, startedAt: t.startedAt }
   }
 
   /**

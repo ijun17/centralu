@@ -186,6 +186,12 @@ export function orchestratorToolsFor(
   }
   /** An orchestrator's row is never read, even one with a project (a project orchestrator restored from before #1941) */
   const readable = (s: SessionInfo) => s.kind !== 'orchestrator' && (inScope(s) || wide())
+  /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one (`OrchestratorTools.mayRead`) */
+  const mayRead = (sessionId: string): boolean => {
+    if (sessionId === orchestratorId) return false
+    const target = host.meta.get(sessionId)
+    return ownLineage().includes(sessionId) || (!!target && readable(target))
+  }
   /** The links a read reaches: the central orchestrator's, and a trusted reader's (#984); acting reaches them from the centre only */
   const readLinks = () => (central || wide() ? host.linkedReader() : null)
   /** A machine's session as a reader may see it: null when it may not, else whether to mark it untrusted */
@@ -259,6 +265,7 @@ export function orchestratorToolsFor(
   }
 
   return {
+    mayRead,
     updateCentralu: async (action, signal) => host.updateCentraluAsked(orchestratorId, action, signal),
     listSessions: async (opts) => {
       const byId = projects()
@@ -390,7 +397,9 @@ export function orchestratorToolsFor(
       const target = remote[0] ?? local[0]
       const trusted = target?.trusted === true
       const asker = host.askedBy?.(orchestratorId)
-      const preset = createdPreset(own, { trusted }, opts.preset, asker ? host.meta.get(asker.sessionId)?.permissionPreset ?? 'safe' : undefined)
+      // Held to the lowest asking session's preset: a turn with two askers (which fails closed) holds to the lower of them
+      const askerPreset = asker ? lowestPreset(...[asker, ...(asker.also ?? [])].map((a) => host.meta.get(a.sessionId)?.permissionPreset ?? 'safe')) : undefined
+      const preset = createdPreset(own, { trusted }, opts.preset, askerPreset)
       if (preset === null) {
         return {
           ok: false,
@@ -572,7 +581,7 @@ export function orchestratorToolsFor(
        */
       const inLineage = !self && ownLineage().includes(sessionId)
       const target = host.meta.get(sessionId)
-      if (!inLineage && (!target || (!self && !readable(target)))) return { ok: false, error: readError(sessionId) }
+      if (self ? !target : !mayRead(sessionId)) return { ok: false, error: readError(sessionId) }
       const state = target?.state ?? 'archived'
       // An archived session's project is in its trash record (the row's own is cleared)
       const targetProject = target ? target.projectId : host.store.handoffs.projectOf(sessionId)

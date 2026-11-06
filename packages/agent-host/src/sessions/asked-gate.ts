@@ -20,6 +20,9 @@ import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } fr
  *   afterwards what a session's request had done and on which message of theirs, if any. A step of the CLI's own is recorded when the CLI says it
  *   ran (`cliDone`), not when it is allowed.
  *
+ * **A turn with requests of two sessions** (`Asker.also`; the drain never makes one) fails closed: nothing can tell whose request a step is for, so
+ * every step but a read asks, the answer in a request's own thread included, and the card names every asker.
+ *
  * One card for one asked step. The person's Allow on the request's card is for exactly this call, so the cards it would raise itself meanwhile (a
  * delete card) are not raised a second time: they have an "always" this turn must not offer, and the answer to them is the one just given.
  */
@@ -66,14 +69,14 @@ export class AskedGate {
    */
   async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
     const asker = this.host.askedBy(orchestratorId)
-    if (!asker || askedAct(tool, input, asker.messageId) === null) return { allowed: true, asked: false }
+    if (!asker || askedAct(tool, input, threadOf(asker)) === null) return { allowed: true, asked: false }
     if (outlivesTheTurn(tool, input)) {
       return {
         allowed: false,
         message: `Nothing was done: ${tool} would go on after this turn, where the person's card for the session's request no longer applies, so a request's turn does not start it. Do the work in this turn, or tell the session to ask the person.`,
       }
     }
-    const step = askedAct(tool, input, asker.messageId)
+    const step = askedAct(tool, input, threadOf(asker))
     if (step === null) return { allowed: true, asked: false }
     return this.put<RequestTurnAnswer>(orchestratorId, asker, step, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
@@ -81,8 +84,8 @@ export class AskedGate {
   /** The CLI ran a step of its own that `askCli` let through as asked, and it did not fail: its record, in the asking session */
   cliDone(orchestratorId: string, tool: string, input: Record<string, unknown>): void {
     const asker = this.host.askedBy(orchestratorId)
-    const step = asker ? askedAct(tool, input, asker.messageId) : null
-    if (asker && step) this.host.done(asker, 'act' in step ? step.act : `run ${tool}`)
+    const step = asker ? askedAct(tool, input, threadOf(asker)) : null
+    if (asker && step) this.record(asker, 'act' in step ? step.act : `run ${tool}`)
   }
 
   async when<T>(
@@ -94,19 +97,25 @@ export class AskedGate {
   ): Promise<T> {
     const asker = this.host.askedBy(orchestratorId)
     if (!asker || call.readOnly === true) return run()
-    const step = askedAct(call.name, call.args, asker.messageId)
+    const step = askedAct(call.name, call.args, threadOf(asker))
     if (step === null) return run()
     const recorded = async (): Promise<T> => {
       const done = await run()
       // A step that did nothing (refused, failed) leaves no record of having been done
       const failed = typeof done === 'object' && done !== null && (('isError' in done && done.isError === true) || ('allowed' in done && done.allowed === false))
-      if (!failed) this.host.done(asker, 'act' in step ? step.act : `run ${call.name}`)
+      if (!failed) this.record(asker, 'act' in step ? step.act : `run ${call.name}`)
       return done
     }
     const kind = stepKind(call.name, call.args)
     // Not covered: the cards the step raises itself ask as they would in the person's own turn
-    if (kind === 'undoable' || (kind === 'handsOn' && this.host.noLooser(asker, call))) return recorded()
+    if (!asker.also && (kind === 'undoable' || (kind === 'handsOn' && this.host.noLooser(asker, call)))) return recorded()
     return this.put(orchestratorId, asker, step, signal, recorded, refused)
+  }
+
+  /** A step done for the turn's request is recorded in each asking session */
+  private record(asker: Asker, act: string): void {
+    this.host.done(asker, act)
+    for (const other of asker.also ?? []) this.host.done({ ...asker, ...other, cites: null }, act)
   }
 
   /** Puts a step to the person and runs it on Allow; Deny, no answer and a turn that has ended run nothing */
@@ -117,7 +126,7 @@ export class AskedGate {
     const answer = await this.host.ask(orchestratorId, askedQuestion(asker, step.act), signal)
     // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
     const now = this.host.askedBy(orchestratorId)
-    if (answer === 'allow' && (now?.messageId !== asker.messageId || now.turn !== asker.turn)) {
+    if (answer === 'allow' && (!now || askersKey(now) !== askersKey(asker))) {
       return refused('Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.')
     }
     if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)
@@ -128,3 +137,9 @@ export class AskedGate {
     )
   }
 }
+
+/** The request's thread, whose answer needs no card; none when the turn holds requests of two sessions, which fails closed */
+const threadOf = (asker: Asker): string | null => (asker.also ? null : asker.messageId)
+
+/** Who asked, in which turn: an Allow is for the turn and the askers it was asked in */
+const askersKey = (asker: Asker): string => [asker.turn, asker.messageId, ...(asker.also ?? []).map((a) => a.sessionId)].join('|')

@@ -686,6 +686,11 @@ export class MailboxRecords {
     return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
   }
 
+  /** The rows delivered to `recipient` in its turn `turnSeq`, settled or not, with their messages, oldest first */
+  inTurn(recipient: string, turnSeq: number): PendingRow[] {
+    return this.withMessages(this.rows(`r.recipient = ? AND r.turn_seq = ? ORDER BY m.created_at, m.id`, recipient, turnSeq))
+  }
+
   /** The watched rows to `recipient` not settled */
   watchedTo(recipient: string): RecipientRow[] {
     return this.rows(`r.recipient = ? AND r.settled IS NULL AND ${WATCHED} ORDER BY m.created_at, m.id`, recipient)
@@ -965,6 +970,12 @@ export class MailboxRecords {
     this.db
       .prepare(`UPDATE mail_turns SET message_id = ?, starter_id = ?, started_by = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`)
       .run(t.messageId, t.starterId, t.startedBy, sessionId, turnSeq)
+  }
+
+  /** The session's turn `turnSeq`, ended or not, or null */
+  turn(sessionId: string, turnSeq: number): TurnRecord | null {
+    const row = this.db.prepare<[string, number], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? AND turn_seq = ?`).get(sessionId, turnSeq)
+    return row ? toTurnRecord(row) : null
   }
 
   nextTurnSeq(sessionId: string): number {

@@ -42,6 +42,8 @@ const FOR_MODEL: Naming = {
 
 /** In a report's place of the last response when it is not read: Centralu's words, not the session's */
 const NOT_READ = "(not read: the session's last turn was the person's; read_session shows it)"
+/** A stopped turn's words a stop notice does not quote (#1948): the turn was not the asker's alone, or the asker cannot read the session */
+const NOT_QUOTED = '(not quoted: the stopped turn was not yours alone, or you cannot read that session)'
 
 /** The one word of Centralu's that says how a turn ended, for the mailbox's wake (the same cases `deliverReport` words in full) */
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
@@ -186,6 +188,12 @@ export class ChildReports {
     this.mailReport = hook
   }
 
+  /** The rule a stop notice quotes the stopped turn by (`MailHooks.quotes`), set by the host when it has a mailbox; with none, nothing is quoted */
+  private quotes: ((stoppedId: string, readerId: string) => boolean) | undefined
+  useQuotes(rule: ChildReports['quotes']): void {
+    this.quotes = rule
+  }
+
   /** The draft of a report for the mailbox, and what it answered; `none` when there is no mailbox, or it failed */
   private toMailbox(ownerId: string, childId: string, draft: Omit<ReportDraft, 'delivery'>): ReportedAs {
     if (!this.mailReport) return 'none'
@@ -306,13 +314,13 @@ export class ChildReports {
     settled?: readonly BackgroundTask[],
     /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed */
     turn?: TurnStarter,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const orchestratorId = this.host.children.awaitingReport.get(sessionId)
-    if (!orchestratorId || this.host.handingOver) return
+    if (!orchestratorId || this.host.handingOver) return undefined
     if (turn?.by === 'person' && !settled) {
       // Their turn changes nothing of the report. The paused work may have ended meanwhile, with no turn to follow: its wait starts again
       if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
-      return
+      return undefined
     }
     // The report of paused work that ended with no turn after it, when the session's last turn was the person's: its last response is theirs, not the work's (#1377). Read before the report is closed
     const theirs = !!settled && this.host.children.lastTurnBy(sessionId) === 'person'
@@ -326,10 +334,10 @@ export class ChildReports {
     else if (waiting === 0) this.host.children.clearReport(sessionId)
     // Its own background work has ended (settled) and what it handed on has not: the pause on tasks is over, the one on threads is not
     else this.host.children.unpauseReport(sessionId)
-    if (toldPaused) return
+    if (toldPaused) return undefined
 
     const target = this.host.meta.get(sessionId)
-    if (!target || !this.host.meta.has(orchestratorId)) return
+    if (!target || !this.host.meta.has(orchestratorId)) return undefined
 
     /*
      * The store and UI keep identifying information and a preview of the last response, as before.
@@ -340,21 +348,21 @@ export class ChildReports {
     const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled } : undefined
     const preview = theirs ? NOT_READ : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
-    await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)
+    return (await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)) ? orchestratorId : undefined
   }
 
   /**
    * The end of a turn the mailbox started for `ownerId`'s thread in a session that owes another owner a report (#1474): reported to `ownerId` as the
    * end of its work, with no pause, and the other owner's mark, its pause and its tasks are left as they are. The person's own turn is reported to nobody
    */
-  async reportMailTurn(sessionId: string, ownerId: string, ending: NormalizedEvent, answer: string | undefined, turn: TurnStarter | undefined): Promise<void> {
-    if (this.host.handingOver || turn?.by === 'person') return
+  async reportMailTurn(sessionId: string, ownerId: string, ending: NormalizedEvent, answer: string | undefined, turn: TurnStarter | undefined): Promise<string | undefined> {
+    if (this.host.handingOver || turn?.by === 'person') return undefined
     const target = this.host.meta.get(sessionId)
-    if (!target || !this.host.meta.has(ownerId)) return
+    if (!target || !this.host.meta.has(ownerId)) return undefined
     const waiting = ending.type === 'turn_complete' ? this.host.children.waitingOn(ownerId, sessionId) : 0
     const { name, project } = this.reportedAs(target)
     const preview = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
-    await this.deliverReport(ownerId, sessionId, name, project, preview, ending, waiting > 0 ? { waitingOn: waiting } : undefined, this.answerSeq(sessionId), turn)
+    return (await this.deliverReport(ownerId, sessionId, name, project, preview, ending, waiting > 0 ? { waitingOn: waiting } : undefined, this.answerSeq(sessionId), turn)) ? ownerId : undefined
   }
 
   /** Where the session's last response starts, as its preview reads it (#1186): the report names the read that shows it */
@@ -386,31 +394,33 @@ export class ChildReports {
    * another turn, so two sessions cannot wake each other in a loop. `turn`: whose the stopped turn was, given when no report
    * is owed; the person's is then told to nobody (#1377), on every path that ends a turn (#1946)
    */
-  async tellAskerOfInterruption(sessionId: string, requester: string | undefined, turn: TurnStarter | undefined): Promise<void> {
-    if (turn?.by === 'person') return
+  async tellAskerOfInterruption(sessionId: string, requester: string | undefined, turn: TurnStarter | undefined): Promise<string | undefined> {
+    if (turn?.by === 'person') return undefined
     const m = this.host.meta.get(sessionId)
     const stop = m?.interruption
     // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
     const asker = requester ?? m?.askedBy ?? undefined
-    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.host.handingOver) return
+    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.host.handingOver) return undefined
     /*
      * **Not a requester a quit stopped** (#698). It waits for the person's Continue under its own "stopped" line; a
      * notice would resume it and start a model turn with nobody there (at launch, when the same quit cut it), and that
      * turn would clear its own mark before the person saw it. Once continued, its children's rows say they stopped.
      */
     const askerInfo = this.host.meta.get(asker)
-    if (!askerInfo || wentWithItsProcess(askerInfo.interruption)) return
+    if (!askerInfo || wentWithItsProcess(askerInfo.interruption)) return undefined
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
     const { preview, seq } = this.stoppedTurnAnswer(sessionId)
-    await this.deliverReport(asker, sessionId, name, project, preview, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)
+    // Its words only by the rule every stop notice quotes by (#1948): `MailHooks.quotes`, `MessageService.quotes`
+    const quoted = preview === '' || this.quotes?.(sessionId, asker) === true ? preview : NOT_QUOTED
+    return (await this.deliverReport(asker, sessionId, name, project, quoted, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)) ? asker : undefined
   }
 
   /**
    * The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn
    * before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does
    */
-  private stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
+  stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
     const span = this.host.children.latestTurnRows(sessionId)
     if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }
     const rows = this.host.store.messages.loadMessages(sessionId, 200)
@@ -488,7 +498,7 @@ export class ChildReports {
     answerSeq?: number,
     /** The person's part in the turn reported (#1377): they wrote into it, or added to the task */
     part?: { wrote?: true; added?: true; cut?: true },
-  ): Promise<void> {
+  ): Promise<boolean> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
      * both the person and the orchestrator read it as a success. On failure, the error message is
@@ -527,7 +537,7 @@ export class ChildReports {
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
     // Centralu's placeholders for words that were not read are not the session's answer, and are not kept as one
-    const answered = preview !== '' && preview !== NOT_READ && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
+    const answered = preview !== '' && preview !== NOT_READ && preview !== NOT_QUOTED && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
     // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
     const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
     const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''
@@ -577,8 +587,9 @@ export class ChildReports {
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
       then: holding || handedOn ? 'running' : 'review',
     })
-    if (reported === 'mailed' || reported === 'closed') return
-    await this.tellSession(
+    // Whether the owner was told now: by the mail, by the relayed notice, or by the report the mailbox delivers if the notice cannot be (a stop notice reads it, #1948)
+    if (reported === 'mailed' || reported === 'closed') return reported === 'mailed'
+    const relayed = await this.tellSession(
       orchestratorId,
       stored,
       // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
@@ -589,6 +600,7 @@ export class ChildReports {
       // The report is in the thread too: delivered this way, it is marked delivered, and the mailbox does not wake the owner for it
       typeof reported === 'object' ? { keep: reported.keep, onDelivered: reported.settle } : undefined,
     )
+    return relayed || typeof reported === 'object'
   }
 
   /**

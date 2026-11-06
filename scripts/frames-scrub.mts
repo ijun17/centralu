@@ -67,6 +67,7 @@ export type ScrubPlaces = {
   /** What a UUID in a text becomes, so that one cut across two streamed chunks (a path with a session id in it) is replaced whole */
   uuid?: (id: string) => string
 }
+export type ScrubOptions = Omit<ScrubPlaces, 'cwd' | 'home'> & { /** A text longer than this is cut to its start and the number of characters left out: a bulky output that only fills a context */ cutText?: number }
 
 /** A Windows path also appears without its drive (measured: an OpenCode tool title), and with `/` for `\` */
 function variants(p: string): string[] {
@@ -181,7 +182,8 @@ function safeUser(): string {
   }
 }
 
-export function scrub(frames: readonly Frame[], cwd: string, home: string = homedir(), more: Omit<ScrubPlaces, 'cwd' | 'home'> = {}): unknown[] {
+export function scrub(frames: readonly Frame[], cwd: string, home: string = homedir(), more: ScrubOptions = {}): unknown[] {
+  const { cutText, ...rest } = more
   const ids = new Map<string, string>()
   const counters: Record<string, number> = {}
   const stable = (kind: string, value: string) => {
@@ -199,10 +201,12 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
   // One already a placeholder (a text scrubbed joined, then each piece again) is not numbered twice
   const placeholderId = (u: string): string => /^0{4}\d{4}-0000-4000-8000-/.test(u) ? u : `${numbered('uuid', u).padStart(8, '0')}-0000-4000-8000-${u.endsWith(CENTRALU_INPUT_MARK) ? CENTRALU_INPUT_MARK : numbered('tail', u).padStart(12, '0')}`
   // Ids in a streamed text are replaced where the text is scrubbed joined, so one cut across two chunks goes whole
-  const places: ScrubPlaces = { cwd, home, ...more, ...(more.uuid ? {} : { uuid: placeholderId }) }
+  const places: ScrubPlaces = { cwd, home, ...rest, ...(rest.uuid ? {} : { uuid: placeholderId }) }
   const claudeIds = (s: string): string =>
     s
       .replace(UUID_ANYWHERE, (u) => placeholderId(u.toLowerCase()))
+      // OpenCode's ids: `tool_…` names a tool output's file, and its leading digits are a time
+      .replace(/\btool_[A-Za-z0-9]{16,}/g, (t) => `tool_${numbered('tool', t).padStart(6, '0')}`)
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
       // A model response's items (Codex: `msg_`, `rs_` reasoning, `call_` and `fc_` tool calls) carry the provider's ids
       .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
@@ -248,7 +252,9 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       // Codex: the machine's system, as `initialize` answers with it
       if (key === 'userAgent') return v.replace(/\([^)]*\d+\.\d+[^)]*; [\w-]+\)/, '(<os>; <arch>)')
       if (key === 'signature' && v.length > 40) return '<signature>'
-      return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      const scrubbed = mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
+      // Cut after scrubbing: the start that stays has lost its paths and ids like the rest
+      return cutText !== undefined && scrubbed.length > cutText ? `${scrubbed.slice(0, 200)}…<cut ${scrubbed.length - 200} characters>` : scrubbed
     }
     if (Array.isArray(v)) {
       // Size, not secrecy: the picture of the window as a grid, and the connectors' tools, are the bulk of a context reading and of the init lists

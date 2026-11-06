@@ -2238,6 +2238,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    with the recorded `<cwd>` read as the replay's folder), and `normalize.test.ts` and `compact.test.ts` take their
    notifications from them (`codex/recorded.test-helpers.ts`). The tests that mock the whole client stay hand-written: they set
    up races (a response before its notification, a late `turn/start` answer) that no recording can be made to repeat.
+   A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
    A conversation whose app-server outlives a host (a swap under the keeper) is recorded from the swap on
    (`codex/swap-scenarios.test-helpers.ts`, `adopt-running` and `adopt-failed`) and replayed by `codex/adopt.test.ts`: the second
    `initialize` is refused, `thread/resume` answers `active` for a running turn and `systemError` for a failed one. A scenario with
@@ -2247,6 +2250,13 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    (`scripts/frames-record-host.mts`: the host from source in a temporary data folder, its own `HOME` and `CODEX_HOME`, driven over
    its WebSocket like a window; `codex/centralu-scenarios.test-helpers.ts`) and replayed by `codex/centralu.test.ts`, which does
    not compare a thread's `config` and tool instructions (the bridge's address and credential, words that change with the build).
+   Past the host's own rules, the same script records the situations a host creates around a session: a context filled past
+   `COMPACT_FLOOR_TOKENS` by four commands' output so `compact_self` really compacts (`centralu-compact-real`: the nudge steered into a
+   running turn, refused by the app-server when the turn was ending, then `thread/compact/start` and the context falling from 124k to 6k;
+   a bulky output is cut in the recording, `cutText`); a session woken by mail (`centralu-wake`); `agent_session` send and wait;
+   and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
+   session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
+   compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
    The recordings also drive the UI's e2e scenarios (#1498): `adapters/frames/replay-agent.test-helpers.ts` makes a
    recorded session the agent of a running host (`--agent replay` of `e2e/fixtures/linked-host-main.ts`), the real
    adapter on a recording in place of the tool's process, and a session replays the scenario its working folder is

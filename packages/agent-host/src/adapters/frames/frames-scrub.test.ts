@@ -99,6 +99,13 @@ describe('scrubbing Claude Code’s frames', () => {
     expect(JSON.parse(streamed.join(''))).toEqual({ command: 'Get-Content "<home>/Docs/a.txt"', content: 'one\ntwo' })
   })
 
+  it('numbers the id OpenCode gives a tool output’s file the same wherever it is named, in a path and in the output’s own words', () => {
+    const name = 'tool_1aff99a540016nieUyWEeXJ0u2'
+    const frames = run([line('in', { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'tool_call_update', toolCallId: 'c', rawOutput: { output: `Full output saved to: ${CWD}/${name}\n`, metadata: { outputPath: `${CWD}/${name}` } } } } })])
+    expect(JSON.stringify(frames)).not.toContain('1aff99a5')
+    expect(JSON.stringify(frames)).toContain('<cwd>/tool_000001')
+  })
+
   it('numbers a session id cut across two streamed pieces as one id, the same as when it stands whole in another frame', () => {
     const id = '3142d2fb-5f69-431e-b37f-2a6507fbb140'
     const piece = (partial_json: string) => line('in', { type: 'stream_event', api_message_id: 'msg_01', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json } } })
@@ -165,5 +172,37 @@ describe('scrubbing Codex’s frames', () => {
   it('numbers the mailbox’s ids and drops the run’s folder suffix from a name made of it', () => {
     const [seen] = macRun([line('in', { id: 'r-3', result: { text: 'Sent hub-5b0933ff.m_01M6QZP77M7RJ0EEHDRB14Z371 to x; project frames-record-centralu-read-3e7fwc' } })]).map((f) => f.msg)
     expect(JSON.stringify(seen)).toBe(JSON.stringify({ id: 'r-3', result: { text: 'Sent hub-00000001.m_00000000000000000000000001 to x; project frames-record-centralu-read' } }))
+  })
+})
+
+describe('cutting a bulky text out of a recording', () => {
+  it('keeps the start of a text over the limit and says how much was left out, in every place it appears, and leaves shorter text alone', () => {
+    const big = 'x'.repeat(5000)
+    const [out, delta, short] = scrub(
+      [
+        line('in', { method: 'item/completed', params: { item: { type: 'commandExecution', aggregatedOutput: big } } }),
+        line('in', { method: 'item/commandExecution/outputDelta', params: { delta: big } }),
+        line('in', { method: 'item/completed', params: { item: { type: 'agentMessage', text: 'short' } } }),
+      ],
+      CWD,
+      HOME,
+      { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice', cutText: 2000 },
+    ).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(out)).toContain(`${'x'.repeat(200)}…<cut 4800 characters>`)
+    expect(JSON.stringify(delta)).toContain('<cut 4800 characters>')
+    expect(JSON.stringify(short)).toContain('"text":"short"')
+    expect(JSON.stringify([out, delta]).length).toBeLessThan(1000)
+  })
+
+  it('scrubs the text first, so the start that stays holds no path of the person’s', () => {
+    const [kept] = scrub([line('in', { method: 'item/commandExecution/outputDelta', params: { delta: `${HOME}\\Docs\\a.txt and ${'z'.repeat(5000)}` } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice', cutText: 2000 }).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(kept)).toContain('<home>/Docs/a.txt and zzz')
+    expect(JSON.stringify(kept)).not.toContain('alice')
+  })
+
+  it('cuts nothing unless asked to', () => {
+    const big = 'y'.repeat(5000)
+    const [kept] = scrub([line('in', { id: 'r-1', result: { text: big } })], CWD, HOME, { tmp: 'C:\\Users\\alice\\AppData\\Local\\Temp', user: 'alice' }).map((f) => (f as { msg: Record<string, unknown> }).msg)
+    expect(JSON.stringify(kept)).toContain(big)
   })
 })

@@ -10,7 +10,8 @@
  * update shows as a diff in those files. It spends model calls: OpenCode's run is free (its free models, no login);
  * Cursor's and Claude's spend the person's plan (Claude on its smallest model, with no settings file read), so run
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
- * link) is a temporary one. `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
+ * link) is a temporary one; so are OpenCode's XDG folders. A scenario that gives an ACP agent Centralu's tools (`centralu-*`) runs
+ * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -25,11 +26,13 @@ import { driveSwap, SWAP_SCENARIOS, type SwapScenario } from '../packages/agent-
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
+import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
 import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
 const TOOLS = ['cursor-agent', 'opencode', 'claude', 'codex']
+const ACP_TOOLS = ['cursor-agent', 'opencode']
 
 class RecordingAdapter extends AcpAdapter {
   readonly tool = 'recording'
@@ -39,6 +42,12 @@ class RecordingAdapter extends AcpAdapter {
 const CLAUDE_MODEL = 'haiku'
 /** Codex's smallest model, with the least reasoning */
 const CODEX_MODEL = 'gpt-5.6-luna'
+/**
+ * Cursor runs on Auto: the ACP adapter sets no model, and Auto is the one the Free plan includes (`Model unavailable on Free: Free
+ * includes Grok 4.7, Grok 4.6, and Auto`), so no explicit one is cheaper on this account. Another plan's model is named here when the
+ * adapter can set one.
+ */
+const CURSOR_MODEL = 'auto'
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
@@ -58,6 +67,8 @@ async function main(): Promise<number> {
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
+  // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
+  if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
   let failed = 0
   // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
   const stop = () => {
@@ -82,6 +93,8 @@ async function main(): Promise<number> {
       const adapter = adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
+      let bridge: BridgeHost | null = null
+      const outside: string[] = []
       try {
         let run: { preset?: string }
         let events
@@ -92,7 +105,11 @@ async function main(): Promise<number> {
           events = await driveSwap(adapter, swap, first, sessionId, () => last, () => void (process.env.CC_RECORD_FRAMES = raw), 300_000)
         } else {
           run = runAs(tool, scenario.drive!)
-          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
+          // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
+          const given = ACP_TOOLS.includes(tool) ? scenario.drive!.session?.() : undefined
+          if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
+          const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
+          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
         }
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
@@ -101,13 +118,15 @@ async function main(): Promise<number> {
         const frames = files.flatMap((file) => readFileSync(join(raw, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
         const dir = join(ADAPTERS, ADAPTER_FOLDER[tool] ?? 'acp', 'recordings', `${tool === 'claude' ? 'claude-code' : tool}-${version.replace(/^(agent|codex-cli) /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
-        const header = { header: { tool, version, scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
-        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, cwd)].map((l) => JSON.stringify(l)).join('\n') + '\n')
+        const header = { header: { tool, version, model: modelOf(tool), scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
+        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...bridgeAsPlaceholders(scrub(frames, cwd))].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] ${tool} ${scenario.name}: ${frames.length} frames, ${events.length} events -> ${dir}`)
       } catch (e) {
         failed++
         console.error(`[record] ${tool} ${scenario.name}: ${(e as Error).message}`)
       } finally {
+        for (const path of outside) rmSync(path, { recursive: true, force: true })
+        await bridge?.close()
         await removeDir(cwd)
         if (!keepRaw) rmSync(raw, { recursive: true, force: true })
       }
@@ -117,6 +136,11 @@ async function main(): Promise<number> {
     await removeDir(data)
   }
   return failed ? 1 : 0
+}
+
+/** The model a recording of `tool` runs on, for its header (OpenCode: its free models, no choice made) */
+function modelOf(tool: string): string {
+  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
 }
 
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
@@ -129,12 +153,34 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
   return {}
 }
 
-/** The files a scenario asks the tool to find in its working folder */
-function seedFiles(cwd: string, files: Record<string, string | Buffer>): void {
+/**
+ * The bridge a session is opened with names this machine's node, the bridge script's place in the checkout and this run's host port:
+ * a recording keeps what the agent was told to start, in words that read the same wherever it is replayed
+ */
+function bridgeAsPlaceholders(frames: unknown[]): unknown[] {
+  const places: Record<string, string> = { CC_HOST_URL: 'ws://127.0.0.1:<port>', CC_SESSION_ID: 'session-1' }
+  for (const f of frames) {
+    const msg = ((f as { msg?: { method?: string; params?: { mcpServers?: unknown } } }).msg ?? {}) as { method?: string; params?: { mcpServers?: unknown } }
+    if (msg.method !== 'session/new' && msg.method !== 'session/load') continue
+    for (const server of (Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : []) as { command?: string; args?: string[]; env?: { name: string; value: string }[] }[]) {
+      server.command = 'node'
+      server.args = ['<bridge>']
+      for (const entry of server.env ?? []) if (places[entry.name]) entry.value = places[entry.name]!
+    }
+  }
+  return frames
+}
+
+/** The files a scenario asks the tool to find in its working folder, and the folders it made outside it */
+function seedFiles(cwd: string, files: Record<string, string | Buffer>): string[] {
+  const outside: string[] = []
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(cwd, name)), { recursive: true })
     writeFileSync(join(cwd, name), text)
+    // A file the scenario puts beside the working folder (a read outside it) is taken away with the run
+    if (name.startsWith('..')) outside.push(dirname(join(cwd, name)))
   }
+  return outside
 }
 
 function adapterFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): AgentAdapter {
