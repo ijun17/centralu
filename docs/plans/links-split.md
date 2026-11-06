@@ -132,7 +132,7 @@ small host type of what it reads, getters never copies (the `parts()` rule of `s
 `readonly` field; `LinkedMachine`'s `protected` seams become the module's public methods; `tunnel.ts` keeps the transport
 (about 420 lines) and the other three roles are modules the importers name directly, with no re-export from `tunnel.ts`.
 
-**What is done of it** is smaller (§4, decision D1): the deletions of §2 (about 250 lines out of `links/`), the text
+**What is done of it** is smaller (§4, decision D1): the deletions of §2 (measured: -6 lines in #2110, not the -250 the first estimate gave; see below), the text
 readers out of `tunnel.ts`, and the two roles cross-machine mail needs as modules (`session-mirror`, `call-reach`).
 Each module adds about 25 lines of its own (host type and imports), so a move that ends no smaller and serves no feature
 is not made; the rest stays a map.
@@ -154,7 +154,8 @@ the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allow
 | 7 | **B5**: the client's redials come back for a host that stays up | #2104 | fix | 1 / 13 (+26 test) |
 | 8 | **B6**: a dev remote is judged as one before its hello | #2106 | fix | 2 / 2 (+12 test) |
 | 9 | **`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts` | branch `centralu/links-split-ssh-text`, opened once #2092 lands | move | 148 / 150 (+6 import lines) |
-| 10 | **Deletions**: D1's one way to settle, D2, D3, D5, D6, D7, D9, D11, the dead `hidden` set and the doc comments that sit above the wrong method; one pull request each | next | deletion | ~-250 together |
+| 10 | **Deletions**: the dead `hidden` set, `lastWords` and `read` through `viaSession` (D1), the update's `sleep` (D9), two doc comments back above their methods | #2110 | deletion | 75 / 69 (-6) |
+| 10a | What the deletions of §2.3 would still do, measured and found not to shrink: D2 and D3 as helpers (+4 lines, one source), D5 (a shared reader adds what it saves), D6, D7, D11 (a decision on one spelling each, across files) | not made | | 0 |
 | 11 | **`session-mirror.ts`** (the shown and hidden sessions) | after the deletions; #2067 needs it | move | ~90 |
 | 12 | **`call-reach.ts`** | after the deletions; #2067 needs it | move | ~130 |
 | 13 | **The reverse-calls allowlist** as the one table a machine's calls to the hub pass | with #2067 | move | small |
