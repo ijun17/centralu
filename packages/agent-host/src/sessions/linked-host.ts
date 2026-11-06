@@ -8,6 +8,7 @@ import type { DelegationHost } from './delegation-flow.js'
 import type { HandoffFlowHost } from './handoff-flow.js'
 import { HUB_SENDER } from './hub-sender.js'
 import type { LinkedEvent, LinkedReports } from './linked-reports.js'
+import type { OverloadRetry } from './overload-retry.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { SessionToolsHost } from './session-tools.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
@@ -34,6 +35,8 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     readonly askProjectFlow: AskProjectFlow
     /** The orchestrator's reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: LinkedReports
+    /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts) */
+    readonly overloadRetry: Pick<OverloadRetry, 'stands'>
   }
 
 /**
@@ -106,6 +109,11 @@ export class LinkedHost {
      * session asked here. Marked before the send, as the turn may end before it returns; taken back if the send fails.
      * The input is tracked where the adapter can (`sendTracked`), so the mark goes with that turn and not with another
      * turn that happens to end first; without tracking (or after a host swap) the next turn end takes it.
+     *
+     * A failure of the input is not always the task's end (#2015): Codex fails it as its turn ends with an error, before the
+     * host sees that error, and the host holds a capacity error and continues the turn after a wait (`OverloadRetry`). So the
+     * failure takes the mark down only when no retry stands once the error has been seen (a step later); with one, the turn
+     * that is continued still runs the task, and the mark goes with the end it reaches (cancelled, retried, or spent).
      */
     if (!ask) return this.host.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
     const key = hubAskDepthKey(sessionId)
@@ -114,12 +122,18 @@ export class LinkedHost {
       this.hubAskTurns.delete(sessionId)
       this.host.store.settings.deleteAppSetting(key)
     }
+    const failed = () => {
+      this.hubAskTurns.delete(sessionId)
+      queueMicrotask(() => {
+        if (!this.host.overloadRetry.stands(sessionId)) this.host.store.settings.deleteAppSetting(key)
+      })
+    }
     try {
       await this.host.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t, inputId) => {
         // Named, so the tool says which input a turn began from (`turnStartInputs`, #1604)
         if (!h.sendTracked) return h.send(t, inputId ? { id: inputId } : undefined)
         this.hubAskTurns.add(sessionId)
-        void h.sendTracked(t, { complete: done, fail: done }, inputId ? { id: inputId } : undefined).catch(() => {})
+        void h.sendTracked(t, { complete: done, fail: failed }, inputId ? { id: inputId } : undefined).catch(() => {})
       })
     } catch (e) {
       done()
