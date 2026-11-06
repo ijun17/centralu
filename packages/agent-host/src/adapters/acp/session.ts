@@ -17,7 +17,7 @@ import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIM
 import { KNOWN_UPDATES } from './known-updates.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
-import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
+import { AcpNormalizer, pathsOf, requestInput, tokenUsage } from './normalize.js'
 import {
   blockText,
   InitializeResult,
@@ -753,9 +753,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 function editPaths(call: ToolCallFields): string[] {
   const input = asObj(call.rawInput)
-  const fromDiffs = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [c.path] : []))
-  const named = [str(input.filePath), str(input.path), str(input.file_path)].filter(Boolean)
-  return [...new Set([...fromDiffs, ...(call.locations ?? []).map((l) => l.path), ...named])]
+  return [...new Set([...pathsOf(call), ...[str(input.filePath), str(input.path), str(input.file_path)].filter(Boolean)])]
 }
 
 /** The approval card for an ACP tool call, by its kind (the request carries the call, measured on OpenCode 1.19.4) */
