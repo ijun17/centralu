@@ -138,11 +138,12 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * "Apply now" (#352): relaunches the app from its bundle, which `centralu install` has just
  * replaced, so the new window is the new build.
  *
- * The keeper is told first, so the window closing is not "the last window left" even with
- * background mode off; the new window attaches within the keeper's grace and is told it is the
- * relaunched one, then applies the switch (keeper, then host) by itself when nothing can be lost.
- * A keeper too old to hold on is acceptable only with background mode on, where a window closing
- * never stopped anything; with it off this refuses, rather than cutting every turn.
+ * A keeper of #1895 step 3 is asked to stop the host for an update and exit (`before_relaunch`): the relaunched
+ * window starts the new build's keeper, and its host continues what this one ended. An older keeper is told instead,
+ * so the window closing is not "the last window left" even with background mode off; the new window attaches within the
+ * keeper's grace and is told it is the relaunched one, then applies the switch (keeper, then host) by itself when nothing
+ * can be lost. A keeper too old to hold on is acceptable only with background mode on, where a window closing never
+ * stopped anything; with it off this refuses, rather than cutting every turn.
  *
  * A window that starts its host itself has no keeper to hold it: it stops the host for an update
  * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
@@ -163,16 +164,8 @@ async fn apply_update_relaunch(app: AppHandle) -> Result<(), String> {
             return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
         }
         // Where this window starts its host itself (#1895), the host is stopped for an update, and given the time it needs,
-        // before the relaunch ends it; with a keeper, the keeper holds it
-        if !sup.stop_host_for_update() {
-            if let Err(e) = sup.announce_relaunch() {
-                if sup.background() != Ok(true) {
-                    return Err(format!(
-                        "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
-                    ));
-                }
-            }
-        }
+        // before the relaunch ends it; a keeper does the same and exits (step 3), or, older, holds it through the relaunch
+        sup.before_relaunch()?;
         app.state::<QuitApproved>().0.store(true, std::sync::atomic::Ordering::SeqCst);
         app.request_restart();
         Ok(())
@@ -229,14 +222,13 @@ fn leave_app_folder() {
 #[cfg(test)]
 mod keeper_command_tests {
     /// The `Supervisor` calls that send a request to the keeper and wait for its answer.
-    const WAITS_ON_KEEPER: [&str; 8] = [
+    const WAITS_ON_KEEPER: [&str; 7] = [
         ".switch_build(",
         ".background(",
         ".set_background(",
         ".stop_agents(",
         ".restart_keeper(",
-        ".announce_relaunch(",
-        ".stop_host_for_update(",
+        ".before_relaunch(",
         ".restart(",
     ];
 

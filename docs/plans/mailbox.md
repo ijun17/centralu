@@ -224,6 +224,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     Each is written at most once per clock hour (its dedupe key names the pair or the host and the hour), it wakes no session,
     and nothing waits for it. The figures are the ones the old guards used: on the owner's store the loop holds never
     caught a loop, and the only held rows were 5 `budget` rows from normal status checks between two sessions.
+  - **A session that keeps compacting (#2024).** The same warning, by the same path, for a session that went through more than
+    `WARN_COMPACT_CYCLES_PER_HOUR = 6` cycles of `compact_self` with `then` (its next step sent after the compaction, or after a refusal that said why) in an hour: one notice in the
+    Inbox naming the session and the count (`facts.compactCycles`, S20), at most once per clock hour per session (`compactcycles:` key). The session
+    keeps working; nothing is held, refused or delayed for it. The cycles are counted in the store (`compact_cycles:<session>`), so a swap does not
+    start the count again. A request the floor refuses still sends its `then` (with the reason); asked again at the same context size it is answered in the tool result and makes no
+    turn, so a count past 6 is real work that changed the context each time, or a context that kept moving.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
   - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
@@ -752,6 +758,7 @@ task is never reminded: its report settles it.
 | `refused` | notice | `{ tool, target, firstLine, projectId }`: a delegation refused for the sender's untrusted project (§7.4); the record S16 is built from |
 | `trusted` | notice | `{ project, refused: string[] }`: the project is trusted now, and these refused calls may be given again (S16) |
 | `hostCap` | notice | the host's mail-started turns in the hour passed 120 (D32; an earlier build's notice of its cap); for the person only |
+| `compactCycles` | notice | `{ session, count }`: the session went through more than 6 compact_self cycles with a next step in the hour (D32, S20); for the person only |
 | `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S18); for the person only |
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
@@ -970,6 +977,7 @@ sender about its messages, that is the sender.
 | A watch firing (§13) | `watch:<recipient>:<watch id>:<change>` |
 | The person warned about the host's mail-started turns (S19, D32; an earlier build's cap notice used the same key, so the two write one line an hour between them) | `hostcap:person:<the clock hour's start, ms>` |
 | The person warned about a pair (S18, D32) | `pairturns:<a>\|<b>:<the clock hour's start, ms>`, the two addresses sorted |
+| The person warned about a session's compaction cycles (S20, D32, #2024) | `compactcycles:<the session's address>:<the clock hour's start, ms>` |
 
 ## 7. Reach, the hold and guards
 
@@ -1971,6 +1979,7 @@ names. Each call is written in its version-2 form; a version-1 process is told t
 | S17 | `rollback_machine`'s and `machines.rollback`'s refusal across the mail switch (D28); person-visible too, so Q2 | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
 | S18 | The warning to the person about a pair (D32), in the Inbox, key `pairturns:` | `<name> and <name> started <n> turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.` |
 | S19 | The warning to the person about the host (D32), in the Inbox, key `hostcap:` | `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` |
+| S20 | The warning to the person about a session that keeps compacting (D32, #2024), in the Inbox, key `compactcycles:` | `<name> asked to compact its conversation and went on to its next step <n> times in the last hour. It keeps working: look at it if that is more than you expect.` |
 
 ## 16. Slices
 

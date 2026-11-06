@@ -41,6 +41,7 @@ import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { SelfCompaction } from './self-compaction.js'
+import { settingThenKeep } from './then-keep.js'
 import { ContextNudges } from './context-nudges.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
@@ -123,6 +124,10 @@ export type MailHooks = {
   handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
   /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
   openWork?(sessionId: string): { unanswered: string[]; owed: string[] }
+  /** A session went through `count` compaction cycles in the hour (`compact_self` with `then`, #2024): the person gets one warning, the mailbox's, once per clock hour */
+  compactCycles?(sessionId: string, count: number): void
+  /** Mail that wakes the session waits for it (due or not yet): its turn is coming, and a note of the host's (`compact_self`'s `then`) follows it */
+  waiting?(sessionId: string): boolean
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
@@ -560,6 +565,7 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       idle: (id) => this.sessionIdle(id),
       running: (id) => this.handles.has(id),
+      ready: (id) => this.mailReceiver(id).kind === 'ready',
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
       command: (id, tool, focus) => {
@@ -568,6 +574,18 @@ export class SessionManager {
         return this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact'
       },
       send: (id, text) => this.events.sendCompact(id, text),
+      // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
+      sendThen: (id, text, line) =>
+        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }),
+      // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
+      queued: (id) => {
+        const held = this.handles.get(id)?.queuedInputs?.()
+        const mail = this.mailHooks?.waiting?.(id) ?? false
+        return mail || (held === undefined ? null : held > 0)
+      },
+      keep: settingThenKeep(this.store.settings),
+      warnCycles: (id, count) => this.mailHooks?.compactCycles?.(id, count),
+      nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
     this.contextNudges = new ContextNudges({
@@ -1105,6 +1123,8 @@ export class SessionManager {
   /** Starts compacting the sessions at rest over the lower share (#1451); the shutdown plan stops it before the sessions are let go of */
   startSelfCompaction(): void {
     this.selfCompaction.start()
+    // What the last host left of a `compact_self` (#2024); a process the keeper kept is looked at once it is adopted (`adoptKept`)
+    this.selfCompaction.recover((id) => !this.keeperOpts.keptSessions?.has(id))
   }
 
 
@@ -1322,6 +1342,8 @@ export class SessionManager {
          * Asked after the conversation opened and the buffered frames were handled, and the state read again then
          */
         else if (adopted?.adoptedIdle && inTurn(m.state) && (await raceTimeout(adopted.adoptedIdle(), ADOPTED_IDLE_WAIT_MS, false)) && inTurn(m.state) && !this.lettingGo() && !this.overloadRetry.stands(k.sessionId)) this.turnLostInSwap(m)
+        // Its `compact_self` the old host left: the step goes in if the compaction was done, else the agent is told (#2024)
+        this.selfCompaction.recover((id) => id === k.sessionId)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
         if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {
@@ -2198,7 +2220,7 @@ export class SessionManager {
         ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal),
         done: (tool, input) => self.askedGate.cliDone(id, tool, input),
       }),
-      compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
+      compactSelf: (id, focus, then) => self.selfCompaction.request(id, focus, then),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
         try {

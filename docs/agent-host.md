@@ -1706,14 +1706,64 @@ the params with the method's schema and reads the answer with its result schema,
   (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
   then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
   (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
-  - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 453 characters; docs/tool-cost.md §15): asks for a compaction
-    **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters). Its description says when:
+  - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 579 characters; docs/tool-cost.md §15): asks for a compaction
+    **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters) and an optional `then` (below). Its description says when:
     work is finished and reported; before waiting more than a few minutes on a child, CI or the person; switching to an unrelated task.
-    The request is always accepted: the size of the context known during a turn is the one read at the previous turn's end, so a turn that grew past the floor would have been refused. The **floor** of 100,000 tokens is checked at the turn's end on the size of the turn's last model request of its own conversation (`usage_update.request`, which both tools send), else on the size the tool reads then (Claude reads it just after the turn ends, so the request waits for that `context_update`, at most 5 seconds (its own timer) before it goes by the reading it has, and a reading owed for the turn before that lands in the next turn is not taken for the next turn's; Codex reads it during the turn); under the floor the request is dropped. One request is pending per
-    session; asking again replaces the focus. **The person's turn first:** a request is spent at the first turn end after it, so a message the
+    The request is always accepted: the size of the context known during a turn is the one read at the previous turn's end, so a turn that grew past the floor would have been refused. The **floor** of 100,000 tokens is checked at the turn's end on the size of the turn's last model request of its own conversation (`usage_update.request`, which both tools send), else on the size the tool reads then (Claude reads it just after the turn ends, so the request waits for that `context_update`, at most 5 seconds (its own timer) before it goes by the reading it has, and a reading owed for the turn before that lands in the next turn is not taken for the next turn's; Codex reads it during the turn); under the floor the request is dropped, and so is one with no size read **since the last compaction** (below). One request is pending per
+    session; asking again replaces the focus and the `then`. **The person's turn first:** a request is spent at the first turn end after it, so a message the
     person sent into that turn is part of it, and one queued behind it runs before the compact in the tool's own queue, which compacts after
     it; a turn the person interrupts (or that ends in an error or a usage limit) **drops** the request, and a card the host raised at the turn's end holds it: it goes when the card closes with the session still at rest, and is dropped if a turn starts first (the person's answer is theirs; the request is never carried into it). The tool's answer is its confirmation: it does not
     wait for the compaction. The request does not ask whether background work runs: waiting on CI in the background is what it is for.
+  - **Going on after the compaction: `then` (#2024, owner decision 2026-11-06).** Before this a session that compacted at its turn's end sat at rest
+    until something else started a turn, so a lone worker in the middle of multi-step work stalled. `compact_self({ then })` is the prompt of the
+    session's next turn, written by the agent before the compaction ("Continue with step 3 of the plan in docs/x.md: ..."; at most 4,000 characters, longer is refused with
+    nothing asked). It is held with the compact Centralu sends and **goes when the compact turn has ended**, after the tool has reported the
+    compaction in it (not at the report: the turn is still running then, and a message sent into it would join it): an ordinary turn of the session's own
+    (`SessionEvents.deliverMail`: Centralu's channel, no user row, a conversation line that says what happened: "Centralu sent the agent its next step after the
+    compaction", or "... its next step: nothing was compacted" for a refused request, or that it was told to go on after a host change), so its end raises the done notice and is the work's.
+    **Only to a session at rest, after what was queued has gone first.** The compact turn's end is not the moment: the person's message typed during it sits in
+    the tool's queue and the mailbox delivers mail the moment the session rests, and a step sent beside either is folded into their turn (real run E2: the person's
+    message ran inside the `then` turn and the "came first" line was missing). So the host **looks at what waits** (`SelfCompactionHost.queued`, from the manager) when the turn ends:
+    the inputs the tool holds that no turn has answered (`SessionHandle.queuedInputs`: Claude counts what it wrote to the CLI and no result has named yet, and what is
+    still in its own queue, never a quiet note or a parent note (a result that names a later input clears the ones written before it: the CLI reads in order, and one a result that named nothing answered, a Stop's, would count for ever and hold every later step for the 60 s bound); Codex counts `MidTurnLedger.waiting`, the inputs behind a compact or review turn and the writes not yet answered, which at
+    a compact's end are already written when the end is said), and mail that wakes the session and waits for it (`MessageService.wakingFor`, `MailHooks.waiting`: due or still
+    in the 2-second debounce, held-out and quiet mail not counted). **Nothing waits: the step goes at once.** Something does: it waits, a turn that begins is theirs, and the
+    step follows that turn's end with a line saying their message came first and weighs more. A step goes only when the session can take a turn (`SelfCompactionHost.ready`:
+    `mailReceiver` is `ready`: no turn, card or limit, the host not leaving); else the end of the turn that runs, or the sweep, tries again, and the step stays in the store
+    meanwhile. The same gate stands in front of the claim, so a step that is not sent is not claimed. A step held for a session that could not take it yet, or kept by a host that found it (`resume`, `sweep`), is looked at the same way: what waits goes first. **Two bounds remain, both named in the code.** A queue the host can see but
+    that never starts a turn (mail held back by the mailbox's own rules, a stuck queue) holds the step for `THEN_QUEUE_MAX_MS` (60 s) at most. **The one guess:** a tool that
+    cannot say what it holds (`queuedInputs` absent, as an ACP agent) gets `THEN_SETTLE_MS` (3 s) after the compact turn's end for a queued turn to start, which is what the
+    first version did for every tool, at the price of 3 s on each step and a wrong order when the queued turn started later than that.
+    **A refused request still sends it.** When nothing is compacted (the context under the floor, no size read since the last compaction, the tool refused the compact or
+    Centralu could not send it, or the tool never reported it within `COMPACT_STALE_MS`, 30 minutes; the sweep checks that, and a compaction reported after it does not
+    bring a second step), the agent was told to end its turn and nothing else would wake it. So `then` goes all the same, as a turn that opens with one line: the
+    request did not compact the conversation, why, and that asking again before anything changed gets the same answer. That turn counts as a cycle for the warning below.
+    **A repeat costs a tool call, not a turn.** The size of a refusal is remembered (`refusedAt`, per session, in memory). A `compact_self` with a `then` that comes again with the
+    context within `REFUSED_AGAIN_TOKENS` (2,000) of it, by the size of the turn's last model request, else the tool's reading (two requests with no size read since a
+    compaction are the same), is answered in the tool result: "Not compacted (reason); nothing has changed since your last request, so no new turn is made for it. Continue in
+    this turn." Nothing is stored or counted, and the session is never blocked. A step that did real work and grew the context asks the usual way, a request that is over the floor now is never answered with a refusal under it (99k, then 100.5k), and a compaction forgets the
+    refusal. This also bounds the loop the context notice could make on Codex, where the context read 43.8k right after a compaction and 119k on the next turn (Codex kept a big
+    user message), so the 46% notice fired again at once: a repeat at the same size costs a call. The warning below remains the bound for a context that does change.
+    **The person's interrupt sends nothing.** Of the turn that asked, of the compact turn **before or after** the tool reported the compaction in it, or of the turn that ran
+    first, or when a turn ends in an error (an errored or rate-limited session is not sent a turn): the session is **told it did not happen**, quietly, with the text
+    of its `then` so it can carry on by itself: `SessionHandle.nudge` (Claude: quiet input read with its next input; Codex: steered into a running turn only, so a note
+    it cannot take now waits for the next turn's start or request, as the context notices do), and the window gets a line from Centralu. A compaction the tool reported
+    as **failed** leaves the context as it was, and the step is still valid, so `then` goes, kept and sent as a refusal (`refused`, "the tool reported the compaction failed: <its reason>"): the turn and the conversation line say nothing was compacted, not that the compaction is done. **Codex:** its compact request takes no focus (`takesFocus` compares the command
+    with and without one), so with a `then` the focus line heads the `then` turn ("This tool's compact takes no focus. What you asked the summary to keep: ..."), and with
+    none the answer of the tool says the focus line is not applied. A resting session that the sweep compacts has no `then`: it was at rest and stays so.
+    **One compaction in flight per session.** A second `compact_self` while one is on its way (its command sent, queued behind a turn of the person's, or running) asks for no second
+    command: it joins the first, replaces its `then` (a call with none drops the earlier one) and says so; its focus line is too late. Two `/compact` commands are never queued. A step
+    held for the turn that went first is replaced by the next request the same way.
+    **A host swap or restart does not lose it.** A `then` is kept in the store from the request on (`sessions/then-keep.ts`, the app setting `compact_then:<session>`, a key an older build serving the same store ignores and the trash's purge takes with the session; no store step) with how far the request came and when it last moved: `asked` (the turn runs), `sent` (the compact command went), `compacted` (the tool reported the compaction), `refused` (it did not compact; `why`), `sending`. The change from `compacted` or `refused` to `sending` is one transaction (`updateAppSetting`, `claim`): of the old host and the new, only the one that makes it sends, so the step goes **at most once**. The leaving host stops its compactor first in the shutdown plan (`stopSelfCompaction`, before the handles are let go of), so it sends nothing in its last moments. **From the claim on the record never goes back** (real run D3: the old host claimed the step, its delivery was refused because the host was leaving, the record went back to `compacted` and the next host sent the step a second time): a step whose delivery is in the air when the host leaves stays `sending`, and the next host only tells the session. A host that starts looks at what is left (`SelfCompaction.recover`, from `startSelfCompaction` for sessions the keeper did not keep, and from `adoptKept` for each one it adopted, after the adoption, so a kept session's input never starts a second process): a `compacted` or `refused` record is **sent** (the compaction is known done) if the session can take a turn, through the mailbox's delivery (`deliverMail`: Centralu's channel, no user row, the session woken if it has no process), with the person-came-first line and the Codex focus line it was kept with, and is held for the sweep otherwise (a limit or a card stands); every other stage is a request whose outcome the new host cannot tell (the turn had not ended, the compact was sent and not yet reported done, or the send itself was in progress), so **the session is woken with a turn** that says Centralu changed hosts, that it cannot tell whether the conversation was compacted or the step sent, and to go on by itself, with the text of its `then` (real runs D1 and D2: a note kept in the store left the session idle until someone typed, while the line said it was told). A quiet note goes instead into a session that is in a turn, and is kept for its next input when the tool takes none; the window gets a line that says which of the three happened. Told once: the record is cleared as it is told. **A record is as old as its last move** (`at`) and one older than `THEN_KEEP_MS` (an hour: a compact is stale after 30 minutes and a swap or a restart with a wake takes minutes, so an hour covers a long outage and cuts what a rollback to an older build left for a newer one to find days later) is not sent; the session is told it was too old. The deletion of a session (the trash) clears its record and its notes, so one restored later is sent no old step. A note the tool cannot take yet (no process, or Codex between turns) is kept in the store too (`compact_notes:<session>`) and given at the session's next turn start or request of its running turn. A store that fails to write is logged and the request goes on in memory as before. **The one window left:** a host that dies between the claim and the tool taking the step leaves a `sending` record, which the next host reports to the session as "being sent" rather than sending it again; the agent may then run a step it already ran, which it can tell from its own history. A step that could not be given after a compaction that did happen says so ("The compaction you asked for is done, but the session could not take your `then`"), not that it did not compact.
+    **A warning, not a stop.** Each time a `then` has gone (the tool took it), the cycle is counted in the store (`compact_cycles:<session>`, the hour up to now, so a swap does not start it again); past `WARN_COMPACT_CYCLES_PER_HOUR` (6) the person is warned by the mailbox's own warning (`MailHooks.compactCycles`, `docs/plans/mailbox.md` D32, S20, #2014): one Inbox notice naming the session and the count, once per session per clock hour. The session keeps working; nothing is refused or delayed.
+    **The floor and its gap.** After a compaction the context is a summary, far under the 100,000-token floor, so a `then` turn that calls
+    `compact_self` again at once is refused by the floor (and, since a refused request still sends its step, gets it back with the reason: see above). A step that reads enough to grow back over the floor did real work, and a
+    time window would block exactly that. **The gap that guard needed closed:** the floor goes by the last model request of the turn, else by a reading of the context
+    taken **in the turn**; the fallbacks (the 5-second timer, a request held for a card) went by `SessionInfo.context`, the tool's last reading, which after a compaction is
+    the one from before it when the tool reads none (Codex reports no size after a compaction). A small context could pass as large. Now a compaction that worked
+    (any trigger) marks the session `unread` until the tool's next reading, the sizes read before it are forgotten, and a request judged with only the old reading is
+    refused ("no size of the context was read since the last compaction"); the rest rule (`due`) leaves such a session alone too. A failed compaction shrank nothing and marks nothing.
+    The context notices tell the agent to set `then` to its next step and end its turn (`context-nudges.ts`).
   - **A session at rest** for 10 minutes whose context is over `autoCompact.idleShare` of the model's window (default 30%, 10% to 95%; Settings
     and `set_preferences` offer it) **and** over the floor is compacted by a sweep (every minute; the 10 minutes count from the moment the session is idle by every rule of `sessionIdle`: no turn, card, question or background work. A turn's end starts them only if it leaves the session idle; otherwise the sweep that sees it become idle does, so a card answered or background work stopped late does not bring an immediate compact; the share is read against the model's own window, not the smaller one a Claude process started under the CLI's compaction setting reports) before its next turn. Off with the existing
     `autoCompact.controlled` switch. Never a session in a turn, with an approval or question card open, running background work, or without a
@@ -1725,7 +1775,7 @@ the params with the method's schema and reads the answer with its result schema,
     A turn's end is the compact's only after a turn began following the send (Codex's request starts its turn later); a tool that refuses it before that clears the mark. The sweep stops in the shutdown plan with the sleep sweep. Known gap: on Codex a message or mail delivered in the moment between the send and the compact's turn start can take that turn's bookkeeping.
   - **Telling a growing session (#1492).** An agent cannot see how full its context is (Claude Code does not tell the model), so `compact_self`
     alone depends on it thinking of the tool. When a session's context passes a first share (`autoCompact.nudgeFirst`, default 30% of the model's
-    window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self`", and tells it
+    window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self` with `then` set to what you do next, and end your turn", and tells it
     **once more** at a second share (`nudgeSecond`: default 10 points below the share the tool compacts at, so 50% when that is 60%; **never at or
     above it**, held at least 5 points below, `nudgeShares` in `@cc/protocol`), where the tool's own compaction would otherwise come in the middle
     of work (`sessions/context-nudges.ts`, `ContextNudges`). **Quiet:** the note goes in as `SessionHandle.nudge`, which never starts a turn and never
@@ -1741,7 +1791,7 @@ the params with the method's schema and reads the answer with its result schema,
     already over a share again, once. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the orchestrator,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
     context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
-    line from Centralu ("Centralu told it its context is 33% full: call compact_self when this step is done"). Settings (Compaction) and `set_preferences`
+    line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
     take `nudge`, `nudgeFirst` and `nudgeSecond` (`null` is back to following the tool's share); a second share at or above the tool's own, or less than
     5 points below it, is refused by the host with the reason, a first share not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
     several is judged as the whole setting that results, and a tool's share lowered under a second share chosen before **takes it down** (to 5 points below the
@@ -2260,6 +2310,13 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
    session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
    compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
+   Claude Code's are recorded the same way (`frames-record-host.mts claude`; `claude/centralu-scenarios.test-helpers.ts`: start_agent,
+   agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
+   sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
+   does not compare the host's answers to the CLI's `mcp_message` calls (`streamJsonCodec`'s `hostAnswers`). A Claude scenario's own
+   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled
+   --thinking-display summarized`, since the adapter never asks for the text and the CLI sends it empty otherwise; `'tasks'`: `--tools TaskCreate,...`,
+   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
@@ -2373,9 +2430,9 @@ it, is the surface check in the table above: a `dropped` limitation there is exa
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → under the keeper: agents, terminals and commands keep running there; the new
-                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
-                → without a keeper: session processes die → a new streamEpoch → UIs resync
+host restarts   → under a keeper that holds children (before #1895 step 3, §4.3): agents, terminals and commands
+                  keep running there; the new host re-attaches to them mid-turn → a new streamEpoch → UIs resync
+                → otherwise (since step 3 under the keeper too): session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
@@ -2411,7 +2468,7 @@ by hand) used to run the keeper in the window's executable; it now fails to star
 
 | Where | Variables | Mode | What runs | Why |
 |---|---|---|---|---|
-| macOS release | none | `ThroughShell` | the window opens `<data>/shell/Centralu.app` through LaunchServices, which starts `centralu-keeper` from `<data>/content/<version>/` and the host from that verified copy (§4.1) | the shell holds macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)) |
+| macOS release | none | `ThroughShell` | the window opens `<data>/shell/Centralu.app` through LaunchServices, which starts `centralu-keeper` from `<data>/content/<version>/` and the host from that verified copy (§4.1). Since #1895 step 3 the keeper serves no child socket, so the host spawns its agents, terminals and commands itself, inside the same tree, and an update stops and continues them (§4.5, "The keeper holds no children") | the shell holds macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)) |
 | macOS release | `CC_SHELL_UNPINNED=1` | `ThroughShell` | the same, and a shell the window carries unpinned is opened too | checking the path by hand with a temporary `CC_DATA_DIR` |
 | macOS release, the shell fell back (refused, not carried, unpinned, not installable, not opened, no report) | none | `KeeperBeside` | the window starts the `centralu-keeper` next to its own executable; the host runs from `<data>/hosts/<key>/` | agents must keep working; the window does so for the rest of its life |
 | macOS release | `CC_KEEPER_HOST_SOURCE` (any value) | `KeeperBeside` | the keeper beside the window, running the named folder (a blank value: the bundled host) | the keeper scripts' way of naming a host, which the shell would not run |
@@ -2627,8 +2684,10 @@ alone, another one is loaded, a failure takes the first load's failure path.
 
 ### 4.3 The children the keeper holds, seen from the host (#280, option C step 2)
 
-The design is in [architecture.md](architecture.md) §4.3. Under the keeper (`CC_KEEPER=1`) the host connects to
-`<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
+The design is in [architecture.md](architecture.md) §4.3. Since #1895 step 3 a keeper started fresh serves no child socket
+(`holds_children` in `server/start.rs`, the one place of the switch; `CC_KEEPER_HOLDS_CHILDREN=1` turns it back on for the keeper
+scripts that still test it), so this section describes a keeper of an earlier build, and one that took over from it (§4.5). Under the
+keeper (`CC_KEEPER=1`) the host connects to `<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
 that would not bind), the host spawns its own children and every ending stops them, exactly as without a keeper.
 `pnpm dev`, e2e, a debug app and Windows never take this path.
 
@@ -2895,9 +2954,10 @@ by ticket, not by connection: only that window was given it, and a window that r
 
 The card rides on the `other` detail, `{ kind: 'other', raw: <question>, about: 'centralu_apply' }`, rather than a
 new kind or a new `centralu_update` action: a released window parses events strictly and drops one whose detail it
-cannot parse, while `other` with its text has been read by every build. The question says what the relaunch costs: the
-agents keep running, and the new window switches the host at once, which stops a Centralu tool call still running
-after 10 s in any session (an agent waiting on its children included). One window relaunches: one ticket goes per request, and the
+cannot parse, while `other` with its text has been read by every build. The question says what the relaunch costs: since
+#1895 step 3 the host restarts, so running turns in every session, the asker's included, stop and go on once it is back,
+and terminals and Run commands start again (`CENTRALU_APPLY_QUESTION`; before, it said the agents keep running and the new
+window's switch cuts a Centralu tool call still running after 10 s). One window relaunches: one ticket goes per request, and the
 keeper's relaunch is the single owner of the switch the new window makes. A replayed request or go starts nothing (the
 host is no longer asking, or the window no longer holds the ticket), a linked machine's apply events never reach a
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows
@@ -2917,11 +2977,42 @@ bundle the update replaced (macOS). No Linux package or Windows install is a bun
 updating", and the busy report is the keeper's, so nothing applies by itself without one. A swap whose host holds no agents (a
 keeper without its child service) is the same stop: the drain begins it before it lets them go, and the host that takes over continues what it ended.
 
-The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. The
-relaunch itself loses nothing a keeper holds, but the relaunched window then switches the host by itself, and that
-switch is what a busy host can lose: a Centralu tool call still running after the 10 s drain (a `start_agent` or
-`agent_session` wait, an `ask_project`, an app tool) is cut and has to be tried again, and a host that cannot hand
-agents over stops running turns. An orchestrator with working children is almost always inside such a wait, so
+**The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
+the removal design of #1895 step 4 (`docs/plans/keeper-removal.md`, on its own branch)). The macOS release keeps its shape, shell then keeper then host, because the
+release is ad-hoc signed and only a tree the shell starts keeps its macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)
+§1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket
+(`holds_children`), so the host finds none, spawns its own children as on every other machine, and every ending stops them:
+
+| | Before (the keeper holds the children) | Since step 3 |
+|---|---|---|
+| "Apply now" | the keeper is told `relaunching` and holds the host; the new window switches the keeper (handoff) and the host (swap); agents go on | the window sends `{"op":"stop","forUpdate":true}` on `keeper.sock`; the keeper writes the host's stop line for an update (the one above), waits up to 15 s, answers, and exits; the window relaunches and opens the shell, which starts the new build's keeper. The next host continues the listed turns with Centralu's note and opens the terminals and Run commands again. No keeper runs a host of another build. Only a window may ask (anyone else gets `window_only`: an agent's Bash could otherwise cut every turn and have it continued as an update's). A refusal (the keeper stopping, a switch under way, a host not up) stops nothing and is shown with its own reason; a "Quit completely" during the stop is refused ("Centralu is stopping for an update; quit again once it has relaunched") and sends nothing, since that stop lists the turns it cut and leaves no quit mark for a linked hub (#1143); the relaunch goes on and the person quits there. The same refusal answers a quit while a switch's keeper stops for an update instead of handing over (its socket gone, its process still running) |
+| The automatic mode | waits for the keeper to report nothing busy, then relaunches | the same (`RelaunchCheck.idleReported`): with nothing busy the stop loses nothing |
+| A host crash | the keeper restarts it, and children re-attach mid-turn | the keeper restarts it by the same rules; the agents, terminals and commands end with it, and a turn in flight shows stopped with Continue, as on Windows and Linux. Only a stop for an update lists turns to continue |
+| "Quit completely", background mode off, idle exit | `stop` on the child service: the host stops its children and notes the person quit (#1143) | a plain `{"op":"stop"}` on the host's stdin (`STOP_LINE`): the same stop and the same mark |
+| Background mode, credential issuance (#1405), the front door, supervision, per-build copies | the keeper's | unchanged, the keeper's |
+| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents. A keeper still holding children (below) whose host can stop for an update stops for one and exits instead of handing over, and the window starts a keeper of its own build. Whether the host can is what the host said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not pass it on: a keeper that took children over with a host it adopted reads "cannot" until a new host starts (the swap of a switch starts one), so a handoff without a swap hands the children on again at that keeper's next switch |
+
+The window knows the keeper does this from its view (`stopsForUpdate`); an older keeper lacks it and gets `relaunching` as before.
+`RelaunchCheck.restartsHost` is set then, and also for an older keeper whose host does not hand its agents over.
+`RelaunchCheck.keepsAgents` is set only for an older keeper whose host does: Settings says agents keep going only then, and a window
+that cannot tell (Windows, Linux, a browser, one not attached to a keeper yet) says only that restarting Centralu applies the update.
+
+*The transition from a keeper that holds children.* A person on an earlier build presses "Apply now" in that build's window, which
+tells its keeper `relaunching`; the new window attaches to that keeper and switches it, as before (its view has no
+`stopsForUpdate`). The old keeper hands itself over to the new build's keeper with everything it holds (§4.4), and the swapped host
+takes the children over. A keeper that received children this way keeps serving them for the rest of its life: its host goes on
+spawning through it, and nothing running is cut by the transition itself. Its next update, switch or quit stops them (the host's
+stop for an update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell
+starts next serves none. A handoff passes a child table on only while the keeper's host cannot stop for an update (an earlier
+build's host, or one not up), and keeper.log says so; otherwise the keeper stops for an update and exits instead
+(`handoff::held_children_on_handoff`), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
+(`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
+turns, and they would have ended as a quit's. Checked end to end by `scripts/keeper-children-integration.mjs`.
+
+The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
+update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
+lose: a Centralu tool call still running (a `start_agent` or `agent_session` wait, an `ask_project`, an app tool) is cut and has to be
+tried again, and running turns are cut and continued. An orchestrator with working children is almost always inside such a wait, so
 dropping the busy rule would cut those waits on every automatic apply. An agent's explicit apply makes that choice for
 itself, as a person pressing the button does, and its own call is answered before the switch begins.
 

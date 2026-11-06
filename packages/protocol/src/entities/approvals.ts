@@ -326,13 +326,13 @@ export const CENTRALU_APPLY = 'centralu_apply'
 /**
  * The question an agent's apply card asks (#665), carried whole as the card's text so a window of any build reads it.
  * Here rather than with the other questions in core: the host raises this card, and the host does not import core.
- * It says what the relaunch costs: the agents keep running, but the relaunched window moves the agent host to the new
- * build at once, and that swap stops Centralu tool calls still running past its 10-second drain, in every session.
+ * It says what the relaunch costs: since #1895 step 3 the agent host restarts, so running turns in every session, the
+ * asker's too, are cut and continued, and terminals and Run commands start again.
  */
 export const CENTRALU_APPLY_QUESTION =
-  'Allow this session to apply the installed Centralu update? The window relaunches into it and running agents keep going. ' +
-  'Right after, the new window switches the agent host to the new build: in any session, a Centralu tool call still running ' +
-  'after 10 seconds (an agent waiting on its child agents, for one) is stopped and has to be tried again.'
+  'Allow this session to apply the installed Centralu update? The window relaunches into it and the agent host restarts: ' +
+  'running turns in every session, this one included, stop and go on once it is back, each told to check what already ' +
+  'happened. Open terminals and Run commands start again; a waiting approval or question is asked again.'
 
 /** An agent's apply card (#665): an update question, whose "always" is for this session only */
 export function isCentraluApply(d: ApprovalDetail): boolean {

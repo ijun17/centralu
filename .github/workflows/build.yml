@@ -1224,7 +1224,7 @@ jobs:
 
       - name: keeper holding a terminal and a dev server across a host crash
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: node scripts/keeper-children-integration.mjs --no-build --no-claude --no-codex
+        run: node scripts/keeper-children-integration.mjs --no-build --no-claude
 
       - name: keeper handing itself over
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
@@ -1321,7 +1321,7 @@ jobs:
 
       - name: keeper holding a terminal and a dev server across a host crash
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: node scripts/keeper-children-integration.mjs --no-build --no-claude --no-codex
+        run: node scripts/keeper-children-integration.mjs --no-build --no-claude
 
       - name: keeper handing itself over
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}

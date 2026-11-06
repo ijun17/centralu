@@ -722,8 +722,8 @@ export type OrchestratorTools = {
    * runner calls it around every tool; absent, or in a turn that is not a session's request, it just runs
    */
   whenAsked?(call: { name: string; args: Record<string, unknown> }, signal: AbortSignal | undefined, run: () => Promise<{ text: string; isError?: boolean }>): Promise<{ text: string; isError?: boolean }>
-  /** compact_self (#1451): asks Centralu to compact this session when its turn ends, with an optional focus line. The answer says what will happen */
-  compactSelf?(focus?: string): { text: string; isError?: boolean }
+  /** compact_self (#1451): asks Centralu to compact this session when its turn ends, with an optional focus line and (#2024) the step to continue with after it. The answer says what will happen */
+  compactSelf?(focus?: string, then?: string): { text: string; isError?: boolean }
   /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */

@@ -30,7 +30,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'update_centralu',
     description:
-      'Checks for or installs a Centralu update, or applies the installed one (the window relaunches; agents keep running). Never changes the person\'s automatic-update setting.',
+      'Checks for or installs a Centralu update, or applies the installed one (the window relaunches and the agent host restarts; running turns, yours too, go on once it is back). Never changes the person\'s automatic-update setting.',
     schema: z.object({ action: UPDATE_ACTION }),
   },
   {
@@ -842,12 +842,15 @@ export const COMPACT_TOOLS = [
     name: 'compact_self',
     description:
       'Compacts this conversation when the current turn ends. Use when work is finished and reported, before waiting over a few minutes on a child, CI or the person, or when switching to an unrelated task.',
-    schema: z.object({ focus: z.string().optional().describe('What the summary keeps.') }),
+    schema: z.object({
+      focus: z.string().optional().describe('What the summary keeps.'),
+      then: z.string().optional().describe('Your next step, sent as your next turn once compacted, or with the reason if not. End your turn after the call.'),
+    }),
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats */
-export const COMPACT_BUDGET_CHARS = 460
+/** The ceiling for COMPACT_TOOLS, counted like MAIL_BUDGET_CHARS; loaded on both tools, so it rides in every request of the two seats. 460 → 610 for `then` (#2024; measured 606) */
+export const COMPACT_BUDGET_CHARS = 610
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's

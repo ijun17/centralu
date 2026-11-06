@@ -362,6 +362,11 @@ export interface SessionHandle {
    */
   nudge?(text: string): boolean | Promise<boolean>
   /**
+   * How many inputs the host handed to the tool that no turn has answered yet and that are not the turn that just ended: queued behind a running turn, or
+   * written and not yet started. Asked when a turn ends, to send a note of the host's own (`compact_self`'s `then`) after them and not beside them. Absent: the tool cannot say
+   */
+  queuedInputs?(): number
+  /**
    * Which of the inputs given an `id` the turn that just ended took in (#1377), read while the event that ends it is
    * handled. Absent: the tool takes every message into the turn it is running (Codex merges one into an active turn; one it
    * runs as a turn after is named by `turnStartInputs` instead). Present:

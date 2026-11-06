@@ -218,3 +218,29 @@ test('A locally replaced bundle offers Apply now without an npm install event (#
   await page.getByTestId('update-apply-now-settings').click()
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
 })
+
+/*
+ * #1895 step 3: what Settings says applying costs follows what the update does. A keeper that holds no agents stops the host
+ * for an update and still reports idle, so the automatic mode still applies by itself; a window with no keeper does not, and
+ * one that cannot tell says only that a restart applies it
+ */
+test('Settings > Updates says what applying stops, and applies by itself only where idle is reported (#1895)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const settings = page.getByTestId('settings-panel')
+  for (const [check, says, not] of [
+    [{ ready: true, restartsHost: true, idleReported: true }, 'applies a newer version once nothing is busy', 'you apply it with the Update button'],
+    [{ ready: true, restartsHost: true }, 'you apply it with the Update button', 'applies a newer version once nothing is busy'],
+    // A window that cannot tell (Windows, Linux, a browser, a window not attached to a keeper): it promises neither
+    [{ ready: false, reason: 'not attached to the background keeper' }, 'restarting Centralu applies it', 'applies a newer version once nothing is busy'],
+  ] as const) {
+    await page.evaluate((c) => {
+      ;(window as any).__mock.relaunchCheck = c
+      ;(window as any).__store.getState().toggleSettings(true)
+    }, check)
+    await page.getByTestId('settings-tab-background').click()
+    await expect(settings).toContainText(says)
+    await expect(settings).not.toContainText(not)
+    await expect(settings).not.toContainText('keep going')
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(false))
+  }
+})

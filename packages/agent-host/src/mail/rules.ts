@@ -173,6 +173,8 @@ export const WARNING_TEXT = {
     `${a} and ${b} started ${turns} turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.`,
   host: (turns: number) =>
     `Mail between sessions started ${turns} turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.`,
+  compactCycles: (session: string, cycles: number) =>
+    `${session} asked to compact its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
 } as const
 
 /** The text of a task written for a report mark an earlier build left with no task (§9.5) */

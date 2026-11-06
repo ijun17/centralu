@@ -44,10 +44,12 @@ export type Scenario = {
   /** The tool is to refuse to open a session (it is signed out): the run opens none and the scenario is the refusal */
   signedOut?: boolean
   /**
-   * The tool's own settings for the run (Codex: its settings folder holds them): `mcp` sets it up with a small MCP server,
-   * `probe`, whose one tool `ping` answers `pong`
+   * The tool's own settings for the run (Codex: its settings folder holds them; Claude Code: flags of the recording's own, as its
+   * settings files are off): `mcp` sets it up with a small MCP server, `probe`, whose one tool `ping` answers `pong`; `thinking`
+   * (Claude Code) turns on extended thinking with its text shown, which the adapter never asks for; `tasks` (Claude Code) offers the
+   * task-list tools, which this CLI leaves out of a non-interactive run
    */
-  settings?: 'mcp'
+  settings?: 'mcp' | 'thinking' | 'tasks'
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */
@@ -179,6 +181,36 @@ export const SCENARIOS: readonly Scenario[] = [
         else if (e.type === 'question_request') d.session().answerQuestion!(e.requestId, [{ question: e.questions[0]!.question, answers: [e.questions[0]!.options[0]!.label] }])
         else return
       }
+    },
+  },
+  {
+    // The task list: TaskCreate and TaskUpdate (`claude/task-plan.ts`), which the screen draws as the plan. A non-interactive CLI 2.1.296
+    // offers no task tool by itself, so the recording offers them with a flag: a Centralu session on this CLI has none
+    name: 'todo',
+    tools: ['claude'],
+    preset: 'auto',
+    settings: 'tasks',
+    async run(d) {
+      await turn(d, 'Use the TaskCreate tool to add two tasks to your task list: "write the intro" and "write the outro". Then use the TaskUpdate tool to mark the first one completed. Then say done.')
+    },
+  },
+  {
+    // Extended thinking with its text shown: the thinking arrives as text, not as an empty block. Turned on by a flag of the recording's:
+    // the adapter never asks for the text, so a Centralu session on this CLI gets empty thinking blocks
+    name: 'thinking',
+    tools: ['claude'],
+    settings: 'thinking',
+    async run(d) {
+      await turn(d, 'What is 17 times 23? Think it through step by step, then give the answer.')
+    },
+  },
+  {
+    // The web tools: a fetch of a fixed page and a search
+    name: 'web',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Use the WebFetch tool on https://example.com and tell me its title. Then use the WebSearch tool to search for "example domain" and tell me the first result title.')
     },
   },
   {
@@ -380,7 +412,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // A call to a tool of an MCP server the person set up: its arguments and its answer
     name: 'mcp-call',
-    tools: ['codex'],
+    tools: ['codex', 'claude'],
     preset: 'auto',
     settings: 'mcp',
     async run(d) {
