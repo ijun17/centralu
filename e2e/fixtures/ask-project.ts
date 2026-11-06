@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import { newSession, setup } from './project-screen.js'
 import { openFolds } from './folds.js'
+import { newSession, setup } from './project-screen.js'
 
 /**
  * One project asking another (#371 part B) on screen, driven through the mock platform with the events the host
@@ -132,7 +132,7 @@ export function askProjectTests(): void {
 
       await emit(page, 'delegated-1', { type: 'user_message', seq: 1, text: "[A session asks through Centralu's ask_project.] Export sprites", from: { sessionId: caller, name: 'consumer session' } })
 
-      await openFolds(page)
+      // A call still waiting for its answer is not folded (#2007), so the card is on the page as it stands
       const card = page.getByTestId('ask-project-card')
       await expect(card).toBeVisible()
       await expect(card.getByTestId('ask-project-toggle')).toContainText('Asked toolkit')
@@ -152,6 +152,8 @@ export function askProjectTests(): void {
         ok: true,
         summary: 'toolkit answered (from the session "Sprites" [delegated-1] in toolkit), as JSON:\n"Exported 12 sprites"',
       })
+      // Answered, the call is no longer waiting on anyone and folds with the run it is in (#2007)
+      await openFolds(page)
       await expect(card.getByTestId('ask-project-status')).toContainText('answered')
       await expect(card.getByTestId('ask-project-result')).toHaveCount(0)
       await card.getByTestId('ask-project-toggle').click()

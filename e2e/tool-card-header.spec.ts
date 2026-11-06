@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { emitEvent, newSession, setup } from './fixtures/control.js'
+import { openFolds } from './fixtures/folds.js'
 
 /**
  * A tool card's header is one line however long its words are (owner, 2026-11-06): the chevron stays at the right end
@@ -28,6 +29,7 @@ for (const width of [1280, 900, 480, 360]) {
     await emitEvent(page, 1, { type: 'tool_result', callId: 'a2', ok: false, summary: 'exit 1' })
     await emitEvent(page, 1, { type: 'tool_call', callId: 'a3', summary: { tool: 'Read', title: LONG_PATH, paths: ['/tmp/alpha/x'] } })
 
+    await openFolds(page)
     const cards = page.getByTestId('tool-card')
     await expect(cards).toHaveCount(3)
     for (let i = 0; i < 3; i++) {

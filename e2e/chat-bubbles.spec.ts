@@ -257,6 +257,7 @@ test('a reasoning row keeps the body size of text', async ({ page }) => {
     },
     { s: sid },
   )
+  await openFolds(page)
   await expect(page.getByTestId('msg-reasoning')).toContainText('Second paragraph')
   const sizes = await page.evaluate(() => {
     const probe = document.createElement('span')
