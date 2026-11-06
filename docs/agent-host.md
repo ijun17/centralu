@@ -2238,6 +2238,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    with the recorded `<cwd>` read as the replay's folder), and `normalize.test.ts` and `compact.test.ts` take their
    notifications from them (`codex/recorded.test-helpers.ts`). The tests that mock the whole client stay hand-written: they set
    up races (a response before its notification, a late `turn/start` answer) that no recording can be made to repeat.
+   A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
    A conversation whose app-server outlives a host (a swap under the keeper) is recorded from the swap on
    (`codex/swap-scenarios.test-helpers.ts`, `adopt-running` and `adopt-failed`) and replayed by `codex/adopt.test.ts`: the second
    `initialize` is refused, `thread/resume` answers `active` for a running turn and `systemError` for a failed one. A scenario with

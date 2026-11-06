@@ -99,6 +99,13 @@ describe('scrubbing Claude Code’s frames', () => {
     expect(JSON.parse(streamed.join(''))).toEqual({ command: 'Get-Content "<home>/Docs/a.txt"', content: 'one\ntwo' })
   })
 
+  it('numbers the id OpenCode gives a tool output’s file the same wherever it is named, in a path and in the output’s own words', () => {
+    const name = 'tool_1aff99a540016nieUyWEeXJ0u2'
+    const frames = run([line('in', { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'tool_call_update', toolCallId: 'c', rawOutput: { output: `Full output saved to: ${CWD}/${name}\n`, metadata: { outputPath: `${CWD}/${name}` } } } } })])
+    expect(JSON.stringify(frames)).not.toContain('1aff99a5')
+    expect(JSON.stringify(frames)).toContain('<cwd>/tool_000001')
+  })
+
   it('numbers a session id cut across two streamed pieces as one id, the same as when it stands whole in another frame', () => {
     const id = '3142d2fb-5f69-431e-b37f-2a6507fbb140'
     const piece = (partial_json: string) => line('in', { type: 'stream_event', api_message_id: 'msg_01', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json } } })
