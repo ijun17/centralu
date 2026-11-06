@@ -40,7 +40,9 @@ export type Fold = {
  * row streaming live has no host number until it is stored, and it must not close the run it is in when it gets one).
  */
 export function foldKeys(item: Pick<ChatItem, 'seq' | 'storedSeq'>): string[] {
-  return item.storedSeq !== undefined ? [`s${item.storedSeq}`, `r${item.seq}`] : [`r${item.seq}`]
+  if (item.storedSeq === undefined) return [`r${item.seq}`]
+  // A row read back has its host number for its render key: the `r` name would be the host's number in the other's space
+  return item.storedSeq === item.seq ? [`s${item.storedSeq}`] : [`s${item.storedSeq}`, `r${item.seq}`]
 }
 
 /** Whether the row folds into a run; `hasView` says whether a tool call opened an app view in the conversation */
@@ -157,4 +159,16 @@ export function dayBreaksOnPage(breaks: Map<number, string>, runs: readonly Fold
     else if (after >= chatLength && !out.has(fold.first)) out.set(fold.first, inside)
   }
   return out
+}
+
+/**
+ * How many drawn rows lie between a row and the range the list draws (0 inside it). The rows a closed run hides stand
+ * at no height, so they are not distance: an app view held beside a closed run would otherwise be told it left the
+ * screen a fold line's height after it did. Counting stops once it passes the limit.
+ */
+export function rowsBeyond(range: { startIndex: number; endIndex: number }, index: number, hidden: ArrayLike<number>, limit = 1_000): number {
+  let drawn = 0
+  if (index < range.startIndex) for (let i = index; i < range.startIndex && drawn <= limit; i++) drawn += hidden[i] ? 0 : 1
+  else for (let i = index; i > range.endIndex && drawn <= limit; i--) drawn += hidden[i] ? 0 : 1
+  return drawn
 }

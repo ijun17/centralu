@@ -10,7 +10,7 @@ import { QuestionCard } from '../../approval/QuestionCard.jsx'
 import { ChatRow, SaidAt } from '../chat-rows/ChatRow.jsx'
 import { ActivityRow } from './ActivityRow.jsx'
 import { FoldLine } from './FoldLine.jsx'
-import { dayBreaksOnPage, foldIsOpen, foldRuns, liveRun, liveStep, type Fold } from './foldRuns.js'
+import { dayBreaksOnPage, foldIsOpen, foldRuns, liveRun, liveStep, rowsBeyond, type Fold } from './foldRuns.js'
 import { OlderSentinel } from './OlderSentinel.jsx'
 import { StickyUser, useStickyUser } from './StickyUser.jsx'
 import { useChatScroll } from './useChatScroll.js'
@@ -178,7 +178,6 @@ export function ChatStream({
     if (run && !run.keys.some((k) => opened?.[k])) useStore.getState().setFoldOpen(sessionId, run.keys, true)
   }, [hit, runOf, folds, opened, sessionId])
   const toggleFold = (fold: Fold, open: boolean) => {
-    if (mine?.kind === 'out' && mine.first === fold.first) return
     clearTimeout(motionTimer.current)
     // The person took the view off the end: opening or closing below it must not pull it back down to follow the end
     stickToBottom.current = false
@@ -186,9 +185,11 @@ export function ChatStream({
     const settle = () => {
       if (fade) motionTimer.current = setTimeout(() => setMotion(null), FOLD_FADE_MS + 50)
     }
-    if (!open) {
+    // Pressed again while its rows still fade out: the press opens it again, it never waits for the fade
+    const closing = mine?.kind === 'out' && mine.first === fold.first
+    if (!open || closing) {
       useStore.getState().setFoldOpen(sessionId, fold.keys, true)
-      setMotion(fade ? { sessionId, first: fold.first, kind: 'in' } : null)
+      setMotion(fade && !closing ? { sessionId, first: fold.first, kind: 'in' } : null)
       return settle()
     }
     // A run held open by the search hit in it closes the hit with it, or it would open again
@@ -425,7 +426,7 @@ export function ChatStream({
                     projectRoot={projectRoot}
                     projectId={projectId}
                     sessionId={sessionId}
-                    leaving={isLeaving(virtualizer.range, v.index)}
+                    leaving={isLeaving(virtualizer.range, v.index, folds.hidden)}
                   />
                 </AnswerBubble>
               )}
@@ -530,7 +531,6 @@ const CHAT_OVERSCAN = 12
  * only a row held onto because it has an app view is ever rendered like this. That view sends
  * teardown and collapses (M4 B-1, see rangeExtractor above).
  */
-function isLeaving(range: { startIndex: number; endIndex: number } | null, index: number): boolean {
-  if (!range) return false
-  return index < range.startIndex - CHAT_OVERSCAN || index > range.endIndex + CHAT_OVERSCAN
+function isLeaving(range: { startIndex: number; endIndex: number } | null, index: number, hidden: Uint8Array): boolean {
+  return range !== null && rowsBeyond(range, index, hidden, CHAT_OVERSCAN) > CHAT_OVERSCAN
 }

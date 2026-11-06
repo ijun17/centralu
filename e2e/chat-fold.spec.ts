@@ -213,3 +213,19 @@ test('an ask_project call stays on the page until it is answered, then folds wit
   await expect(page.getByTestId('fold-line')).toHaveCount(1)
   await expect(page.getByTestId('ask-project-card')).toHaveCount(0)
 })
+
+test('a press while the rows still fade out opens the run again, it never waits', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  await seed(page, sid, [user(1), said(2), thought(3), tool(4), said(5)])
+  const line = page.getByTestId('fold-line')
+  await line.click()
+  await expect(line).toHaveAttribute('aria-expanded', 'true')
+  // Close and press again at once, inside the fade
+  await line.click()
+  await line.click()
+  await expect(line).toHaveAttribute('aria-expanded', 'true')
+  await page.waitForTimeout(400)
+  await expect(line).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByTestId('tool-card')).toHaveCount(1)
+})

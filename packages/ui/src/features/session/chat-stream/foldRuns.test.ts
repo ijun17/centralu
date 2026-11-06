@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatItem } from '../../../store/store.js'
-import { dayBreaksOnPage, foldIsOpen, foldKeys, foldRuns, foldSummary, liveRun, liveStep } from './foldRuns.js'
+import { dayBreaksOnPage, foldIsOpen, foldKeys, foldRuns, foldSummary, liveRun, liveStep, rowsBeyond } from './foldRuns.js'
 
 let n = 0
 // A row without its render key, whichever kind: the key is numbered here
@@ -71,6 +71,8 @@ describe('foldRuns: how a run is remembered and drawn', () => {
   it('names a row by the host number when it has one (a re-read keeps the open state) and by its render key (a row stored while the run is open keeps it open)', () => {
     expect(foldKeys({ seq: 9, storedSeq: 4 })).toEqual(['s4', 'r9'])
     expect(foldKeys({ seq: 9 })).toEqual(['r9'])
+    // A row read back has the host's number as its render key: no `r` name that a live row's key could be taken for
+    expect(foldKeys({ seq: 4, storedSeq: 4 })).toEqual(['s4'])
   })
 
   it('is open when any row of it is, so a run that grows at either end stays open', () => {
@@ -144,5 +146,29 @@ describe('liveStep and liveRun', () => {
     expect(liveRun(chat, runs, false)).toBeNull()
     const answered = [tool(), said()]
     expect(liveRun(answered, foldRuns(answered, none).runs, true)).toBeNull()
+  })
+})
+
+describe('rowsBeyond', () => {
+  it('counts the rows between a row and the drawn range, and none inside it', () => {
+    const range = { startIndex: 20, endIndex: 30 }
+    const none = new Uint8Array(60)
+    expect(rowsBeyond(range, 25, none)).toBe(0)
+    expect(rowsBeyond(range, 5, none)).toBe(15)
+    expect(rowsBeyond(range, 45, none)).toBe(15)
+  })
+
+  it('does not count the rows a closed run hides, which stand at no height', () => {
+    const range = { startIndex: 20, endIndex: 30 }
+    const hidden = new Uint8Array(60)
+    hidden.fill(1, 6, 20)
+    // Rows 6-19 are hidden: only row 5 is drawn between row 5 and the range
+    expect(rowsBeyond(range, 5, hidden)).toBe(1)
+    hidden.fill(1, 31, 60)
+    expect(rowsBeyond(range, 45, hidden)).toBe(0)
+  })
+
+  it('stops counting at the limit', () => {
+    expect(rowsBeyond({ startIndex: 500, endIndex: 510 }, 0, new Uint8Array(600), 12)).toBe(13)
   })
 })
