@@ -171,8 +171,10 @@ test('opening a run keeps the line where it was under the pointer', async ({ pag
   await seed(page, sid, rows)
   const stream = page.getByTestId('chat-stream')
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight / 2))
-  // The third run's first row: the line is found by its row, since rows far from the view are not on the page
-  const line = page.locator('[data-testid=fold-line][data-fold-at="10"]')
+  // A line the list has on the page near the middle; it is found again by its row, since the list moves its rows
+  await expect(page.getByTestId('fold-line').first()).toBeVisible()
+  const at = await page.getByTestId('fold-line').first().getAttribute('data-fold-at')
+  const line = page.locator('[data-testid=fold-line][data-fold-at="' + at + '"]')
   await line.scrollIntoViewIfNeeded()
   const before = (await line.boundingBox())!.y
   await line.click()
@@ -205,10 +207,9 @@ test('an ask_project call stays on the page until it is answered, then folds wit
   await seed(page, sid, [user(1), said(2), tool(3), tool(4, ask), tool(5), said(6)])
   // Two runs, the call between them
   await expect(page.getByTestId('fold-line')).toHaveCount(2)
-  await expect(page.getByTestId('tool-card')).toHaveCount(1)
-  await expect(page.getByTestId('tool-card')).toContainText('Ask the sprite project')
+  await expect(page.getByTestId('ask-project-card')).toHaveCount(1)
 
   await seed(page, sid, [user(1), said(2), tool(3), tool(4, { ...ask, result: 'done', ok: true }), tool(5), said(6)])
   await expect(page.getByTestId('fold-line')).toHaveCount(1)
-  await expect(page.getByTestId('tool-card')).toHaveCount(0)
+  await expect(page.getByTestId('ask-project-card')).toHaveCount(0)
 })
