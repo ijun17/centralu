@@ -254,7 +254,7 @@ describe('worktree sessions', () => {
   it('leaves no worktree or branch behind when a step before the tool starts throws (#774)', async () => {
     const branches = () =>
       execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
-    const sink = vi.spyOn(wtMgr as unknown as { handleSink: () => unknown }, 'handleSink').mockImplementation(() => {
+    const sink = vi.spyOn(wtMgr.processes, 'handleSink').mockImplementation(() => {
       throw new Error('no sink')
     })
     try {

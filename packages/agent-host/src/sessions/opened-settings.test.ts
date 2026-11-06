@@ -115,7 +115,7 @@ describe('a session whose conversation runs another model than the record', () =
     adapter.opened = { model: 'gpt-5.5', effort: null }
     events.length = 0
     // What the process is registered as running with, as it is at that moment: the record is registered by reference
-    const running = (mgr as unknown as { running: Map<string, { model: string | null }> }).running
+    const running = mgr.processes.running
     const registered: (string | null)[] = []
     const set = running.set.bind(running)
     running.set = (id, launched) => (registered.push(launched.model), set(id, launched))
