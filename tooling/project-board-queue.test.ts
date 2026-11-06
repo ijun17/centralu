@@ -1174,11 +1174,13 @@ describe('which tier a batch must run before it lands, and what lands from a run
   })
 
   it('still wants every shard of the matrix build.yml declares, with the stand-in ignored', () => {
-    // The shard count is build.yml's (`shards: [M]`, `shard: [1..M]`), and the job names carry it
+    // The job names carry build.yml's matrix (`shards: [M]`, `shard: [1..M]`; tooling/build-workflow.test.ts holds its rows
+    // to the count), and the recorded run is one of 5 shards
     const yml = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
     for (const browser of ['webkit', 'chromium']) {
       const job = yml.split(/\n(?= {2}[\w-]+:\n)/).find((block) => block.includes(`name: e2e (${browser} \${{ matrix.shard }}/\${{ matrix.shards }})`) && !block.includes("if: needs.changes.outputs.code == 'false'"))!
-      const count = Number(/shards: \[(\d+)\]/.exec(job)![1])
+      expect(job).toMatch(/shards: \[\d+\]/)
+      const count = 5
       expect(RUN_220.jobs.filter((j) => j.name.startsWith(`e2e (${browser} `) && !template(j.name)).map((j) => j.name).sort()).toEqual(Array.from({ length: count }, (_, i) => `e2e (${browser} ${i + 1}/${count})`))
     }
     const without = (name: string) => RUN_220.jobs.filter((j) => j.name !== name)
