@@ -743,7 +743,7 @@ export class RemoteAgents {
   }
 
   /**
-   * A linked machine's event (`LinkedHost.observeLinked`), read before the linked reports are: a call waiting on a
+   * A linked machine's event (`SessionManager.observeLinked`), read before the linked reports are: a call waiting on a
    * child's turn takes its end, so the report a waiting caller already read is not sent too.
    */
   observe(e: LinkedEvent): void {

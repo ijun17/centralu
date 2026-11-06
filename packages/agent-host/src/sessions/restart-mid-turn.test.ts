@@ -38,8 +38,8 @@ describe('a turn its process took with it (#839)', () => {
   }
 
   it.each([
-    ['a restart', (w: CrossWorld, id: string) => w.mgr.processes.restartSession(id)],
-    ['a tool switch', (w: CrossWorld, id: string) => w.mgr.processes.switchTool(id, 'codex')],
+    ['a restart', (w: CrossWorld, id: string) => w.mgr.restartSession(id)],
+    ['a tool switch', (w: CrossWorld, id: string) => w.mgr.switchTool(id, 'codex')],
   ])('%s settles a waited start_agent as stopped', async (_, swap) => {
     const s = await parent()
     const { call, child } = await waitedChild(s)
@@ -56,11 +56,11 @@ describe('a turn its process took with it (#839)', () => {
     expect(r).toMatchObject({ ok: true, state: 'working' })
     const child = named(childrenOf(s)[0]!.id)
     const told = () => reports(s, child)
-    expect((await w.mgr.processes.restartSession(child)).resumed).toBe(true)
+    expect((await w.mgr.restartSession(child)).resumed).toBe(true)
     await w.until(() => told().length === 1)
     expect(told()[0]).toContain('stopped before finishing')
     // The person's own turn in the child afterwards is not the parent's to hear about
-    await w.mgr.inputs.send(child, 'something else')
+    await w.mgr.send(child, 'something else')
     handleOf(child)!.answer('Unrelated answer.')
     await new Promise((r) => setImmediate(r))
     expect(told()).toHaveLength(1)
@@ -74,7 +74,7 @@ describe('a turn its process took with it (#839)', () => {
     handleOf(child)!.answer('Parser done.')
     await w.until(() => reports(s, child).length === 1)
     const events = w.events.length
-    expect((await w.mgr.processes.restartSession(child)).resumed).toBe(true)
+    expect((await w.mgr.restartSession(child)).resumed).toBe(true)
     expect(w.events.slice(events).filter((e) => e.type === 'state_change' && e.sessionId === child && e.reason === 'interrupted')).toEqual([])
     expect(reports(s, child)).toHaveLength(1)
   })

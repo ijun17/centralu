@@ -51,7 +51,7 @@ const children = (mgr: SessionManager, id: string) => mgr.listSessions().filter(
 
 /** A `safe` session (which still asks in a trusted project) whose start_agent card stands */
 async function asking(h: ReturnType<typeof host>) {
-  const project = await h.mgr.projectCreation.addProject(root)
+  const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
   const call = h.mgr.startAgent(parent, { task: 'long work', wait: false })
@@ -64,7 +64,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     const a = host()
     const { parent, call, requestId } = await asking(a)
     expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, callerSessionId: parent })])
-    a.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    a.mgr.respondApproval(parent, requestId, 'allow')
     expect(await call).toMatchObject({ ok: true, state: 'working' })
     expect(store.children.listAgentStartRequests()).toEqual([])
   })
@@ -85,7 +85,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(raised).toHaveLength(2)
     expect(raised.map((e) => (e as { seq?: number }).seq != null)).toEqual([true, false])
     expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending' })
-    b.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    b.mgr.respondApproval(parent, requestId, 'allow')
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
     await eventually(() => store.children.listReportMarks().length === 1)
@@ -99,7 +99,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     const { parent, requestId } = await asking(a)
     await a.mgr.detachAll()
     const b = host()
-    b.mgr.inputs.respondApproval(parent, requestId, 'deny')
+    b.mgr.respondApproval(parent, requestId, 'deny')
     await eventually(() => !!b.claude.handles.get(parent)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
     expect(children(b.mgr, parent)).toEqual([])
     expect(store.children.listAgentStartRequests()).toEqual([])
@@ -119,10 +119,10 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('hidden by the caller\'s own turn after the call answered "pending", comes back when that turn ends', async () => {
     const a = host()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const project = await a.mgr.projectCreation.addProject(root)
+    const project = await a.mgr.addProject(root)
     a.mgr.setProjectTrusted(project.id, true)
     const parent = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'safe' })).id
-    await a.mgr.inputs.send(parent, 'do the work, with a helper')
+    await a.mgr.send(parent, 'do the work, with a helper')
     const call = a.mgr.startAgent(parent, { task: 'long work', wait: false })
     for (let i = 0; i < 50 && !card(a.mgr, parent); i++) await vi.advanceTimersByTimeAsync(0)
     const requestId = card(a.mgr, parent)!.requestId
@@ -136,7 +136,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     h.answer('carried on alone for now')
     await eventually(() => card(a.mgr, parent)?.requestId === requestId)
     expect(a.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('waiting_approval')
-    a.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    a.mgr.respondApproval(parent, requestId, 'allow')
     await eventually(() => children(a.mgr, parent).length === 1)
     // No call waits on that card: the session goes back to where its turn left it, not to a "working" nothing ends
     expect(a.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('waiting_input')
@@ -162,7 +162,7 @@ describe('a start allowed but waiting for memory (#686)', () => {
     const a = host()
     a.mgr.useMemoryGate(gate())
     const { parent, call, requestId } = await asking(a)
-    a.mgr.inputs.respondApproval(parent, requestId, 'allow')
+    a.mgr.respondApproval(parent, requestId, 'allow')
     // Allowed on the card, then queued: the same handle, now waiting for memory
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId, lowMemory: { floor: '2.0 GB' } })
     expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, request: expect.objectContaining({ allowed: true }) })])

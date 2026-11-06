@@ -56,7 +56,7 @@ type Host = ReturnType<typeof host>
 
 /** A parent in a trusted project that may start agents without a card */
 async function parentOf(h: Host) {
-  const project = await h.mgr.projectCreation.addProject(root)
+  const project = await h.mgr.addProject(root)
   await h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -83,7 +83,7 @@ async function handOff(h: Host, project: string, from: string, deleteOld = true,
     initialPrompt: 'You are taking over. Read the note.',
     handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: from, ...(says ? { removesOriginal: true } : {}) },
   })).id
-  if (deleteOld) await h.mgr.trash.trashSession(from)
+  if (deleteOld) await h.mgr.trashSession(from)
   return heir
 }
 
@@ -205,7 +205,7 @@ describe("a handoff moves the original's mail to the session that took over (#15
 
   it("case 7 (#1932), the original stays: a child doing the work it owes its own giver stays with it, so the giver is told the end", async () => {
     const h = host()
-    h.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    h.mgr.setUiPreferences({ agentDepth: 3 })
     const { project, parent: upstream } = await parentOf(h)
     // upstream asks the original; the original hands the work on to a child and answers that it waits
     const original = await startChild(h, upstream, 'land #12')
@@ -310,7 +310,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     expect(read.row(fromChild.id, at(second))).toBeDefined()
     expect(read.row(fromChild.id, at(first))).toBeUndefined()
 
-    await h.mgr.trash.trashSession(parent)
+    await h.mgr.trashSession(parent)
     expect(read.row(given.id, at(second))).toMatchObject({ settled: null })
     expect(read.row(given.id, at(parent))).toBeUndefined()
     expect(read.to(PERSON)).toEqual([])
@@ -363,7 +363,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     const given = give(h, g, parent, 'G gives A work')
     const heir = await handOff(h, project, parent, false)
     vi.spyOn(store.trash, 'trashSession').mockRejectedValue(new Error('crash before the archive'))
-    await expect(h.mgr.trash.trashSession(parent)).rejects.toThrow('crash before the archive')
+    await expect(h.mgr.trashSession(parent)).rejects.toThrow('crash before the archive')
     vi.restoreAllMocks()
     expect(read.row(given.id, at(heir))).toMatchObject({ settled: null })
     expect(store.sessions.listSessions().some((s) => s.id === parent)).toBe(true)
@@ -388,7 +388,7 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     const x = await session(h, project)
     const heir = await handOff(h, project, parent, false)
     const both = ask(h, x, [parent, heir], 'which?')
-    await h.mgr.trash.trashSession(parent)
+    await h.mgr.trashSession(parent)
     await h.mgr.trash.restoreSession(parent)
     expect(pendingFor(parent, both.id)).toBe(false)
     expect(pendingFor(heir, both.id)).toBe(true)
@@ -400,7 +400,7 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     const heir = await handOff(h, project, parent, false)
     const asked = ask(h, parent, [heir], 'what?')
     const own = answer(h, heir, asked.id, 'this')
-    await h.mgr.trash.trashSession(parent)
+    await h.mgr.trashSession(parent)
     expect(read.row(own.id, at(heir))).toBeUndefined()
     expect(store.mailbox.pendingFor(at(heir), Date.now() + 10 * DEBOUNCE_MS).filter((p) => p.message.sender === at(heir))).toEqual([])
   })
@@ -431,7 +431,7 @@ describe('mail the move cannot simply re-point (#1580 review)', () => {
     const asks = (await h.mgr.trash.archiveIfAtRest(parent)) as { archived: false; asks: string[] }
     expect(asks.asks).toContain('It holds a message waiting for it ("X asks A"); it goes to "Successor", which took over from it, and stays there if it is restored.')
     expect(asks.asks.some((l) => l.includes('A gives B work'))).toBe(false)
-    await h.mgr.trash.trashSession(parent)
+    await h.mgr.trashSession(parent)
     const notice = events.find((e) => e.type === 'notice' && e.sessionId === heir)
     const text = notice && 'text' in notice ? notice.text : ''
     expect(text).toContain('mail message "X asks A" (unread, now waiting for you)')
@@ -446,7 +446,7 @@ describe('the re-check of the review fixes (#1580)', () => {
     const heir = await handOff(h, project, parent, false)
     give(h, parent, heir, 'A gives B work')
     const question = ask(h, heir, [parent], 'which branch?')
-    await h.mgr.trash.trashSession(parent)
+    await h.mgr.trashSession(parent)
     expect(read.row(question.id, at(heir))).toBeUndefined()
     await h.mgr.trash.restoreSession(parent)
     expect(pendingFor(parent, question.id)).toBe(false)

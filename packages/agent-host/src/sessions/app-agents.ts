@@ -30,7 +30,7 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  * Once the outcome is decided, later events are ignored (except for tokens).
  */
 export class AgentRunWait {
-  /** The person stopped that session's turn (`TurnInputs.interrupt`) */
+  /** The person stopped that session's turn (`SessionManager.interrupt`) */
   stoppedByPerson = false
   /** The person deleted that session — there is no session left to conclude */
   deleted = false

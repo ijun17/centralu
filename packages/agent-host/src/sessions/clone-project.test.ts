@@ -105,7 +105,7 @@ beforeEach(() => {
   events = []
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, (e) => events.push(e))
-  mgr.projectCreation.useProjectsHome(() => centralu)
+  mgr.useProjectsHome(() => centralu)
   const handler = createRpcHandler(mgr, agents)
   rpc = (method, params) => handler(method, params)
 })
@@ -184,7 +184,7 @@ describe('create_project with git (the orchestrator)', () => {
     expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(centralu, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })
     expect(readdirSync(centralu)).toEqual([])
 
-    mgr.inputs.respondApproval(orc.id, pending.requestId, 'allow')
+    mgr.respondApproval(orc.id, pending.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('a clone of')

@@ -54,7 +54,7 @@ describe('child sessions and the machine (#686)', () => {
       handleOf(r.sessionId).answer('done')
       await w.mgr.agentSession(s, { sessionId: r.sessionId, action: 'wait' })
       const before = handleOf(r.sessionId)
-      await w.mgr.processes.restartSession(r.sessionId)
+      await w.mgr.restartSession(r.sessionId)
       expect(handleOf(r.sessionId)).not.toBe(before)
       expect(handleOf(r.sessionId).opts.noCodeIntelligence).toBe(true)
     })
@@ -164,7 +164,7 @@ describe('child sessions and the machine (#686)', () => {
       handleOf(a).externalId = 'ext-a'
       handleOf(a).answer('first job done')
       await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-      await w.mgr.inputs.send(a, "the person's own work")
+      await w.mgr.send(a, "the person's own work")
       let forks = 0
       const fake = claude() as CrossAdapter & { forkConversation?: () => Promise<string>; readExternalHistory?: () => Promise<HistoryMessage[]> }
       fake.forkConversation = async () => `fork-${++forks}`

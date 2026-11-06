@@ -5,7 +5,7 @@ import type { ToolProfile } from '../apps/contract.js'
 /**
  * Which bundle of Centralu's own tools a session gets (#69, #320), as a function of what the session
  * is. The manager asks the same question at creation, at every wake and on every bridge call
- * (`SessionTools.toolProfileOf`); the one rule lives here so those answers cannot drift apart.
+ * (`SessionManager.toolProfileOf`); the one rule lives here so those answers cannot drift apart.
  *
  * Everything the rule reads is a fact about the session's row or the person's settings. The tool
  * (Claude or Codex) and the permission preset are deliberately not inputs: the profile is the same

@@ -253,7 +253,7 @@ export class ExternalApps {
 
   /**
    * Receives the part of the broker's body only the host's core can do (an agent session) (D). Called
-   * by the manager when it receives the runtime (`SessionAppWiring.useExternalApps`) — the host's main
+   * by the manager when it receives the runtime (`SessionManager.useExternalApps`) — the host's main
    * and the tests use the same seam. Empties it if null: a request afterward is refused with "no
    * agent to lend".
    */

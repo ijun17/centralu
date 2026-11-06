@@ -95,11 +95,11 @@ describe('a session whose conversation runs another model than the record', () =
     adapter.opened = null
     Object.assign(adapter.capabilities, { backgroundTasks: true })
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
-    expect(await mgr.processes.sleepSession(s.id)).toBe(true)
+    expect(await mgr.sleepSession(s.id)).toBe(true)
     adapter.opened = { model: 'gpt-5.6-luna', effort: 'medium' }
     events.length = 0
 
-    await mgr.processes.resumeSession(s.id)
+    await mgr.resumeSession(s.id)
 
     expect(mgr.listSessions().find((x) => x.id === s.id)).toMatchObject({ model: null, effort: null })
     expect(events.filter((e) => e.type === 'settings_changed')).toEqual([])
@@ -111,16 +111,16 @@ describe('a session whose conversation runs another model than the record', () =
     // A tool that reports its background work can be put to sleep
     Object.assign(adapter.capabilities, { backgroundTasks: true })
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', model: 'gpt-5.6-terra' })) as { id: string }
-    expect(await mgr.processes.sleepSession(s.id)).toBe(true)
+    expect(await mgr.sleepSession(s.id)).toBe(true)
     adapter.opened = { model: 'gpt-5.5', effort: null }
     events.length = 0
     // What the process is registered as running with, as it is at that moment: the record is registered by reference
-    const running = mgr.processes.running
+    const running = (mgr as unknown as { running: Map<string, { model: string | null }> }).running
     const registered: (string | null)[] = []
     const set = running.set.bind(running)
     running.set = (id, launched) => (registered.push(launched.model), set(id, launched))
 
-    await mgr.processes.resumeSession(s.id)
+    await mgr.resumeSession(s.id)
 
     expect(registered).toEqual(['gpt-5.5'])
 

@@ -227,7 +227,7 @@ describe('asking another project', () => {
   }
 
   it('refuses an empty project without consent, adapter discovery or session creation, including under auto', async () => {
-    await w.mgr.trash.trashSession(targetSession)
+    await w.mgr.trashSession(targetSession)
     const caller = await w.callerSession()
     await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
     const create = vi.spyOn(w.mgr, 'createSession')
@@ -301,15 +301,15 @@ describe('asking another project', () => {
     expect(w.events.filter((e) => e.type === 'session_title' && e.sessionId === blank.id)).toEqual([])
     handleOf(blank.id)!.answer('exported')
     expect(await call).toMatchObject({ ok: true, answer: 'exported' })
-    await w.mgr.inputs.send(blank.id, 'now the tiles')
+    await w.mgr.send(blank.id, 'now the tiles')
     expect(w.mgr.listSessions().find((s) => s.id === blank.id)!.name).toBe('now the tiles')
   })
 
   it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
-    await w.mgr.processes.switchTool(targetSession, tool)
+    await w.mgr.switchTool(targetSession, tool)
     const caller = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
+    await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
     await w.until(() => h.sent.length === 2)
@@ -402,7 +402,7 @@ describe('asking another project', () => {
     const first = await autoCaller()
     const second = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
+    await w.mgr.send(targetSession, 'person work')
     handleOf(targetSession)!.event({ type: 'tool_call', sessionId: targetSession, callId: 'c1', summary: { tool: 'Read', title: 'README.md', paths: [] } })
     expect(await w.mgr.askProject(first, { project: w.target.id, task: 'export', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued', position: 1 })
     expect(await w.mgr.askProject(second, { project: w.target.id, task: 'import' })).toMatchObject({
@@ -417,8 +417,8 @@ describe('asking another project', () => {
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
     await w.until(() => !!w.card(caller))
     expect(w.card(caller)!.detail).toMatchObject({ session: { id: targetSession, name: 'Sprites' } })
-    await w.mgr.trash.trashSession(targetSession)
-    w.mgr.inputs.respondApproval(caller, w.card(caller)!.requestId, 'allow')
+    await w.mgr.trashSession(targetSession)
+    w.mgr.respondApproval(caller, w.card(caller)!.requestId, 'allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('no longer available') })
     expect(w.mgr.listSessions().filter((s) => s.projectId === w.target.id)).toEqual([])
   })
@@ -448,10 +448,10 @@ describe('asking another project', () => {
     const sibling = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'normal' })
     const child = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'normal', askedBy: sibling.id })
     const original = w.mgr.listSessions().find((s) => s.id === targetSession)!
-    await w.mgr.inputs.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
+    await w.mgr.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
     handleOf(targetSession)!.answer('old history')
     w.store.sessions.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
-    if (ownerState !== 'live') await w.mgr.trash.trashSession(caller)
+    if (ownerState !== 'live') await w.mgr.trashSession(caller)
     if (ownerState === 'purged') await w.mgr.trash.purgeSession(caller)
     await w.mgr.disposeAll()
     const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }
@@ -478,7 +478,7 @@ describe('asking another project', () => {
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     await w.until(() => !!w.card(s))
     expect(w.card(s)!.detail).toMatchObject({ access: 'delegate', to: { name: w.target.name }, text: 'export the sprites' })
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     const r = await p
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain('did not allow')
@@ -581,7 +581,7 @@ describe('asking another project', () => {
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const h = handleOf(delegatedIn(s)[0]!.id)!
-    w.mgr.inputs.interrupt(s)
+    w.mgr.interrupt(s)
     const r = await p
     expect(h.interrupted).toBe(1)
     expect(r.ok).toBe(false)
@@ -603,17 +603,17 @@ describe('asking another project', () => {
   it.each([
     ['claude', 'stop'], ['claude', 'cancel'], ['codex', 'stop'], ['codex', 'cancel'],
   ] as const)("%s: caller %s ends its wait without interrupting the person's running turn", async (tool, action) => {
-    await w.mgr.processes.switchTool(targetSession, tool)
+    await w.mgr.switchTool(targetSession, tool)
     const caller = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
+    await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const ac = new AbortController()
     const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' }, ac.signal)
     await w.until(() => h.sent.length === 2)
     const observer = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool, permissionPreset: 'auto' })
     const observing = w.mgr.agentSession(observer.id, { sessionId: targetSession, action: 'wait' })
-    if (action === 'stop') w.mgr.inputs.interrupt(caller)
+    if (action === 'stop') w.mgr.interrupt(caller)
     else ac.abort()
     const result = await asking
     expect(h.interrupted).toBe(0)
@@ -633,7 +633,7 @@ describe('asking another project', () => {
   it('an explicit stop of the target still interrupts a task that joined its running turn', async () => {
     const caller = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
+    await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
     await w.until(() => h.sent.length === 2)
@@ -646,7 +646,7 @@ describe('asking another project', () => {
   it.each([false, true])('Stop after an ask bound leaves the target running (joined turn: %s)', async (joinedTurn) => {
     const caller = joinedTurn ? await autoCaller() : await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    if (joinedTurn) await w.mgr.inputs.send(targetSession, 'person work')
+    if (joinedTurn) await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ...(joinedTurn ? { ifBusy: 'note' as const } : {}) })
@@ -654,7 +654,7 @@ describe('asking another project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await asking).toMatchObject({ ok: true, state: 'working' })
     vi.useRealTimers()
-    w.mgr.inputs.interrupt(caller)
+    w.mgr.interrupt(caller)
     expect(h.interrupted).toBe(0)
     expect(w.mgr.listSessions().find((s) => s.id === targetSession)?.state).toBe('working')
     h.answer('finished after the bound')
@@ -671,10 +671,10 @@ describe('asking another project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await asking).toMatchObject({ ok: true, state: 'working' })
     vi.useRealTimers()
-    w.mgr.inputs.interrupt(caller)
+    w.mgr.interrupt(caller)
     expect(h.interrupted).toBe(0)
     const waitingAgain = w.mgr.askProject(caller, { project: w.target.id })
-    w.mgr.inputs.interrupt(caller)
+    w.mgr.interrupt(caller)
     expect(await waitingAgain).toMatchObject({ ok: false, error: expect.stringContaining('the person stopped') })
     expect(h.interrupted).toBe(1)
   })
@@ -752,14 +752,14 @@ describe('asking another project', () => {
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     await w.until(() => !!w.card(s))
     expect(w.card(s)!.detail).toMatchObject({ access: 'delegate', to: { id: w.target.id, trusted: false } })
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     await p
 
     w.mgr.setProjectTrusted(w.target.id, true)
     const q = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     await w.until(() => !!w.card(s))
     expect(w.card(s)!.detail).toMatchObject({ to: { id: w.target.id, trusted: true } })
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     await q
   })
 
@@ -798,7 +798,7 @@ describe('asking another project', () => {
       await w.until(() => !!w.card(s))
       // Trust taken away at the store, so only the read after the answer can see it
       w.store.projects.setProjectTrusted(w.caller.id, false)
-      w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
       // Either the call settles or the task reaches the target, whichever comes first
       let settled = false
       void p.then(() => (settled = true))
@@ -824,7 +824,7 @@ describe('asking another project', () => {
       await w.until(() => !!w.card(s))
       // Removed at the store, so the card is still up when the person answers it
       w.store.trash.deleteProject(w.target.id)
-      w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'always')
+      w.mgr.respondApproval(s, w.card(s)!.requestId, 'always')
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('removed') })
       expect(w.store.permissions.listProjectConsents()).toEqual([])
     })
@@ -839,7 +839,7 @@ describe('asking another project', () => {
       const codex = w.adapters.get('codex')!
       // A tool that reports its background work can be put to sleep (#568)
       Object.assign(codex.capabilities, { backgroundTasks: true })
-      expect(await w.mgr.processes.sleepSession(targetSession)).toBe(true)
+      expect(await w.mgr.sleepSession(targetSession)).toBe(true)
       const s = await w.callerSession()
       if (preset === 'auto') await w.mgr.updateSettings(s, { permissionPreset: 'auto' })
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')

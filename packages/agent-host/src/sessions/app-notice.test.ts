@@ -30,7 +30,7 @@ async function session(): Promise<SessionInfo> {
 describe("an app's notice into a session that called it (#1161 item 1)", () => {
   it("is recorded as the app's message and reaches the agent framed as the app's text, each line quoted", async () => {
     const s = await session()
-    await w.mgr.inputs.appNotice(s.id, LANDED, board)
+    await w.mgr.appNotice(s.id, LANDED, board)
 
     expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).toMatchObject({ text: LANDED, fromApp: board })
     expect(w.store.messages.loadMessages(s.id).find((m) => m.role === 'user')?.payload).toEqual({ text: LANDED, fromApp: board, inputId: expect.any(String) })
@@ -50,12 +50,12 @@ describe("an app's notice into a session that called it (#1161 item 1)", () => {
     // A tool whose sessions can sleep (as app-agents.test.ts puts one to sleep)
     Object.assign(w.claude.capabilities, { backgroundTasks: true, sleep: true })
     const s = await session()
-    await w.mgr.inputs.appNotice(s.id, 'first', board)
+    await w.mgr.appNotice(s.id, 'first', board)
     await until(() => w.mgr.listSessions().find((x) => x.id === s.id)?.state, (st) => st === 'idle')
-    expect(await w.mgr.processes.sleepSession(s.id)).toBe(true)
+    expect(await w.mgr.sleepSession(s.id)).toBe(true)
     const opened = w.claude.opened.filter((o) => o.sessionId === s.id).length
 
-    await w.mgr.inputs.appNotice(s.id, 'Merge queue: #78 needs attention: dirty.', board)
+    await w.mgr.appNotice(s.id, 'Merge queue: #78 needs attention: dirty.', board)
     await until(() => w.claude.opened.filter((o) => o.sessionId === s.id).length, (n) => n === opened + 1)
     const sent = await until(() => w.claude.handles.get(s.id)?.sent ?? [], (x) => x.some((t) => t.includes('#78 needs attention')))
     expect(sent.at(-1)).toContain('> Merge queue: #78 needs attention: dirty.')
@@ -64,7 +64,7 @@ describe("an app's notice into a session that called it (#1161 item 1)", () => {
   it('refuses a session that is gone, with a reason the app reads', async () => {
     const s = await session()
     await w.rpc('agents.deleteSession', { sessionId: s.id })
-    await expect(w.mgr.inputs.appNotice(s.id, 'late', board)).rejects.toThrow('that session is gone')
-    await expect(w.mgr.inputs.appNotice('no-such-session', 'late', board)).rejects.toThrow('that session is gone')
+    await expect(w.mgr.appNotice(s.id, 'late', board)).rejects.toThrow('that session is gone')
+    await expect(w.mgr.appNotice('no-such-session', 'late', board)).rejects.toThrow('that session is gone')
   })
 })

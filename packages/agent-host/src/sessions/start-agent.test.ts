@@ -276,14 +276,14 @@ describe('starting another agent in the same project', () => {
 
   it("carries the project's instructions for started agents after the task, as they stand when the child is made (#1161 item 2)", async () => {
     const s = await session('normal')
-    w.mgr.projectRegistry.setAgentInstructions(w.caller.id, '  Make your own worktree.\nNever use git stash.\n')
+    w.mgr.setAgentInstructions(w.caller.id, '  Make your own worktree.\nNever use git stash.\n')
     const first = await startRunning(s, 'implement the parser')
     await w.until(() => !!handleOf(first)?.sent.length)
     const task = handleOf(first)!.sent[0]!
     expect(task).toContain("[The person's standing instructions for agents started in this project, from the project's settings on this computer:]\n\nMake your own worktree.\nNever use git stash.")
     expect(task.indexOf('implement the parser')).toBeLessThan(task.indexOf('Make your own worktree.'))
     // Cleared, the next child's task has no such part
-    w.mgr.projectRegistry.setAgentInstructions(w.caller.id, ' ')
+    w.mgr.setAgentInstructions(w.caller.id, ' ')
     const second = await startRunning(s, 'write the docs')
     await w.until(() => !!handleOf(second)?.sent.length)
     expect(handleOf(second)!.sent[0]).not.toContain('standing instructions')
@@ -317,7 +317,7 @@ describe('starting another agent in the same project', () => {
     const p = w.mgr.startAgent(s, { task: 'write it', wait: false })
     await w.until(() => !!agentCard(s))
     expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', preset: 'safe' })
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
     expect(await p).toMatchObject({ ok: true, state: 'working' })
   })
 
@@ -325,7 +325,7 @@ describe('starting another agent in the same project', () => {
     const option = (id: string, efforts: string[] = ['low', 'high']): ModelOption => ({ id, label: id, efforts, defaultEffort: 'low', tiers: [] })
     beforeEach(() => {
       w.adapters.get('codex')!.listModels = async () => [option('gpt-big', ['low', 'high', 'xhigh']), option('gpt-small')]
-      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'xhigh' }, light: { model: 'gpt-small' } } } })
+      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'xhigh' }, light: { model: 'gpt-small' } } } })
     })
 
     it('starts the person\'s model and effort for that tool and difficulty, and the card names both', async () => {
@@ -333,7 +333,7 @@ describe('starting another agent in the same project', () => {
       const p = w.mgr.startAgent(s, { task: 'design the store', tool: 'codex', difficulty: 'heavy', wait: false })
       await w.until(() => !!agentCard(s))
       expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', model: 'gpt-big', difficulty: 'heavy' })
-      w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
       expect(await p).toMatchObject({ ok: true, state: 'working' })
       const c = childrenOf(s)[0]!
       expect(handleOf(c.id)!.opts).toMatchObject({ model: 'gpt-big', effort: 'xhigh' })
@@ -345,13 +345,13 @@ describe('starting another agent in the same project', () => {
       await w.until(() => !!agentCard(s))
       expect(agentCard(s)!.detail).toMatchObject({ model: 'gpt-small' })
       expect(agentCard(s)!.detail).not.toHaveProperty('difficulty')
-      w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
       await p
       expect(handleOf(childrenOf(s)[0]!.id)!.opts).toMatchObject({ model: 'gpt-small' })
     })
 
     it('a chosen model the tool no longer lists is refused with the list, and says whose choice it was', async () => {
-      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-retired' } } } })
+      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-retired' } } } })
       const s = await session()
       const r = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-retired". Its models: gpt-big, gpt-small') })
@@ -360,7 +360,7 @@ describe('starting another agent in the same project', () => {
     })
 
     it('credits the setting only with what the setting chose: its effort, not an effort the caller named', async () => {
-      w.mgr.prefs.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'turbo' } } } })
+      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'turbo' } } } })
       const s = await session()
       const own = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
       expect(own).toMatchObject({ ok: false, error: expect.stringContaining('gpt-big has no effort "turbo"') })
@@ -411,7 +411,7 @@ describe('starting another agent in the same project', () => {
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     vi.useRealTimers()
 
-    w.mgr.inputs.respondApproval(s, requestId, 'allow')
+    w.mgr.respondApproval(s, requestId, 'allow')
     await w.until(() => childrenOf(s).length === 1)
     const child = childrenOf(s)[0]!.id
     await w.until(() => w.store.children.listReportMarks().length === 1)
@@ -431,7 +431,7 @@ describe('starting another agent in the same project', () => {
     expect(await p).toMatchObject({ ok: true, state: 'pending' })
     vi.useRealTimers()
 
-    w.mgr.inputs.respondApproval(s, requestId, 'deny')
+    w.mgr.respondApproval(s, requestId, 'deny')
     // The caller's model hears it as a message: no call is left to answer it
     await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
     expect(handleOf(s)!.sent.find((t) => t.includes(requestId))).toContain('did not allow')
@@ -465,7 +465,7 @@ describe('starting another agent in the same project', () => {
     await q
     vi.useRealTimers()
     const answered = w.mgr.agentSession(second, { sessionId: other, action: 'wait' })
-    w.mgr.inputs.respondApproval(second, other, 'allow')
+    w.mgr.respondApproval(second, other, 'allow')
     expect(await answered).toMatchObject({ ok: true, state: 'working', sessionId: childrenOf(second)[0]?.id })
 
     const stopped = await w.mgr.agentSession(s, { sessionId: requestId, action: 'stop' })
@@ -506,7 +506,7 @@ describe('starting another agent in the same project', () => {
     it('trust taken away elsewhere (another host): an approval starts nothing, and the session is told', async () => {
       const { s, requestId } = await pendingCard()
       w.store.projects.setProjectTrusted(w.caller.id, false)
-      w.mgr.inputs.respondApproval(s, requestId, 'allow')
+      w.mgr.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('no longer trusted')
       expect(childrenOf(s)).toEqual([])
@@ -545,7 +545,7 @@ describe('starting another agent in the same project', () => {
         made = child.id
         return child
       })
-      vi.spyOn(w.mgr.trash, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
+      vi.spyOn(w.mgr, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => vi.mocked(w.mgr.createSession).mock.calls.length > 0)
       w.store.projects.setProjectTrusted(w.caller.id, false)
@@ -587,7 +587,7 @@ describe('starting another agent in the same project', () => {
       const { s, requestId } = await pendingCard()
       expect(agentCard(s)!.detail).toMatchObject({ preset: 'safe' })
       await w.mgr.updateSettings(s, { permissionPreset: 'auto' })
-      w.mgr.inputs.respondApproval(s, requestId, 'allow')
+      w.mgr.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('raised to auto')
       expect(childrenOf(s)).toEqual([])
@@ -605,7 +605,7 @@ describe('starting another agent in the same project', () => {
       w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something', ifBusy: 'note' })
       await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
-      w.mgr.inputs.respondApproval(s, requestId, 'allow')
+      w.mgr.respondApproval(s, requestId, 'allow')
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('How deep agents may start agents') })
       expect(childrenOf(s)).toEqual([])
     })
@@ -655,13 +655,13 @@ describe('starting another agent in the same project', () => {
     // Another job is another request
     const other = w.mgr.startAgent(s, { task: 'another job', wait: false })
     await w.until(() => w.store.children.listAgentStartRequests().length === 2)
-    w.mgr.inputs.respondApproval(s, requestId, 'deny')
+    w.mgr.respondApproval(s, requestId, 'deny')
     // The refusal is told to the caller, and the turn that starts clears the slot the second card had just taken (a card
     // still standing comes back at the turn's end, #673): it is answered once it is back, not in the tick it was raised
     await w.until(() => !!handleOf(s)?.sent.length)
     handleOf(s)!.answer('noted')
     await w.until(() => agentCard(s)?.requestId !== requestId && !!agentCard(s))
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
     expect(await other).toMatchObject({ ok: false })
   })
 
@@ -669,7 +669,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
     await w.until(() => !!agentCard(s))
-    await w.mgr.trash.trashSession(s)
+    await w.mgr.trashSession(s)
     expect(await p).toMatchObject({ ok: false })
     expect(childrenOf(s)).toEqual([])
     expect(w.store.children.listAgentStartRequests()).toEqual([])
@@ -702,7 +702,7 @@ describe('starting another agent in the same project', () => {
       const p = w.mgr.startAgent(s, { task: 'a long job' })
       await cardOf(s)
       await vi.advanceTimersByTimeAsync(150_000)
-      w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
       await vi.advanceTimersByTimeAsync(START_AGENT_CALL_MS - 150_000 + 1_000)
       // Waiting the full ask bound after the card would still be pending here
       expect(await settled(p)).toMatchObject({ ok: true, state: 'working', reported: true })
@@ -755,7 +755,7 @@ describe('starting another agent in the same project', () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       // Registered before the call's own timer, so on one synchronous advance the person's "allow" is given first
       // and the bound follows before the start that the "allow" releases can run
-      setTimeout(() => w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow'), START_AGENT_SETUP_MS)
+      setTimeout(() => w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow'), START_AGENT_SETUP_MS)
       const p = w.mgr.startAgent(s, { task: 'race', wait: false })
       await cardOf(s)
       vi.advanceTimersByTime(START_AGENT_SETUP_MS)
@@ -798,7 +798,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'implement the parser' })
     await w.until(() => !!agentCard(s))
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
     const r = await p
     expect(!r.ok && r.error).toContain('tell the person')
   })
@@ -808,7 +808,7 @@ describe('starting another agent in the same project', () => {
     const p = w.mgr.startAgent(s, { task: 'implement the parser', tool: 'codex' })
     await w.until(() => !!agentCard(s))
     expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', project: { id: w.caller.id }, tool: 'Codex', preset: 'safe', text: 'implement the parser' })
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
     const r = await p
     expect(!r.ok && r.error).toContain('did not allow')
     expect(childrenOf(s)).toEqual([])
@@ -818,7 +818,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'implement the parser', tool: 'codex' })
     await w.until(() => !!agentCard(s))
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
     await w.until(() => childrenOf(s).length === 1 && !!handleOf(childrenOf(s)[0]!.id)?.sent.length)
     const c = childrenOf(s)[0]!
     expect([c.projectId, c.tool, c.name]).toEqual([w.caller.id, 'codex', 'implement the parser'])
@@ -836,7 +836,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('safe')
     const first = w.mgr.startAgent(s, { task: 'one', wait: false })
     await w.until(() => !!agentCard(s))
-    w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'always', 'session')
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'always', 'session')
     expect(await first).toMatchObject({ ok: true })
     expect(await w.mgr.startAgent(s, { task: 'two', wait: false })).toMatchObject({ ok: true })
     expect(agentCard(s)).toBeUndefined()
@@ -844,7 +844,7 @@ describe('starting another agent in the same project', () => {
     const other = await session('safe')
     const third = w.mgr.startAgent(other, { task: 'three', wait: false })
     await w.until(() => !!agentCard(other))
-    w.mgr.inputs.respondApproval(other, agentCard(other)!.requestId, 'always', 'project')
+    w.mgr.respondApproval(other, agentCard(other)!.requestId, 'always', 'project')
     expect(await third).toMatchObject({ ok: true })
     expect(w.mgr.consents.projectConsents()).toEqual([expect.objectContaining({ fromProjectId: w.caller.id, toProjectId: w.caller.id, kind: 'agents' })])
     const fresh = await session('safe')
@@ -856,7 +856,7 @@ describe('starting another agent in the same project', () => {
     w.mgr.consents.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
     const fifth = w.mgr.startAgent(fresh, { task: 'five', wait: false })
     await w.until(() => !!agentCard(fresh))
-    w.mgr.inputs.respondApproval(fresh, agentCard(fresh)!.requestId, 'deny')
+    w.mgr.respondApproval(fresh, agentCard(fresh)!.requestId, 'deny')
     expect((await fifth).ok).toBe(false)
   })
 
@@ -1055,7 +1055,7 @@ describe('starting another agent in the same project', () => {
     let finishDisposal!: () => void
     const disposal = new Promise<void>((resolve) => { finishDisposal = resolve })
     vi.spyOn(h, 'dispose').mockImplementation(() => disposal)
-    const restart = vi.spyOn(w.mgr.processes, 'restartSession')
+    const restart = vi.spyOn(w.mgr, 'restartSession')
     expect(await w.mgr.updateSettings(c, { model: 'new-model' })).toMatchObject({ applied: 'after_turn' })
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
@@ -1072,7 +1072,7 @@ describe('starting another agent in the same project', () => {
     expect(await waiting).toMatchObject({ ok: true, answer: 'note answer' })
     try {
       expect(restart).toHaveBeenCalledTimes(1)
-      const next = w.mgr.inputs.send(c, 'next task')
+      const next = w.mgr.send(c, 'next task')
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(h.sent).toHaveLength(3) // Neither the note's answer nor asynchronous close lets work reach old settings.
       finishDisposal()
@@ -1092,7 +1092,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     h.externalId = 'fixture-thread'
-    const restart = vi.spyOn(w.mgr.processes, 'restartSession')
+    const restart = vi.spyOn(w.mgr, 'restartSession')
     await w.mgr.updateSettings(c, { model: 'new-model' })
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
@@ -1114,7 +1114,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'pending note' })
-    w.mgr.inputs.interrupt(c)
+    w.mgr.interrupt(c)
     expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('the person stopped the agent before it finished') })
     expect(handleOf(c)!.interrupted).toBe(1)
   })
@@ -1126,8 +1126,8 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
     handleOf(c)!.answer('old turn ended', false)
-    expect(w.mgr.processes.sessionIdle(c)).toEqual({ idle: false, reason: 'turn' })
-    expect(await w.mgr.processes.sleepSession(c)).toBe(false)
+    expect(w.mgr.sessionIdle(c)).toEqual({ idle: false, reason: 'turn' })
+    expect(await w.mgr.sleepSession(c)).toBe(false)
     expect(w.mgr.isLive(c)).toBe(true)
     handleOf(c)!.answer('note answer')
     expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, answer: 'note answer' })
@@ -1181,7 +1181,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     handleOf(c)!.answer('first done')
     await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
-    await w.mgr.inputs.send(c, 'the person\'s task')
+    await w.mgr.send(c, 'the person\'s task')
     // Busy with the person's turn (#677): the choices, and no note from a session that is not auto
     expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({
       ok: true, state: 'busy', choices: [{ choice: 'note', available: false, why: expect.stringContaining('auto') }, { choice: 'queue', available: true }, { choice: 'fork' }],
@@ -1216,7 +1216,7 @@ describe('starting another agent in the same project', () => {
     const waited = w.mgr.startAgent(s, { task: 'waited on' })
     await w.until(() => childrenOf(s).length === 3 && !!handleOf(childrenOf(s).find((x) => x.name === 'waited on')!.id)?.sent.length)
     const waitedId = childrenOf(s).find((x) => x.name === 'waited on')!.id
-    w.mgr.inputs.interrupt(s)
+    w.mgr.interrupt(s)
     const r = await waited
     expect(!r.ok && r.error).toContain('the person stopped the session that asked')
     expect(handleOf(waitedId)!.interrupted).toBe(1)
@@ -1232,7 +1232,7 @@ describe('starting another agent in the same project', () => {
         const child = handleOf(c)!
         child.answer('Delegated task complete.')
         await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
-        await w.mgr.inputs.send(c, 'The person has another task')
+        await w.mgr.send(c, 'The person has another task')
         if (activity === 'approval') child.event({ type: 'approval_request', sessionId: c, requestId: 'person-approval', detail: { kind: 'command', command: 'check', cwd: w.caller.path } })
         if (activity === 'question') {
           child.event({ type: 'state_change', sessionId: c, state: 'waiting_input' })
@@ -1327,7 +1327,7 @@ describe('starting another agent in the same project', () => {
     it('waits for child disposal mid-turn before trashing, without stopping the parent\'s own turn', async () => {
       allowProject()
       const s = await session()
-      await w.mgr.inputs.send(s, 'coordinate the research')
+      await w.mgr.send(s, 'coordinate the research')
       const c = await startRunning(s)
       const child = handleOf(c)!
       child.event({ type: 'message_delta', sessionId: c, role: 'assistant', text: 'Partial research' })
@@ -1386,7 +1386,7 @@ describe('starting another agent in the same project', () => {
     allowProject()
     const s = await session()
     const c = await startRunning(s)
-    await w.mgr.trash.trashSession(s)
+    await w.mgr.trashSession(s)
     expect(handleOf(c)!.interrupted).toBe(0)
     expect(w.mgr.listSessions().find((x) => x.id === c)?.askedBy).toBe(s)
   })
@@ -1420,7 +1420,7 @@ describe('starting another agent in the same project', () => {
       allowProject()
       const caller = await session('auto')
       const person = await session()
-      await w.mgr.inputs.send(person, 'run the dev server')
+      await w.mgr.send(person, 'run the dev server')
       handleOf(person)!.answer('it runs')
       await w.until(() => w.mgr.listSessions().find((x) => x.id === person)?.state === 'waiting_input')
       const stopped = watchStops(person)
@@ -1447,7 +1447,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => !!agentCard(orch.id))
       const card = agentCard(orch.id)!
       expect(card.detail).toMatchObject({ kind: 'agent_start', project: { id: '', name: 'a folder of its own, outside any project' } })
-      w.mgr.inputs.respondApproval(orch.id, card.requestId, 'allow')
+      w.mgr.respondApproval(orch.id, card.requestId, 'allow')
       expect(await p).toMatchObject({ ok: true, state: 'working' })
       const c = childrenOf(orch.id)[0]!
       expect(c).toMatchObject({ projectId: null, kind: 'worker', askedBy: orch.id, permissionPreset: orch.permissionPreset })
@@ -1475,7 +1475,7 @@ describe('starting another agent in the same project', () => {
       expect(existsSync(a!)).toBe(true)
       const first = childrenOf(orch.id)[0]!.id
       writeFileSync(join(a!, 'notes.md'), 'what it found')
-      await w.mgr.trash.trashSession(first)
+      await w.mgr.trashSession(first)
       expect(existsSync(a!)).toBe(true)
       await w.mgr.trash.purgeSession(first)
       expect(existsSync(a!)).toBe(false)
@@ -1491,7 +1491,7 @@ describe('starting another agent in the same project', () => {
       handleOf(c)!.answer('found it')
       await w.until(() => w.mgr.listSessions().find((x) => x.id === c)?.state !== 'working')
       // The person asks it more: a turn that is not the orchestrator's
-      await w.mgr.inputs.send(c, 'and look at this too')
+      await w.mgr.send(c, 'and look at this too')
       await w.until(() => w.mgr.listSessions().find((x) => x.id === c)?.state === 'working')
       const r = await tools.sendToSession(c, 'and this', false, 'fork')
       expect(r).toMatchObject({ ok: false, error: expect.stringContaining('works outside any project, so there is nothing to fork it from') })
@@ -1500,7 +1500,7 @@ describe('starting another agent in the same project', () => {
     it('counts its own children against the ceiling and says so in its words', async () => {
       const { orch, tools } = await orchestratorTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
-      w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
+      w.mgr.setUiPreferences({ agentCeiling: 1 })
       await tools.startAgent({ task: 'first lookup', wait: false })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('1 agents you started are already working') })
     })
@@ -1542,7 +1542,7 @@ describe('starting another agent in the same project', () => {
       const { orch, tools } = await orchestratorTools()
       const p = tools.startAgent({ task: 'first lookup', wait: false })
       await w.until(() => !!agentCard(orch.id))
-      w.mgr.inputs.respondApproval(orch.id, agentCard(orch.id)!.requestId, 'always', 'project')
+      w.mgr.respondApproval(orch.id, agentCard(orch.id)!.requestId, 'always', 'project')
       expect(await p).toMatchObject({ ok: true })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: true, state: 'working' })
       expect(w.store.permissions.getProjectConsent('', '', 'agents')).toBeFalsy()
@@ -1881,7 +1881,7 @@ describe('starting another agent in the same project', () => {
       const detail = agentCard(s)!.detail as { name?: string; worktree?: { branch: string } }
       expect(detail.name).toBe('Area C: stored data')
       expect(detail.worktree?.branch).toMatch(/^centralu\/area-c-stored-data-[a-z0-9]{4}$/)
-      w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
       expect(await p).toMatchObject({ ok: true })
       const c = childrenOf(s)[0]!
       expect(c.name).toBe('Area C: stored data')
@@ -1915,7 +1915,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => !!agentCard(s))
       const branch = (agentCard(s)!.detail as { worktree?: { branch: string } }).worktree?.branch
       expect(branch).toMatch(/^centralu\/write-the-parser-[a-z0-9]{4}$/)
-      w.mgr.inputs.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
       expect(await p).toMatchObject({ ok: true, state: 'working' })
       const c = childrenOf(s)[0]!
       expect(c.worktree?.branch).toBe(branch)

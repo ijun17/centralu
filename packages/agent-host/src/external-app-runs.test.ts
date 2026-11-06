@@ -204,7 +204,7 @@ describe('RPC and project deletion', () => {
   it('apps.runs returns the record, and deleting a project also erases the records for its apps', async () => {
     const adapters = new Map<ToolName, AgentAdapter>()
     const mgr = new SessionManager(store, adapters, () => {})
-    const { id } = await mgr.projectCreation.addProject(projRoot)
+    const { id } = await mgr.addProject(projRoot)
     store.projects.setProjectTrusted(id, true)
     rt = new ExternalApps({
       projects: () => store.projects.projectRoots(),

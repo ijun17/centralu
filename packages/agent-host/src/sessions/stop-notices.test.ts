@@ -132,7 +132,7 @@ describe('a turn ends without finishing', () => {
     // The deep review's case: the person gives the session a secret in their turn, another session's question rides into it, the person presses Stop
     const asker = await w.callerSession()
     const child = await w.callerSession()
-    await w.mgr.inputs.send(child, 'my staging password is hunter2, deploy with it', undefined, undefined, true)
+    await w.mgr.send(child, 'my staging password is hunter2, deploy with it', undefined, undefined, true)
     m.turns.beginOther(child, 'person', null)
     working(child)
     ask(asker, child)
@@ -155,7 +155,7 @@ describe('a turn ends without finishing', () => {
 
     // The asker's own turn, into which the person typed
     const third = await askedOwnTurn()
-    await w.mgr.inputs.send(third.child, 'the token is s3cret, use it', undefined, undefined, true)
+    await w.mgr.send(third.child, 'the token is s3cret, use it', undefined, undefined, true)
     says(third.child, 'Using the token s3cret for the release branch.')
     handleOf(third.child).event({ type: 'limit_reached', sessionId: third.child })
     await w.until(() => stopNotices(third.asker).length === 1)
@@ -168,9 +168,9 @@ describe('a turn ends without finishing', () => {
     const { asker, child } = await askedOwnTurn(other)
     type Seat = { tools: { toolChoice(m: unknown): { tools(): { readSession(id: string): Promise<{ ok: boolean }> } } } }
     const reads = async () => (await (w.mgr as unknown as Seat).tools.toolChoice(w.mgr.sessionInfo(asker)).tools().readSession(child)).ok
-    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([true, true])
+    expect([w.mgr.readsSession(asker, child), await reads()]).toEqual([true, true])
     await w.mgr.setProjectTrusted(w.caller.id, false)
-    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([false, false])
+    expect([w.mgr.readsSession(asker, child), await reads()]).toEqual([false, false])
     says(child, 'The release branch is release/2026-11.')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
@@ -186,14 +186,14 @@ describe('a turn ends without finishing', () => {
       name: "the person's answer to the session's question card",
       give: async (child) => {
         Object.assign(handleOf(child), { answerQuestion: () => true })
-        w.mgr.inputs.answerQuestion(child, 'req-1', [{ question: 'Which key?', answers: ['the key is k3y'] }])
+        w.mgr.answerQuestion(child, 'req-1', [{ question: 'Which key?', answers: ['the key is k3y'] }])
       },
     },
     { name: "an app's message", give: (child) => deliverIn()(child, 'the key is k3y', undefined, undefined, false, { appId: 'notes', projectId: null, name: 'Notes' }) },
-    { name: "a script's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, false, 'ask', { credential: 'script-1' }) },
+    { name: "a script's message", give: (child) => w.mgr.send(child, 'the key is k3y', undefined, undefined, false, 'ask', { credential: 'script-1' }) },
     { name: 'a report relayed into the turn', give: (child, asker) => deliverIn()(child, 'the key is k3y', undefined, { sessionId: asker, name: 'Asker' }, true) },
-    { name: "another session's message", give: async (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, { sessionId: await w.callerSession(), name: 'Other' }) },
-    { name: "the person's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true) },
+    { name: "another session's message", give: async (child) => w.mgr.send(child, 'the key is k3y', undefined, { sessionId: await w.callerSession(), name: 'Other' }) },
+    { name: "the person's message", give: (child) => w.mgr.send(child, 'the key is k3y', undefined, undefined, true) },
   ]
   it.each(ENTERED)('quotes nothing of the asker’s own turn that took in $name', async ({ give }) => {
     const { asker, child } = await askedOwnTurn()
@@ -215,7 +215,7 @@ describe('a turn ends without finishing', () => {
     const question = m.service.send(addr(asker), { to: [addr(child)], text: 'which branch is the release on?', needsReply: true }).message
     const seq = m.turns.begin(child, { workMessage: null, starter: question.id })
     w.store.mailbox.markDelivered(addr(child), [question.id], Date.now(), seq)
-    await w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true)
+    await w.mgr.send(child, 'the key is k3y', undefined, undefined, true)
     says(child, 'Using the key k3y on the release branch.')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
@@ -224,7 +224,7 @@ describe('a turn ends without finishing', () => {
 
   it('quotes the asker’s own turn that took in only more of the asker’s own messages', async () => {
     const { asker, child } = await askedOwnTurn()
-    await w.mgr.inputs.send(child, 'also check CI', undefined, { sessionId: asker, name: 'Asker' })
+    await w.mgr.send(child, 'also check CI', undefined, { sessionId: asker, name: 'Asker' })
     says(child, 'Rebased; CI is green.')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
@@ -241,7 +241,7 @@ describe('a turn ends without finishing', () => {
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
     // The child's CLI runs a turn of its own; the person gives it a key in it; the network ends it: the starter is told (#698)
     working(child)
-    await w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true)
+    await w.mgr.send(child, 'the key is k3y', undefined, undefined, true)
     says(child, 'Using the key k3y on the release branch.')
     handleOf(child).event(ENDINGS[1]!.end(child))
     const toAsker = () => [
@@ -400,7 +400,7 @@ describe('who is not told, or told another way', () => {
     working(child)
     ask(asker, child, 'which table first?')
     m.service.done(addr(starter), read.tasks(addr(starter), child)[0]!.id)
-    if (opts.typed) await w.mgr.inputs.send(child, 'the db password is pa55', undefined, undefined, true)
+    if (opts.typed) await w.mgr.send(child, 'the db password is pa55', undefined, undefined, true)
     says(child, 'Halfway through the settings migration.')
     handleOf(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
     await w.until(() => stopNotices(asker).length === 1)
@@ -454,7 +454,7 @@ describe('who is not told, or told another way', () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
       m.service.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
-      w.mgr.mail.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
+      w.mgr.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
       await vi.advanceTimersByTimeAsync(OLD_PATH_WAIT_MS - 1_000)
       expect(stopNotices(asker)).toEqual([])
       await vi.advanceTimersByTimeAsync(1_000)

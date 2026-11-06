@@ -124,7 +124,7 @@ describe('apps.versions', () => {
   it("deleting the project forgets its apps' secrets, as it does their grants (#1141)", async () => {
     rootManifest()
     rt.refresh()
-    mgr.apps.useExternalApps(rt)
+    mgr.useExternalApps(rt)
     rt.updateSecret({ projectId, appId: 'board' }, 'TOKEN', 'secret-value')
     await rpc('projects.delete', { projectId })
     await rpc('projects.add', { path: repo })

@@ -211,7 +211,7 @@ describe('agents.detect and the setup actions', () => {
 /** Parameters are parsed once, in the dispatcher: a call that fails validation answers the schema's own error and runs nothing */
 describe('parameters at the boundary', () => {
   const calls: string[] = []
-  const mgr = { inputs: { interrupt: () => void calls.push('interrupt') }, projectRegistry: { listProjects: () => [] } } as unknown as SessionManager
+  const mgr = { interrupt: () => void calls.push('interrupt'), listProjects: () => [] } as unknown as SessionManager
   const rpc = createRpcHandler(mgr, new Map())
   const messageOf = (schemaName: 'agents.interrupt', params: unknown) => {
     const r = RpcMethods[schemaName].params.safeParse(params)

@@ -59,7 +59,7 @@ describe('a chain started from a session — that session\'s approval card', () 
     // The request waits on the person — there is no agent session yet
     expect(w.agentSessions()).toEqual([])
 
-    w.mgr.inputs.respondApproval(caller.id, card!.requestId, 'allow')
+    w.mgr.respondApproval(caller.id, card!.requestId, 'allow')
     expect(brokerSaid(await pending)).toMatchObject({ isError: false, text: 'done by the agent' })
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)).toMatchObject({ pendingApproval: null })
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'approval_resolved', sessionId: caller.id, requestId: card!.requestId, decision: 'allow' }))
@@ -80,14 +80,14 @@ describe('a chain started from a session — that session\'s approval card', () 
     const caller = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const denied = w.callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })
     const [first] = await until(() => capabilityCards(caller.id), (c) => c.length === 1)
-    w.mgr.inputs.respondApproval(caller.id, first!.requestId, 'deny')
+    w.mgr.respondApproval(caller.id, first!.requestId, 'deny')
     expect(brokerSaid(await denied)).toMatchObject({ isError: true })
     expect(brokerSaid(await w.callFromSession(caller, 'app-notes', { args: { prompt: 'x' } })).text).toContain('run_agent refused: the person did not allow App notes')
     expect(capabilityCards(caller.id)).toHaveLength(1)
 
     const always = w.callFromSession(caller, 'app-notes', { tool: 'host_data', args: { name: 'sessions.list' } })
     const [, second] = await until(() => capabilityCards(caller.id), (c) => c.length === 2)
-    w.mgr.inputs.respondApproval(caller.id, second!.requestId, 'always', 'session', 'other')
+    w.mgr.respondApproval(caller.id, second!.requestId, 'always', 'session', 'other')
     expect(brokerSaid(await always).isError).toBe(false)
   })
 
@@ -105,10 +105,10 @@ describe('a chain started from a session — that session\'s approval card', () 
     expect(w.mgr.listSessions().find((s) => s.id === caller.id)!.pendingApproval?.requestId).toBe('req-bash')
 
     // The person answers the adapter's card — once the adapter announces it closed, our card stands up
-    w.mgr.inputs.respondApproval(caller.id, 'req-bash', 'allow')
+    w.mgr.respondApproval(caller.id, 'req-bash', 'allow')
     h.emit({ type: 'approval_resolved', sessionId: caller.id, requestId: 'req-bash', decision: 'allow' })
     const [card] = await until(() => capabilityCards(caller.id), (c) => c.length === 1)
-    w.mgr.inputs.respondApproval(caller.id, card!.requestId, 'allow')
+    w.mgr.respondApproval(caller.id, card!.requestId, 'allow')
     expect(brokerSaid(await pending).isError).toBe(false)
   })
 

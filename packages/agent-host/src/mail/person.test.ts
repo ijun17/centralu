@@ -26,7 +26,7 @@ afterEach(() => {
 function ready(w: ReturnType<typeof hostWorld>) {
   w.afterReady()
   stops.push(w.stop)
-  /** The sessions whose process takes a notice now (a live Claude), and what the host was asked to put into them when the person closed a chain (`MailSessionsView.tellMailNow`) */
+  /** The sessions whose process takes a notice now (a live Claude), and what the host was asked to put into them when the person closed a chain (`SessionManager.tellMailNow`) */
   const live = new Set<string>()
   const told: { sessionId: string; text: string }[] = []
   let tellFails = false

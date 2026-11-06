@@ -75,7 +75,7 @@ function makeRuntime(): void {
 function startHost(): void {
   emitted = []
   mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>(), (e) => emitted.push(e))
-  mgr.apps.useExternalApps(rt)
+  mgr.useExternalApps(rt)
   adoption = new UserAppAdoption({ rt, store, sessionsMoved: (ids, pid) => mgr.sessionsMovedToProject(ids, pid), changed: () => changed++ })
 }
 

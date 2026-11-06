@@ -31,7 +31,7 @@ describe('consent from one project to another', () => {
     })
     expect(w.mgr.listSessions().find((x) => x.id === s)?.state).toBe('waiting_approval')
 
-    w.mgr.inputs.respondApproval(s, card.requestId, 'always')
+    w.mgr.respondApproval(s, card.requestId, 'always')
     expect(await first).toEqual({ ok: true })
     expect(w.events.some((e) => e.type === 'project_consents_changed')).toBe(true)
     expect(w.mgr.consents.projectConsents()).toMatchObject([{ fromProjectId: w.caller.id, fromName: w.caller.name, toProjectId: w.target.id, toName: w.target.name, kind: 'delegate' }])
@@ -43,7 +43,7 @@ describe('consent from one project to another', () => {
     const apps = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'apps', { text: '', app: { appId: 'extractor', name: 'Extractor' } })
     await w.until(() => !!w.card(s))
     expect(w.card(s)!.detail).toMatchObject({ access: 'apps', app: { appId: 'extractor', name: 'Extractor' } })
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     expect((await apps).ok).toBe(false)
   })
 
@@ -51,23 +51,23 @@ describe('consent from one project to another', () => {
     const s = await w.callerSession()
     const first = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'allow')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
     expect(await first).toEqual({ ok: true })
     expect(w.mgr.consents.projectConsents()).toEqual([])
 
     const second = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'allow')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
     expect(await second).toEqual({ ok: true })
   })
 
   it('a denial is refused in words the model can act on, and is not remembered', async () => {
     const s = await w.callerSession()
     // Asked from inside a turn, as a tool call asks (a card raised between turns closes back into its rest, #428)
-    await w.mgr.inputs.send(s, 'reach the toolkit')
+    await w.mgr.send(s, 'reach the toolkit')
     const p = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     const r = await p
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain(`did not allow ${w.caller.name} to reach ${w.target.name}`)
@@ -89,7 +89,7 @@ describe('consent from one project to another', () => {
 
     const p = w.mgr.consents.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
-    w.mgr.inputs.respondApproval(s, w.card(s)!.requestId, 'deny')
+    w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
     expect((await p).ok).toBe(false)
   })
 

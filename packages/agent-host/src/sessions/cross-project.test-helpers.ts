@@ -140,8 +140,8 @@ export async function crossWorld(): Promise<CrossWorld> {
   // Worktrees (start_agent's, #561) go under the temp root, never the data folder's; no gh is asked about pull requests
   const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e), undefined, join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  const caller = await mgr.projectCreation.addProject(callerPath)
-  const target = await mgr.projectCreation.addProject(targetPath)
+  const caller = await mgr.addProject(callerPath)
+  const target = await mgr.addProject(targetPath)
   /*
    * The caller is trusted: ask_project refuses an untrusted caller (#382). The target is left as a project is when it
    * is registered, untrusted, which ask_project allows (the card says so); a test that needs it trusted says so.

@@ -104,7 +104,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
 
     expect(r.isError).toBe(true)
     // No approval card comes up, so there is nothing to approve.
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.mcpProposals()).toEqual([])
     expect(servers()['centralu']).toEqual({ type: 'sdk', name: 'centralu' })
   })
 
@@ -121,7 +121,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
     })
 
     expect(r.isError).toBe(true)
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.mcpProposals()).toEqual([])
 
     // The name rule narrows what is allowed, but an ordinary proposal still has to go through.
     const ok = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
@@ -130,7 +130,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
       args: ['-y', '@playwright/mcp@latest'],
     })
     expect(ok.isError).toBeFalsy()
-    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['playwright'])
+    expect(mgr.mcpProposals().map((p) => p.name)).toEqual(['playwright'])
   })
 
   /*
@@ -150,7 +150,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
 
     expect(r.isError).toBe(true)
     expect(r.text).toContain('app-')
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.mcpProposals()).toEqual([])
   })
 
   /*

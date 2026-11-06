@@ -770,7 +770,7 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
 | 바탕화면이 아니라 `~/Centralu`(오너, 2026-10-12. #515의 첫 빌드는 바탕화면을 썼다) | 권한 창이 없다: macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로 접근 권한을 물었다. 홈의 폴더는 보호되지 않는다. 눈에 보인다: 사람이 자기 작업을 찾는 Finder나 탐색기에서 보인다. 어디서나 한 규칙: 바탕화면 알려진 폴더를 찾지 않고(Windows의 PowerShell, Linux의 XDG), 바탕화면이 없는 WSL 배포판이나 서버도 노트북과 같은 폴더를 쓴다 |
 | 데이터 폴더(`~/.centralu`)와 따로 | 데이터 폴더는 앱의 것이라 제거할 때 지워질 수 있다. 프로젝트는 사람의 작업이라 함께 지워지면 안 된다 |
 
-호스트는 `main.ts`가 연결해 줄 때만 기본 위치를 안다(`ProjectCreation.useProjectsHome`). 없으면 `parent` 없는
+호스트는 `main.ts`가 연결해 줄 때만 기본 위치를 안다(`SessionManager.useProjectsHome`). 없으면 `parent` 없는
 호출은 거절된다. 그래서 테스트와 linked-hosts e2e(임시 `HOME`의 `Centralu`를 준다)는 실행하는 사람의 홈에 손대지
 않는다.
 
@@ -1616,7 +1616,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 | `sessionIdle`이 아니라고 하는 동안은 재우지 않는다: 턴, 기다리는 승인이나 질문, 백그라운드 작업(아래의 CLI 자신의 타이머 포함), 백그라운드 작업을 알리지 못하는 도구 | 새 CLI로 옮기는 규칙(§4.6)과 같다: 프로세스를 끝내면 그것이 쥔 것도 끝난다 |
 | Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | 이 호스트가 아직 소식을 듣지 못한 세션의 조용한 시간은 호스트 시작부터 센다 | 다른 호스트를 막 이어받은 호스트(재시작, 교체)는 사람이 1초 전에 무엇을 했는지 모른다 |
-| 재우기는 `SessionProcesses.sleepSession`: 여전히 유휴가 아니면 거절하고, 핸들을 맵에서 빼고, `session_live {live: false, reason: 'asleep'}`를 보내고, 프로세스를 정리한다. 그 사이 온 메시지는 정리가 끝나기를 기다리는 재개를 시작한다(`sleeping`) | 한 대화에 프로세스가 둘이 되지 않고, 닫히는 핸들에 메시지를 잃지 않는다 |
+| 재우기는 `SessionManager.sleepSession`: 여전히 유휴가 아니면 거절하고, 핸들을 맵에서 빼고, `session_live {live: false, reason: 'asleep'}`를 보내고, 프로세스를 정리한다. 그 사이 온 메시지는 정리가 끝나기를 기다리는 재개를 시작한다(`sleeping`) | 한 대화에 프로세스가 둘이 되지 않고, 닫히는 핸들에 메시지를 잃지 않는다 |
 | 깨우기는 보통의 `resumeSession`, 호스트 재시작 뒤 세션이 가는 길이다. 모든 재개는 `session_live {live: true}`를 보낸다 | 맞게 지킬 길이 하나다. 요청한 창만이 아니라 모든 창이 안다 |
 | 프로세스가 떨어져 나가고 새 프로세스가 그 자리를 채우지 못했을 때도 `session_live {live: false}`가 나간다(#648): 호스트가 시작한 재시작(새로 고침, CLI 옮기기, "Restart agent")이 프로세스를 띄우지 못하면 `reason: 'restart_failed'`, 프로세스가 죽으면 `'crashed'` | 전에는 창이 세션을 계속 살아 있다고 보여 화면의 깨우기가 물러섰고, 사람은 보내기가 실패해야 알았다. 이제 잠든 것으로 보이고 다음 메시지가 깨운다 |
 | 키퍼 아래에서는 정리가 맡겨 둔 자식을 멈춘다(stdin을 닫고 신호). 이어받은 호스트는 그 세션에 대해 넘겨받을 것이 없고, 잠든 채로 보여 주고, 새 자식으로 깨운다(`sleep-keeper.test.ts`). 훑기는 떼어 놓기 전에 멈춘다(`stopPlan`) | 교체 도중의 재우기는 다음 호스트가 넘겨받을 프로세스를 끝낸다 |

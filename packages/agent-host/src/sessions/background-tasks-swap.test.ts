@@ -126,13 +126,13 @@ describe('background work across a host swap (#648)', () => {
     // The session lists it, every window hears it, and the session holds work
     expect(running(b.session(id))).toEqual(['dev'])
     expect(events.some((e) => e.type === 'background_tasks' && e.sessionId === id && e.live.some((t) => t.id === 'dev'))).toBe(true)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
+    expect(await b.mgr.sleepSession(id)).toBe(false)
     expect(handle.disposed).toBe(false)
 
     // The dev server exits: the session is idle again, and the record says so for the next swap
     handle.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, status: 'completed' }] })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
     expect(JSON.parse(store.settings.appSetting(`background_tasks:${id}`)!)).toEqual([])
   })
 
@@ -145,19 +145,19 @@ describe('background work across a host swap (#648)', () => {
     const b = host(new Set([id]))
     const handle = await adopt(b, id)
     expect(handle.opts.processSource?.adopt?.backgroundTasks).toEqual([])
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(await b.mgr.sleepSession(id)).toBe(false)
 
     // A level built from what this host saw (an ending, a /loop timer) does not settle it, and is not recorded
     handle.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, id: 'other', status: 'completed' }] })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
     expect(store.settings.appSetting(`background_tasks:${id}`)).toBeNull()
 
     // The CLI's own full list does: nothing runs, and the next host is told so
     handle.emit({ type: 'background_tasks', sessionId: id, live: [], snapshot: true })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
     expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
-    expect(await b.mgr.processes.sleepSession(id)).toBe(true)
+    expect(await b.mgr.sleepSession(id)).toBe(true)
   })
 
   /*
@@ -176,8 +176,8 @@ describe('background work across a host swap (#648)', () => {
 
     const b = host(new Set([id]))
     await adopt(b, id)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(await b.mgr.sleepSession(id)).toBe(false)
   })
 
   it('an unknown state is bounded by quiet: after two hours without a word the session is taken as holding nothing, and recorded', async () => {
@@ -194,9 +194,9 @@ describe('background work across a host swap (#648)', () => {
       vi.setSystemTime(t0 + 90 * 60_000)
       handle.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
       vi.setSystemTime(t0 + 150 * 60_000)
-      expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+      expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
       vi.setSystemTime(t0 + (90 + 120) * 60_000 + 1)
-      expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
+      expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
       expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
       expect(log).toHaveBeenCalledWith(expect.stringContaining('taking it as none'))
     } finally {
@@ -211,7 +211,7 @@ describe('background work across a host swap (#648)', () => {
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     a.claude.last.emit({ type: 'background_tasks', sessionId: s.id, live: [shell] })
     expect(store.settings.appSetting(`background_tasks:${s.id}`)).not.toBeNull()
-    await a.mgr.trash.trashSession(s.id)
+    await a.mgr.trashSession(s.id)
     expect(store.settings.appSetting(`background_tasks:${s.id}`)).toBeNull()
   })
 
@@ -221,9 +221,9 @@ describe('background work across a host swap (#648)', () => {
     store.settings.deleteAppSetting(`background_tasks:${id}`)
     const b = host(new Set([id]))
     await adopt(b, id)
-    expect(b.mgr.processes.sessionIdle(id).idle).toBe(false)
-    expect((await b.mgr.processes.restartSession(id)).resumed).toBe(true)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
+    expect(b.mgr.sessionIdle(id).idle).toBe(false)
+    expect((await b.mgr.restartSession(id)).resumed).toBe(true)
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
     expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
   })
 
@@ -236,9 +236,9 @@ describe('background work across a host swap (#648)', () => {
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     change(id, b)
-    const restart = vi.spyOn(b.mgr.processes, 'restartSession')
+    const restart = vi.spyOn(b.mgr, 'restartSession')
 
-    await b.mgr.launches.refreshToolDefinitions()
+    await b.mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(restart).toHaveBeenCalledWith(id, cause)
     expect(b.session(id).live).toBe(true)
@@ -252,7 +252,7 @@ describe('background work across a host swap (#648)', () => {
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     b.claude.fingerprint = 'v2'
-    await b.mgr.launches.refreshToolDefinitions()
+    await b.mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(notices(id)).toEqual([expect.stringContaining('before Centralu was updated')])
   })
@@ -268,12 +268,12 @@ describe('background work across a host swap (#648)', () => {
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
-    const restart = vi.spyOn(b.mgr.processes, 'restartSession')
+    const restart = vi.spyOn(b.mgr, 'restartSession')
     if (typeof settings === 'object') expect((await b.mgr.updateSettings(id, settings)).applied).toBe('after_turn')
     else {
       if (settings === 'definitions') store.settings.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
       else b.claude.fingerprint = 'v2'
-      await b.mgr.launches.refreshToolDefinitions()
+      await b.mgr.refreshToolDefinitions()
     }
     expect(old.disposed).toBe(false)
     if (settings === 'launch') expect(restart).not.toHaveBeenCalled()
@@ -352,7 +352,7 @@ describe('background work across a host swap (#648)', () => {
       old.emit({ type: 'turn_complete', sessionId: id })
       await vi.advanceTimersByTimeAsync(30 * 60_000)
       // "Restart agent": the held change goes with it
-      await b.mgr.processes.restartSession(id)
+      await b.mgr.restartSession(id)
       const next = b.claude.last
       expect(next).not.toBe(old)
       // The new process starts a dev server, and another model change waits for it from the end of this turn
@@ -403,7 +403,7 @@ describe('a process dropped without a replacement (#648)', () => {
 
     b.claude.failCreate = new Error('claude did not start')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const r = await b.mgr.processes.restartSession(id, 'instructions')
+    const r = await b.mgr.restartSession(id, 'instructions')
     log.mockRestore()
     expect(r.resumed).toBe(false)
     expect(old.disposed).toBe(true)
@@ -412,7 +412,7 @@ describe('a process dropped without a replacement (#648)', () => {
 
     // The next wake is an ordinary resume
     b.claude.failCreate = null
-    expect((await b.mgr.processes.resumeSession(id)).resumed).toBe(true)
+    expect((await b.mgr.resumeSession(id)).resumed).toBe(true)
     expect(events.at(-2)).toEqual({ type: 'session_live', sessionId: id, live: true })
   })
 
@@ -424,7 +424,7 @@ describe('a process dropped without a replacement (#648)', () => {
     events.length = 0
     b.claude.failCreate = new Error('claude did not start')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect((await b.mgr.processes.restartSession(id)).resumed).toBe(false)
+    expect((await b.mgr.restartSession(id)).resumed).toBe(false)
     log.mockRestore()
     expect(events.filter((e) => e.type === 'session_live')).toEqual([])
   })

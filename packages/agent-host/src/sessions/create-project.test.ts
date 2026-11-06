@@ -38,7 +38,7 @@ beforeEach(() => {
   const adapters = new Map<ToolName, CrossAdapter>([['claude', claude]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, (e) => events.push(e))
-  mgr.projectCreation.useProjectsHome(() => projectsHome(process.platform, home, { USERPROFILE: home }))
+  mgr.useProjectsHome(() => projectsHome(process.platform, home, { USERPROFILE: home }))
   const handler = createRpcHandler(mgr, agents)
   rpc = (method, params) => handler(method, params)
 })
@@ -142,7 +142,7 @@ describe('create_project (the orchestrator)', () => {
       if (preset !== 'auto') {
         await eventually(() => !!card(orc.id))
         expect(existsSync(join(centralu, name))).toBe(false)
-        mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+        mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
       }
       const result = await call
       expect(result.isError === true).toBe(preset !== 'auto')
@@ -161,7 +161,7 @@ describe('create_project (the orchestrator)', () => {
     expect(existsSync(join(centralu, 'shop'))).toBe(false)
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
 
-    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain(JSON.stringify(join(centralu, 'shop')))
@@ -176,7 +176,7 @@ describe('create_project (the orchestrator)', () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })
     await eventually(() => !!card(orc.id))
-    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/did not approve/)
@@ -196,7 +196,7 @@ describe('create_project (the orchestrator)', () => {
     await eventually(() => !!card(orc.id))
     mkdirSync(join(centralu, 'late'))
     writeFileSync(join(centralu, 'late', 'keep.txt'), 'mine')
-    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBe(true)
     expect(readdirSync(join(centralu, 'late'))).toEqual(['keep.txt'])
@@ -219,12 +219,12 @@ describe('create_project (the orchestrator)', () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'one' })
     await eventually(() => !!card(orc.id))
-    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'always')
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'always')
     expect((await call).isError).toBeFalsy()
     const second = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'two' })
     // Asked again: nothing was remembered
     await eventually(() => !!card(orc.id))
-    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     expect((await second).isError).toBe(true)
     expect(existsSync(join(centralu, 'two'))).toBe(false)
   })

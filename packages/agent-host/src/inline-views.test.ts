@@ -94,7 +94,7 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
     timing: { idleMs, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, maxFailures },
   })
   // So a call with no matching card is not waited on for long — the product's value is 5 seconds
-  mgr.apps.useExternalApps(rt, { callJoinWaitMs: 300 })
+  mgr.useExternalApps(rt, { callJoinWaitMs: 300 })
   views = new ViewHost({
     secret: 'inline-views-test-secret-0123456789abcdef',
     allowedOrigins: [HOST_ORIGIN],
@@ -104,7 +104,7 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
     hostPort: () => 1,
     log: () => {},
   })
-  inline = attachInlineViews(mgr.apps, rt, views, { log: (line) => logged.push(line), limits })
+  inline = attachInlineViews(mgr, rt, views, { log: (line) => logged.push(line), limits })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt, views, inlineViews: inline })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
@@ -553,7 +553,7 @@ describe('a planned hand-over to the next host', () => {
       hostPort: () => 1,
       log: () => {},
     })
-    inline = attachInlineViews(mgr.apps, rt, views, { log: (line) => logged.push(line) })
+    inline = attachInlineViews(mgr, rt, views, { log: (line) => logged.push(line) })
     rpc = createRpcHandler(mgr, hostAdapters, { externalApps: rt, views, inlineViews: inline })
   }
 

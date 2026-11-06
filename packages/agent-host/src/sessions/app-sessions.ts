@@ -84,7 +84,7 @@ export type AppSessionsHost = {
   readonly store: Store
   /** Sessions waking right now (#378 review: a finished app-agent session that is waking is in use) */
   readonly resuming: ReadonlyMap<string, unknown>
-  /** A queued note not yet taken by the session (`TurnInputs.inputsHeld`) */
+  /** A queued note not yet taken by the session (`SessionManager.inputsHeld`) */
   inputsHeld: (sessionId: string) => boolean
   /** Requests queued for a session until it is free (#677) */
   readonly children: { readonly queued: ReadonlyMap<string, readonly unknown[]> }

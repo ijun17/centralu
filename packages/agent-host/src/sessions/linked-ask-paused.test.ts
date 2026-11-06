@@ -67,7 +67,7 @@ async function hub(o: { tasks?: boolean } = {}) {
   mgr.useLinkedReader(reader)
   cleanup.push(() => void mgr.disposeAll())
 
-  const event = (e: Record<string, unknown>) => mgr.linkedHost.observeLinked({ sessionId: 'm1.w1', ...e } as never)
+  const event = (e: Record<string, unknown>) => mgr.observeLinked({ sessionId: 'm1.w1', ...e } as never)
   const tasks = (live: BackgroundTask[], ended?: BackgroundTask[]) => event({ type: 'background_tasks', live, ...(ended ? { ended } : {}) })
   /** A turn of the machine's session: it works, and ends */
   const turn = () => {
@@ -90,7 +90,7 @@ async function hub(o: { tasks?: boolean } = {}) {
     const call = mgr.askProject('h1', { project: 'm1/api', ...(task ? { task } : {}) })
     if (task) {
       await eventually(() => !!mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
-      mgr.inputs.respondApproval('h1', mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+      mgr.respondApproval('h1', mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
       // The machine's events can only be about this task once it has gone in
       if (after) await eventually(() => sent.length > before)
     }
@@ -104,7 +104,7 @@ async function hub(o: { tasks?: boolean } = {}) {
     setAway: (why: string) => (away = why),
     dropLink: () => {
       linked = false
-      mgr.linkedHost.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
+      mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
     },
   }
 }
@@ -170,7 +170,7 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     const stop = new AbortController()
     const call = h.mgr.askProject('h1', { project: 'm1/api', task: 'run the suite' }, stop.signal)
     await eventually(() => !!h.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
-    h.mgr.inputs.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    h.mgr.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
     await eventually(() => h.sent.length > 0)
     stop.abort()
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('was left running') })
@@ -193,7 +193,7 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     const stop = new AbortController()
     const call = h.mgr.askProject('h1', { project: 'm1/api', task: 'run the suite' }, stop.signal)
     await eventually(() => !!h.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
-    h.mgr.inputs.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
+    h.mgr.respondApproval('h1', h.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
     await eventually(() => h.sent.length > 0)
     stop.abort()
     await call

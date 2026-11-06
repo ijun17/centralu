@@ -1303,7 +1303,7 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
 /** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders an older report path told of this stop or may still tell */
 export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; held?: readonly string[] }
 
-/** How long a stop notice waits for an older report path before it is told anyway (`oldPathEnded`, `MailSessionsView.mailStopTold`) */
+/** How long a stop notice waits for an older report path before it is told anyway (`oldPathEnded`, `SessionManager.mailStopTold`) */
 export const OLD_PATH_WAIT_MS = 10 * MINUTE_MS
 
 /** A stopped session and a sender of questions to it, as one key */

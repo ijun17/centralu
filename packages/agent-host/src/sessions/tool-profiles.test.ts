@@ -143,16 +143,16 @@ describe('through the manager: the same profile under either tool and any preset
 
   it.each(['claude', 'codex'] as const)('%s: an ordinary session is a reader and an app agent gets nothing, under safe, normal and auto', async (tool) => {
     const { mgr, adapters } = world()
-    const project = await mgr.projectCreation.addProject(tmpdir())
+    const project = await mgr.addProject(tmpdir())
     for (const permissionPreset of ['safe', 'normal', 'auto'] as const) {
       const s = await mgr.createSession({ projectId: project.id, cwd: project.path, tool, permissionPreset })
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('reader')
-      expect(mgr.tools.toolProfileOf(s.id)).toBe('reader')
+      expect(mgr.toolProfileOf(s.id)).toBe('reader')
       // An app's agent (M4 D-1) runs under safe (app-agents.test.ts); the preset is not what takes its tools away
       const agent = await mgr.createSession({ projectId: project.id, cwd: project.path, tool, permissionPreset, appId: 'app-notes' })
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBeUndefined()
       expect(adapters[tool].handed.at(-1)?.orchestratorTools).toBeUndefined()
-      expect(mgr.tools.toolProfileOf(agent.id)).toBeNull()
+      expect(mgr.toolProfileOf(agent.id)).toBeNull()
     }
   })
 
@@ -162,7 +162,7 @@ describe('through the manager: the same profile under either tool and any preset
       mgr.orchestratorSlot.configureOrchestrator(tool)
       const o = await mgr.orchestrator()
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('orchestrator')
-      expect(mgr.tools.toolProfileOf(o.id)).toBe('orchestrator')
+      expect(mgr.toolProfileOf(o.id)).toBe('orchestrator')
     }
   })
 })

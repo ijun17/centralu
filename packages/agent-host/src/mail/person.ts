@@ -17,7 +17,7 @@ export type PersonHost = {
   untrusted(projectId: string): boolean
   /** The turn going in the session, from the turn records (`MailTurns.current`, while the session is in a turn): its work message, else its starter */
   turnOn(sessionId: string): { work: string | null } | undefined
-  /** Whether the session takes a notice into its running process now, without a wake (a live process of a tool that takes quiet input; `MailSessionsView.tellsMailNow`) */
+  /** Whether the session takes a notice into its running process now, without a wake (a live process of a tool that takes quiet input; `SessionManager.tellsMailNow`) */
   tellsNow(sessionId: string): boolean
   /** Puts the notice into that process (`tellsNow` said it takes it): the session reads it where it is, in its turn if it is in one. Nothing is stopped */
   tell(sessionId: string, text: string): Promise<void>

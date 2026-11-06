@@ -39,7 +39,7 @@ async function setup() {
   const store = new Store()
   const f = fake()
   const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(f)]]), () => {})
-  const project = await mgr.projectCreation.addProject(process.cwd())
+  const project = await mgr.addProject(process.cwd())
   const session = await mgr.createSession({
     projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal',
   })
@@ -53,7 +53,7 @@ describe('approval rules persist (C-2)', () => {
   it('saves the rule when given always + the card’s own key', async () => {
     const { mgr, session, ask, command } = await setup()
     ask('req-1', command('npm test'))
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'session', 'npm test')
+    mgr.respondApproval(session.id, 'req-1', 'always', 'session', 'npm test')
     // id and createdAt are used by the settings screen to show when a rule was created, for deleting it (E-4)
     expect(mgr.approvalRules.listApprovalRules()).toMatchObject([{ scope: 'session', matcher: 'npm test', decision: 'allow' }])
     expect(mgr.approvalRules.listApprovalRules()[0]!.id).toBeGreaterThan(0)
@@ -64,7 +64,7 @@ describe('approval rules persist (C-2)', () => {
   it('does not save it with no matcher (an empty rule is useless)', async () => {
     const { mgr, session, ask, command } = await setup()
     ask('req-1', command('npm test'))
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'session')
+    mgr.respondApproval(session.id, 'req-1', 'always', 'session')
     expect(mgr.approvalRules.listApprovalRules()).toEqual([])
   })
 
@@ -72,7 +72,7 @@ describe('approval rules persist (C-2)', () => {
   it('does not save a rule for a file edit with no path', async () => {
     const { mgr, session, ask } = await setup()
     ask('req-1', { kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'session', NO_PATH)
+    mgr.respondApproval(session.id, 'req-1', 'always', 'session', NO_PATH)
     expect(mgr.approvalRules.listApprovalRules()).toEqual([])
   })
 
@@ -91,11 +91,11 @@ describe('approval rules persist (C-2)', () => {
     ]
     for (const [i, [detail, matcher]] of cases.entries()) {
       ask(`req-${i}`, detail)
-      mgr.inputs.respondApproval(session.id, `req-${i}`, 'always', 'project', matcher)
+      mgr.respondApproval(session.id, `req-${i}`, 'always', 'project', matcher)
     }
     // An answer whose request id is not the card standing
     ask('req-x', command('ls'))
-    mgr.inputs.respondApproval(session.id, 'req-other', 'always', 'project', 'ls')
+    mgr.respondApproval(session.id, 'req-other', 'always', 'project', 'ls')
     expect(mgr.approvalRules.listApprovalRules()).toEqual([])
     // The call itself is allowed, and the adapter is given no matcher to keep
     expect(f.given).toEqual([undefined, undefined, undefined, undefined, undefined])
@@ -104,12 +104,12 @@ describe('approval rules persist (C-2)', () => {
   it('a session-scoped rule is injected only into that session', async () => {
     const { store, mgr, session, project, ask, command } = await setup()
     ask('req-1', command('ls'))
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'session', 'ls')
+    mgr.respondApproval(session.id, 'req-1', 'always', 'session', 'ls')
 
     // Simulates a host restart: a new manager is created on the same store
     const f2 = fake()
     const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
-    const res = await mgr2.processes.resumeSession(session.id)
+    const res = await mgr2.resumeSession(session.id)
     expect(res.resumed).toBe(true)
     expect(f2.applied[0]).toContain('ls')
 
@@ -125,7 +125,7 @@ describe('approval rules persist (C-2)', () => {
   it('a project-scoped rule also applies to a new session in the same project', async () => {
     const { store, mgr, session, project, ask, command } = await setup()
     ask('req-1', command('git status'))
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'project', 'git status')
+    mgr.respondApproval(session.id, 'req-1', 'always', 'project', 'git status')
 
     const f2 = fake()
     const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
@@ -171,13 +171,13 @@ describe('approval rules persist (C-2)', () => {
       type: 'approval_request', sessionId: session.id, requestId: 'req-1',
       detail: { kind: 'command', command: 'git push', cwd: process.cwd() },
     })
-    mgr.inputs.respondApproval(session.id, 'req-1', 'always', 'project', 'git push')
+    mgr.respondApproval(session.id, 'req-1', 'always', 'project', 'git push')
     expect(mgr.approvalRules.listApprovalRules()).toMatchObject([{ scope: 'session', sessionId: session.id, projectId: null, matcher: 'git push' }])
 
     // After a restart: the answering session keeps it, another session with no project does not get it
     const f2 = fake()
     const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
-    await mgr2.processes.resumeSession(session.id)
+    await mgr2.resumeSession(session.id)
     expect(f2.applied[0]).toContain('git push')
     await start(mgr2)
     expect(f2.applied[f2.applied.length - 1]).not.toContain('git push')

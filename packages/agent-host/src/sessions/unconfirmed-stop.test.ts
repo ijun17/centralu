@@ -39,7 +39,7 @@ describe('a Stop the tool refused (#1060)', () => {
       interrupt()
       h.event(stopNotConfirmed(a, 'Could not stop: the control request was lost. The turn is still running.'))
     }
-    w.mgr.inputs.interrupt(a)
+    w.mgr.interrupt(a)
   }
   const settles = (p: Promise<unknown>) => Promise.race([p.then(() => true, () => true), new Promise((r) => setTimeout(() => r(false), 30))])
 
@@ -60,7 +60,7 @@ describe('a Stop the tool refused (#1060)', () => {
     const { a, b } = await child()
     handleOf(a).answer('first job done')
     await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-    await w.mgr.inputs.send(a, "the person's own work")
+    await w.mgr.send(a, "the person's own work")
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     const sent = handleOf(a).sent.length
 

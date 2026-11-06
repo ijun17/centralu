@@ -190,7 +190,7 @@ describe('the turns of a delegated child', () => {
     handleOf(child)!.answer('done')
     await w.until(() => turnsOfChild()[0]![2] !== null)
     // The person works in the child: a turn of their own, of no task
-    await w.mgr.inputs.send(child, 'my own work')
+    await w.mgr.send(child, 'my own work')
     handleOf(child)!.answer('their answer')
     await w.until(() => turnsOfChild().length === 2 && turnsOfChild()[1]![2] !== null)
     // The caller’s later instruction is a task of its own, and the turn it starts is that task's
@@ -217,7 +217,7 @@ describe('a fork of a busy session', () => {
     handleOf(busy)!.externalId = 'ext-busy'
     handleOf(busy)!.answer('first job done')
     await w.mgr.agentSession(requester, { sessionId: busy, action: 'wait' })
-    await w.mgr.inputs.send(busy, "the person's own work")
+    await w.mgr.send(busy, "the person's own work")
     const claude = w.adapters.get('claude') as unknown as { forkConversation?: (id: string) => Promise<string>; readExternalHistory?: () => Promise<unknown[]> }
     claude.forkConversation = async (id) => `fork-of-${id}`
     claude.readExternalHistory = async () => []
@@ -238,7 +238,7 @@ describe('a fork of a busy session', () => {
     askAgents()
     const worker = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })
     handleOf(worker.id)!.externalId = 'ext-worker'
-    await w.mgr.inputs.send(worker.id, "the person's own work")
+    await w.mgr.send(worker.id, "the person's own work")
     const claude = w.adapters.get('claude') as unknown as { forkConversation?: (id: string) => Promise<string>; readExternalHistory?: () => Promise<unknown[]> }
     claude.forkConversation = async (id) => `fork-of-${id}`
     claude.readExternalHistory = async () => []
@@ -261,8 +261,8 @@ describe('the turn a child’s report starts in its caller', () => {
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     // The parent cannot read mail, so the old way tells it, and the notice starts its turn
-    const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
-    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    const real = w.mgr.toolProfileOf.bind(w.mgr)
+    vi.spyOn(w.mgr, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
     handleOf(child)!.answer('done')
     await w.until(() => (handleOf(parent)?.sent.length ?? 0) === 1)
     expect(turnsOf(w.store, parent).map((t) => [t.startedBy, t.messageId])).toEqual([['report', null]])
@@ -271,7 +271,7 @@ describe('the turn a child’s report starts in its caller', () => {
 
 describe('a mailbox that fails', () => {
   it('breaks no delegation: the task still reaches the child, and nothing is written', async () => {
-    w.mgr.mail.useMail({ sessionGone: () => {}, sessionChanged: () => {}, delegated: () => { throw new Error('the store is busy') } })
+    w.mgr.useMail({ sessionGone: () => {}, sessionChanged: () => {}, delegated: () => { throw new Error('the store is busy') } })
     askAgents()
     const s = await w.callerSession()
     const started = await w.mgr.startAgent(s, { task: 'Write the export', wait: false })
@@ -290,7 +290,7 @@ describe('a request queued behind a busy session', () => {
     handleOf(child)!.answer('first job done')
     await w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
     // The person is using the child for a turn of their own: the request waits behind it
-    await w.mgr.inputs.send(child, "the person's own work")
+    await w.mgr.send(child, "the person's own work")
     const queued = await w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'add the index', ifBusy: 'queue' })
     expect(queued).toMatchObject({ ok: true, state: 'queued' })
     expect(bodies(read.tasks(addr(s), child))).toEqual(['first job'])

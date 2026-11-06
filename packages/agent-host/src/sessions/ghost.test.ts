@@ -25,9 +25,9 @@ describe('session creation failure', () => {
   it('a session is not saved if the adapter fails (preventing ghost sessions)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
-    await mgr.projectCreation.addProject(tmpdir())
+    await mgr.addProject(tmpdir())
 
-    const project = (await mgr.projectRegistry.listProjects())[0]!
+    const project = (await mgr.listProjects())[0]!
     await expect(
       mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' }),
     ).rejects.toThrow('Could not start')
@@ -40,8 +40,8 @@ describe('session creation failure', () => {
   it('the failure reason is passed through as-is (the user needs to know the cause to fix it)', async () => {
     const store = new Store()
     const mgr = new SessionManager(store, new Map([['claude', failingAdapter]]), () => {})
-    await mgr.projectCreation.addProject(tmpdir())
-    const project = (await mgr.projectRegistry.listProjects())[0]!
+    await mgr.addProject(tmpdir())
+    const project = (await mgr.listProjects())[0]!
     await expect(
       mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' }),
     ).rejects.toThrow('Native CLI binary')

@@ -62,7 +62,7 @@ async function deliverTo(m: HostMail, address: string): Promise<void> {
 }
 
 async function parentAndChild(h: ReturnType<typeof host>) {
-  const project = await h.mgr.projectCreation.addProject(root)
+  const project = await h.mgr.addProject(root)
   await h.mgr.setProjectTrusted(project.id, true)
   store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -83,7 +83,7 @@ describe('a session the keeper handed over after a swap', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // The process is one an earlier build started; the receive rule is the seat's, as for any other
-    expect(b.mgr.mail.canReadMail(child)).toBe(true)
+    expect(b.mgr.canReadMail(child)).toBe(true)
     const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 10_000 })
     const reply = later.service.send(PERSON, { to: [addressOf(child)], replyTo: waiting.id, text: 'and the formatter' })
     expect(reply.message).toMatchObject({ body: 'and the formatter', replyTo: waiting.id })
@@ -111,7 +111,7 @@ describe('an owner the keeper handed over after a swap', () => {
       { sessionId: parent, tool: 'claude', process: new FakeProcess() },
       { sessionId: child, tool: 'claude', process: new FakeProcess() },
     ])
-    await b.mgr.inputs.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
+    await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
     const reports = () => read().between('centralu', addressOf(parent), 'report')
     await until(() => reports().length === 1)
@@ -123,7 +123,7 @@ describe('an owner the keeper handed over after a swap', () => {
     // ... and the mailbox does wake it with the report: the mail is handed to the adopted process
     // (its own turn, which the swap kept, ends first: mail waits for a turn's end)
     b.claude.handles.get(parent)!.answer('its own turn ends')
-    await until(() => b.mgr.mail.mailSessions().receiver(parent).kind === 'ready')
+    await until(() => b.mgr.mailSessions().receiver(parent).kind === 'ready')
     const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 300_000 })
     await deliverTo(later, addressOf(parent))
     expect(read().row(reports()[0]!.id, addressOf(parent))).toMatchObject({ attempts: 1 })
@@ -140,7 +140,7 @@ const marksOf = (h: ReturnType<typeof host>) => (h.mgr as unknown as { children:
 describe('a parent that waits for what it handed on, across a swap', () => {
   it('keeps its mark with the swap, and its end is reported once, at the real end', async () => {
     const a = host()
-    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -163,7 +163,7 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     // The helper is done; the session has a turn of its own, and ends it
     const handed = read().tasks(addressOf(child), helper)[0]!
     b.m.service.report(handed.id, { outcome: 'finished', body: '[Centralu] The helper finished.' })
-    await b.mgr.inputs.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
+    await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
     await until(() => reports().length === 2)
     expect(reports().map((m) => m.facts.outcome)).toEqual(['waiting', 'finished'])
@@ -178,7 +178,7 @@ describe('a parent that waits for what it handed on, across a swap', () => {
 
   it('a kept session at rest whose helper is gone has no pause to keep: its mark is dropped as before', async () => {
     const a = host()
-    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -205,7 +205,7 @@ describe('a rollback to an earlier build, then forward', () => {
    */
   it.each([false, true])('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause (unread note: %s)', async (unread) => {
     const a = host()
-    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    a.mgr.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
     const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
     if (!helperStarted.ok) throw new Error(helperStarted.error)
@@ -236,7 +236,7 @@ describe('a rollback to an earlier build, then forward', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
-    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.mail.oldOwes(o, c) })
+    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.oldOwes(o, c) })
     expect(result.settled).toBe(1)
     expect(read().taskRow(part.id, helper)).toMatchObject({ settled: 'reported' })
     expect(b.m.hooks.waitingOn!(parent, child)).toBe(0)
@@ -299,7 +299,7 @@ describe('the turn of a session the keeper kept', () => {
 describe('a mail turn cut by a plain restart (#1916)', () => {
   it('ends lost under the next host, and the asker is told its question was cut, once; the question is not given again', async () => {
     const a = host()
-    const project = await a.mgr.projectCreation.addProject(root)
+    const project = await a.mgr.addProject(root)
     await a.mgr.setProjectTrusted(project.id, true)
     const asker = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const helper = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id

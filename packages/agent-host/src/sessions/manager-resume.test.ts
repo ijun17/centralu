@@ -333,7 +333,7 @@ describe('a deleted session can be recovered from the past-conversations list', 
     expect(listed.imported).toBe(true)
     expect(listed.importedAs).toBe(s.id)
 
-    await m.trash.trashSession(s.id)
+    await m.trashSession(s.id)
 
     /*
       A deleted session **must be recoverable** from the past-conversations list. Blocking it here
@@ -396,7 +396,7 @@ describe('when the tool cannot find the conversation', () => {
     await m.disposeAll()
 
     a.present = [] // the tool no longer lists it — an absence is all we actually know
-    const r = await m.processes.resumeSession(s.id)
+    const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(false)
     /*
@@ -428,7 +428,7 @@ describe('when the tool cannot find the conversation', () => {
     a.failCreate = Object.assign(new Error('This conversation is already open elsewhere'), {
       code: 'conversation_locked',
     })
-    const r = await m.processes.resumeSession(s.id)
+    const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(false)
     expect(r.lockedElsewhere).toBe(true)
@@ -443,7 +443,7 @@ describe('when the tool cannot find the conversation', () => {
 
     a.failList = true
     a.failCreate = Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
-    const r = await m.processes.resumeSession(s.id)
+    const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(false)
     expect(r.reason).toMatch(/has no record of this conversation under .* The history kept here is still readable/)
@@ -458,7 +458,7 @@ describe('when the tool cannot find the conversation', () => {
     // Bring down only the process (the same state as a host restart)
     await m.disposeAll()
 
-    const r = await m.processes.forkConversation(s.id)
+    const r = await m.forkConversation(s.id)
 
     expect(r.resumed).toBe(true)
     expect(a.forkedFrom).toBe(before)
@@ -473,7 +473,7 @@ describe('when the tool cannot find the conversation', () => {
     // Capability is expressed by **whether the method exists**, not a flag (the rule in contract.ts).
     delete (a as { forkConversation?: unknown }).forkConversation
 
-    const r = await m.processes.forkConversation(s.id)
+    const r = await m.forkConversation(s.id)
 
     expect(r.resumed).toBe(false)
     expect(r.reason).toMatch(/cannot fork/)
@@ -487,7 +487,7 @@ describe('when the tool cannot find the conversation', () => {
     await m.disposeAll()
 
     a.failList = true
-    const r = await m.processes.resumeSession(s.id)
+    const r = await m.resumeSession(s.id)
 
     // Blocking a perfectly fine session just because it could not be confirmed would cut off the conversation
     // over nothing more than the tool being briefly slow.
@@ -505,7 +505,7 @@ describe('when the tool cannot find the conversation', () => {
 
     // Resume issues a new id so external_id is not ext-1, but the original still exists.
     a.present = ['ext-1']
-    expect((await m.processes.resumeSession(s.id)).resumed).toBe(true)
+    expect((await m.resumeSession(s.id)).resumed).toBe(true)
   })
 })
 
@@ -608,7 +608,7 @@ describe('catching up on a conversation continued outside', () => {
     // Work continued in the terminal in the meantime.
     a.toolHistory.push({ role: 'user', text: 'something said in the terminal' }, { role: 'assistant', text: 'a terminal answer' })
 
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['First question', 'First answer', 'something said in the terminal', 'a terminal answer'])
     expect(events.some((e) => e.type === 'history_synced')).toBe(true)
@@ -627,7 +627,7 @@ describe('catching up on a conversation continued outside', () => {
 
     // Bring down only the process (the same state as a host restart)
     await m.disposeAll()
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['First question'])
   })
@@ -665,7 +665,7 @@ describe('catching up on a conversation continued outside', () => {
     await m.disposeAll()
     // The tool's record has that compaction too, then work continued in the terminal, compacting once more there
     a.toolHistory.push(compaction, { role: 'user', text: 'said in the terminal' }, compaction, { role: 'assistant', text: 'a terminal answer' })
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
     expect(await rows(call, s.id)).toEqual([
       'First question', 'First answer', '[compaction]', 'said in the terminal', '[compaction]', 'a terminal answer',
     ])
@@ -727,7 +727,7 @@ describe('catching up on a conversation continued outside', () => {
       recorded(toolResult('tu2', '/work')),
       { role: 'assistant', text: 'a terminal answer' },
     )
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
     const stored = (await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]
     expect(stored.map((r) => (r.kind === 'text' ? (r.payload as { text: string }).text : `${r.kind}:${(r.payload as { callId: string }).callId}`))).toEqual([
       'List the files', 'Let me look', 'tool_call:tu1', 'tool_result:tu1',
@@ -752,7 +752,7 @@ describe('catching up on a conversation continued outside', () => {
     for (const e of live) a.last!.emitEvent({ ...e, sessionId: s.id } as NormalizedEvent)
     await m.disposeAll()
     a.toolHistory.push({ role: 'assistant', text: 'Let me look' }, ...outside)
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
     return ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
   }
 
@@ -826,7 +826,7 @@ describe('catching up on a conversation continued outside', () => {
       note,
       recorded(toolCall('tc2', 'sleep 6')), recorded(toolResult('tc2', '')), recorded(toolCall('tc3', 'sleep 6')),
     )
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
     return ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
   }
   const note = '[Centralu] Centralu on this machine was updated while your turn was running. Continue where you stopped.'
@@ -853,7 +853,7 @@ describe('catching up on a conversation continued outside', () => {
     a.last!.emitEvent({ ...toolCall('tc1', 'ls'), sessionId: s.id })
     await m.disposeAll()
     a.toolHistory = [{ role: 'user', text: '[Centralu] mail', sent: true }, recorded(toolCall('tc1', 'ls')), { role: 'user', text: 'typed in a terminal' }]
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
     const stored = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]).map(label)
     expect(stored).toEqual(['[notice]', 'tool_call:tc1', 'typed in a terminal'])
   })
@@ -870,7 +870,7 @@ describe('catching up on a conversation continued outside', () => {
     await m.disposeAll()
     // The tool's whole history changed (e.g. the earlier part was lost to compaction).
     a.toolHistory = [{ role: 'user', text: 'a completely different conversation' }]
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
 
     expect(await texts(call, s.id)).toEqual(['First question'])
   })
@@ -907,7 +907,7 @@ describe('catches up a session even when its cwd differs from the project path (
         { role: 'user', text: 'something said in the terminal' },
         { role: 'assistant', text: 'a terminal answer' },
       ]
-      await m.processes.resumeSession(s.id)
+      await m.resumeSession(s.id)
 
       const texts = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as { payload: { text?: string } }[])
         .map((r) => r.payload.text)
@@ -947,7 +947,7 @@ describe('when resuming hangs', () => {
     vi.useFakeTimers()
     try {
       adapter.hangCreate = true
-      const attempt = mgr.processes.resumeSession(s.id)
+      const attempt = mgr.resumeSession(s.id)
       await vi.advanceTimersByTimeAsync(150_100)
       const r = await attempt
       expect(r.resumed).toBe(false)
@@ -955,7 +955,7 @@ describe('when resuming hangs', () => {
 
       // Retry does not join the stuck promise — it starts fresh, and this time the spawn succeeds normally.
       adapter.hangCreate = false
-      const retry = mgr.processes.resumeSession(s.id)
+      const retry = mgr.resumeSession(s.id)
       await vi.advanceTimersByTimeAsync(1)
       expect((await retry).resumed).toBe(true)
 
@@ -1005,7 +1005,7 @@ describe('when the resume identifier does not exist yet', () => {
     }
     await call('agents.send', { sessionId: s.id, text: 'leftover words' })
 
-    const r = (await m.processes.restartSession(s.id)) as { resumed: boolean; reason?: string }
+    const r = (await m.restartSession(s.id)) as { resumed: boolean; reason?: string }
     expect(r.resumed).toBe(false)
     expect(r.reason).toMatch(/Lost this session's resume id/)
   })
@@ -1054,7 +1054,7 @@ describe('resumes from the original it was imported from when there is no identi
     await m.disposeAll()
     a.resumedWith = undefined
 
-    const r = await m.processes.resumeSession(s.id)
+    const r = await m.resumeSession(s.id)
 
     expect(r.resumed).toBe(true)
     expect(a.resumedWith).toBe('ext-origin') // Resumed from the original.
@@ -1139,7 +1139,7 @@ describe('catches up even from history accumulated as deltas', () => {
     // Work continued in the terminal in the meantime.
     a.toolHistory.push({ role: 'user', text: 'something said in the terminal' }, { role: 'assistant', text: 'a terminal answer' })
 
-    await m.processes.resumeSession(s.id)
+    await m.resumeSession(s.id)
 
     const texts = ((await call('messages.load', { sessionId: s.id, limit: 200 })) as { payload: { text?: string } }[])
       .map((r) => r.payload.text)
@@ -1201,7 +1201,7 @@ describe('resuming returns to where it was created', () => {
     expect(store.sessions.sessionCwd('old')).toBeNull()
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-    await new SessionManager(store, adapters, () => {}).processes.resumeSession('old')
+    await new SessionManager(store, adapters, () => {}).resumeSession('old')
 
     expect(store.sessions.sessionCwd('old')).toBe(p.path)
   })

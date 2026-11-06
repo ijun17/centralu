@@ -45,7 +45,7 @@ type DepthStore = { appSetting(key: string): string | null; setAppSetting(key: s
 
 /**
  * Where a hub's ask_project task marks the session of this machine working on it (#838 item 12): the depth the hub
- * counts it at, kept until that turn ends (`LinkedHost.sendFromHub`). The hub's caller is on another machine, so no
+ * counts it at, kept until that turn ends (`SessionManager.sendFromHub`). The hub's caller is on another machine, so no
  * link here leads to it; without the mark, a session asked from a linked machine could start agents and ask projects
  * as if the person had started it, past the depth on both machines. An app setting, as `agentDepthKey`: an older
  * build leaves it alone.

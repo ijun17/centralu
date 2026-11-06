@@ -7,8 +7,7 @@ import type { MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { sessionAddress } from '../mail/address.js'
 import type { MailDeliveryOptions } from '../mail/delivery.js'
 import { hostMail, mailSessionsOf, type HostMail } from '../mail/host-mail.js'
-import type { SessionManager } from './manager.js'
-import type { MailHooks } from './mail-sessions.js'
+import type { MailHooks, SessionManager } from './manager.js'
 
 export const MAIL_HOST = 'hub-aaaaaaaa'
 /** A session's mail address on the test host */
@@ -28,7 +27,7 @@ export function wireHostMail(
     ...(opts.now ? { now: opts.now } : {}),
     delivery: { schedule: () => () => {}, ...opts.delivery },
   })
-  mgr.mail.useMail({ ...m.hooks, ...opts.hooks })
+  mgr.useMail({ ...m.hooks, ...opts.hooks })
   return m
 }
 

@@ -194,8 +194,6 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const agentVersions = new AgentVersionService({
     tools: () => [],
     sessions: mgr,
-    processes: mgr.processes,
-    notes: mgr.sessionSettings,
     publish: (status) => server.broadcast({ type: 'agent_versions', status }),
   })
   // The person's side of the mailbox over this store (#1347), wired as main.ts wires it; its delivery is not started, so nothing is delivered
@@ -1134,7 +1132,7 @@ describe.each([
  * impossible.
  *
  * So the mock's answer is pinned to the function the host uses instead of to the host itself.
- * `ProjectCreation.addProject` names a project with `basename` from `node:path`; on Windows that
+ * `SessionManager.addProject` names a project with `basename` from `node:path`; on Windows that
  * is `win32.basename`. Reading only `/` here meant the mock called a project
  * `C:\Users\me\proj` while the host called it `proj`, and e2e — which only ever runs the mock —
  * had no way to notice.
@@ -1249,7 +1247,7 @@ describe('Platform contract: tool call from a screen (web + real host + real app
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    const project = await mgr.projectCreation.addProject(projRoot)
+    const project = await mgr.addProject(projRoot)
     store.projects.setProjectTrusted(project.id, true)
     const changes = broadcastAppChanges((e) => server.broadcast(e))
     const rt = new ExternalApps({
@@ -1335,7 +1333,7 @@ describe('Platform contract: external app list (web + real host)', () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    const project = await mgr.projectCreation.addProject(projRoot)
+    const project = await mgr.addProject(projRoot)
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
@@ -1391,7 +1389,7 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    const project = await mgr.projectCreation.addProject(projRoot)
+    const project = await mgr.addProject(projRoot)
     store.projects.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({
       projects: () => store.projects.projectRoots(),
@@ -1465,11 +1463,11 @@ describe('Platform contract: new app (web + real host)', () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    const project = await mgr.projectCreation.addProject(projRoot)
+    const project = await mgr.addProject(projRoot)
     store.projects.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
-    mgr.apps.useExternalApps(rt)
+    mgr.useExternalApps(rt)
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
     const port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
@@ -1538,7 +1536,7 @@ describe('Platform contract: app secrets (web + real host)', () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    const project = await mgr.projectCreation.addProject(projRoot)
+    const project = await mgr.addProject(projRoot)
     store.projects.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
@@ -1588,10 +1586,10 @@ describe('Platform contract: app import (web + real host)', () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    mgr.projectCreation.useProjectsHome(() => join(fixture, 'Centralu'))
+    mgr.useProjectsHome(() => join(fixture, 'Centralu'))
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
-    mgr.apps.useExternalApps(rt)
+    mgr.useExternalApps(rt)
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
     const port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })

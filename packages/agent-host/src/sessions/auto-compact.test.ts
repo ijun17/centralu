@@ -250,22 +250,22 @@ describe('what a session is launched with', () => {
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBeUndefined()
 
     handle(s.id).emitContext(10_000, 258_400)
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(155_040)
   })
 
   it("a Codex session reports the model's own window: a smaller one replaces the known window, and the next start passes the share of it", async () => {
     const s = await create()
     handle(s.id).emitContext(10_000, 1_000_000)
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
 
     // Started with the setting, the thread reports its real, smaller window (the default model changed, the provider shrank it)
     handle(s.id).emitContext(10_000, 272_000)
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(163_200)
   })
 
@@ -273,13 +273,13 @@ describe('what a session is launched with', () => {
     Object.assign(world.codexAdapter, { windowCeilingFor: (tokens: number) => tokens + 33_000 })
     const s = await create()
     handle(s.id).emitContext(10_000, 1_000_000, 'big')
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(600_000)
     // The name now means a 200k model: under the ceiling of 633,000 it reports 200,000, which is real
     handle(s.id).emitContext(10_000, 200_000, 'small')
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(120_000)
   })
 
@@ -289,8 +289,8 @@ describe('what a session is launched with', () => {
     expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toEqual({ controlled: true, share: 0.6, tokens: null })
     handle(s.id).emitContext(10_000, 200_000)
     expect(await world.rpc('agents.autoCompact', { sessionId: s.id })).toEqual({ controlled: true, share: 0.6, tokens: 120_000 })
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(120_000)
 
     // A model switch: the old model's window is not the new one's, and the menu says so before the start does
@@ -307,16 +307,16 @@ describe('what a session is launched with', () => {
     const rowOf = (id: string) => world.store.settings.appSetting(`auto_compact_ceiling:${id}`)
     const s = await create()
     handle(s.id).emitContext(10_000, 200_000)
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(rowOf(s.id)).toBe('153000')
 
     // A slept session has no process for a later host to adopt
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
     expect(rowOf(s.id)).toBeNull()
 
     // Deleted: the row goes at once, not only when the trash is purged
-    await world.mgr.processes.resumeSession(s.id)
+    await world.mgr.resumeSession(s.id)
     expect(rowOf(s.id)).toBe('153000')
     await world.rpc('agents.deleteSession', { sessionId: s.id })
     expect(rowOf(s.id)).toBeNull()
@@ -337,8 +337,8 @@ describe('what a session is launched with', () => {
     /** Reads a window, then wakes the session on the point the setting gives */
     const restarted = async (id: string, used: number, window: number, model?: string) => {
       handle(id).emitContext(used, window, model)
-      expect(await world.mgr.processes.sleepSession(id)).toBe(true)
-      await world.mgr.processes.resumeSession(id)
+      expect(await world.mgr.sleepSession(id)).toBe(true)
+      await world.mgr.resumeSession(id)
     }
     const lastUpdate = () => world.events.filter((e) => e.type === 'context_update').at(-1)
 
@@ -372,8 +372,8 @@ describe('what a session is launched with', () => {
       handle(s.id).emitContext(304_000, 633_000, 'opus-1m', 600_000)
       expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact', compactAt: 600_000 })
       await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
-      expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-      await world.mgr.processes.resumeSession(s.id)
+      expect(await world.mgr.sleepSession(s.id)).toBe(true)
+      await world.mgr.resumeSession(s.id)
       expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBeUndefined()
       // The new process was not started to compact anywhere: the old one's point is not carried into it (neither by the host's copy)
       expect(shown(s.id)).toEqual({ used: 304_000, window: 1_000_000, exactness: 'exact' })
@@ -396,8 +396,8 @@ describe('what a session is launched with', () => {
       handle(s.id).emitContext(100_000, 153_000, 'haiku-5', 120_000)
       expect(shown(s.id)).toEqual({ used: 100_000, window: 153_000, exactness: 'exact', capped: true, compactAt: 120_000 })
       // The next start passes nothing, and the real window is learnt
-      expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-      await world.mgr.processes.resumeSession(s.id)
+      expect(await world.mgr.sleepSession(s.id)).toBe(true)
+      await world.mgr.resumeSession(s.id)
       handle(s.id).emitContext(100_000, 1_000_000, 'haiku-5')
       expect(shown(s.id)).toEqual({ used: 100_000, window: 1_000_000, exactness: 'exact' })
     })
@@ -416,13 +416,13 @@ describe('what a session is launched with', () => {
     handle(s.id).emitContext(10_000, 200_000)
 
     await world.rpc('prefs.set', { patch: { autoCompact: { share: 0.5 } } })
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBe(100_000)
 
     await world.rpc('prefs.set', { patch: { autoCompact: { controlled: false } } })
-    expect(await world.mgr.processes.sleepSession(s.id)).toBe(true)
-    await world.mgr.processes.resumeSession(s.id)
+    expect(await world.mgr.sleepSession(s.id)).toBe(true)
+    await world.mgr.resumeSession(s.id)
     expect(world.codexAdapter.lastOpts?.autoCompactTokens).toBeUndefined()
     // The share stays for when it is turned back on
     expect(((await world.rpc('prefs.get', {})) as { autoCompact: unknown }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })

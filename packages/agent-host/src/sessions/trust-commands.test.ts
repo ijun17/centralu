@@ -36,7 +36,7 @@ beforeEach(() => {
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: ['control'], permissions: storePermissionBook(store), shared: (ref) => readShared(store.settings, ref) })
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, () => {})
-  mgr.apps.useExternalApps(rt)
+  mgr.useExternalApps(rt)
   const handler = createRpcHandler(mgr, agents, { externalApps: rt })
   rpc = (method, params) => handler(method, params)
   mgr.useWindowRpc(rpc)

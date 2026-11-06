@@ -229,7 +229,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
   it('is cancelled by a message of the person’s, which carries the work on', async () => {
     const { a, id } = await working()
     a.adapter.last.emit(overloaded(id))
-    await a.mgr.inputs.send(id, 'try again yourself')
+    await a.mgr.send(id, 'try again yourself')
     await vi.advanceTimersByTimeAsync(DELAYS_MS[0] * 2)
     expect(a.adapter.last.sent).toEqual(['try again yourself'])
   })
@@ -288,7 +288,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
       const { a, id } = await working()
       a.adapter.last.emit(overloaded(id))
       const release = await hold(id, a)
-      const sending = a.mgr.inputs.send(id, 'try again yourself')
+      const sending = a.mgr.send(id, 'try again yourself')
       release()
       await sending
       await vi.advanceTimersByTimeAsync(1)
@@ -318,7 +318,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
     it('a message of the person’s joins that turn: when the tool refuses it, the turn is not ended by the retry', async () => {
       const { a, id, take } = await handed()
       a.adapter.last.refuseSend = true
-      await expect(a.mgr.inputs.send(id, 'try again yourself')).rejects.toThrow('refused')
+      await expect(a.mgr.send(id, 'try again yourself')).rejects.toThrow('refused')
       expect(errors(id)).toHaveLength(0)
       expect(a.session(id).state).toBe('working')
       take()
@@ -328,7 +328,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
 
     it('a message of the person’s joined it: the note refused afterwards is not a failure of theirs', async () => {
       const { a, id } = await handed()
-      await a.mgr.inputs.send(id, 'try again yourself')
+      await a.mgr.send(id, 'try again yourself')
       a.adapter.last.refuseHeld(new Error('the tool turned the note down'))
       await vi.advanceTimersByTimeAsync(1)
       expect(errors(id)).toHaveLength(0)
@@ -337,7 +337,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
 
     it('a message of the person’s starts the count over, as it does for a retry that waits', async () => {
       const { a, id, take } = await handed()
-      await a.mgr.inputs.send(id, 'try again yourself')
+      await a.mgr.send(id, 'try again yourself')
       take()
       await vi.advanceTimersByTimeAsync(1)
       a.adapter.last.emit(overloaded(id))
@@ -368,7 +368,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
     a.adapter.last.emit(overloaded(id))
     ;(a.mgr as unknown as { handles: Map<string, unknown> }).handles.delete(id)
     a.adapter.failCreate = true
-    await expect(a.mgr.inputs.send(id, 'hello', undefined, undefined)).rejects.toThrow()
+    await expect(a.mgr.send(id, 'hello', undefined, undefined)).rejects.toThrow()
     expect(errors(id)).toHaveLength(1)
     expect(errors(id)[0]!.error.message).toMatch(/message to the session came first and was not delivered/)
     await vi.advanceTimersByTimeAsync(DELAYS_MS[0] * 2)
