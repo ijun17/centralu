@@ -678,11 +678,15 @@ jobs:
   # WebKit (e2e/playwright.config.ts). Not gated by the files: every full run has it, documents only
   # included.
   #
-  # Sharded so the job finishes inside the time the slowest other job already takes (`windows
-  # tests`, about 6.5 minutes). Measured 2026-10-11: the suite is about 18 minutes of one runner's
-  # time; 4 shards took 5.7 to 6.3 minutes a job, 5 take 3.9 to 5.3 (about 45 seconds of it setup
-  # and installing WebKit). Playwright's default of 2 workers on these 4-CPU runners: 3 workers
-  # were no faster. Each shard runs a slice of the tests with its own dev servers and hosts; every
+  # Sharded so every shard ends well inside the tests' step limit (12 minutes) on a slow runner too.
+  # Measured 2026-10-11: the suite was about 18 minutes of one runner's time and 5 shards took 3.9 to
+  # 5.3 minutes of tests. Measured 2026-11-06: 1,330 tests, 5 shards took 5.7 to 12.0 minutes, and 6 of
+  # 270 timed out with nothing hung: the same tests ran up to 1.6 times slower on some runners than on
+  # others (a shard of 260 tests: 770 s of test time on one, 1,200 s on another), the replay's 60 tests
+  # (one worker, 4 to 8 s each) all fell in shard 1 (`--shard` cuts the list in the order of the projects),
+  # and a shard's time is about half its test time (Playwright's default of 2 workers on these 4-CPU
+  # runners; 3 were no faster). So 10 shards, and each plays its share of the replay on its own, then the rest
+  # (.github/scripts/e2e-shard.sh): the shards took X to Y minutes in 3 full runs of 2026-11-06 and 07. Each shard runs a slice of the tests with its own dev servers and hosts; every
   # shard keeps a blob report, and when one fails the `e2e report` job below merges them into one
   # HTML report with traces. A failed test runs once more (Playwright's `retries`, CI only), and one
   # that passes then is flaky, not green: e2e/flaky-report.ts names it on the run and has `e2e
@@ -713,8 +717,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [8]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -822,8 +826,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [8]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -913,8 +917,8 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        shards: [8]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - run: echo "Only documents changed (.github/scripts/ci-changes.mjs)"
 
