@@ -915,7 +915,9 @@ export class MessageService {
    * Whether a stop notice to `sender` may quote the words of `stopped`'s turn `turnSeq` (its latest when absent): the one rule every stop notice
    * to a session quotes by (security-boundaries.md), the mailbox's and the older report path's (`MailHooks.quotes`). All of it must hold:
    * - `sender` is a session that can read `stopped` with read_session (`mayRead`, that tool's own rule);
-   * - the turn is the session's latest (no turn since), and the mailbox started it with `sender`'s own message (the turn's starter);
+   * - the turn is the session's latest (no turn since), and `sender`'s own message started it: a mail the mailbox delivered, or work `sender`
+   *   gave it (a start_agent task, an agent_session send: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the
+   *   CLI started by itself (`cli`), or the person's, is never quoted, even when it goes on with a task's work;
    * - every message the mailbox gave into it is from `sender`;
    * - everything else that may have entered it (`turnInputs`: each user row stored since the turn before began, and a question card answered
    *   since) was sent by `sender`: none from the person, an app, a script, a relayed report or another session.
@@ -927,7 +929,7 @@ export class MessageService {
     const seq = turnSeq ?? this.records.nextTurnSeq(party.sessionId) - 1
     if (this.records.nextTurnSeq(party.sessionId) !== seq + 1) return false
     const turn = this.records.turn(party.sessionId, seq)
-    if (!turn || turn.startedBy !== 'mail' || turn.starterId === null || this.records.message(turn.starterId)?.sender !== sender) return false
+    if (!turn || (turn.startedBy !== 'mail' && turn.startedBy !== 'caller') || turn.starterId === null || this.records.message(turn.starterId)?.sender !== sender) return false
     if (this.records.inTurn(stopped, seq).some((r) => r.message.sender !== sender)) return false
     const given = this.opts.turnInputs?.(party.sessionId)
     return given !== undefined && given.every((id) => id === from.sessionId)

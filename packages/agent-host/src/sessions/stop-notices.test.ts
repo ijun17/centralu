@@ -370,6 +370,35 @@ describe('who is not told, or told another way', () => {
     expect(stopNotices(asker)).toEqual([])
   })
 
+  /**
+   * `starter` gives a new child a task by start_agent and `asker` asks it a question in that task's turn. The starter takes the task back, so
+   * the older path writes no report and the stop notice tells the asker. `typed`: the person writes into the turn
+   */
+  const stoppedTaskTurn = async (opts: { otherStarter?: boolean; typed?: boolean } = {}) => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const asker = await w.callerSession()
+    const starter = opts.otherStarter ? await w.callerSession() : asker
+    const started = await w.mgr.startAgent(starter, { task: 'migrate the settings table', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    working(child)
+    ask(asker, child, 'which table first?')
+    m.service.done(addr(starter), read.tasks(addr(starter), child)[0]!.id)
+    if (opts.typed) await w.mgr.send(child, 'the db password is pa55', undefined, undefined, true)
+    says(child, 'Halfway through the settings migration.')
+    handleOf(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
+    await w.until(() => stopNotices(asker).length === 1)
+    return stopNotices(asker)[0]!.message.body
+  }
+  it('quotes a turn the asker’s own start_agent task started to that asker', async () => {
+    expect(await stoppedTaskTurn()).toContain('> Halfway through the settings migration.')
+  })
+  it('quotes nothing of that task turn once the person wrote into it', async () => {
+    expect(await stoppedTaskTurn({ typed: true })).not.toContain('Halfway through')
+  })
+  it('quotes nothing of a task turn another session’s task started to an asker that only asked in it', async () => {
+    expect(await stoppedTaskTurn({ otherStarter: true })).not.toContain('Halfway through')
+  })
+
   it('the session the older report would tell is told by the stop notice when that report does not go out: told is what was sent, not who might be', async () => {
     const asker = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')

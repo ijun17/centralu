@@ -23,7 +23,9 @@ read path, and one rule decides it (`MessageService.quotes`), which the older re
 (`ChildReports.tellAskerOfInterruption`) is held to as well. Each of these must hold, or nothing is quoted:
 - the sender is a session that can read the stopped session with `read_session` (that tool's own rule,
   `OrchestratorTools.mayRead`, asked through `SessionTools.readsSession`);
-- the cut turn is the session's latest in the mailbox's record of turns, and the mailbox started it with the sender's own message;
+- the cut turn is the session's latest in the mailbox's record of turns, and the sender's own message started it: a mail the
+  mailbox delivered, or work the sender gave it (a start_agent task, an agent_session send), whose task row the turn names as
+  its starter and the sender sent. A turn the CLI started by itself, or the person's, is never quoted;
 - every message the mailbox delivered into that turn is the sender's;
 - every user row the session stored since the row its turn before began after names the sender in `from`, not as a relayed
   report, and no question card of the session was answered since (`ChildOwnership.latestTurnInputs`). A row the person typed,
