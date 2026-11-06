@@ -106,7 +106,9 @@ describe('who reads the pin', () => {
     const j = job(build, 'host-tests-remote-node')
     expect(j).toContain(`require("./packaging/remote-runtime.json").node.version`)
     expect(j).toContain('node-version: ${{ steps.pin.outputs.node }}')
-    expect(j).toMatch(/runner: \[ubuntu-24\.04, windows-2022\]/)
+    // Linux whole, and Windows in two shards (build-workflow.test.ts)
+    expect(j).toMatch(/runner: ubuntu-24\.04/)
+    expect(j).toMatch(/runner: windows-2022/)
     expect(j).toMatch(/vitest run packages\/agent-host packages\/protocol packages\/common tooling\/launcher-/)
     // Added, not swapped: the app's own host still runs on the person's Node, 22 or later
     // (they pass no Node of their own: they take the setup action's default)

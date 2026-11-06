@@ -21,12 +21,17 @@
  *                                                        balanced by the measured times (`balance`)
  *   tsx tooling/os-tests.ts --macos --out <file>         the same for the macOS job's full run: those, and the tests that
  *                                                        make folders in the OS temp folder (`selectMacTests`)
+ *   tsx tooling/os-tests.ts --remote-node [--shard i/n] --out <file>
+ *                                                        every test the host's tests on the remote's Node run
+ *                                                        (`REMOTE_NODE_TESTS`), not only those that touch the OS; with
+ *                                                        --shard, balanced as above (the Windows job runs two shards)
  *   tsx tooling/os-tests.ts --offenders                  the checked files that touch the OS outside the layer
  *   tsx tooling/os-tests.ts --tighten                    takes off the allowlist every line the code no longer needs
  *                                                        (`pnpm os:tighten`); never adds one
  *   tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...
  *                                                        rewrites tooling/test-durations.json from the reports, for the
- *                                                        tests this checkout selects (`refreshDurations`)
+ *                                                        tests this checkout selects and the remote Node's (`timedTests`,
+ *                                                        `refreshDurations`)
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -39,6 +44,23 @@ import { baseCommit, renamesSince, type Rename } from './lint-allowlist.js'
 import { EVERY_OS_TESTS, OS_ALLOWLIST, inOsLayer, isChecked, isRepoApp, parseOsAllowlist } from './os-layer.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
+
+/**
+ * The tests of the job `host tests, remote Node` (build.yml): the host, its protocol and shared helpers, and the npm
+ * launcher's tests and the key-pairing vector's. A path prefix each, as the Linux job passes them to vitest, which
+ * tooling/build-workflow.test.ts holds equal to this list. The Windows job runs them in shards (`--remote-node --shard`).
+ */
+export const REMOTE_NODE_TESTS = ['packages/agent-host', 'packages/protocol', 'packages/common', 'tooling/launcher-', 'tooling/key-pairing-vector'] as const
+
+/** The tests of `all` that the remote Node's job runs: a path starting with one of `REMOTE_NODE_TESTS`, as vitest's filter reads it */
+export const remoteNodeTests = (all: readonly string[]): string[] => all.filter((t) => REMOTE_NODE_TESTS.some((p) => t.startsWith(p)))
+
+/**
+ * The files whose times `tooling/test-durations.json` holds: those the Windows unit shards run (`selected`) and those the
+ * remote Node's Windows shards run (`remoteNodeTests`). The two overlap; the unit shards alone left the rest (94 of 525) at the
+ * median, and the remote Node's shards, which split by these times too, 6.0 and 9.1 minutes apart.
+ */
+export const timedTests = (selected: readonly string[], all: readonly string[]): string[] => [...new Set([...selected, ...remoteNodeTests(all)])].sort()
 
 /** What a file says about the OS, and what it imports */
 export type Scan = {
@@ -274,8 +296,8 @@ export async function vitestFiles(listed?: string): Promise<string[]> {
 
 /**
  * Each test file's time on the Windows runner, in seconds, by repository path. Read by `balance`; rewritten by
- * `--refresh-durations` from the Windows shards' vitest JSON reports, which build.yml keeps as the
- * `windows-test-times-<shard>` artifacts of every run (docs/plans/os-layer.md §6.4).
+ * `--refresh-durations` from the Windows shards' vitest JSON reports (the unit shards' and the remote Node's), which build.yml keeps as
+ * the `windows-test-times-<shard>` and `windows-test-times-remote-node-<shard>` artifacts of every run (docs/plans/os-layer.md §6.4).
  */
 export const DURATIONS = 'tooling/test-durations.json'
 
@@ -512,18 +534,19 @@ async function main(argv: string[]) {
   if (argv.includes('--refresh-durations')) {
     const reports = argv.filter((a) => !a.startsWith('--'))
     if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
-    const tests = await repo.selectTests(await vitestFiles())
+    const all = await vitestFiles()
+    const tests = timedTests(await repo.selectTests(all), all)
     console.error(refreshDurationsFile(`${ROOT}${DURATIONS}`, reports, tests))
     return
   }
   const out = argv[argv.indexOf('--out') + 1]
-  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] | --offenders | --tighten | --refresh-durations <report>...')
+  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] [--macos | --remote-node] | --offenders | --tighten | --refresh-durations <report>...')
   const shardArg = argv.includes('--shard') ? argv[argv.indexOf('--shard') + 1] : undefined
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
   const all = await vitestFiles()
-  const picked = await (argv.includes('--macos') ? repo.selectMacTests(all) : repo.selectTests(all))
-  const why = argv.includes('--why')
+  const picked = argv.includes('--remote-node') ? remoteNodeTests(all) : await (argv.includes('--macos') ? repo.selectMacTests(all) : repo.selectTests(all))
+  const why = argv.includes('--why') && !argv.includes('--remote-node')
   if (shard) {
     const durations = readDurations()
     const lists = balance(picked, durations, Number(shard[2]))

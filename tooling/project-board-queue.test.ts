@@ -21,6 +21,8 @@ import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/ap
 // @ts-expect-error — plain .mjs of a Centralu app
 import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
+import { GitHubError, countsTowardLimit, isOutage } from '../.centralu/apps/project-board/github.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, PROJECT, LISTS, MECHANICAL_FILES, deadPid, ghCheck, green, ghRun, ghPr, type Gh, ghState, appRef, root, rt, IDLE_SERVER, runtime, call, patchGh, writes, ghCalls, filesNamed, queueOnDisk, notices, pollUntil, until, polls, stateOf, morePolls, itemsOnDisk, forgetApp } from './project-board-queue.test-helpers.js'
@@ -120,6 +122,35 @@ describe('what the merge queue decides for one poll', () => {
     expect(twice.reason.text).toContain('"windows tests" (job 12) failed twice')
     // Pushed again: the reruns belong to the old head, so the new head gets its own
     expect(decideCi({ item: after, pr: openPr({ headRefOid: SHA2 }), checks: failing, runs: [run('failure', 1, 901)], failures: timedOut(1, 901), defaultBranch: 'main', now: NOW, ref })).toMatchObject({ action: { type: 'rerun', runId: 901 } })
+  })
+
+  // 2026-11-05: GitHub began to write a limit as "20m0s", not "20 minutes". Runs 42041432265 and 42053421100 lost jobs to their limit
+  // (a windows test step, an apt install) and were reported "cancelled, with no failed job": the note was not read
+  it("reads GitHub's limit notes in both wordings, and says which step the limit ended: setup is the runner's, a test step is named", () => {
+    const job = (name: string, conclusion: string | null, extra: Record<string, unknown> = {}) => ({ id: name.length, name, conclusion, steps: [], notes: [], ...extra })
+    const cancelledRun = { id: 1, attempt: 1, conclusion: 'cancelled' }
+    const failedRun = { id: 1, attempt: 1, conclusion: 'failure' }
+    const ended = (name: string) => ({ steps: [{ name: 'Set up job', conclusion: 'success' }, { name, conclusion: 'cancelled' }] })
+    for (const note of ['The job has exceeded the maximum execution time of 20m0s', 'The job has exceeded the maximum execution time of 1h0m0s', 'The job has exceeded the maximum execution time of 20 minutes', 'The job has exceeded the maximum execution time of 1 minute']) {
+      expect(classifyRun(cancelledRun, [job('keeper e2e (linux)', 'cancelled', { ...ended('Install Linux system dependencies'), notes: [note, 'The operation was canceled.'] })]), note).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step: 'Install Linux system dependencies' })
+    }
+    // A step's own limit, in the new wording too
+    expect(classifyRun(failedRun, [job('keeper e2e (linux)', 'failure', { steps: [{ name: 'Install Linux system dependencies', conclusion: 'failure' }], notes: ["The action 'Install Linux system dependencies' has timed out after 8m0s."] })])).toMatchObject({ real: false, cause: 'timeout', inSetup: true })
+    // A test step: still not the commit's fault by itself (a rerun), but named, and not "cancelled with no failed job"
+    const hit = classifyRun(cancelledRun, [job('host tests, remote Node (windows-2022)', 'cancelled', { ...ended('pnpm test (host, protocol, launcher)'), notes: ['The job has exceeded the maximum execution time of 20m0s', 'The operation was canceled.'] })])
+    expect(hit).toMatchObject({ real: false, cause: 'timeout', inSetup: false, step: 'pnpm test (host, protocol, launcher)' })
+    // A run a newer push cancelled says only that
+    expect(classifyRun(cancelledRun, [job('host tests, remote Node (windows-2022)', 'cancelled', { ...ended('pnpm test (host, protocol, launcher)'), notes: ['The operation was canceled.'] })])).toMatchObject({ real: false, cause: 'cancelled', step: null })
+    // The queue: rerun once, the event names the step; the second time it is a timeout in that step, not "cancelled again"
+    const checks = checksOf([check('verify', 'success'), check('windows tests', 'cancelled', { jobId: '12' })])
+    const first = decideCi({ item: fresh(), pr: openPr(), checks, runs: [run('cancelled')], failures: { 900: hit }, defaultBranch: 'main', now: NOW, ref })
+    expect(first).toMatchObject({ action: { type: 'rerun', failedOnly: false } })
+    expect(first.event).toContain('in step "pnpm test (host, protocol, launcher)"')
+    const again = decideCi({ item: fresh({ reruns: first.patch.reruns }), pr: openPr(), checks, runs: [run('cancelled', 2)], failures: { 900: { ...hit, attempt: 2 } }, defaultBranch: 'main', now: NOW + 600_000, ref })
+    expect(again).toMatchObject({ state: 'attention', reason: { kind: 'timeout', job: { name: 'host tests, remote Node (windows-2022)' } } })
+    expect(again.reason.text).toContain('hit its time limit again')
+    expect(again.reason.text).toContain('in step "pnpm test (host, protocol, launcher)"')
+    expect(again.reason.text).not.toContain('cancelled')
   })
 
   // The owner, 2026-10-19: 19 reruns on the queue's first day, most of them a test failing the same way again
@@ -1844,6 +1875,61 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(notices()).toHaveLength(1)
     expect(notices()[0]!.text).toContain('#77 is not a pull request this GitHub login can see')
     expect(writes()).toEqual([])
+  })
+
+  // 2026-11-06 (#1993): one check-runs read answered HTTP 500 three polls running, and the item went to attention
+  // "could not be read or acted on 3 times in a row", though the same read answered fine moments later
+  it('pauses and backs off on GitHub answering HTTP 500, and never counts it against the item', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    patchGh((s) => (s.checksError = 'HTTP 500: Internal Server Error (https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1)'))
+    const q = await until((x) => x.pause?.kind === 'outage', 'the pause')
+    expect(q.queue[0].state).not.toBe('attention')
+    expect(q.queue[0].errors ?? 0).toBe(0)
+    const before = ghCalls().length
+    await polls(6)
+    // Paused: nothing asked of GitHub for a while, so three failures cannot pile up
+    expect(ghCalls().length).toBe(before)
+    expect((await call('merge_queue')).text).toMatch(/Paused until \d\d:\d\d:\d\d UTC: GitHub answered repos\/ijun17\/centralu\/commits\/c0ffee0000000000000000000000000000000000\/check-runs with: HTTP 500/)
+    expect(notices()).toHaveLength(0)
+    expect(writes()).toEqual([])
+  })
+
+  // The queue pauses for each outage (1, 2, 4, 8, 15 minutes); a clock that steps 20 minutes a poll is past each pause at the next one
+  it('tells the session once after a 5xx that one pull request meets every time, six pauses running, not before', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }), { PROJECT_BOARD_QUEUE_STEP_MS: String(20 * 60_000) })
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    patchGh((s) => (s.checksError = 'HTTP 502: Bad Gateway (https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1)'))
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('error')
+    // Six polls failed with the 5xx, none was a strike before: not "3 times in a row"
+    expect(q.queue[0].reason.text).toContain('could not be read or acted on 6 times in a row')
+    await morePolls()
+    expect(notices()).toHaveLength(1)
+  })
+
+  // A 4xx stays the item's strike: three of them reach attention ('tells the session once when it can no longer read a queued pull request, after three tries')
+  it('reads an outage from what GitHub answered, not from the item: a 5xx, a dropped connection and what FATAL names, never a 4xx', () => {
+    const e = (kind: string, opts: object = {}) => new GitHubError(kind, 'x', opts)
+    expect(isOutage(e('github', { status: 500 }))).toBe(true)
+    expect(isOutage(e('github', { status: 503 }))).toBe(true)
+    // A dropped connection (gh's "EOF") on a write, but not a refusal that printed no status: GraphQL's words for `gh pr ready` carry none
+    expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: Post "https://api.github.com/graphql": EOF', { lost: true }))).toBe(true)
+    // A read whose answer never came is the item's strike, as it was: the merge's read-back test above retries it on the next poll
+    expect(isOutage(new GitHubError('github', 'Get "https://api.github.com/x": EOF', { status: 0 }))).toBe(false)
+    expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: GraphQL: Pull request is not ready (convertPullRequestToDraft)', { lost: true }))).toBe(false)
+    for (const kind of ['network', 'rate', 'auth', 'gh-missing']) expect(isOutage(e(kind))).toBe(true)
+    for (const status of [0, 404, 409, 422]) expect(isOutage(e('github', { status })), String(status)).toBe(false)
+    expect(isOutage(e('not-found', { status: 404 }))).toBe(false)
+    expect(isOutage(new Error('boom'))).toBe(false)
+  })
+
+  // Which outages count toward an item's limit (review of #2017: a dropped answer on one item paused the queue for ever, since only a 5xx counted)
+  it("counts a 5xx and a dropped answer toward an item's own limit, and never what FATAL names", () => {
+    const dropped = new GitHubError('github', 'GitHub refused to start ci.yml: Post "https://api.github.com/x": EOF', { lost: true })
+    expect(isOutage(dropped) && countsTowardLimit(dropped)).toBe(true)
+    expect(countsTowardLimit(new GitHubError('github', 'x', { status: 503 }))).toBe(true)
+    for (const kind of ['network', 'rate', 'auth', 'gh-missing']) expect(countsTowardLimit(new GitHubError(kind, 'x')), kind).toBe(false)
   })
 
   it('closes no lower when the top is found merged into another branch than main', async () => {

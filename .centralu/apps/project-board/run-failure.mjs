@@ -73,9 +73,12 @@ export const isSetupStep = (name, notes = '', log = '') =>
   SETUP_STEP.some((re) => re.test(String(name ?? ''))) ||
   (INSTALL_STEP.test(String(name ?? '')) && FETCH_NOTE.test(`${notes}\n${log}`)) ||
   (BUNDLE_STEP.test(String(name ?? '')) && /failed to bundle project:/i.test(log) && looksLikeNetworkError(log))
-// GitHub's own words only: a test's own "timed out in 5000ms" is a test failure
-const JOB_LIMIT_NOTE = /has exceeded the maximum execution time of \d+ minutes/i
-const STEP_LIMIT_NOTE = /The action '(.*)' has timed out after \d+ minutes/gi
+// GitHub's own words only: a test's own "timed out in 5000ms" is a test failure. GitHub wrote the limit as "20 minutes" and
+// writes it as "20m0s" now (2026-11-05, runs 42041432265 and 42053421100): the old pattern read neither of those runs' notes,
+// so jobs that hit their limit were reported "cancelled, with no failed job". Both forms are read.
+const LIMIT = String.raw`(?:\d+ minutes?|(?:\d+h)?\d+m(?:\d+s)?)`
+const JOB_LIMIT_NOTE = new RegExp(String.raw`has exceeded the maximum execution time of ${LIMIT}`, 'i')
+const STEP_LIMIT_NOTE = new RegExp(String.raw`The action '(.*)' has timed out after ${LIMIT}`, 'gi')
 /** What GitHub writes on a job whose runner went away. */
 const SHUTDOWN_NOTE = /runner has received a shutdown signal/i
 export const LOST_RUNNER_NOTE = /lost communication with the server|runner has received a shutdown signal|hosted runner encountered an error|runner .{0,80}(?:did not connect|is offline|was lost|has been deprovisioned)/i
@@ -117,7 +120,7 @@ export function onFlakyList(name, list = []) {
  * Why one job did not pass, or null when it did (or has not finished). `job`: `{ name, conclusion,
  * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
  * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
- * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout` (`inSetup`, with its `step`, when the step the limit ended set the job up, #1503),
+ * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout` (with the `step` the limit ended, and `inSetup` when that step set the job up, #1503),
  * `runner`, `setup` (its first failed step set the job up, #1435), `storage` (its first failed step only stored results), `flaky` or `cancelled`.
  */
 export function jobFailure(job, { flaky = [] } = {}) {
@@ -134,7 +137,8 @@ export function jobFailure(job, { flaky = [] } = {}) {
   const stepLimit = limitedSteps.length > 0 && (!(job.steps ?? []).length || (ended != null && limitedSteps.includes(ended.name)))
   if (job.conclusion === 'timed_out' || JOB_LIMIT_NOTE.test(notes) || stepLimit) {
     if (ended && isSetupStep(ended.name, notes)) return { real: false, cause: 'timeout', step: ended.name, inSetup: true }
-    return { real: false, cause: 'timeout' }
+    // A limit in a step that does the work (a test, a build) is named too: "cancelled, with no failed job" is what a newer run's cancel says, and a hang or a slow suite is the commit's to look at
+    return { real: false, cause: 'timeout', ...(ended ? { step: ended.name } : {}) }
   }
   // `shutdown`: the runner was stopped under the job. A lost connection is the network's; a shutdown can be a commit that exhausted the runner's memory or disk (the main guard hunts the second time)
   if (LOST_RUNNER_NOTE.test(notes)) return { real: false, cause: 'runner', ...(SHUTDOWN_NOTE.test(notes) ? { shutdown: true } : {}) }

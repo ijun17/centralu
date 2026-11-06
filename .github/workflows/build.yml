@@ -209,20 +209,28 @@ jobs:
         # be clever. patchelf and libfuse2 are not Tauri dependencies but AppImage tooling
         # ones: linuxdeploy rewrites rpaths with patchelf, and is itself distributed as an
         # AppImage, so it needs FUSE to run.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            xdg-utils \
+        #
+        # Not a bare `sudo apt-get install` (2026-11-05, #1603): the mirror stalled for the whole 20 minutes of a job's limit,
+        # twice. The action puts the .deb files of an earlier run of this runner image back first (a cache), limits each try
+        # and tries twice (.github/scripts/apt-install.sh), and the step has a limit of its own, so a stuck mirror fails this
+        # step in under 9 minutes and the merge queue reads it as setup (an install step that fails or times out,
+        # .centralu/apps/project-board/run-failure.mjs), not as a job cancelled with no failed job.
+        timeout-minutes: 9
+        uses: ./.github/actions/apt-packages
+        with:
+          key: bundle
+          packages: >-
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+            patchelf
+            xdg-utils
             libfuse2
 
       # The host sidecar targets node22 (packages/agent-host/scripts/bundle.mjs), and
@@ -1067,8 +1075,15 @@ jobs:
   # The host, its protocol and shared helpers, and the npm launcher, which is what a remote runs. Linux and Windows,
   # the two systems the installer serves. The version comes from the pin itself, so moving the pin
   # (scripts/node-pin.mjs --set) moves this job with it; tooling/node-pin.test.ts holds the two together.
+  #
+  # Windows in two shards (2026-11-06). The 524 test files took 13.2 to 17.9 minutes of `pnpm test` there, and 18.3 to 18.6
+  # (the job's limit, 20, with its 1.5 to 2 minutes of setup) in 18 of the 34 runs of main from 2026-11-04 02:31 to 2026-11-05 14:19: a job
+  # at its limit is cancelled, and the queue read that as "cancelled, with no failed job" and reran a whole hour of runners. Split by
+  # each file's measured time as `windows-tests-unit` is (`tooling/os-tests.ts --remote-node --shard`, tooling/test-durations.json; a
+  # file with no time weighs the median), so each shard takes about half. Linux, which runs the whole set in one job, is the
+  # other row.
   host-tests-remote-node:
-    name: host tests, remote Node (${{ matrix.runner }})
+    name: host tests, remote Node (${{ matrix.label }})
     needs: changes
     if: needs.changes.outputs.host_tests == 'true'
     runs-on: ${{ matrix.runner }}
@@ -1076,7 +1091,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, windows-2022]
+        include:
+          - label: ubuntu-24.04
+            runner: ubuntu-24.04
+            shard: 1
+            shards: 1
+          - label: windows-2022 1/2
+            runner: windows-2022
+            shard: 1
+            shards: 2
+          - label: windows-2022 2/2
+            runner: windows-2022
+            shard: 2
+            shards: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1100,22 +1127,43 @@ jobs:
           echo "node $have (pinned ${{ steps.pin.outputs.node }})"
           [ "$have" = "${{ steps.pin.outputs.node }}" ] || { echo "::error::the tests would run on Node $have, not the pinned ${{ steps.pin.outputs.node }}"; exit 1; }
 
+      # A sharded row's half of them (vitest.config.ts `CC_TEST_FILES`); an unsharded row runs them all
+      - name: Pick this shard's tests
+        if: matrix.shards > 1
+        shell: bash
+        run: pnpm exec tsx tooling/os-tests.ts --remote-node --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/remote-node-tests.txt"
+
       - name: pnpm test (host, protocol, launcher)
         shell: bash
         env:
           # Never the real data folder, on any OS (AGENTS.md)
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
-        # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto
-        run: pnpm exec vitest run packages/agent-host packages/protocol packages/common tooling/launcher- tooling/key-pairing-vector
+          # The shard's list, above; empty for the row that runs them all
+          CC_TEST_FILES: ${{ matrix.shards > 1 && format('{0}/remote-node-tests.txt', runner.temp) || '' }}
+        # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto. The list in os-tests.ts
+        # (`REMOTE_NODE_TESTS`) is these same five.
+        # The JSON report is each file's time on this runner: the Windows shards keep it (below), and it refreshes
+        # tooling/test-durations.json with the files only this job runs (.github/workflows/test-durations.yml).
+        run: pnpm exec vitest run packages/agent-host packages/protocol packages/common tooling/launcher- tooling/key-pairing-vector --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
+
+      # Only the sharded rows: the Linux row's times are not the Windows runner's, which the split is made for
+      - name: Upload the test times
+        if: ${{ !cancelled() && matrix.shards > 1 }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-times-remote-node-${{ matrix.shard }}
+          path: ${{ runner.temp }}/vitest-times.json
+          retention-days: 30
+          if-no-files-found: warn
 
   host-tests-remote-node-skipped:
-    name: host tests, remote Node (${{ matrix.runner }})
+    name: host tests, remote Node (${{ matrix.label }})
     needs: changes
     if: needs.changes.outputs.host_tests == 'false'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runner: [ubuntu-24.04, windows-2022]
+        label: [ubuntu-24.04, windows-2022 1/2, windows-2022 2/2]
     steps:
       - run: echo "Nothing these tests run changed (.github/scripts/ci-changes.mjs)"
 
@@ -1227,18 +1275,21 @@ jobs:
       - name: Point CC_DATA_DIR at a temporary folder
         run: echo "CC_DATA_DIR=$RUNNER_TEMP/centralu-data" >> "$GITHUB_ENV"
 
+      # As the bundle job's: cached .deb files, each try limited, one retry, and the step limited (the apt-packages action)
       - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
+        timeout-minutes: 9
+        uses: ./.github/actions/apt-packages
+        with:
+          key: keeper-linux
+          packages: >-
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
             librsvg2-dev
 
       - uses: ./.github/actions/setup

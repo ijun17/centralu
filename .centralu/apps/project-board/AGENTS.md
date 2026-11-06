@@ -319,8 +319,13 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   built, at that attempt; otherwise as any cancelled run (a failed job in it is still real).
 - **Infrastructure** (rerun once per head): a run or job cancelled with no failed job; a job that hit
   its timeout (conclusion `timed_out`, or GitHub's "has exceeded the maximum execution time of N
-  minutes" / "The action '…' has timed out after N minutes"; a test's own "timed out in 5000ms" is a
-  test failure); a lost runner ("lost communication with the server", "received a shutdown signal"; a shutdown
+  minutes" / "The action '…' has timed out after N minutes", or since 2026-11-05 "of 20m0s" / "after 3m0s",
+  both read: runs 42041432265 and 42053421100 lost jobs to their limit and were reported "cancelled, with no
+  failed job" because the new wording matched nothing; a test's own "timed out in 5000ms" is a
+  test failure). The timeout names the step the limit ended (`step`, `inSetup` when it set the job up): the
+  first time the run is rerun once and the event names the step, the second time the attention is kind `timeout`,
+  "hit its time limit again … in step X" (a step that sets the job up: the runner or a package source was slow; any
+  other: a hang or a slow suite), where a run a newer push or a person cancelled stays kind `cancelled`; a lost runner ("lost communication with the server", "received a shutdown signal"; a shutdown
   leaves no such note on the job, only "The operation was canceled." and a failed step, so for a job with that
   note alone `jobNotes` reads the log for the line `##[error]The runner has received a shutdown signal`, #1507;
   `cleanLog` ends a log at that line, so a test the shutdown cut short is never quoted as the first failure. Only
@@ -336,6 +341,17 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   a `Build bundle` step whose log line is tauri's ``failed to bundle project: `http status: 5xx` `` (or its timeout, host-not-found or lost-connection wording) for a tool it downloads, cause `setup` (#2004: AppRun answered 504; `isFetchStep`, whose log line the queue and the main guard read, as for `pnpm install`);
   a failed job on `project.json` `queue.flakyJobs` (exact names, `*` for any characters). A real
   failure beside any of these makes the run real.
+- **An outage is not a strike against the item** (2026-11-06: #1993 went to attention `error` after three HTTP 500s from one
+  `check-runs` read that answered fine moments later). `GitHubError` carries the HTTP `status` gh printed, and
+  `isOutage` (github.mjs) is what `FATAL` names (network, rate, auth, gh missing), a 5xx, or a write whose connection dropped
+  with no answer (`lost` with gh's "EOF", and no status: a refusal in GraphQL's words, `gh pr ready`, carries none and stays a
+  refusal). A poll or a batch step that fails so pauses the whole queue with a growing wait (kind `outage` for a 5xx) and
+  adds nothing to the item's `errors`; a 4xx (a pull request gone, a refused write, 404 or 422) still counts, and three in a
+  row still go to attention `error`. A 5xx or a dropped answer that one item meets every time (a poll that goes through starts the count over; not what `FATAL` names:
+  no network, no login, a rate limit and no gh are the machine's and pause for as long as they last)
+  is counted apart (`outages`) and goes to attention after `OUTAGE_LIMIT` (6) of them, about 45 minutes of pauses, so one
+  item's broken read cannot hold the whole queue for ever. A batch counts the same. The inner places that read a refusal (a
+  refused rerun, a refused dispatch) are unchanged.
 - **The contract with CI** (two sessions built the two sides at once): in a full-tier run, when the
   `verify` job fails, CI cancels the rest of that run at once (fail fast). The queue therefore never
   reads a run's conclusion alone: a `cancelled` run with a failed job is a failure.
