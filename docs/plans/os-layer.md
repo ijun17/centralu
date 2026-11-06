@@ -403,6 +403,8 @@ file refused", which is not what Node does: it opens files with share-delete):
 | open a folder: to read; to write | allowed, it reads as `EISDIR`; allowed | allowed, it reads as `EISDIR`; `EISDIR` |
 | copy a tree into itself (`cpSync`), as written, through a link in the target's parents, or through another name that is no link (a share to the same disk, `\\localhost\C$\…`; a bind mount) | `ERR_FS_CP_EINVAL` | the same |
 | `copyFile`: the copy's change time | the source's (CopyFile) | now (macOS too, measured on APFS) |
+| `chmod`, `utimes` / `fchmod`: the file's change time (`ctimeMs`) | now / kept as it was | now / now (POSIX's chmod, fchmod and utimensat) |
+| a link on PATH that leads nowhere: `tools.find` / `tools.resolve`, a batch shim's target | there (the name is, `presentOnWindows`: an App Execution Alias) / not there | not there / the command as written |
 | a junction | absolute (a relative target read from its folder); a link to `lstat` and the listing; one to a file leads nowhere (`ENOENT`) | — |
 | `realpathSync.native` / `realpathSync` | the case stored / the case given | the same |
 | `child.kill()` / `taskkill /F` / `process.kill(pid)` | exit `null, SIGTERM` / `1, null` / `1, null` | exit `null, SIGTERM` / — / `null, SIGTERM` |

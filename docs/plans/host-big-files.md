@@ -69,6 +69,12 @@ Windows (`presentOnWindows`), so a test on the fake finds a tool real does not. 
 `utimes` do not. Both are a fake that disagrees with the real thing, so a fix is a contract case that fails on the
 fake and passes on real, then the fix (its own pull request, §5, PR 5).
 
+Fixed so, with two cases at the end of the contract. What the real OS does was narrower than the audit said: only
+`tools.find` (and the find inside `tools.program`) counts a link that leads nowhere on Windows; `tools.resolve` and a
+batch shim's target use plain `existsSync` on every OS (`tool-launch.ts`), so the fake was wrong on Windows too. And
+`fchmod` on Windows leaves the change time as it was (measured on Windows 11 with Node 22, where `chmod` and `utimes`
+move it), so the fake's `fchmod` was right there and wrong on POSIX only.
+
 **Split (after the deletions):** `memory-types.ts` (types, constants, `fsError`), `memory-clock.ts`, `memory-tree.ts`,
 `memory-ops.ts`, `memory-fds.ts`, `memory-env.ts`, `memory-processes.ts` (432 lines, ordering of `setImmediate`
 ticks, `exit` before `close`, the TERM/KILL grace: moved last and byte-identical), and a `memory.ts` facade of about
