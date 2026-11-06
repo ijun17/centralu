@@ -244,6 +244,11 @@ So that the removal deletes the switch instead of leaving two paths:
   on: a keeper that holds children and whose host says `stopsForUpdate` never hands them on; asked to switch, it stops for
   an update and exits, and the window starts a keeper of its own build. It hands a child table on only while its host
   cannot stop for an update (an earlier build's host after a failed swap, or a host not up), and logs that.
+  Whether the host can is what it said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not
+  pass `host_stops_for_update` on (`handoff/mod.rs`, the received state): a keeper that took children over with a host it
+  adopted reads "cannot" until a new host starts. The transition's switch starts one (its swap), so that keeper stops
+  instead at its next switch; after a handoff without a swap it hands the children on again at its next switch, and
+  "Apply now" holds through the relaunch as with an earlier keeper, until its host restarts.
 - **Step 4 and a handed child table: refused, not received.** Choice between keeping a path that receives a child table
   and stops it for N releases, or refusing such a handoff. Refused, from PR 2 on, because:
   1. After PR 3 no window sends `switch`, and a window names only its own build's keeper, so no keeper of PR 3 or later is
