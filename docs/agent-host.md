@@ -2110,9 +2110,10 @@ Implementation rules:
   going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. It says so before the host is marked as leaving, so the
   end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
   no process when the time comes ends the same way. Known gap: a hard crash of the host during the wait leaves a kept Codex
-  session `working` (the next host adopts an idle process; #2020). Known gap: a hub's `ask_project` task marks its depth for the input
-  (`hub_ask_depth:`), and Codex fails the tracked input when the turn fails, before the host sees the error, which takes the
-  mark down; the continued turn then runs at depth 0 (#2015). **Claude** is not covered: its CLI retries a 529 itself
+  session `working` (the next host adopts an idle process; #2020). **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
+  fails, before the host sees the error: the failure takes the mark down only when no retry stands once the error was seen
+  (`OverloadRetry.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
+  tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
