@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -7,6 +7,7 @@ import { tempRoot } from '../temp-dir.test-helpers.js'
 import { FakeAdapter, FakeHandle, projectDirs } from './manager.test-helpers.js'
 import { FakeProcess } from './kept-host.test-helpers.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { THEN_SETTLE_MS } from './self-compaction.js'
 
 /**
  * A `compact_self` with a `then` across a host swap and a restart (#2024). Two session managers over one store, as the swap tests do
@@ -25,8 +26,12 @@ const dir = projectDirs()
 beforeEach(() => {
   store = new Store()
   events = []
+  // The moment a step waits after the compact turn ended is moved by hand
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
 })
+const settle = () => vi.advanceTimersByTimeAsync(THEN_SETTLE_MS + 1)
 afterEach(async () => {
+  vi.useRealTimers()
   for (const m of hosts.splice(0)) await m.disposeAll()
   store.close()
 })
@@ -77,11 +82,17 @@ describe('compact_self then across a host swap (#2024)', () => {
     await a.mgr.detachAll()
     // The kept compact turn ends after the old host let go: it must not act on it
     h.finishTurn()
+    await settle()
     expect(stepsSentTo(h)).toEqual([])
 
     const b = host(new Set([id]))
     await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
     const next = lastHandle(b)
+    // The adopted process is still in the compact turn: the step is not put into it, and follows its end
+    await settle()
+    expect(stepsSentTo(next)).toEqual([])
+    next.finishTurn()
+    await settle()
     await expect.poll(() => stepsSentTo(next)).toHaveLength(1)
     expect(next.origins[next.sent.findIndex((t) => t.includes(STEP))]).toEqual({ kind: 'channel', server: 'centralu' })
     expect(next.sent.find((t) => t.includes(STEP))).toMatch(/The compaction you asked for with compact_self is done/)
@@ -94,7 +105,7 @@ describe('compact_self then across a host swap (#2024)', () => {
     expect(stepsSentTo(next)).toHaveLength(1)
   })
 
-  it('tells the session, with the text of its step, when the swap came before the compaction was known done', async () => {
+  it('tells a kept process that is in a turn, quietly and with the text of its step, when the swap came before the compaction was known done', async () => {
     for (const until of ['asked', 'sent'] as const) {
       const a = host()
       const { id } = await asking(a, until)
@@ -130,18 +141,27 @@ describe('compact_self then across a host swap (#2024)', () => {
     const now = Date.now()
     store.settings.setAppSetting(`compact_cycles:${id}`, JSON.stringify([1, 2, 3, 4, 5, 6].map((n) => now - n * 60_000)))
     h.finishTurn()
+    await settle()
     await expect.poll(() => warned).toEqual([[id, 7]])
     expect(stepsSentTo(h)).toHaveLength(1)
   })
 
-  it('keeps a note for the session in the store until its tool can take it', async () => {
-    const a = host()
-    const { id } = await asking(a, 'asked')
-    await a.mgr.detachAll()
-    // The restarted host has no process for it and no wake is made for a note: it waits in the store
-    const b = host()
-    b.mgr.startSelfCompaction()
-    expect(JSON.parse(store.settings.appSetting(`compact_notes:${id}`)!)).toEqual([expect.stringContaining(STEP)])
-    expect(store.settings.appSetting(`compact_then:${id}`)).toBeNull()
+  it('wakes a session with no process with a turn that carries its step, when the restart came before the compaction was known done', async () => {
+    for (const until of ['asked', 'sent'] as const) {
+      const a = host()
+      const { id } = await asking(a, until)
+      await a.mgr.detachAll()
+      // The restarted host has no process for it: the note is a turn that wakes it, not a note that waits in the store for someone to type
+      const b = host()
+      b.mgr.startSelfCompaction()
+      await expect.poll(() => (b.claude.last ? b.claude.last.sent.length : 0)).toBe(1)
+      const woken = lastHandle(b)
+      expect(woken.sent[0], until).toContain(STEP)
+      expect(woken.sent[0], until).toMatch(/changed hosts/)
+      expect(woken.origins[0], until).toEqual({ kind: 'channel', server: 'centralu' })
+      expect(store.settings.appSetting(`compact_notes:${id}`), until).toBeNull()
+      expect(store.settings.appSetting(`compact_then:${id}`), until).toBeNull()
+      expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /changed hosts.*the agent was woken with its next step/.test(e.text)), until).toBe(true)
+    }
   })
 })

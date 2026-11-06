@@ -174,7 +174,7 @@ export const WARNING_TEXT = {
   host: (turns: number) =>
     `Mail between sessions started ${turns} turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.`,
   compactCycles: (session: string, cycles: number) =>
-    `${session} compacted its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
+    `${session} asked to compact its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
 } as const
 
 /** The text of a task written for a report mark an earlier build left with no task (§9.5) */

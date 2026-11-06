@@ -553,6 +553,7 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       idle: (id) => this.sessionIdle(id),
       running: (id) => this.handles.has(id),
+      ready: (id) => this.mailReceiver(id).kind === 'ready',
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
       command: (id, tool, focus) => {
@@ -563,7 +564,7 @@ export class SessionManager {
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
       sendThen: (id, text) =>
-        this.events.deliverMail(id, { text, quiet: false, line: 'Centralu sent the agent its next step after the compaction', label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => true }),
+        this.events.deliverMail(id, { text, quiet: false, line: 'Centralu sent the agent its next step after the compaction', label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }),
       keep: settingThenKeep(this.store.settings),
       warnCycles: (id, count) => this.mailHooks?.compactCycles?.(id, count),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,

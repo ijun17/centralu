@@ -23,10 +23,13 @@ const HOUR_MS = 60 * 60_000
 
 /** A stored step reads as null when it is not one (never written, cleared, or a shape this build does not know) */
 const Stored = z.object({
-  stage: z.enum(['asked', 'sent', 'compacted', 'sending']),
+  stage: z.enum(['asked', 'sent', 'compacted', 'refused', 'sending']),
   then: z.string(),
   focusAside: z.string().nullable().catch(null),
   ahead: z.boolean().catch(false),
+  why: z.string().nullable().catch(null),
+  // A record without one reads as left long ago
+  at: z.number().catch(0),
 })
 const Notes = z.array(z.string())
 const Times = z.array(z.number())
@@ -42,7 +45,7 @@ export function settingThenKeep(settings: ThenSettings): ThenKeep {
       let won = false
       settings.updateAppSetting(thenKey(id), (current) => {
         const record = readStep(current)
-        if (record?.stage !== 'compacted') return current ?? ''
+        if (record?.stage !== 'compacted' && record?.stage !== 'refused') return current ?? ''
         won = true
         return JSON.stringify({ ...record, stage: 'sending' })
       })

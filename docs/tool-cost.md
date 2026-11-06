@@ -975,11 +975,13 @@ contexts over 300k tokens were 64% of the cost); the tool's own cost is a few do
 
 **`then` (#2024, owner decision 2026-11-06).** A new optional argument, the agent's own next step, sent as its next turn once the compaction is
 done (docs/agent-host.md "Going on after the compaction"). Counted from the definition the way the rest of this section is (`sentChars`, the name,
-description and the schema as the tool sends them): **453 → 579 characters, +126** (`COMPACT_BUDGET_CHARS` 460 → 580). The argument is 126
-characters because its words are the instruction: the call carries the next step, and the turn must end after it. The description of the tool
-itself did not change. The ceilings move by the same 120: the reader seat's Claude resident ceiling 3,310 → 3,430 (measured 3,428), its Codex
-ceiling the same (measured 6,381 against 6,400), and the orchestrator's 10,170 → 10,760 (measured 10,693 on Claude, 10,751 on Codex). At the section's
-estimate of about 4 characters a token that is **about 32 more tokens in every request of an ordinary session and of the orchestrator** (computed from
+description and the schema as the tool sends them): **453 → 606 characters, +153** (`COMPACT_BUDGET_CHARS` 460 → 610). The argument is 153
+characters because its words are the instruction: the call carries the next step, the turn must end after it, and a refusal still brings the step with
+the reason ("or with the reason if not", 27 of them, added by the review of the first version, where a refused request left the session stalled). The
+description of the tool itself did not change. The ceilings move by the same 150, which they take from `COMPACT_BUDGET_CHARS`: the reader seat's Claude
+resident ceiling 3,310 → 3,460, its Codex ceiling the same, and the orchestrator's 10,170 → 10,790 (the first version measured 3,428 and 6,381 on Claude and
+Codex for the reader and 10,693 and 10,751 for the orchestrator at +126; these move by +27, computed, not measured again). At the section's
+estimate of about 4 characters a token that is **about 38 more tokens in every request of an ordinary session and of the orchestrator** (computed from
 the characters, not measured live). The context notice (`context-nudges.ts`) gained about 60 characters, sent once per share per compaction cycle,
 not per request. Not measured live: tokens through `pnpm measure:tools --live`, and how often a model sets `then` and ends its turn after the notice; the
 one live run of the whole path is in the pull request.

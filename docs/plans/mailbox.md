@@ -225,11 +225,11 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     and nothing waits for it. The figures are the ones the old guards used: on the owner's store the loop holds never
     caught a loop, and the only held rows were 5 `budget` rows from normal status checks between two sessions.
   - **A session that keeps compacting (#2024).** The same warning, by the same path, for a session that went through more than
-    `WARN_COMPACT_CYCLES_PER_HOUR = 6` cycles of `compact_self` with `then` (the compaction done and its next step sent) in an hour: one notice in the
+    `WARN_COMPACT_CYCLES_PER_HOUR = 6` cycles of `compact_self` with `then` (its next step sent after the compaction, or after a refusal that said why) in an hour: one notice in the
     Inbox naming the session and the count (`facts.compactCycles`, S20), at most once per clock hour per session (`compactcycles:` key). The session
     keeps working; nothing is held, refused or delayed for it. The cycles are counted in the store (`compact_cycles:<session>`), so a swap does not
-    start the count again. The 100,000-token floor already drops a `then` turn that asks again at once, so a count past 6 means real work grew the
-    context back each time.
+    start the count again. A request the floor refuses still sends its `then` (with the reason), so an agent that asks again at once loops without compacting: this
+    warning is the only bound on it, and a count past 6 is either that or real work that grew the context back each time.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
   - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
@@ -1963,7 +1963,7 @@ names. Each call is written in its version-2 form; a version-1 process is told t
 | S17 | `rollback_machine`'s and `machines.rollback`'s refusal across the mail switch (D28); person-visible too, so Q2 | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
 | S18 | The warning to the person about a pair (D32), in the Inbox, key `pairturns:` | `<name> and <name> started <n> turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.` |
 | S19 | The warning to the person about the host (D32), in the Inbox, key `hostcap:` | `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` |
-| S20 | The warning to the person about a session that keeps compacting (D32, #2024), in the Inbox, key `compactcycles:` | `<name> compacted its conversation and went on to its next step <n> times in the last hour. It keeps working: look at it if that is more than you expect.` |
+| S20 | The warning to the person about a session that keeps compacting (D32, #2024), in the Inbox, key `compactcycles:` | `<name> asked to compact its conversation and went on to its next step <n> times in the last hour. It keeps working: look at it if that is more than you expect.` |
 
 ## 16. Slices
 

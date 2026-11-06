@@ -21,7 +21,7 @@ describe('compact cycles warning (#2024)', () => {
     const told = warnings()
     expect(told).toHaveLength(1)
     expect(told[0]?.facts.compactCycles).toEqual({ session: at('a'), count: 7 })
-    expect(told[0]?.body).toBe('alpha compacted its conversation and went on to its next step 7 times in the last hour. It keeps working: look at it if that is more than you expect.')
+    expect(told[0]?.body).toBe('alpha asked to compact its conversation and went on to its next step 7 times in the last hour. It keeps working: look at it if that is more than you expect.')
     expect(told[0]?.dedupeKey).toBe(`compactcycles:${at('a')}:${Math.floor(world.clock.t / HOUR_MS) * HOUR_MS}`)
     // For the person only, and no session is woken for it
     expect(world.store.mailbox.recipients(told[0]?.id ?? '').map((r) => r.recipient)).toEqual([PERSON])
