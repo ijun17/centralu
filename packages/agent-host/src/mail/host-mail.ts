@@ -77,7 +77,7 @@ export type HostMail = {
   turns: MailTurns
   delivery: MailDelivery
   tool: MailTool
-  /** What the manager hears through `useMail` */
+  /** What the manager hears through `mgr.mail.useMail` */
   hooks: MailHooks
   /**
    * The step after the host's ready line (§6.3, §9.5), before delivery starts: the thread mail an older build left pending moves, then the report
