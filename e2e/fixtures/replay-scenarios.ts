@@ -105,13 +105,14 @@ export type Replay = {
   shows?(page: Page, held: Held, seen: Seen): Promise<void>
 }
 
-/** The words of `s` as a person reads them: the marks of Markdown (a heading's hashes, a bullet, a code fence, a table's rule and bars, emphasis) are not words */
+/** The words of `s` as a person reads them: the marks of Markdown (a heading's hashes, a bullet or a list's number, a code fence, a table's rule and bars, emphasis, a link's address) are not words */
 const text = (s: string) =>
   s
     .replace(/^```.*$/gm, '')
     .replace(/^[\s:|-]*-{3,}[\s:|-]*$/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[|`*]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -341,6 +342,45 @@ export const REPLAYS: Replay[] = [
     },
   },
   { tool: 'claude', scenario: 'powershell' },
+  {
+    tool: 'claude',
+    scenario: 'centralu-agent',
+    // A recording made through a host: its tools were served by one, and the replay host stands in with tools that answer a success
+    async shows(page) {
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent'])
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'centralu-ask',
+    // A recording made through a host: its tools were served by one, and the replay host stands in with tools that answer a success
+    async shows(page) {
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Asked frames-record-other'])
+      expect(await page.getByTestId('ask-project-status').allInnerTexts()).toEqual(['answered'])
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'centralu-failed',
+    // A recording made through a host: its tools were served by one, and the replay host stands in with tools that answer a success
+    async shows(page, _held, seen) {
+      // The call the host refused is counted failed on its line, and the turn goes on to say so
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Read a session'])
+      expect(seen.folds).toEqual(['1 tool 1 failed'])
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'centralu-session',
+    // A recording made through a host: its tools were served by one, and the replay host stands in with tools that answer a success
+    async shows(page) {
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent', 'Sent more to an agent'])
+    },
+  },
+  { tool: 'claude', scenario: 'mcp-call' },
+  { tool: 'claude', scenario: 'thinking' },
+  { tool: 'claude', scenario: 'todo' },
+  { tool: 'claude', scenario: 'web' },
   { tool: 'claude', scenario: 'question' },
   { tool: 'claude', scenario: 'subagent' },
   {

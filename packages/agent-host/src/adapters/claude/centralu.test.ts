@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { AgentSpawnSpec, OrchestratorTools } from '../contract.js'
+import type { AgentSpawnSpec } from '../contract.js'
 import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder } from '../frames/replay.test-helpers.js'
-import { fakeCentraluTools } from '../frames/fakes.test-helpers.js'
+import { notingCentraluTools, type Handed } from '../frames/fakes.test-helpers.js'
 import { drive, type Scenario } from '../frames/scenarios.test-helpers.js'
 import { centraluInputId } from '../input-receipts.js'
 import { CLAUDE_CENTRALU_SCENARIOS } from './centralu-scenarios.test-helpers.js'
@@ -18,22 +18,6 @@ import { CLAUDE_RECORDINGS, recordedVersion } from './recorded.test-helpers.js'
  * arguments the CLI's call carried, through the adapter's MCP server and `runOrchestratorTool`), so a call that never reached its
  * tool, or reached it with other arguments, fails.
  */
-
-type Handed = { tool: string; args: unknown }
-
-/** The reader's fakes plus the tools a host answers for, each noting its arguments and answering a minimal success */
-function notingTools(handed: Handed[]): OrchestratorTools {
-  const note = <T,>(tool: string, answer: T) => async (...args: unknown[]): Promise<T> => (handed.push({ tool, args: args[0] }), answer)
-  const child = { ok: true as const, sessionId: 'child-1', sessionName: 'child', tool: 'claude', state: 'done' as const, answer: 'noted', readable: [], outside: [] }
-  const base = fakeCentraluTools()
-  return {
-    ...base,
-    readSession: async (...args: Parameters<OrchestratorTools['readSession']>) => (handed.push({ tool: 'read_session', args: args[0] }), base.readSession(...args)),
-    startAgent: note('start_agent', child),
-    agentSession: note('agent_session', child),
-    askProject: note('ask_project', { ok: true as const, state: 'done' as const, project: 'frames-record-other', sessionId: 'other-1', sessionName: 'other', answer: 'noted', readable: [], outside: [] }),
-  }
-}
 
 async function replay(name: string) {
   const handed: Handed[] = []
@@ -59,7 +43,7 @@ async function replay(name: string) {
   const spawn = (s: AgentSpawnSpec) => (started.push(s), replayed(s))
   const events: NormalizedEvent[] = await drive(new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' }), scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'claude',
-    session: { model: 'haiku', processSource: { spawn }, orchestratorTools: notingTools(handed), toolProfile: 'reader' },
+    session: { model: 'haiku', processSource: { spawn }, orchestratorTools: notingCentraluTools(handed), toolProfile: 'reader' },
   })
     .catch((e: unknown) => {
       throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
@@ -73,8 +57,7 @@ describe(`Claude Code calling Centralu's tools through a host (${recordedVersion
     it(`${name}: sends what it sent to the real CLI, and uses every recorded line`, async () => {
       const r = await replay(name)
       expect(r.problems).toEqual([])
-      // The host asks the CLI for the plan's usage a moment after a turn ends, which a replay that has finished by then never sends
-      if (r.left > 0) expect({ left: r.left, waitingFor: r.waitingFor }).toEqual({ left: 1, waitingFor: expect.stringContaining('get_usage') })
+      expect(r.left).toBe(0)
       expect(callOrder(r.events)).toEqual([])
     })
   }

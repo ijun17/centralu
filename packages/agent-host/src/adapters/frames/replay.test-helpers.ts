@@ -69,6 +69,11 @@ export type FrameCodec = {
    */
   readonly unordered?: (sent: Record<string, unknown>) => boolean
   /**
+   * A line the adapter sends when it likes, a moment after the tool has finished (Claude: the plan's usage, asked of the CLI once a turn has ended):
+   * a recording may end with it, and a replay that finishes before the adapter asks is not short of it. If the adapter does send it, it is compared
+   */
+  readonly optionalAtEnd?: (recorded: Record<string, unknown>) => boolean
+  /**
    * A query the adapter makes when it likes, not because the tool said something (Claude: a context reading, sent when
    * the previous one has been answered, so how many go out and where depends on timing). Neither it nor its answer is
    * played from the recording: the adapter is answered with the recording's first answer to one
@@ -161,6 +166,7 @@ const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'obje
 export const streamJsonCodec = (cwd: string, opts: { hostAnswers?: boolean } = {}): FrameCodec => ({
   // Two inputs of the person are in the order they were sent; the lines around them are not
   unordered: (line) => line.type !== 'user',
+  optionalAtEnd: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_usage',
   probe: {
     is: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_context_usage',
     answers: (line, asked) => line.type === 'control_response' && asked.has(String(record(line.response).request_id)),
@@ -309,7 +315,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   }
 
   left(): number {
-    return this.frames.length - this.i
+    const rest = this.frames.slice(this.i)
+    return rest.every((f) => f.dir === 'out' && f.msg && this.codec.optionalAtEnd?.(f.msg)) ? 0 : rest.length
   }
 
   /** What the replay waits for next, for a failure message */

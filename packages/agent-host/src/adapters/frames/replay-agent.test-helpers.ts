@@ -2,6 +2,7 @@ import type { ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, replayedClaudeAdapter } from '../claude/recorded.test-helpers.js'
 import { loadRecording, newestVersion, recordedFolders, replaySpawner, streamJsonCodec, type FrameCodec, type Recording, type ReplayPeer } from './replay.test-helpers.js'
+import { notingCentraluTools } from './fakes.test-helpers.js'
 import { scenariosFor } from './scenarios.test-helpers.js'
 
 /**
@@ -26,7 +27,7 @@ export type ReplayedTool = {
   /** The real adapter, told nothing about the replay: its process comes from `CreateSessionOpts.processSource` */
   adapter(): AgentAdapter
   /** What "the same frame" means in the tool's protocol; `cwd` is the folder the session runs in */
-  codec(cwd: string): FrameCodec
+  codec(cwd: string, recording: Recording): FrameCodec
   /** The session's options as the recording was made with them: what the host adds to a session that the recorded run did not have is taken away */
   session(opts: CreateSessionOpts, scenario: string, recording: Recording): CreateSessionOpts
 }
@@ -36,14 +37,15 @@ export const REPLAYED: readonly ReplayedTool[] = [
     tool: 'claude',
     recordings: CLAUDE_RECORDINGS,
     adapter: replayedClaudeAdapter,
-    codec: streamJsonCodec,
-    session(opts, scenario) {
+    // A recording made through a host holds the host's answers to the CLI's calls to Centralu's tools, which a replay host does not give the same words
+    codec: (cwd, recording) => streamJsonCodec(cwd, { hostAnswers: recording.header.host === true }),
+    session(opts, scenario, recording) {
       const named = scenariosFor('claude').find((s) => s.name === scenario)
       const session: CreateSessionOpts = { ...opts, ...CLAUDE_REPLAY_SESSION, model: named?.model ?? CLAUDE_REPLAY_SESSION.model }
-      // The host gives every session Centralu's own tools and the attached apps; the recorded run had what its scenario adds (fakes answering in the host's place)
+      // The host gives every session Centralu's own tools and the attached apps; the recorded run had what its scenario adds (fakes answering in the host's place), or, of a host's, tools it served
       delete session.orchestratorTools
       delete session.apps
-      return { ...session, ...named?.session?.() }
+      return { ...session, ...named?.session?.(), ...(recording.header.host === true ? { orchestratorTools: notingCentraluTools([]), toolProfile: 'reader' as const } : {}) }
     },
   },
 ]
@@ -79,7 +81,7 @@ export function replayAdapters(tools: readonly ReplayedTool[] = REPLAYED): Map<T
       const known = replays.get(opts.sessionId)
       if (known) return known
       const recording = loadRecording(recordingFile(row, scenario))
-      const { spawn, state } = replaySpawner(recording, row.codec(opts.cwd), (problem) => console.error(`${PROBLEM} ${scenario}: ${problem}`))
+      const { spawn, state } = replaySpawner(recording, row.codec(opts.cwd, recording), (problem) => console.error(`${PROBLEM} ${scenario}: ${problem}`))
       const started = (spec: AgentSpawnSpec) => {
         const process = spawn(spec) as ReplayPeer
         console.error(`${STARTED} ${scenario}`)

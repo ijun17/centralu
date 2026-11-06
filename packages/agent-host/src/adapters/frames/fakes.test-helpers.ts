@@ -32,6 +32,27 @@ export function fakeCentraluTools(): OrchestratorTools {
   return tools as OrchestratorTools
 }
 
+/** What a stand-in tool was handed: its name and the arguments the call carried */
+export type Handed = { tool: string; args: unknown }
+
+/**
+ * The tools a host answered for in a recording made through one (`host: true`): the reader's fakes plus the tools only a host can answer
+ * (another agent, another project), each noting its arguments in `handed` and answering a minimal success. A call that never reached its
+ * tool, or reached it with other arguments, shows in `handed`; the words of the answer are not the recording's, which a replay does not compare.
+ */
+export function notingCentraluTools(handed: Handed[]): OrchestratorTools {
+  const note = <T,>(tool: string, answer: T) => async (...args: unknown[]): Promise<T> => (handed.push({ tool, args: args[0] }), answer)
+  const child = { ok: true as const, sessionId: 'child-1', sessionName: 'child', tool: 'claude', state: 'done' as const, answer: 'noted', readable: [], outside: [] }
+  const base = fakeCentraluTools()
+  return {
+    ...base,
+    readSession: async (...args: Parameters<OrchestratorTools['readSession']>) => (handed.push({ tool: 'read_session', args: args[0] }), base.readSession(...args)),
+    startAgent: note('start_agent', child),
+    agentSession: note('agent_session', child),
+    askProject: note('ask_project', { ok: true as const, state: 'done' as const, project: 'frames-record-other', sessionId: 'other-1', sessionName: 'other', answer: 'noted', readable: [], outside: [] }),
+  }
+}
+
 /** An attached app with one read-only tool, as `SessionApps` hands them to an adapter */
 export function fakeApps(): SessionApps {
   const server = 'app-weather'
