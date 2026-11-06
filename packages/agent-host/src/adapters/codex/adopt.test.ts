@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { callOrder, codexCodec, loadRecording, of, recordedFolders, ReplayPeer, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { CodexAdapter } from './index.js'
-import { CODEX_RECORDINGS, recordedFrames, recordedVersion } from './recorded.test-helpers.js'
+import { CODEX_RECORDINGS, CODEX_REPLAY_SESSION, recordedFrames, recordedVersion } from './recorded.test-helpers.js'
 import { driveAdopted, SWAP_SCENARIOS } from './swap-scenarios.test-helpers.js'
 
 /**
@@ -25,7 +25,7 @@ async function replayAdopted(name: string) {
   const events: NormalizedEvent[] = await driveAdopted(
     new CodexAdapter(),
     scenario,
-    { sessionId: `replay-${name}`, cwd, permissionPreset: scenario.preset ?? 'normal', projectTrusted: true, model: scenario.model ?? 'gpt-5.6-luna', effort: 'low' },
+    { sessionId: `replay-${name}`, cwd, permissionPreset: scenario.preset ?? 'normal', projectTrusted: true, ...CODEX_REPLAY_SESSION, ...(scenario.model ? { model: scenario.model } : {}) },
     process,
     threadId,
     0,
