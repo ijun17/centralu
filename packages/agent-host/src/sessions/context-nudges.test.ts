@@ -103,7 +103,7 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     w.request(310_000)
     expect(w.told).toHaveLength(1)
     expect(w.told[0]).toMatch(/about 31% full \(310k of 1000k tokens\)/)
-    expect(w.told[0]).toMatch(/call compact_self/)
+    expect(w.told[0]).toMatch(/call compact_self with "then" set to what you do next, and end your turn/)
     // Once: more requests under the second share say nothing
     w.request(330_000)
     w.request(480_000)
@@ -113,6 +113,7 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     expect(w.told).toHaveLength(2)
     expect(w.told[1]).toMatch(/about 51% full/)
     expect(w.told[1]).toMatch(/compacts it by itself in the middle of work at 60%/)
+    expect(w.told[1]).toMatch(/call compact_self with "then" set to what you do next, and end your turn/)
     w.request(590_000)
     expect(w.told).toHaveLength(2)
     expect(w.notices).toHaveLength(2)

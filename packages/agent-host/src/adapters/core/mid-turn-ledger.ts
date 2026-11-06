@@ -115,6 +115,9 @@ export class MidTurnLedger {
     return this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0 && !this.blocking
   }
 
+  /** Inputs that wait to start a turn: not written yet (behind a compact or review turn, or while the conversation opens) or written and not answered */
+  get waiting(): number { return this.queue.length + this.unanswered }
+
   /** A turn runs: one the tool started, or one an input of ours started */
   get turnRunning(): boolean { return this.running !== null }
 

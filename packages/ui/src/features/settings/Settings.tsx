@@ -990,7 +990,7 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
           hint={
             <>
               When a session&apos;s context passes the first share, Centralu tells it once, quietly with its next message or
-              tool result, to call compact_self when the step it is on is done; it tells it once more at the second share,
+              tool result, to call compact_self when the step it is on is done, with its next step as the prompt it continues with; it tells it once more at the second share,
               which stays below the share agents compact at, where the compaction would come in the middle of work. It
               never starts or interrupts a turn, and starts again after the session compacts. Only sessions that have
               compact_self, and over 100,000 tokens.
