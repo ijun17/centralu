@@ -173,9 +173,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   protected client: RemoteClient | null = null
   /** The client when it stopped redialling (`gaveUp`, #1143) and is waiting, idle, for the next opening */
   private gaveUp: RemoteClient | null = null
-  /** Sessions of the remote the hub shows / hides, by the remote's id. Events of any other session are not passed on */
+  /** Sessions of the remote the hub shows, by the remote's id. Events of any other session are not passed on */
   private shown = new Set<string>()
-  private hidden = new Set<string>()
   /** The remote's coordinators as it last gave them: not shown, but read by a reader (#1941, `unshown`) */
   private readonly coordinators = new Map<string, Record<string, unknown>>()
   protected retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -546,14 +545,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return !!line.credential && c.id === line.credential && this.isPairedHere(c)
   }
 
-  /**
-   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
-   * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
-   * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
-   * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
-   * not remember, are not taken for another's
-   */
-  /**
+ /**
    * Marks, in a list the host answered with `nonce`, the entries whose `check` is of the secret this hub holds under
    * their id (`own`). An entry without a check (a host from before it) or a credential this hub holds no secret of is not
    * marked, and is compared by id alone
@@ -567,7 +559,14 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     )
   }
 
-  private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
+  /**
+   * The credentials used on the machine under this hub's own label that this hub did not pair (#1405 review), and that
+   * `listed` does not name already, as used and gone. The machine's host leaves out a credential whose label's next one
+   * was paired the same way, taking it for its pairer again; under a hub's label only the hub can tell. Counted from the
+   * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
+   * not remember, are not taken for another's
+   */
+   private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
     if (!line.pairedAs) return []
     const first = this.usedUnderHubLabels.findIndex((u) => this.isPairedHere(u))
     if (first < 0) return []
@@ -784,7 +783,6 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   observe(kind: 'sessions' | 'projects', list: unknown[]): void {
     if (kind === 'sessions') {
       this.shown.clear()
-      this.hidden.clear()
       this.coordinators.clear()
       for (const s of list) this.classify(s)
       this.deps.mirror.replace(this.id, 'sessions', list.filter((s) => !hiddenKind(s)))
@@ -1426,8 +1424,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   private classify(s: unknown): void {
     if (!isObj(s) || typeof s.id !== 'string') return
-    if (hiddenKind(s)) this.hidden.add(s.id)
-    else this.shown.add(s.id)
+    if (!hiddenKind(s)) this.shown.add(s.id)
     if (s.kind === 'coordinator') this.coordinators.set(s.id, s)
   }
 
@@ -1446,15 +1443,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.autoReconnect ? KEEPS_TRYING : WAITS_FOR_PERSON
   }
 
-  /**
-   * Asks the machine again after a delay. `backoff` (the default): the next step of the backoff, and nothing at all
-   * while Auto reconnect is off (#1341), where only the person's Connect tries again (after the client's quick redials,
-   * which an off machine keeps). `within`: part of an attempt that
-   * is under way or of the person's own request (a refusal asked again at once, a Connect that met an opening), so it
-   * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
-   * reads the line and connects nothing (`readsOnly`)
-   */
-  /** The link is up, or was just: remembers when, and keeps it for the next start of this host */
+ /** The link is up, or was just: remembers when, and keeps it for the next start of this host */
   private seen(): void {
     this.lastConnectedAt = Date.now()
     this.deps.registry.setLastConnected?.(this.id, this.lastConnectedAt)
@@ -1466,7 +1455,15 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     this.nextAttemptAt = null
   }
 
-  protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
+  /**
+   * Asks the machine again after a delay. `backoff` (the default): the next step of the backoff, and nothing at all
+   * while Auto reconnect is off (#1341), where only the person's Connect tries again (after the client's quick redials,
+   * which an off machine keeps). `within`: part of an attempt that
+   * is under way or of the person's own request (a refusal asked again at once, a Connect that met an opening), so it
+   * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
+   * reads the line and connects nothing (`readsOnly`)
+   */
+   protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
     if (this.stopped || this.held) return
     if (mode === 'backoff' && !this.autoReconnect && !this.inOperation()) return
     clearTimeout(this.retryTimer)

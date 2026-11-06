@@ -4,6 +4,7 @@ import { DATA_PS, DATA_SH, STEP, installRemote, readStep, type InstallOptions, t
 import { VERSION_WORD } from './registry.js'
 import { lastLine, thisHubName, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
+import { sleep } from '../timing.js'
 
 /**
  * Update, rollback and uninstall of the Centralu the hub installs on a linked machine
@@ -224,7 +225,7 @@ async function follow(c: HostControl, id: string): Promise<SwitchState> {
       const machine = c.machine ?? c.target
       throw new Error(`The update of ${machine} could not be followed to its end from this computer; how it ended is shown once ${machine} is reached again`)
     }
-    await new Promise((r) => setTimeout(r, wait))
+    await sleep(wait)
   }
 }
 
