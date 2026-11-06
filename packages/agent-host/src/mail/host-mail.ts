@@ -192,7 +192,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return s && { address: addressOf(id), askedBy: s.askedBy ?? null, ...(s.startedFromHub ? { fromHub: true } : {}) }
     },
     orchestratorId: () => sessions.orchestratorId(),
-    sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null })),
+    sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),

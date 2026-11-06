@@ -41,7 +41,7 @@ export type MailToolHost = {
   /** The orchestrator's session id, or null while there is none */
   orchestratorId(): string | null
   /** The sessions of this host a name or id can mean: the ones that are here (not archived or deleted) */
-  sessions(): { id: string; name: string; project: string | null }[]
+  sessions(): { id: string; name: string; project: string | null; state: string }[]
   /** How the session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the orchestrator (§7.6) */
@@ -134,7 +134,7 @@ export class MailTool {
    */
   private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const t = to.trim()
-    if (t === PERSON) return { address: PERSON }
+    if (t.toLowerCase() === PERSON) return { address: PERSON }
     if (t.toLowerCase() === 'orchestrator') {
       const id = this.host.orchestratorId()
       if (!id) throw refuse('no_mailbox', 'there is no orchestrator to ask yet: write to the person instead')
@@ -155,11 +155,12 @@ export class MailTool {
     const here = this.host.sessions()
     const exact = here.find((s) => s.id === word)
     if (exact) return { address: this.service.sessionAddress(exact.id) }
-    const named = here.filter((s) => s.name.trim().toLowerCase() === word.toLowerCase())
+    // (never the caller: after a handoff the heir has the name of the session it replaced, and writes to that one)
+    const named = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
     if (only) {
-      const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`})`)
+      const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`}, ${s.state})`)
       throw refuse('ambiguous', `${named.length} sessions are named ${JSON.stringify(word)}: ${shown.join(', ')}${named.length > shown.length ? ', and more' : ''}. Send to one of them by its address.`)
     }
     throw refuse(

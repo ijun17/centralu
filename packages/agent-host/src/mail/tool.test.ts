@@ -107,20 +107,27 @@ describe('"to" as a name (#2039)', () => {
     // The expanded form of a name, and a name with a space or a colon in it (which no address holds)
     expect(w.run('a', { action: 'send', to: `session:${HOST}/nobody`, text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "nobody"')
     expect(w.run('a', { action: 'send', to: 'fix: the mail', text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "fix: the mail"')
+    // An address on another computer is not looked up here: the service refuses it in its own words
+    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe('Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and mail does not reach other computers yet; use agent_session there.')
   })
 
   it('a name two sessions share is refused with both addresses, and an address or an id still reaches exactly one', () => {
     const w = hostWorld({ extra: { d: { name: 'Beta', projectId: 'p2' } } })
     stops.push(() => w.stop())
     const r = w.tool.run('a', { action: 'send', to: 'beta', text: 'x' })
-    expect(r).toEqual({ text: `Refused (ambiguous): 2 sessions are named "beta": ${B} (project p1), ${at('d')} (project p2). Send to one of them by its address.`, isError: true })
+    expect(r).toEqual({ text: `Refused (ambiguous): 2 sessions are named "beta": ${B} (project p1, idle), ${at('d')} (project p2, idle). Send to one of them by its address.`, isError: true })
     expect(w.tool.run('a', { action: 'send', to: `session:${HOST}/Beta`, text: 'x' }).text).toContain('Refused (ambiguous)')
     expect(w.tool.run('a', { action: 'send', to: at('d'), text: 'x' }).isError).toBeUndefined()
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]!.recipient).toBe(at('d'))
   })
 
-  it('an address on another computer is still refused as elsewhere, in the service words', () => {
-    expect(world().run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe('Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and mail does not reach other computers yet; use agent_session there.')
+  it('the caller is never a candidate: an heir with the name of the session it replaced writes to that one; "Person" is the person', () => {
+    const w = hostWorld({ extra: { d: { name: 'Alpha', projectId: 'p1' } } })
+    stops.push(() => w.stop())
+    expect(w.tool.run('d', { action: 'send', to: 'alpha', text: 'x' }).isError).toBeUndefined()
+    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(at('d'), { limit: 1 })[0]!.id)[0]!.recipient).toBe(A)
+    expect(w.tool.run('a', { action: 'send', to: 'Person', text: 'x' }).isError).toBeUndefined()
+    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]!.recipient).toBe(PERSON)
   })
 
   // The child's host has no row of its parent, which lives on the hub: no name or address it can write names it, and the refusal says why instead of "gone"
