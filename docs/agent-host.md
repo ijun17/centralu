@@ -1729,7 +1729,7 @@ the params with the method's schema and reads the answer with its result schema,
     `then`; it is kept and sent after the compact with a line saying their message came first and weighs more than the step. A compaction the tool reported as
     **failed** leaves the context as it was, and the step is still valid, so `then` goes. **Codex:** its compact request takes no focus (`takesFocus` compares the command
     with and without one), so with a `then` the focus line heads the `then` turn ("This tool's compact takes no focus. What you asked the summary to keep: ..."), and with
-    none the answer of the tool says the focus line is not applied. A resting session that the sweep compacts has no `then`: it was at rest and stays so.
+    none the answer of the tool says the focus line is not applied. A resting session that the sweep compacts has no `then`: it was at rest and stays so. **Memory only:** the request and its `then` live in the host's memory, like the request before them, so a host that restarts or swaps between the call and the send forgets them and does not tell the session (known gap); a session that finds itself at rest after a restart is idle until something starts a turn, as before.
     **No time window and no refusal as a loop guard.** After a compaction the context is a summary, far under the 100,000-token floor, so a `then` turn that calls
     `compact_self` again at once is dropped by the floor and its `then` is not sent: no loop. A step that reads enough to grow back over the floor did real work, and a
     time window would block exactly that. **The gap that guard needed closed:** the floor goes by the last model request of the turn, else by a reading of the context
