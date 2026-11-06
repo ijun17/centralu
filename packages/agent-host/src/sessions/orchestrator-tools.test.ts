@@ -368,10 +368,10 @@ describe('the reader set', () => {
   })
 
   it('runs compact_self through the seat and says so when the seat cannot', async () => {
-    const asked: (string | undefined)[] = []
-    const ok = await runOrchestratorTool(toolsWith({ compactSelf: (focus) => (asked.push(focus), { text: 'ok' }) }), 'compact_self', { focus: 'keep the PR number' }, { sessionId: 's', profile: 'reader' })
+    const asked: (string | undefined)[][] = []
+    const ok = await runOrchestratorTool(toolsWith({ compactSelf: (focus, then) => (asked.push([focus, then]), { text: 'ok' }) }), 'compact_self', { focus: 'keep the PR number', then: 'Continue with step 3' }, { sessionId: 's', profile: 'reader' })
     expect(ok.text).toBe('ok')
-    expect(asked).toEqual(['keep the PR number'])
+    expect(asked).toEqual([['keep the PR number', 'Continue with step 3']])
     const none = await runOrchestratorTool(toolsWith({}), 'compact_self', {}, { sessionId: 's', profile: 'reader' })
     expect(none.isError).toBe(true)
   })

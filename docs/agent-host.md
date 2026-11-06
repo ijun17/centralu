@@ -1706,14 +1706,38 @@ the params with the method's schema and reads the answer with its result schema,
   (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
   then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
   (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
-  - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 453 characters; docs/tool-cost.md §15): asks for a compaction
-    **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters). Its description says when:
+  - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 579 characters; docs/tool-cost.md §15): asks for a compaction
+    **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters) and an optional `then` (below). Its description says when:
     work is finished and reported; before waiting more than a few minutes on a child, CI or the person; switching to an unrelated task.
-    The request is always accepted: the size of the context known during a turn is the one read at the previous turn's end, so a turn that grew past the floor would have been refused. The **floor** of 100,000 tokens is checked at the turn's end on the size of the turn's last model request of its own conversation (`usage_update.request`, which both tools send), else on the size the tool reads then (Claude reads it just after the turn ends, so the request waits for that `context_update`, at most 5 seconds (its own timer) before it goes by the reading it has, and a reading owed for the turn before that lands in the next turn is not taken for the next turn's; Codex reads it during the turn); under the floor the request is dropped. One request is pending per
-    session; asking again replaces the focus. **The person's turn first:** a request is spent at the first turn end after it, so a message the
+    The request is always accepted: the size of the context known during a turn is the one read at the previous turn's end, so a turn that grew past the floor would have been refused. The **floor** of 100,000 tokens is checked at the turn's end on the size of the turn's last model request of its own conversation (`usage_update.request`, which both tools send), else on the size the tool reads then (Claude reads it just after the turn ends, so the request waits for that `context_update`, at most 5 seconds (its own timer) before it goes by the reading it has, and a reading owed for the turn before that lands in the next turn is not taken for the next turn's; Codex reads it during the turn); under the floor the request is dropped, and so is one with no size read **since the last compaction** (below). One request is pending per
+    session; asking again replaces the focus and the `then`. **The person's turn first:** a request is spent at the first turn end after it, so a message the
     person sent into that turn is part of it, and one queued behind it runs before the compact in the tool's own queue, which compacts after
     it; a turn the person interrupts (or that ends in an error or a usage limit) **drops** the request, and a card the host raised at the turn's end holds it: it goes when the card closes with the session still at rest, and is dropped if a turn starts first (the person's answer is theirs; the request is never carried into it). The tool's answer is its confirmation: it does not
     wait for the compaction. The request does not ask whether background work runs: waiting on CI in the background is what it is for.
+  - **Going on after the compaction: `then` (#2024, owner decision 2026-11-06).** Before this a session that compacted at its turn's end sat at rest
+    until something else started a turn, so a lone worker in the middle of multi-step work stalled. `compact_self({ then })` is the prompt of the
+    session's next turn, written by the agent before the compaction ("Continue with step 3 of the plan in docs/x.md: ..."; at most 4,000 characters, longer is refused with
+    nothing asked). It is held with the compact Centralu sends and **goes when the compact turn has ended**, after the tool has reported the
+    compaction in it (not at the report: the turn is still running then, and a message sent into it would join it): an ordinary turn of the session's own
+    (`SessionEvents.sendThen`: Centralu's channel, no user row, a line "Centralu sent the agent its next step after the compaction"), so its end raises the
+    done notice and is the work's. It is **never sent** when the request was dropped (under the floor, or no size read since the last compaction), when the person
+    interrupted the turn (before the compact, or the compact turn itself) or it ended in an error, when the tool refused the compact or Centralu could not send it, or when
+    the tool never reported the compaction (`COMPACT_STALE_MS`, 30 minutes; the sweep checks it, and a compaction reported after that does not bring it). In each of
+    these the session is **told it did not happen**, quietly, with the text of its `then` so it can carry on by itself: `SessionHandle.nudge` (Claude: quiet input read with its
+    next input; Codex: steered into a running turn only, so a note it cannot take now waits for the next turn's start or request, as the context notices do), and the
+    window gets a line from Centralu. **The person's message first:** a turn that ran before the compact (the tool's queue had their message already) does not cancel
+    `then`; it is kept and sent after the compact with a line saying their message came first and weighs more than the step. A compaction the tool reported as
+    **failed** leaves the context as it was, and the step is still valid, so `then` goes. **Codex:** its compact request takes no focus (`takesFocus` compares the command
+    with and without one), so with a `then` the focus line heads the `then` turn ("This tool's compact takes no focus. What you asked the summary to keep: ..."), and with
+    none the answer of the tool says the focus line is not applied. A resting session that the sweep compacts has no `then`: it was at rest and stays so.
+    **No time window and no refusal as a loop guard.** After a compaction the context is a summary, far under the 100,000-token floor, so a `then` turn that calls
+    `compact_self` again at once is dropped by the floor and its `then` is not sent: no loop. A step that reads enough to grow back over the floor did real work, and a
+    time window would block exactly that. **The gap that guard needed closed:** the floor goes by the last model request of the turn, else by a reading of the context
+    taken **in the turn**; the fallbacks (the 5-second timer, a request held for a card) went by `SessionInfo.context`, the tool's last reading, which after a compaction is
+    the one from before it when the tool reads none (Codex reports no size after a compaction). A small context could pass as large. Now a compaction that worked
+    (any trigger) marks the session `unread` until the tool's next reading, the sizes read before it are forgotten, and a request judged with only the old reading is
+    dropped ("no size of the context was read since the last compaction"); the rest rule (`due`) leaves such a session alone too. A failed compaction shrank nothing and marks nothing.
+    The context notices tell the agent to set `then` to its next step and end its turn (`context-nudges.ts`).
   - **A session at rest** for 10 minutes whose context is over `autoCompact.idleShare` of the model's window (default 30%, 10% to 95%; Settings
     and `set_preferences` offer it) **and** over the floor is compacted by a sweep (every minute; the 10 minutes count from the moment the session is idle by every rule of `sessionIdle`: no turn, card, question or background work. A turn's end starts them only if it leaves the session idle; otherwise the sweep that sees it become idle does, so a card answered or background work stopped late does not bring an immediate compact; the share is read against the model's own window, not the smaller one a Claude process started under the CLI's compaction setting reports) before its next turn. Off with the existing
     `autoCompact.controlled` switch. Never a session in a turn, with an approval or question card open, running background work, or without a
@@ -1725,7 +1749,7 @@ the params with the method's schema and reads the answer with its result schema,
     A turn's end is the compact's only after a turn began following the send (Codex's request starts its turn later); a tool that refuses it before that clears the mark. The sweep stops in the shutdown plan with the sleep sweep. Known gap: on Codex a message or mail delivered in the moment between the send and the compact's turn start can take that turn's bookkeeping.
   - **Telling a growing session (#1492).** An agent cannot see how full its context is (Claude Code does not tell the model), so `compact_self`
     alone depends on it thinking of the tool. When a session's context passes a first share (`autoCompact.nudgeFirst`, default 30% of the model's
-    window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self`", and tells it
+    window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self` with `then` set to what you do next, and end your turn", and tells it
     **once more** at a second share (`nudgeSecond`: default 10 points below the share the tool compacts at, so 50% when that is 60%; **never at or
     above it**, held at least 5 points below, `nudgeShares` in `@cc/protocol`), where the tool's own compaction would otherwise come in the middle
     of work (`sessions/context-nudges.ts`, `ContextNudges`). **Quiet:** the note goes in as `SessionHandle.nudge`, which never starts a turn and never
@@ -1741,7 +1765,7 @@ the params with the method's schema and reads the answer with its result schema,
     already over a share again, once. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the orchestrator,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
     context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
-    line from Centralu ("Centralu told it its context is 33% full: call compact_self when this step is done"). Settings (Compaction) and `set_preferences`
+    line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
     take `nudge`, `nudgeFirst` and `nudgeSecond` (`null` is back to following the tool's share); a second share at or above the tool's own, or less than
     5 points below it, is refused by the host with the reason, a first share not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
     several is judged as the whole setting that results, and a tool's share lowered under a second share chosen before **takes it down** (to 5 points below the

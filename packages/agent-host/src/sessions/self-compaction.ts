@@ -28,6 +28,17 @@ import { inTurn, type SessionIdle } from '../idle.js'
  * is never sent one, and `compact_self` answers that it cannot: the bare `/compact` would be an ordinary prompt to its model.
  * **One compaction per rest.** What a compaction leaves is not always read back (Codex reports no size), so a session
  * Centralu compacted is not compacted again until it has had a turn of its own.
+ * **Going on after it (#2024).** `compact_self` may carry `then`, the agent's own next step. Once the compact turn Centralu started has
+ * ended (the tool reported the compaction in it), `then` goes in as an ordinary turn of the session's own, in Centralu's channel and with no
+ * user row. It is never sent when the request was dropped (under the floor, or no size read since the last compaction), the person
+ * interrupted the turn, or the tool never reported the compaction (`COMPACT_STALE_MS`, checked by the sweep): the session is then told so,
+ * quietly, with the text of its `then`, at its next input (`told`). A person's message that ran before the compact does not cancel it:
+ * `then` goes after the compact with a line saying that message came first. A compaction the tool reported as failed leaves the context as
+ * it was, so `then` still goes. A tool whose compact takes no focus (Codex) gets the focus line at the head of the `then` turn; with no
+ * `then` the tool's answer says the focus was not applied.
+ * **No loop guard but the floor.** A `then` turn that asks again at once finds a context far under the floor and is dropped, so nothing
+ * loops; a context that grew back over it did real work. After a compaction only a size read since it counts for the floor (`unread`):
+ * Codex reports none, and the reading kept from before would let a small context pass.
  */
 
 /** Below this much context a request is dropped and a resting session is left alone */
@@ -40,6 +51,8 @@ const COMPACT_STALE_MS = 30 * 60_000
 /** A request whose turn ended waits this long for the tool's size reading before it goes by the one it has */
 const READING_WAIT_MS = 5_000
 const FOCUS_MAX_CHARS = 300
+/** The longest `then` a request takes: it is a prompt, so it is refused rather than cut */
+export const THEN_MAX_CHARS = 4_000
 
 export type SelfCompactionHost = {
   sessions(): SessionInfo[]
@@ -58,6 +71,10 @@ export type SelfCompactionHost = {
   command(sessionId: string, tool: ToolName, focus: string | null): string | null
   /** Sends the tool's compact command to the session as a turn of its own; throws when it cannot */
   send(sessionId: string, text: string): void
+  /** Sends text as an ordinary turn of the session's own, in Centralu's channel and with no user row (`SessionEvents.sendThen`); throws when it cannot */
+  sendThen(sessionId: string, text: string): void
+  /** A note read with the session's next input, starting nothing (`SessionHandle.nudge`): whether the tool took it. False when it cannot now */
+  nudge(sessionId: string, text: string): boolean | Promise<boolean>
   /** A line in the conversation, in Centralu's name */
   notice(sessionId: string, text: string): void
   now?: () => number
@@ -68,14 +85,26 @@ export type SelfCompactionHost = {
  * request starts its turn later). `compacted`: the tool reported the compaction. `ended`: its turn is over; the entry then stays until
  * the session has a turn of its own.
  */
-type Compacting = { why: string; sentAt: number; started: boolean; compacted: boolean; ended: boolean }
+type Compacting = {
+  why: string
+  sentAt: number
+  started: boolean
+  compacted: boolean
+  ended: boolean
+  /** The agent's next step, sent when the compact turn has ended; null when none, or once it went or was dropped */
+  then: string | null
+  /** The focus line a tool that takes none could not be given: it heads the `then` turn */
+  focusAside: string | null
+  /** A turn of the person's ran before the compact */
+  ahead: boolean
+}
 
 /**
  * A request from `compact_self`. `endedAt` is set once its turn ended and the size of the context is awaited (a timer decides it after
  * `READING_WAIT_MS`). `held`: a card the host raised was open at the turn's end, so the request waits for it to close at rest, and goes
  * if a turn starts first (the person's answer is theirs: the request is never carried into it); `size` is what the turn grew to.
  */
-type Request = { focus: string | null; endedAt: number | null; held: boolean; size: number | null }
+type Request = { focus: string | null; then: string | null; endedAt: number | null; held: boolean; size: number | null }
 
 export class SelfCompaction {
   private readonly pending = new Map<string, Request>()
@@ -90,6 +119,10 @@ export class SelfCompaction {
   private readonly waits = new Map<string, ReturnType<typeof setTimeout>>()
   /** The size of the last model request of the session's own conversation in the running turn: the size the turn grew to, in both tools */
   private readonly lastRequest = new Map<string, number>()
+  /** Sessions compacted whose context the tool has not read since: the reading kept in `SessionInfo.context` is from before, no size to judge by */
+  private readonly unread = new Set<string>()
+  /** Notes for a session that the tool could not take yet, tried again at a turn's start and with a request of a running turn */
+  private readonly owed = new Map<string, string[]>()
   private timer: ReturnType<typeof setInterval> | null = null
   /** `stop()` was called: a late event of a turn that was running is not acted on (it would start the timer or send) */
   private stopped = false
@@ -100,18 +133,32 @@ export class SelfCompaction {
     return (this.host.now ?? Date.now)()
   }
 
+  /** Whether the tool's compact command takes the focus line (Claude: `/compact <focus>`; Codex's request takes none) */
+  private takesFocus(id: string, tool: ToolName): boolean {
+    return this.host.command(id, tool, 'focus') !== this.host.command(id, tool, null)
+  }
+
   /** The `compact_self` tool's answer. Says what will happen */
-  request(sessionId: string, focus?: string): { text: string; isError?: boolean } {
+  request(sessionId: string, focus?: string, then?: string): { text: string; isError?: boolean } {
     const m = this.host.session(sessionId)
     if (!m) return { text: 'This session is not known to Centralu.', isError: true }
     if (this.host.command(sessionId, m.tool, null) === null) {
       return { text: 'This tool has no compact command, so Centralu cannot compact this conversation. Nothing was asked; carry on as usual.', isError: true }
     }
+    const next = then?.trim() || null
+    if (next && next.length > THEN_MAX_CHARS) {
+      return { text: `\`then\` is ${next.length} characters, over the ${THEN_MAX_CHARS} a request takes. Nothing was asked: put the plan in a file and name it in a shorter \`then\`.`, isError: true }
+    }
     const line = focus?.replace(/\s+/g, ' ').trim().slice(0, FOCUS_MAX_CHARS) || null
-    const asked = this.pending.has(sessionId)
-    this.pending.set(sessionId, { focus: line, endedAt: null, held: false, size: null })
-    const then = `Centralu compacts this conversation when the current turn ends, never in the middle of one, if the context is then over ${COMPACT_FLOOR_TOKENS / 1000}k tokens; the next turn starts from the summary. Finish and answer as usual.`
-    return { text: asked ? `Already asked${line ? ' (the focus line is replaced)' : ''}. ${then}` : then }
+    const before = this.pending.get(sessionId)
+    this.pending.set(sessionId, { focus: line, then: next, endedAt: null, held: false, size: null })
+    const aside = line !== null && !this.takesFocus(sessionId, m.tool)
+    const after = next
+      ? `The next turn starts from the summary with your \`then\`${aside ? ' (the focus line at its head: this tool\'s compact takes none)' : ''}. If nothing is compacted, \`then\` is not sent and you are told at your next input. End your turn now.`
+      : `The next turn starts from the summary.${aside ? ' This tool\'s compact takes no focus, so the focus line is not applied.' : ''} Finish and answer as usual.`
+    const text = `Centralu compacts this conversation when the current turn ends, never in the middle of one, if the context is then over ${COMPACT_FLOOR_TOKENS / 1000}k tokens. ${after}`
+    const replaced = [line ? 'the focus line' : null, next || before?.then ? '`then`' : null].filter(Boolean)
+    return { text: before ? `Already asked${replaced.length ? ` (${replaced.join(' and ')} ${replaced.length > 1 ? 'are' : 'is'} replaced)` : ''}. ${text}` : text }
   }
 
   /**
@@ -133,6 +180,13 @@ export class SelfCompaction {
     if (e.type === 'session_deleted') return this.forget(id)
     const m = this.host.session(id)
     if (!m) return
+    // A reading by the tool is a size since the last compaction; a compaction that worked leaves the sizes read before it behind
+    if (e.type === 'context_update') this.unread.delete(id)
+    if (e.type === 'compaction' && !e.failed) {
+      this.unread.add(id)
+      this.read.delete(id)
+      this.lastRequest.delete(id)
+    }
     const busy = inTurn(m.state)
     const wasBusy = this.wasBusy.get(id) ?? false
     this.wasBusy.set(id, busy)
@@ -143,6 +197,7 @@ export class SelfCompaction {
       this.read.delete(id)
       this.lastRequest.delete(id)
     }
+    if (this.owed.size > 0 && (turnStarted || (e.type === 'usage_update' && e.request))) this.flushOwed(id)
     // A reading the tool owes for the turn that ended is that turn's, wherever it lands; any other is this turn's
     const owed = e.type === 'context_update' && this.late.delete(id)
     if (e.type === 'context_update' && !owed) this.read.add(id)
@@ -152,17 +207,23 @@ export class SelfCompaction {
     const sent = this.compacting.get(id)
     if (turnStarted && sent) {
       // A turn of the session's own after Centralu's compact (or one the tool compacted in without our seeing it start) frees it to be compacted again
-      if (sent.ended || (sent.compacted && !sent.started)) this.compacting.delete(id)
-      else sent.started = true
+      if (sent.ended || (sent.compacted && !sent.started)) {
+        // A compaction reported with no turn seen to start: the turn running now is the session's own, and a `then` sent into it would not be a turn of its own
+        this.lose(id, sent, 'the tool compacted before Centralu saw its turn begin')
+        this.compacting.delete(id)
+      } else sent.started = true
     }
     const req = this.pending.get(id)
     if (turnStarted && req) {
       // A request held for a card is not carried into the turn the answer starts; one waiting for its size goes to this turn's end
-      if (req.held) this.settle(id)
+      if (req.held) this.drop(id, 'a card was open when the turn ended and the person’s answer started the next turn')
       else this.stopWaiting(id, req)
     }
     // The tool refused the compact before any turn began: nothing is running, and the session may be tried again
-    if (e.type === 'error' && sent && !sent.started && !sent.ended) this.compacting.delete(id)
+    if (e.type === 'error' && sent && !sent.started && !sent.ended) {
+      this.lose(id, sent, 'the tool refused the compact')
+      this.compacting.delete(id)
+    }
     const mine = this.compacting.get(id)
     // Not the tool's own compaction at its threshold (Claude says so): that is the person's turn running first, not Centralu's compact
     if (e.type === 'compaction' && mine && !mine.compacted && e.trigger !== 'auto') {
@@ -186,17 +247,21 @@ export class SelfCompaction {
     const c = this.compacting.get(id)
     if (c && c.started && !c.ended) {
       if (c.compacted) {
-        // The turn Centralu's own compact ran in has ended
+        // The turn Centralu's own compact ran in has ended: the session is at rest, and its next step goes now
         c.ended = true
+        this.proceed(id, c)
         return
       }
       // Stopped before the tool reported the compaction: a compaction after this is not Centralu's
-      if (stopped) this.compacting.delete(id)
+      if (stopped) {
+        this.lose(id, c, 'the turn was interrupted before the compaction')
+        this.compacting.delete(id)
+      } else c.ahead = true
     }
     if (!live) return
     // The request goes with a turn that was stopped: it is theirs
     if (stopped) {
-      this.settle(id)
+      this.drop(id, 'the person interrupted the turn, or it ended in an error')
       return
     }
     // The size the turn grew to: its last model request when the tool said it, else the reading of the context (the tool reads it after
@@ -223,12 +288,17 @@ export class SelfCompaction {
     const req = this.pending.get(id)
     if (!req?.held) return false
     if (!this.host.running(id)) {
-      this.settle(id)
+      this.drop(id, 'the session had no process left')
       return true
     }
     if (inTurn(m.state) || this.cardOpen(id)) return false
-    this.decide(id, req.size ?? m.context?.used ?? 0, m.tool)
+    this.decide(id, req.size ?? this.reading(id, m), m.tool)
     return true
+  }
+
+  /** The tool's last reading of the context, unless the session was compacted since: then it is the size from before, and there is none */
+  private reading(id: string, m: SessionInfo): number | null {
+    return this.unread.has(id) ? null : (m.context?.used ?? 0)
   }
 
   /** A request whose turn ended with no size: a timer decides it on the reading it has if the tool's own does not come */
@@ -240,7 +310,7 @@ export class SelfCompaction {
       try {
         const live = this.pending.get(id)
         const m = this.host.session(id)
-        if (live && live.endedAt !== null && m) this.decide(id, m.context?.used ?? 0, m.tool)
+        if (live && live.endedAt !== null && m) this.decide(id, this.reading(id, m), m.tool)
         else if (live && !m) this.settle(id)
       } catch (err) {
         console.error(`[compact] ${id.slice(0, 8)}: could not decide the request: ${err instanceof Error ? err.message : String(err)}`)
@@ -267,13 +337,76 @@ export class SelfCompaction {
     this.clearWait(id)
   }
 
-  /** The turn ended and the size of the context is known: compacts when it is over the floor, drops the request otherwise */
-  private decide(id: string, used: number, tool: ToolName): void {
+  /** Ends a request that will not compact, and tells the session when it had a `then` that now will not be sent */
+  private drop(id: string, why: string): void {
+    const req = this.pending.get(id)
+    this.settle(id)
+    if (req?.then) this.tell(id, req.then, why)
+  }
+
+  /** The turn ended and the size of the context is known (`null`: none since a compaction): compacts when it is over the floor, drops the request otherwise */
+  private decide(id: string, used: number | null, tool: ToolName): void {
     const req = this.pending.get(id)
     if (!req) return
+    if (used === null) return this.drop(id, 'no size of the context was read since the last compaction, so it could not be told to be over the floor')
+    if (used < COMPACT_FLOOR_TOKENS) return this.drop(id, `the context was ${Math.round(used / 1000)}k tokens, under the ${COMPACT_FLOOR_TOKENS / 1000}k floor`)
     this.settle(id)
-    if (used < COMPACT_FLOOR_TOKENS) return
-    this.fire(id, 'the agent asked to after finishing its turn', req.focus, tool)
+    this.fire(id, 'the agent asked to after finishing its turn', req.focus, tool, req.then)
+  }
+
+  /** The `then` of a compact that will not happen as asked is lost: the session is told with its text */
+  private lose(id: string, c: Compacting, why: string): void {
+    const then = c.then
+    c.then = null
+    if (then) this.tell(id, then, why)
+  }
+
+  /** The compact turn has ended: the agent's next step goes in as a turn of its own */
+  private proceed(id: string, c: Compacting): void {
+    const then = c.then
+    if (!then) return
+    c.then = null
+    const text = [
+      '[Centralu] The compaction you asked for with compact_self is done. This is the step you set with `then`.',
+      ...(c.ahead ? ['A message from the person ran before the compaction and came first: what they asked weighs more than this step.'] : []),
+      ...(c.focusAside ? [`This tool's compact takes no focus. What you asked the summary to keep: ${c.focusAside}`] : []),
+      '',
+      then,
+    ].join('\n')
+    try {
+      this.host.notice(id, 'Centralu sent the agent its next step after the compaction')
+      this.host.sendThen(id, text)
+    } catch (err) {
+      this.tell(id, then, 'the session could not take it')
+      console.error(`[compact] ${id.slice(0, 8)}: could not send the next step: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /** Tells the session, quietly, that its `then` was not sent; the person's window gets a line too */
+  private tell(id: string, then: string, why: string): void {
+    this.host.notice(id, `The compaction did not happen (${why}): the next step the agent set was not sent`)
+    this.deliver(id, `[Centralu] Your compact_self request did not compact (${why}), so your \`then\` was not sent. It was: ${then}`)
+  }
+
+  private deliver(id: string, text: string): void {
+    if (this.stopped) return
+    const hold = (): void => void this.owed.set(id, [...(this.owed.get(id) ?? []), text].slice(-3))
+    try {
+      const took = this.host.nudge(id, text)
+      if (took === true) return
+      if (took === false) return hold()
+      void took.then((ok) => (ok ? undefined : hold()), hold)
+    } catch {
+      hold()
+    }
+  }
+
+  /** The notes the tool could not take at the time, tried again: a turn of the session has begun, or its running turn made a request */
+  private flushOwed(id: string): void {
+    const notes = this.owed.get(id)
+    if (!notes) return
+    this.owed.delete(id)
+    for (const text of notes) this.deliver(id, text)
   }
 
   /** Where the rest starts: the turn's end if the session is idle by every rule then, else when the sweep sees it become so */
@@ -300,15 +433,21 @@ export class SelfCompaction {
     }
   }
 
-  private fire(id: string, why: string, focus: string | null, tool: ToolName): void {
+  private fire(id: string, why: string, focus: string | null, tool: ToolName, then: string | null = null): void {
     const text = this.host.command(id, tool, focus)
     // The tool has no compact command: a bare `/compact` would only be a prompt to its model
-    if (text === null) return
+    if (text === null) {
+      if (then) this.tell(id, then, 'this tool has no compact command')
+      return
+    }
+    // A tool whose compact takes no focus gets the same text with or without it: the line then heads the `then` turn
+    const focusAside = focus !== null && text === this.host.command(id, tool, null) ? focus : null
     try {
-      this.compacting.set(id, { why, sentAt: this.now(), started: false, compacted: false, ended: false })
+      this.compacting.set(id, { why, sentAt: this.now(), started: false, compacted: false, ended: false, then, focusAside, ahead: false })
       this.host.send(id, text)
     } catch (err) {
       this.compacting.delete(id)
+      if (then) this.tell(id, then, 'the compaction could not be sent')
       console.error(`[compact] ${id.slice(0, 8)}: could not send the compaction: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -318,6 +457,8 @@ export class SelfCompaction {
     const now = this.now()
     const setting = this.host.setting()
     const sent: string[] = []
+    // A compact the tool never reported: its `then` is never sent (it would follow a compaction that did not happen)
+    for (const [id, c] of this.compacting) if (c.then && !c.compacted && now - c.sentAt >= COMPACT_STALE_MS) this.lose(id, c, 'the tool never reported the compaction')
     for (const m of this.host.sessions()) {
       // A held request whose card closed without an event is judged here at the latest (`releaseHeld`)
       if (this.pending.get(m.id)?.held) this.releaseHeld(m.id, m)
@@ -345,7 +486,8 @@ export class SelfCompaction {
     if (c && (c.ended || now - c.sentAt < COMPACT_STALE_MS)) return false
     if (now - since < IDLE_COMPACT_MINUTES * 60_000) return false
     const ctx = m.context
-    if (!ctx || ctx.window <= 0) return false
+    // Compacted since the tool last read the context: the reading kept is from before and says nothing of the size now
+    if (!ctx || ctx.window <= 0 || this.unread.has(m.id)) return false
     // The model's full window, as the gauge shows the share (#1553); a floor under it is no window to take a share of
     const window = this.host.window(m)
     if (window === null || window <= 0) return false
@@ -367,6 +509,7 @@ export class SelfCompaction {
     this.timer = null
     for (const t of this.waits.values()) clearTimeout(t)
     this.waits.clear()
+    this.owed.clear()
   }
 
   private sweepSafely(): void {
@@ -385,5 +528,7 @@ export class SelfCompaction {
     this.wasBusy.delete(id)
     this.read.delete(id)
     this.lastRequest.delete(id)
+    this.unread.delete(id)
+    this.owed.delete(id)
   }
 }

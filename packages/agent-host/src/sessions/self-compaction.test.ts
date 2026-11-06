@@ -20,7 +20,9 @@ function world(initial: Partial<SessionInfo> = {}) {
   const sessions = new Map<string, SessionInfo>([['s1', info(initial)]])
   const sent: [string, string][] = []
   const notices: [string, string][] = []
-  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, modelWindow: undefined as number | null | undefined, noCompact: false }
+  const thens: [string, string][] = []
+  const nudges: string[] = []
+  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, failThen: false, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
     session: (id) => sessions.get(id),
@@ -33,6 +35,14 @@ function world(initial: Partial<SessionInfo> = {}) {
     send: (id, text) => {
       if (state.failSend) throw new Error('no process')
       sent.push([id, text])
+    },
+    sendThen: (id, text) => {
+      if (state.failThen) throw new Error('no process')
+      thens.push([id, text])
+    },
+    nudge: (_id, text) => {
+      if (state.nudgeTaken) nudges.push(text)
+      return state.nudgeTaken
     },
     notice: (id, text) => void notices.push([id, text]),
     now: () => state.now,
@@ -58,7 +68,7 @@ function world(initial: Partial<SessionInfo> = {}) {
     emit(e, true)
     if (reading === 'after' && m().context) read(m().context!.used)
   }
-  return { c, state, sent, notices, m, emit, startTurn, endTurn, read }
+  return { c, state, sent, thens, nudges, notices, m, emit, startTurn, endTurn, read }
 }
 
 describe('compact_self (#1451)', () => {
@@ -377,6 +387,297 @@ describe('compact_self (#1451)', () => {
     w.state.failSend = false
     w.state.now += (IDLE_COMPACT_MINUTES + 1) * MIN
     expect(w.c.sweep()).toEqual(['s1'])
+  })
+})
+
+describe('compact_self then (#2024)', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  const compaction = { type: 'compaction', sessionId: 's1', failed: false } as const
+  /** The agent asks in a turn that ends over the floor: the compact is sent */
+  function asked(w: ReturnType<typeof world>, focus: string | undefined, then: string | undefined) {
+    w.startTurn()
+    const answer = w.c.request('s1', focus, then)
+    w.endTurn()
+    return answer
+  }
+
+  it('sends the next step as a turn of the session’s own only once the compact turn has ended, after the tool reported the compaction', () => {
+    const w = world()
+    const answer = asked(w, undefined, 'Continue with step 3 of the plan')
+    expect(answer.text).toMatch(/with your `then`/)
+    expect(answer.text).toMatch(/End your turn now/)
+    expect(w.sent).toEqual([['s1', '/compact']])
+    expect(w.thens).toEqual([])
+    // The compact turn runs: the compaction is reported, the turn is still going
+    w.startTurn()
+    expect(w.thens).toEqual([])
+    w.emit(compaction)
+    expect(w.thens).toEqual([])
+    w.endTurn()
+    expect(w.thens).toHaveLength(1)
+    expect(w.thens[0]![1]).toContain('Continue with step 3 of the plan')
+    expect(w.thens[0]![1]).not.toMatch(/came first/)
+    expect(w.notices.map((n) => n[1])).toContain('Centralu sent the agent its next step after the compaction')
+    // The turn it starts is the session’s own, not the compact’s, and sends nothing again
+    w.startTurn()
+    expect(w.c.compactTurn('s1')).toBe(false)
+    w.endTurn()
+    expect(w.thens).toHaveLength(1)
+    expect(w.nudges).toEqual([])
+  })
+
+  it('sends a compaction the tool reported as failed on: the context is as it was, and the step still stands', () => {
+    const w = world()
+    asked(w, undefined, 'next')
+    w.startTurn()
+    w.emit({ type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' })
+    w.endTurn()
+    expect(w.thens).toHaveLength(1)
+  })
+
+  it('never sends it when the request was dropped under the floor, and tells the session at its next input', () => {
+    const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+    w.startTurn()
+    w.c.request('s1', undefined, 'Continue with step 3')
+    w.endTurn(undefined, 'after')
+    expect(w.sent).toEqual([])
+    expect(w.thens).toEqual([])
+    expect(w.nudges).toHaveLength(1)
+    expect(w.nudges[0]).toMatch(/did not compact \(the context was 60k tokens, under the 100k floor\), so your `then` was not sent/)
+    expect(w.nudges[0]).toContain('Continue with step 3')
+    expect(w.notices.map((n) => n[1])).toEqual([expect.stringMatching(/The compaction did not happen/)])
+    // A request with no `then` says nothing
+    const plain = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+    plain.startTurn()
+    plain.c.request('s1')
+    plain.endTurn(undefined, 'after')
+    expect(plain.nudges).toEqual([])
+    expect(plain.notices).toEqual([])
+  })
+
+  it('never sends it when the person interrupts the turn, before the compact or in the compact turn', () => {
+    const before = world()
+    before.startTurn()
+    before.c.request('s1', undefined, 'next')
+    before.endTurn({ type: 'state_change', sessionId: 's1', state: 'waiting_input', reason: 'interrupted' })
+    expect(before.sent).toEqual([])
+    expect(before.thens).toEqual([])
+    expect(before.nudges).toEqual([expect.stringMatching(/the person interrupted the turn/)])
+
+    const during = world()
+    asked(during, undefined, 'next')
+    during.startTurn()
+    during.endTurn({ type: 'state_change', sessionId: 's1', state: 'waiting_input', reason: 'interrupted' })
+    during.startTurn()
+    during.emit(compaction)
+    during.endTurn()
+    expect(during.thens).toEqual([])
+    expect(during.nudges).toEqual([expect.stringMatching(/interrupted before the compaction/)])
+  })
+
+  it('never sends it when the tool never reported the compaction, and a compaction reported late does not bring it', () => {
+    const w = world()
+    asked(w, undefined, 'next')
+    w.state.now += 29 * MIN
+    w.c.sweep()
+    expect(w.nudges).toEqual([])
+    w.state.now += 2 * MIN
+    w.c.sweep()
+    expect(w.nudges).toEqual([expect.stringMatching(/the tool never reported the compaction/)])
+    w.startTurn()
+    w.emit(compaction)
+    w.endTurn()
+    expect(w.thens).toEqual([])
+  })
+
+  it('keeps it when the person’s message ran before the compact, and says that message came first', () => {
+    const w = world()
+    asked(w, undefined, 'next')
+    // The message was already in the tool’s queue: its turn runs first
+    w.startTurn()
+    w.endTurn()
+    expect(w.thens).toEqual([])
+    w.startTurn()
+    w.emit(compaction)
+    w.endTurn()
+    expect(w.thens).toHaveLength(1)
+    expect(w.thens[0]![1]).toMatch(/message from the person ran before the compaction and came first/)
+  })
+
+  it('gives a tool whose compact takes no focus (Codex) the focus line at the head of the next step', () => {
+    const w = world({ tool: 'codex' })
+    const answer = asked(w, 'keep the PR number', 'next')
+    expect(answer.text).toMatch(/the focus line at its head/)
+    expect(w.sent).toEqual([['s1', '/compact']])
+    w.startTurn()
+    w.emit(compaction)
+    w.endTurn()
+    expect(w.thens[0]![1]).toMatch(/takes no focus\. What you asked the summary to keep: keep the PR number\n\nnext$/)
+
+    // Claude took the focus in its command: not repeated
+    const claude = world()
+    expect(asked(claude, 'keep the PR number', 'next').text).not.toMatch(/focus line at its head/)
+    claude.startTurn()
+    claude.emit(compaction)
+    claude.endTurn()
+    expect(claude.thens[0]![1]).not.toContain('keep the PR number')
+  })
+
+  it('says in the answer that a focus the tool cannot take is not applied, when there is no next step to put it in', () => {
+    expect(world({ tool: 'codex' }).c.request('s1', 'keep the PR number').text).toMatch(/takes no focus, so the focus line is not applied/)
+    expect(world().c.request('s1', 'keep the PR number').text).not.toMatch(/not applied/)
+    expect(world({ tool: 'codex' }).c.request('s1').text).not.toMatch(/not applied/)
+  })
+
+  it('refuses a next step too long to be a prompt and asks nothing', () => {
+    const w = world()
+    w.startTurn()
+    expect(w.c.request('s1', undefined, 'x'.repeat(4_001))).toEqual({ text: expect.stringMatching(/Nothing was asked/), isError: true })
+    w.endTurn()
+    expect(w.sent).toEqual([])
+  })
+
+  it('replaces the next step with a second request, and says so', () => {
+    const w = world()
+    w.startTurn()
+    w.c.request('s1', undefined, 'first')
+    expect(w.c.request('s1', undefined, 'second').text).toMatch(/^Already asked \(`then` is replaced\)/)
+    w.endTurn()
+    w.startTurn()
+    w.emit(compaction)
+    w.endTurn()
+    expect(w.thens).toHaveLength(1)
+    expect(w.thens[0]![1]).toContain('second')
+  })
+
+  it('tells the session when the next step could not be sent', () => {
+    const w = world()
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    w.state.failThen = true
+    asked(w, undefined, 'next')
+    w.startTurn()
+    w.emit(compaction)
+    w.endTurn()
+    expect(w.thens).toEqual([])
+    expect(w.nudges).toEqual([expect.stringMatching(/the session could not take it/)])
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('could not send the next step'))
+    err.mockRestore()
+  })
+
+  it('keeps the note for a tool that cannot take it now, and gives it with a request of a running turn', () => {
+    const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+    w.state.nudgeTaken = false
+    w.startTurn()
+    w.c.request('s1', undefined, 'Continue with step 3')
+    w.endTurn(undefined, 'after')
+    expect(w.nudges).toEqual([])
+    // A turn begins: the tool still cannot steer it yet
+    w.startTurn()
+    expect(w.nudges).toEqual([])
+    w.state.nudgeTaken = true
+    const request = { type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 5_000, cacheReadTokens: 20_000 } } as const
+    w.emit(request)
+    expect(w.nudges).toHaveLength(1)
+    expect(w.nudges[0]).toContain('Continue with step 3')
+    // Given once
+    w.emit(request)
+    expect(w.nudges).toHaveLength(1)
+  })
+
+  describe('the size read since a compaction (#2024)', () => {
+    it('drops a request that ends a turn with no size read since the compaction, whatever the reading kept from before says', () => {
+      // Codex reports no size after a compaction: the reading kept is the 150k from before it
+      const w = world({ tool: 'codex' })
+      w.startTurn()
+      w.emit({ ...compaction, trigger: 'auto' })
+      w.endTurn(undefined, 'none')
+      w.startTurn()
+      w.c.request('s1', undefined, 'next')
+      w.endTurn(undefined, 'none')
+      vi.advanceTimersByTime(5_100)
+      expect(w.sent).toEqual([])
+      expect(w.nudges).toEqual([expect.stringMatching(/no size of the context was read since the last compaction/)])
+    })
+
+    it('stops a next step that asks again at once after Centralu’s own compaction when nothing was read', () => {
+      const w = world({ tool: 'codex' })
+      asked(w, undefined, 'first step')
+      w.startTurn()
+      w.emit(compaction)
+      w.endTurn(undefined, 'none')
+      expect(w.thens).toHaveLength(1)
+      // The next step is done and asks again: the 150k of before the compaction is not its size
+      w.startTurn()
+      w.c.request('s1', undefined, 'second step')
+      w.endTurn(undefined, 'none')
+      vi.advanceTimersByTime(5_100)
+      expect(w.sent).toHaveLength(1)
+      expect(w.thens).toHaveLength(1)
+    })
+
+    it('judges a request held for a card by it too', () => {
+      const w = world({ tool: 'codex' })
+      w.startTurn()
+      w.emit({ ...compaction, trigger: 'auto' })
+      w.endTurn(undefined, 'none')
+      w.startTurn()
+      w.c.request('s1')
+      w.state.idle = { idle: false, reason: 'question' }
+      w.endTurn(undefined, 'none')
+      w.state.idle = { idle: true }
+      w.c.sweep()
+      expect(w.sent).toEqual([])
+    })
+
+    it('goes by a size read after the compaction, and by the size of the turn’s own last request', () => {
+      const w = world()
+      w.startTurn()
+      w.emit({ ...compaction, trigger: 'auto' })
+      w.endTurn(undefined, 'none')
+      // The tool reads the context after the compaction: small; then the turn grew
+      w.read(9_000)
+      w.startTurn()
+      w.c.request('s1')
+      w.emit({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 140_000, cacheReadTokens: 0 } })
+      w.endTurn(undefined, 'none')
+      expect(w.sent).toEqual([['s1', '/compact']])
+
+      const small = world()
+      small.startTurn()
+      small.emit({ ...compaction, trigger: 'auto' })
+      small.endTurn(undefined, 'none')
+      small.read(9_000)
+      small.startTurn()
+      small.c.request('s1')
+      small.endTurn(undefined, 'none')
+      vi.advanceTimersByTime(5_100)
+      expect(small.sent).toEqual([])
+    })
+
+    it('leaves a resting session alone until the tool has read its context since the compaction', () => {
+      const w = world()
+      w.startTurn()
+      w.emit({ ...compaction, trigger: 'auto' })
+      w.endTurn(undefined, 'none')
+      w.state.now += 30 * MIN
+      expect(w.c.sweep()).toEqual([])
+      w.read(150_000)
+      expect(w.c.sweep()).toEqual(['s1'])
+    })
+
+    it('does not count a compaction that failed: nothing shrank', () => {
+      const w = world()
+      w.startTurn()
+      w.emit({ type: 'compaction', sessionId: 's1', failed: true })
+      w.endTurn(undefined, 'none')
+      w.startTurn()
+      w.c.request('s1')
+      w.endTurn(undefined, 'none')
+      vi.advanceTimersByTime(5_100)
+      expect(w.sent).toEqual([['s1', '/compact']])
+    })
   })
 })
 
@@ -755,6 +1056,43 @@ describe('on the session manager (#1451)', () => {
     const own = world.events.find((e) => e.type === 'turn_complete')
     expect(own).toBeDefined()
     expect(own).not.toMatchObject({ turn: { compaction: true } })
+  })
+
+  it('sends the next step after the compaction as an ordinary turn of the session in Centralu’s channel, with no user row (#2024)', async () => {
+    const { id, h, tools } = await session()
+    h.finishTurn()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    expect(tools.compactSelf!(undefined, 'Continue with step 3 of the plan').text).toMatch(/with your `then`/)
+    h.finishTurn()
+    h.emitContext(150_000, 200_000)
+    expect(h.sent).toEqual(['hello', '/compact'])
+    // The compact turn: the tool starts it, reports the compaction, ends it
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    h.emitEvent({ type: 'compaction', sessionId: id, failed: false })
+    expect(h.sent).toHaveLength(2)
+    h.finishTurn()
+    expect(h.sent).toEqual(['hello', '/compact', expect.stringContaining('Continue with step 3 of the plan')])
+    expect(h.origins.at(-1)).toEqual({ kind: 'channel', server: 'centralu' })
+    expect(h.compacts.at(-1)).toBe(false)
+    const rows = world.store.messages.loadMessages(id, 50)
+    expect(JSON.stringify(rows.filter((r) => r.role === 'user'))).not.toContain('Continue with step 3')
+    // The turn it starts is the session's own: it ends with no compaction mark
+    world.events.length = 0
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    h.finishTurn()
+    expect(world.events.find((e) => e.type === 'turn_complete')).not.toMatchObject({ turn: { compaction: true } })
+  })
+
+  it('tells the session quietly that its next step was not sent when the request was dropped (#2024)', async () => {
+    const { id, h, tools } = await session()
+    h.emitContext(40_000, 200_000)
+    h.finishTurn()
+    h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
+    tools.compactSelf!(undefined, 'Continue with step 3')
+    h.finishTurn()
+    h.emitContext(41_000, 200_000)
+    expect(h.sent).toEqual(['hello'])
+    expect(h.nudges).toEqual([expect.stringContaining('Continue with step 3')])
   })
 
   it('leaves a resting session alone after a model switch until the new model’s window is read: the old one’s is not its window (#1553)', async () => {

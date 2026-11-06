@@ -555,6 +555,8 @@ export class SessionManager {
         return this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact'
       },
       send: (id, text) => this.events.sendCompact(id, text),
+      sendThen: (id, text) => this.events.sendThen(id, text),
+      nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
     this.contextNudges = new ContextNudges({
@@ -2120,7 +2122,7 @@ export class SessionManager {
         ask: (tool, input, signal) => self.askedGate.askCli(id, tool, input, signal),
         done: (tool, input) => self.askedGate.cliDone(id, tool, input),
       }),
-      compactSelf: (id, focus) => self.selfCompaction.request(id, focus),
+      compactSelf: (id, focus, then) => self.selfCompaction.request(id, focus, then),
       compactTurn: (id) => self.selfCompaction.compactTurn(id),
       compactEvent: (e, ended) => {
         try {

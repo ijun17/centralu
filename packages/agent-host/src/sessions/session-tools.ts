@@ -26,7 +26,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
   /** The `compact_self` tool of a session (#1451) */
-  compactSelf: (sessionId: string, focus?: string) => { text: string; isError?: boolean }
+  compactSelf: (sessionId: string, focus?: string, then?: string) => { text: string; isError?: boolean }
   /** One step of the orchestrator, asked about when a session's request is its turn (#1447) */
   whenAsked: WhenAsked
 }
@@ -153,7 +153,7 @@ export class SessionTools {
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       mail: (args) => this.host.mailTool(sessionId, args),
-      compactSelf: (focus) => this.host.compactSelf(sessionId, focus),
+      compactSelf: (focus, then) => this.host.compactSelf(sessionId, focus, then),
     }
   }
 }

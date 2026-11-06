@@ -811,6 +811,19 @@ export class SessionEvents {
   }
 
   /**
+   * The step an agent set with `compact_self`'s `then` (#2024), sent once its compaction is done: an ordinary turn of the session's own,
+   * in the channel of Centralu and with no user row, so nothing in the conversation reads as the person. Only a live process takes it.
+   */
+  sendThen(sessionId: string, text: string): void {
+    const handle = this.host.handles.get(sessionId)
+    if (!handle) throw rpcError('The session is not running')
+    this.host.record.closeStream(sessionId)
+    // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
+    this.host.cardRests.turnAsked(sessionId)
+    handle.send(text, { origin: { kind: 'channel', server: 'centralu' } })
+  }
+
+  /**
    * Turns a touched file into a path relative to the project (#185).
    *
    * The tool gives an absolute path (Claude's `file_path`, Codex's `fileChange`). Entries in the file
