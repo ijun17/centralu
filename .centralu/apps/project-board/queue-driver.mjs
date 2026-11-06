@@ -24,6 +24,7 @@ import {
   dispatchWorkflow,
   FATAL,
   GitHubError,
+  countsTowardLimit,
   isOutage,
   markDraft,
   markReady,
@@ -810,7 +811,7 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
       // a 5xx or a dropped answer that this one item meets every time (a poll that goes through starts the count over);
       // no network, no login, a rate limit or no gh are the machine's, and pause for as long as they last
       if (fatal) {
-        if (FATAL.has(e.kind) && !(e.status >= 500)) return
+        if (!countsTowardLimit(e)) return
         it.outages = (it.outages ?? 0) + 1
         if (it.outages < OUTAGE_LIMIT) return
         it.errors = it.outages

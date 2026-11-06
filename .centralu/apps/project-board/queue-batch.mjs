@@ -34,6 +34,7 @@ import {
   dispatchWorkflow,
   FATAL,
   GitHubError,
+  countsTowardLimit,
   isOutage,
   mergeInto,
   postStatus,
@@ -122,7 +123,7 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
       Object.assign(fb, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
       if (fatal) {
         // As an item's: an outage is no strike, unless it is a 5xx or a dropped answer that this batch meets every time
-        if (FATAL.has(e.kind) && !(e.status >= 500)) return
+        if (!countsTowardLimit(e)) return
         fb.outages = (fb.outages ?? 0) + 1
         if (fb.outages < OUTAGE_LIMIT) return
         fb.errors = fb.outages

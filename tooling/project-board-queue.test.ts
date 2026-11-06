@@ -21,7 +21,7 @@ import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/ap
 // @ts-expect-error — plain .mjs of a Centralu app
 import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { GitHubError, isOutage } from '../.centralu/apps/project-board/github.mjs'
+import { GitHubError, countsTowardLimit, isOutage } from '../.centralu/apps/project-board/github.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
@@ -1895,16 +1895,11 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(writes()).toEqual([])
   })
 
-  // A read that GitHub's side drops (gh's "EOF") says as little about the item as a 5xx: paused for, never a strike, and bounded the same
-  // way (review of #2017: it paused the queue for ever, since only a 5xx counted towards the limit). The queue pauses for each outage
-  // (1, 2, 4, 8, 15 minutes); a clock that steps 20 minutes a poll is past each pause at the next one
-  it.each([
-    ['a 5xx', 'HTTP 502: Bad Gateway (https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1)'],
-    ['a dropped connection', 'Get "https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1": EOF'],
-  ])('tells the session once after %s that one pull request meets every time, six pauses running, not before', async (_what, answer) => {
+  // The queue pauses for each outage (1, 2, 4, 8, 15 minutes); a clock that steps 20 minutes a poll is past each pause at the next one
+  it('tells the session once after a 5xx that one pull request meets every time, six pauses running, not before', async () => {
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }), { PROJECT_BOARD_QUEUE_STEP_MS: String(20 * 60_000) })
     await call('queue_merge', { pr: 77, owner: 'tester' })
-    patchGh((s) => (s.checksError = answer))
+    patchGh((s) => (s.checksError = 'HTTP 502: Bad Gateway (https://api.github.com/repos/ijun17/centralu/commits/c0ffee/check-runs?per_page=100&page=1)'))
     const q = await until((x) => stateOf(x) === 'attention', 'attention')
     expect(q.queue[0].reason.kind).toBe('error')
     // Six polls failed with the 5xx, none was a strike before: not "3 times in a row"
@@ -1920,13 +1915,21 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(isOutage(e('github', { status: 503 }))).toBe(true)
     // A dropped connection (gh's "EOF") on a write, but not a refusal that printed no status: GraphQL's words for `gh pr ready` carry none
     expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: Post "https://api.github.com/graphql": EOF', { lost: true }))).toBe(true)
-    // And a read whose answer never came
-    expect(isOutage(new GitHubError('github', 'GitHub answered repos/x/commits/c0ffee/check-runs with: Get "https://api.github.com/x": EOF', { status: 0 }))).toBe(true)
+    // A read whose answer never came is the item's strike, as it was: the merge's read-back test above retries it on the next poll
+    expect(isOutage(new GitHubError('github', 'Get "https://api.github.com/x": EOF', { status: 0 }))).toBe(false)
     expect(isOutage(new GitHubError('github', 'GitHub refused to turn #7 into a draft: GraphQL: Pull request is not ready (convertPullRequestToDraft)', { lost: true }))).toBe(false)
     for (const kind of ['network', 'rate', 'auth', 'gh-missing']) expect(isOutage(e(kind))).toBe(true)
     for (const status of [0, 404, 409, 422]) expect(isOutage(e('github', { status })), String(status)).toBe(false)
     expect(isOutage(e('not-found', { status: 404 }))).toBe(false)
     expect(isOutage(new Error('boom'))).toBe(false)
+  })
+
+  // Which outages count toward an item's limit (review of #2017: a dropped answer on one item paused the queue for ever, since only a 5xx counted)
+  it("counts a 5xx and a dropped answer toward an item's own limit, and never what FATAL names", () => {
+    const dropped = new GitHubError('github', 'GitHub refused to start ci.yml: Post "https://api.github.com/x": EOF', { lost: true })
+    expect(isOutage(dropped) && countsTowardLimit(dropped)).toBe(true)
+    expect(countsTowardLimit(new GitHubError('github', 'x', { status: 503 }))).toBe(true)
+    for (const kind of ['network', 'rate', 'auth', 'gh-missing']) expect(countsTowardLimit(new GitHubError(kind, 'x')), kind).toBe(false)
   })
 
   it('closes no lower when the top is found merged into another branch than main', async () => {
