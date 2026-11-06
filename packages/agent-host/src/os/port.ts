@@ -282,7 +282,7 @@ export interface OsChild {
   readonly stdin: Writable | null
   readonly stdout: Readable | null
   readonly stderr: Readable | null
-  /** By fd; `stdio[3]` is the `'overlapped'` duplex when asked for */
+  /** By fd; `stdio[3]` is the `'overlapped'` duplex when asked for (the in-memory OS refuses one) */
   readonly stdio: ReadonlyArray<Readable | Writable | Duplex | null>
   readonly exitCode: number | null
   readonly signalCode: NodeJS.Signals | null
