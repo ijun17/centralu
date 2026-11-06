@@ -558,7 +558,7 @@ const HANDLERS: ToolHandlers = {
   async create_session(args, { tools }) {
     // Reported unless asked not to (#1233)
     const reportBack = args.reportBack !== false
-    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage, reportBack })
+    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, preset: args.preset, firstMessage: args.firstMessage, reportBack })
     const sent = args.firstMessage === undefined ? '' : ' — sent the first instruction' + (reportBack ? '; you are told when its turn ends' : '')
     return {
       text: r.ok ? `Created: ${r.name} [${r.sessionId}]${sent}` : `Could not create it — ${r.error}`,

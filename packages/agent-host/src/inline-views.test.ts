@@ -242,6 +242,28 @@ describe('calling a tool with a view attaches the view under a card', () => {
   })
 })
 
+/*
+ * Owner decision 2026-11-05 (deep review of #1993): a call a view inline in a conversation makes is rooted at that
+ * conversation's session, so an agent its app starts runs no higher than that session; a fixed view's call is the person's.
+ */
+describe("a view's calls and the session they are rooted at", () => {
+  it('apps.invoke from an inline view names its conversation; from a fixed view, none', async () => {
+    const { sessionId, apps } = await start()
+    await apps.call('app-viewer', 'show', { q: 'x' }, { callId: 'toolu_R1' })
+    await until(appViews, (v) => v.some((e) => e.phase === 'result'))
+    const inlineId = appViews()[0]!.instanceId!
+    const pinnedId = views.open({ projectId, appId: 'viewer' }, 'ui://viewer/main').instanceId
+    const seen = vi.spyOn(rt, 'call')
+    const app = { appId: 'viewer', projectId }
+    await rpc('apps.invoke', { ...app, name: 'show', args: { q: 'inline' }, instanceId: inlineId })
+    await rpc('apps.invoke', { ...app, name: 'show', args: { q: 'pinned' }, instanceId: pinnedId })
+    expect(seen.mock.calls.map((c) => c[3])).toEqual([
+      { kind: 'view', instanceId: inlineId, sessionId },
+      { kind: 'view', instanceId: pinnedId },
+    ])
+  })
+})
+
 describe('paths that close a view', () => {
   it('closes the instance when the UI closes it (apps.closeView)', async () => {
     const { apps } = await start()

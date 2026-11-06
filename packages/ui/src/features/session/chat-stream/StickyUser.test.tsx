@@ -27,3 +27,16 @@ describe('the pinned copy of a message', () => {
     expect(html).not.toContain('border-dashed')
   })
 })
+
+describe('the pinned copy while its pane is folded', () => {
+  it('is out of view and takes no press, and is drawn in place otherwise', () => {
+    const folded = pinned({ stickyFolded: true })
+    expect(folded).toContain('data-folded="true"')
+    expect(folded).toContain('opacity-0')
+    expect(folded).toContain('inert')
+    const open = pinned({ stickyFolded: false })
+    expect(open).not.toContain('data-folded')
+    expect(open).toContain('opacity-100')
+    expect(open).not.toContain('inert')
+  })
+})

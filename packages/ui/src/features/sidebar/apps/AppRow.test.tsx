@@ -53,3 +53,25 @@ describe('an app row says "asks you" for its own sessions only (#1143 U6)', () =
     expect(render(p, [waiting({ projectId: 'p1', state: 'idle' })])).not.toContain('asks you')
   })
 })
+
+describe('an app holding busy (#1928)', () => {
+  const busy = () => app({ status: 'running', busy: 'merge queue, 1 item' })
+
+  it('writes nothing on the row; the reason is the name of its square Stop icon', () => {
+    const html = render(busy(), [])
+    expect(html).not.toContain('app-row-hint')
+    expect(html).not.toContain('>Running')
+    expect(html).toMatch(/<button[^>]*aria-label="Stop X: running merge queue, 1 item\. It starts again the next time something needs it"[^>]*data-testid="app-stop-[^"]*"[^>]*><svg[^>]*><rect/)
+    expect(html).not.toContain('>Stop<')
+    // the reserve for the icon: 36px, not the 56px the text button needed
+    expect(html).toContain('pr-9')
+    expect(html).not.toContain('pr-14')
+  })
+
+  it('still says "asks you" when it waits on the person, beside the Stop icon', () => {
+    const html = render(busy(), [waiting()])
+    expect(html).toContain('asks you')
+    expect(html).toContain('data-testid="app-stop-')
+    expect(html).toContain('pr-9')
+  })
+})

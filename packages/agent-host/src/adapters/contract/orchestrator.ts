@@ -668,6 +668,11 @@ export type OrchestratorTools = {
     /** The session name. If given, the automatic name does not override it */
     name?: string
     /**
+     * The preset it runs under. Absent: the default a new session gets (`defaultPresetFor`: `auto` in a trusted project,
+     * `normal` in an untrusted one), held to the orchestrator's own preset. One named above that is refused (`createdPreset`)
+     */
+    preset?: PermissionPreset
+    /**
      * The first instruction to send right after creation. Its turn is the orchestrator's (#1233), as a send to a
      * session at rest is: its cards come to the orchestrator, and its later words go in as notes with no busy answer
      */

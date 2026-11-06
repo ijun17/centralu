@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import { orchestratorHome } from './orchestrator-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
+import { lowestPreset } from './start-agent.js'
 import { AgentRunWait } from './app-agents.js'
 import { turnAnswer } from './turn-answer.js'
 import { builderRole } from './app-builder.js'
@@ -212,8 +213,8 @@ export class AppSessions {
    *
    * The caller picks the tool, and if it does not, the project's default tool is used (for a
    * user-folder app, the orchestrator's own tool). The session's app slot (`appId`) is set to that
-   * app — it stands under the app in the sidebar. The preset is `normal`: a session that edits an
-   * app's code never runs unattended without the person's knowledge. No builder is stood up for an
+   * app — it stands under the app in the sidebar. The preset is `auto`, the default every new session
+   * gets (owner decision 2026-11-05; it was `normal`, so a session that edits an app's code asked the person). No builder is stood up for an
    * app in an untrusted project — that app cannot even launch, so there is nothing to test even if a builder
    * existed.
    */
@@ -266,7 +267,8 @@ export class AppSessions {
       projectId: ref.projectId,
       cwd,
       tool: tool ?? fallback,
-      permissionPreset: 'normal',
+      // The default a new session gets (owner decision 2026-11-05): a builder exists only in a trusted project or the user folder
+      permissionPreset: 'auto',
       roleAppend: builderRole(app, cwd),
       appId: ref.appId,
       builderOf: ref,
@@ -359,9 +361,9 @@ export class AppSessions {
    *   Location  That project (cwd is the project root) for a project app; for a user-folder app, the
    *             orchestrator's own empty folder with no project, the same as a coordinator session.
    *             The session's app slot (`appId`) is set to that app.
-   *   Preset    **Always `safe`** — never inherited from the calling session even if it is `auto`
-   *             (the plan's "security boundary"). An app's text is someone else's words, and an agent
-   *             running on that text must never act unattended without the person's knowledge.
+   *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), but never
+   *             above any session with a call open into the app (`appAgentPreset`); it was always
+   *             `safe` before (see the comment where the session is made).
    *   Text      Sent as the app's own text, not the person's — recorded in the conversation as a
    *             message the app sent (`fromApp`), and reaches the agent wrapped in the same frame as
    *             an inline view's message (`appMessageFrame`, every line contained in a quote) with the
@@ -419,27 +421,24 @@ export class AppSessions {
     }
 
     /*
-     * **The preset is `safe`** — regardless of the calling session and regardless of the person's own
-     * global setting.
+     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the lowest
+     * preset among the sessions with a call open into the app now** (`appAgentPreset`, `AppCalls.agentCallers`), whatever
+     * run id the app cites: while a `safe` session's call is open, every agent the app starts is `safe`, so no session
+     * gains through an app what its own preset withholds. An inline view counts as its conversation's session; through
+     * `call_app` an app is held as its caller is. Only calls from a screen opened in the window, with no session's call
+     * open, give `auto`; a call whose chain can no longer be followed, or nothing open at all, gives `safe`.
      *
-     * This was `normal` at first (the plan's decision 6: never inherit the calling session's `auto`).
-     * But `normal` still pulls its approval mode from the person's own `~/.claude`. For someone using
-     * global bypass, that would let an agent an app called do anything at all with no approval card —
-     * exactly the path decision 6 was meant to close off. This prompt was never written by the person.
-     * It was sent by the app's code, and data the app pulled in from outside can be mixed into it (a
-     * prompt injection channel). Global bypass is the person choosing to trust **their own
-     * instructions** — not a choice to trust an instruction an app wrote too. (This differs from #92
-     * respecting the user's own setting — there, the one giving the instruction was still the person.)
-     *
-     * Even under `safe`, a read is never asked about. A request like summarizing or looking something
-     * up just runs, and only a write or a command execution surfaces as an approval card in this
-     * session under this app — a slot the person can actually see.
+     * It was always `safe` before (and `normal` before that, the plan's decision 6), because this prompt was never written
+     * by the person: the app's code sent it, and data the app pulled in from outside can be mixed into it (a prompt
+     * injection channel). What holds it besides the preset: no Centralu server and no apps (`session-app-wiring.ts`), no
+     * Centralu updates (`updates-asked.ts`), the project's trust for its files (`launch-inputs.ts`), and no other session
+     * answers a card raised here (`answersApproval`, routed-cards.ts). The person may lower it in the session's settings.
      */
     const info = await this.host.createSession({
       projectId: req.app.projectId,
       cwd,
       tool: req.tool,
-      permissionPreset: 'safe',
+      permissionPreset: appAgentPreset(req.callers, (sessionId) => this.host.meta.get(sessionId)?.permissionPreset),
       appId: req.app.appId,
       appAgent: req.schema ? { outputSchema: req.schema } : {},
     })
@@ -635,4 +634,15 @@ export async function gitStatusForApp(
     ...(summary.more ? { more: true as const } : {}),
     files: await files(),
   }
+}
+
+/**
+ * The preset an app's agent starts under (owner decision 2026-11-05): `auto`, the default every new session gets, held to
+ * the lowest preset among the calls open into the app (`AgentRunRequest.callers`), as a child never runs above its caller
+ * (`presetWithin`). A screen opened in the window adds nothing below `auto`; a session that is gone, a chain that can no
+ * longer be followed, or no open call at all gives `safe`: nothing says who asked.
+ */
+export function appAgentPreset(callers: AgentRunRequest['callers'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
+  if (callers.length === 0) return 'safe'
+  return lowestPreset(...callers.map((c): PermissionPreset => (c.kind === 'person' ? 'auto' : c.kind === 'session' ? (presetOf(c.sessionId) ?? 'safe') : 'safe')))
 }

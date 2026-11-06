@@ -121,7 +121,7 @@ function launcher(): string {
     const src = join(folder, `launcher-${unique}.cs`)
     const tmp = join(folder, `launcher-${unique}.exe`)
     writeFileSync(src, LAUNCHER_CS)
-    execFileSync(csc, ['/nologo', '/target:exe', '/platform:x64', `/out:${tmp}`, src], { stdio: 'pipe' })
+    execFileSync(csc, ['/nologo', '/target:exe', '/platform:x64', `/out:${tmp}`, src], { stdio: 'pipe', timeout: 120_000 })
     try {
       renameSync(tmp, exe)
     } catch {
@@ -131,6 +131,21 @@ function launcher(): string {
     rmSync(src, { force: true })
   }
   return (launcherCache = exe)
+}
+
+/**
+ * Builds the launcher now, for the run's global setup (`tooling/vitest-tmp-root.ts`): the first fake program a worker made
+ * compiled it inside a hook, and on a cold, loaded Windows runner two workers did that at once and held their event loops
+ * for 36 s, past the 30 s hook limit. Windows only, as the launcher is; a build that fails is left for the first test that
+ * needs it to say. A compiler that never ends is cut off at 120 s the same way, rather than hanging the run.
+ */
+export function buildLauncherEarly(): void {
+  if (process.platform !== 'win32') return
+  try {
+    launcher()
+  } catch {
+    // the test that needs it builds it again and fails with the compiler's own words
+  }
 }
 
 /**
