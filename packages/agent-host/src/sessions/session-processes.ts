@@ -1,4 +1,5 @@
 import type { PermissionPreset, RebuildCause, SessionInfo, ToolName } from '@cc/protocol'
+import { errorMessage } from '@cc/protocol'
 import type { AgentProcess, EventSink, SessionHandle } from '../adapters/contract.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
@@ -159,7 +160,7 @@ export class SessionProcesses {
       m.externalId = forked
       this.host.store.sessions.upsertSession(m)
     } catch (err) {
-      return { session: m, resumed: false, reason: (err as Error).message }
+      return { session: m, resumed: false, reason: errorMessage(err) }
     }
 
     return this.resumeSession(sessionId)
