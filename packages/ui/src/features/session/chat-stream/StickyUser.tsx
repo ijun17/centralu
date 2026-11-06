@@ -36,6 +36,8 @@ export function useStickyUser({
    * holds the position of every row already measured, so this uses that instead.
    */
   const [stickyIndex, setStickyIndex] = useState<number | null>(null)
+  /** What `stickyIndex` was last set to, so a pass that finds the same message sets nothing (see `syncSticky`) */
+  const pinnedIndex = useRef<number | null>(null)
   /**
    * The actual card's rectangle — held so its overlap with the next user message can be
    * measured in DOM coordinates.
@@ -59,6 +61,14 @@ export function useStickyUser({
       if (m.end > top) break // From here on, rows are still on screen or below it
       if (chat[m.index]?.kind === 'user') found = m.index
     }
+    /*
+     * Not set again when it is the same: this runs after every commit of a growing conversation, and a state update
+     * scheduled from an effect waits for a task of its own. Events that arrive without one between them (a socket
+     * hands a burst over in one task) commit again and again with that update still waiting, which React counts as
+     * nested updates, and past 50 it throws from the next store update (#2059).
+     */
+    if (found === pinnedIndex.current) return
+    pinnedIndex.current = found
     setStickyIndex(found)
     // scrollRef is a **prop received** by this component — unlike a ref created inside it, it can change
   }, [chat, virtualizer, scrollRef])
