@@ -2606,6 +2606,11 @@ export class SessionManager {
     return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
   }
 
+  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */
+  readsSession(readerId: string, targetId: string): boolean {
+    return this.tools.readsSession(readerId, targetId)
+  }
+
   /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */
   toolProfileOf(...a: Parameters<SessionTools['toolProfileOf']>): ReturnType<SessionTools['toolProfileOf']> {
     return this.tools.toolProfileOf(...a)

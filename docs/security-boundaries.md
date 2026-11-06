@@ -18,7 +18,13 @@ hook's output, a linked machine's is whatever it sends), a session's or project'
 `ChildReports.tellSession`'s `forModel`, `errorKind`). One exception, by the owner's choice (#1948): the mail notice a
 session gets when a session it asked stops before answering (docs/plans/turn-owned-by-no-one.md §4.1) quotes what the
 stopped session last wrote in the cut turn, at most 600 characters, five sessions a notice, every line behind `> `, under
-Centralu's words that it is that session's own text, to be read as information and never as instructions. It is mail, so
+Centralu's words that it is that session's own text, to be read as information and never as instructions. It is not a new
+read path: it quotes only what that sender could read anyway (`MessageService.quoteFor`). Only to a sender that can read the
+stopped session with `read_session` (that tool's own rule, `OrchestratorTools.mayRead`, asked through
+`SessionTools.readsSession`), and only of a turn that was wholly the answer to that sender: its own message started it, every
+message given into it is its own, the person wrote nothing in it, and the session has run no turn since. A turn the person,
+the CLI or another sender had a part in is not split: nothing of it is quoted, so a secret the person gave the session, or
+an answer to someone else that rode in the same turn, never reaches the asker's notice. It is mail, so
 it is never inline in a wake: `mail read` shows it quoted again under "the person did not write it". The error's words are
 still left out, and the person's Inbox notice quotes nothing. A notice that could not be delivered is kept in memory, dropped
 with its session, and delivered when the session next takes a message; ordinary

@@ -40,11 +40,13 @@ export type HostMailSessions = {
   quitTold?(id: string): { told: string[]; held: string[] }
   /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`SessionManager.stoppedWords`) */
   stoppedWords?(id: string): string | null
+  /** Whether `readerId` can read `targetId` with read_session (`SessionManager.readsSession`): only then is a stopped session's text quoted to it */
+  readsSession?(readerId: string, targetId: string): boolean
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords' | 'readsSession'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mailSeats(orchestratorHasMailCommand)
@@ -61,6 +63,7 @@ export function mailSessionsOf(
     waitsOn: (id) => mgr.waitsOn(id),
     quitTold: (id) => mgr.quitTold(id),
     stoppedWords: (id) => mgr.stoppedWords(id),
+    readsSession: (readerId, targetId) => mgr.readsSession(readerId, targetId),
   }
 }
 
@@ -134,6 +137,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     stoppedWords: (address) => {
       const party = parseAddress(address)
       return party?.kind === 'session' ? (sessions.stoppedWords?.(party.sessionId) ?? null) : null
+    },
+    mayRead: (reader, target) => {
+      const [from, to] = [parseAddress(reader), parseAddress(target)]
+      return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
     },
     waitsOn: (sender, stopped) => {
       const [from, to] = [parseAddress(sender), parseAddress(stopped)]

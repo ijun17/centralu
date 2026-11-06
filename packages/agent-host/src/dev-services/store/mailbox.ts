@@ -981,6 +981,12 @@ export class MailboxRecords {
       .run(t.messageId, t.starterId, t.startedBy, sessionId, turnSeq)
   }
 
+  /** The session's turn `turnSeq`, ended or not, or null */
+  turn(sessionId: string, turnSeq: number): TurnRecord | null {
+    const row = this.db.prepare<[string, number], TurnSql>(`SELECT * FROM mail_turns WHERE session_id = ? AND turn_seq = ?`).get(sessionId, turnSeq)
+    return row ? toTurnRecord(row) : null
+  }
+
   nextTurnSeq(sessionId: string): number {
     return this.count(`SELECT COALESCE(MAX(turn_seq), 0) + 1 AS n FROM mail_turns WHERE session_id = ?`, sessionId)
   }

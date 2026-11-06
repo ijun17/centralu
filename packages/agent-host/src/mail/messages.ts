@@ -186,6 +186,8 @@ export class MessageService {
       waitsOn?: (sender: string, stopped: string) => boolean
       /** The words of the turn a session's stop cut, which its stop notice to a session quotes as that session's own text; none quoted when absent */
       stoppedWords?: (sessionAddress: string) => string | null
+      /** Whether `reader` can read the session `sessionAddress` with read_session (`SessionTools.readsSession`): a stop notice quotes only to such a reader; none when absent */
+      mayRead?: (reader: string, sessionAddress: string) => boolean
     },
   ) {
     this.now = opts.now ?? Date.now
@@ -871,7 +873,7 @@ export class MessageService {
             released++
             if (gave.has(m.sender) || this.opts.waitsOn?.(m.sender, address)) waiting.add(m.sender)
             if (told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
-            else if (!held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, quiet || !waiting.has(m.sender))) senders.add(m.sender)
+            else if (!held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, turnSeq, quiet || !waiting.has(m.sender))) senders.add(m.sender)
           }
         }
       },
@@ -900,14 +902,33 @@ export class MessageService {
    * Holds a released row's notice for an older report path (`oldPathEnded`), with the stopped session's words as they are now, so a late notice
    * quotes the cut turn. One stop of a pair is held at a time: a later stop's rows are told now (a double notice at worst, never a lost one)
    */
-  private holdFor(stopped: string, sender: string, messageId: string, quiet: boolean): boolean {
+  private holdFor(stopped: string, sender: string, messageId: string, turnSeq: number, quiet: boolean): boolean {
     const key = oldPathKey(stopped, sender)
     const open = this.oldPathsOpen.get(key)
     const now = this.now()
     if (open && open.at !== now) return false
     if (open) open.rows.push({ messageId, recipient: stopped })
-    else this.oldPathsOpen.set(key, { quiet, at: now, rows: [{ messageId, recipient: stopped }], said: this.opts.stoppedWords?.(stopped) ?? null })
+    else this.oldPathsOpen.set(key, { quiet, at: now, rows: [{ messageId, recipient: stopped }], said: this.quoteFor(stopped, sender, turnSeq) })
     return true
+  }
+
+  /**
+   * What `stopped`'s stop notice to `sender` quotes of its cut turn `turnSeq` (owner, #1948; security-boundaries.md), or null. Never text `sender`
+   * could not read anyway: only to a sender that can read the stopped session with read_session (`mayRead`), and only of a turn that was wholly
+   * the answer to that sender: its own message started it (the turn's starter), every message given into it is its own, the person wrote nothing
+   * in it, and the session has run no turn since, so the words are that turn's. A turn the person, the CLI or another sender had a part in is
+   * not split: nothing of it is quoted
+   */
+  private quoteFor(stopped: string, sender: string, turnSeq: number | null): string | null {
+    const party = parseAddress(stopped)
+    if (turnSeq === null || party?.kind !== 'session' || parseAddress(sender)?.kind !== 'session' || this.opts.mayRead?.(sender, stopped) !== true) return null
+    const turn = this.records.turn(party.sessionId, turnSeq)
+    if (!turn || turn.startedBy !== 'mail' || turn.starterId === null || this.records.message(turn.starterId)?.sender !== sender) return null
+    if (this.records.nextTurnSeq(party.sessionId) !== turnSeq + 1) return null
+    if (this.records.inTurn(stopped, turnSeq).some((r) => r.message.sender !== sender)) return null
+    const typed = this.opts.personSaid?.(party.sessionId)
+    if (typed && typed.ts >= turn.startedAt) return null
+    return this.opts.stoppedWords?.(stopped) ?? null
   }
 
   /**
@@ -1123,9 +1144,13 @@ export class MessageService {
       .filter((r) => !waiting.has(`${r.messageId}/${r.recipient}`) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
-    // A session reads what the stopped session last said, as its words (the person reads it in the conversation itself)
+    // A session reads what the stopped session last said in a turn that was its own (`quoteFor`), as that session's words; the person reads it in the conversation itself
     const stopped = kind === 'session' ? [...new Set(unanswered.filter((u) => isStop(u.why)).map((u) => u.recipient))].slice(0, QUOTED_STOPS) : []
-    const words = new Map(stopped.flatMap((r) => { const w = said.has(r) ? said.get(r) : this.opts.stoppedWords?.(r); return w ? [[r, w] as const] : [] }))
+    const cutTurn = (r: string): number | null => {
+      const seqs = new Set(rows.filter((x) => x.recipient === r && isStop(x.releasedWhy)).map((x) => x.turnSeq))
+      return seqs.size === 1 ? ([...seqs][0] ?? null) : null
+    }
+    const words = new Map(stopped.flatMap((r) => { const w = said.has(r) ? said.get(r) : this.quoteFor(r, sender, cutTurn(r)); return w ? [[r, w] as const] : [] }))
     this.centralu(sender, {
       kind: 'notice',
       body: unansweredText(unanswered.map((u) => ({ ...u, name: this.reach.labelOf(u.recipient) })), kind === 'person', words),

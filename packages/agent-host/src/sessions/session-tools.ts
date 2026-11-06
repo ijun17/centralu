@@ -8,6 +8,7 @@ import type { AgentStartFlow } from './start-agent-flow.js'
 import type { WhenAsked } from './asked-gate.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 import { toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { profileAllows } from './tool-seats.js'
 import type { UpdatesAsked } from './updates-asked.js'
 
 /**
@@ -106,6 +107,17 @@ export class SessionTools {
   }
 
   /**
+   * Whether `readerId` can read `targetId` with read_session: its profile has the tool and its seat's read rule lets it (`OrchestratorTools.mayRead`).
+   * What a stop notice may quote of a stopped session to it (security-boundaries.md): nothing it could not read anyway
+   */
+  readsSession(readerId: string, targetId: string): boolean {
+    const m = this.host.meta.get(readerId)
+    if (!m) return false
+    const { profile, tools } = this.toolChoice(m)
+    return profile !== null && profileAllows(profile, 'read_session') && tools()?.mayRead?.(targetId) === true
+  }
+
+  /**
    * The light set an ordinary session gets (#320): other sessions, read-only — every project's and the linked
    * machines' from a trusted project, its own project's from an untrusted one (#984).
    *
@@ -120,6 +132,7 @@ export class SessionTools {
     const refuse = async () => ({ ok: false, error })
     return {
       updateCentralu: async (action, signal) => this.host.updateCentraluAsked(sessionId, action, signal),
+      mayRead: (id) => view.mayRead?.(id) === true,
       listSessions: async (opts) => view.listSessions(opts),
       readSession: async (...a) => view.readSession(...a),
       recall: async (...a) => view.recall(...a),
