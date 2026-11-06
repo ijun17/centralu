@@ -42,6 +42,12 @@ class RecordingAdapter extends AcpAdapter {
 const CLAUDE_MODEL = 'haiku'
 /** Codex's smallest model, with the least reasoning */
 const CODEX_MODEL = 'gpt-5.6-luna'
+/**
+ * Cursor runs on Auto: the ACP adapter sets no model, and Auto is the one the Free plan includes (`Model unavailable on Free: Free
+ * includes Grok 4.7, Grok 4.6, and Auto`), so no explicit one is cheaper on this account. Another plan's model is named here when the
+ * adapter can set one.
+ */
+const CURSOR_MODEL = 'auto'
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
@@ -112,7 +118,7 @@ async function main(): Promise<number> {
         const frames = files.flatMap((file) => readFileSync(join(raw, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
         const dir = join(ADAPTERS, ADAPTER_FOLDER[tool] ?? 'acp', 'recordings', `${tool === 'claude' ? 'claude-code' : tool}-${version.replace(/^(agent|codex-cli) /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
-        const header = { header: { tool, version, scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
+        const header = { header: { tool, version, model: modelOf(tool), scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
         writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...bridgeAsPlaceholders(scrub(frames, cwd))].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] ${tool} ${scenario.name}: ${frames.length} frames, ${events.length} events -> ${dir}`)
       } catch (e) {
@@ -130,6 +136,11 @@ async function main(): Promise<number> {
     await removeDir(data)
   }
   return failed ? 1 : 0
+}
+
+/** The model a recording of `tool` runs on, for its header (OpenCode: its free models, no choice made) */
+function modelOf(tool: string): string {
+  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
 }
 
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
