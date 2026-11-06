@@ -457,9 +457,9 @@ export async function pickDirectory(): Promise<string | null> {
 
 /**
  * "Apply now" (#352) through the Rust shell: `relaunch_info` says whether this window's bundle on
- * disk now holds another build, `apply_update_relaunch` tells the keeper (or, without one, stops the
- * host for an update, #1895) and relaunches, and the keeper's activity report (in `host-build`) is
- * what an automatic apply waits on: there is none without a keeper, so nothing applies by itself there.
+ * disk now holds another build, `apply_update_relaunch` stops the host for an update (#1895: itself, or through the
+ * keeper, which exits; an older keeper is told to hold on instead) and relaunches, and the keeper's activity report (in
+ * `host-build`) is what an automatic apply waits on: there is none without a keeper, so nothing applies by itself there.
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {

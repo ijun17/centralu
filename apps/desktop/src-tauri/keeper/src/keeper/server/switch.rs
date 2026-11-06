@@ -5,6 +5,8 @@ use super::*;
 
 /// The answer to a second switch (or a restart, an upgrade) while one runs.
 pub(super) const SWITCH_IN_PROGRESS: &str = "a build switch is already in progress";
+/// A switch, an upgrade or a host restart asked of a keeper on its way out (a stop, or a stop for an update, #1895 step 3)
+pub(super) const KEEPER_STOPPING: &str = "the keeper is stopping";
 
 /// Switches the host to the requesting app's build: a blue-green swap when a host is up
 /// (`swap.rs`), else the next start runs it. The build stamp is re-read from the folder
@@ -58,10 +60,11 @@ pub(in crate::keeper) fn begin_switch(k: Arc<Keeper>, next: BuildSource, keeper_
     let blue_green = {
         let Ok(mut st) = k.state.lock() else { return };
         // A stream means a fresh request; without one the caller (a keeper move) already holds it
-        if st.swapping && stream.is_some() {
+        if (st.swapping || st.stopping) && stream.is_some() {
+            let error = if st.stopping { KEEPER_STOPPING } else { SWITCH_IN_PROGRESS };
             drop(st);
             if let Some(s) = stream.as_mut() {
-                reply(s, &json!({ "ok": false, "error": SWITCH_IN_PROGRESS }));
+                reply(s, &json!({ "ok": false, "error": error }));
             }
             return;
         }
@@ -179,9 +182,10 @@ pub(in crate::keeper) fn content_route(origin: &content::Origin, exe: Option<&Pa
 /// Marks a switch as running, or answers that one already is. True when this request may go on.
 pub(super) fn start_switching(k: &Keeper, stream: &mut UnixStream) -> bool {
     let Ok(mut st) = k.state.lock() else { return false };
-    if st.swapping {
+    if st.swapping || st.stopping {
+        let error = if st.stopping { KEEPER_STOPPING } else { SWITCH_IN_PROGRESS };
         drop(st);
-        reply(stream, &json!({ "ok": false, "error": SWITCH_IN_PROGRESS }));
+        reply(stream, &json!({ "ok": false, "error": error }));
         return false;
     }
     st.swapping = true;

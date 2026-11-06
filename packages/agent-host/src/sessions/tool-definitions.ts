@@ -30,7 +30,7 @@ export const ORCHESTRATOR_TOOLS = [
   {
     name: 'update_centralu',
     description:
-      'Checks for or installs a Centralu update, or applies the installed one (the window relaunches; agents keep running). Never changes the person\'s automatic-update setting.',
+      'Checks for or installs a Centralu update, or applies the installed one (the window relaunches and the agent host restarts; running turns, yours too, go on once it is back). Never changes the person\'s automatic-update setting.',
     schema: z.object({ action: UPDATE_ACTION }),
   },
   {

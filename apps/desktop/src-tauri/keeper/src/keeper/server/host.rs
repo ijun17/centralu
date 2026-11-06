@@ -36,6 +36,7 @@ impl StatusSink for KeeperSink {
             if !matches!(status, HostStatus::Ready(_)) {
                 st.busy = false;
                 st.keeps_agents = None;
+                st.host_stops_for_update = false;
             }
             k.broadcast(&mut st);
             matches!(status, HostStatus::Ready(_))
@@ -73,6 +74,7 @@ impl StatusSink for KeeperSink {
         if let Some(keeps) = line.pointer("/swap/keepsAgents").and_then(Value::as_bool) {
             if let Ok(mut st) = self.0.state.lock() {
                 st.keeps_agents = Some(keeps);
+                st.host_stops_for_update = line.pointer("/swap/stopsForUpdate").and_then(Value::as_bool) == Some(true);
                 self.0.broadcast(&mut st);
             }
             return true;

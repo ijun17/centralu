@@ -17,7 +17,7 @@
  * the same names as what these scripts start (CONTRIBUTING.md, "Never stop what you did not start").
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 
@@ -88,6 +88,20 @@ export function request(sock, body, timeoutMs = 8000) {
 
 /** The keeper's `status` view */
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
+
+/**
+ * Copies the bundled host from `from` to `to` as a host of a build before #1895 step 3: the same code, but it does not say it
+ * stops for an update (`stopsForUpdate`). A keeper holding its children hands them on in a handoff only for such a host
+ * (`handoff::held_children_on_handoff`); for one that says it, the keeper stops for an update instead.
+ */
+export function copyEarlierHost(from, to) {
+  cpSync(from, to, { recursive: true })
+  const main = join(to, 'main.mjs')
+  const src = readFileSync(main, 'utf8')
+  const earlier = src.replace('stopsForUpdate: true', 'stopsForUpdate: false')
+  if (earlier === src) throw new Error(`${main} no longer says "stopsForUpdate: true" where copyEarlierHost expects it`)
+  writeFileSync(main, earlier)
+}
 
 /** What the keeper holds, from `keeper.sock`: the child socket answers only the keeper's hosts (#538) */
 export const heldChildren = (data) => request(join(data, 'keeper.sock'), { op: 'children' }).then((r) => r.children ?? [])

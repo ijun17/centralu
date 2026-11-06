@@ -9,6 +9,7 @@
 //! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?,"relaunched":bool}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. `relaunched`: this window is the one an announced relaunch started |
 //! | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is relaunching itself to apply an update (#352): for up to `n` s (default 60, at most 300) no window attached does not stop the keeper, whatever background mode says |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
+//! | `{"op":"stop","forUpdate":true}` | the host is stopped for an update (it lists what it ends for the next host), then `{"ok":true}`, and the keeper exits (#1895 step 3). A window's only: anyone else gets `{"ok":false,"error":"window_only: …"}` |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
 //! | `{"op":"upgrade","exe":path,"source":BuildSource}` | a window's only (#1405): `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 //! | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970): `{"ok":true}` once the host has been told, on its stdin, that the system is ending (a shutdown, restart or sign-out; `cancelled`: that it is not after all); `{"ok":false}` when no host is up |
@@ -108,6 +109,10 @@ pub(super) struct State {
     pub(super) drained: Option<Value>,
     /// The current host's `{"swap":{"keepsAgents":..}}` report.
     pub(super) keeps_agents: Option<bool>,
+    /// The current host said it takes the keeper's stop lines on its stdin (`{"swap":{"stopsForUpdate":true}}`, #1895 step
+    /// 3): only then is "Apply now" a stop for an update here (`view.stops_for_update`). A host of an earlier build takes
+    /// them only from a window, and would be stopped as a quit
+    pub(super) host_stops_for_update: bool,
     /// Until when an announced relaunch (#352) holds the keeper with no window attached. Cleared by
     /// the next attach, which is told it is the window that relaunch started.
     pub(super) relaunch_until: Option<Instant>,
@@ -145,6 +150,7 @@ impl State {
             swapping: false,
             drained: None,
             keeps_agents: None,
+            host_stops_for_update: false,
             relaunch_until: None,
             reattach_until: None,
         }
@@ -395,6 +401,7 @@ impl Keeper {
             swap: st.swap.clone(),
             keeps_agents: st.keeps_agents,
             rights: Some(if full { "full" } else { "limited" }.to_string()),
+            stops_for_update: st.host_stops_for_update,
         }
     }
 
@@ -472,12 +479,81 @@ impl Keeper {
         // A stop, unlike a host restart, ends the agents, terminals and commands. The host stops
         // them first, the way it always did; whatever it could not (a host that hung or had
         // already died) the keeper ends itself once the host is gone.
-        self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
-        self.sup.shutdown();
+        if self.children.enabled() {
+            self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
+            self.sup.shutdown();
+        } else {
+            // No child service to say it on (#1895 step 3): the host hears it on its stdin, and notes the person quit (#1143)
+            self.sup.stop_by_line(host_proc::STOP_LINE, children::HOST_STOP_WAIT);
+        }
         self.children.stop_all(children::STOP_GRACE);
         let _ = fs::remove_file(self.data.join("keeper.json"));
         log(&format!("stopped (pid {})", self.info.pid));
         std::process::exit(0);
+    }
+
+    /**
+     * "Apply now" (#1895 step 3): stops the host for an update, so the next host continues the turns it ended and opens its
+     * terminals and Run commands again, then ends the keeper. The relaunched window opens the shell, which starts the new
+     * build's keeper from its verified content: no keeper ever runs a host of another build this way
+     * (docs/plans/keeper-removal.md §2.3). Answers once the host is gone, so the window relaunches after it, not before.
+     *
+     * Returns whether it stopped: the caller then ends the process. A window's only (`window`), as `system_ending` is: any
+     * other process of this user could otherwise cut every turn and have it continued as if Centralu had been updated.
+     */
+    pub(super) fn stop_for_update(self: &Arc<Self>, stream: &mut UnixStream, window: Result<(), String>, wait: Duration) -> bool {
+        if self.handed_over.load(Ordering::SeqCst) {
+            reply(stream, &json!({ "ok": false, "error": HANDED_OVER }));
+            return false;
+        }
+        {
+            let Ok(mut st) = self.state.lock() else { return false };
+            if let Some(why) = stop_for_update_refusal(&st, window.is_ok()) {
+                drop(st);
+                if let Err(not) = &window {
+                    log(&format!("refused a stop for an update to a process that is not a Centralu window: {not}"));
+                }
+                reply(stream, &json!({ "ok": false, "error": why }));
+                return false;
+            }
+            st.stopping = true;
+        }
+        log("stopping for an update: the host lists what it ends for the next one");
+        self.end_for_update(wait);
+        reply(stream, &json!({ "ok": true }));
+        log(&format!("stopped for an update (pid {})", self.info.pid));
+        true
+    }
+
+    /// The stop for an update itself, with the keeper already marked stopping: by the op above, and by a handoff that would
+    /// otherwise pass the children this keeper holds on to the next keeper (`handoff::give`). The process exits after it
+    pub(in crate::keeper) fn end_for_update(&self, wait: Duration) {
+        let _ = fs::remove_file(&self.sock);
+        self.sup.stop_for_update(wait);
+        // Children a holding keeper of an earlier build handed over: the host ended its own, this ends what it could not
+        self.children.stop_all(children::STOP_GRACE);
+        let _ = fs::remove_file(self.data.join("keeper.json"));
+    }
+}
+
+/// The refusal of a stop for an update by a keeper that has handed over
+pub(super) const HANDED_OVER: &str = "this keeper has just handed over to a newer one; try again in a moment";
+/// The refusal of a stop for an update to a process that is not a Centralu window
+pub(super) const NOT_A_WINDOW: &str = "window_only: only a Centralu window can stop the keeper for an update";
+
+/// Why this keeper cannot stop for an update now, or None (#1895 step 3), each in words the window shows after "Not
+/// relaunched:". Nothing is stopped when it cannot: the window says why and stays
+pub(super) fn stop_for_update_refusal(st: &State, window: bool) -> Option<&'static str> {
+    if !window {
+        Some(NOT_A_WINDOW)
+    } else if st.stopping {
+        Some("Centralu is already stopping (a quit, or another update); open it again once it has")
+    } else if st.swapping {
+        Some("a build switch is under way; apply the update once it has ended")
+    } else if !st.host_stops_for_update {
+        Some("the agent host is not up to be stopped for the update (it is starting or restarting); try again in a moment")
+    } else {
+        None
     }
 }
 
@@ -513,6 +589,15 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
             k.shutdown(reason);
         }
     });
+}
+
+/// Ends the keeper once it has stopped for an update (this op, and a handoff that stops instead). A test runs the dispatcher inside its own binary: there this panics on the
+/// request's thread instead, so a stop that should not have happened fails the test rather than end the run as if it passed
+pub(in crate::keeper) fn exit_after_stop() -> ! {
+    #[cfg(test)]
+    panic!("the keeper would exit here");
+    #[cfg(not(test))]
+    std::process::exit(0)
 }
 
 fn reply(stream: &mut UnixStream, v: &Value) {
@@ -558,6 +643,13 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             Some(list) => reply(&mut stream, &json!({ "ok": true, "children": list })),
             None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
         },
+        "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
+            let window = k.judge_window(&stream);
+            if k.stop_for_update(&mut stream, window, host_proc::STOP_FOR_UPDATE_WAIT) {
+                drop(stream);
+                exit_after_stop();
+            }
+        }
         "stop" => {
             reply(&mut stream, &json!({ "ok": true }));
             drop(stream);
@@ -586,6 +678,9 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         "switch" => switch(k, &mut stream, &req),
         "upgrade" => upgrade(k, &mut stream, &req),
         "restart" => {
+            if k.state.lock().map(|st| st.stopping).unwrap_or(true) {
+                return reply(&mut stream, &json!({ "ok": false, "error": switch::KEEPER_STOPPING }));
+            }
             if k.state.lock().map(|st| st.swapping).unwrap_or(false) {
                 return reply(&mut stream, &json!({ "ok": false, "error": "a build switch is in progress" }));
             }

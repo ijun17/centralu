@@ -108,6 +108,12 @@ pub fn stop(sock: &Path) -> Result<(), String> {
     request(sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
 }
 
+/// `stop` with `forUpdate` (#1895 step 3): the keeper stops the host for an update and exits. It answers once the host is gone,
+/// which takes up to `host_proc::STOP_FOR_UPDATE_WAIT`; this waits that and a margin.
+pub fn stop_for_update(sock: &Path) -> Result<(), String> {
+    request(sock, &json!({ "op": "stop", "forUpdate": true }), crate::host_proc::STOP_FOR_UPDATE_WAIT + Duration::from_secs(10)).map(|_| ())
+}
+
 /// A live attach connection. Its being open is what tells the keeper a window is attached;
 /// closing it (or this process ending, however it ends) is the detach.
 pub struct Attached {
@@ -260,6 +266,7 @@ mod tests {
             "Ok(true)",
         );
         check("stop", r#"{"ok":true}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), "Ok(())");
+        check("stop-for-update", r#"{"ok":true}"#, &|s| format!("{:?}", stop_for_update(s)), json!({ "op": "stop", "forUpdate": true }), "Ok(())");
         check("system-ending", r#"{"ok":true}"#, &|s| format!("{:?}", system_ending(s, false)), json!({ "op": "system_ending", "cancelled": false }), "Ok(())");
         let source = BuildSource { commit: "abc".into(), ..Default::default() };
         check(

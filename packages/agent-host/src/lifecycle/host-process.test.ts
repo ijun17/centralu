@@ -306,6 +306,12 @@ describe('the host process, started for real', () => {
       // The window quitting: its end of the pipe closes
       plain: async (h: Running) => void h.p.stdin!.end(),
     },
+    // The keeper that holds no children (#1895 step 3): "Apply now" stops the host for an update by its line, "Quit completely" by a plain one
+    keeper: {
+      env: { CC_KEEPER: '1' },
+      update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'stop', forUpdate: true })}\n`),
+      plain: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'stop' })}\n`),
+    },
     drain: {
       env: { CC_KEEPER: '1' },
       update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'drain', timeoutMs: 100 })}
@@ -364,6 +370,24 @@ describe('the host process, started for real', () => {
   it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', () => bringsBack(stops.hub), 180_000 * SLOW)
   it("the same for the window's stop line on the host's stdin (#1895)", () => bringsBack(stops.window), 180_000 * SLOW)
   it('the same for a keeper draining a host that holds no agents for a swap (#1895)', () => bringsBack(stops.drain), 180_000 * SLOW)
+  it("the same for the keeper's stop line, which a keeper with no child service sends (#1895 step 3)", () => bringsBack(stops.keeper), 180_000 * SLOW)
+
+  /*
+   * #1143 under a keeper that holds no children (#1895 step 3): its stop for good came as `stop` on the child service, which said the
+   * person quit. With no service it comes as a plain line on stdin, and must still leave the mark; its stop for an update must not
+   */
+  it("the keeper's plain stop line notes that the person quit, and its stop for an update does not", async () => {
+    for (const [line, quit] of [[{ op: 'stop' }, true], [{ op: 'stop', forUpdate: true }, false]] as const) {
+      const s = setup()
+      const host = startHost(s, ['--watch-parent'], { CC_KEEPER: '1' })
+      await host.ready
+      host.p.stdin.write(`${JSON.stringify(line)}\n`)
+      expect(await exitsSoon(host)).toBe(0)
+      expect(s.log()).toContain(`asked to stop (the keeper${quit ? '' : ', for an update'})`)
+      const mark = join(s.dir, 'stopped.json')
+      expect(existsSync(mark) && readFileSync(mark, 'utf8').includes('"quit"'), JSON.stringify(line)).toBe(quit)
+    }
+  }, 120_000 * SLOW)
 
   it("the window's stop line that comes while the host is still starting is not lost (#1895)", async () => {
     const s = setup()
