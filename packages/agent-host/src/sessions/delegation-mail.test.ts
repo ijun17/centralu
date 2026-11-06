@@ -271,7 +271,7 @@ describe('the turn a child’s report starts in its caller', () => {
 
 describe('a mailbox that fails', () => {
   it('breaks no delegation: the task still reaches the child, and nothing is written', async () => {
-    w.mgr.useMail({ sessionGone: () => {}, sessionChanged: () => {}, delegated: () => { throw new Error('the store is busy') } })
+    w.mgr.mail.useMail({ sessionGone: () => {}, sessionChanged: () => {}, delegated: () => { throw new Error('the store is busy') } })
     askAgents()
     const s = await w.callerSession()
     const started = await w.mgr.startAgent(s, { task: 'Write the export', wait: false })

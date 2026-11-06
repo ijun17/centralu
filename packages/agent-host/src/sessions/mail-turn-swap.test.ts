@@ -83,7 +83,7 @@ describe('a session the keeper handed over after a swap', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // The process is one an earlier build started; the receive rule is the seat's, as for any other
-    expect(b.mgr.canReadMail(child)).toBe(true)
+    expect(b.mgr.mail.canReadMail(child)).toBe(true)
     const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 10_000 })
     const reply = later.service.send(PERSON, { to: [addressOf(child)], replyTo: waiting.id, text: 'and the formatter' })
     expect(reply.message).toMatchObject({ body: 'and the formatter', replyTo: waiting.id })
@@ -123,7 +123,7 @@ describe('an owner the keeper handed over after a swap', () => {
     // ... and the mailbox does wake it with the report: the mail is handed to the adopted process
     // (its own turn, which the swap kept, ends first: mail waits for a turn's end)
     b.claude.handles.get(parent)!.answer('its own turn ends')
-    await until(() => b.mgr.mailSessions().receiver(parent).kind === 'ready')
+    await until(() => b.mgr.mail.mailSessions().receiver(parent).kind === 'ready')
     const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 300_000 })
     await deliverTo(later, addressOf(parent))
     expect(read().row(reports()[0]!.id, addressOf(parent))).toMatchObject({ attempts: 1 })
@@ -236,7 +236,7 @@ describe('a rollback to an earlier build, then forward', () => {
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
-    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.oldOwes(o, c) })
+    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.mail.oldOwes(o, c) })
     expect(result.settled).toBe(1)
     expect(read().taskRow(part.id, helper)).toMatchObject({ settled: 'reported' })
     expect(b.m.hooks.waitingOn!(parent, child)).toBe(0)

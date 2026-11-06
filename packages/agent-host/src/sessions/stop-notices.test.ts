@@ -168,9 +168,9 @@ describe('a turn ends without finishing', () => {
     const { asker, child } = await askedOwnTurn(other)
     type Seat = { tools: { toolChoice(m: unknown): { tools(): { readSession(id: string): Promise<{ ok: boolean }> } } } }
     const reads = async () => (await (w.mgr as unknown as Seat).tools.toolChoice(w.mgr.sessionInfo(asker)).tools().readSession(child)).ok
-    expect([w.mgr.readsSession(asker, child), await reads()]).toEqual([true, true])
+    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([true, true])
     await w.mgr.setProjectTrusted(w.caller.id, false)
-    expect([w.mgr.readsSession(asker, child), await reads()]).toEqual([false, false])
+    expect([w.mgr.mail.readsSession(asker, child), await reads()]).toEqual([false, false])
     says(child, 'The release branch is release/2026-11.')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
@@ -454,7 +454,7 @@ describe('who is not told, or told another way', () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
       m.service.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
-      w.mgr.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
+      w.mgr.mail.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
       await vi.advanceTimersByTimeAsync(OLD_PATH_WAIT_MS - 1_000)
       expect(stopNotices(asker)).toEqual([])
       await vi.advanceTimersByTimeAsync(1_000)

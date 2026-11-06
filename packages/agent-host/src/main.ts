@@ -432,7 +432,7 @@ const userAppAdoption = new UserAppAdoption({
 const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('orchestrator').includes('mail')), { hostId: hubSelfId(store) })
 const mailDelivery = hostMailbox.delivery
 hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
-mgr.useMail(hostMailbox.hooks)
+mgr.mail.useMail(hostMailbox.hooks)
 // The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
 const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
   session: (id) => {
@@ -448,8 +448,8 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
     const turn = s && inTurn(s.state) ? hostMailbox.turns.current(id) : undefined
     return turn && { work: turn.messageId ?? turn.starter }
   },
-  tellsNow: (id) => mgr.tellsMailNow(id),
-  tell: (id, text) => mgr.tellMailNow(id, text),
+  tellsNow: (id) => mgr.mail.tellsMailNow(id),
+  tell: (id, text) => mgr.mail.tellMailNow(id, text),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty

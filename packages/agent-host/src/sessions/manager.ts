@@ -6,20 +6,12 @@ import { parseAddress } from '../mail/address.js'
 import { presetWithin } from './start-agent.js'
 import { matchProjects } from './ask-project.js'
 import { AskedGate } from './asked-gate.js'
-import type { Asker } from '../mail/asked-by.js'
 import { withHubMark } from './hub-preset.js'
-import { MailNotAtRest, type MailSessions, type ReceiverState } from '../mail/delivery.js'
-import type { AnswerGiven } from '../mail/delegation.js'
-import type { MailToolArgs } from '../mail/tool.js'
-import type { TurnStart } from '../mail/turns.js'
-import type { HandOverScope } from '../dev-services/store/mailbox.js'
-import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
-import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
+import { MailNotAtRest } from '../mail/delivery.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
-import type { ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
 import { OverloadRetry } from './overload-retry.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
@@ -40,6 +32,7 @@ import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
+import { MailSessionsView, type MailSessionsHost } from './mail-sessions.js'
 import { SelfCompaction } from './self-compaction.js'
 import { settingThenKeep } from './then-keep.js'
 import { ContextNudges } from './context-nudges.js'
@@ -48,7 +41,7 @@ import { ApprovalRules } from './approval-rules.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
-import { ChildOwnership, type PersonReportDraft, type QuitNotice, type TurnStarter } from './child-ownership.js'
+import { ChildOwnership, type QuitNotice, type TurnStarter } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
 import { sessionDemands, unfitError } from './tool-fit.js'
@@ -103,61 +96,6 @@ export type AgentProcessHost = {
  * A tool process a previous host left running for this session, to be re-attached at startup. `version` is the CLI
  * version it was started from, when its tag says (#297): an adopted process does not announce it again.
  */
-/** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
-export type MailHooks = {
-  sessionGone(sessionId: string): void
-  /**
-   * Whether a notice to `readerId` of `stoppedId`'s stop may quote the words of its latest turn (`MessageService.quotes`, security-boundaries.md):
-   * the one rule every stop notice to a session quotes by. Nothing is quoted without it
-   */
-  quotes?(stoppedId: string, readerId: string): boolean
-  /** A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): the senders of the questions it left unanswered are told once. Quiet: wakes no one */
-  stopped?(sessionId: string, why: StopWhy, opts?: { quiet?: boolean; told?: readonly string[]; held?: readonly string[] }): void
-  /** An older report path held by `stopped` (its `held`) ended: `told`, it really told `senderId` of the stop; else the stop notice tells it now */
-  oldPathEnded?(sessionId: string, senderId: string, told: boolean): void
-  /**
-   * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
-   * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
-   */
-  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverMessage[]
-  /** What `handOver` would give the successor of an original that goes, read only: the archive preview says it (#1574) */
-  handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
-  /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
-  openWork?(sessionId: string): { unanswered: string[]; owed: string[] }
-  /** A session went through `count` compaction cycles in the hour (`compact_self` with `then`, #2024): the person gets one warning, the mailbox's, once per clock hour */
-  compactCycles?(sessionId: string, count: number): void
-  /** Mail that wakes the session waits for it (due or not yet): its turn is coming, and a note of the host's (`compact_self`'s `then`) follows it */
-  waiting?(sessionId: string): boolean
-  sessionChanged(sessionId: string): void
-  sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
-  /** The `mail` tool of a session */
-  tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
-  /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
-  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
-  /** How many threads a session handed on in the work it does for another are still going (§6) */
-  waitingOn?(ownerId: string, childId: string): number
-  /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
-  personWork?: {
-    started(sessionId: string, text: string, fromScript?: { credential: string }): void
-    owes(sessionId: string): boolean
-    report(sessionId: string, draft: PersonReportDraft): boolean
-  }
-  /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
-  finishedWith?(callerId: string, childId: string): void
-  /** A turn of delegated work ended, or the person took the session over (§6, §8.1): the report goes in the thread, and the mailbox tells the owner when it can */
-  report?(ownerId: string, childId: string, draft: ReportDraft): ReportedAs
-  /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
-  answered?(callerId: string, childId: string, how?: AnswerGiven): void
-  /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
-  turnStarted?(sessionId: string, turn: TurnStart): void
-  /** The orchestrator's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
-  roleMoved?(toSessionId: string): void
-  /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
-  askedBy?(orchestratorId: string): Asker | null
-  /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
-  refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
-}
-
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
@@ -176,7 +114,6 @@ import { ProjectFiles } from '../dev-services/project-files.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, agentStartPersonText } from './delegation-flow.js'
-import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
@@ -196,7 +133,7 @@ const ADOPTED_IDLE_WAIT_MS = 30_000
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & OrchestratorSlotHost & LinkedHostHost & SessionSettingsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & OrchestratorSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost
 
 /** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
 function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
@@ -332,6 +269,8 @@ export class SessionManager {
   private readonly starts: SessionStarts
   /** What a session's tool says, received and settled, and what goes into its conversation (session-events.ts) */
   readonly events: SessionEvents
+  /** The mailbox's view of the sessions: its hooks, whether a session can take mail now, stop notices, seat rules (mail-sessions.ts) */
+  readonly mail: MailSessionsView
   /**
    * Session currently being resumed -> its promise.
    *
@@ -493,7 +432,7 @@ export class SessionManager {
     this.worktrees = new WorktreeSessions(this.parts())
     this.hostCards = new HostCards(this.parts())
     this.askedGate = new AskedGate({
-      askedBy: (id) => this.mailHooks?.askedBy?.(id) ?? null,
+      askedBy: (id) => this.mail.hooks?.askedBy?.(id) ?? null,
       // Allow or deny only, under every preset: `auto` does not answer a session's request for the person (§9.7)
       ask: async (id, question, signal) => {
         const answer = await this.hostCards.askHost(id, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
@@ -535,6 +474,7 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.starts = new SessionStarts(this.parts())
     this.events = new SessionEvents(this.parts())
+    this.mail = new MailSessionsView(this.parts())
     this.overloadRetry = new OverloadRetry({
       meta: this.meta,
       leaving: () => this.handingOver || this.disposing,
@@ -565,7 +505,7 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       idle: (id) => this.sessionIdle(id),
       running: (id) => this.handles.has(id),
-      ready: (id) => this.mailReceiver(id).kind === 'ready',
+      ready: (id) => this.mail.mailReceiver(id).kind === 'ready',
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
       command: (id, tool, focus) => {
@@ -576,15 +516,15 @@ export class SessionManager {
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
       sendThen: (id, text, line) =>
-        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready' }),
+        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mail.mailReceiver(id).kind === 'ready' }),
       // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
       queued: (id) => {
         const held = this.handles.get(id)?.queuedInputs?.()
-        const mail = this.mailHooks?.waiting?.(id) ?? false
+        const mail = this.mail.hooks?.waiting?.(id) ?? false
         return mail || (held === undefined ? null : held > 0)
       },
       keep: settingThenKeep(this.store.settings),
-      warnCycles: (id, count) => this.mailHooks?.compactCycles?.(id, count),
+      warnCycles: (id, count) => this.mail.hooks?.compactCycles?.(id, count),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
@@ -593,7 +533,7 @@ export class SessionManager {
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
       // The two seats that have the tool (tool-seats.ts): an ordinary session and the orchestrator
-      hasCompactTool: (id) => this.canReadMail(id),
+      hasCompactTool: (id) => this.mail.canReadMail(id),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
@@ -954,9 +894,6 @@ export class SessionManager {
     })
   }
 
-  /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
-  private mailHooks: MailHooks | null = null
-
   /** The sessions this host took over mid-run: the keeper's, and the turns an update cut and this host continues */
   private keptAtStart: ReadonlySet<string> = new Set()
 
@@ -967,11 +904,6 @@ export class SessionManager {
   keptInTurn(sessionId: string): boolean {
     const m = this.meta.get(sessionId)
     return this.keptAtStart.has(sessionId) && !!m && inTurn(m.state)
-  }
-
-  /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
-  oldOwes(ownerId: string, childId: string): boolean {
-    return this.children.oldOwes(ownerId, childId)
   }
 
   /**
@@ -991,60 +923,7 @@ export class SessionManager {
     const q = this.quitRequesters.get(sessionId)
     if (!q) return
     q.told = told === q.requester
-    if (q.read) this.mailOldPathEnded(sessionId, q.requester, q.told)
-  }
-
-  /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
-  mailStopped(sessionId: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[]; held?: readonly string[] } = {}): void {
-    // A host that is leaving writes nothing: its sessions are cut by the leaving, and the next host continues them or finds them marked (§4.1)
-    if (this.disposing || this.handingOver) return
-    try {
-      this.mailHooks?.stopped?.(sessionId, why, opts)
-    } catch (e) {
-      console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to the senders (${errorMessage(e)})`)
-    }
-  }
-
-  /**
-   * The older report paths of a stop whose notices `mailStopped` held for them (`held`), each resolving to the session it really told: once all have
-   * ended, those they told are marked told and the rest get the stop notice (docs/plans/turn-owned-by-no-one.md §4.1)
-   */
-  mailStopTold(sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]): void {
-    if (held.length === 0) return
-    // A path that does not end within the wait counts as not having told: a double notice at worst, never none
-    const bounded = sends.map((send) =>
-      Promise.race([
-        send,
-        new Promise<undefined>((resolve) => {
-          const timer = setTimeout(() => resolve(undefined), OLD_PATH_WAIT_MS)
-          timer.unref?.()
-        }),
-      ]),
-    )
-    void Promise.allSettled(bounded).then((ended) => {
-      const told = new Set(ended.flatMap((r) => (r.status === 'fulfilled' && r.value !== undefined ? [r.value] : [])))
-      for (const who of held) this.mailOldPathEnded(sessionId, who, told.has(who))
-    })
-  }
-
-  private mailOldPathEnded(sessionId: string, senderId: string, told: boolean): void {
-    try {
-      this.mailHooks?.oldPathEnded?.(sessionId, senderId, told)
-    } catch (e) {
-      console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to ${senderId.slice(0, 8)} (${errorMessage(e)})`)
-    }
-  }
-
-  useMail(hooks: MailHooks): void {
-    this.mailHooks = hooks
-    this.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
-    this.children.onWaitingOn(hooks.waitingOn ? (ownerId, childId) => hooks.waitingOn?.(ownerId, childId) ?? 0 : undefined)
-    this.children.onPersonWork(hooks.personWork)
-    this.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
-    this.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
-    this.reports.useQuotes(hooks.quotes ? (stoppedId, readerId) => hooks.quotes?.(stoppedId, readerId) === true : undefined)
-    this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
-    this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
+    if (q.read) this.mail.mailOldPathEnded(sessionId, q.requester, q.told)
   }
 
   stopSelfCompaction(): void {
@@ -1059,89 +938,6 @@ export class SessionManager {
     this.selfCompaction.recover((id) => !this.keeperOpts.keptSessions?.has(id))
   }
 
-
-  /** How the mailbox's delivery reaches a session (#1347): whether it can take mail now, and the mail. See `MailSessions` (mail/delivery.ts) */
-  mailSessions(): MailSessions {
-    return {
-      receiver: (id) => this.mailReceiver(id),
-      deliver: async (id, input, late) => {
-        /*
-         * A turn the mail starts is the work of the thread it carries (§6): its end is reported to the thread's owner like any turn of work that
-         * session gave, so a report is owed from here. A session already owing the same owner keeps its mark (the turn is that work's); one owing
-         * another owner keeps that mark and its pause, and this turn is reported to its own owner when it ends (#1474). A mark or a note made
-         * here goes if the input was not taken
-         */
-        const owner = input.quiet ? undefined : input.reportTo
-        const known = owner !== undefined && this.meta.has(owner)
-        const marked = known && !this.children.awaitingReport.has(id)
-        const other = known && this.children.awaitingReport.has(id) && this.children.awaitingReport.get(id) !== owner
-        if (marked) this.children.markReport(id, owner)
-        if (other) this.children.markMailTurn(id, owner)
-        const unmark = () => {
-          if (marked && this.children.awaitingReport.get(id) === owner) this.children.clearReport(id)
-          if (other) this.children.clearMailTurn(id, owner)
-        }
-        try {
-          await this.events.deliverMail(id, input, { leaving: () => this.handingOver || this.disposing, atRest: () => this.mailReceiver(id).kind === 'ready', wanted: () => input.wanted?.() ?? true }, (e) => {
-            unmark()
-            late?.(e)
-          })
-        } catch (e) {
-          unmark()
-          throw e
-        }
-      },
-      note: (id, text) => {
-        if (this.meta.has(id)) this.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
-      },
-    }
-  }
-
-  /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
-  pausedFor(sessionId: string, ownerId: string): boolean {
-    return this.children.awaitingReport.get(sessionId) === ownerId && this.children.pausedReports.has(sessionId)
-  }
-
-  /**
-   * Whether a notice from Centralu goes into the session's process now without a wake: a live process of a tool that takes quiet input (Claude), in or out
-   * of a turn, in a host that is not leaving. Codex starts a turn for any input, and a session that sleeps has no process: for those the notice waits as mail
-   * for the session's next mail (`MailPerson.close`)
-   */
-  tellsMailNow(sessionId: string): boolean {
-    const m = this.meta.get(sessionId)
-    return !!m && !this.handingOver && !this.disposing && this.handles.has(sessionId) && this.adapters.get(m.tool)?.quietInput === true
-  }
-
-  /** Puts a notice from Centralu into the session's process, quietly (`tellsMailNow`). It stops nothing: the person's close tells a session its work is not wanted, and the session decides */
-  async tellMailNow(sessionId: string, text: string): Promise<void> {
-    try {
-      await this.events.deliverMail(sessionId, { text: `[Centralu] ${text}`, quiet: true, line: '✉ Centralu told it the person closed its work' })
-    } catch (e) {
-      console.error(`[mail] could not tell ${sessionId.slice(0, 8)} that the person closed its work (${errorMessage(e)}); the notice goes with its next mail`)
-      throw e
-    }
-  }
-
-  /** Whether a session can be told of mail now, and how (`ReceiverState`, mail/delivery.ts) */
-  private mailReceiver(id: string): ReceiverState {
-    const m = this.meta.get(id)
-    if (!m) return { kind: 'gone' }
-    // A host that is leaving tells nobody anything: the next one delivers (§4.2)
-    if (this.handingOver || this.disposing) return { kind: 'busy', why: 'turn' }
-    // A card is standing: mail is never taken as its answer (§7.1). `waiting_input` is not one: it is the state a turn ends in
-    // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
-    if (m.pendingApproval || m.pendingQuestions.length > 0 || m.state === 'waiting_approval') return { kind: 'busy', why: 'card' }
-    switch (m.state) {
-      case 'working':
-        return { kind: 'busy', why: 'turn' }
-      case 'limited':
-        return { kind: 'busy', why: 'limited' }
-      default: {
-        const live = this.handles.has(id)
-        return { kind: 'ready', live, quiet: live && this.adapters.get(m.tool)?.quietInput === true, auto: m.permissionPreset === 'auto' }
-      }
-    }
-  }
 
   /** A session that is here (not in the trash), as the mailbox's relations read it (#1347); undefined for one that is gone */
   sessionInfo(id: string): SessionInfo | undefined {
@@ -1229,7 +1025,7 @@ export class SessionManager {
     // Centralu cut this turn and could not continue it: the senders of the questions it left unanswered are told (§4.1). The notice to a session the older
     // path below may tell of the same stop (the owner of the report, the session that gave the turn or started it) waits for that path to end
     const held = [this.children.awaitingReport.get(m.id), this.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? undefined].flatMap((id) => (id && id !== m.id ? [id] : []))
-    this.mailStopped(m.id, 'uncontinued', { held })
+    this.mail.mailStopped(m.id, 'uncontinued', { held })
     const sends: Promise<string | undefined>[] = []
     if (this.children.awaitingReport.has(m.id)) sends.push(this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy))
     else {
@@ -1237,7 +1033,7 @@ export class SessionManager {
       // The work the person owns: the same end, in their Inbox (§8.1)
       void this.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
     }
-    this.mailStopTold(m.id, held, sends)
+    this.mail.mailStopTold(m.id, held, sends)
   }
 
   /**
@@ -1948,12 +1744,6 @@ export class SessionManager {
    * child's own background work (#721) counts only while the child is in a turn: that work may run for minutes or
    * for good (a dev server), and the report wakes the caller when it comes.
    */
-  /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.stoppedTurnAnswer`, at most 600 characters), or null when it said none */
-  stoppedWords(sessionId: string): string | null {
-    if (!this.meta.has(sessionId)) return null
-    return this.reports.stoppedTurnAnswer(sessionId).preview || null
-  }
-
   waitsOn(sessionId: string): string[] {
     const ids = new Set<string>()
     for (const d of this.children.delegations.values()) if (d.callerId === sessionId && !d.settled) ids.add(d.sessionId)
@@ -2115,9 +1905,9 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
-      mailTool: (id, args) => self.mailHooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
-      refusesDelegation: (callerId, target, call) => self.mailHooks?.refusesDelegation?.(callerId, target, call) ?? null,
-      roleMoved: (toId) => self.mailHooks?.roleMoved?.(toId),
+      mailTool: (id, args) => self.mail.hooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      refusesDelegation: (callerId, target, call) => self.mail.hooks?.refusesDelegation?.(callerId, target, call) ?? null,
+      roleMoved: (toId) => self.mail.hooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),
       requestTurn: (id) => ({
         active: () => self.askedGate.active(id),
@@ -2232,6 +2022,9 @@ export class SessionManager {
       ensureProjectAccess: (...a) => self.consents.ensureProjectAccess(...a),
       exportHandoffNote: (...a) => self.handoffNotes.exportHandoffNote(...a),
       exportHandoffRecord: (...a) => self.handoffNotes.exportHandoffRecord(...a),
+      get events() {
+        return self.events
+      },
       get externals() {
         return self.externals
       },
@@ -2240,32 +2033,32 @@ export class SessionManager {
       forgetHeldNotices: (id) => self.reports.forgetHeld(id),
       mailPoke: (id) => {
         try {
-          self.mailHooks?.sessionChanged(id)
+          self.mail.hooks?.sessionChanged(id)
         } catch (e) {
           console.error(`[mail] ${id.slice(0, 8)}: ${errorMessage(e)}`)
         }
       },
-      mailStopped: (id, why, o) => self.mailStopped(id, why, o),
-      mailStopTold: (id, held, sends) => self.mailStopTold(id, held, sends),
+      mailStopped: (id, why, o) => self.mail.mailStopped(id, why, o),
+      mailStopTold: (id, held, sends) => self.mail.mailStopTold(id, held, sends),
       mailEvent: (e, ended) => {
         try {
-          self.mailHooks?.sessionEvent?.(e, ended)
+          self.mail.hooks?.sessionEvent?.(e, ended)
         } catch (err) {
           console.error(`[mail] ${e.sessionId?.slice(0, 8) ?? '?'}: ${errorMessage(err)}`)
         }
       },
       mailWork: (id) => {
         try {
-          return self.mailHooks?.openWork?.(id) ?? { unanswered: [], owed: [] }
+          return self.mail.hooks?.openWork?.(id) ?? { unanswered: [], owed: [] }
         } catch (e) {
           console.error(`[mail] ${id.slice(0, 8)}: its open work could not be read (${errorMessage(e)})`)
           return null
         }
       },
-      mailHandOver: (...a) => self.mailHooks?.handOver?.(...a) ?? [],
+      mailHandOver: (...a) => self.mail.hooks?.handOver?.(...a) ?? [],
       mailHandOverPreview: (from, to) => {
         try {
-          return self.mailHooks?.handOverPreview?.(from, to) ?? []
+          return self.mail.hooks?.handOverPreview?.(from, to) ?? []
         } catch (e) {
           console.error(`[mail] ${from.slice(0, 8)}: what a handoff would move could not be read (${errorMessage(e)})`)
           return null
@@ -2273,7 +2066,7 @@ export class SessionManager {
       },
       mailGone: (id) => {
         try {
-          self.mailHooks?.sessionGone(id)
+          self.mail.hooks?.sessionGone(id)
         } catch (e) {
           // The trash move has happened and is not undone by the mailbox: the delivery sweep moves the work on at its next run
           console.error(`[mail] ${id.slice(0, 8)}: the work it held could not be moved on (${errorMessage(e)}); the next sweep does it`)
@@ -2431,7 +2224,7 @@ export class SessionManager {
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
-      canReadMail: (...a) => self.canReadMail(...a),
+      canReadMail: (...a) => self.mail.canReadMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools
@@ -2510,7 +2303,7 @@ export class SessionManager {
       usageHistory: (p) => this.usageHistory(p),
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
-      askedBy: (orchestratorId) => this.mailHooks?.askedBy?.(orchestratorId) ?? null,
+      askedBy: (orchestratorId) => this.mail.hooks?.askedBy?.(orchestratorId) ?? null,
     }
     // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
     const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()
@@ -2519,48 +2312,9 @@ export class SessionManager {
     return (this.seatHost ??= own)
   }
 
-  /**
-   * Whether the session's seat has the mail tool (§9.1): `reader` and `orchestrator`. This is the receive rule (who may be written to, and who
-   * is woken by mail, and told of a child's report by mail), and it does not look at the process: a process the keeper handed over after a
-   * swap is still the session's, and mail is for the session
-   */
-  canReadMail(sessionId: string): boolean {
-    const profile = this.tools.toolProfileOf(sessionId)
-    return profile === 'reader' || profile === 'orchestrator'
-  }
-
-  /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the orchestrator's `centralu_run` */
-  mailSeats(orchestratorHasMailCommand: () => boolean): { mailTool(id: string): boolean; mailCommand(id: string): boolean } {
-    return {
-      mailTool: (id) => this.canReadMail(id),
-      mailCommand: (id) => this.tools.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
-    }
-  }
-
-  /**
-   * Why sessions may not ask the orchestrator now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
-   * person's card; that needs the orchestrator's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
-   * the orchestrator run a command or write a file unasked, so it is not taken
-   */
-  orchestratorAsks(): string | null {
-    const orchestrator = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (!orchestrator || this.adapters.get(orchestrator.tool)?.capabilities.gatesSteps === true) return null
-    return 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
-  }
-
   /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
   orchestratorId(): string | null {
     return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
-  }
-
-  /** `ChildOwnership.latestTurnInputs`: who gave what may have entered the session's latest turn, which a stop notice quotes only to its one asker */
-  turnInputs(sessionId: string): (string | null)[] {
-    return this.children.latestTurnInputs(sessionId)
-  }
-
-  /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */
-  readsSession(readerId: string, targetId: string): boolean {
-    return this.tools.readsSession(readerId, targetId)
   }
 
   /** The tools given to an orchestrator (FR-11), built over this manager (`orchestrator-seat.ts`) */

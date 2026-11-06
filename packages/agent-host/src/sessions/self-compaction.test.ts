@@ -1868,14 +1868,14 @@ describe('on the session manager (#1451)', () => {
     const { id, h } = await inCompactTurn()
     // Mail for the session waits in the mailbox as the compact turn ends (the mailbox’s debounce has not made it due yet)
     let mailWaiting = true
-    world.mgr.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, waiting: () => mailWaiting })
+    world.mgr.mail.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, waiting: () => mailWaiting })
     h.queuedInputs = () => 0
     h.finishTurn()
     await vi.advanceTimersByTimeAsync(THEN_SETTLE_MS + 500)
     expect(h.sent).toEqual(['hello', '/compact'])
     // The mailbox delivers it; its turn runs; the step follows its end
     mailWaiting = false
-    await world.mgr.mailSessions().deliver(id, { text: '[mail] from another session: the build is green', quiet: false, line: '✉ mail' })
+    await world.mgr.mail.mailSessions().deliver(id, { text: '[mail] from another session: the build is green', quiet: false, line: '✉ mail' })
     h.emitEvent({ type: 'state_change', sessionId: id, state: 'working' })
     expect(h.sent).toEqual(['hello', '/compact', '[mail] from another session: the build is green'])
     h.finishTurn()

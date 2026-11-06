@@ -135,7 +135,7 @@ describe('compact_self then across a host swap (#2024)', () => {
   it('warns the person through the mailbox hook when a session passes 6 cycles in an hour, on the sixth step that goes before it', async () => {
     const warned: [string, number][] = []
     const a = host()
-    a.mgr.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, compactCycles: (id, count) => void warned.push([id, count]) })
+    a.mgr.mail.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, compactCycles: (id, count) => void warned.push([id, count]) })
     const { id, h } = await asking(a, 'compacted')
     // Six cycles went in the hour before this one
     const now = Date.now()

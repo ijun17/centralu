@@ -23,7 +23,7 @@ beforeEach(async () => {
   refusal = null
   asked = []
   overLink = []
-  w.mgr.useMail({
+  w.mgr.mail.useMail({
     sessionGone: () => {},
     sessionChanged: () => {},
     refusesDelegation: (callerId, target, call) => {

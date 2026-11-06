@@ -162,7 +162,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(helper, 'server started')
     const forA = taskOf(a, helper)
     await w.until(() => outcomes(forA.id).includes('paused'))
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
     const earlier = m.service.task(addr(b), addr(helper), { text: 'write the docs', origin: 'send_to_session', delivered: true })
     m.service.report(earlier.id, { outcome: 'finished', body: '[Centralu] The session ended its turn.' })
     return { a, b, helper, forA }
@@ -184,7 +184,7 @@ describe('new work sent by mail after the first was reported', () => {
     expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'reported' })
     expect(outcomes(forA.id)).toEqual(['paused'])
     expect(read.taskRow(forA.id, helper)).toMatchObject({ settled: null })
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
     expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
   })
 
@@ -212,7 +212,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(helper, 'stopped')
     await new Promise((r) => setTimeout(r, 30))
     expect(outcomes(forA.id)).toEqual(['paused'])
-    expect(w.mgr.pausedFor(helper, a)).toBe(true)
+    expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
     expect(outcomes(forB.id)).toEqual([])
     expect(read.taskRow(forB.id, helper)).toMatchObject({ settled: 'withdrawn' })
     expect(handleOf(b).sent.filter((t) => t.includes(`sourceSessionId: ${helper}`))).toEqual([])
@@ -235,8 +235,8 @@ describe('the person closing a chain whose work is going, over the real manager 
         const turn = s && inTurn(s.state) ? m.turns.current(id) : undefined
         return turn && { work: turn.messageId ?? turn.starter }
       },
-      tellsNow: (id) => w.mgr.tellsMailNow(id),
-      tell: (id, text) => w.mgr.tellMailNow(id, text),
+      tellsNow: (id) => w.mgr.mail.tellsMailNow(id),
+      tell: (id, text) => w.mgr.mail.tellMailNow(id, text),
     })
   /** A session at work on the person's task, which the mailbox delivered and started its turn with */
   async function working() {
@@ -273,7 +273,7 @@ describe('the person closing a chain whose work is going, over the real manager 
     const { helper, task } = await working()
     // Codex starts a turn for any input
     Object.defineProperty(w.adapters.get('claude')!, 'quietInput', { value: false })
-    expect(w.mgr.tellsMailNow(helper)).toBe(false)
+    expect(w.mgr.mail.tellsMailNow(helper)).toBe(false)
     personOf().close(task.id, 'dropped')
     await new Promise((r) => setTimeout(r, 30))
     expect(handleOf(helper).quiet).toEqual([])

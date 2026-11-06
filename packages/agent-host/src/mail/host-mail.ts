@@ -2,7 +2,8 @@ import { errorMessage, type SessionInfo } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { wentWithItsProcess } from '../sessions/interruptions.js'
 import type { Store } from '../dev-services/store.js'
-import type { MailHooks, SessionManager } from '../sessions/manager.js'
+import type { SessionManager } from '../sessions/manager.js'
+import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
@@ -38,35 +39,35 @@ export type HostMailSessions = {
   waitsOn?(id: string): string[]
   /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`SessionManager.quitTold`) */
   quitTold?(id: string): { told: string[]; held: string[] }
-  /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`SessionManager.stoppedWords`) */
+  /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`MailSessionsView.stoppedWords`) */
   stoppedWords?(id: string): string | null
-  /** Whether `readerId` can read `targetId` with read_session (`SessionManager.readsSession`): only then is a stopped session's text quoted to it */
+  /** Whether `readerId` can read `targetId` with read_session (`MailSessionsView.readsSession`): only then is a stopped session's text quoted to it */
   readsSession?(readerId: string, targetId: string): boolean
-  /** Who gave what may have entered the session's latest turn (`SessionManager.turnInputs`): only a turn its asker alone gave anything is quoted to it */
+  /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords' | 'readsSession' | 'turnInputs'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'keptInTurn' | 'waitsOn' | 'quitTold' | 'mail'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
-  const seats = mgr.mailSeats(orchestratorHasMailCommand)
+  const seats = mgr.mail.mailSeats(orchestratorHasMailCommand)
   return {
     sessionInfo: (id) => mgr.sessionInfo(id),
     listSessions: () => mgr.listSessions(),
     canReadMail: (id) => seats.mailTool(id),
     orchestratorId: () => mgr.orchestratorId(),
-    orchestratorAsks: () => mgr.orchestratorAsks(),
+    orchestratorAsks: () => mgr.mail.orchestratorAsks(),
     mailCommand: (id) => seats.mailCommand(id),
     keptInTurn: (id) => mgr.keptInTurn(id),
-    oldOwes: (ownerId, childId) => mgr.oldOwes(ownerId, childId),
-    mailSessions: () => mgr.mailSessions(),
+    oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
+    mailSessions: () => mgr.mail.mailSessions(),
     waitsOn: (id) => mgr.waitsOn(id),
     quitTold: (id) => mgr.quitTold(id),
-    stoppedWords: (id) => mgr.stoppedWords(id),
-    readsSession: (readerId, targetId) => mgr.readsSession(readerId, targetId),
-    turnInputs: (id) => mgr.turnInputs(id),
+    stoppedWords: (id) => mgr.mail.stoppedWords(id),
+    readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
+    turnInputs: (id) => mgr.mail.turnInputs(id),
   }
 }
 

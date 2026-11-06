@@ -222,6 +222,13 @@ Manager line counts are after each pull request.
   `loadMessages`. `tools` and `machineAsks` are public `readonly`. A test that spied on the manager's stub spies on the
   module's method (`vi.spyOn(mgr.tools, 'toolProfileOf')`), which every caller now reaches, and `rpc.test.ts`'s fake
   manager carries `projectRegistry`. The stubs left are the eight verbs of D1.
+- **6, the mailbox's view of sessions** (`manager.ts` 2,828 to 2,582; `sessions/mail-sessions.ts`, 282 lines, a move of 246):
+  `MailHooks`, the hooks (`mgr.mail.hooks`), `useMail`, the stop notices (`mailStopped`, `mailStopTold`,
+  `mailOldPathEnded`), `mailSessions`, `mailReceiver`, `pausedFor`, `tellsMailNow`, `tellMailNow`, `canReadMail`,
+  `mailSeats`, `oldOwes`, `stoppedWords`, `turnInputs`, `readsSession` and `orchestratorAsks`, as they were, on
+  `MailSessionsView` (`mgr.mail`). `sessionInfo` and `orchestratorId` stay: they are the session lookup. `parts()` gains
+  the `events` getter the view needs, and `waitsOn`'s doc, which sat above `stoppedWords`, is back on `waitsOn`. The
+  new module's host type and imports are the 37 lines the move adds (D2).
 
 ### 6.2 Work in flight
 
