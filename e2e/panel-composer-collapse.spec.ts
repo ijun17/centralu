@@ -43,8 +43,8 @@ async function transitionsDone(loc: ReturnType<Page['getByTestId']>): Promise<vo
 }
 
 /**
- * A grid panel folds its composer by its own height (SessionPane's `foldWhenShort`: below about 285px it folds, above
- * about 312px it opens, with the usual composer). So every scenario here runs in a short window, whose one-row grid
+ * A grid panel folds its composer by its own height (SessionPane's `foldWhenShort`: below about 570px it folds, above
+ * about 620px it opens, with the usual composer; owner, 2026-11-07). So every scenario here runs in a short window, whose one-row grid
  * gives a panel under that line; the last one makes the window tall to see the composer stay open.
  */
 const SHORT_WINDOW = { width: 1280, height: 320 }
@@ -57,7 +57,7 @@ const COMPOSER_REACH = 54
  * The collapsed composer in the grid (user request, 2026-09-10).
  *
  * Reading space was tight in a two-row grid — out of a 370px panel, the input area took 95px,
- * while the actual text field was only 22px. Collapsed, the rounded card shows a sliver of itself,
+ * while the actual text field was only 22px. Collapsed, the rounded card waits below the panel's bottom edge,
  * and when a cursor arrives at the bottom, it **rises over the conversation.** It covers rather
  * than pushes, so the line being read does not move.
  */
@@ -239,6 +239,18 @@ test('a raised composer neither covers nor pushes the last line', async ({ page 
     const m = await read()
     return m.pad === m.cardHeight
   }).toBe(true)
+  // The rows near the end are still being measured (each is estimated at 64px until drawn), and the last line moves
+  // with every measurement; read it as `down` only once two consecutive polls agree (each is two frames after the last)
+  let before = ''
+  await expect
+    .poll(async () => {
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+      const m = JSON.stringify(await read())
+      const same = m === before
+      before = m
+      return same
+    })
+    .toBe(true)
   const down = await read()
 
   const box = (await panel.boundingBox())!
@@ -346,13 +358,13 @@ test('a panel tall enough keeps the composer open, and the focus view never fold
     const s = (await shell.boundingBox())!
     return s.y + s.height > p.y + p.height + 1
   }
-  // The short window folds it: the card hangs below the panel's bottom edge, showing only its top
-  expect((await panel.boundingBox())!.height).toBeLessThan(285)
+  // The short window folds it: the card hangs wholly below the panel's bottom edge
+  expect((await panel.boundingBox())!.height).toBeLessThan(570)
   expect(await hangsBelow()).toBe(true)
 
   // A taller window gives the panel enough height: the composer opens and sits wholly inside it
   await page.setViewportSize({ width: SHORT_WINDOW.width, height: 800 })
-  await expect.poll(async () => (await panel.boundingBox())!.height).toBeGreaterThan(312)
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBeGreaterThan(620)
   await expect.poll(hangsBelow).toBe(false)
   await expect(shell).not.toHaveAttribute('data-up', 'true')
 
@@ -368,11 +380,10 @@ test('a panel tall enough keeps the composer open, and the focus view never fold
 })
 
 /**
- * A folded composer shows 32px of its card at rest (owner, 2026-11-06; it showed 16 before). The card's top is read off
- * the page against the bottom of the pane once it holds still, and a hand 40px up, over the conversation but inside
- * the strip that raises it, still raises the card.
+ * A folded composer is wholly below the pane's bottom edge at rest (owner, 2026-11-07; #2018 had left 32px showing,
+ * which the owner did not mean). Neither its box nor its shadow is inside the pane (read off the boxes and the computed shadow, not from pixels). A hand in the strip that raises it still raises it, and it goes down again when the hand leaves.
  */
-test('a folded composer shows 32px of its card above the pane bottom', async ({ page }) => {
+test('a folded composer shows nothing of itself at rest, rises to a hand at the bottom and goes back down', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', 'one')
   const b = await newSession(page, 'alpha', 'claude', 'two')
@@ -382,13 +393,54 @@ test('a folded composer shows 32px of its card above the pane bottom', async ({ 
   const panel = page.getByTestId(`grid-panel-${a}`)
   const shell = panel.getByTestId('composer-shell')
   await expect(shell).not.toHaveAttribute('data-up', 'true')
-  const card = await settled(shell)
   const pane = (await panel.getByTestId('session-view').boundingBox())!
-  expect(Math.round(pane.y + pane.height - card.y)).toBe(32)
+  const card = await settled(shell)
+  // The card's top edge is at the pane's bottom edge or below it: no pixel of the card is inside the pane
+  expect(Math.round(card.y - (pane.y + pane.height))).toBeGreaterThanOrEqual(0)
+  // Nor its shadow, which is cast upward from the top edge
+  // (Tailwind's `shadow-none` is a stack of transparent, zero-size shadows, not the keyword)
+  await expect(shell).toHaveCSS('box-shadow', /^(rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, )?)+$/)
 
-  // The strip that raises it is taller than what shows, so a hand reaching for the sliver is inside it
+  // A hand 40px up, over the conversation but inside the strip, raises it; it comes to rest inside the pane
   await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 40)
   await expect(shell).toHaveAttribute('data-up', 'true')
+  const up = await settled(shell)
+  expect(up.y + up.height).toBeLessThanOrEqual(pane.y + pane.height + 1)
+
+  // And goes back down, wholly below the edge again, when the hand returns to the middle of the conversation
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + 80)
+  await expect(shell).not.toHaveAttribute('data-up', 'true')
+  const down = await settled(shell)
+  expect(Math.round(down.y - (pane.y + pane.height))).toBeGreaterThanOrEqual(0)
+})
+
+/**
+ * A panel of a middling height folds too (owner, 2026-11-07): the line was about 285px and is about 570px now, so a
+ * 450px panel, which an ordinary two-row grid gives, folds its composer and a 700px one keeps it open. Run in both
+ * engines, as CI does (WebKit is the one the desktop app runs in).
+ */
+test('a panel of 450px folds its composer and one of 700px does not', async ({ page }) => {
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 500 })
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const hangsBelow = async () => {
+    const p = (await panel.boundingBox())!
+    const s = (await shell.boundingBox())!
+    return s.y + s.height > p.y + p.height + 1
+  }
+  const height = async () => Math.round((await panel.boundingBox())!.height)
+  expect(await height()).toBeGreaterThan(420)
+  expect(await height()).toBeLessThan(480)
+  await expect.poll(hangsBelow).toBe(true)
+
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 750 })
+  await expect.poll(height).toBeGreaterThan(620)
+  await expect.poll(hangsBelow).toBe(false)
 })
 
 /**

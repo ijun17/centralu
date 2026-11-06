@@ -209,7 +209,7 @@
   --shadow-notice: 0 12px 32px -12px rgb(0 0 0 / 0.9);
   --shadow-modal: 0 24px 60px -12px rgb(0 0 0 / 0.9);
   --shadow-sticky: 0 8px 24px -8px rgb(0 0 0 / 0.8); /* my pinned question over the conversation */
-  /* The collapsed composer at rest and raised — tuned by measuring, see SessionView */
+  /* The folded composer: `--shadow-dock` is not drawn any more (it rests out of sight, 2026-11-07; the key stays for themes), `-raised` is its shadow while raised — tuned by measuring, see SessionView */
   --shadow-dock: 0 -14px 32px -12px rgb(0 0 0 / 0.6);
   --shadow-dock-raised: 0 -19px 40px -15px rgb(0 0 0 / 0.58);
   --shadow-key: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(0 0 0 / 0.7);

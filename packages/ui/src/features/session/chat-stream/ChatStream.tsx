@@ -58,7 +58,7 @@ export function ChatStream({
   working: boolean
   activity: SessionSummary['activity']
   /**
-   * A collapsed composer covers a bit of the bottom — this reserves margin so the last line is
+   * A raised composer covers the bottom — this reserves margin so the last line is
    * never permanently hidden under it. It also says the pane is folded: the pinned copy of the last user
    * message leaves the screen while it holds (StickyUser)
    */

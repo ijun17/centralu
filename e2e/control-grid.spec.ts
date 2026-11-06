@@ -13,7 +13,7 @@ test('Grid — a collapsed composer expands in the panel it was dropped into', a
   await newSession(page, 'alpha', 'b')
   const b = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // A short window gives each panel a height that folds its composer (SessionPane's foldWhenShort, below about 285px)
+  // A short window gives each panel a height that folds its composer (SessionPane's foldWhenShort, below about 570px)
   await page.setViewportSize({ width: 1280, height: 320 })
   await page.evaluate((ids) => (window as any).__store.getState().setGridPanels(ids.map((sessionId: string) => ({ kind: 'session', sessionId }))), [a, b])
   await page.getByTestId('grid-button').click()
