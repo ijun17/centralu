@@ -47,7 +47,7 @@ describe('the answers Centralu writes itself', () => {
 
   /** The codec asked for the CLI's request, then shown the adapter's answer to it against a recorded one */
   const compare = (sent: unknown, recorded: unknown) => {
-    const codec = streamJsonCodec('/work', own)
+    const codec = streamJsonCodec('/work', { own })
     const ids = new Map<string, string | number>()
     codec.rewrite(asks('rid-4', 'tools/list'), ids)
     return codec.match(sent as Record<string, unknown>, recorded as Record<string, unknown>, ids)
@@ -64,7 +64,7 @@ describe('the answers Centralu writes itself', () => {
   })
 
   it('are compared with the recording as to what the code does not make: the protocol version, the capabilities', () => {
-    const codec = streamJsonCodec('/work', { server: 'centralu', check: () => null })
+    const codec = streamJsonCodec('/work', { own: { server: 'centralu', check: () => null } })
     const ids = new Map<string, string | number>()
     codec.rewrite(asks('rid-2', 'initialize'), ids)
     const initialized = (protocolVersion: string, instructions: string) => answer('rid-2', { protocolVersion, capabilities: { tools: { listChanged: true } }, instructions })
@@ -73,7 +73,7 @@ describe('the answers Centralu writes itself', () => {
   })
 
   it('leave the answers to the CLI’s other requests compared with the recording', () => {
-    const codec = streamJsonCodec('/work', own)
+    const codec = streamJsonCodec('/work', { own })
     const ids = new Map<string, string | number>()
     codec.rewrite(asks('rid-7', 'tools/call'), ids)
     expect(codec.match(answer('rid-7', { content: 'b' }) as never, answer('rid-7', { content: 'a' }) as never, ids)).toMatch(/first difference at response\.mcp_response\.result\.content: the recording has "a", the adapter sent "b"/)

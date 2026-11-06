@@ -42,13 +42,16 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { rawPublicKey, throwawayKey, writeContentManifest, type SigningKey } from './content-manifest.mjs'
-import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, copyEarlierHost, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildShellExe, TAURI_DIR } from './shell-bundle.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
+// Keepers that hold their hosts' children, so a handoff through content carries a terminal, as before #1895 step 3. Step 4
+// deletes this script with the handoff
+process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const flag = (name: string) => {
@@ -157,7 +160,8 @@ function makeBundle(root: string, name: string, version: string, keeper: string,
   mkdirSync(content, { recursive: true })
   copyFileSync(keeper, join(content, 'centralu-keeper'))
   chmodSync(join(content, 'centralu-keeper'), 0o755)
-  cpSync(HOST_SRC, join(content, 'host'), { recursive: true })
+  // Of a build before #1895 step 3, so a handoff through content carries what the keeper holds (`copyEarlierHost`)
+  copyEarlierHost(HOST_SRC, join(content, 'host'))
   const infoPath = join(content, 'host/bundle-info.json')
   const commit = `content-${name}`
   writeFileSync(infoPath, JSON.stringify({ ...JSON.parse(readFileSync(infoPath, 'utf8')), commit, builtAt: new Date().toISOString() }))

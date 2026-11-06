@@ -195,8 +195,11 @@ pub const STABLE_UPTIME: Duration = Duration::from_secs(30);
 /// The old 300ms finished the process off before its WAL checkpoint had completed.
 pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
-/// The line that asks a host the window started to stop for an update (agent-host `main.ts`, #1895)
+/// The line that asks a host the window or the keeper started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
+/// The line a keeper with no child service stops its host with for good: the person quit Centralu here, which the host
+/// notes for a linked hub (#1143), as it did when the child service said `stop` (#1895 step 3)
+pub const STOP_LINE: &str = r#"{"op":"stop"}"#;
 
 /// The lines that tell a host the system is ending, and that it is not after all (agent-host `main.ts`, `system-ending`; #1397,
 /// #1970): said by whoever hears the end first, the window at Windows' end-session question or the keeper at launchd's stop
@@ -359,6 +362,11 @@ impl Supervisor {
      * stopped the usual way (`shutdown`), which lists nothing: its turns end as a quit's.
      */
     pub fn stop_for_update(&self, wait: Duration) {
+        self.stop_by_line(STOP_FOR_UPDATE_LINE, wait)
+    }
+
+    /// The same with another stop line (`STOP_LINE`): asked by `line`, given up to `wait`, then stopped the usual way
+    pub fn stop_by_line(&self, line: &str, wait: Duration) {
         let pid = match self.inner.lock() {
             Ok(mut inner) => {
                 inner.shutting_down = true;
@@ -368,7 +376,7 @@ impl Supervisor {
         };
         if let Some(pid) = pid {
             // The watcher takes the child out when its stdout closes, which is when the host has exited
-            if self.send_line(STOP_FOR_UPDATE_LINE).is_ok() {
+            if self.send_line(line).is_ok() {
                 wait_until(wait, || self.pid() != Some(pid));
             }
         }
@@ -716,7 +724,7 @@ pub fn stop_child(child: &mut Child) {
 }
 
 /// Polls the condition until it holds or the wait is over; whether it held
-fn wait_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
+pub fn wait_until(wait: Duration, mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + wait;
     while Instant::now() < deadline {
         if done() {

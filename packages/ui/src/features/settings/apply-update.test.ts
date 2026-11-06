@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UpdateStatus } from '@cc/protocol'
-import { agentApplyVerdict, applyOffer, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
+import { agentApplyVerdict, applyOffer, applyWords, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
 
 /**
  * Applying an installed update (#352): what the update line offers, and when the automatic mode
@@ -113,6 +113,13 @@ describe('autoApplyDecision', () => {
     expect(autoApplyDecision({ ...idle, relaunch: { ...ready, restartsHost: true } })).toEqual({ apply: false })
   })
 
+  // #1895 step 3: a keeper that holds no agents still reports busy, so the automatic mode keeps waiting for idle there
+  it('still applies by itself when idle where a keeper reports busy, though the update stops the host', () => {
+    const keeper = { ...ready, restartsHost: true, idleReported: true }
+    expect(autoApplyDecision({ ...idle, relaunch: keeper })).toEqual({ apply: true })
+    expect(autoApplyDecision({ ...idle, relaunch: keeper, busy: true })).toEqual({ apply: false, waitingFor: 'something is running' })
+  })
+
   it('never relaunches under someone typing', () => {
     expect(autoApplyDecision({ ...idle, typing: true })).toEqual({ apply: false, waitingFor: 'you are typing' })
   })
@@ -221,5 +228,42 @@ describe('agentApplyVerdict', () => {
       expect(v.ready).toBe(false)
       expect(v.ready === false && v.reason).toContain(why)
     }
+  })
+})
+
+/** #1895 step 3: what Settings says applying costs, and whether it applies by itself, follows what the update does */
+describe('applyWords', () => {
+  const keepsGoing = /keep (going|running)/
+
+  it('says agents keep going only where the keeper says it holds them through the update', () => {
+    expect(applyWords({ ...ready, keepsAgents: true }).applying).toMatch(keepsGoing)
+    for (const r of [{ ...ready, restartsHost: true }, { ...ready, restartsHost: true, idleReported: true }]) {
+      const w = applyWords(r)
+      expect(w.applying).toMatch(/running turns go on once the agent host is back/)
+      expect(`${w.applying} ${w.more}`).not.toMatch(keepsGoing)
+    }
+  })
+
+  /**
+   * Review of #1895 step 3: an absent `restartsHost` was read as "the keeper holds them", so Windows and Linux (whose check
+   * is empty), a browser, a window before its first check and one not attached to a keeper all promised that agents keep
+   * going and that the update applies by itself once idle, neither of which happens there
+   */
+  it('promises nothing it cannot tell: no keep-going and no applying by itself without a signal', () => {
+    const unknown = [undefined, null, { ready: false }, { ready: false, reason: 'not attached to the background keeper' }, { ...ready }]
+    for (const r of unknown) {
+      const w = applyWords(r)
+      expect(`${w.applying} ${w.hint} ${w.more}`, JSON.stringify(r)).not.toMatch(keepsGoing)
+      expect(`${w.hint} ${w.more}`, JSON.stringify(r)).not.toMatch(/applies a newer version|once nothing is busy|applied once/)
+      expect(w.applying).toMatch(/Restarting Centralu applies it/)
+    }
+  })
+
+  it('promises applying by itself only where something reports idle', () => {
+    expect(applyWords({ ...ready, restartsHost: true, idleReported: true }).hint).toMatch(/applies a newer version once nothing is busy/)
+    expect(applyWords({ ...ready, keepsAgents: true }).hint).toMatch(/applies a newer version once nothing is busy/)
+    const direct = applyWords({ ...ready, restartsHost: true })
+    expect(direct.hint).not.toMatch(/applies/)
+    expect(direct.more).toMatch(/when you press Update/)
   })
 })

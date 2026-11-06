@@ -623,8 +623,18 @@ const stopFromRequest = (o: { forUpdate: boolean }, by = 'centralu serve --stop'
   if (stopNow) stopNow()
   else stopAsked = true
 }
-// The window stops the host it started for an update by a line on its stdin: it speaks no WebSocket, and `host.stop` is refused to a host the app runs (#1895)
-if (control && launch.startedBy === 'app') control.on('stop', (m) => stopFromRequest({ forUpdate: m.forUpdate === true }, 'the window'))
+/*
+ * The window stops the host it started for an update by a line on its stdin: it speaks no WebSocket, and `host.stop` is refused to a
+ * host the app runs (#1895). The keeper does the same for "Apply now" since it holds no children (#1895 step 3), and stops a host for
+ * good by a plain line, having no child service to say it on: the person quit Centralu here, which a linked hub must respect (#1143)
+ */
+if (control && (launch.startedBy === 'app' || launch.underKeeper)) {
+  control.on('stop', (m) => {
+    const forUpdate = m.forUpdate === true
+    if (launch.underKeeper && !forUpdate && dbPath !== ':memory:') markQuit(dirname(dbPath))
+    stopFromRequest({ forUpdate }, launch.underKeeper ? 'the keeper' : 'the window')
+  })
+}
 /*
  * The system is ending (a shutdown, restart or sign-out), told by the parent that hears it: the window's Windows end-session
  * question, or the keeper (#1397). Said before the parent goes, so the cut turns this host's leave leaves are the system's. A serve
@@ -927,8 +937,11 @@ try {
 start.at('ready')
 // This line is parsed by the supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
-// What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts)
-if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null } }))
+/*
+ * What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts), and that this host
+ * takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through the keeper
+ */
+if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null, stopsForUpdate: true } }))
 /*
  * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready, where the steps a
  * swap left for later run: by then the host it replaced is gone, so a host failing before ready never leaves the

@@ -68,13 +68,17 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, cleanupOnExit, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, copyEarlierHost, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildKeeper, HOST_SRC, log, readyView, recordedOnce, started, STEPS, TARGET, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
+// Keepers that hold their hosts' children, as every keeper did before #1895 step 3, with hosts of that time (`makeBuild`): a
+// handoff carries them (the move to a keeper that holds none starts from such a handoff, keeper-children-integration.mjs).
+// Step 4 deletes this script with the holding
+process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const BIN = join(TARGET, 'debug', 'centralu')
 const KEEPER_BIN = join(TARGET, 'debug', 'centralu-keeper')
@@ -112,7 +116,8 @@ function check(cond, what, detail = '') {
 function makeBuild(root, name, windowBin = BIN, keeperBin = KEEPER_BIN) {
   const dir = join(root, name)
   const host = join(dir, 'host')
-  cpSync(HOST_SRC, host, { recursive: true })
+  // Of a build before #1895 step 3, so the keepers here hand on what they hold (`copyEarlierHost`)
+  copyEarlierHost(HOST_SRC, host)
   const infoPath = join(host, 'bundle-info.json')
   const info = JSON.parse(readFileSync(infoPath, 'utf8'))
   writeFileSync(infoPath, JSON.stringify({ ...info, commit: `handoff-${name}`, builtAt: new Date().toISOString() }))

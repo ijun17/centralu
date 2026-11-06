@@ -70,6 +70,17 @@ describe('scrubbing Claude Code’s frames', () => {
     expect(JSON.stringify([init, answer])).not.toMatch(/alice|Notion|acme|secret/i)
   })
 
+  it('keeps the name of the recorder’s own probe server and its tool, and renames a connector of the person’s', () => {
+    const [init, call] = run([
+      line('in', { type: 'system', subtype: 'init', cwd: CWD, tools: ['Bash', 'mcp__probe__ping', 'mcp__claude_ai_Notion__search'] }),
+      line('in', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_01', name: 'mcp__probe__ping', input: {} }, { type: 'tool_use', id: 'toolu_02', name: 'mcp__claude_ai_Notion__search', input: {} }] } }),
+    ]).map((f) => f.msg)
+    expect((init as { tools: string[] }).tools).toEqual(['Bash', 'mcp__probe__ping'])
+    const names = ((call as { message: { content: { name: string }[] } }).message.content).map((b) => b.name)
+    expect(names[0]).toBe('mcp__probe__ping')
+    expect(names[1]).not.toMatch(/Notion/)
+  })
+
   it('reads a path under a placeholder folder with `/`, and scrubs a streamed path joined, though its pieces were cut in the middle of the name', () => {
     const delta = (text: string) => line('in', { type: 'stream_event', api_message_id: 'msg_01', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } })
     const frames = run([

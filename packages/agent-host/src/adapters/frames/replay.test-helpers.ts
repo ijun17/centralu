@@ -184,9 +184,11 @@ const withoutOwnWords = (response: unknown) => {
  * answers: a control request by its `subtype`, the answer to the CLI's request (an approval, a hook) by its request id and
  * its verdict, a user message by its content. The ids the SDK and the adapter make up for themselves (a request id, an
  * input's uuid) differ per run, so each is mapped to the recorded one and the CLI's later references to it are rewritten.
- * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for. `own`: see {@link OwnAnswers}.
+ * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for. `own`: see {@link OwnAnswers}. `hostAnswers`: the
+ * recording was made through a real host, whose tools answered the CLI's calls to Centralu's server (`mcp_message`); the replay has
+ * no host, so what those answers hold (the tools' list and descriptions, their words) is not compared, only that the adapter answers.
  */
-export const streamJsonCodec = (cwd: string, own?: OwnAnswers): FrameCodec => ({
+export const streamJsonCodec = (cwd: string, opts: { own?: OwnAnswers; hostAnswers?: boolean } = {}): FrameCodec => ({
   // Two inputs of the person are in the order they were sent; the lines around them are not
   unordered: (line) => line.type !== 'user',
   probe: {
@@ -203,8 +205,11 @@ export const streamJsonCodec = (cwd: string, own?: OwnAnswers): FrameCodec => ({
       if (typeof want.request_id === 'string' && typeof sent.request_id === 'string') ids.set(want.request_id, sent.request_id)
     } else if (want.type === 'control_response') {
       const asked = ids.get(`own ${String(record(want.response).request_id)}`)
-      if (own && (asked === 'initialize' || asked === 'tools/list')) {
-        const problem = own.check(asked, record(record(record(sent.response).response).mcp_response).result as Record<string, unknown>)
+      if (opts.hostAnswers && record(record(want.response).response).mcp_response !== undefined) {
+        return record(record(sent.response).response).mcp_response === undefined ? `the adapter answered ${describeLine(sent)} where the recording answers a call to Centralu's server` : null
+      }
+      if (opts.own && (asked === 'initialize' || asked === 'tools/list')) {
+        const problem = opts.own.check(asked, record(record(record(sent.response).response).mcp_response).result as Record<string, unknown>)
         if (problem) return `the adapter’s answer to ${asked}: ${problem}`
         const rest = differs('the adapter’s answer', withoutOwnWords(sent.response), withoutOwnWords(inFolder(want.response, cwd)))
         if (rest) return rest
@@ -222,7 +227,7 @@ export const streamJsonCodec = (cwd: string, own?: OwnAnswers): FrameCodec => ({
   rewrite(incoming, ids) {
     // The CLI asks Centralu's server for what Centralu writes itself: note it, for the answer to be told from the CLI's
     const asks = mcpMessage(incoming)
-    if (own && asks?.server === own.server && (asks.method === 'initialize' || asks.method === 'tools/list')) ids.set(`own ${String(incoming.request_id)}`, asks.method)
+    if (opts.own && asks?.server === opts.own.server && (asks.method === 'initialize' || asks.method === 'tools/list')) ids.set(`own ${String(incoming.request_id)}`, asks.method)
     const swap = (v: unknown): unknown => {
       if (typeof v === 'string') return ids.get(v) ?? inFolder(v, cwd)
       if (Array.isArray(v)) return v.map(swap)

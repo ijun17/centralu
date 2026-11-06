@@ -45,6 +45,8 @@ export const MailFacts = z.looseObject({
   hostCap: z.boolean().optional(),
   /** On Centralu's warning to the person (#2014): the pair of sessions whose mail started more turns in the hour than it warns at, and how many */
   pairTurns: z.object({ sessions: z.array(z.string()), turns: z.number() }).optional(),
+  /** On Centralu's warning to the person (#2024): the session that went through more compaction cycles (`compact_self` with `then`) in the hour than it warns at, and how many */
+  compactCycles: z.object({ session: z.string(), count: z.number() }).optional(),
   answerHeld: z.object({ question: z.string(), answer: z.string() }).optional(),
   refused: z.object({ tool: z.string(), target: z.string(), firstLine: z.string(), projectId: z.string() }).optional(),
   trusted: z.object({ project: z.string(), refused: z.array(z.string()) }).optional(),

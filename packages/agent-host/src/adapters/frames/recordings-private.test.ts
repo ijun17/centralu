@@ -35,8 +35,8 @@ const PRIVATE: readonly [string, RegExp][] = [
 const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
   ['an id that is not a placeholder', /\b(?!0{4}\d{4}-0000-4000-8000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
   ['an account address', /[\w.+-]+@[\w-]+\.[\w.-]+/],
-  // Server and tool both named: a name streamed in pieces reads whole only in the joined reading, and its first piece alone (`mcp__central`) is no connector
-  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+?__[\w.-]+/],
+  // The recorder's probe server is its own. Server and tool both named: a name streamed in pieces reads whole only in the joined reading, and its first piece alone (`mcp__central`) is no connector
+  ['a connector of the person', /\bmcp__(?!centralu__|probe__|app-|server-\d+__)[\w.-]+?__[\w.-]+/],
 ]
 
 /** What Codex's recordings must also be free of: the app-server says the account's plan and the machine's name, and numbers a response's items */

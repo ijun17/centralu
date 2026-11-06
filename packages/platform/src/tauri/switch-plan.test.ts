@@ -104,9 +104,11 @@ describe('what switching builds costs (#280 step 3)', () => {
     expect(switchPlan({ keepsAgents: true, busy: true, sameBuild: false, keeperSameBuild: false }).confirm).toBe(false)
   })
 
-  it('a host that cannot hand agents over yet says turns stop, rather than pretending they survive', () => {
+  it('a host that stops for an update says turns stop and go on, rather than pretending they keep running (#1895 step 3)', () => {
     const { loses } = switchPlan({ keepsAgents: false, busy: true })
-    expect(loses).toContain('running turns stop')
+    expect(loses).toContain('Running turns stop and go on once the new build is up')
+    expect(loses).toContain('terminals and commands start again')
+    expect(loses).not.toContain('keep running')
     expect(loses).toContain('10 seconds')
     // Unknown is treated as the host that cannot
     expect(switchPlan({ busy: true }).loses).toBe(loses)
