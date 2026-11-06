@@ -21,3 +21,16 @@ export function threadIdOf(res: Record<string, unknown> | undefined): string | n
   const id = (thread?.id ?? res.threadId) as string | undefined
   return typeof id === 'string' ? id : null
 }
+
+/**
+ * Whether the app-server says no turn runs in the thread (`thread.status.type`, a resume's answer). Measured (codex-cli 0.160.0, a
+ * resume on the same process): `active` while a turn runs (a command in flight), `idle` after a turn completed or was interrupted, and
+ * `systemError` after one failed (a capacity error). Any status that is not `active` means none runs. A resume that says no status
+ * (an older Codex) says nothing: the turn goes on.
+ */
+export function threadRunsNoTurn(res: Record<string, unknown> | undefined): boolean {
+  const thread = res?.thread
+  if (typeof thread !== 'object' || thread === null || !('status' in thread)) return false
+  const status = thread.status
+  return typeof status === 'object' && status !== null && 'type' in status && typeof status.type === 'string' && status.type !== 'active'
+}
