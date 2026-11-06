@@ -2204,14 +2204,15 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
 2. Add the tool to `ToolName` and give it a `TOOL_META` entry in `@cc/protocol` — display
    name, one-glyph mark, install command, login command. Then register the adapter in the
    `adapters` Map in `main.ts`.
-3. **Record real runs before writing the adapter's tests (required).** Contract tests replay recorded raw frames →
-   NormalizedEvent snapshot verification; hand-written frames are not enough, because they hold what the author believed
+3. **Record real runs before writing the adapter's tests (required, except what no real run sends or cheaply can; see
+   the end of this step).** Contract tests replay recorded raw frames → NormalizedEvent snapshot verification;
+   hand-written frames are not enough, because they hold what the author believed
    the tool sends (#2031: a fake answered `idle` where the real Codex answers `systemError`, and the fix passed every test
    while doing nothing on a real crash). A new tool lands with recordings of at least: a plain turn, a tool call with an
    approval, a refused or failed turn, an interrupted turn, a long answer, a compaction (if the tool has one), a resumed
-   session, and each answer the adapter branches on (a status, an error kind). A change to an existing adapter that
+   session, and each answer the adapter branches on (a status, an error kind) where a real run can send it. A change to an existing adapter that
    depends on what the tool sends adds or cites the recording that shows it; a value copied into a fake without a
-   recording is not evidence. Re-record on a CLI version bump; the diff is the review. For a new tool, record
+   recording is not evidence. Re-record on a CLI version bump. For a new tool, record
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by
