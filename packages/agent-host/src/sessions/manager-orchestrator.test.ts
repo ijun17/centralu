@@ -161,7 +161,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
     adapter.handleOf(a.id)!.externalId = 'ext-worker'
     // A tool that reports its background work can be put to sleep
     Object.assign(adapter.capabilities, { backgroundTasks: true })
-    expect(await mgr.sleepSession(orc.id)).toBe(true)
+    expect(await mgr.processes.sleepSession(orc.id)).toBe(true)
     await tools.sendToSession(a.id, 'let me know when it is done', true)
     // Its tool cannot start now: the report cannot wake it
     adapter.failCreate = 'Could not start the tool'
@@ -463,7 +463,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
    */
   it('the orchestrator can also switch to codex (tools attach through the bridge)', async () => {
     const { orc } = await setup()
-    const r = await mgr.switchTool(orc.id, 'codex')
+    const r = await mgr.processes.switchTool(orc.id, 'codex')
     expect(r.tool).toBe('codex')
   })
 
@@ -486,7 +486,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
 
   it('a plain session can be switched', async () => {
     const { a } = await setup()
-    const r = await mgr.switchTool(a.id, 'codex')
+    const r = await mgr.processes.switchTool(a.id, 'codex')
     expect(r.tool).toBe('codex')
     // The new tool does not know the old conversation — it severs the thread to continue from.
     expect(r.externalId).toBeNull()
@@ -517,8 +517,8 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       },
     ])
 
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
 
     const handed = codexAdapter.lastOpts?.systemPromptAppend ?? ''
     expect(handed).toContain('Past conversation')
@@ -541,8 +541,8 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       },
     ])
 
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
 
     const handed = codexAdapter.lastOpts?.systemPromptAppend ?? ''
     expect(handed).not.toContain('HOSTILE_LEGACY_FROM_SENTINEL')
@@ -555,14 +555,14 @@ describe("the orchestrator's tools see only this app's sessions", () => {
       projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'safe', model: 'sonnet', effort: 'max',
     })) as { id: string }
 
-    const r = await mgr.switchTool(s.id, 'codex')
+    const r = await mgr.processes.switchTool(s.id, 'codex')
     expect(r.model).toBeNull()
     expect(r.effort).toBeNull()
     expect(r.verbosity).toBeNull()
     expect(r.serviceTier).toBeNull()
     // What the adapter receives on the next wake-up must be empty too — clearing only the stored value would
     // be half a fix.
-    await mgr.resumeSession(s.id)
+    await mgr.processes.resumeSession(s.id)
     expect(codexAdapter.lastOpts?.model).toBeUndefined()
     expect(codexAdapter.lastOpts?.effort).toBeUndefined()
     // Permission is a policy the person set, so it survives across tools.

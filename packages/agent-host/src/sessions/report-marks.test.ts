@@ -105,7 +105,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(store.children.listReportMarks()).toEqual([])
-    expect(b.mgr.waitsOn(parent)).not.toContain(child)
+    expect(b.mgr.processes.waitsOn(parent)).not.toContain(child)
     // The answer it finished with is there for the parent to read
     expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
     await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
@@ -130,7 +130,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const c = host()
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
     expect(store.children.listReportMarks()).toEqual([])
-    expect(c.mgr.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
+    expect(c.mgr.processes.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
   })
 
   it('held over the child\'s own background work (#721), it stays owed in the next host, which tells the work\'s end', async () => {
@@ -259,7 +259,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const c = host()
     expect(store.children.listReportMarks()).toEqual([])
     expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-    expect(c.mgr.waitsOn(parent)).toEqual([])
+    expect(c.mgr.processes.waitsOn(parent)).toEqual([])
   })
 
   it('goes with the child or the parent when either is trashed', async () => {
@@ -272,6 +272,6 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(store.children.listReportMarks()).toEqual([{ sessionId: second.child, callerSessionId: second.parent }])
     await a.mgr.trash.trashSession(second.parent)
     expect(store.children.listReportMarks()).toEqual([])
-    expect(a.mgr.waitsOn(parent)).toEqual([])
+    expect(a.mgr.processes.waitsOn(parent)).toEqual([])
   })
 })

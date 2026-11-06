@@ -194,6 +194,7 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const agentVersions = new AgentVersionService({
     tools: () => [],
     sessions: mgr,
+    processes: mgr.processes,
     notes: mgr.sessionSettings,
     publish: (status) => server.broadcast({ type: 'agent_versions', status }),
   })

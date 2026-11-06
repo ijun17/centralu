@@ -351,11 +351,11 @@ export function createRpcHandler(
       return mgr.externals.listExternalSessions(projectId, tool, limit)
     },
     'agents.restartSession': async (p) =>
-      mgr.restartSession(p.sessionId),
+      mgr.processes.restartSession(p.sessionId),
     'agents.resumeSession': async (p) =>
-      mgr.resumeSession(p.sessionId),
+      mgr.processes.resumeSession(p.sessionId),
     'agents.forkConversation': async (p) =>
-      mgr.forkConversation(p.sessionId),
+      mgr.processes.forkConversation(p.sessionId),
     'agents.updateSettings': async (p) => {
       /*
        * **Fields are never pulled out one at a time.**
@@ -370,7 +370,7 @@ export function createRpcHandler(
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {
-      return mgr.switchTool(sessionId, tool)
+      return mgr.processes.switchTool(sessionId, tool)
     },
     'agents.capabilities': async ({ tool }) => {
       const a = adapters.get(tool)

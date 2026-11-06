@@ -49,7 +49,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
     await rpc('agents.send', { sessionId: session.id, text: 'work' })
-    const restart = vi.spyOn(mgr, 'restartSession')
+    const restart = vi.spyOn(mgr.processes, 'restartSession')
     old.emitApproval('held-card')
     store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
     await mgr.launches.refreshToolDefinitions()
@@ -87,7 +87,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     store.settings.deleteAppSetting(`launch_settings:${session.id}`)
     store.settings.deleteAppSetting(`tool_prefix:${session.id}`)
     if (state === 'working') await rpc('agents.send', { sessionId: session.id, text: 'work' })
-    const restart = vi.spyOn(mgr, 'restartSession')
+    const restart = vi.spyOn(mgr.processes, 'restartSession')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     await mgr.launches.refreshToolDefinitions()

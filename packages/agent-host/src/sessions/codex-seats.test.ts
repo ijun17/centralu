@@ -144,7 +144,7 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
   it('the orchestrator: its role, then the same instructions Claude gets from the server', async () => {
     mgr.orchestratorSlot.configureOrchestrator('codex')
     const o = await mgr.orchestrator()
-    await mgr.resumeSession(o.id)
+    await mgr.processes.resumeSession(o.id)
     const text = developerInstructions()
     // The role as the session is given it: the preamble (on by default, #564), then the role
     expect(text.startsWith(orchestratorRole())).toBe(true)

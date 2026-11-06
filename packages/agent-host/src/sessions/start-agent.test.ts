@@ -1055,7 +1055,7 @@ describe('starting another agent in the same project', () => {
     let finishDisposal!: () => void
     const disposal = new Promise<void>((resolve) => { finishDisposal = resolve })
     vi.spyOn(h, 'dispose').mockImplementation(() => disposal)
-    const restart = vi.spyOn(w.mgr, 'restartSession')
+    const restart = vi.spyOn(w.mgr.processes, 'restartSession')
     expect(await w.mgr.updateSettings(c, { model: 'new-model' })).toMatchObject({ applied: 'after_turn' })
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
@@ -1092,7 +1092,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const h = handleOf(c)!
     h.externalId = 'fixture-thread'
-    const restart = vi.spyOn(w.mgr, 'restartSession')
+    const restart = vi.spyOn(w.mgr.processes, 'restartSession')
     await w.mgr.updateSettings(c, { model: 'new-model' })
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
@@ -1126,8 +1126,8 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
     handleOf(c)!.answer('old turn ended', false)
-    expect(w.mgr.sessionIdle(c)).toEqual({ idle: false, reason: 'turn' })
-    expect(await w.mgr.sleepSession(c)).toBe(false)
+    expect(w.mgr.processes.sessionIdle(c)).toEqual({ idle: false, reason: 'turn' })
+    expect(await w.mgr.processes.sleepSession(c)).toBe(false)
     expect(w.mgr.isLive(c)).toBe(true)
     handleOf(c)!.answer('note answer')
     expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, answer: 'note answer' })

@@ -33,6 +33,10 @@ export const DEFAULT_SLEEP_AFTER_MINUTES = 15
 /** What this needs from the session manager */
 export type SleepSessions = {
   listSessions(): SessionInfo[]
+}
+
+/** What this needs of a session's process (the manager's `processes`) */
+export type SleepProcesses = {
   sessionIdle(sessionId: string): SessionIdle
   /** Sessions whose running work this one waits on: its children still in the turn it gave them, reports it is owed */
   waitsOn(sessionId: string): string[]
@@ -42,6 +46,7 @@ export type SleepSessions = {
 
 export type SleeperDeps = {
   sessions: SleepSessions
+  processes: SleepProcesses
   /** Whether a tool's sessions may sleep (`AdapterCapabilities.sleep`) */
   canSleep: (tool: ToolName) => boolean
   readAfterMinutes?: () => number | null
@@ -164,7 +169,7 @@ export class SessionSleeper {
     if (!s.live) return { sleep: false, why: 'not_live' }
     let idle: SessionIdle
     try {
-      idle = this.deps.sessions.sessionIdle(s.id)
+      idle = this.deps.processes.sessionIdle(s.id)
     } catch {
       // Gone between the list and now
       return { sleep: false, why: 'not_live' }
@@ -173,7 +178,7 @@ export class SessionSleeper {
       live: s.live,
       supported: this.deps.canSleep(s.tool),
       idle,
-      waitsOn: this.deps.sessions.waitsOn(s.id).length,
+      waitsOn: this.deps.processes.waitsOn(s.id).length,
       quietFor: this.deps.now() - (this.lastEvent.get(s.id) ?? this.since),
       afterMs,
     })
@@ -187,7 +192,7 @@ export class SessionSleeper {
     try {
       for (const s of this.deps.sessions.listSessions()) {
         if (!this.decide(s).sleep) continue
-        const ok = await this.deps.sessions.sleepSession(s.id).catch((err: Error) => {
+        const ok = await this.deps.processes.sleepSession(s.id).catch((err: Error) => {
           console.error(`[sleep] could not put ${s.id.slice(0, 8)} to sleep: ${err.message}`)
           return false
         })

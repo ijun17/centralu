@@ -128,7 +128,7 @@ export function cutTurns(s: ActivitySnapshot): string[] {
 /**
  * Whether one session's agent process can be replaced without losing anything (#290, #297): the
  * rule for restarting a single session on a newly installed CLI. The session manager answers with
- * it (`SessionManager.sessionIdle`), adding the facts only it holds: whether a process is running
+ * it (`SessionProcesses.sessionIdle`), adding the facts only it holds: whether a process is running
  * and whether the tool reports its background work.
  *
  * Not idle while a turn runs, while an approval or a question waits, or while background work that

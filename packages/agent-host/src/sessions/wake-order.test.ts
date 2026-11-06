@@ -34,7 +34,7 @@ describe('a send while the session wakes (#839)', () => {
     const { t, held } = await asleep()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     // The screen wakes it with nothing to send
-    const waking = w.mgr.resumeSession(t)
+    const waking = w.mgr.processes.resumeSession(t)
     for (let i = 0; i < 50 && !held.reading; i++) await vi.advanceTimersByTimeAsync(0)
     expect(held.reading).toBe(true)
     // The wake stops waiting for it

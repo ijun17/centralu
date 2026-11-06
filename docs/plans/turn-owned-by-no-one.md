@@ -249,7 +249,7 @@ Rules:
 - **A sender that is itself stopped by the same event** (both cut by the same quit) gets it quiet, as `tellAskerOfInterruption`
   does today with `wentWithItsProcess` (`child-reports.ts:402`).
 - **Woken or not (Q1, decided in §11)**: only a sender that is at rest **and waits on the stopped session** is woken: it gave the session
-  a task that is still open, or it waits on it by a blocking wait or a report it is owed (`SessionManager.waitsOn`). Every other sender gets
+  a task that is still open, or it waits on it by a blocking wait or a report it is owed (`SessionProcesses.waitsOn`). Every other sender gets
   the notice quiet and reads it with its other mail, as does a sender in a turn; a quit or a shutdown is quiet for all; the person's goes to
   the Inbox and wakes nothing. A sender that only asked a question and waits on nothing else is therefore not woken by the stop; the notice
   is there at its next turn.

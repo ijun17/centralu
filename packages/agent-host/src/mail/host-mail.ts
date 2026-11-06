@@ -35,7 +35,7 @@ export type HostMailSessions = {
   /** §9.5: the old report paths still owe the owner a report of the child */
   oldOwes(ownerId: string, childId: string): boolean
   mailSessions(): MailSessions
-  /** The sessions whose running work `id` waits on (`SessionManager.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
+  /** The sessions whose running work `id` waits on (`SessionProcesses.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
   waitsOn?(id: string): string[]
   /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`SessionManager.quitTold`) */
   quitTold?(id: string): { told: string[]; held: string[] }
@@ -49,7 +49,7 @@ export type HostMailSessions = {
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'keptInTurn' | 'waitsOn' | 'quitTold' | 'mail'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'keptInTurn' | 'quitTold' | 'mail' | 'processes'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mail.mailSeats(orchestratorHasMailCommand)
@@ -63,7 +63,7 @@ export function mailSessionsOf(
     keptInTurn: (id) => mgr.keptInTurn(id),
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
-    waitsOn: (id) => mgr.waitsOn(id),
+    waitsOn: (id) => mgr.processes.waitsOn(id),
     quitTold: (id) => mgr.quitTold(id),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),

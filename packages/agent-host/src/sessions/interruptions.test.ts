@@ -847,7 +847,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     const from = events.length
     const b = host({ updateResume: f })
     // The window's wake, in the same moment as the start's own Continue
-    const woken = b.mgr.resumeSession(child)
+    const woken = b.mgr.processes.resumeSession(child)
     await eventually(() => sentTo(b, child).length === 1)
     expect((await woken).resumed).toBe(true)
     await startNoticesRan()

@@ -162,7 +162,7 @@ describe('creating an app stands up its building session', () => {
   it('the role prompt is loaded again even after a resume', async () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     claude.seen = []
-    await mgr.restartSession(builder!.id)
+    await mgr.processes.restartSession(builder!.id)
     expect(claude.seen).toHaveLength(1)
     expect(claude.last().systemPromptAppend).toBe(builder!.roleAppend)
     expect(claude.last().cwd).toBe(repo)
@@ -253,7 +253,7 @@ describe('a building session tries out its own app (C-3)', () => {
     plantApp(join(app.dir, ...PROJECT_APPS), 'extra', { server: { command: 'node', args: ['server.mjs'] } })
     rt.refresh()
     claude.seen = []
-    expect((await mgr.restartSession(builder!.id)).resumed).toBe(true)
+    expect((await mgr.processes.restartSession(builder!.id)).resumed).toBe(true)
     expect(servers(claude.last())).toEqual(['app-extra', 'app-timer'])
     expect(claude.last().toolProfile).toBe('builder')
     // Actually calls the attached app's tool — the template's increment

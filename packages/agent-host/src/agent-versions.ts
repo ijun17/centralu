@@ -23,6 +23,10 @@ import type { SessionIdle } from './idle.js'
 /** What this needs from the session manager */
 export type VersionSessions = {
   listSessions(): SessionInfo[]
+}
+
+/** What this needs of a session's process (the manager's `processes`) */
+export type VersionProcesses = {
   sessionIdle(sessionId: string): SessionIdle
   restartSession(sessionId: string): Promise<{ resumed: boolean; reason?: string }>
 }
@@ -44,6 +48,7 @@ export type ToolVersionChange = { tool: ToolName; from: string; to: string }
 export type AgentVersionDeps = {
   tools: () => VersionedTool[]
   sessions: VersionSessions
+  processes: VersionProcesses
   notes: VersionNotes
   publish: (status: AgentVersions) => void
   readAutoApply?: () => boolean
@@ -281,7 +286,7 @@ export class AgentVersionService {
     if (this.restarting.has(s.id)) return { restart: false, why: 'restarting' }
     let idle: SessionIdle
     try {
-      idle = this.deps.sessions.sessionIdle(s.id)
+      idle = this.deps.processes.sessionIdle(s.id)
     } catch {
       return { restart: false, why: 'not_live' }
     }
@@ -332,7 +337,7 @@ export class AgentVersionService {
     const to = this.status.installed[s.tool]
     this.restarting.add(s.id)
     try {
-      const r = await this.deps.sessions.restartSession(s.id)
+      const r = await this.deps.processes.restartSession(s.id)
       if (!r.resumed) {
         this.moveFailed(s, to, r.reason ?? 'unknown')
         return false

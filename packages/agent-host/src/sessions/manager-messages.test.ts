@@ -520,8 +520,8 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
 
     // The orchestrator's own tool calls are not carried into its next process's prompt either
     adapter.handleOf(orc.id)!.emitToolRecord('c-orc', 'npm run build', input, output)
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
     expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 })
@@ -648,8 +648,8 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 
     // The orchestrator's own subagent is not carried into its next process's prompt either
     for (const e of subagentWork(orc.id)) adapter.handleOf(orc.id)!.emitEvent(e)
-    await mgr.switchTool(orc.id, 'codex')
-    await mgr.resumeSession(orc.id)
+    await mgr.processes.switchTool(orc.id, 'codex')
+    await mgr.processes.resumeSession(orc.id)
     expect(leaks(codexAdapter.lastOpts?.systemPromptAppend ?? '')).toEqual([])
   })
 

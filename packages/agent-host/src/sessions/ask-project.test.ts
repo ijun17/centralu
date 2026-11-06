@@ -306,7 +306,7 @@ describe('asking another project', () => {
   })
 
   it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
-    await w.mgr.switchTool(targetSession, tool)
+    await w.mgr.processes.switchTool(targetSession, tool)
     const caller = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     await w.mgr.inputs.send(targetSession, 'person work')
@@ -603,7 +603,7 @@ describe('asking another project', () => {
   it.each([
     ['claude', 'stop'], ['claude', 'cancel'], ['codex', 'stop'], ['codex', 'cancel'],
   ] as const)("%s: caller %s ends its wait without interrupting the person's running turn", async (tool, action) => {
-    await w.mgr.switchTool(targetSession, tool)
+    await w.mgr.processes.switchTool(targetSession, tool)
     const caller = await autoCaller()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     await w.mgr.inputs.send(targetSession, 'person work')
@@ -839,7 +839,7 @@ describe('asking another project', () => {
       const codex = w.adapters.get('codex')!
       // A tool that reports its background work can be put to sleep (#568)
       Object.assign(codex.capabilities, { backgroundTasks: true })
-      expect(await w.mgr.sleepSession(targetSession)).toBe(true)
+      expect(await w.mgr.processes.sleepSession(targetSession)).toBe(true)
       const s = await w.callerSession()
       if (preset === 'auto') await w.mgr.updateSettings(s, { permissionPreset: 'auto' })
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')

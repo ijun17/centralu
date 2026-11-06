@@ -41,7 +41,7 @@ describe('the person\'s input is stamped human', () => {
 
   it('a message to a session that has no process yet: woken first, then stamped', async () => {
     const s = await session()
-    await mgr.sleepSession(s.id)
+    await mgr.processes.sleepSession(s.id)
     await rpc('agents.send', { sessionId: s.id, text: 'wake up' })
     expect(adapter.last!.sent.at(-1)).toBe('wake up')
     expect(adapter.last!.origins.at(-1)).toEqual(human)

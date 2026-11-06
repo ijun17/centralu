@@ -109,7 +109,7 @@ describe('approval rules persist (C-2)', () => {
     // Simulates a host restart: a new manager is created on the same store
     const f2 = fake()
     const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
-    const res = await mgr2.resumeSession(session.id)
+    const res = await mgr2.processes.resumeSession(session.id)
     expect(res.resumed).toBe(true)
     expect(f2.applied[0]).toContain('ls')
 
@@ -177,7 +177,7 @@ describe('approval rules persist (C-2)', () => {
     // After a restart: the answering session keeps it, another session with no project does not get it
     const f2 = fake()
     const mgr2 = new SessionManager(store, new Map([['claude', fakeAdapter(f2)]]), () => {})
-    await mgr2.resumeSession(session.id)
+    await mgr2.processes.resumeSession(session.id)
     expect(f2.applied[0]).toContain('git push')
     await start(mgr2)
     expect(f2.applied[f2.applied.length - 1]).not.toContain('git push')

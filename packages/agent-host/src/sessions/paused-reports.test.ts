@@ -73,7 +73,7 @@ describe('a child that waits on its own background work (#721)', () => {
   /** The caller ends the turn the paused notice gave it, and is put to sleep */
   async function callerSleeps(caller: string) {
     handleOf(caller)!.answer('Noted.')
-    expect(await w.mgr.sleepSession(caller)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(caller)).toBe(true)
     expect(w.mgr.listSessions().find((s) => s.id === caller)!.live).toBe(false)
   }
 
@@ -93,7 +93,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(paused).toContain('A final report follows only if that work ends; agent_session(action="stop") on it stops that work and ends the wait.')
     expect(paused).toContain('Waiting for verify to finish.')
     // A child paused on its own work does not keep its caller awake; the final report wakes it
-    expect(w.mgr.waitsOn(caller)).toEqual([])
+    expect(w.mgr.processes.waitsOn(caller)).toEqual([])
     await callerSleeps(caller)
 
     verifyEndsAndChildFinishes(child)
@@ -634,7 +634,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(w.store.children.listReportMarks()).toEqual([])
     verifyEndsAndChildFinishes(two.child)
     await settle()
-    expect(w.mgr.waitsOn(two.caller)).toEqual([])
+    expect(w.mgr.processes.waitsOn(two.caller)).toEqual([])
   })
 
   it('a turn that fails while its task runs is reported as it ended, not held as paused', async () => {

@@ -85,6 +85,7 @@ function host() {
   const svc = new AgentVersionService({
     tools: () => [{ tool: 'claude', installedVersion: () => adapter.installedVersion() }],
     sessions: mgr,
+    processes: mgr.processes,
     notes: mgr.sessionSettings,
     publish: () => {},
     quietMs: 0,

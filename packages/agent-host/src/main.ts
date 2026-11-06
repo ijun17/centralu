@@ -525,6 +525,7 @@ const autoApplyAgentVersions = flagSetting(store.settings, AUTO_APPLY_AGENT_VERS
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
+  processes: mgr.processes,
   notes: mgr.sessionSettings,
   // Not listening yet: the first window asks
   publish: (status) => events.push({ type: 'agent_versions', status }),
@@ -545,6 +546,7 @@ mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
 const SLEEP_AFTER_KEY = 'agents.sleepAfterMinutes'
 const sleeper = new SessionSleeper({
   sessions: mgr,
+  processes: mgr.processes,
   canSleep: (tool) => !!adapters.get(tool)?.capabilities.sleep,
   readAfterMinutes: () => parseSleepSetting(store.settings.appSetting(SLEEP_AFTER_KEY)),
   writeAfterMinutes: (minutes) => store.settings.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),

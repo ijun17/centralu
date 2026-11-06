@@ -230,9 +230,9 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     } else mgr.inputs.interrupt(observer.id)
     const h = claude.handles.get(child.id)!
     expect(h.interrupted).toBe(false)
-    expect(mgr.waitsOn(observer.id)).toEqual([])
+    expect(mgr.processes.waitsOn(observer.id)).toEqual([])
     Object.assign(claude.capabilities, { backgroundTasks: true, sleep: true })
-    expect(await mgr.sleepSession(observer.id)).toBe(true)
+    expect(await mgr.processes.sleepSession(observer.id)).toBe(true)
     h.say('The app still gets its answer.')
     h.done()
     if (action === 'wait') expect(await observation).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.', readable: [] })

@@ -143,7 +143,7 @@ describe('a host restart under the keeper', () => {
       expect(adopted.opts.processSource?.adopt?.process).toBe(kept)
       expect(b.mgr.listSessions().find((s) => s.id === session.id)?.state).toBe(working ? 'working' : 'idle')
       expect(store.settings.appSetting(key)).toBe(oldFingerprint)
-      const restart = vi.spyOn(b.mgr, 'restartSession')
+      const restart = vi.spyOn(b.mgr.processes, 'restartSession')
 
       await b.mgr.launches.refreshToolDefinitions()
       if (working) {

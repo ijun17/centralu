@@ -100,6 +100,7 @@ function host() {
   const svc = new AgentVersionService({
     tools: () => [{ tool: 'claude', installedVersion: () => adapter.installedVersion() }],
     sessions: mgr,
+    processes: mgr.processes,
     notes: mgr.sessionSettings,
     publish: () => {},
     quietMs: 0,
@@ -122,7 +123,7 @@ describe('a session’s own process without a keeper, for real', () => {
     const first = h.adapter.created.at(-1)!
     first.emit({ type: 'turn_complete', sessionId: s })
 
-    expect(await h.mgr.sleepSession(s)).toBe(true)
+    expect(await h.mgr.processes.sleepSession(s)).toBe(true)
     expect(alive(first.process.pid!)).toBe(false)
     expect(await goneWithin(first.helper, GONE_MS)).toBe(true)
     expect(h.mgr.listSessions().find((x) => x.id === s)!.live).toBe(false)

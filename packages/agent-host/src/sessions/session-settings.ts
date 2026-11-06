@@ -22,7 +22,7 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   Pick<SessionRecordHost, 'cacheLedger' | 'sessionOf'> &
   Pick<SessionEventsHost, 'queue' | 'requireHandle'> &
   Pick<WorktreeHost, 'resuming'> & {
-    /** Why a tool cannot run the session under a preset, or null (`SessionManager.toolRefusal`) */
+    /** Why a tool cannot run the session under a preset, or null (`SessionProcesses.toolRefusal`) */
     toolRefusal: (m: SessionInfo, tool?: string, preset?: PermissionPreset) => string | null
   }
 

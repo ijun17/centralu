@@ -113,7 +113,7 @@ describe.skipIf(keeperless)('a session put to sleep under the keeper (#568)', ()
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     await until(() => keeper!.alive('c1'))
 
-    expect(await a.mgr.sleepSession(s.id)).toBe(true)
+    expect(await a.mgr.processes.sleepSession(s.id)).toBe(true)
     // Ended through the keeper, not let go of: stdin closed, signalled, gone
     await until(() => !keeper!.alive('c1'))
     expect(keeper!.ops('close_stdin').some((r) => r.id === 'c1')).toBe(true)

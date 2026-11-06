@@ -84,7 +84,7 @@ describe('a session at rest is woken by mail', () => {
     // A tool whose sessions can sleep (as app-notice.test.ts puts one to sleep)
     Object.assign(w.adapter.capabilities, { backgroundTasks: true })
     const worker = await create()
-    expect(await w.mgr.sleepSession(worker.id)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(worker.id)).toBe(true)
     expect(w.mgr.mail.mailSessions().receiver(worker.id)).toEqual({ kind: 'ready', live: false, quiet: false, auto: false })
     personTask(worker.id, 'wake up')
     await due(worker.id)

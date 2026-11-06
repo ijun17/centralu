@@ -163,7 +163,7 @@ describe('worktree sessions', () => {
     a.toolHistory = [{ role: 'user', text: 'something said in the worktree terminal' }]
     const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
     restarted.prLookup = async () => null
-    await restarted.resumeSession(s.id)
+    await restarted.processes.resumeSession(s.id)
 
     const texts = store.messages.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
     expect(texts).toContain('something said in the worktree terminal')
@@ -1028,7 +1028,7 @@ describe('worktree sessions', () => {
       await waiting
       expect(existsSync(s.worktree!.path)).toBe(true)
       await expect(wtMgr.inputs.send(s.id, 'keep working')).rejects.toThrow('being removed')
-      await expect(wtMgr.resumeSession(s.id)).rejects.toThrow('being removed')
+      await expect(wtMgr.processes.resumeSession(s.id)).rejects.toThrow('being removed')
       release()
       expect((await deletion).isError).not.toBe(true)
     })
@@ -1752,15 +1752,15 @@ describe('after the worktree manager (#561 part 3)', () => {
     store.sessions.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
     store.sessions.upsertSession(wtRow('stranger', p.id, { worktree: null }))
     const m2 = boot()
-    expect(m2.waitsOn('old-mgr')).toEqual([])
+    expect(m2.processes.waitsOn('old-mgr')).toEqual([])
     await m2.inputs.send('wt-a', 'keep going')
     await new Promise((res) => setTimeout(res, 0))
-    expect(m2.waitsOn('old-mgr')).toEqual(['wt-a'])
+    expect(m2.processes.waitsOn('old-mgr')).toEqual(['wt-a'])
     // Owning is askedBy, not being in the same project
-    expect(m2.waitsOn('stranger')).toEqual([])
+    expect(m2.processes.waitsOn('stranger')).toEqual([])
     adapter.handleOf('wt-a')!.finishTurn()
     await new Promise((res) => setTimeout(res, 0))
-    expect(m2.waitsOn('old-mgr')).toEqual([])
+    expect(m2.processes.waitsOn('old-mgr')).toEqual([])
   })
 
   it('a directive and attachment the orchestrator sends to an ordinary session arrive intact in the adapter turn', async () => {

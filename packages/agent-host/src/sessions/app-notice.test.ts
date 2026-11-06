@@ -52,7 +52,7 @@ describe("an app's notice into a session that called it (#1161 item 1)", () => {
     const s = await session()
     await w.mgr.inputs.appNotice(s.id, 'first', board)
     await until(() => w.mgr.listSessions().find((x) => x.id === s.id)?.state, (st) => st === 'idle')
-    expect(await w.mgr.sleepSession(s.id)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(s.id)).toBe(true)
     const opened = w.claude.opened.filter((o) => o.sessionId === s.id).length
 
     await w.mgr.inputs.appNotice(s.id, 'Merge queue: #78 needs attention: dirty.', board)

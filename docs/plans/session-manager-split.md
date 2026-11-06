@@ -235,6 +235,14 @@ Manager line counts are after each pull request.
   `send` and `respondApproval` were no stubs, so D1 did not keep them: the router and the tests call `mgr.inputs.send`.
   `parts()` gains the `approvalRules` getter; `rpc.test.ts`'s fake manager carries `inputs`. Deep tier: the link tests
   send and approve.
+- **9, processes** (`manager.ts` 2,377 to 1,972; `sessions/session-processes.ts`, 458 lines, a move of 405):
+  `resumeSession` (one wake at a time, `resuming`), `forkConversation`, `switchTool`, `toolRefusal`, `sleepSession`
+  (`sleeping`), `restartSession`, `sessionIdle`, `waitsOn`, `untilWakeWithdrawn` (`leaving`), `handleSink`,
+  `noticeTrustRestart`, `endTurnWithProcess` and the launch settings a process holds (`running`), as they were, on
+  `SessionProcesses` (`mgr.processes`). The doc comments of `switchTool` and `toolRefusal`, which sat above
+  `createdInTrusted`, go with them. `AgentVersionService` and `SessionSleeper` read the list from `sessions` and the
+  process from a required `processes` dependency (`processes: mgr.processes`), so a construction that leaves it out does
+  not compile. `parts()` gains the `starts` and `inputs` getters and `refuseWhileLettingGo`, which stays with host tenure.
 
 ### 6.2 Work in flight
 

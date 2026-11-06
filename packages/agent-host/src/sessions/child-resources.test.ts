@@ -54,7 +54,7 @@ describe('child sessions and the machine (#686)', () => {
       handleOf(r.sessionId).answer('done')
       await w.mgr.agentSession(s, { sessionId: r.sessionId, action: 'wait' })
       const before = handleOf(r.sessionId)
-      await w.mgr.restartSession(r.sessionId)
+      await w.mgr.processes.restartSession(r.sessionId)
       expect(handleOf(r.sessionId)).not.toBe(before)
       expect(handleOf(r.sessionId).opts.noCodeIntelligence).toBe(true)
     })

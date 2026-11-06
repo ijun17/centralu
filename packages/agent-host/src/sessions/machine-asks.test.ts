@@ -29,7 +29,7 @@ describe("a machine's ask, read again once the asked session is awake (#550)", (
     const codex = w.adapters.get('codex')!
     // A tool that reports its background work can be put to sleep (#568)
     Object.assign(codex.capabilities, { backgroundTasks: true })
-    expect(await w.mgr.sleepSession(target)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(target)).toBe(true)
     const create = codex.createSession.bind(codex)
     let wake!: () => void
     const held = new Promise<void>((r) => (wake = r))

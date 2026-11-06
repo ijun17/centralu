@@ -281,7 +281,7 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
     await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
     const s = await create(alpha, 'claude')
     await tool(s.id, 'attach_app', { app: 'beta/board' })
-    await mgr.restartSession(s.id)
+    await mgr.processes.restartSession(s.id)
     expect(claude.seen).toHaveLength(2)
     expect(servers(claude.last())).toEqual(['app-board'])
   })

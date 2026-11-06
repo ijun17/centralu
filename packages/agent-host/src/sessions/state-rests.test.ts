@@ -118,7 +118,7 @@ describe('a session at rest stays at rest (#428)', () => {
     h.ev({ type: 'tool_result', callId: 'late', ok: false, summary: 'released' })
     expect(info().state).toBe('waiting_input')
     expect(busy()).toBe(false)
-    expect(mgr.sessionIdle(s.id)).toEqual({ idle: true })
+    expect(mgr.processes.sessionIdle(s.id)).toEqual({ idle: true })
   })
 
   it('closing a process between turns with a background agent open leaves no "stopped by quit" for the next start', async () => {
@@ -199,7 +199,7 @@ describe('a session at rest stays at rest (#428)', () => {
     h.quiet = true
     await mgr.inputs.send(s.id, 'a message the tool never acts on')
     // A restart resumes the session at rest (`settleState`): the input before it is not a turn any more
-    await mgr.restartSession(s.id)
+    await mgr.processes.restartSession(s.id)
     expect(info().state).toBe('idle')
     const fresh = claude.handles.get(s.id)!
     expect(fresh).not.toBe(h)
@@ -221,7 +221,7 @@ describe('a session at rest stays at rest (#428)', () => {
     adopted.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
     b.mgr.inputs.respondApproval(a.s.id, 'r1', 'allow')
     expect(b.mgr.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
-    expect(b.mgr.sessionIdle(a.s.id)).toEqual({ idle: true })
+    expect(b.mgr.processes.sessionIdle(a.s.id)).toEqual({ idle: true })
     expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
   })
 

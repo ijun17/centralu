@@ -40,7 +40,7 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
       await gate
       return detect()
     }
-    const switching = w.mgr.switchTool(id, 'codex')
+    const switching = w.mgr.processes.switchTool(id, 'codex')
     void switching.catch(() => {})
     await w.until(() => checking)
     await w.mgr.trash.trashSession(id)
@@ -63,7 +63,7 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
         return 'ext-fork'
       },
     })
-    const fork = w.mgr.forkConversation(id)
+    const fork = w.mgr.processes.forkConversation(id)
     await w.until(() => forking)
     await w.mgr.trash.trashSession(id)
     release()

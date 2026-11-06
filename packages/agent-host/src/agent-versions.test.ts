@@ -84,6 +84,7 @@ describe('the agent version service (#297)', () => {
     new AgentVersionService({
       tools: () => [{ tool: 'claude', installedVersion: async () => installed }],
       sessions,
+      processes: sessions,
       notes: sessions,
       publish: (s) => published.push(s),
       readAutoApply: () => autoApply,

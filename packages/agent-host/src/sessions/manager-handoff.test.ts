@@ -395,7 +395,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
 
     // Granted again on wake-up after a restart too — the first message still points at that path.
     const reborn = new SessionManager(store, new Map([['claude', adapter as AgentAdapter]]), () => {})
-    await reborn.resumeSession(heir.id)
+    await reborn.processes.resumeSession(heir.id)
     expect(adapter.lastOpts?.sessionId).toBe(heir.id)
     expect(adapter.lastOpts?.readableDirs).toEqual([join(data, 'handoff', p.id)])
   })

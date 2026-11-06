@@ -935,7 +935,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1 })
 
     // A restart that says why (a Codex thread restarted for its apps) is named by that reason, not as a new process
-    await mgr.restartSession(s.id, 'thread_restart')
+    await mgr.processes.restartSession(s.id, 'thread_restart')
     await rebuild()
     expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1, thread_restart: 1 })
   })

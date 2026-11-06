@@ -99,7 +99,7 @@ describe('a session\'s background tasks in the manager (#290)', () => {
     const { mgr, session, handles, info, tasks } = await setup()
     tasks([agent('a')])
     const old = handles[0]!
-    await mgr.restartSession(session.id)
+    await mgr.processes.restartSession(session.id)
     expect(handles).toHaveLength(2)
     tasks([agent('n')], undefined, handles[1])
     // The old process says, late, that its task went with it
@@ -114,30 +114,30 @@ describe('a session\'s background tasks in the manager (#290)', () => {
 describe('whether a session is idle (#290, for #297)', () => {
   it('idle with no turn, nothing waiting on the person and no background task running', async () => {
     const { mgr, session } = await setup()
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: true })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: true })
   })
 
   it('not idle while a background task runs, but ambient and ended ones do not count', async () => {
     const { mgr, session, tasks } = await setup()
     tasks([agent('a')])
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'background' })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: false, reason: 'background' })
     tasks([agent('w', { ambient: true })], [agent('a', { status: 'completed' })])
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: true })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: true })
   })
 
   it('not idle during a turn, or while an approval or a question waits', async () => {
     const { mgr, session, handles } = await setup()
     const h = handles[0]!
     h.emit({ type: 'state_change', sessionId: session.id, state: 'working' })
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'turn' })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: false, reason: 'turn' })
     h.emit({ type: 'approval_request', sessionId: session.id, requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'approval' })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: false, reason: 'approval' })
     h.emit({ type: 'approval_resolved', sessionId: session.id, requestId: 'r1', decision: 'allow' })
     h.emit({ type: 'question_request', sessionId: session.id, requestId: 'q1', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }, { label: 'B', description: '' }] }] })
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'question' })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: false, reason: 'question' })
     h.emit({ type: 'question_resolved', sessionId: session.id, requestId: 'q1' })
     h.emit({ type: 'turn_complete', sessionId: session.id })
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: true })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: true })
   })
 
   /*
@@ -168,6 +168,6 @@ describe('whether a session is idle (#290, for #297)', () => {
 
   it('a tool that cannot report its background work is never called idle while its process lives', async () => {
     const { mgr, session } = await setup({ reports: false })
-    expect(mgr.sessionIdle(session.id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(mgr.processes.sessionIdle(session.id)).toEqual({ idle: false, reason: 'background_unknown' })
   })
 })

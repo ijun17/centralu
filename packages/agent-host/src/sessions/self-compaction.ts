@@ -111,7 +111,7 @@ export type ThenKeep = {
 export type SelfCompactionHost = {
   sessions(): SessionInfo[]
   session(sessionId: string): SessionInfo | undefined
-  /** `SessionManager.sessionIdle`: in a turn, a card, a question or background work make it not idle */
+  /** `SessionProcesses.sessionIdle`: in a turn, a card, a question or background work make it not idle */
   idle(sessionId: string): SessionIdle
   /** The model's own context window when Centralu has read it, else null (`ModelWindows.of`, #1553): the record for this tool and model, which a floor is never written to */
   window(session: SessionInfo): number | null

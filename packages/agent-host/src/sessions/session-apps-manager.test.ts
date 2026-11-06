@@ -153,7 +153,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
   it('attaches apps on resume too — a session whose process was swapped out does not lose its apps', async () => {
     const s = await create()
     adapter.seen = []
-    await mgr.restartSession(s.id)
+    await mgr.processes.restartSession(s.id)
     expect(adapter.seen).toHaveLength(1)
     expect(servers(adapter.last())).toEqual(['app-notes'])
   })

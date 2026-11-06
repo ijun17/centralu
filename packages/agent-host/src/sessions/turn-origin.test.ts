@@ -254,7 +254,7 @@ describe('what is kept for the turns a hub may be owed', () => {
     expect(origins(id)).not.toBeNull()
     // A tool whose sessions can sleep
     Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true, sleep: true })
-    expect(await w.mgr.sleepSession(id)).toBe(true)
+    expect(await w.mgr.processes.sleepSession(id)).toBe(true)
     await w.mgr.inputs.send(id, 'typed by the person')
     expect(origins(id)).toBeNull()
   })
