@@ -922,6 +922,8 @@ the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), s
 `MAIL_BUDGET_CHARS` 910 → 1,110, and the reader seat's ceilings rise by 200. The frames that start a child (`start_agent`, `agent_session`) and
 `ask_project`'s name the address in a line of their own, which rides in that task and not in every request, and only to a child that can use it (one the sender started, in a project).
 
+**#2039 (a name for `to`).** A bare `to` was read as a session id, so a name was refused as gone. `to` now says a session may be named by its name or id, and that a shared name is refused with a list: the definition is 1,160, `MAIL_BUDGET_CHARS` 1,110 → 1,170, and the reader seat's ceilings rise by 60.
+
 Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds

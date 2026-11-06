@@ -40,6 +40,8 @@ export type MailToolHost = {
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
   /** The orchestrator's session id, or null while there is none */
   orchestratorId(): string | null
+  /** The sessions of this host a name or id can mean: the ones that are here (not archived or deleted) */
+  sessions(): { id: string; name: string; project: string | null }[]
   /** How the session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
   form(sessionId: string): 'plain' | 'command'
   /** Who a session is, for the line over its request to the orchestrator (§7.6) */
@@ -67,7 +69,7 @@ export class MailTool {
   constructor(
     private readonly service: MessageService,
     private readonly records: MailboxRecords,
-    private readonly reach: Pick<MailReach, 'labelOf'>,
+    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel'>,
     private readonly host: MailToolHost,
   ) {
     this.now = host.now ?? Date.now
@@ -126,10 +128,11 @@ export class MailTool {
   }
 
   /**
-   * A party the call names: `person`, `orchestrator` (the role, D15), `parent` (the session that started the caller, D16), an absolute address,
-   * or a bare id of a session on this host. Names come with the version-2 tool (M3b)
+   * A party the call names: `person`, `orchestrator` (the role, D15), `parent` (the session that started the caller, D16), an absolute address, or a
+   * session of this host by its id or its exact name (any case; `session:<this host>/<name>` too, which is what an agent gets back when it writes a name).
+   * Several sessions of one name are refused with their addresses: a guess could send the words to the wrong one
    */
-  private party(sessionId: string, me: { askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
+  private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const t = to.trim()
     if (t === PERSON) return { address: PERSON }
     if (t.toLowerCase() === 'orchestrator') {
@@ -143,8 +146,26 @@ export class MailTool {
       if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "orchestrator" or "person".')
       return { address: this.service.sessionAddress(me.askedBy) }
     }
-    if (t === sessionId) throw refuse('bad_value', 'a message is for someone else')
-    return { address: t.includes(':') ? t : this.service.sessionAddress(t) }
+    // An address of an app, of Centralu or of another computer is the service's to judge (it refuses all three, each in its own words)
+    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
+    const absolute = parseAddress(t)
+    if (absolute && !(absolute.kind === 'session' && t.startsWith(own))) return { address: t }
+    const word = t.startsWith(own) ? t.slice(own.length) : t
+    if (word === sessionId) throw refuse('bad_value', 'a message is for someone else')
+    const here = this.host.sessions()
+    const exact = here.find((s) => s.id === word)
+    if (exact) return { address: this.service.sessionAddress(exact.id) }
+    const named = here.filter((s) => s.name.trim().toLowerCase() === word.toLowerCase())
+    const [only] = named
+    if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
+    if (only) {
+      const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`})`)
+      throw refuse('ambiguous', `${named.length} sessions are named ${JSON.stringify(word)}: ${shown.join(', ')}${named.length > shown.length ? ', and more' : ''}. Send to one of them by its address.`)
+    }
+    throw refuse(
+      'unknown',
+      `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>. Mail does not reach sessions on other computers yet.`,
+    )
   }
 
   /**
