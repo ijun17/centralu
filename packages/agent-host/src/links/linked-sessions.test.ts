@@ -92,8 +92,11 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(r).toEqual({ ok: false, error: 'git said no' })
     const reading = linkedSessions(() => [m], async () => ({ origin: 'git@github.com:me/apps.git' }))
     expect(await reading.origin(project!)).toEqual({ ok: true, origin: 'git@github.com:me/apps.git' })
-    // A machine without a method says so as it came, with nothing more (#1143)
-    expect(await linkedSessions(() => [m]).hubAuto('m1')).toEqual({ ok: false, error: expect.stringMatching(/^Unknown method: host\.hubAuto/) })
+  })
+
+  // The window reads 'older' for it (`LinkedMachine.hubAuto`, links.test.ts): the model is told the same, not the machine's "Unknown method" (#1143)
+  it('says a machine from before "Allow auto from a linked computer" has none, as the window does', async () => {
+    expect(await linkedSessions(() => [machine({})]).hubAuto('m1')).toEqual({ ok: false, error: 'Box runs a Centralu from before "Allow auto from a linked computer"' })
   })
 
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
