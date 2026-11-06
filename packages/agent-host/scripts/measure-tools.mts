@@ -27,6 +27,8 @@ import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { ORCHESTRATOR_TOOLS, commandsFor, instructionsFor, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
+import { CLAUDE_SUBAGENT_TOOL } from '../src/adapters/claude/orchestrator-mcp.js'
+import { CODEX_SUBAGENT_TOOL } from '../src/adapters/codex/thread-open.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
 import { ApiRecorder, call, say, setOurInstructions, type RecordedRequest, type Usage } from './measure-tools/recorder.mjs'
@@ -80,7 +82,8 @@ const PROMPTS = JSON.parse(readFileSync(PROMPTS_FILE, 'utf8')) as {
   selection: { id: string; profile: 'reader' | 'orchestrator'; prompt: string; expect: string[]; fresh?: boolean }[]
 }
 // What the recorder takes out of a request to count Centralu's own tokens: the instructions each seat can be sent
-setOurInstructions(TOOL_PROFILES.map((p) => instructionsFor(p)).filter((x): x is string => Boolean(x)))
+// (each CLI's is worded with its own subagent tool, #1587)
+setOurInstructions(TOOL_PROFILES.flatMap((p) => [CLAUDE_SUBAGENT_TOOL, CODEX_SUBAGENT_TOOL].map((tool) => instructionsFor(p, undefined, false, tool))).filter((x): x is string => Boolean(x)))
 if (opt.only) {
   const only = opt.only.split(',').map((x) => x.trim())
   PROMPTS.selection = PROMPTS.selection.filter((p) => only.includes(p.id))
@@ -109,8 +112,8 @@ const commit = (() => {
 
 const toolServing = (cli: Cli) =>
   cli === 'claude'
-    ? { toolDeferral: true, instructionChannel: 'server' as const }
-    : { toolDeferral: false, instructionChannel: 'developer' as const }
+    ? { toolDeferral: true, instructionChannel: 'server' as const, subagentTool: CLAUDE_SUBAGENT_TOOL }
+    : { toolDeferral: false, instructionChannel: 'developer' as const, subagentTool: CODEX_SUBAGENT_TOOL }
 
 const definitions = Object.fromEntries(
   (['claude', 'codex'] as const).map((cli) => [cli, Object.fromEntries(TOOL_PROFILES.map((p) => [p, residentCost(p, toolServing(cli))]))]),

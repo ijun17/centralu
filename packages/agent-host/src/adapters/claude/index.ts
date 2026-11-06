@@ -22,6 +22,7 @@ import { ClaudeSession, type ClaudeLaunch } from './session.js'
 import { launchPreset } from '../edit-grant.js'
 import { personsDefaultMode } from './permissions.js'
 import { CLAUDE_SURFACE } from './surface.js'
+import { CLAUDE_SUBAGENT_TOOL } from './orchestrator-mcp.js'
 import { STOP_CONFIRM_MS } from '../core/ledger.js'
 
 export { personsDefaultMode }
@@ -247,6 +248,7 @@ export class ClaudeAdapter implements AgentAdapter {
     instructionChannel: 'server',
     processModel: 'per-session',
     builtInSubagents: true,
+    subagentTool: CLAUDE_SUBAGENT_TOOL,
     peerMessaging: true,
     // The query's prompt iterator reads queued user messages while the current turn continues.
     midTurnInput: true,

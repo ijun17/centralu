@@ -397,6 +397,17 @@ describe('the host process, started for real', () => {
     expect(s.log()).toContain('parent process exited; shutting down')
   }, 60_000 * SLOW)
 
+  // #1942: the close that comes while the host is still starting is seen, as the one after the ready line is
+  it('with --watch-parent a close of stdin while the host is still starting ends it too (#1942)', async () => {
+    const s = setup()
+    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1' })
+    // The token, then the end at once: the host takes a second or more to start, and wires its parent watch at the end of it
+    host.p.stdin.end(`${JSON.stringify({ token: 'token-handed-on-stdin-0123456789' })}
+`)
+    expect(await exitsSoon(host)).toBe(0)
+    expect(s.log()).toContain('parent process exited; shutting down')
+  }, 60_000 * SLOW)
+
   /*
    * #1397: a host writes that the system is ending when it is told so (system-end.ts), and the next start reads that alone. Asked of
    * real hosts: the notice, the leave that waits for systemd's answer, and the start that reads it are steps main.ts takes in order.

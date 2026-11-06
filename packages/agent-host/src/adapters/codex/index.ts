@@ -18,6 +18,7 @@ import { raceTimeout } from '../../timing.js'
 import { threadIdOf } from './turn-reads.js'
 import { CodexSession, LAZY_RESUME_WAIT_MS } from './session.js'
 import { CODEX_SURFACE } from './surface.js'
+import { CODEX_SUBAGENT_TOOL } from './thread-open.js'
 import { launchPreset } from '../edit-grant.js'
 import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 
@@ -76,6 +77,7 @@ export class CodexAdapter implements AgentAdapter {
     instructionChannel: 'developer',
     processModel: 'per-session',
     builtInSubagents: true,
+    subagentTool: CODEX_SUBAGENT_TOOL,
     peerMessaging: false,
     // 0.160 TurnStartParams: turn/start steers an already-active regular turn; compact/review input is queued.
     midTurnInput: true,

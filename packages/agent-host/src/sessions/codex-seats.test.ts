@@ -11,7 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { ORCHESTRATOR_ROLE, orchestratorRole } from './orchestrator-home.js'
-import { READER_INSTRUCTIONS, codexToolInstructionsFor, instructionsFor } from './orchestrator-tools.js'
+import { codexToolInstructionsFor, instructionsFor, readerInstructions } from './orchestrator-tools.js'
 
 /**
  * A Codex session through the real manager and the real adapter, with only the app-server faked, and faked the way
@@ -149,7 +149,10 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
     // The role as the session is given it: the preamble (on by default, #564), then the role
     expect(text.startsWith(orchestratorRole())).toBe(true)
     expect(orchestratorRole().endsWith(ORCHESTRATOR_ROLE)).toBe(true)
-    expect(text).toContain(instructionsFor('orchestrator')!)
+    expect(text).toContain(instructionsFor('orchestrator', undefined, false, 'spawn_agent')!)
+    // #1587: its light-work line names Codex's own subagent tool, not Claude's
+    expect(text).toContain('with the start_agent command, not your spawn_agent tool.')
+    expect(text).not.toContain('Agent tool.')
   })
 
   it("an app's building session, after the role it was made with", async () => {
@@ -161,7 +164,10 @@ describe('a Codex seat gets its tools\' instructions in the thread\'s developer 
 
   it("an ordinary session: the reader set's instructions alone, since it has no role (#564)", async () => {
     await rpc('agents.createSession', { projectId, cwd: repo, tool: 'codex' })
-    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBe(codexToolInstructionsFor('reader'))
-    expect(developerInstructions()).toContain(READER_INSTRUCTIONS)
+    expect(sent('thread/start').at(-1)!.params.developerInstructions).toBe(codexToolInstructionsFor('reader', undefined, false, 'spawn_agent'))
+    expect(developerInstructions()).toContain(readerInstructions('spawn_agent'))
+    // #1587: Codex's own subagent tool is spawn_agent, not Claude's Agent
+    expect(developerInstructions()).toContain('start_agent, not your spawn_agent tool, for long work')
+    expect(new CodexAdapter().capabilities.subagentTool).toBe('spawn_agent')
   })
 })

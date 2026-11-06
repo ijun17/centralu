@@ -194,6 +194,11 @@ export const AdapterCapabilities = z.object({
   processModel: z.enum(['per-session', 'shared-server']).optional(),
   /** Whether the CLI has child agents whose events the adapter normalizes for the host. */
   builtInSubagents: z.boolean().optional(),
+  /**
+   * What the model calls the CLI's own subagent tool (Claude `Agent`, Codex `spawn_agent`), for the one line in Centralu's
+   * tool instructions that sends long or watched work to `start_agent` instead of it (#1587). Absent: the CLI has none to name.
+   */
+  subagentTool: z.string().optional(),
   /** Whether the CLI has a direct peer-to-peer messaging path outside Centralu's own session tools. */
   peerMessaging: z.boolean().optional(),
   /**

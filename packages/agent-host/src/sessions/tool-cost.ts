@@ -13,7 +13,7 @@ import { ORCHESTRATOR_MCP_NAME, toolInstructionsFor, toolDefsFor } from './orche
  */
 
 /** The adapter properties that decide how Centralu's definitions are served. */
-export type ToolServingCapabilities = Pick<AdapterCapabilities, 'toolDeferral' | 'instructionChannel'>
+export type ToolServingCapabilities = Pick<AdapterCapabilities, 'toolDeferral' | 'instructionChannel' | 'subagentTool'>
 
 /** Every profile, in the order tables list them */
 export const TOOL_PROFILES = ['orchestrator', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
@@ -57,7 +57,7 @@ export function servedDefinitions(profile: ToolProfile, capabilities: ToolServin
  * (`codexToolInstructionsFor`), next to its role where it has one; they ride in every request too.
  */
 export function servedInstructions(profile: ToolProfile, capabilities: ToolServingCapabilities): string {
-  return toolInstructionsFor(profile, capabilities.instructionChannel ?? 'server') ?? ''
+  return toolInstructionsFor(profile, capabilities.instructionChannel ?? 'server', undefined, capabilities.subagentTool) ?? ''
 }
 
 export type ResidentCost = {

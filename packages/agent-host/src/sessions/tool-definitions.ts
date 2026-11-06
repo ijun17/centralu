@@ -914,33 +914,47 @@ export const APP_ACCESS_BUDGET_CHARS = 900
 export const REPO_WORK_FIRST = "an attached app's help tool before repository work by hand (PRs, CI, merges, releases)"
 
 /**
+ * The words that put a Centralu tool before the CLI's own subagent tool, the one phrase both the reader's and the orchestrator's
+ * instructions use (#1587): "not your Agent tool" on Claude, "not your spawn_agent tool" on Codex, nothing for a CLI that has
+ * none. `before` and `after` are what goes around it where it is present.
+ */
+const notYour = (subagentTool: string | undefined, before: string, after: string): string => (subagentTool ? `${before}not your ${subagentTool} tool${after}` : '')
+
+/**
  * What an ordinary session reaches for first, one need per entry (#564). A tool that joins the reader seat and
  * answers a need the person states in words adds its line here. Every entry rides in every ordinary session's
  * every request, on Claude as the server's instructions and on Codex in the thread's developer instructions
  * (codexToolInstructionsFor); the cost and the selection with and without them are in docs/tool-cost.md §11.
+ *
+ * `subagentTool` is what the session's CLI calls its own subagent tool, which its adapter declares
+ * (`AdapterCapabilities.subagentTool`): Claude's `Agent`, Codex's `spawn_agent` (#1587). A model reads the name it
+ * knows, so the line must not name another CLI's tool. A CLI with none is given no tool to be chosen over.
  */
-export const READER_FIRST: readonly string[] = [
-  'recall for earlier conversations',
-  'read_session for other sessions',
-  "find_apps to use another project's app",
-  'update_centralu to update Centralu',
-  'ask_project to have another project do work',
-  /*
-   * #561's tool. Owner decision (2026-10-12, option B): the CLI's own subagents stay the way to hand off short helper
-   * work inside the turn; start_agent is for work that runs in another CLI or a worktree, runs long, or that the person
-   * will follow. Naming the Agent tool is what moved the choice (docs/tool-cost.md §11).
-   */
-  'start_agent, not your Agent tool, for long work, another CLI or a worktree, or work the person will follow',
-]
+export function readerFirst(subagentTool?: string): readonly string[] {
+  return [
+    'recall for earlier conversations',
+    'read_session for other sessions',
+    "find_apps to use another project's app",
+    'update_centralu to update Centralu',
+    'ask_project to have another project do work',
+    /*
+     * #561's tool. Owner decision (2026-10-12, option B): the CLI's own subagents stay the way to hand off short helper
+     * work inside the turn; start_agent is for work that runs in another CLI or a worktree, runs long, or that the person
+     * will follow. Naming the CLI's own subagent tool is what moved the choice (docs/tool-cost.md §11).
+     */
+    `start_agent${notYour(subagentTool, ', ', ',')} for long work, another CLI or a worktree, or work the person will follow`,
+  ]
+}
 
 /**
  * The reader set's instructions (#564): the product rule (product-spec.md §1.2), worded as needs rather than as a
- * role. "Unless the person says otherwise" is the rule's own limit: a direct instruction wins.
+ * role. "Unless the person says otherwise" is the rule's own limit: a direct instruction wins. With REPO_WORK_FIRST
+ * for an ordinary session that starts with an app attached (#957, #992 review).
  */
-export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${READER_FIRST.join('; ')}.`
-
-/** The same with REPO_WORK_FIRST, for an ordinary session that starts with an app attached (#957, #992 review) */
-export const READER_INSTRUCTIONS_WITH_APPS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${[...READER_FIRST, REPO_WORK_FIRST].join('; ')}.`
+export function readerInstructions(subagentTool?: string, appsAttached = false): string {
+  const first = appsAttached ? [...readerFirst(subagentTool), REPO_WORK_FIRST] : readerFirst(subagentTool)
+  return `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${first.join('; ')}.`
+}
 
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
@@ -1000,8 +1014,8 @@ export const BUILDER_INSTRUCTIONS = [
   'Build the screen to work in a narrow grid panel (about 360px) first and spread out when there is room: no wide fixed widths, rows that wrap, side-by-side parts stacked below about 520px.',
 ].join('\n')
 
-/** The instructions given to the model — travels together with the tool list */
-export const ORCHESTRATOR_INSTRUCTIONS = [
+/** The instructions given to the model — travels together with the tool list. `subagentTool`: as for `readerFirst` (#1587) */
+export const orchestratorInstructions = (subagentTool?: string): string => [
   'A tool for handling the sessions this app (Centralu) manages.',
   'For a question that crosses projects or spans several sessions, look at the current state with list_sessions first.',
   'Use send_to_session to assign work — the target session\'s approval settings apply as they are,',
@@ -1012,7 +1026,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
   // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
-  'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
+  `For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command${notYour(subagentTool, ', ', '')}.`,
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
   'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences archive".',

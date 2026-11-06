@@ -13,7 +13,7 @@ import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
 import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, ORCHESTRATOR_INSTRUCTIONS } from './orchestrator-tools.js'
+import { commandsFor, orchestratorInstructions } from './orchestrator-tools.js'
 
 /**
  * The orchestrator's trust commands (#1219, third slice). Each makes the window's own call through the real RPC handler
@@ -667,7 +667,7 @@ describe('set_agent_limits', () => {
 describe('who may run them', () => {
   it('are found through centralu_commands with the words the instructions give', async () => {
     const orc = await mgr.orchestrator()
-    const query = /centralu_commands "([^"]+)"/.exec(ORCHESTRATOR_INSTRUCTIONS.split('\n').find((l) => l.startsWith('More commands'))!)![1]
+    const query = /centralu_commands "([^"]+)"/.exec(orchestratorInstructions().split('\n').find((l) => l.startsWith('More commands'))!)![1]
     const found = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query })).text
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
     // The machine commands are found by the same words

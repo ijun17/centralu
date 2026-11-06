@@ -5,7 +5,7 @@ import { APP_GUIDE_TOPICS } from './app-guide.js'
 import {
   APP_ACCESS_TOOLS,
   COMMAND_TOOLS,
-  ORCHESTRATOR_INSTRUCTIONS,
+  orchestratorInstructions,
   ORCHESTRATOR_TOOLS,
   COMPACT_TOOLS,
   AGENT_TOOLS,
@@ -74,7 +74,7 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
   })
 
   it('the same holds for the instructions given to the model', () => {
-    const text = [ORCHESTRATOR_INSTRUCTIONS, SCOPED_INSTRUCTIONS].join('\n')
+    const text = [orchestratorInstructions(), SCOPED_INSTRUCTIONS].join('\n')
     expect(toolLikeWords(text).filter((w) => !KNOWN.has(w))).toEqual([])
   })
 

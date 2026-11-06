@@ -678,12 +678,14 @@ directly says otherwise, agents running in Centralu use Centralu's own features 
 sessions, which had Centralu's tools and no instructions (#320), now get one sentence, and the orchestrator's preamble
 (§9, round 2) is on by default, worded as the rule:
 
-- Ordinary sessions (`READER_INSTRUCTIONS`, 392 characters; Codex: 444 with the header over it): "You are running inside
+- Ordinary sessions (`readerInstructions`, 392 characters; Codex: 444 with the header over it): "You are running inside
   Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: recall for earlier
   conversations; read_session for this project's other sessions; find_apps to use another project's app; ask_project to
   have another project do work; start_agent, not your Agent tool, for long work, another CLI or a worktree, or work the
   person will follow." The last entry came
   after #561's tools (§10) joined the seat; it was measured on its own (below), the rest of this section without it.
+  Each CLI is given the name of its own subagent tool in place of "Agent" (#1587): Codex's reads "not your spawn_agent tool"
+  (6 characters longer), in the orchestrator's light-work line (#853) as well, which uses the same phrase. That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
 - The orchestrator (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
   person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or
   using another tool."
