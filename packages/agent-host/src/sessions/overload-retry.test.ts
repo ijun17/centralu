@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, InputObserver, SessionHandle } from '../adapters/contract.js'
 import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -31,16 +31,37 @@ class Handle implements SessionHandle {
   ) {}
   readonly sent: string[] = []
   stops = 0
+  /** Set by a test: the next person's message is refused */
+  refuseSend = false
+  /** Set by `slowTake`: the tool is slow to say it took an input */
+  sendTracked?: (text: string, observer?: InputObserver) => Promise<void>
+  private pending: { fail(e: Error): void } | null = null
   send(text: string) {
+    if (this.refuseSend && text !== RETRY_NOTE) throw new Error('the tool refused the message')
     this.sent.push(text)
     // As the tool does: the input starts a turn
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
+  }
+  /** The tool holds the next tracked input (Codex says it took one only when its turn is named: up to 90 s): returns what makes it take it */
+  slowTake(): () => void {
+    let take = () => {}
+    this.sendTracked = (text) => {
+      this.send(text)
+      return new Promise<void>((resolve, reject) => {
+        take = resolve
+        this.pending = { fail: reject }
+      })
+    }
+    return () => take()
   }
   respondApproval() {
     return true
   }
   interrupt() {
     this.stops++
+    // As the tool does: the input it had not taken fails with the stop
+    this.pending?.fail(new Error('The parent note was stopped before it finished'))
+    this.pending = null
   }
   async dispose() {}
   async detach() {}
@@ -85,15 +106,29 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
   store = new Store()
   events = []
+  leavingAtError = []
 })
 afterEach(() => {
   vi.useRealTimers()
 })
 
+/** Whether the host was already marked as leaving when each error was said (a quit or a swap names a turn's end by that) */
+let leavingAtError: boolean[]
+
 function host(kept: ReadonlySet<string> = new Set()) {
   const adapter = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, dir, { processes, keptSessions: kept })
+  const mgr: SessionManager = new SessionManager(
+    store,
+    adapters,
+    (e) => {
+      events.push(e)
+      if (e.type === 'error') leavingAtError.push(Boolean((mgr as unknown as { handingOver: boolean; disposing: boolean }).handingOver || (mgr as unknown as { disposing: boolean }).disposing))
+    },
+    undefined,
+    dir,
+    { processes, keptSessions: kept },
+  )
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }
 }
@@ -253,6 +288,64 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
       await sending
       await vi.advanceTimersByTimeAsync(1)
       expect(a.adapter.last.sent).toEqual(['try again yourself'])
+    }
+  })
+
+  describe('once the note is with the tool, the turn is the tool’s', () => {
+    /** The retry's note is handed to a tool that has not said it took it yet */
+    async function handed() {
+      const { a, id } = await working()
+      const take = a.adapter.last.slowTake()
+      a.adapter.last.emit(overloaded(id))
+      await vi.advanceTimersByTimeAsync(DELAYS_MS[0])
+      expect(a.adapter.last.sent).toEqual([RETRY_NOTE])
+      return { a, id, take }
+    }
+
+    it('a Stop stops the tool’s turn too, and ends nothing else', async () => {
+      const { a, id } = await handed()
+      await a.rpc('agents.interrupt', { sessionId: id })
+      expect(a.adapter.last.stops).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(errors(id)).toHaveLength(0)
+    })
+
+    it('a message of the person’s joins that turn: when the tool refuses it, the turn is not ended by the retry', async () => {
+      const { a, id, take } = await handed()
+      a.adapter.last.refuseSend = true
+      await expect(a.mgr.send(id, 'try again yourself')).rejects.toThrow('refused')
+      expect(errors(id)).toHaveLength(0)
+      expect(a.session(id).state).toBe('working')
+      take()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(errors(id)).toHaveLength(0)
+    })
+
+    it('a message of the person’s starts the count over, as it does for a retry that waits', async () => {
+      const { a, id, take } = await handed()
+      await a.mgr.send(id, 'try again yourself')
+      take()
+      await vi.advanceTimersByTimeAsync(1)
+      a.adapter.last.emit(overloaded(id))
+      expect(retryLines(id).at(-1)!.text).toContain('(retry 1 of 4)')
+    })
+
+    it('a host that leaves ends nothing for it: the tool’s turn leaves as any turn does', async () => {
+      const { a, id } = await handed()
+      await a.mgr.detachAll()
+      expect(errors(id)).toHaveLength(0)
+      expect(a.session(id).state).toBe('working')
+    })
+  })
+
+  it('a host that leaves says the turn’s end before it is marked as leaving: the end is the provider’s error, not a stop of the quit’s', async () => {
+    for (const leave of ['disposeAll', 'detachAll'] as const) {
+      leavingAtError = []
+      const { a, id } = await working()
+      a.adapter.last.emit(overloaded(id))
+      await a.mgr[leave]()
+      expect(errors(id)).toHaveLength(1)
+      expect(leavingAtError).toEqual([false])
     }
   })
 

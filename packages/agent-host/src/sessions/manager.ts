@@ -521,9 +521,17 @@ export class SessionManager {
       running: (id) => this.handles.has(id),
       note: (e) => this.events.onEvent(e),
       // Through Centralu's channel, as an update's continue: sent only while the retry still stands (a Stop or a message of the person's takes it away, even while a restart is waited out)
-      send: (id, text, live) =>
+      send: (id, text, gate) =>
         this.events
-          .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, { leaving: () => this.handingOver || this.disposing, atRest: () => live() && inTurn(this.meta.get(id)?.state ?? 'idle') })
+          .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, {
+            leaving: () => this.handingOver || this.disposing,
+            // The last check before the tool is given the note (deliverMail asks it once, right before): passed, the turn is the tool's
+            atRest: () => {
+              const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle')
+              if (stands) gate.handed()
+              return stands
+            },
+          })
           // Stopped or taken over while it waited: nothing was sent, and nothing failed
           .catch((err: unknown) => {
             if (!(err instanceof MailNotAtRest)) throw err
@@ -1991,8 +1999,10 @@ export class SessionManager {
   }
 
   interrupt(sessionId: string): void {
-    // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop
-    const waiting = this.overloadRetry.cancel(sessionId)
+    // A turn waiting for the provider's capacity (#1693) has nothing running: the Stop is the end of the wait, and of the turn, even where no process is left to stop.
+    // Once the retry's note is with the tool it runs a turn, which the Stop stops like any
+    const took = this.overloadRetry.cancel(sessionId)
+    const waiting = took === 'waiting' || took === 'sending'
     const handle = waiting ? this.handles.get(sessionId) : this.requireHandle(sessionId)
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)
@@ -2726,6 +2736,8 @@ export class SessionManager {
 
   private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
+    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's
+    this.overloadRetry.stopAll()
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
     /*
@@ -2782,6 +2794,8 @@ export class SessionManager {
     // A compact now would reach a process the next host is meant to take over, as a sleep would (#568)
     this.stopSelfCompaction()
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
+    // Ends as a quit's does, before the host is marked as leaving (#1693)
+    this.overloadRetry.stopAll()
     this.handingOver = true
     this.leaveHost('Centralu is restarting')
     await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.merges.mergeChecks])
@@ -2798,8 +2812,6 @@ export class SessionManager {
   private leaveHost(why: string): void {
     // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
     this.interruptions.stopAll()
-    // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693)
-    this.overloadRetry.stopAll()
     // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
     // mark; handing over, the wait is the next host's, which starts it again on adoption
     this.reports.stopSettlingPausedReports()
