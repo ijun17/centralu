@@ -62,7 +62,7 @@ const FOREIGN: readonly [RegExp, string][] = [
  * in, which a tool also names without their path (a project's name in an answer). The name keeps what the folder is for. Found in the
  * text joined, like a path, since a streamed answer may cut the suffix across pieces
  */
-const RECORDER_FOLDER = /\bframes-(?:data|record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g
+const RECORDER_FOLDER = /\bframes-(?:data|raw|record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g
 
 /** The kinds of update whose text an agent streams in pieces */
 const CHUNKED = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
@@ -340,9 +340,9 @@ function chunkOf(msg: unknown): Chunk | null {
     return { kind: u.sessionUpdate, session: String(acp.params?.sessionId ?? ''), holder: u.content as Record<string, string>, field: 'text' }
   }
   // Codex's app-server: the text of an item, in notifications of its own
-  const codex = msg as { method?: string; params?: { threadId?: string; itemId?: string; summaryIndex?: number; delta?: unknown } } | null
+  const codex = msg as { method?: string; params?: { threadId?: string; itemId?: string; summaryIndex?: number; contentIndex?: number; delta?: unknown } } | null
   if (codex?.method && /^item\/.*delta$/i.test(codex.method) && typeof codex.params?.delta === 'string') {
-    return { kind: codex.method, session: `${codex.params.threadId}:${codex.params.itemId}:${codex.params.summaryIndex ?? ''}`, holder: codex.params as Record<string, string>, field: 'delta' }
+    return { kind: codex.method, session: `${codex.params.threadId}:${codex.params.itemId}:${codex.params.summaryIndex ?? ''}:${codex.params.contentIndex ?? ''}`, holder: codex.params as Record<string, string>, field: 'delta' }
   }
   const claude = msg as { type?: string; event?: { type?: string; index?: number; delta?: Record<string, unknown> }; api_message_id?: string } | null
   const delta = claude?.type === 'stream_event' && claude.event?.type === 'content_block_delta' ? claude.event.delta : undefined

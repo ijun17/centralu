@@ -28,12 +28,12 @@ export function loadRecording(path: string): Recording {
 }
 
 /** Where `sent` first differs from `want`: the JSON path (empty for the whole value) and both values there */
-export function firstDifference(want: unknown, sent: unknown, path = ''): { path: string; want: unknown; sent: unknown } | null {
+export function firstDifference(sent: unknown, want: unknown, path = ''): { path: string; want: unknown; sent: unknown } | null {
   if (isDeepStrictEqual(want, sent)) return null
   const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object'
   if (isObject(want) && isObject(sent) && Array.isArray(want) === Array.isArray(sent)) {
     for (const k of new Set([...Object.keys(want), ...Object.keys(sent)])) {
-      const found = firstDifference(want[k], sent[k], Array.isArray(want) ? `${path}[${k}]` : path ? `${path}.${k}` : k)
+      const found = firstDifference(sent[k], want[k], Array.isArray(want) ? `${path}[${k}]` : path ? `${path}.${k}` : k)
       if (found) return found
     }
   }
@@ -42,7 +42,7 @@ export function firstDifference(want: unknown, sent: unknown, path = ''): { path
 
 /** Null when `sent` is `want`, else where they differ, in words (`what`: the line being compared; `against`: where `want` comes from) */
 export function differs(what: string, sent: unknown, want: unknown, against = 'the recording'): string | null {
-  const d = firstDifference(want, sent)
+  const d = firstDifference(sent, want)
   const show = (v: unknown) => (v === undefined ? 'nothing' : JSON.stringify(v).slice(0, 200))
   return d && `${what}: first difference at ${d.path || 'the line itself'}: ${against} has ${show(d.want)}, the adapter sent ${show(d.sent)}`
 }
@@ -162,26 +162,30 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
 
 /**
+ * What Centralu writes into Claude's stream itself, not the CLI: its MCP server's answer to the CLI's `initialize` (the instructions)
+ * and `tools/list` (the tools), made from the tool definitions and instructions in this repository. `check` says whether such an
+ * answer's words are what that code makes, so the replay compares them with the code, not with the recorded copy, which every
+ * change to a tool would outdate. The rest of the answer (protocol version, capabilities, the envelope) and every other line are
+ * compared with the recording.
+ */
+type OwnMethod = 'initialize' | 'tools/list'
+export type OwnAnswers = { server: string; check(method: OwnMethod, result: Record<string, unknown>): string | null }
+
+const mcpMessage = (line: Record<string, unknown>) => (line.type === 'control_request' && record(line.request).subtype === 'mcp_message' ? { server: record(line.request).server_name, method: record(record(line.request).message).method } : null)
+/** An answer to the CLI's MCP request without the words Centralu wrote itself, for the rest of it to be compared */
+const withoutOwnWords = (response: unknown) => {
+  const body = record(record(response).response)
+  const result = Object.fromEntries(Object.entries(record(record(body.mcp_response).result)).filter(([k]) => k !== 'instructions' && k !== 'tools'))
+  return { ...record(response), response: { ...body, mcp_response: { ...record(body.mcp_response), result } } }
+}
+
+/**
  * Claude Code's stream-json (what the SDK speaks to the CLI): a line matches by its `type`, and further by what it asks or
  * answers: a control request by its `subtype`, the answer to the CLI's request (an approval, a hook) by its request id and
  * its verdict, a user message by its content. The ids the SDK and the adapter make up for themselves (a request id, an
  * input's uuid) differ per run, so each is mapped to the recorded one and the CLI's later references to it are rewritten.
- * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for.
- *
- * `own`: what Centralu writes itself, not the CLI (its MCP server's answers to `initialize` and `tools/list`, made from the tool
- * definitions and instructions in this repository). Those are checked against the code that makes them, not against the recorded
- * copy, which would fail every change to a tool's words; every other line, the CLI's own requests answered included, is compared with the recording.
+ * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for. `own`: see {@link OwnAnswers}.
  */
-export type OwnAnswers = { server: string; check(method: 'initialize' | 'tools/list', result: Record<string, unknown>): string | null }
-
-const mcpMessage = (line: Record<string, unknown>) => (line.type === 'control_request' && record(line.request).subtype === 'mcp_message' ? { server: record(line.request).server_name, method: record(record(line.request).message).method } : null)
-const mcpResultOf = (response: unknown) => record(record(record(response).response).mcp_response).result
-/** An answer to the CLI's MCP request with its result taken out, for the rest of the line to be compared */
-const withoutResult = (response: unknown) => {
-  const body = record(record(response).response)
-  return { ...record(response), response: { ...body, mcp_response: { ...record(body.mcp_response), result: null } } }
-}
-
 export const streamJsonCodec = (cwd: string, own?: OwnAnswers): FrameCodec => ({
   // Two inputs of the person are in the order they were sent; the lines around them are not
   unordered: (line) => line.type !== 'user',
@@ -200,9 +204,9 @@ export const streamJsonCodec = (cwd: string, own?: OwnAnswers): FrameCodec => ({
     } else if (want.type === 'control_response') {
       const asked = ids.get(`own ${String(record(want.response).request_id)}`)
       if (own && (asked === 'initialize' || asked === 'tools/list')) {
-        const problem = own.check(asked, record(mcpResultOf(sent.response)))
+        const problem = own.check(asked, record(record(record(sent.response).response).mcp_response).result as Record<string, unknown>)
         if (problem) return `the adapter’s answer to ${asked}: ${problem}`
-        const rest = differs('the adapter’s answer', withoutResult(sent.response), withoutResult(want.response))
+        const rest = differs('the adapter’s answer', withoutOwnWords(sent.response), withoutOwnWords(inFolder(want.response, cwd)))
         if (rest) return rest
       } else {
         const answer = differs('the adapter’s answer', sent.response, inFolder(want.response, cwd))

@@ -2266,12 +2266,14 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    adapter's answer: first difference at response.behavior: the recording has "deny", the adapter sent "allow"`), not as a step that
    waits out its timeout (`ReplayState.failed`, raced by `drive`). Only what Centralu itself writes into the stream, from code in
    this repository, is checked against that code instead of the recorded bytes: Claude's `centralu` MCP server answers the CLI's
-   `initialize` with the instructions and `tools/list` with the tool definitions, and the replay compares those with
-   `instructionsFor` and `toolDefsFor` (`OwnAnswers`, `centraluAnswers` in `claude/replay.test.ts`). A change to a Centralu tool's
-   schema or words then needs no re-record, and the recorded copy of those two lines may be anything that parses; the rest of such
-   a line (its request id, its envelope) and every other line, the answers to the CLI's `tools/call` and to its approval requests
-   included, are still compared byte for byte. That keeps the recording honest: it shows what really went over the wire, and the
-   replay still fails when the adapter stops answering the CLI's questions as the CLI was answered. Codex and ACP recordings hold no
+   `initialize` with instructions and `tools/list` with tool definitions, and the replay compares the instructions with
+   `instructionsFor` and each tool's name, description and parameter names with `toolDefsFor` (`OwnAnswers`, `centraluAnswers` in
+   `claude/replay.test.ts`). A change to a Centralu tool's words or parameters then needs no re-record, and the recorded
+   `instructions` and `tools` may be anything that parses. The rest of those two answers (protocol version, capabilities, server
+   info, the envelope) and every other line, the answers to the CLI's `tools/call` and to its approval requests included, are
+   still compared byte for byte; a tool's parameter types, `required` and `_meta` are the SDK's rendering of the definition and
+   are not compared. That keeps the recording honest: it shows what really went over the wire, and the replay still fails when
+   the adapter stops answering the CLI as the CLI was answered. Codex and ACP recordings hold no
    such copy (Codex's `config` and tool instructions are skipped, `codex/centralu.test.ts`). A recording is scrubbed with a streamed
    text read joined (ACP and Claude chunks, Codex's item deltas), so a value cut across pieces, such as the random suffix of a
    recorder's temporary folder, is replaced whole; `frames/recordings-private.test.ts` fails when one survives in any frame.

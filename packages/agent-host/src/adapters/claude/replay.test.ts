@@ -79,10 +79,10 @@ describe('what a replay notices', () => {
     return recording.frames.find((f) => f.dir === 'out' && (f.msg?.response as { request_id?: unknown } | undefined)?.request_id === asked)!.msg as { response: { response: { mcp_response: { result: unknown } } } }
   }
 
-  it('a change to a Centralu tool’s words needs no new recording: the recorded tools/list and initialize answers can be anything', async () => {
+  it('a change to a Centralu tool’s words needs no new recording: the recorded tools and instructions can be anything', async () => {
     const r = await replay(own, 'centralu-mail', (recording) => {
-      answerTo(recording, 'tools/list').response.response.mcp_response.result = { tools: 'not the tools' }
-      answerTo(recording, 'initialize').response.response.mcp_response.result = null
+      answerTo(recording, 'tools/list').response.response.mcp_response.result = 'not even a list'
+      Object.assign(answerTo(recording, 'initialize').response.response.mcp_response.result as object, { instructions: 'words from long ago' })
     })
     expect(r.problems).toEqual([])
   })

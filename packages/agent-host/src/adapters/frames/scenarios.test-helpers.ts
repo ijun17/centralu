@@ -533,7 +533,7 @@ export async function drive(
   const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...scenario.session?.(), ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
   if (scenario.signedOut) {
     // The refusal is the recording: no session opens
-    const refusal = await guard(adapter.createSession(opts, emit)).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string })
+    const refusal = await guard(adapter.createSession(opts, emit).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string }))
     if (refusal?.code !== 'not_logged_in') throw new Error(`${scenario.name}: expected a refusal as signed out, got ${refusal ? JSON.stringify(refusal.code) : 'a session'}`)
     return events
   }

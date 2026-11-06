@@ -9,9 +9,9 @@ import { differs, firstDifference, replaySpawner, streamJsonCodec, type OwnAnswe
 
 describe('where two lines differ', () => {
   it('names the JSON path, down through objects and arrays', () => {
-    expect(firstDifference({ a: { b: [1, { c: 'x' }] } }, { a: { b: [1, { c: 'y' }] } })).toEqual({ path: 'a.b[1].c', want: 'x', sent: 'y' })
-    expect(firstDifference({ a: 1 }, { a: 1, extra: true })).toEqual({ path: 'extra', want: undefined, sent: true })
-    expect(firstDifference([1, 2], [1])).toEqual({ path: '[1]', want: 2, sent: undefined })
+    expect(firstDifference({ a: { b: [1, { c: 'y' }] } }, { a: { b: [1, { c: 'x' }] } })).toEqual({ path: 'a.b[1].c', want: 'x', sent: 'y' })
+    expect(firstDifference({ a: 1, extra: true }, { a: 1 })).toEqual({ path: 'extra', want: undefined, sent: true })
+    expect(firstDifference([1], [1, 2])).toEqual({ path: '[1]', want: 2, sent: undefined })
     expect(firstDifference({ a: 1 }, { a: 1 })).toBeNull()
   })
 
@@ -61,6 +61,15 @@ describe('the answers Centralu writes itself', () => {
   it('fail when the code does not make them, and when the rest of the line is not the recorded one', () => {
     expect(compare(answer('rid-4', { tools: ['other'] }), answer('rid-4', { tools: ['now'] }))).toBe('the adapter’s answer to tools/list: tools/list is not what the code makes')
     expect(compare(answer('rid-4', { tools: ['now'] }), { ...answer('rid-4', {}), response: { ...answer('rid-4', {}).response, subtype: 'error' } })).toMatch(/first difference at subtype: the recording has "error", the adapter sent "success"/)
+  })
+
+  it('are compared with the recording as to what the code does not make: the protocol version, the capabilities', () => {
+    const codec = streamJsonCodec('/work', { server: 'centralu', check: () => null })
+    const ids = new Map<string, string | number>()
+    codec.rewrite(asks('rid-2', 'initialize'), ids)
+    const initialized = (protocolVersion: string, instructions: string) => answer('rid-2', { protocolVersion, capabilities: { tools: { listChanged: true } }, instructions })
+    expect(codec.match(initialized('2025-11-25', 'new words') as never, initialized('2025-11-25', 'old words') as never, ids)).toBeNull()
+    expect(codec.match(initialized('2026-01-01', 'new words') as never, initialized('2025-11-25', 'old words') as never, ids)).toMatch(/first difference at response\.mcp_response\.result\.protocolVersion: the recording has "2025-11-25", the adapter sent "2026-01-01"/)
   })
 
   it('leave the answers to the CLI’s other requests compared with the recording', () => {
