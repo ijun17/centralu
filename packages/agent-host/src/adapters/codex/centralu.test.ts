@@ -6,7 +6,7 @@ import { centraluInputId } from '../input-receipts.js'
 import { drive, type Driver, type Scenario } from '../frames/scenarios.test-helpers.js'
 import { CENTRALU_SCENARIOS, type CentraluScenario } from './centralu-scenarios.test-helpers.js'
 import { CodexAdapter } from './index.js'
-import { CODEX_RECORDINGS, CODEX_REPLAY_SESSION, recordedAnswers, recordedFrames, recordedVersion } from './recorded.test-helpers.js'
+import { CODEX_RECORDINGS, recordedAnswers, recordedFrames, recordedVersion } from './recorded.test-helpers.js'
 
 /**
  * Codex calling Centralu's own tools, as a real host served them behind the real bridge (`scripts/frames-record-host.mts`, #1498):
@@ -83,7 +83,8 @@ async function replay(name: string) {
   const events: NormalizedEvent[] = await drive(new CodexAdapter(), scenario, cwd, `replay-${name}`, 3_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'codex',
     session: {
-      ...CODEX_REPLAY_SESSION,
+      model: 'gpt-5.6-luna',
+      effort: 'low',
       processSource: { spawn },
       orchestratorTools: {} as OrchestratorTools,
       orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 'replay' },

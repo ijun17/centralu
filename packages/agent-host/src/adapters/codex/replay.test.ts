@@ -6,7 +6,7 @@ import { callOrder, codexCodec, loadRecording, of, recordedFolders, replaySpawne
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
 import { CodexAdapter } from './index.js'
 import type { CodexClient } from './client.js'
-import { CODEX_RECORDINGS, CODEX_REPLAY_SESSION, recordedAnswers, recordedNotifications, recordedVersion } from './recorded.test-helpers.js'
+import { CODEX_RECORDINGS, recordedAnswers, recordedNotifications, recordedVersion } from './recorded.test-helpers.js'
 import { latestRunningTurn } from './thread-open.js'
 import { runningTurnOf } from './turn-reads.js'
 
@@ -32,7 +32,7 @@ async function replay(dir: string, name: string): Promise<Replayed> {
   const spawn = (spec: AgentSpawnSpec) => (started.push(spec), replayed(spec))
   const events = await drive(new CodexAdapter(), scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'codex',
-    session: { ...CODEX_REPLAY_SESSION, processSource: { spawn } },
+    session: { model: 'gpt-5.6-luna', effort: 'low', processSource: { spawn } },
     replay: state,
   }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), spawned: state.spawned, started }

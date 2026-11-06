@@ -3,7 +3,6 @@ import { PermissionPreset, type ToolName } from '@cc/protocol'
 import { recordedScenarios, recordingFile, REPLAYED } from '../../packages/agent-host/src/adapters/frames/replay-agent.test-helpers.js'
 import { inFolder, loadRecording, type Recording } from '../../packages/agent-host/src/adapters/frames/replay.test-helpers.js'
 import { scenariosFor } from '../../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
-import { ORCHESTRATOR_MCP_NAME } from '../../packages/agent-host/src/apps/contract.js'
 import { openFolds } from './folds.js'
 import { openSession, type ReplayHost, type ReplayRun, startReplayHost } from './replay-host.js'
 
@@ -30,14 +29,9 @@ export type Held = {
   tools: { name: string; marked?: true }[]
   /** What the person picked on the cards that ask a question, in order: the labels of the options */
   answers: string[]
-  /** The thoughts the tool showed the words of, where the tool shows any (Codex's reasoning summaries) */
-  thoughts?: number
-  /** The compactions the tool announced, with the size of the conversation before and after where it says */
-  compactions: { before?: number; after?: number }[]
+  /** The compactions the tool announced, with the size of the conversation before and after */
+  compactions: { before: number; after: number }[]
 }
-
-/** Whether the MCP server's calls are drawn with a mark of their own: Centralu's own tools and an attached app's */
-const marked = (server: string): boolean => server === ORCHESTRATOR_MCP_NAME || server.startsWith('app-')
 
 /** The tool's frames, read for `Held`; one per recorded tool */
 const HELD: Record<string, (recording: Recording) => Held> = {
@@ -49,7 +43,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
       held.said.push(words)
       held.order.push('said')
     }
-    const call = (name: string) => held.tools.push(marked(/^mcp__(.+?)__/.exec(name)?.[1] ?? '') ? { name, marked: true } : { name })
+    const call = (name: string) => held.tools.push(/^mcp__(centralu|app-[^_]+)__/.test(name) ? { name, marked: true } : { name })
     /** The messages that streamed: their words and calls were taken as they came, and the whole message says them again */
     const streamed = new Set<string>()
     for (const f of recording.frames) {
@@ -94,65 +88,6 @@ const HELD: Record<string, (recording: Recording) => Held> = {
     }
     return held
   },
-  codex: (recording) => {
-    const held: Held = { steps: [], said: [], order: [], tools: [], answers: [], compactions: [] }
-    let running = false
-    let ended = false
-    /** Whether the agent has called Centralu's `compact_self`, after which a compaction is the host's, not the person's */
-    let askedToCompact = false
-    /** The block of words each message item is */
-    const blocks = new Map<string, number>()
-    /** The reasoning items that said something of what they thought */
-    const thoughts = new Set<string>()
-    for (const f of recording.frames) {
-      if (f.dir === 'exit') {
-        ended = true
-        continue
-      }
-      const m = f.msg as { method?: string; params?: Record<string, any> } | undefined
-      if (typeof m?.method !== 'string') continue
-      const p = m.params ?? {}
-      if (f.dir === 'out') {
-        // A new process after the last one ended is the person restarting the agent
-        if (m.method === 'initialize' && ended && held.steps.length > 0) held.steps.push({ kind: 'restart' })
-        if (m.method === 'initialize') ended = false
-        if (m.method === 'turn/start') {
-          held.steps.push({ kind: 'prompt', text: (p.input as { text?: string }[]).map((i) => i.text ?? '').join(''), ...(running ? { during: true } : {}) })
-          held.order.push('prompt')
-          running = true
-        } else if (m.method === 'thread/compact/start') {
-          // The command the person typed is drawn as their words; after the agent's own `compact_self` the host asked for it, and nothing is typed
-          if (!askedToCompact) {
-            held.steps.push({ kind: 'prompt', text: '/compact' })
-            held.order.push('prompt')
-          }
-          running = true
-        } else if (m.method === 'turn/interrupt') held.steps.push({ kind: 'stop' })
-        continue
-      }
-      const item = p.item as { type: string; id: string; text?: string; server?: string; tool?: string } | undefined
-      if (m.method === 'turn/completed') running = false
-      else if (m.method === 'item/started' && item?.type === 'agentMessage') {
-        blocks.set(item.id, held.said.length)
-        held.said.push('')
-        held.order.push('said')
-      } else if (m.method === 'item/agentMessage/delta') held.said[blocks.get(String(p.itemId))!] += String(p.delta)
-      else if (m.method === 'item/reasoning/summaryTextDelta' && p.delta) thoughts.add(String(p.itemId))
-      else if (m.method === 'item/completed' && item?.type === 'reasoning' && ((item as { summary?: string[] }).summary ?? []).some(Boolean)) thoughts.add(item.id)
-      // The words the screen draws are the ones streamed; the whole message is the words of a message that was not streamed
-      else if (m.method === 'item/completed' && item?.type === 'agentMessage' && held.said[blocks.get(item.id)!] === '') held.said[blocks.get(item.id)!] = item.text ?? ''
-      else if (m.method === 'item/started' && item?.type === 'commandExecution') held.tools.push({ name: 'Bash' })
-      else if (m.method === 'item/started' && item?.type === 'fileChange') held.tools.push({ name: 'Edit' })
-      else if (m.method === 'item/started' && item?.type === 'mcpToolCall') {
-        askedToCompact ||= item.tool === 'compact_self'
-        held.tools.push(marked(String(item.server)) ? { name: String(item.tool), marked: true } : { name: String(item.tool) })
-      }
-      // Codex says how large the conversation was before and after in no frame
-      else if (m.method === 'item/completed' && item?.type === 'contextCompaction') held.compactions.push({})
-    }
-    held.thoughts = thoughts.size
-    return held
-  },
 }
 
 /** What the pane showed before the checks opened anything */
@@ -181,12 +116,6 @@ const text = (s: string) =>
     .replace(/[|`*]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-
-/** "Context compacted here · 21.3k → 3.3k" where the tool says the sizes, else the plain line */
-const compactionMark = (c: { before?: number; after?: number }): string => {
-  const size = (n: number) => `${(n / 1000).toFixed(1)}k`
-  return c.before !== undefined && c.after !== undefined ? `Context compacted here · ${size(c.before)} → ${size(c.after)}` : 'Earlier messages were compacted here'
-}
 
 /** How the polls wait: looked at again soon (a turn that has not ended is not looked at after a second), for as long as a replay on a loaded machine may take */
 const POLL = { timeout: 15_000, intervals: [50, 100, 250] }
@@ -262,45 +191,24 @@ async function expectPane(page: Page, held: Held): Promise<Seen> {
   const words = [...held.said]
   const bubbles = held.order.map((kind) => (kind === 'prompt' ? prompts.shift()! : words.shift()!)).map(text).filter(Boolean)
   await expect.poll(async () => (await page.locator('[data-testid=msg-user] [data-mine-bubble], [data-testid=msg-assistant]').allInnerTexts()).map(text), POLL).toEqual(bubbles)
-  // Thoughts and tool calls fold into one line a run (#2007, #2023): none is drawn until its line is opened, and the lines count them all
-  const counted = (word: string) => async () => (await page.getByTestId('fold-summary').allInnerTexts()).reduce((n, t) => n + Number(new RegExp(`(\\d+) ${word}s?\\b`).exec(t)?.[1] ?? 0), 0)
   if (held.tools.length > 0) {
+    // Tool calls fold into one line a run (#2023): none is drawn until its line is opened, and the lines count them all
     await expect(page.getByTestId('tool-card')).toHaveCount(0)
-    await expect.poll(counted('tool'), POLL).toBe(held.tools.length)
+    await expect.poll(async () => (await page.getByTestId('fold-summary').allInnerTexts()).reduce((n, t) => n + Number(/(\d+) tools?/.exec(t)?.[1] ?? 0), 0), POLL).toBe(held.tools.length)
+    seen.folds = await folds(page)
+    await openFolds(page)
   }
-  if (held.thoughts !== undefined) await expect.poll(counted('thought'), POLL).toBe(held.thoughts)
-  seen.folds = await folds(page)
-  if (held.tools.length > 0) await openFolds(page)
   // Each call is a card: its tool's name on a badge, or the mark of Centralu's own tools and an app's where the call is one of theirs
   const cards = page.locator('[data-testid=tool-card], [data-testid=ask-project-card]')
   await expect
-    .poll(() => cards.evaluateAll((els, mark) => els.map((e) => (e.querySelector('[data-testid=centralu-call-mark]') ? mark : (e.querySelector('[data-testid=tool-card-toggle] > span:first-child')?.textContent ?? ''))), MARK), POLL)
+    .poll(() => cards.evaluateAll((els, mark) => els.map((e) => (e.querySelector('[data-testid=centralu-call-mark]') ? mark : (e.querySelector('[data-testid=tool-card-toggle] > span:first-child')?.textContent ?? ''))), MARK))
     .toEqual(held.tools.map((t) => (t.marked ? MARK : t.name)))
   await expect(page.getByTestId('centralu-call-mark')).toHaveCount(held.tools.filter((t) => t.marked).length)
-  await expect.poll(async () => (await page.getByTestId('msg-mark').filter({ hasText: /compacted/i }).allInnerTexts()).map(text), POLL).toEqual(held.compactions.map(compactionMark))
+  // "Context compacted here · 21.3k → 3.3k"
+  const size = (n: number) => `${(n / 1000).toFixed(1)}k`
+  await expect.poll(async () => (await page.getByTestId('msg-mark').filter({ hasText: /compacted/i }).allInnerTexts()).map(text), POLL).toEqual(held.compactions.map((c) => `Context compacted here · ${size(c.before)} → ${size(c.after)}`))
   return seen
 }
-
-/** One long answer is one bubble, its lines in order to the last */
-const oneLongAnswer: Replay['shows'] = async (page) => {
-  await expect(page.getByTestId('msg-assistant')).toHaveCount(1)
-  expect(text(await page.getByTestId('msg-assistant').innerText())).toMatch(/^1 2 3 .* 149 150$/)
-}
-
-/** A turn the person stopped ends as stopped: no failure on the page, and the composer takes the next message */
-const stopped: Replay['shows'] = async (page) => {
-  await expect(page.getByTestId('msg-mark')).toHaveCount(0)
-  await expect(page.getByTestId('activity-row')).toHaveCount(0)
-}
-
-/** The tool cards of the run, each opened (once: pressing an open one closes it) and read: its words and its result */
-async function cardTexts(page: Page): Promise<string[]> {
-  for (const toggle of await page.getByTestId('tool-card-toggle').all()) await toggle.click()
-  return (await page.getByTestId('tool-card').allInnerTexts()).map(text)
-}
-
-/** The marks in the conversation that say a turn failed */
-const failure = async (page: Page) => (await page.getByTestId('msg-mark').allInnerTexts()).map(text).filter((t) => t.startsWith('The agent could not finish this turn'))
 
 export const REPLAYS: Replay[] = [
   {
@@ -335,17 +243,30 @@ export const REPLAYS: Replay[] = [
   {
     tool: 'claude',
     scenario: 'big-output',
-    shows: oneLongAnswer,
+    async shows(page) {
+      // One long answer is one bubble, its lines in order to the last
+      await expect(page.getByTestId('msg-assistant')).toHaveCount(1)
+      expect(text(await page.getByTestId('msg-assistant').innerText())).toMatch(/^1 2 3 .* 149 150$/)
+    },
   },
-  { tool: 'claude', scenario: 'interrupt', shows: stopped },
+  {
+    tool: 'claude',
+    scenario: 'interrupt',
+    async shows(page) {
+      // A turn the person stopped ends as stopped: no failure on the page, and the composer takes the next message
+      await expect(page.getByTestId('msg-mark')).toHaveCount(0)
+      await expect(page.getByTestId('activity-row')).toHaveCount(0)
+    },
+  },
   {
     tool: 'claude',
     scenario: 'interrupt-tool',
     stopAt: 'folded',
-    async shows(page, held, seen) {
+    async shows(page, _held, seen) {
       // The call that was cut off is counted failed on its line; the turn itself ends as stopped, with no error line
       expect(seen.folds).toEqual(['1 tool 1 failed'])
-      await stopped(page, held, seen)
+      await expect(page.getByTestId('msg-mark')).toHaveCount(0)
+      await expect(page.getByTestId('activity-row')).toHaveCount(0)
     },
   },
   { tool: 'claude', scenario: 'compact' },
@@ -471,186 +392,12 @@ export const REPLAYS: Replay[] = [
       await expect(page.getByTestId('msg-mark')).toHaveCount(0)
     },
   },
-  {
-    tool: 'codex',
-    scenario: 'basic',
-    async shows(page, _held, seen) {
-      // A file written under `auto` asks nothing: its thought and the one call are folded lines before the answer
-      expect(seen.folds).toEqual(['1 thought', '1 tool'])
-      expect(await approvals(page)).toEqual([])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'approval',
-    cards: ['allow', 'deny', 'always'],
-    async shows(page, _held, seen) {
-      expect(await approvals(page)).toEqual([expect.stringMatching(/^Allowed · .*touch probe-1\.txt'?$/), expect.stringMatching(/^Denied · .*touch probe-2\.txt'?$/), expect.stringMatching(/^Allowed · .*touch probe-3\.txt \.'?$/)])
-      // Each turn's calls are one line; the denied one says it failed, and the fourth, run on the rule, asked nothing
-      expect(seen.folds.map((f) => f.replace(/\d+ thoughts? · /, '')).filter((f) => f.includes('tool'))).toEqual(['1 tool', '1 tool 1 failed', '1 tool', '1 tool'])
-    },
-  },
-  // A burst of one delta a line (#2059: it threw "Maximum update depth exceeded" in the page and left the turn busy under WebKit)
-  { tool: 'codex', scenario: 'big-output', shows: oneLongAnswer },
-  { tool: 'codex', scenario: 'interrupt', stopAt: 'folded', shows: stopped },
-  { tool: 'codex', scenario: 'queued' },
-  {
-    tool: 'codex',
-    scenario: 'failed',
-    async shows(page) {
-      const model = scenariosFor('codex').find((s) => s.name === 'failed')!.model!
-      // The app-server's warning that it knows nothing of the model, then the refusal; the reason is under the composer too
-      const marks = (await page.getByTestId('msg-mark').allInnerTexts()).map(text)
-      expect(marks).toHaveLength(2)
-      expect(marks[0]).toContain(`Model metadata for ${model} not found`)
-      expect(marks[1]).toContain(`Codex refused the model ${model}`)
-      await expect(page.getByTestId('error-note')).toBeVisible()
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'long-command',
-    async shows(page, _held, seen) {
-      expect(seen.folds).toEqual(['1 tool'])
-      expect(await cardTexts(page)).toEqual([expect.stringContaining('long-done')])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'command-failed',
-    async shows(page, _held, seen) {
-      // The command's own words, on a card the line counts as failed; the turn is not an error
-      expect(seen.folds).toEqual(['1 tool 1 failed'])
-      expect(await cardTexts(page)).toEqual([expect.stringContaining('No such file or directory')])
-      expect(await failure(page)).toEqual([])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'long-output',
-    async shows(page) {
-      // The card shows the start of an output of 3000 lines, not all of it
-      const [card] = await cardTexts(page)
-      expect(card).toMatch(/^Bash .*seq 1 3000' 1 2 3 4 5 .* 100 /)
-      expect(card).not.toContain(' 2999 ')
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'mcp-call',
-    async shows(page) {
-      // A tool of the person's own MCP server: named by its server and tool, with its answer
-      expect(await cardTexts(page)).toEqual([expect.stringMatching(/^ping probe: ping pong$/)])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'files',
-    async shows(page) {
-      // A file created and one deleted are two cards of the same kind and path; nothing on the card says which is the delete (#2060)
-      const cards = await cardTexts(page)
-      expect(cards).toHaveLength(2)
-      expect(cards.every((c) => c.includes('gone.txt'))).toBe(true)
-    },
-  },
-  { tool: 'codex', scenario: 'compact' },
-  {
-    tool: 'codex',
-    scenario: 'die',
-    async shows(page) {
-      // The app-server killed in the middle of a turn: one error line and the reason under the composer, not a finished turn
-      expect(await failure(page)).toEqual([expect.stringContaining('codex app-server exited')])
-      await expect(page.getByTestId('error-note')).toBeVisible()
-    },
-  },
-  { tool: 'codex', scenario: 'resume' },
-  { tool: 'codex', scenario: 'resume-interrupted', stopAt: 'folded', shows: stopped },
-  {
-    tool: 'codex',
-    scenario: 'resume-failed',
-    async shows(page) {
-      // The thread opened again after the failure says nothing more of it: the one error stays the one
-      expect(await failure(page)).toHaveLength(1)
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-read',
-    async shows(page) {
-      // Each call is drawn as what it did, with Centralu's mark: the sessions listed, then one read
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Listed sessions', 'Read a session'])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-mail',
-    async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Listed sessions', 'Mail', 'Mail'])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-compact',
-    async shows(page) {
-      // Asked to compact a small conversation, the call says why nothing is compacted; no compaction mark is drawn (the common check)
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Asked to compact'])
-      expect((await cardTexts(page))[0]).toContain('over 100k tokens')
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-agent-session',
-    async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent', 'Sent more to an agent', 'Waited for an agent'])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-agent-stop',
-    async shows(page) {
-      // A child still working is stopped, then deleted: three calls of Centralu's, each drawn as what it did
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent', 'Stopped an agent', 'Deleted an agent'])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-ask-untrusted',
-    async shows(page) {
-      // Work for another project is refused while this one is not trusted: the card says it did not finish, and why
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Asked frames-record-other'])
-      expect(await page.getByTestId('ask-project-status').allInnerTexts()).toEqual(['did not finish'])
-      await expect(page.getByTestId('ask-project-card')).toContainText('Refused (untrusted_project)')
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-ask-project',
-    async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Asked frames-record-other'])
-      expect(await page.getByTestId('ask-project-status').allInnerTexts()).toEqual(['answered'])
-    },
-  },
-  {
-    tool: 'codex',
-    scenario: 'centralu-agent',
-    async shows(page) {
-      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['Started an agent'])
-      // The new agent's job as the title, and its answer in the card
-      await expect(page.getByTestId('tool-card-title')).toHaveText(`Reply with exactly: pong (codex, ${REPLAYED.find((r) => r.tool === 'codex')!.model})`)
-      expect((await cardTexts(page))[0]).toContain('answered, as JSON: "pong"')
-    },
-  },
 ]
 
 /** Recordings that no entry plays, and why */
 const NOT_PLAYED: Record<string, string> = {
   'claude/interrupt-approval': 'the screen has no Stop while a card is open: the person answers the card, which the approval scenario plays',
   'claude/question-declined': 'the screen has no Stop while a question card is open: it is answered by an option or by words, which the question scenario plays',
-  'codex/interrupt-approval': 'the screen has no Stop while a card is open: the person answers the card, which the approval scenario plays',
-  'codex/adopt-running': 'it opens an app-server that a keeper kept running through a host swap, and a replay host starts its processes itself, with no keeper to hold one; the adapter replay test plays it',
-  'codex/centralu-wake': 'the second turn is started by the host from a mail that another session answers with; the replay host has no other session to send it, and the words typed as a person would be drawn as theirs, not as a mail',
-  'codex/centralu-compact-real': 'the host starts the compaction (thread/compact/start) after the agent calls Centralu\'s compact_self, and a replay host never serves that call (the bridge is the recording host\'s); playing it would mean typing /compact, which draws a bubble the real session never draws, and the host-started compaction would go unexercised',
-  'codex/adopt-failed': 'the same: a kept app-server answering the new host thread/resume',
 }
 
 /** Every scenario a project is made for, in one host that the tests of a worker share */

@@ -2330,9 +2330,7 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    UI: it types the prompts the recording holds, presses Stop and restarts the agent where it holds them, and checks
    against what the recording holds the bubbles in their order, the tool calls (their number and names, and that they fold
    into lines), the Centralu call marks and the compaction marks, and that the adapter sent the tool nothing the
-   recording does not hold. The spec is a Playwright project of its own, listed first (`replay` in `e2e/playwright.config.ts`: a shard is a run of
-   tests in the order of the projects, so it falls in the first shard, not the last with the linked project's), and the tests of its worker share
-   one host, each reading only what the host says from the moment its run began and deleting its session when it is done. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
+   recording does not hold. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
    Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line); a question card is
    answered with the option the recording holds. A test fails for a
    recording that has no entry and no reason in `NOT_PLAYED`. A new recording of a tool already in `REPLAYED` is one entry
@@ -2340,13 +2338,6 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    recordings folder) and one reader of its frames in `HELD`. A check that a tool's new version sends frames the recordings lack would read the same table: the
    version folder `newestVersion` picks against the installed tool's version, and the kinds of frame the host logs as
    unmapped (`unmapped message type`) against those the recordings hold.
-   Claude and Codex are both rows of `REPLAYED`. Codex's recordings of the adapter alone (not made through a host) name no
-   message, which a host does, so `codexCodec(cwd, { host: true })` accepts the name and gives it back on the app-server's echo of
-   the message; a recording made through a host holds the names its host gave and is compared as it is. The host asks for the
-   command list (`skills/list`) when it likes, so that is a probe (`skills`): answered from the recording if it holds an answer, else with the
-   result an app-server answered a host with. The recordings of a kept
-   app-server (`adopt-running`, `adopt-failed`) are not played: a replay host starts its processes itself and has no keeper to hold one;
-   nor is `centralu-compact-real`, whose compaction the host starts after `compact_self`, a call a replay host never serves.
 
    **What a replay compares (#2068).** Every line the adapter sends the tool is compared with the recorded one, and a difference
    fails the run at once, naming the recording, its line and the JSON path (`claude-code-2.1.296/centralu-mail.jsonl line 26: the

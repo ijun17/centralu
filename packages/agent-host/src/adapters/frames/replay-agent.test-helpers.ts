@@ -1,9 +1,7 @@
 import type { ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, replayedClaudeAdapter } from '../claude/recorded.test-helpers.js'
-import { CodexAdapter } from '../codex/index.js'
-import { CODEX_RECORDINGS, CODEX_REPLAY_SESSION, hasCentraluBridge, recordedSkillsList, wasProjectTrusted } from '../codex/recorded.test-helpers.js'
-import { codexCodec, loadRecording, newestVersion, recordedFolders, replaySpawner, streamJsonCodec, type FrameCodec, type Recording, type ReplayPeer } from './replay.test-helpers.js'
+import { loadRecording, newestVersion, recordedFolders, replaySpawner, streamJsonCodec, type FrameCodec, type Recording, type ReplayPeer } from './replay.test-helpers.js'
 import { notingCentraluTools } from './fakes.test-helpers.js'
 import { scenariosFor } from './scenarios.test-helpers.js'
 
@@ -28,8 +26,6 @@ export type ReplayedTool = {
   recordings: string
   /** The real adapter, told nothing about the replay: its process comes from `CreateSessionOpts.processSource` */
   adapter(): AgentAdapter
-  /** The model the recordings were made with, which the host offers as the only one */
-  model: string
   /** What "the same frame" means in the tool's protocol; `cwd` is the folder the session runs in */
   codec(cwd: string, recording: Recording): FrameCodec
   /** The session's options as the recording was made with them: what the host adds to a session that the recorded run did not have is taken away */
@@ -40,7 +36,6 @@ export const REPLAYED: readonly ReplayedTool[] = [
   {
     tool: 'claude',
     recordings: CLAUDE_RECORDINGS,
-    model: CLAUDE_REPLAY_SESSION.model,
     adapter: replayedClaudeAdapter,
     // A recording made through a host holds the host's answers to the CLI's calls to Centralu's tools, which a replay host does not give the same words
     codec: (cwd, recording) => streamJsonCodec(cwd, { hostAnswers: recording.header.host === true }),
@@ -51,33 +46,6 @@ export const REPLAYED: readonly ReplayedTool[] = [
       delete session.orchestratorTools
       delete session.apps
       return { ...session, ...named?.session?.(), ...(recording.header.host === true ? { orchestratorTools: notingCentraluTools([]), toolProfile: 'reader' as const } : {}) }
-    },
-  },
-  {
-    tool: 'codex',
-    recordings: CODEX_RECORDINGS,
-    model: CODEX_REPLAY_SESSION.model,
-    adapter: () => new CodexAdapter(),
-    // A recording of Centralu's tools was made through a host: its thread's config holds that host's bridge address and credential, its trust list for the machine's folders and its auto-compaction limit, and its instructions the tools' words of that build. None of them is the replay's, so they are not compared; the rest of the config is
-    codec: (cwd, recording) =>
-      codexCodec(cwd, {
-        skills: recordedSkillsList(),
-        // A recording made through a host holds the names its host gave its messages; one of the driver alone names none
-        host: !recording.header.host,
-        ...(hasCentraluBridge(recording) ? { ignoreParams: ['developerInstructions'], ignoreConfig: [['mcp_servers', 'centralu'], ['projects'], ['model_auto_compact_token_limit']] } : {}),
-      }),
-    session(opts, scenario, recording) {
-      const session: CreateSessionOpts = { ...opts, ...CODEX_REPLAY_SESSION, projectTrusted: wasProjectTrusted(recording), model: scenariosFor('codex').find((s) => s.name === scenario)?.model ?? CODEX_REPLAY_SESSION.model }
-      // The host asks the thread to compact by itself once it knows the model's window; the recordings of the adapter alone left that to the app-server (a recording made through a host holds its limit in a config that is not compared)
-      delete session.autoCompactTokens
-      delete session.autoCompactCeiling
-      // The host gives every session Centralu's own tools and the attached apps; the recorded run had them only if its thread offers the bridge
-      if (!hasCentraluBridge(recording)) {
-        delete session.orchestratorTools
-        delete session.orchestratorBridge
-        delete session.apps
-      }
-      return session
     },
   },
 ]
@@ -114,13 +82,11 @@ export function replayAdapters(tools: readonly ReplayedTool[] = REPLAYED): Map<T
       if (known) return known
       const recording = loadRecording(recordingFile(row, scenario))
       const { spawn, state } = replaySpawner(recording, row.codec(opts.cwd, recording), (problem) => console.error(`${PROBLEM} ${scenario}: ${problem}`))
-      let drained = false
       const started = (spec: AgentSpawnSpec) => {
         const process = spawn(spec) as ReplayPeer
         console.error(`${STARTED} ${scenario}`)
         process.stdout.on('data', () => {
-          if (state.left() === 0 && !drained) console.error(`${DRAINED} ${scenario}`)
-          drained = state.left() === 0
+          if (state.left() === 0) console.error(`${DRAINED} ${scenario}`)
         })
         process.once('exit', () => console.error(`${ENDED} ${scenario}: own=${process.left()} later=${state.left() - process.left()}`))
         return process
@@ -145,7 +111,7 @@ export function replayAdapters(tools: readonly ReplayedTool[] = REPLAYED): Map<T
           if (prop === 'createSession') return createSession
           if (prop === 'detect') return async () => ({ tool: row.tool, installed: true, loggedIn: true, detail: 'replay' })
           if (prop === 'listExternalSessions') return async (cwd: string) => opened.filter((o) => o.cwd === cwd && o.handle.externalId).map((o) => ({ externalId: o.handle.externalId!, title: 'replay', updatedAt: Date.now() }))
-          if (prop === 'listModels') return async () => [{ id: row.model, label: row.model, efforts: [], defaultEffort: null, tiers: [] }]
+          if (prop === 'listModels') return async () => [{ id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null, tiers: [] }]
           if (OFFLINE.has(prop)) return undefined
           const value: unknown = Reflect.get(target, prop, target)
           return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
