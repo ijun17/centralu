@@ -40,9 +40,7 @@ export type Fold = {
  * row streaming live has no host number until it is stored, and it must not close the run it is in when it gets one).
  */
 export function foldKeys(item: Pick<ChatItem, 'seq' | 'storedSeq'>): string[] {
-  if (item.storedSeq === undefined) return [`r${item.seq}`]
-  // A row read back has its host number for its render key: the `r` name would be the host's number in the other's space
-  return item.storedSeq === item.seq ? [`s${item.storedSeq}`] : [`s${item.storedSeq}`, `r${item.seq}`]
+  return item.storedSeq !== undefined ? [`s${item.storedSeq}`, `r${item.seq}`] : [`r${item.seq}`]
 }
 
 /** Whether the row folds into a run; `hasView` says whether a tool call opened an app view in the conversation */

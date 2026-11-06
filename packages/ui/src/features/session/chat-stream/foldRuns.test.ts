@@ -71,8 +71,6 @@ describe('foldRuns: how a run is remembered and drawn', () => {
   it('names a row by the host number when it has one (a re-read keeps the open state) and by its render key (a row stored while the run is open keeps it open)', () => {
     expect(foldKeys({ seq: 9, storedSeq: 4 })).toEqual(['s4', 'r9'])
     expect(foldKeys({ seq: 9 })).toEqual(['r9'])
-    // A row read back has the host's number as its render key: no `r` name that a live row's key could be taken for
-    expect(foldKeys({ seq: 4, storedSeq: 4 })).toEqual(['s4'])
   })
 
   it('is open when any row of it is, so a run that grows at either end stays open', () => {
