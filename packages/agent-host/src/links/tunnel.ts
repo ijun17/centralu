@@ -883,7 +883,7 @@ export class SshTunnel implements Tunnel {
     const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.opts.hubName ?? hostname())], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
+    if (r.stdout.includes(NOT_FOUND)) throw notInstalled(this.where, remote)
     let answer: DetachAnswer
     try {
       answer = parseDetachLine(r.stdout)
@@ -1044,7 +1044,7 @@ export class SshTunnel implements Tunnel {
       return this.connectionLine()
     }
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
-    if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) throw notInstalled(this.where, remote)
+    if (r.stdout.includes(NOT_FOUND)) throw notInstalled(this.where, remote)
     try {
       const line = parseConnectionLine(r.stdout, remote)
       // Under which label this hub's own credential was made: another of that label on the row is not this hub's
