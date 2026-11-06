@@ -3,7 +3,7 @@ import { waitForExit } from '../../timing.js'
 import { lineSplitter } from '../../transport/json-lines.js'
 import type { AgentProcess, AgentSpawnSpec, ProcessSource } from '../contract.js'
 import { frameRecorder, type FrameRecorder } from '../frames/recorder.js'
-import { spawnLocalAgent } from '../local-process.js'
+import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 
 /**
  * The frame tap (docs/plans/session-core.md §6.1, #1654): the one place a tool's lines are recorded, for every tool, at its
@@ -72,13 +72,13 @@ export type ToolStart = {
 }
 
 /**
- * Starts a tool's process: the one start for every tool (Codex, ACP; Claude through the SDK's `spawnClaudeCodeProcess`).
+ * Starts a tool's process: the one start for every tool (Codex, ACP; Claude through the SDK's `spawnClaudeCodeProcess`, whose `signal` stops it).
  * Started by this host, it ends with this host however the host ends (`endsWithHost`, #1654 Q3: every tool, not ACP alone);
  * started in the keeper, it is the keeper's. Tapped before anyone reads it, so the wire's reader comes after the tap.
  */
-export function startToolProcess(spec: AgentSpawnSpec, how: ToolStart = {}): AgentProcess {
+export function startToolProcess(spec: LocalSpawnSpec, how: ToolStart = {}): AgentProcess {
   const plain: AgentSpawnSpec = { command: spec.command, args: spec.args, env: spec.env, ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }) }
-  const proc = how.source ? how.source.spawn(plain) : (how.spawn ?? spawnLocalAgent)({ ...plain, endsWithHost: true })
+  const proc = how.source ? how.source.spawn(plain) : (how.spawn ?? spawnLocalAgent)({ ...plain, ...(spec.signal ? { signal: spec.signal } : {}), endsWithHost: true })
   if (how.stderrLine) redactStderrTail(proc, how.stderrLine)
   return how.sessionId ? tapSessionProcess(proc, how.sessionId) : proc
 }

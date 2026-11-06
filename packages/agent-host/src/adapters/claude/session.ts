@@ -7,8 +7,7 @@ import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
 import type { AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, InputOrigin, SessionHandle } from '../contract.js'
-import { spawnLocalAgent } from '../local-process.js'
-import { tapSessionProcess } from '../core/tool-process.js'
+import { startToolProcess, tapSessionProcess } from '../core/tool-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
@@ -244,7 +243,7 @@ export class ClaudeSession implements SessionHandle {
         servers,
         permissionOptions,
         codeIntelligence,
-        spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = tapSessionProcess(spawnLocalAgent(o), this.sessionId))),
+        spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = startToolProcess(o, { sessionId: this.sessionId }))),
         canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
         hooks: requestTurnHooks(this.opts, () => this.servers.orchestratorServer !== null),
       }),

@@ -67,6 +67,13 @@ describe('starting a tool', () => {
     expect(specs).toEqual([{ ...spec, endsWithHost: true }])
   })
 
+  it('hands the SDK’s abort signal to the local start, which kills the process on it (Claude)', () => {
+    const specs: unknown[] = []
+    const signal = new AbortController().signal
+    startToolProcess({ ...spec, signal }, { spawn: (s) => (specs.push(s), new FakeProc([])) })
+    expect(specs).toEqual([{ ...spec, signal, endsWithHost: true }])
+  })
+
   it('under the keeper, is the keeper’s, which outlives the host by design: no host watch', () => {
     const specs: AgentSpawnSpec[] = []
     const local = vi.fn()
