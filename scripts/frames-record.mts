@@ -27,7 +27,7 @@ import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
 import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
-import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
+import { removeDir, temporaryClaudeConfig, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
@@ -69,10 +69,12 @@ async function main(): Promise<number> {
   let codexHome: { finish(): void } | null = null
   // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
   if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
+  let claudeConfig: { finish(): void; mcpConfig(): string } | null = null
   let failed = 0
   // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
   const stop = () => {
     codexHome?.finish()
+    claudeConfig?.finish()
     rmSync(data, { recursive: true, force: true })
     process.exit(130)
   }
@@ -80,8 +82,9 @@ async function main(): Promise<number> {
   process.once('SIGTERM', stop)
   try {
     codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
+    claudeConfig = tool === 'claude' ? temporaryClaudeConfig(data) : null
     for (const scenario of chosen) {
-      codexHome?.settings(scenario.drive?.settings)
+      codexHome?.settings(scenario.drive?.settings === 'mcp' ? 'mcp' : undefined)
       // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
@@ -89,7 +92,7 @@ async function main(): Promise<number> {
       if (scenario.swap) delete process.env.CC_RECORD_FRAMES
       else process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
-      const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(spec))
+      const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(tool === 'claude' ? claudeFlags(spec, scenario.drive?.settings, claudeConfig) : spec))
       const adapter = adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
@@ -133,6 +136,7 @@ async function main(): Promise<number> {
     }
   } finally {
     codexHome?.finish()
+    claudeConfig?.finish()
     await removeDir(data)
   }
   return failed ? 1 : 0
@@ -141,6 +145,17 @@ async function main(): Promise<number> {
 /** The model a recording of `tool` runs on, for its header (OpenCode: its free models, no choice made) */
 function modelOf(tool: string): string {
   return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
+}
+
+/**
+ * Claude Code's own settings for a scenario, as flags of its process (the run reads no settings file): an MCP server to connect, or
+ * extended thinking with its text shown, the task-list tools. They are appended after the flags the SDK passes.
+ */
+function claudeFlags(spec: AgentSpawnSpec, settings: Scenario['settings'], config: { mcpConfig(): string } | null): AgentSpawnSpec {
+  if (settings === 'mcp' && config) return { ...spec, args: [...spec.args, '--mcp-config', config.mcpConfig()] }
+  if (settings === 'tasks') return { ...spec, args: [...spec.args, '--tools', 'TaskCreate,TaskUpdate,TaskList'] }
+  if (settings === 'thinking') return { ...spec, args: [...spec.args, '--thinking', 'enabled', '--thinking-display', 'summarized'] }
+  return spec
 }
 
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
