@@ -2,7 +2,7 @@
 /**
  * Records the scenarios against an installed CLI (docs/plans/acp-adapter.md §10.5, #1498):
  *
- *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude> [scenario ...] [--raw <folder>]
+ *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]
  *
  * Each scenario (`adapters/frames/scenarios.test-helpers.ts`) drives the real adapter, as the host would, in a new
  * temporary folder; the adapter's own recorder writes the frames, and they are scrubbed into
@@ -12,21 +12,22 @@
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
  * link) is a temporary one. `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AcpAdapter } from '../packages/agent-host/src/adapters/acp/adapter.js'
 import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.js'
+import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec } from '../packages/agent-host/src/adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts } from '../packages/agent-host/src/adapters/contract.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
-const TOOLS = ['cursor-agent', 'opencode', 'claude']
+const TOOLS = ['cursor-agent', 'opencode', 'claude', 'codex']
 
 class RecordingAdapter extends AcpAdapter {
   readonly tool = 'recording'
@@ -34,6 +35,8 @@ class RecordingAdapter extends AcpAdapter {
 
 /** The cheapest model Claude Code offers: a recording only needs the frames, not an answer worth reading */
 const CLAUDE_MODEL = 'haiku'
+/** Codex's smallest model, with the least reasoning */
+const CODEX_MODEL = 'gpt-5.6-luna'
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
@@ -41,16 +44,18 @@ async function main(): Promise<number> {
   const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
   const [tool, ...names] = args
   if (!tool || !TOOLS.includes(tool)) {
-    console.error('usage: frames-record.mts <cursor-agent | opencode | claude> [scenario ...] [--raw <folder>]')
+    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
     return 2
   }
   const chosen = scenariosFor(tool).filter((s) => names.length === 0 || names.includes(s.name))
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
+  const codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
   let failed = 0
   try {
     for (const scenario of chosen) {
-      const cwd = mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`))
+      // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
+      const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
       process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
@@ -60,13 +65,13 @@ async function main(): Promise<number> {
       const sessionId = `record-${scenario.name}`
       try {
         const run = runAs(tool, scenario)
-        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...(tool === 'claude' ? { session: { model: CLAUDE_MODEL, noSettingFiles: true } } : {}) })
+        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
           .sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
         const frames = files.flatMap((file) => readFileSync(join(raw, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
-        const dir = join(ADAPTERS, tool === 'claude' ? 'claude' : 'acp', 'recordings', `${tool === 'claude' ? 'claude-code' : tool}-${version.replace(/^agent /, '').split(/[-\s]/)[0]}`)
+        const dir = join(ADAPTERS, ADAPTER_FOLDER[tool] ?? 'acp', 'recordings', `${tool === 'claude' ? 'claude-code' : tool}-${version.replace(/^(agent|codex-cli) /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
         const header = { header: { tool, version, scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
         writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, cwd)].map((l) => JSON.stringify(l)).join('\n') + '\n')
@@ -80,9 +85,44 @@ async function main(): Promise<number> {
       }
     }
   } finally {
+    codexHome?.finish()
     await removeDir(data)
   }
   return failed ? 1 : 0
+}
+
+/** The folder each non-ACP tool's adapter, and so its recordings, live in */
+const ADAPTER_FOLDER: Record<string, string> = { claude: 'claude', codex: 'codex' }
+
+/** What a session of `tool` is opened with in a recording run: the cheapest model, and the process the run can kill (`die`) */
+function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): { session?: Partial<CreateSessionOpts> } {
+  if (tool === 'claude') return { session: { model: CLAUDE_MODEL, noSettingFiles: true, processSource: { spawn } } }
+  if (tool === 'codex') return { session: { model: CODEX_MODEL, effort: 'low', processSource: { spawn } } }
+  return {}
+}
+
+/**
+ * A Codex settings folder of its own for the run (`CODEX_HOME`), so no setting, skill, hook or thread of the person's is read or
+ * written. It holds a copy of the sign-in alone. Codex rotates the refresh token when it refreshes one, which would leave the
+ * person's own file with a token it no longer accepts: if the copy changed, `finish` puts it back into the person's file.
+ */
+function temporaryCodexHome(parent: string): { finish(): void } {
+  const real = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'auth.json')
+  const home = join(parent, 'codex-home')
+  mkdirSync(home, { recursive: true })
+  const copy = join(home, 'auth.json')
+  if (!existsSync(real)) throw new Error('codex is not signed in: run `codex login` first')
+  copyFileSync(real, copy)
+  const before = readFileSync(copy, 'utf8')
+  process.env.CODEX_HOME = home
+  return {
+    finish() {
+      if (readFileSync(copy, 'utf8') !== before) {
+        writeFileSync(real, readFileSync(copy), { mode: 0o600 })
+        console.log('[record] the sign-in was refreshed during the run: kept in the person\'s auth file')
+      }
+    },
+  }
 }
 
 /** The files a scenario asks the tool to find in its working folder */
@@ -108,10 +148,11 @@ async function removeDir(dir: string): Promise<void> {
 
 function adapterFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): AgentAdapter {
   if (tool === 'claude') return new ClaudeAdapter()
+  if (tool === 'codex') return new CodexAdapter()
   return new RecordingAdapter(tool === 'cursor-agent' ? cursorProfile() : openCodeProfile(), spawn)
 }
 
-/** OpenCode and Claude ask for every command under Safe only (their preset config); Cursor asks under Normal */
+/** OpenCode, Claude and Codex ask for every command under Safe only (their preset config); Cursor asks under Normal */
 function runAs(tool: string, scenario: Scenario): Scenario {
   const preset = scenario.presetFor?.[tool] ?? (tool !== 'cursor-agent' && scenario.asksForCommands ? 'safe' : undefined)
   return preset ? { ...scenario, preset } : scenario

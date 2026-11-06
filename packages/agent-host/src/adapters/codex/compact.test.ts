@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { sessionLiveDefaults, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import type { SessionRecordHost } from '../../sessions/session-record.js'
+import { recordedNotifications } from './recorded.test-helpers.js'
 
 /**
  * compact is a function, not a message (a dogfooding observation).
@@ -459,6 +460,18 @@ describe('codex compaction — one marker per compaction', () => {
       { type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' },
       { type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' },
     ])
+  })
+
+  it('the compaction turn codex-cli 0.160.0 really sent (recorded) leaves one marker, and clears the activity it showed', async () => {
+    const real = recordedNotifications('compact')
+    // The second turn of the recording is the compaction; the thread the recording ran is the one this session has
+    const turns = real.flatMap((n, i) => (n.method === 'turn/started' ? [i] : []))
+    const events: { type: string; activity?: unknown }[] = []
+    await session((e) => events.push(e as { type: string; activity?: unknown }))
+    for (const n of real.slice(turns[1], turns[2])) state.handlers!.onNotification(JSON.parse(JSON.stringify(n).split('00000002-0000-4000-8000-000000000002').join('t1')))
+    await tick()
+    expect(events.filter((e) => e.type === 'compaction')).toEqual([{ type: 'compaction', sessionId: 's1', failed: false, trigger: 'auto' }])
+    expect(events.filter((e) => e.type === 'activity').map((e) => e.activity)).toEqual(['compacting', null])
   })
 
   it("says a compaction inside the compact turn the session started is manual, and the next one in a turn of its own is not (#1500)", async () => {

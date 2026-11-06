@@ -92,6 +92,15 @@ export const jsonRpcCodec: FrameCodec = {
   },
 }
 
+/**
+ * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
+ * answer, a file change, a command's output). `cwd`: that folder
+ */
+export const codexCodec = (cwd: string): FrameCodec => ({
+  match: (sent, want, ids) => jsonRpcCodec.match(sent, inFolder(want, cwd), ids),
+  rewrite: (incoming, ids) => inFolder(jsonRpcCodec.rewrite(incoming, ids), cwd),
+})
+
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
 
 /**
@@ -250,8 +259,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   private received(msg: Record<string, unknown>): void {
     if (this.codec.probe?.is(msg)) {
       // A recording that holds no answer to one (the tool ended first) leaves the adapter's query unanswered, as the tool did
-      if (this.probeAnswer) this.stdout.write(`${JSON.stringify(this.codec.probe.answer(msg, this.probeAnswer))}
-`)
+      if (this.probeAnswer) this.say(`${JSON.stringify(this.codec.probe.answer(msg, this.probeAnswer))}\n`)
       return
     }
     const expected = this.frames[this.i]
@@ -274,6 +282,14 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     this.pump()
   }
 
+  /**
+   * A line to the adapter. Never within the call that wrote the line it answers: a pipe delivers after the write returned, and a
+   * client registers its wait for an answer after writing the request (Codex's does), so an answer in the same call is lost
+   */
+  private say(line: string): void {
+    queueMicrotask(() => this.stdout.write(line))
+  }
+
   private pump(): void {
     while (this.i < this.frames.length && !this.ended) {
       const f = this.frames[this.i]!
@@ -284,7 +300,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
         return
       }
       const msg = this.codec.rewrite(f.msg ?? {}, this.ids)
-      this.stdout.write(`${JSON.stringify(msg)}\n`)
+      this.say(`${JSON.stringify(msg)}\n`)
     }
   }
 
@@ -295,7 +311,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     if (this.frames[this.i]?.dir === 'exit') this.i++
     this.exitCode = code
     this.signalCode = signal
-    this.stdout.end()
+    queueMicrotask(() => this.stdout.end())
     setImmediate(() => this.emit('exit', code, signal))
   }
 

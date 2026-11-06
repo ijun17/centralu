@@ -58,7 +58,7 @@ const said = (events: NormalizedEvent[]) => of(events, 'message_delta').map((e) 
 const ended = (events: NormalizedEvent[]) => of(events, 'turn_complete').length
 
 describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`, () => {
-  const run = (name: string) => replay(recordedVersion(), name)
+  const run = (name: string) => replay(recordedVersion(name), name)
 
   it('basic: a plain turn streams its words and ends once; a file written inside the folder under `edits` asks nothing and is marked touched', async () => {
     const { events } = await run('basic')
@@ -152,6 +152,22 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
     expect(started.map((s) => s.args[s.args.indexOf('--model') + 1])).toEqual(['haiku', 'haiku'])
     expect(said(events)).toContain('pelican')
     expect(of(events, 'agent_version')).toHaveLength(2)
+  })
+
+  it('die: the CLI killed in the middle of an answer is one retryable crash that names the signal, with no completed turn', async () => {
+    const { events, spawned } = await run('die')
+    expect(spawned).toBe(1)
+    expect(of(events, 'error')).toMatchObject([{ error: { code: 'adapter_crashed', retryable: true, message: expect.stringContaining('SIGKILL') } }])
+    expect(ended(events)).toBe(0)
+  })
+
+  it('files: a file written with the Write tool is one call with its result and marks its file; a search for a tool that deletes is a call too', async () => {
+    const { events } = await run('files')
+    expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Write', 'ToolSearch'])
+    expect(of(events, 'tool_result').map((r) => r.ok)).toEqual([true, true])
+    expect(of(events, 'files_touched')).toHaveLength(1)
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(ended(events)).toBe(1)
   })
 
   it('queued: a message sent while a turn runs is answered after it, as its own turn', async () => {

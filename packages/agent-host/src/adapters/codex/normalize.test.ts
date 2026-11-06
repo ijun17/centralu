@@ -4,30 +4,41 @@ import { CodexChildTracker } from './child-tracker.js'
 import { fileChangesOf } from './items.js'
 import { CompactionMarks, normalizeNotification } from './normalize.js'
 import { __resetWarningsForTest, CodexRequestInputs } from './token-readings.js'
+import { recordedNotifications, recordedServerRequests } from './recorded.test-helpers.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
  * recorded** during the M0 spike (docs/spikes/m0-findings.md). They must run without a real
  * process so CI can use them.
+ *
+ * Where a case can be had from a real run, the test takes the notification from the recordings of the real app-server
+ * (`real`, #1498) instead of a line written by hand. What stays written by hand is a case no cheap real run produces
+ * (a plan, an MCP call, a limit being hit, a child agent, a malformed value) or a variation on a recorded one; each says so.
  */
 
 const S = 'sess-1'
 const n = (method: string, params?: unknown) => normalizeNotification(S, { method, params })
 
+/** A value inside what the app-server sent, by a dotted path */
+const dig = (v: unknown, path: string): unknown => path.split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), v)
+/** The first notification of `method` that the real app-server sent in the recorded `scenario` and `pick` accepts, and what the adapter makes of it */
+function real(scenario: string, method: string, pick: (params: unknown) => boolean = () => true) {
+  const found = recordedNotifications(scenario, method).find((r) => pick(r.params))
+  if (!found) throw new Error(`no ${method} in the ${scenario} recording`)
+  return { params: found.params, out: n(found.method, found.params) }
+}
+
 describe('streaming and tool calls', () => {
-  it('agentMessage delta → message_delta', () => {
-    expect(n('item/agentMessage/delta', { delta: 'hello' })).toEqual([
-      { type: 'message_delta', sessionId: S, role: 'assistant', text: 'hello' },
-    ])
+  it('an agentMessage delta → message_delta that names its item, so the host can tell one message from the next (#212)', () => {
+    const { params, out } = real('basic', 'item/agentMessage/delta')
+    expect(out).toEqual([{ type: 'message_delta', sessionId: S, role: 'assistant', text: 'hello', messageId: dig(params, 'itemId') }])
   })
 
-  it('an agentMessage chunk names its item, so the host can tell one message from the next (#212)', () => {
-    expect(n('item/agentMessage/delta', { threadId: 't', turnId: 'u', itemId: 'msg-1', delta: 'hello' })).toEqual([
-      { type: 'message_delta', sessionId: S, role: 'assistant', text: 'hello', messageId: 'msg-1' },
-    ])
-    expect(n('item/completed', { item: { type: 'agentMessage', id: 'msg-1', text: 'hello', phase: 'commentary' } })).toEqual([
-      { type: 'message_delta', sessionId: S, role: 'assistant', text: '', messageId: 'msg-1' },
-    ])
+  it('a completed agentMessage closes with an empty chunk that names it, whether it was the words before a tool call or the final answer', () => {
+    for (const phase of ['commentary', 'final_answer']) {
+      const { params, out } = real('approval', 'item/completed', (p) => dig(p, 'item.type') === 'agentMessage' && dig(p, 'item.phase') === phase)
+      expect(out).toEqual([{ type: 'message_delta', sessionId: S, role: 'assistant', text: '', messageId: dig(params, 'item.id') }])
+    }
   })
 
   /*
@@ -37,20 +48,20 @@ describe('streaming and tool calls', () => {
    * streamed through the deltas.
    */
   it('reasoning summaryTextDelta → reasoning_delta', () => {
-    expect(n('item/reasoning/summaryTextDelta', { itemId: 'rs-1', delta: '**Reviewing path constraints**', summaryIndex: 0 })).toEqual([
-      { type: 'reasoning_delta', sessionId: S, text: '**Reviewing path constraints**' },
-    ])
+    const { params, out } = real('approval', 'item/reasoning/summaryTextDelta')
+    expect(out).toEqual([{ type: 'reasoning_delta', sessionId: S, text: dig(params, 'delta') }])
   })
 
+  // Hand-written for the second paragraph: every recorded reasoning has one paragraph (summaryIndex 0 only)
   it('from the second paragraph on, the boundary becomes a blank line — there is nothing before the first paragraph', () => {
-    expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 0 })).toEqual([])
+    expect(real('approval', 'item/reasoning/summaryPartAdded').out).toEqual([])
     expect(n('item/reasoning/summaryPartAdded', { itemId: 'rs-1', summaryIndex: 1 })).toEqual([
       { type: 'reasoning_delta', sessionId: S, text: '\n\n' },
     ])
   })
 
   it('the reasoning item on completed stays silent too (it would duplicate the delta)', () => {
-    expect(n('item/completed', { item: { type: 'reasoning', id: 'rs-1', summary: ['**Reviewing path constraints**'], content: [] } })).toEqual([])
+    expect(real('approval', 'item/completed', (p) => dig(p, 'item.type') === 'reasoning').out).toEqual([])
   })
 
   /*
@@ -92,23 +103,24 @@ describe('streaming and tool calls', () => {
 
   // Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}
   it('commandExecution outputDelta → tool_output_delta', () => {
-    expect(n('item/commandExecution/outputDelta', { threadId: 't', turnId: 'u', itemId: 'exec-1', delta: 'tick 2\n' })).toEqual([
-      { type: 'tool_output_delta', sessionId: S, callId: 'exec-1', text: 'tick 2\n' },
-    ])
+    const { params, out } = real('long-command', 'item/commandExecution/outputDelta')
+    expect(out).toEqual([{ type: 'tool_output_delta', sessionId: S, callId: dig(params, 'itemId'), text: 'long-done\n' }])
+  })
+
+  // Hand-written: no run sends an empty chunk
+  it('an empty output chunk says nothing', () => {
     expect(n('item/commandExecution/outputDelta', { itemId: 'exec-1', delta: '' })).toEqual([])
   })
 
   it('the start of a commandExecution → tool_call (the full command text is the title)', () => {
-    const out = n('item/started', {
-      item: { type: 'commandExecution', id: 'exec-1', command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
-    })
-    expect(out).toEqual([
+    const { params, out } = real('approval', 'item/started', (p) => dig(p, 'item.type') === 'commandExecution')
+    expect(out).toMatchObject([
       {
         type: 'tool_call',
         sessionId: S,
-        callId: 'exec-1',
-        summary: { tool: 'Bash', title: "/bin/zsh -lc 'npm test'", paths: [] },
-        input: { command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
+        callId: dig(params, 'item.id'),
+        summary: { tool: 'Bash', title: "/bin/zsh -lc 'touch probe-1.txt'", paths: [] },
+        input: { command: "/bin/zsh -lc 'touch probe-1.txt'", cwd: dig(params, 'item.cwd') },
       },
     ])
   })
@@ -120,11 +132,10 @@ describe('streaming and tool calls', () => {
   })
 
   it('fileChange completed → tool_result + files_touched (for conflict detection)', () => {
-    const out = n('item/completed', {
-      item: { type: 'fileChange', id: 'fc-1', status: 'completed', changes: [{ path: 'src/a.ts', diff: '+1' }] },
-    })
+    const { params, out } = real('files', 'item/completed', (p) => dig(p, 'item.type') === 'fileChange')
     expect(out.map((e) => e.type)).toEqual(['tool_result', 'files_touched'])
-    expect(out[1]).toMatchObject({ paths: ['src/a.ts'] })
+    expect(out[1]).toMatchObject({ paths: ['<cwd>/gone.txt'] })
+    expect(dig(params, 'item.changes.0.path')).toBe('<cwd>/gone.txt')
   })
 
   it('a declined file change marks no file, a failed one still does (it may have written some); a move marks both paths (#843)', () => {
@@ -137,15 +148,19 @@ describe('streaming and tool calls', () => {
     expect(moved[1]).toMatchObject({ type: 'files_touched', paths: ['src/a.ts', 'src/b.ts'] })
   })
 
-  it('a failed tool gets ok=false', () => {
-    const out = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'failed', output: 'error' } })
-    expect(out[0]).toMatchObject({ type: 'tool_result', ok: false })
+  it('a failed command gets ok=false and its own words as the result', () => {
+    const { out } = real('command-failed', 'item/completed', (p) => dig(p, 'item.type') === 'commandExecution')
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'ls: /no-such-folder-xyz: No such file or directory\n' })
   })
 
-  it('a declined command or edit, and an interrupted agent call, close as not ok and say so (#843)', () => {
-    const declined = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'declined', command: 'rm -rf build', aggregatedOutput: null } })
-    expect(declined[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(declined)' })
-    expect(declined[0]).not.toHaveProperty('output')
+  it('a declined command closes as not ok and says so (#843)', () => {
+    const { out } = real('approval', 'item/completed', (p) => dig(p, 'item.status') === 'declined')
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(declined)' })
+    expect(out[0]).not.toHaveProperty('output')
+  })
+
+  // Hand-written: a declined edit, an interrupted agent call and a failed dynamic call are not produced by a cheap real run
+  it('a declined edit, an interrupted agent call and a failed dynamic call close as not ok and say so (#843)', () => {
     const edit = n('item/completed', { item: { type: 'fileChange', id: 'f', status: 'declined', changes: [{ path: 'src/a.ts', diff: '+1', kind: { type: 'update' } }] } })
     expect(edit[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(declined)' })
     const agent = n('item/completed', { item: { type: 'collabAgentToolCall', id: 'c', tool: 'wait', status: 'interrupted' } })
@@ -281,12 +296,10 @@ describe('streaming and tool calls', () => {
  */
 describe('the whole record of a tool call (#221)', () => {
   it('a result keeps its whole output, and the card still shows the first 2,000 characters', () => {
-    const log = `${'building…\n'.repeat(400)}error: the conclusion is at the end`
-    const [result] = n('item/completed', {
-      item: { type: 'commandExecution', id: 'e', status: 'completed', command: 'npm run build', aggregatedOutput: log, exitCode: 1 },
-    })
+    const { params, out } = real('long-output', 'item/completed', (p) => dig(p, 'item.type') === 'commandExecution')
+    const log = dig(params, 'item.aggregatedOutput') as string
     expect(log.length).toBeGreaterThan(2000)
-    expect(result).toMatchObject({ type: 'tool_result', summary: log.slice(0, 2000), output: log })
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: true, summary: log.slice(0, 2000), output: log })
   })
 
   it('an MCP result keeps its whole text, and an empty result carries no output', () => {
@@ -326,7 +339,22 @@ describe('the whole record of a tool call (#221)', () => {
 
 describe('state and gauges', () => {
   it('turn/completed → turn_complete', () => {
-    expect(n('turn/completed', {})).toEqual([{ type: 'turn_complete', sessionId: S }])
+    expect(real('basic', 'turn/completed').out).toEqual([{ type: 'turn_complete', sessionId: S }])
+  })
+
+  /*
+   * The turn of a model the provider does not have, as the app-server sent it: a `failed` turn whose `codexErrorInfo` is the
+   * catch-all `other` (not `badRequest`: the hand-written cases below assumed it was), the provider's 400 as the message
+   * body. It is a refused model by the body alone.
+   */
+  it('a turn that failed because the model does not exist is a refused model, by the provider’s 400', () => {
+    const { out } = real('failed', 'turn/completed')
+    expect(out).toMatchObject([{ type: 'error', error: { retryable: false, data: { reason: 'model_rejected', model: 'no-such-model-xyz' } } }])
+    expect(out.map((e) => e.type)).not.toContain('turn_complete')
+  })
+
+  it('the error notification of that turn leaves no marker of its own: the turn’s end says it once (#168)', () => {
+    expect(real('failed', 'error').out).toEqual([])
   })
 
   /*
@@ -431,24 +459,16 @@ describe('state and gauges', () => {
   })
 
   it('an interrupted turn is not a failure, and not a finished turn either: it ends as a stop does (#698)', () => {
-    expect(n('turn/completed', { turn: { id: 't', status: 'interrupted', error: null } })).toEqual([
-      { type: 'state_change', sessionId: S, state: 'waiting_input', reason: 'interrupted' },
-    ])
+    expect(real('interrupt', 'turn/completed').out).toEqual([{ type: 'state_change', sessionId: S, state: 'waiting_input', reason: 'interrupted' }])
   })
 
   it('tokenUsage → usage_update (+ context_update when a window exists)', () => {
-    const out = n('thread/tokenUsage/updated', {
-      // `last` is required by ThreadTokenUsage and is what fills the window; `total` is the
-      // thread's running spend and feeds usage_update only.
-      tokenUsage: {
-        total: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 },
-        last: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 },
-      },
-      contextWindow: 1_000_000,
-    })
-    // Codex counts the 80 cached tokens inside its 100 input tokens; the protocol keeps them apart (TokenUsage)
-    expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: 20, outputTokens: 20, cacheReadTokens: 80 } })
-    expect(out[1]).toMatchObject({ type: 'context_update', used: 120, window: 1_000_000, exactness: 'exact' })
+    const { params, out } = real('basic', 'thread/tokenUsage/updated')
+    // `last` is what fills the window; `total` is the thread's running spend and feeds usage_update only
+    const total = dig(params, 'tokenUsage.total') as { inputTokens: number; cachedInputTokens: number; outputTokens: number }
+    // Codex counts the cached tokens inside its input tokens; the protocol keeps them apart (TokenUsage)
+    expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: total.inputTokens - total.cachedInputTokens, outputTokens: total.outputTokens, cacheReadTokens: total.cachedInputTokens } })
+    expect(out[1]).toMatchObject({ type: 'context_update', used: dig(params, 'tokenUsage.last.totalTokens'), window: dig(params, 'tokenUsage.modelContextWindow'), exactness: 'exact' })
   })
 
   // #850 item 20: the running reading and the request's own reading split input two ways, and only the request clamped
@@ -539,9 +559,7 @@ describe('state and gauges', () => {
    * in the conversation. Measured on codex-cli 0.147.0, 0.153.4 and 0.160.0 (#303).
    */
   it('a compaction item is an activity, not a tool call', () => {
-    expect(n('item/started', { item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
-      { type: 'activity', sessionId: S, activity: 'compacting' },
-    ])
+    expect(real('compact', 'item/started', (p) => dig(p, 'item.type') === 'contextCompaction').out).toEqual([{ type: 'activity', sessionId: S, activity: 'compacting' }])
   })
 
   /*
@@ -549,7 +567,7 @@ describe('state and gauges', () => {
    * 0.153.4 or 0.160.0). The marker used to come only from that notification, so no Codex compaction left one.
    */
   it('a completed compaction item clears the activity and leaves the compaction marker', () => {
-    expect(n('item/completed', { threadId: 't', turnId: 'u1', item: { type: 'contextCompaction', id: 'i1' } })).toEqual([
+    expect(real('compact', 'item/completed', (p) => dig(p, 'item.type') === 'contextCompaction').out).toEqual([
       { type: 'activity', sessionId: S, activity: null },
       { type: 'compaction', sessionId: S, failed: false },
     ])
@@ -614,7 +632,7 @@ describe('state and gauges', () => {
   })
 
   it('thread/goal/cleared → goal:null (a clearing notification)', () => {
-    expect(n('thread/goal/cleared', { threadId: 't1' })).toEqual([{ type: 'goal', sessionId: S, goal: null }])
+    expect(real('resume', 'thread/goal/cleared').out).toEqual([{ type: 'goal', sessionId: S, goal: null }])
   })
 
   it('an updated with status:complete is a clearing too — an achieved badge must not stay forever (dogfooding 2026-09-07)', () => {
@@ -663,6 +681,13 @@ describe('one compaction marker per compaction (CompactionMarks)', () => {
 
 describe('approval request conversion (the basis for approving right from the banner)', () => {
   it('a command approval → kind=command (a shape the banner can approve directly)', () => {
+    const asked = recordedServerRequests('approval').find((r) => r.method === 'item/commandExecution/requestApproval')!
+    // The real request carries the command and folder itself, not an `item`
+    expect(approvalDetailFrom(asked.method, asked.params as Record<string, unknown>)).toEqual({ kind: 'command', command: "/bin/zsh -lc 'touch probe-1.txt'", cwd: '<cwd>' })
+  })
+
+  // Hand-written: the older shape, which names an item (what the first version of this test assumed the app-server sends)
+  it('a command approval that names its item in `item` is read the same', () => {
     const d = approvalDetailFrom('item/commandExecution/requestApproval', {
       item: { command: 'npm run build', cwd: '/tmp/p' },
     })

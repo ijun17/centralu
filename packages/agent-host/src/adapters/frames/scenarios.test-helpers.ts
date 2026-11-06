@@ -27,7 +27,9 @@ export type Driver = {
 
 /** The tools whose recordings come from the scenarios that name no tool of their own */
 const ACP_TOOLS: readonly string[] = ['cursor-agent', 'opencode']
-const ANY_TOOL: readonly string[] = [...ACP_TOOLS, 'claude']
+const ANY_TOOL: readonly string[] = [...ACP_TOOLS, 'claude', 'codex']
+/** The tools that are not ACP: the same scenarios, but each is recorded with its own presets and prompts */
+const CLI_TOOLS: readonly string[] = ['claude', 'codex']
 
 export type Scenario = {
   name: string
@@ -48,8 +50,8 @@ const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
   d.session().send(text, opts)
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
-/** A command the tool asks about: Claude Code runs a read-only one such as echo without asking, so it is given one that writes */
-const commandAsked = (d: Driver, n: number | string) => (d.tool === 'claude' ? `touch probe-${n}.txt` : `echo probe-${n}`)
+/** A command the tool asks about: Claude Code and Codex run a read-only one such as echo without asking, so they are given one that writes */
+const commandAsked = (d: Driver, n: number | string) => (CLI_TOOLS.includes(d.tool) ? `touch probe-${n}.txt` : `echo probe-${n}`)
 /** A turn in which every card asked is answered `decide` until the turn ends; the kinds of card asked, in order */
 const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): Promise<string[]> => {
   d.session().send(text)
@@ -90,7 +92,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // A model the API does not have: the turn fails at once
     name: 'failed',
-    tools: ['claude'],
+    tools: CLI_TOOLS,
     model: 'no-such-model-xyz',
     async run(d) {
       d.session().send('Reply with exactly: hello')
@@ -112,7 +114,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'big-output',
-    tools: ['claude'],
+    tools: CLI_TOOLS,
     async run(d) {
       await turn(d, 'Count from 1 to 150, one number per line, and nothing else.')
     },
@@ -122,7 +124,7 @@ export const SCENARIOS: readonly Scenario[] = [
     tools: ANY_TOOL,
     // Claude Code asks before it writes a file unless the preset grants edits in the folder, and OpenCode before every write under Normal;
     // this scenario answers no card (it would wait for ever)
-    presetFor: { claude: 'edits', opencode: 'auto' },
+    presetFor: { claude: 'edits', opencode: 'auto', codex: 'auto' },
     async run(d) {
       await turn(d, 'Reply with exactly: hello')
       await turn(d, 'Create a file named probe.txt containing the word hi, using your tools. Then say done.')
@@ -159,6 +161,57 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // A command that outlasts the first wait for its output (Codex hands it back as a process it keeps running), then the answer after it
+    name: 'long-command',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command and wait until it finishes: sleep 12 && echo long-done . Then say done.')
+    },
+  },
+  {
+    // A command that exits with an error: the card ends not ok with the command's own words, and the turn goes on to say so
+    name: 'command-failed',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command: ls /no-such-folder-xyz . It is expected to fail. Then say what happened in one sentence.')
+    },
+  },
+  {
+    // A command whose output is long: the card keeps the output whole while the screen shows the start of it
+    name: 'long-output',
+    tools: ['codex'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Run this shell command: seq 1 3000 . Then say done.')
+    },
+  },
+  {
+    // The thread's state when it is opened again after a turn the person stopped: what the tool answers `thread/resume` with
+    name: 'resume-interrupted',
+    tools: ['codex'],
+    async run(d) {
+      d.session().send('Count from 1 to 300, one number per line.')
+      await d.waitFor('the first output', (e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
+      d.session().interrupt()
+      await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
+      await d.reopen()
+      await turn(d, 'Say ok.')
+    },
+  },
+  {
+    // ... and after a turn that failed: a model the API does not have
+    name: 'resume-failed',
+    tools: ['codex'],
+    model: 'no-such-model-xyz',
+    async run(d) {
+      d.session().send('Reply with exactly: hello')
+      await d.waitFor('the failure', (e) => e.type === 'error')
+      await d.reopen()
+    },
+  },
+  {
     name: 'interrupt-approval',
     tools: ANY_TOOL,
     asksForCommands: true,
@@ -187,6 +240,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'die',
+    tools: ANY_TOOL,
     async run(d) {
       d.session().send('Write a 300-word essay on tides.')
       await d.waitFor('the first output', (e) => e.type === 'message_delta' || e.type === 'reasoning_delta')
@@ -206,6 +260,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562 review)
     name: 'files',
+    tools: ANY_TOOL,
     preset: 'auto',
     async run(d) {
       await turn(d, 'Using your file tools, not the shell: create a file named gone.txt containing x, then delete gone.txt. Then say done.')
