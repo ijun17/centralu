@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fakeRegistry, fakeServe, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, fakeServe, hungListening, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { SshTunnel, SwitchUnderWay } from './tunnel.js'
 import { parseStopLine, readSwitchStatus, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
@@ -215,10 +215,10 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
       await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
       expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop hung (for update)', 'start 9.9.1'])
       expect(running()).toBe('9.9.1')
-      expect(() => process.kill(hung(), 0)).toThrow()
+      await eventually(async () => !(await hungListening(data())))
     } finally {
-      // Only the process this test's fake started
-      if (existsSync(data('hung'))) {
+      // Only the process this test's fake started: while it still listens, it is that one (a pid alone may be another's by now)
+      if (existsSync(data('hung.port')) && (await hungListening(data()))) {
         try {
           process.kill(hung(), 'SIGKILL')
         } catch {
