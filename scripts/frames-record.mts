@@ -11,7 +11,7 @@
  * Cursor's and Claude's spend the person's plan (Claude on its smallest model, with no settings file read), so run
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
  * link) is a temporary one; so are OpenCode's XDG folders. A scenario that gives an ACP agent Centralu's tools (`centralu-*`) runs
- * the real stdio bridge against a host of fixed answers (`frames/bridge-host.test-helpers.ts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
+ * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { AcpAdapter } from '../packages/agent-host/src/adapters/acp/adapter.js'
 import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.js'
 import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
-import { startBridgeHost, type BridgeHost } from '../packages/agent-host/src/adapters/frames/bridge-host.test-helpers.js'
+import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts } from '../packages/agent-host/src/adapters/contract.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
