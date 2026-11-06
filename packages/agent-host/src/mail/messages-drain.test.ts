@@ -171,25 +171,18 @@ describe('what one wake carries', () => {
     expect(w.mail.drain(B, { again: true })).toMatchObject({ messageIds: [note.id], pointed: [note.id], inline: [] })
   })
 
-  it('the guards’ hooks: quiet is told of without a turn, holdBack is left out, skip is dropped', () => {
+  it('skip is dropped, and wakes nothing', () => {
     const w = world()
-    const quiet = w.send(A, { to: [B], text: 'q', needsReply: false }).message
-    const held = w.send(C, { to: [B], text: 'h', needsReply: false }).message
+    const kept = w.send(A, { to: [B], text: 'k', needsReply: false }).message
     const skipped = w.send(W, { to: [B], text: 's', needsReply: false }).message
     due(w)
-    const d = w.mail.drain(B, {
-      quiet: (m) => (m.id === quiet.id ? 'budget' : null),
-      holdBack: (m) => (m.id === held.id ? 'loop' : null),
-      skip: (m) => m.id === skipped.id,
-    })
-    expect(d.quieted).toEqual([{ messageId: quiet.id, reason: 'budget' }])
-    expect(d.heldBack).toEqual([{ messageId: held.id, reason: 'loop' }])
-    expect(d.messageIds).toEqual([quiet.id])
-    expect(d.wake).toBe(false)
+    const d = w.mail.drain(B, { skip: (m) => m.id === skipped.id })
+    expect(d.heldBack).toEqual([])
+    expect(d.messageIds).toEqual([kept.id])
     expect(d.line).toBe('✉ 1 message, from a session of your project')
   })
 
-  it('holdFor returns policy before loop; a row released by resumeDepth is not held loop again at drain, and is still held policy while its project is untrusted', () => {
+  it('the one hold is the only hold: a message an earlier build wrote 5 hops deep goes, and an untrusted project’s is held policy until it is trusted', () => {
     const w = world()
     w.projects.set('px', { trusted: true })
     const fromX = w.send(X, { to: [C], text: 'sent while px was trusted' }).message
@@ -197,13 +190,11 @@ describe('what one wake carries', () => {
     w.db.prepare(`UPDATE mail SET depth = 5 WHERE id IN (?, ?)`).run(fromX.id, deep.id)
     w.projects.set('px', { trusted: false })
     due(w)
-    // Untrusted and deep: policy first; trusted and deep: loop
-    expect(w.mail.drain(C).heldBack).toEqual([{ messageId: fromX.id, reason: 'policy' }, { messageId: deep.id, reason: 'loop' }])
-    expect(w.mail.drain(C).messageIds).toEqual([])
-    // The person resumed both: loop no longer holds, policy still does while px is untrusted
-    w.records.hold(C, [fromX.id, deep.id], 'released')
     expect(w.mail.drain(C).heldBack).toEqual([{ messageId: fromX.id, reason: 'policy' }])
     expect(w.mail.drain(C).messageIds).toEqual([deep.id])
+    // Released by the person is not trust: policy still holds while px is untrusted
+    w.records.hold(C, [fromX.id], 'released')
+    expect(w.mail.drain(C).heldBack).toEqual([{ messageId: fromX.id, reason: 'policy' }])
     w.projects.set('px', { trusted: true })
     expect(w.mail.drain(C).messageIds).toEqual([fromX.id, deep.id])
   })
@@ -361,31 +352,14 @@ describe('what a crash leaves (§7.6.5)', () => {
   })
 })
 
-describe('depth and settling, by model', () => {
+describe('holds and settling, by model', () => {
   /** A seeded generator: a failing seed can be run again */
   const rng = (seed: number) => {
     let s = seed
     return () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648
   }
 
-  it('a pair’s back-and-forth adds no depth however long it runs, and a hop adds one', () => {
-    const w = world()
-    let last = w.send(A, { to: [B], text: 'start' }).message
-    for (let i = 0; i < 30; i++) {
-      const from = i % 2 === 0 ? B : A
-      w.startTurn(from, last.id)
-      last = w.send(from, { replyTo: last.id, needsReply: true, text: `turn ${i}` }).message
-      expect(last.depth).toBe(0)
-    }
-    // A third party joins: one hop, and what it answers back is the pair again
-    w.startTurn(B, last.id)
-    const hop = w.send(B, { to: [C], text: 'ask c' }).message
-    expect(hop.depth).toBe(1)
-    w.startTurn(C, hop.id)
-    expect(w.send(C, { replyTo: hop.id, text: 'c answers' }).message.depth).toBe(1)
-  })
-
-  it('in any run of sends, depth follows the hops of the cause chain, only depth above 4 is held loop, and nothing is lost', () => {
+  it('in any run of sends along cause chains, nothing is held, nothing is refused for how much mail there is, and nothing is lost', () => {
     for (let seed = 1; seed <= 25; seed++) {
       const random = rng(seed)
       const w = world()
@@ -403,18 +377,16 @@ describe('depth and settling, by model', () => {
         try {
           w.clock.t += MINUTE
           const r = w.mail.send(from, { to, text: `step ${step}`, needsReply: random() < 0.5 })
-          const causeRow = cause ? w.message(cause) : null
-          const expected = causeRow && causeRow.kind === 'message' ? causeRow.depth + (to.every((x) => x === causeRow.sender) ? 0 : 1) : 0
-          expect(r.message.depth, `seed ${seed} step ${step}`).toBe(expected)
-          expect(r.held.length > 0, `seed ${seed} step ${step}`).toBe(expected > 4)
+          expect(r.held, `seed ${seed} step ${step}`).toEqual([])
+          expect(r.message.depth, `seed ${seed} step ${step}`).toBe(0)
           for (const x of to) heard.get(x)?.push(r.message.id)
           sent++
         } catch (e) {
-          // The guards may say no (a pair’s five an hour): that is the run’s business, anything else is a fault
-          expect(refusalReason(e), `seed ${seed} step ${step}: ${String(e)}`).toBeDefined()
+          // The post rate may say no; nothing says no for a pair's or a chain's count
+          expect(refusalReason(e), `seed ${seed} step ${step}: ${String(e)}`).toBe('rate_limited')
         }
       }
-      expect(sent, `seed ${seed}`).toBeGreaterThan(10)
+      expect(sent, `seed ${seed}`).toBe(60)
     }
   })
 

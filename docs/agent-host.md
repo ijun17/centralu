@@ -2109,10 +2109,17 @@ Implementation rules:
   host swallowed, which a kept process does not replay, so the leaving host ends the turn with that error now ("Centralu was
   going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. It says so before the host is marked as leaving, so the
   end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
-  no process when the time comes ends the same way. Known gap: a hard crash of the host during the wait leaves a kept Codex
-  session `working` (the next host adopts an idle process; #2020). Known gap: a hub's `ask_project` task marks its depth for the input
-  (`hub_ask_depth:`), and Codex fails the tracked input when the turn fails, before the host sees the error, which takes the
-  mark down; the continued turn then runs at depth 0 (#2015). **Claude** is not covered: its CLI retries a 529 itself
+  no process when the time comes ends the same way. **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
+  fails, before the host sees the error: the failure takes the mark down only when no retry stands once the error was seen
+  (`OverloadRetry.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
+  tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029).
+  **A crash of the host** during the wait ends nothing, and the kept process has already ended its turn: the
+  next host adopts it (`adoptKept`) idle while the stored state is `working`. The Codex handle answers `adoptedIdle()` (the
+  app-server's `thread.status` at the resume was not `active`, measured with codex-cli 0.160.0: `systemError` after a turn failed for capacity, `idle` after a completed or interrupted one, `active` while a turn runs, and nothing was sent since), and the manager then ends the turn as one a swap
+  could not continue (`turnLostInSwap`: idle, the "stopped" line, the interruption, its requester told, and the hub task's depth mark taken down by the rule that takes it down at any end of a turn, which #2015 keeps while the wait stands). The retry is not resumed (it
+  lived in the dead host). The same holds for a turn whose end the dead host had already read; an end that fell in the gap reaches the next host as a frame the
+  keeper buffered and ends normally (and a retry that frame starts in the new host stands). A tool that cannot say (Claude's CLI, silent until its
+  next frame) is taken to go on (#2020). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
@@ -2204,7 +2211,15 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
 2. Add the tool to `ToolName` and give it a `TOOL_META` entry in `@cc/protocol` — display
    name, one-glyph mark, install command, login command. Then register the adapter in the
    `adapters` Map in `main.ts`.
-3. Add contract tests: recorded raw response fixtures → NormalizedEvent snapshot verification. For a new tool, record
+3. **Record real runs before writing the adapter's tests (required, except what no real run sends or cheaply can; see
+   the end of this step).** Contract tests replay recorded raw frames → NormalizedEvent snapshot verification;
+   hand-written frames are not enough, because they hold what the author believed
+   the tool sends (#2031: a fake answered `idle` where the real Codex answers `systemError`, and the fix passed every test
+   while doing nothing on a real crash). A new tool lands with recordings of at least: a plain turn, a tool call with an
+   approval, a refused or failed turn, an interrupted turn, a long answer, a compaction (if the tool has one), a resumed
+   session, and each answer the adapter branches on (a status, an error kind) where a real run can send it. A change to an existing adapter that
+   depends on what the tool sends adds or cites the recording that shows it; a value copied into a fake without a
+   recording is not evidence. Re-record on a CLI version bump. For a new tool, record
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by
@@ -2217,6 +2232,12 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings. A scenario
    that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
    tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
+   Codex's are made by `pnpm exec tsx scripts/frames-record.mts codex` (its smallest model, in a settings folder of its own:
+   `CODEX_HOME` holds a copy of the sign-in alone, which is put back into the person's file if Codex refreshed it) and kept in
+   `adapters/codex/recordings/codex-<version>/`; `codex/replay.test.ts` plays them through the real adapter (`codexCodec`: JSON-RPC
+   with the recorded `<cwd>` read as the replay's folder), and `normalize.test.ts` and `compact.test.ts` take their
+   notifications from them (`codex/recorded.test-helpers.ts`). The tests that mock the whole client stay hand-written: they set
+   up races (a response before its notification, a late `turn/start` answer) that no recording can be made to repeat.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
@@ -3136,12 +3157,11 @@ is the report, written as told. At each ready a report mark with no task gets on
 
 **Turns** (§8.2). The delivery begins a turn with its work message (a task, or for the orchestrator one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and
-reckons its depth from it. A turn the person or the CLI started has no cause. A turn continued after a restart or an update (kept by the keeper,
+A turn the person or the CLI started has no cause. A turn continued after a restart or an update (kept by the keeper,
 or cut by an update's stop and continued, `SessionManager.keptInTurn`) writes no new row: its open row is read back with its starter, work and
-asker, so it is not counted again by the host-wide cap or the pair guard and adds no hop. The guards are the pair loop guard (20 mail-started
-turns an hour between two sessions, counted from the store since the person's last word to either), the token guard, and the host-wide cap
-(120 mail-started turns an hour; a wake waits for a receiver over its share of 10 unless it carries the person's words or a report; the person is
-told once an hour). An orchestrator made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
+asker, so neither count below counts it again. Nothing holds or defers mail for how much of it there is (#2014): past 20 mail-started turns an
+hour between two sessions, counted from the store since the person's last word to either, or past 120 on the host, the delivery writes the
+person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An orchestrator made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
 trashed session's watched rows are settled `gone` and their senders told (`partyGone`), except what was sent to the role, which waits for the next.
 
 **The first message is the script's, not the person's** (3.8b). Only words the person typed may pass as theirs, and a script's first message can carry outside words (a CI log, an issue title). So `createSession` over the limited credential stores it, and announces it as `user_message`, with `fromScript: { credential }`, where `credential` is what the connection called itself in its hello (`RpcContext.label`, cut by the transport, never checked), made plain by `scriptLabel` (no quote, bracket, angle bracket or line break; `unnamed` when it said nothing). It is written by the host from the connection, never from a field of the call: a window's call has none, and a field in the params is ignored. The session reads it under a header of Centralu's (`scriptMessageFrame`: "sent by the script <label> the person set up; the person did not type it"), every line behind `> `, not stamped `origin: human`. The screen draws it as the script's (its label, drawn as the agent's bubble, like an app's message), not as the person's bubble; `read_session` gives the line `fromScript`, `recall` marks it `[script "<label>"]`, a handoff record and an orchestrator's memory do not take it for the person's; the session is not named from it. The thread's `assign` carries the label as a fact and `mail read` says it is a script's, not typed by the person; the owner stays the person, so reports still land in the Inbox. A call the person allowed on a card keeps the label (`HostRequests` passes it on). The label is the script's own claim: every process of the user holds the one limited credential, so any script may call itself anything, another script's name or `Centralu` included. It stands in quotes in every sentence of Centralu's (`the script "<label>"`), says who the script says it is and nothing more, and grants nothing. A later `agents.send` by a script is marked the same way, from the calling connection (`SessionManager.send`'s `fromScript`): stored and announced as the script's, under the same header, not stamped `origin: human`, not naming the session, and with no `intent` (a script cannot take over a report another session is owed); it is the work's turn, not the person's own, so a thread the person owes is reported when it ends. Not done (#1468): `apps.askBuilder` from a script still stores its text as the person's, a session created on a linked machine has no mark, and the Inbox thread's subject is still taken from the script's text.

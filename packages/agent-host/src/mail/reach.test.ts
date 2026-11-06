@@ -110,15 +110,11 @@ describe('the one hold (§7.4)', () => {
     for (const kind of ['task', 'report', 'notice'] as const) expect(reach.holdFor(message(X, 'px', 0, kind), C), kind).toBeNull()
   })
 
-  it('holdFor returns policy before loop; a released row is not held loop again and is still held policy', () => {
+  it('holdFor holds only for the one hold, whatever the depth an earlier build wrote (#2014)', () => {
     const { reach } = world()
-    expect(reach.holdFor(message(A, 'p1', 4), C)).toBeNull()
-    expect(reach.holdFor(message(A, 'p1', 5), C)).toBe('loop')
-    expect(reach.holdFor(message(A, 'p1', 5), C, true)).toBeNull()
+    expect(reach.holdFor(message(A, 'p1', 5), C)).toBeNull()
     expect(reach.holdFor(message(X, 'px', 5), C)).toBe('policy')
-    expect(reach.holdFor(message(X, 'px', 5), C, true)).toBe('policy')
-    // To its own project an untrusted session is held only for the depth
-    expect(reach.holdFor(message(X, 'px', 5), Y)).toBe('loop')
+    expect(reach.holdFor(message(X, 'px', 5), Y)).toBeNull()
   })
 
   it('refusesDelegation names the caller’s untrusted project for a target outside it, and nothing within it', () => {

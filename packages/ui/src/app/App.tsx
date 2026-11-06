@@ -283,8 +283,20 @@ export function App({
             The window's edge: the default hairline, drawn over the frame rather than around it (owner, 2026-11-02). A border
             on the frame would push the top bar 1px down, off the centre of the native window controls, and shrink the
             lanes; this takes no room and no pointer. No z-index, so every layer above the page stays above it.
+
+            Four strips, not one box with a border: a box the size of the window that lies over the composited scrollers is
+            composited for overlap too, with a backing store as large as the window (~22 MB of the GPU process in WebKit,
+            #2034). Each strip is a layer a pixel thick. Each is a border of its own, not a 1px background, so it snaps to
+            whole device pixels as the frame's border did (at 1.5x a 1px box can come out two device pixels thick). The
+            sides run the full height and cross the top and bottom strips at the corners: the colour is opaque, so no
+            pixel is painted differently.
           */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 border border-line" data-testid="app-edge" />
+          <div aria-hidden className="pointer-events-none absolute inset-0" data-testid="app-edge">
+            <span className="absolute inset-x-0 top-0 border-t border-line" />
+            <span className="absolute inset-x-0 bottom-0 border-t border-line" />
+            <span className="absolute inset-y-0 left-0 border-l border-line" />
+            <span className="absolute inset-y-0 right-0 border-l border-line" />
+          </div>
         </div>
       </ErrorBoundary>
     </PlatformProvider>

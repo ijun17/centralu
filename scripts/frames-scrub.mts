@@ -22,6 +22,8 @@
  *   what the CLI says of the person's setup (account, plugins, connectors, commands, skills, agents) keeps only what ships
  *   with the CLI; a path under a placeholder folder reads with `/`; the folder's name as Claude Code files it
  *   (`C--Users-name-…`) is a placeholder too; the deltas of a streamed answer or tool input are scrubbed joined, as chunks are;
+ * - Codex's app-server: its ids are UUIDs (kept in shape and numbered, as Claude's) and the provider's `msg_`, `rs_`, `call_` ids;
+ *   the host's name (`remoteControl/status/changed`), the account's plan and how much of its allowance was used are replaced;
  * - stderr is dropped.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -197,7 +199,10 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     s
       .replace(UUID_ANYWHERE, (u) => placeholderId(u.toLowerCase()))
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
-      .replace(/^(msg|req)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
+      // A model response's items (Codex: `msg_`, `rs_` reasoning, `call_` and `fc_` tool calls) carry the provider's ids
+      .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
+      // The directory the run's settings and threads were in, whose name is random
+      .replace(/frames-data-[A-Za-z0-9]+/g, 'frames-data')
   // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server and its apps' are not
   const mcpNames = (s: string): string =>
     s.replace(/\bmcp__(.+?)__(\w+)/g, (all, server: string, tool: string) =>
@@ -221,6 +226,12 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'messageId') return stable('msg', v)
       if (key === 'request_id' && !/^req_/.test(v)) return stable('rid', v)
       if (key === 'serverName') return stable('server', v)
+      // Codex: the account's plan, which says more of the person than the recording needs
+      if (key === 'planType') return '<plan>'
+      // Codex: a thread's rollout file is named for the minute it began in local time, which says the time zone
+      if (key === 'path' && /rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/.test(v)) return walk(v.replace(/rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/, 'rollout-2000-01-01T00-00-00-'), 'rolloutPath')
+      // Codex: the machine's system, as `initialize` answers with it
+      if (key === 'userAgent') return v.replace(/\([^)]*\d+\.\d+[^)]*; [\w-]+\)/, '(<os>; <arch>)')
       if (key === 'signature' && v.length > 40) return '<signature>'
       return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
     }
@@ -249,6 +260,9 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       }
       return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, walk(x, k)]))
     }
+    // Codex: how much of the account's allowance was used, and when it resets, are the person's, not the protocol's
+    if (typeof v === 'number' && key === 'usedPercent') return 12
+    if (typeof v === 'number' && key === 'resetsAt') return 1_800_000_000
     return v
   }
   const out: { t: number; dir: string; msg?: unknown; code?: number | null; signal?: string | null }[] = []

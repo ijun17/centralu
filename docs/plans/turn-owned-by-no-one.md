@@ -302,14 +302,13 @@ That is stricter, which floor b allows.
 
 ### 4.3 Loop and rate guards (C8)
 
-- **Pair loop guard** (`pairLoopSpent`, `turns.ts:251`; `pairTurnsSince` counts `started_by = 'mail'` with a session
+- **The pair's warning count** (`pairTurns`, `turns.ts`; it holds nothing since #2014; `pairTurnsSince` counts `started_by = 'mail'` with a session
   sender, `dev-services/store/mailbox.ts:757`) is about mail starting turns. It keeps reading `started_by = 'mail'`,
   which the delivery writes when it starts a turn (`MailTurns.begin`), with no turn owner involved.
 - **Its reset at the person's word** (`lastPersonWord` → `lastPersonTurn`, `started_by = 'person'`, `mailbox.ts:1007`)
   reads, instead, the newest `byPerson` user row of either session of the pair, and the person's mail. That is what
   "a word from the person" means, and it needs no turn decision.
-- **Token guard** (`budgetSpent`, `turns.ts:232`, mail-started turns only, memory) and the **host cap**
-  (`mailStartedSince`, `delivery.ts:533`): unchanged.
+- **The token guard is gone** (#2014), and the **host's warning count** (`hostTurns` → `mailStartedSince`) is unchanged.
 - **`started_by` keeps being written** for an older build's readers during a swap: `mail` by the delivery, `person` when
   the turn's first input at its start was a `byPerson` row, else `cli`. No correction afterwards (`MailTurns.restate`
   goes with the turn-starter engine).

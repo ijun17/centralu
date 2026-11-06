@@ -5,7 +5,6 @@
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
 import { A, B, C, ORC, W, X, Y, HOST, NOW, addr, refusedFor, world } from './messages.test-helpers.js'
-import { MAX_DEPTH } from './rules.js'
 
 const MINUTE = 60_000
 
@@ -106,18 +105,9 @@ describe('sending', () => {
 })
 
 describe('the guards', () => {
-  it('the sixth non-reply message an hour to one session is refused pair_rate; replies pass', () => {
+  it('new conversations from one session to another are never refused for their number (#2014)', () => {
     const w = world()
-    for (let i = 1; i <= 5; i++) w.send(A, { to: [B], text: `new ${i}` })
-    expect(refusedFor(() => w.send(A, { to: [B], text: 'new 6' }))).toBe('pair_rate')
-    // The other direction is another pair, another recipient is another pair, and a reply is no new conversation
-    expect(refusedFor(() => w.send(B, { to: [A], text: 'ping' }))).toBe('NOT REFUSED')
-    expect(refusedFor(() => w.send(A, { to: [C], text: 'new 6' }))).toBe('NOT REFUSED')
-    const q = w.send(B, { to: [A], text: 'a question' }).message
-    expect(refusedFor(() => w.send(A, { replyTo: q.id, text: 'an answer' }))).toBe('NOT REFUSED')
-    // An hour later the pair is free again
-    w.clock.t += 61 * MINUTE
-    expect(refusedFor(() => w.send(A, { to: [B], text: 'new 7' }))).toBe('NOT REFUSED')
+    for (let i = 1; i <= 10; i++) expect(refusedFor(() => w.send(A, { to: [B], text: `new ${i}` }))).toBe('NOT REFUSED')
   })
 
   it('the same text to the same session within 10 minutes is refused repeat', () => {
@@ -365,12 +355,12 @@ describe('quiet answers (D3)', () => {
   })
 })
 
-describe('cause, depth and clarifications (D9, §9.7)', () => {
+describe('cause and clarifications (D9, §9.7)', () => {
   it('a message sent in a turn a message started carries that message as its cause', () => {
     const w = world()
     const m1 = w.send(A, { to: [B], text: 'first' }).message
     w.startTurn(B, m1.id)
-    expect(w.send(B, { to: [C], text: 'onward' }).message).toMatchObject({ causeId: m1.id, depth: 1 })
+    expect(w.send(B, { to: [C], text: 'onward' }).message).toMatchObject({ causeId: m1.id, depth: 0 })
     // A turn the person or the session itself started has no cause
     w.startTurn(B, null)
     expect(w.send(B, { to: [C], text: 'on its own' }).message).toMatchObject({ causeId: null, depth: 0 })
@@ -378,50 +368,36 @@ describe('cause, depth and clarifications (D9, §9.7)', () => {
     expect(w.send(B, { to: [C], text: 'person turn' }).message).toMatchObject({ causeId: null, depth: 0 })
   })
 
-  it('a ring of messages adds a hop at each party; the sixth message (depth 5) is held loop, and the person’s word in its sender does not let it go', () => {
+  it('a ring of messages passed on round three sessions is held at no hop, and an answer deep in a chain an earlier build counted settles its question', () => {
     const w = world()
-    const ring = [A, B, C, A, B, C]
+    const ring = [A, B, C, A, B, C, A, B]
     let last = w.send(ring[0] ?? A, { to: [ring[1] ?? B], text: 'round 0' }).message
-    const depths = [last.depth]
-    for (let i = 1; i < 6; i++) {
+    for (let i = 1; i < ring.length; i++) {
       w.startTurn(ring[i] ?? A, last.id)
       const r = w.send(ring[i] ?? A, { to: [ring[(i + 1) % 3] ?? A], text: `round ${i}` })
-      depths.push(r.message.depth)
-      if (i < 5) expect(r.held).toEqual([])
-      else expect(r.held).toEqual([{ recipient: A, why: 'loop' }])
+      expect(r.held).toEqual([])
       last = r.message
     }
-    expect(depths).toEqual([0, 1, 2, 3, 4, 5])
-    expect(depths[5]).toBeGreaterThan(MAX_DEPTH)
-    expect(w.rowOf(last.id, A).held).toBe('loop')
-
-    // The person writes to C: what C sends from then on starts at depth 0, but the held row stays held
-    const word = w.mail.send(PERSON, { to: [C], text: 'carry on' }).message
-    w.startTurn(C, word.id)
-    expect(w.send(C, { to: [B], text: 'after the word' }).message.depth).toBe(0)
-    expect(w.rowOf(last.id, A).held).toBe('loop')
-
-    // Only Resume lets it go, and then it is never held loop again
-    expect(w.mail.resumeDepth(last.id)).toBe(1)
-    expect(w.rowOf(last.id, A).held).toBe('released')
-    expect(w.mail.resumeDepth(last.id)).toBe(0)
-  })
-
-  it('a held loop answer leaves its question open; Resume settles it', () => {
-    const w = world()
     const q = w.send(A, { to: [B], text: 'what now?' }).message
-    // B is deep into a chain when it answers
     const deep = w.mail.send(C, { to: [B], text: 'x' }).message
     w.db.prepare(`UPDATE mail SET depth = 4 WHERE id = ?`).run(deep.id)
     w.startTurn(B, deep.id)
     const answer = w.send(B, { replyTo: q.id, text: 'the answer', to: [A, C] })
-    expect(answer.message.depth).toBe(5)
-    expect(answer.held.map((h) => h.why)).toEqual(['loop', 'loop'])
-    expect(w.rowOf(q.id, B)).toMatchObject({ settled: null, answerId: answer.message.id })
-    const notice = w.records.pendingFor(A, w.clock.t + 10_000).find((p) => p.message.kind === 'notice')
-    expect(notice?.message.body).toContain('it is the 5th hop in a row')
-    expect(w.mail.resumeDepth(answer.message.id)).toBe(2)
+    expect(answer.held).toEqual([])
     expect(w.rowOf(q.id, B)).toMatchObject({ settled: 'answered', answerId: answer.message.id })
+  })
+
+  it('Resume on an answer an earlier build held loop lets it go, marks it released, and settles its question', () => {
+    const w = world()
+    const q = w.send(A, { to: [B], text: 'what now?' }).message
+    const answer = w.send(B, { replyTo: q.id, text: 'the answer' }).message
+    // As the earlier build left it: the row held, the question open with the answer's id
+    w.records.hold(A, [answer.id], 'loop')
+    w.db.prepare(`UPDATE mail_recipients SET settled = NULL, settled_at = NULL WHERE message_id = ? AND recipient = ?`).run(q.id, B)
+    expect(w.mail.resumeHeld(answer.id)).toBe(1)
+    expect(w.rowOf(answer.id, A).held).toBe('released')
+    expect(w.rowOf(q.id, B)).toMatchObject({ settled: 'answered', answerId: answer.id })
+    expect(w.mail.resumeHeld(answer.id)).toBe(0)
   })
 
   it('a message caused by a task from its recipient is stored with clarifies and is no request; the owner’s answer to it is stored as a task with reply_to', () => {
@@ -752,16 +728,10 @@ describe('what the deep review of #1899 found', () => {
     expect(answer.quiet).toBe(false)
     expect(answer.message.facts).toEqual({})
     w.clock.t += 10_000
-    expect(w.mail.drain(ORC)).toMatchObject({ wake: true, workMessage: answer.message.id, asker: W, quieted: [] })
+    expect(w.mail.drain(ORC)).toMatchObject({ wake: true, workMessage: answer.message.id, asker: W })
     // Between two ordinary sessions the same answer is quiet
     const other = w.send(A, { to: [B], text: 'carry on', needsReply: false }).message
     expect(w.send(B, { replyTo: other.id, text: 'ok' }).quiet).toBe(true)
-  })
-
-  it('tasks are not new conversations: five tasks to a session do not make its owner’s first plain message pair_rate', () => {
-    const w = world()
-    for (let i = 0; i < 5; i++) w.mail.task(A, W, { text: `task ${i}`, origin: 'agent_session', delivered: false })
-    expect(refusedFor(() => w.send(A, { to: [W], text: 'hello' }))).toBe('NOT REFUSED')
   })
 
   it('dismissProject counts a message once, whatever the number of rows it was held in', () => {
@@ -772,7 +742,7 @@ describe('what the deep review of #1899 found', () => {
     expect(notice?.message.body).toBe(`The person dismissed 1 of your messages that were waiting for project Pex to be trusted (${m.id}). They were not delivered and will not be.`)
   })
 
-  it('trusting a project does not settle a question whose answer is still held for the depth: it stays held loop, and its asker is told why', () => {
+  it('trusting a project lets an answer held for it go and settles its question, however deep in a chain it was sent', () => {
     const w = world()
     const q = w.send(A, { to: [X], text: 'what now?' }).message
     const deep = w.mail.send(C, { to: [X], text: 'x' }).message
@@ -780,17 +750,11 @@ describe('what the deep review of #1899 found', () => {
     w.startTurn(X, deep.id)
     const answer = w.send(X, { replyTo: q.id, text: 'the answer' })
     expect(answer.held).toEqual([{ recipient: A, why: 'policy' }])
+    expect(w.rowOf(q.id, X)).toMatchObject({ settled: null, answerId: answer.message.id })
 
     w.projects.set('px', { trusted: true })
-    expect(w.mail.trustChanged('px')).toEqual([])
-    expect(w.rowOf(answer.message.id, A).held).toBe('loop')
-    expect(w.rowOf(q.id, X)).toMatchObject({ settled: null, answerId: answer.message.id })
-    const told = w.records.pendingFor(A, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')
-    expect(told).toHaveLength(2)
-    expect(told[0]?.message.body).toContain('Pex is not trusted')
-    expect(told[1]?.message.body).toContain('it is the 5th hop in a row')
-    // The person’s Resume is the way out now
-    expect(w.mail.resumeDepth(answer.message.id)).toBe(1)
+    expect(w.mail.trustChanged('px')).toEqual([A])
+    expect(w.rowOf(answer.message.id, A).held).toBeNull()
     expect(w.rowOf(q.id, X)).toMatchObject({ settled: 'answered' })
   })
 

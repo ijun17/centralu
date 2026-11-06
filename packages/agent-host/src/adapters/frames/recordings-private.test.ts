@@ -14,6 +14,7 @@ const ROOTS = [
   fileURLToPath(new URL('../acp/recordings/', import.meta.url)),
   fileURLToPath(new URL('../antigravity/recordings/', import.meta.url)),
   fileURLToPath(new URL('../claude/recordings/', import.meta.url)),
+  fileURLToPath(new URL('../codex/recordings/', import.meta.url)),
 ]
 
 const PRIVATE: readonly [string, RegExp][] = [
@@ -34,12 +35,18 @@ const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
   ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+?__[\w.-]+/],
 ]
 
+/** What Codex's recordings must also be free of: the app-server says the account's plan and the machine's name, and numbers a response's items */
+const CODEX_PRIVATE: readonly [string, RegExp][] = [
+  ['the account’s plan', /"planType":"(?!<plan>)/],
+  ['a response item id that is not a placeholder', /\b(?:msg|rs|call|fc|ws|resp)_(?!\d{6}\b)[0-9a-f]{16,}/],
+]
+
 /**
  * The words of the machine the test runs on. The user name is looked for only off CI: a recording is made and
  * scrubbed on a person's machine, so that is where their name could leak, while a CI runner's account is a common
  * word ("runner") that a model's own text may use (an Antigravity sub-agent named its role "Command Runner").
  */
-function machineWords(): [string, RegExp][] {
+function machineWords(codex: boolean): [string, RegExp][] {
   const words: [string, RegExp][] = []
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   try {
@@ -48,9 +55,11 @@ function machineWords(): [string, RegExp][] {
   } catch {
     // No user name to look for
   }
-  // The machine's name, as a host in a path or an address (`\\\\name\\share`, `user@name`, `name.local`): a bare word could be a month ("Jun") in a listing. Off CI, where a runner's name is a common word
+  // The machine's name, as a host in a path or an address (`\\name\share`, `user@name`, `name.local`): a bare word could be a month ("Jun") in a listing. Off CI, where a runner's name is a common word
   const machine = hostname().split('.')[0] ?? ''
   if (machine.length >= 3 && !process.env.CI) words.push(['this machine’s name', new RegExp(`[\\\\/@]${escape(machine)}\\b|\\b${escape(machine)}\\.(?:local|lan|home|internal)\\b`, 'i')])
+  // A Codex app-server also says the machine's name bare, in the frames about its remote control
+  if (codex && machine.length >= 4 && !process.env.CI) words.push(['this machine’s name', new RegExp(`\\b${escape(machine)}\\b`, 'i')])
   for (const form of new Set([homedir(), homedir().replace(/\\/g, '/'), homedir().replace(/\\/g, '\\\\')])) {
     if (form.length > 3) words.push(['this machine’s home folder', new RegExp(escape(form), 'i')])
   }
@@ -100,7 +109,7 @@ describe('the committed recordings', () => {
       const text = readFileSync(file, 'utf8')
       const lines = text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line)
       const readings = [text, joinedChunks(lines)]
-      const found = [...PRIVATE, ...(/[\\/]claude[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...machineWords()].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
+      const found = [...PRIVATE, ...(/[\\/](?:claude|codex)[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...(/[\\/]codex[\\/]recordings[\\/]/.test(file) ? CODEX_PRIVATE : []), ...machineWords(/[\\/]codex[\\/]recordings[\\/]/.test(file))].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
       expect(found).toEqual([])
       const commands = lines.flatMap((l) => l.msg?.params?.update?.availableCommands ?? []).map((c) => c.name)
       expect(commands.filter((c) => typeof c !== 'string' || !/^command-\d+$/.test(c))).toEqual([])
