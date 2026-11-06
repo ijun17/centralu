@@ -25,8 +25,10 @@ export type Held = {
   said: string[]
   /** The conversation's bubbles in the order the tool made them: the person's prompts and the agent's blocks of text */
   order: ('prompt' | 'said')[]
-  /** The tool calls, by the name the tool gave them */
-  tools: string[]
+  /** The tool calls, by the name the tool gave them; Centralu's own and an attached app's are drawn with a mark of their own, not their name */
+  tools: { name: string; marked?: true }[]
+  /** What the person picked on the cards that ask a question, in order: the labels of the options */
+  answers: string[]
   /** The compactions the tool announced, with the size of the conversation before and after */
   compactions: { before: number; after: number }[]
 }
@@ -34,13 +36,14 @@ export type Held = {
 /** The tool's frames, read for `Held`; one per recorded tool */
 const HELD: Record<string, (recording: Recording) => Held> = {
   claude: (recording) => {
-    const held: Held = { steps: [], said: [], order: [], tools: [], compactions: [] }
+    const held: Held = { steps: [], said: [], order: [], tools: [], answers: [], compactions: [] }
     let running = false
     let ended = false
     const say = (words: string) => {
       held.said.push(words)
       held.order.push('said')
     }
+    const call = (name: string) => held.tools.push(/^mcp__(centralu|app-[^_]+)__/.test(name) ? { name, marked: true } : { name })
     /** The messages that streamed: their words and calls were taken as they came, and the whole message says them again */
     const streamed = new Set<string>()
     for (const f of recording.frames) {
@@ -48,7 +51,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         ended = true
         continue
       }
-      const m = f.msg as { type?: string; subtype?: string; parent_tool_use_id?: string | null; message?: { id?: string; content?: { type: string; text?: string; name?: string }[] }; request?: { subtype?: string }; event?: Record<string, any>; compact_metadata?: { pre_tokens: number; post_tokens: number } } | undefined
+      const m = f.msg as { type?: string; subtype?: string; parent_tool_use_id?: string | null; message?: { id?: string; content?: { type: string; text?: string; name?: string }[] }; request?: { subtype?: string }; response?: { response?: { updatedInput?: { answers?: Record<string, string> } } }; event?: Record<string, any>; compact_metadata?: { pre_tokens: number; post_tokens: number } } | undefined
       if (!m) continue
       if (f.dir === 'out') {
         if (m.type === 'user') {
@@ -59,6 +62,11 @@ const HELD: Record<string, (recording: Recording) => Held> = {
           held.order.push('prompt')
           running = true
         } else if (m.type === 'control_request' && m.request?.subtype === 'interrupt') held.steps.push({ kind: 'stop' })
+        else if (m.type === 'control_response') {
+          // The answer to a question card: the option the person picked for each question
+          const answers = (m.response?.response?.updatedInput?.answers ?? {})
+          held.answers.push(...Object.values(answers))
+        }
       } else if (f.dir === 'in') {
         if (m.type === 'result') running = false
         if (m.type === 'system' && m.subtype === 'compact_boundary') held.compactions.push({ before: m.compact_metadata!.pre_tokens, after: m.compact_metadata!.post_tokens })
@@ -67,7 +75,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         if (m.type === 'assistant' && !streamed.has(String(m.message?.id))) {
           for (const b of m.message?.content ?? []) {
             if (b.type === 'text') say(b.text ?? '')
-            else if (b.type === 'tool_use') held.tools.push(String(b.name))
+            else if (b.type === 'tool_use') call(String(b.name))
           }
         }
         if (m.type !== 'stream_event') continue
@@ -75,7 +83,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         if (e?.type === 'message_start') streamed.add(String(e.message?.id))
         else if (e?.type === 'content_block_start' && e.content_block?.type === 'text') say('')
         else if (e?.type === 'content_block_delta' && e.delta?.type === 'text_delta') held.said[held.said.length - 1] += String(e.delta.text)
-        else if (e?.type === 'content_block_start' && e.content_block?.type === 'tool_use') held.tools.push(String(e.content_block.name))
+        else if (e?.type === 'content_block_start' && e.content_block?.type === 'tool_use') call(String(e.content_block.name))
       }
     }
     return held
@@ -91,23 +99,47 @@ export type Replay = {
   scenario: string
   /** How the person answers the cards, in the order they come: a recording says that a command was allowed, not that a card asked */
   cards?: Decision[]
-  /** What is on screen when the person presses Stop, where the recording holds one: not decided by the frames, which arrive at once */
-  stopAt?: 'thinking' | 'tool'
+  /** What is on screen when the person presses Stop, where the recording holds one (not decided by the frames, which arrive at once): the activity "Thinking", or a line the turn's thoughts and calls are folded into */
+  stopAt?: 'thinking' | 'folded'
   /** What this scenario draws that every recording does not */
   shows?(page: Page, held: Held, seen: Seen): Promise<void>
 }
 
-const text = (s: string) => s.replace(/`/g, '').replace(/\s+/g, ' ').trim()
+/** The words of `s` as a person reads them: the marks of Markdown (a heading's hashes, a bullet, a code fence, a table's rule and bars, emphasis) are not words */
+const text = (s: string) =>
+  s
+    .replace(/^```.*$/gm, '')
+    .replace(/^[\s:|-]*-{3,}[\s:|-]*$/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/[|`*]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** Stands for the mark of Centralu's own tools and an app's where the cards are listed: it is an icon, with no words */
+const MARK = '<mark>'
 
 const approvals = (page: Page) => page.getByTestId('msg-approval-log').allInnerTexts().then((rows) => rows.map(text))
 const folds = (page: Page) => page.getByTestId('fold-line').allInnerTexts().then((rows) => rows.map(text))
 
-async function settled(page: Page, cards: Decision[]): Promise<void> {
+/** The answers still to give: to the cards that ask to allow something, and to the ones that ask a question */
+type Answers = { cards: Decision[]; picks: string[] }
+
+async function settled(page: Page, answers: Answers): Promise<void> {
   const card = page.getByTestId('approval-card')
+  const question = page.getByTestId('question-card')
   for (;;) {
-    await expect.poll(async () => ((await card.count()) > 0 ? 'card' : (await page.getByTestId('activity-row').count()) === 0 ? 'idle' : 'busy')).not.toBe('busy')
+    await expect.poll(async () => ((await card.count()) + (await question.count()) > 0 ? 'card' : (await page.getByTestId('activity-row').count()) === 0 ? 'idle' : 'busy')).not.toBe('busy')
+    if ((await question.count()) > 0) {
+      const pick = answers.picks.shift()
+      if (!pick) throw new Error(`a card asked ${await question.innerText()} and the recording holds no answer to it`)
+      // A single-choice question is answered by its option, with no Answer to press
+      await question.getByTestId('question-option').filter({ hasText: pick }).first().click({ timeout: 10_000 })
+      await expect(question).toHaveCount(0)
+      continue
+    }
     if ((await card.count()) === 0) return
-    const decision = cards.shift()
+    const decision = answers.cards.shift()
     if (!decision) throw new Error(`a card asked for ${await card.getByTestId('approval-detail').innerText()} and the entry has no answer for it`)
     await card.getByTestId(`approve-${decision}`).click({ timeout: 10_000 })
     await expect(card).toHaveCount(0)
@@ -115,14 +147,17 @@ async function settled(page: Page, cards: Decision[]): Promise<void> {
 }
 
 async function play(page: Page, replay: Replay, held: Held, host: ReplayHost): Promise<void> {
-  const cards = [...(replay.cards ?? [])]
+  const answers: Answers = { cards: [...(replay.cards ?? [])], picks: [...held.answers] }
   const input = page.getByTestId('prompt-input')
   for (const [i, step] of held.steps.entries()) {
     if (step.kind === 'stop') {
-      const cue = { thinking: page.getByTestId('activity-label').filter({ hasText: 'Thinking' }), tool: page.getByTestId('tool-card-toggle').or(page.getByTestId('fold-line')) }[replay.stopAt ?? 'thinking']
+      const cue = {
+        thinking: page.getByTestId('activity-label').filter({ hasText: 'Thinking' }),
+        folded: page.getByTestId('tool-card-toggle').or(page.getByTestId('fold-line')),
+      }[replay.stopAt ?? 'thinking']
       await expect(cue.first()).toBeVisible()
       await page.getByTestId('activity-interrupt').click({ timeout: 10_000 })
-      await settled(page, cards)
+      await settled(page, answers)
       continue
     }
     if (step.kind === 'restart') {
@@ -139,9 +174,9 @@ async function play(page: Page, replay: Replay, held: Held, host: ReplayHost): P
     await input.press('Enter')
     // A turn that is stopped does not end by itself, and one that has another prompt sent into it ends after that: the next step ends it
     const next = held.steps[i + 1]
-    if (next?.kind !== 'stop' && !(next?.kind === 'prompt' && next.during)) await settled(page, cards)
+    if (next?.kind !== 'stop' && !(next?.kind === 'prompt' && next.during)) await settled(page, answers)
   }
-  expect(cards, 'every answer the entry holds was asked for').toEqual([])
+  expect(answers, 'every answer the entry and the recording hold was asked for').toEqual({ cards: [], picks: [] })
 }
 
 /** The pane against `held`: every recording gets these */
@@ -159,11 +194,12 @@ async function expectPane(page: Page, held: Held): Promise<Seen> {
     seen.folds = await folds(page)
     await openFolds(page)
   }
-  const own = held.tools.filter((t) => !t.startsWith('mcp__centralu__'))
-  const badges = page.locator('[data-testid=tool-card-toggle] > span:first-child')
-  await expect.poll(() => badges.evaluateAll((els) => els.map((e) => e.textContent))).toEqual(own)
-  // No recording holds a Centralu call yet, so this is 0 until one does; then it counts them
-  await expect(page.getByTestId('centralu-call-mark')).toHaveCount(held.tools.length - own.length)
+  // Each call is a card: its tool's name on a badge, or the mark of Centralu's own tools and an app's where the call is one of theirs
+  const cards = page.locator('[data-testid=tool-card], [data-testid=ask-project-card]')
+  await expect
+    .poll(() => cards.evaluateAll((els, mark) => els.map((e) => (e.querySelector('[data-testid=centralu-call-mark]') ? mark : (e.querySelector('[data-testid=tool-card-toggle] > span:first-child')?.textContent ?? ''))), MARK))
+    .toEqual(held.tools.map((t) => (t.marked ? MARK : t.name)))
+  await expect(page.getByTestId('centralu-call-mark')).toHaveCount(held.tools.filter((t) => t.marked).length)
   // "Context compacted here · 21.3k → 3.3k"
   const size = (n: number) => `${(n / 1000).toFixed(1)}k`
   await expect.poll(async () => (await page.getByTestId('msg-mark').filter({ hasText: /compacted/i }).allInnerTexts()).map(text)).toEqual(held.compactions.map((c) => `Context compacted here · ${size(c.before)} → ${size(c.after)}`))
@@ -221,7 +257,7 @@ export const REPLAYS: Replay[] = [
   {
     tool: 'claude',
     scenario: 'interrupt-tool',
-    stopAt: 'tool',
+    stopAt: 'folded',
     async shows(page, _held, seen) {
       // The call that was cut off is counted failed on its line; the turn itself ends as stopped, with no error line
       expect(seen.folds).toEqual(['1 tool 1 failed'])
@@ -244,11 +280,81 @@ export const REPLAYS: Replay[] = [
   { tool: 'claude', scenario: 'background' },
   { tool: 'claude', scenario: 'queued' },
   { tool: 'claude', scenario: 'resume' },
+  { tool: 'claude', scenario: 'background-open' },
+  { tool: 'claude', scenario: 'background-poll' },
+  {
+    tool: 'claude',
+    scenario: 'centralu-agents',
+    async shows(page) {
+      // Each call is drawn as what it did, under the mark of Centralu's tools
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(["Searched past conversations","Read a session","Started an agent"])
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'centralu-compact',
+    async shows(page) {
+      // Each call is drawn as what it did, under the mark of Centralu's tools
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(["Asked to compact"])
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'centralu-mail',
+    async shows(page) {
+      // Each call is drawn as what it did, under the mark of Centralu's tools
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(["Mail","Mail"])
+    },
+  },
+  { tool: 'claude', scenario: 'image' },
+  { tool: 'claude', scenario: 'long-output' },
+  {
+    tool: 'claude',
+    scenario: 'markdown',
+    async shows(page, held) {
+      // Each construct of the answer's Markdown is drawn as one: the heading, the bullets, the code block, the table's rows
+      const markdown = held.said[0]!
+      const count = (pattern: RegExp) => (markdown.match(pattern) ?? []).length
+      const drawn = await page.getByTestId('msg-assistant').evaluate((el) => ({ headings: el.querySelectorAll('h1,h2,h3,h4,h5,h6').length, items: el.querySelectorAll('li').length, blocks: el.querySelectorAll('pre').length, rows: el.querySelectorAll('tr').length }))
+      expect(drawn).toEqual({ headings: count(/^#{1,6} /gm), items: count(/^\s*[-*+] /gm), blocks: count(/^```/gm) / 2, rows: count(/^\|/gm) - 1 })
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'mcp-app',
+    async shows(page) {
+      // A tool of an attached app: marked as the app's, named by the app and its tool
+      expect(await page.getByTestId('centralu-call-label').allInnerTexts()).toEqual(['weather: forecast'])
+      await expect(page.getByTestId('centralu-call-mark')).toHaveAttribute('data-mark', 'app')
+    },
+  },
+  {
+    tool: 'claude',
+    scenario: 'plan',
+    cards: ['allow'],
+    async shows(page) {
+      // The plan is asked about as an approval of the tool's raw input, not as a plan to read (#2043)
+      expect((await approvals(page))[0]).toMatch(/^Allowed · ExitPlanMode \{"plan":"# Plan/)
+    },
+  },
+  { tool: 'claude', scenario: 'powershell' },
+  { tool: 'claude', scenario: 'question' },
+  { tool: 'claude', scenario: 'subagent' },
+  {
+    tool: 'claude',
+    scenario: 'tool-error',
+    async shows(page, _held, seen) {
+      // A command that exits with an error and a read of a file that is not there: both calls are counted failed, and the turn goes on to say so
+      expect(seen.folds).toEqual(['2 tools 2 failed'])
+      await expect(page.getByTestId('msg-mark')).toHaveCount(0)
+    },
+  },
 ]
 
 /** Recordings that no entry plays, and why */
 const NOT_PLAYED: Record<string, string> = {
   'claude/interrupt-approval': 'the screen has no Stop while a card is open: the person answers the card, which the approval scenario plays',
+  'claude/question-declined': 'the screen has no Stop while a question card is open: it is answered by an option or by words, which the question scenario plays',
 }
 
 export function replayTests(): void {

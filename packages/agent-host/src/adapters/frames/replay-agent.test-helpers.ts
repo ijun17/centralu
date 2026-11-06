@@ -37,16 +37,13 @@ export const REPLAYED: readonly ReplayedTool[] = [
     recordings: CLAUDE_RECORDINGS,
     adapter: replayedClaudeAdapter,
     codec: streamJsonCodec,
-    session(opts, scenario, recording) {
-      const initialize = recording.frames.find((f) => f.dir === 'out' && (f.msg?.request as { subtype?: string } | undefined)?.subtype === 'initialize')
-      const bridged = Array.isArray((initialize?.msg?.request as { sdkMcpServers?: unknown } | undefined)?.sdkMcpServers)
-      const session: CreateSessionOpts = { ...opts, ...CLAUDE_REPLAY_SESSION, model: scenariosFor('claude').find((s) => s.name === scenario)?.model ?? CLAUDE_REPLAY_SESSION.model }
-      // The host gives every session Centralu's own tools and the attached apps; the recorder's run had neither unless the recording names a server
-      if (!bridged) {
-        delete session.orchestratorTools
-        delete session.apps
-      }
-      return session
+    session(opts, scenario) {
+      const named = scenariosFor('claude').find((s) => s.name === scenario)
+      const session: CreateSessionOpts = { ...opts, ...CLAUDE_REPLAY_SESSION, model: named?.model ?? CLAUDE_REPLAY_SESSION.model }
+      // The host gives every session Centralu's own tools and the attached apps; the recorded run had what its scenario adds (fakes answering in the host's place)
+      delete session.orchestratorTools
+      delete session.apps
+      return { ...session, ...named?.session?.() }
     },
   },
 ]

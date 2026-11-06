@@ -2254,8 +2254,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    UI: it types the prompts the recording holds, presses Stop and restarts the agent where it holds them, and checks
    against what the recording holds the bubbles in their order, the tool calls (their number and names, and that they fold
    into lines), the Centralu call marks and the compaction marks, and that the adapter sent the tool nothing the
-   recording does not hold. What the recording cannot say is in the entry: how a card is answered, what is on screen when
-   Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line). A test fails for a
+   recording does not hold. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
+   Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line); a question card is
+   answered with the option the recording holds. A test fails for a
    recording that has no entry and no reason in `NOT_PLAYED`. A new recording of a tool already in `REPLAYED` is one entry
    of `REPLAYS`; a new tool is one row of `REPLAYED` (its adapter, its `FrameCodec`, the options its session is given, its
    recordings folder) and one reader of its frames in `HELD`. A check that a tool's new version sends frames the recordings lack would read the same table: the
