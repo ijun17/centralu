@@ -179,6 +179,9 @@ import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { MachineAsks } from './machine-asks.js'
 import type { HubsReader } from './ask-project-flow.js'
 
+/** How long `adoptKept` waits for an adopted tool to say whether its conversation is idle (`SessionHandle.adoptedIdle`): past it, the turn is taken to go on */
+const ADOPTED_IDLE_WAIT_MS = 30_000
+
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
   SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & OrchestratorSlotHost & LinkedHostHost & SessionSettingsHost
@@ -1211,6 +1214,8 @@ export class SessionManager {
     this.interruptions.markTurnLost(m, true)
     this.store.sessions.upsertSession(m)
     this.emit(change)
+    // The turn is over: so is a hub task's depth for it, as at any end of a turn (#2020)
+    this.events.endHubAsk(m.id)
     // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
     // Whose the turn was (#1377): the person's is reported to nobody
     // The process is gone with it (#1604): what it was given is run by no one
@@ -1255,6 +1260,14 @@ export class SessionManager {
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
         // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached. Centralu cut it, so it continues it (#1966)
         if (adopted?.takesOverTurn === false && inTurn(m.state)) await this.continueLostTurn(m)
+        /*
+         * The tool says its conversation is idle while the record says a turn runs (#2020): that turn ended while no host ran and its
+         * end was not stored (a crash during a capacity retry's wait, which the host that held the error took with it). Nothing will say
+         * it ended, and the retry was in that host's memory: the turn is over, as one a swap could not continue is, and a message goes on.
+         * Not when this host holds a retry of its own: the error reached it as a frame the keeper buffered, and the wait is its.
+         * Asked after the conversation opened and the buffered frames were handled, and the state read again then
+         */
+        else if (adopted?.adoptedIdle && inTurn(m.state) && (await raceTimeout(adopted.adoptedIdle(), ADOPTED_IDLE_WAIT_MS, false)) && inTurn(m.state) && !this.lettingGo() && !this.overloadRetry.stands(k.sessionId)) this.turnLostInSwap(m)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
         if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {

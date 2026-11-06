@@ -22,7 +22,7 @@ import { CodexRequests } from './server-requests.js'
 import { CodexServers } from './thread-servers.js'
 import { CodexChildThreads } from './child-threads.js'
 import { CodexSlashCommands } from './slash-commands.js'
-import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
+import { runningTurnOf, threadIdOf, threadRunsNoTurn, turnIdOf } from './turn-reads.js'
 import { codexCompactAt, initializeAppServer, latestRunningTurn, networkAccessOf, resumeFailure, resumeThreadParams, startThreadParams } from './thread-open.js'
 import { watchBackgroundResume } from './background-resume.js'
 import { keepAttachedAppMarks } from '../tool-titles.js'
@@ -243,6 +243,7 @@ export class CodexSession implements SessionHandle {
       }
       this.threadServers.checkAppMode(res)
       this.networkAccess = networkAccessOf(res)
+      this.idleOnResume = adopted && threadRunsNoTurn(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
       if (adopted && this.ledger.taken([], runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))) this.threadWritten()
       /*
@@ -271,6 +272,14 @@ export class CodexSession implements SessionHandle {
   }
 
   private networkAccess: boolean | undefined
+
+  /** The app-server of an adopted process said no turn ran in the thread when it was resumed (`thread.status` not `active`, `threadRunsNoTurn`) */
+  private idleOnResume = false
+
+  async adoptedIdle(): Promise<boolean> {
+    await this.ready.catch(() => {})
+    return this.idleOnResume && this.ledger.quiet
+  }
 
   delegationNotice(): string | undefined {
     return this.networkAccess === false
