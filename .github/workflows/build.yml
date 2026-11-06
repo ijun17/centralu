@@ -686,7 +686,7 @@ jobs:
   # (one worker, 4 to 8 s each) all fell in shard 1 (`--shard` cuts the list in the order of the projects),
   # and a shard's time is about half its test time (Playwright's default of 2 workers on these 4-CPU
   # runners; 3 were no faster). So 10 shards, and each plays its share of the replay on its own, then the rest
-  # (.github/scripts/e2e-shard.sh): the shards took X to Y minutes in 3 full runs of 2026-11-06 and 07. Each shard runs a slice of the tests with its own dev servers and hosts; every
+  # (.github/scripts/e2e-shard.sh): the shards of full runs on this branch took 4.8 to 9.1 minutes on 8 (WebKit) and 3.9 to 7.2 on 10. Each shard runs a slice of the tests with its own dev servers and hosts; every
   # shard keeps a blob report, and when one fails the `e2e report` job below merges them into one
   # HTML report with traces. A failed test runs once more (Playwright's `retries`, CI only), and one
   # that passes then is flaky, not green: e2e/flaky-report.ts names it on the run and has `e2e
@@ -696,7 +696,7 @@ jobs:
   # Time limits (2026-10-19): one shard hung 35 minutes and held a merge batch. A job's limit is its
   # slowest green run of the last 20 full runs with about half again on top, so a hang ends as a
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
-  # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
+  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
   # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
