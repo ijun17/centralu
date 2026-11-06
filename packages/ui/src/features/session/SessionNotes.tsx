@@ -1,13 +1,38 @@
-import { SHUTDOWN_WORDS, type Interruption } from '@cc/protocol/client'
+import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
+import { isInTurn } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
-import { CONTINUE_TEXT, interruptionLabel } from '../../components/primitives.jsx'
+import { CONTINUE_TEXT, canContinue, interruptionLabel } from '../../components/primitives.jsx'
 import { Button } from '../../components/Button.jsx'
 
 /*
  * The lines a session pane shows above its composer when the session will not simply hear the
  * next message (#428): its machine is away, its last turn was cut short, or it has no process.
  */
+
+type NotedSession = { id: string; state: SessionState; live: boolean; interruption?: Interruption | null }
+
+/**
+ * Which of the notes below a pane shows, and whether one of them has a button to press. The pane reads this to keep its
+ * composer open while it does: a folded composer rises over the bottom of the pane and would cover the button (owner,
+ * 2026-11-07). Both the notes and the pane decide from these, so a note cannot show without the pane knowing.
+ *
+ * The away note has no button (it only says the machine will pick up again), so it does not count.
+ */
+export function useSessionNotes(session: NotedSession | undefined, away: boolean) {
+  const waking = useStore((s) => !!(session && s.resuming[session.id]))
+  const wakeError = useStore((s) => (session ? s.wakeError[session.id] : undefined))
+  const error = !!session && session.state === 'error' && !away
+  const interrupted = !!session && canContinue(session.interruption) && !isInTurn(session.state) && !away
+  const dormant = !!session && !away && !session.live
+  return {
+    error,
+    interrupted,
+    dormant,
+    /** A button waits in a note: Done, Continue, or the dormant note's Retry (it has no button while it only says Waking) */
+    hasButton: error || interrupted || (dormant && !!wakeError && !waking),
+  }
+}
 
 /**
  * A session on a linked machine that is away (#82). What shows is what the hub last heard, and nothing here wakes it:

@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode, RefObject } from 'react'
-import { isInTurn, shouldMarkRead } from '@cc/core'
+import { shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
-import { Kbd, canContinue } from '../../components/primitives.jsx'
+import { Kbd } from '../../components/primitives.jsx'
 import { useSessionAway, useSessionFolder } from '../../store/selectors.js'
 import { lazyComponent } from '../../components/lazy.jsx'
 import { usePresence } from '../../components/presence.js'
@@ -14,7 +14,7 @@ import { ChatStream } from './chat-stream/ChatStream.jsx'
 import { SessionStart } from './SessionStart.jsx'
 import { Composer, type ComposerDrop } from './Composer.jsx'
 import { SessionHeader } from './SessionHeader.jsx'
-import { AwayNote, DormantNote, ErrorNote, InterruptedNote } from './SessionNotes.jsx'
+import { AwayNote, DormantNote, ErrorNote, InterruptedNote, useSessionNotes } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 import { COMPOSER_REACH } from './foldedComposer.js'
@@ -32,6 +32,9 @@ import { COMPOSER_REACH } from './foldedComposer.js'
  */
 const FOLD_SHARE = 1 / 6
 const UNFOLD_SHARE = 0.16
+
+/** How long the card takes to slide up into place when a pane opens its composer (the fold's own `duration-300`, `.cc-composer-rise`) */
+const RISE_MS = 300
 
 /** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
 const CommandRunnerOverlay = lazyComponent(() =>
@@ -198,7 +201,35 @@ export function SessionPane({
     return () => pane.removeEventListener(APP_LINK_DROP_EVENT, onAppDrop)
   }, [])
   const composerRef = useRef<HTMLDivElement>(null)
-  const fold = useShortPane(foldWhenShort, paneRef, composerRef)
+  // On a linked machine that is away (#82): dimmed, and nothing here tries to wake it
+  const away = useSessionAway(sessionId)
+  const notes = useSessionNotes(session, away)
+  /*
+   * A short pane folds its composer, unless a note with a button shows above it (owner, 2026-11-07): the raised card
+   * would cover Done, Continue or Retry. The pane stays open for as long as the note does and folds when it goes.
+   */
+  const short = useShortPane(foldWhenShort, paneRef, composerRef, notes.hasButton)
+  const fold = short && !notes.hasButton
+  /*
+   * Opening the composer is a slide too (owner: every fold and unfold is animated, design-system §9): the card comes up
+   * from below the pane's edge into the place it takes in the layout, as it went down. The pane clips while it does,
+   * since it is no longer clipping once open. It is decided during render (the change of `fold`), so the first frame
+   * of the open pane already has the card below the edge, and it is not an effect that races the paint. Under reduced
+   * motion it does not move, as the fold's own slide does not.
+   */
+  const [prevFold, setPrevFold] = useState(fold)
+  const [rising, setRising] = useState(false)
+  if (prevFold !== fold) {
+    setPrevFold(fold)
+    // A card that was raised (a hand, a caret, a menu, a drop) is already in its place: it has nowhere to come up from
+    const raised = nearComposer || overComposer || composerFocused || composerMenu || droppedIn
+    setRising(!fold && !raised && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  }
+  useEffect(() => {
+    if (!rising) return
+    const t = setTimeout(() => setRising(false), RISE_MS)
+    return () => clearTimeout(t)
+  }, [rising])
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
   /*
@@ -266,9 +297,6 @@ export function SessionPane({
     if (sessionShownId && shownAppSession && appFocused) void markOpened(sessionShownId)
   }, [sessionShownId, shownAppSession, appFocused, markOpened])
 
-  // On a linked machine that is away (#82): dimmed, and nothing here tries to wake it
-  const away = useSessionAway(sessionId)
-
   // Avoid rendering even at the moment the session disappears (deleted, archived)
   if (!session) return null
 
@@ -302,7 +330,7 @@ export function SessionPane({
        * for it to scroll up to in the first place.
        */
       ref={paneRef}
-      className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor ${fold ? 'overflow-clip' : ''}`}
+      className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor ${fold || rising ? 'overflow-clip' : ''}`}
       data-testid="session-view"
       /*
        * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
@@ -312,7 +340,7 @@ export function SessionPane({
        * through the middle of the conversation.
        */
       onMouseMove={
-        fold
+        foldWhenShort
           ? (e) => {
               const r = e.currentTarget.getBoundingClientRect()
               setNearComposer(e.clientY > r.bottom - COMPOSER_REACH)
@@ -320,7 +348,7 @@ export function SessionPane({
           : undefined
       }
       onMouseLeave={
-        fold
+        foldWhenShort
           ? () => {
               setNearComposer(false)
               setDroppedIn(false)
@@ -440,20 +468,16 @@ export function SessionPane({
         can be read. This tells the person it can be continued before they say anything to it —
         better than reporting failure after they have already sent something (FR-10).
       */}
-      {away ? (
-        <AwayNote machine={session.machine ?? null} />
-      ) : (
-        !session.live && <DormantNote sessionId={session.id} />
-      )}
+      {away ? <AwayNote machine={session.machine ?? null} /> : notes.dormant && <DormantNote sessionId={session.id} />}
 
       {/*
         The last turn stopped before it finished, and nobody here chose that (#698): the network, a quit, or the tool's
         own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
         waiting for input) looks the same as a turn that ended.
       */}
-      {session.state === 'error' && !away && <ErrorNote sessionId={session.id} />}
+      {notes.error && <ErrorNote sessionId={session.id} />}
 
-      {canContinue(session.interruption) && !isInTurn(session.state) && !away && (
+      {notes.interrupted && session.interruption && (
         <InterruptedNote sessionId={session.id} interruption={session.interruption} />
       )}
 
@@ -515,7 +539,9 @@ export function SessionPane({
                      */
                     'translate-y-full shadow-none'
               }`
-            : undefined
+            : rising
+              ? 'cc-composer-rise'
+              : undefined
         }
         ref={composerRef}
         data-testid="composer-shell"
@@ -563,6 +589,7 @@ function useShortPane(
   enabled: boolean,
   paneRef: RefObject<HTMLElement | null>,
   composerRef: RefObject<HTMLDivElement | null>,
+  held: boolean,
 ): boolean {
   const [short, setShort] = useState(false)
   useLayoutEffect(() => {
@@ -572,6 +599,9 @@ function useShortPane(
       setShort(false)
       return
     }
+    // While a note holds the composer open it is not the folded card the fold line was drawn for (that card measures a
+    // few pixels taller): the answer from before stands, and the measure runs again as the note goes
+    if (held) return
     const measure = () => {
       const paneH = pane.offsetHeight
       const restH = restingHeight(shell)
@@ -584,7 +614,7 @@ function useShortPane(
     ro.observe(pane)
     ro.observe(shell)
     return () => ro.disconnect()
-  }, [enabled, paneRef, composerRef])
+  }, [enabled, held, paneRef, composerRef])
   return enabled && short
 }
 
