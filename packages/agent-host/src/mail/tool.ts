@@ -167,7 +167,11 @@ export class MailTool {
     const lines = [`Sent ${m.id} to ${name}${name === to ? '' : ` (${to})`}.`]
     if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the orchestrator reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
     if (r.cited) lines.push(`Centralu checked the citation: the orchestrator reads the person's message ${r.cited.seq} of this session with your request.`)
-    if (answered) lines.push(`It answers ${answered.id} from ${this.reach.labelOf(answered.sender)}.`)
+    if (answered) {
+      // A request its sender withdrew (the person closed the chain) is answered anyway, and the answer says so
+      const withdrawn = this.records.recipient(answered.id, m.sender)?.settled === 'withdrawn'
+      lines.push(`It answers ${answered.id} from ${this.reach.labelOf(answered.sender)}${withdrawn ? ` (${answered.sender === PERSON ? 'the person' : 'its sender'} withdrew it)` : ''}.`)
+    }
     if (r.asWork) lines.push(`As an answer to a question about the work you gave ${name}, it is given as work: ${name}'s turn on it is reported to you.`)
     else if (r.quiet) lines.push(`It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`)
     else if (m.kind === 'message' && m.needsReply) lines.push(`It waits for a reply; the reply will reach you as mail.`)

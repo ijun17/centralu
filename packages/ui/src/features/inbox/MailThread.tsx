@@ -7,7 +7,7 @@ import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
-import { partyName, replyKind, threadStateLabel } from './mailLabels.js'
+import { closeStopsWork, partyName, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
@@ -18,6 +18,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const back = useStore((s) => s.closeMailThread)
   const close = useStore((s) => s.closeMail)
   const older = useStore((s) => s.loadOlderMail)
+  // A host of an older build stops the turn when the chain is closed: asked once first, with no way to close and leave it running. A host of this build stops nothing (it says so by sending `canReply`)
+  const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
   const list = useRef<HTMLOListElement>(null)
   // A conversation opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
   const newest = view?.messages.at(-1)?.seq
@@ -84,12 +86,33 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
         <Fold open={view.canReply !== false}>
           <Reply />
         </Fold>
-        {/* Closing is at once: the session that was working on it is told, and its turn is not stopped */}
+        {confirming !== null && (
+          <div className="flex items-center gap-2 border-t border-line/60 px-4 py-2 text-sm text-ink" role="alertdialog" data-testid="mail-stop-confirm">
+            <span className="min-w-0">{thread.assignee ? partyName(thread.assignee) : 'The session'} is working on this. Stop its work and close this?</span>
+            <Button
+              size="sm"
+              variant="danger"
+              className="ml-auto shrink-0"
+              onClick={() => {
+                const outcome = confirming
+                setConfirming(null)
+                void close(outcome)
+              }}
+              data-testid="mail-stop-close"
+            >
+              Stop and close
+            </Button>
+            <Button size="sm" variant="quiet" className="shrink-0" onClick={() => setConfirming(null)} data-testid="mail-stop-cancel">
+              Cancel
+            </Button>
+          </div>
+        )}
+        {/* Closing is at once: the session that was working on it is told, and its turn is not stopped (only a host of an older build stops it, and asks first) */}
         <div className="flex items-center gap-1.5 border-t border-line/60 px-4 py-2">
-          <Button size="sm" variant="quiet" onClick={() => void close('finished')} data-testid="mail-finish">
+          <Button size="sm" variant="quiet" onClick={() => (closeStopsWork(view) ? setConfirming('finished') : void close('finished'))} data-testid="mail-finish">
             Mark done
           </Button>
-          <Button size="sm" variant="quiet" onClick={() => void close('dropped')} data-testid="mail-drop">
+          <Button size="sm" variant="quiet" onClick={() => (closeStopsWork(view) ? setConfirming('dropped') : void close('dropped'))} data-testid="mail-drop">
             Drop
           </Button>
         </div>

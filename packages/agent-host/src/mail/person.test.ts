@@ -461,6 +461,24 @@ describe('closing a chain a session works on, and its state, as on main (owner d
     expect(w.told).toHaveLength(2)
   })
 
+  it('closes the whole chain or none of it: a failure part-way leaves the requests as they were, and tells nobody', () => {
+    const w = ready(hostWorld())
+    w.live.add('b')
+    const task = working(w)
+    const fail = vi.spyOn(w.store.mailbox, 'markClosed').mockImplementation(() => {
+      throw new Error('disk full')
+    })
+    expect(() => w.person.close(task.id, 'dropped')).toThrow('disk full')
+    fail.mockRestore()
+    expect(w.row(task.id, B)?.settled).toBeNull()
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'running' })
+    expect(w.told).toEqual([])
+    expect(notices(w, B)).toEqual([])
+    // Asked again, it closes
+    expect(w.person.close(task.id, 'dropped')).toMatchObject({ state: 'done', outcome: 'dropped' })
+    expect(w.told).toHaveLength(1)
+  })
+
   it('a request not delivered yet is withdrawn: it never reaches the session, which is not told of what it never saw', async () => {
     const w = ready(hostWorld())
     // The session is busy with its own work, so the request waits

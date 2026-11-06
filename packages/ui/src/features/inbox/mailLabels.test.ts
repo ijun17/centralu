@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MailParty } from '@cc/protocol'
-import { crowdText, heldLabel, heldResume, partyName, replyKind, threadStateLabel } from './mailLabels.js'
+import { closeStopsWork, crowdText, heldLabel, heldResume, partyName, replyKind, threadStateLabel } from './mailLabels.js'
 
 const party = (over: Partial<MailParty>): MailParty => ({ address: 'x', kind: 'session', sessionId: null, name: null, state: null, ...over })
 
@@ -64,5 +64,16 @@ describe('the person’s reply', () => {
     expect(replyKind([{ sender: them, kind: 'question' }, { sender: centralu, kind: 'event' }, { sender: you, kind: 'note' }])).toBe('answer')
     expect(replyKind([{ sender: them, kind: 'question' }, { sender: them, kind: 'report' }])).toBe('note')
     expect(replyKind([])).toBe('note')
+  })
+})
+
+describe('asking before a close', () => {
+  it('only a host that does not say canReply (an older build, which stops the turn on a close) is asked first, and only while a turn is on the thread', () => {
+    expect(closeStopsWork({ thread: { working: true } })).toBe(true)
+    expect(closeStopsWork({ thread: { working: false } })).toBe(false)
+    expect(closeStopsWork({ thread: {} })).toBe(false)
+    // This build's host stops nothing, so nothing is asked, whether or not the thread has a reply box
+    expect(closeStopsWork({ canReply: true, thread: { working: true } })).toBe(false)
+    expect(closeStopsWork({ canReply: false, thread: { working: true } })).toBe(false)
   })
 })

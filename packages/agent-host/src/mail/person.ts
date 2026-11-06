@@ -180,47 +180,50 @@ export class MailPerson {
     const now = Date.now()
     /** The sessions to tell, once each across every chain the id names, with the person's requests withdrawn that they had and where each chain ended */
     const tell = new Map<string, { address: string; root: string; ids: string[]; ends: string[] }>()
-    // Every chain an id names: the window showed them as one thread
-    for (const r of roots) {
-      const chain = this.chainOf(r)
-      // What the person asked in it that is open, by the session that has it
-      const asked: { id: string; recipient: string; seen: boolean }[] = []
-      // A request in doubt (in delivery, or delivered and unsure) may be in the session already, so the session is told of it
+    // One unit of work, so a failure part-way leaves no chain half closed (requests withdrawn, the chain not marked); the sessions are told after it commits
+    this.records.transaction(() => {
+      // Every chain an id names: the window showed them as one thread
+      for (const r of roots) {
+        const chain = this.chainOf(r)
+        // What the person asked in it that is open, by the session that has it
+        const asked: { id: string; recipient: string; seen: boolean }[] = []
+        // A request in doubt (in delivery, or delivered and unsure) may be in the session already, so the session is told of it
 
-      for (const m of chain) {
-        if (m.sender !== PERSON || !(m.needsReply || m.kind === 'task')) continue
-        for (const row of this.records.recipients(m.id)) if (row.settled === null) asked.push({ id: m.id, recipient: row.recipient, seen: row.deliveredAt !== null || row.attemptAt !== null || row.held === 'uncertain' })
+        for (const m of chain) {
+          if (m.sender !== PERSON || !(m.needsReply || m.kind === 'task')) continue
+          for (const row of this.records.recipients(m.id)) if (row.settled === null) asked.push({ id: m.id, recipient: row.recipient, seen: row.deliveredAt !== null || row.attemptAt !== null || row.held === 'uncertain' })
+        }
+        const working = this.workers(chain)
+        // What the person reads of it: a row held out of their sight is not theirs to close
+        this.records.closeFor(
+          PERSON,
+          this.shown(r).map((s) => s.m.id),
+          now,
+        )
+        // Withdrawn, not done: a request not delivered yet goes nowhere. A row an older build settled `legacy` is marked done, as it was
+        const withdrawn = asked.filter((a) => this.records.settle(a.id, a.recipient, 'withdrawn', now) > 0)
+        for (const m of chain) {
+          if (m.sender === PERSON && (m.needsReply || m.kind === 'task')) for (const row of this.records.recipients(m.id)) this.records.settle(m.id, row.recipient, 'done', now)
+        }
+        this.records.markClosed(r, outcome, now)
+        // The sessions to tell: the ones working on it, and the ones that were delivered a request of the person's that is withdrawn now (or have it in delivery: it may arrive after this)
+        const end = chain.at(-1)?.id ?? r
+        const add = (sessionId: string, address: string, id?: string) => {
+          const kept = tell.get(sessionId) ?? { address, root: r, ids: [], ends: [] }
+          if (id !== undefined && !kept.ids.includes(id)) kept.ids.push(id)
+          if (!kept.ends.includes(end)) kept.ends.push(end)
+          tell.set(sessionId, kept)
+        }
+        for (const w of working) add(w.sessionId, w.address)
+        for (const a of withdrawn) {
+          const party = parseAddress(a.recipient)
+          if (party?.kind !== 'session' || !a.seen || !this.here(a.recipient)) continue
+          add(party.sessionId, a.recipient, a.id)
+        }
       }
-      const working = this.workers(chain)
-      // What the person reads of it: a row held out of their sight is not theirs to close
-      this.records.closeFor(
-        PERSON,
-        this.shown(r).map((s) => s.m.id),
-        now,
-      )
-      // Withdrawn, not done: a request not delivered yet goes nowhere. A row an older build settled `legacy` is marked done, as it was
-      const withdrawn = asked.filter((a) => this.records.settle(a.id, a.recipient, 'withdrawn', now) > 0)
-      for (const m of chain) {
-        if (m.sender === PERSON && (m.needsReply || m.kind === 'task')) for (const row of this.records.recipients(m.id)) this.records.settle(m.id, row.recipient, 'done', now)
-      }
-      this.records.markClosed(r, outcome, now)
-      // The sessions to tell: the ones working on it, and the ones that were delivered a request of the person's that is withdrawn now (or have it in delivery: it may arrive after this)
-      const end = chain.at(-1)?.id ?? r
-      const add = (sessionId: string, address: string, id?: string) => {
-        const kept = tell.get(sessionId) ?? { address, root: r, ids: [], ends: [] }
-        if (id !== undefined && !kept.ids.includes(id)) kept.ids.push(id)
-        if (!kept.ends.includes(end)) kept.ends.push(end)
-        tell.set(sessionId, kept)
-      }
-      for (const w of working) add(w.sessionId, w.address)
-      for (const a of withdrawn) {
-        const party = parseAddress(a.recipient)
-        if (party?.kind !== 'session' || !a.seen || !this.here(a.recipient)) continue
-        add(party.sessionId, a.recipient, a.id)
-      }
-      // The window that has the chain open reads it again
-      this.service.announce(r)
-    }
+    })
+    // The windows that have the chain open read it again
+    for (const r of roots) this.service.announce(r)
     for (const [sessionId, t] of tell) this.tellClosed(outcome, sessionId, t)
     return this.row(root, this.heldIn(root)) ?? this.emptyRow(root)
   }
