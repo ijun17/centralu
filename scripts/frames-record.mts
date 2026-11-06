@@ -92,7 +92,7 @@ async function main(): Promise<number> {
           events = await driveSwap(adapter, swap, first, sessionId, () => last, () => void (process.env.CC_RECORD_FRAMES = raw), 300_000)
         } else {
           run = runAs(tool, scenario.drive!)
-          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
+          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
         }
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
@@ -130,7 +130,7 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
 }
 
 /** The files a scenario asks the tool to find in its working folder */
-function seedFiles(cwd: string, files: Record<string, string>): void {
+function seedFiles(cwd: string, files: Record<string, string | Buffer>): void {
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(cwd, name)), { recursive: true })
     writeFileSync(join(cwd, name), text)

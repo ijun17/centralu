@@ -176,3 +176,145 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
     expect(said(events)).toMatch(/lighthouse[\s\S]*4/i)
   })
 })
+
+describe(`what the adapter makes of the CLI's real turns, the tools Centralu's screens draw (${recordedVersion()})`, () => {
+  const run = (name: string) => replay(recordedVersion(name), name)
+  const calls = (events: NormalizedEvent[]) => of(events, 'tool_call')
+  const results = (events: NormalizedEvent[]) => of(events, 'tool_result')
+
+  it("subagent: the Agent call carries the subagent's own Read and its result as steps under it, and the subagent's report is the call's result", async () => {
+    const { events } = await run('subagent')
+    expect(calls(events).map((c) => c.summary.tool)).toEqual(['Agent'])
+    const steps = of(events, 'subagent_event')
+    expect(steps.map((s) => s.parentCallId)).toEqual(steps.map(() => calls(events)[0]!.callId))
+    expect(steps.map((s) => s.step.type)).toEqual(expect.arrayContaining(['tool_call', 'tool_result', 'message_delta']))
+    expect(steps.find((s) => s.step.type === 'tool_call')?.step).toMatchObject({ summary: { tool: 'Read' } })
+    expect(results(events)).toMatchObject([{ callId: calls(events)[0]!.callId, ok: true, summary: expect.stringContaining('The sky is red.') }])
+    expect(ended(events)).toBe(1)
+  })
+
+  it('question: the choice is a question card, not an approval; the answer closes it and the tool finishes as a success the model reads', async () => {
+    const { events } = await run('question')
+    expect(of(events, 'approval_request')).toEqual([])
+    const cards = of(events, 'question_request')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.questions[0]!.options.map((o) => o.label)).toEqual(['Red', 'Blue'])
+    expect(of(events, 'question_resolved')).toMatchObject([{ requestId: cards[0]!.requestId }])
+    expect(results(events)).toMatchObject([{ ok: true, summary: expect.stringContaining('"Red"') }])
+    expect(said(events)).toContain('Red')
+    expect(ended(events)).toBe(1)
+  })
+
+  it('question-declined: a Stop on the open choice closes the card and the tool fails as rejected; the turn ends as stopped, not as an error', async () => {
+    const { events } = await run('question-declined')
+    expect(of(events, 'question_request')).toHaveLength(1)
+    expect(of(events, 'question_resolved')).toHaveLength(1)
+    expect(results(events)).toMatchObject([{ ok: false }])
+    expect(of(events, 'error')).toEqual([])
+    expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
+  })
+
+  it("plan: entering plan mode asks nothing, the plan is one approval card of the plan's tool, and approving it finishes the tool", async () => {
+    const { events } = await run('plan')
+    expect(calls(events).map((c) => c.summary.tool)).toEqual(['ToolSearch', 'EnterPlanMode', 'Write', 'ExitPlanMode'])
+    const cards = of(events, 'approval_request')
+    expect(cards).toHaveLength(1)
+    // No plan-shaped card: the plan reaches the person as the tool's raw input (what the adapter makes of ExitPlanMode today)
+    expect(cards[0]!.detail).toMatchObject({ kind: 'other', raw: expect.stringContaining('ExitPlanMode') })
+    expect(of(events, 'approval_resolved').map((e) => e.decision)).toEqual(['allow'])
+    expect(results(events).map((r) => r.ok)).toEqual([true, true, true, true])
+    expect(ended(events)).toBe(1)
+  })
+
+  it('background-poll: a task started in the background is live, a later command in the same turn sees it end as completed, and its output file is read', async () => {
+    const { events } = await run('background-poll')
+    const levels = of(events, 'background_tasks')
+    expect(levels.flatMap((l) => l.live).find((t) => t.parentCallId)).toMatchObject({ kind: 'shell', status: 'running', parentCallId: calls(events)[0]!.callId })
+    expect(levels.flatMap((l) => l.ended ?? [])).toMatchObject([{ kind: 'shell', status: 'completed' }])
+    expect(calls(events).map((c) => c.summary.tool)).toEqual(['Bash', 'Bash', 'Read'])
+    expect(results(events).at(-1)).toMatchObject({ ok: true, summary: expect.stringContaining('poll-done') })
+    expect(ended(events)).toBe(1)
+  })
+
+  it("background-open: the task is still running when the turn ends, and ends as stopped with the session's process", async () => {
+    const { events } = await run('background-open')
+    const firstEnd = events.findIndex((e) => e.type === 'turn_complete')
+    expect(events.slice(0, firstEnd).some((e) => e.type === 'background_tasks' && e.live.length > 0)).toBe(true)
+    expect(events.slice(0, firstEnd).some((e) => e.type === 'background_tasks' && (e.ended?.length ?? 0) > 0)).toBe(false)
+    expect(of(events, 'background_tasks').flatMap((l) => l.ended ?? [])).toMatchObject([{ kind: 'shell', status: 'stopped' }])
+  })
+
+  it('centralu-mail: the mail tool is a Centralu call named by its tool, answered without a card, whatever the action', async () => {
+    const { events } = await run('centralu-mail')
+    const mail = calls(events).filter((c) => c.summary.centralu?.tool === 'mail')
+    expect(mail.map((c) => (c.input as { action: string }).action)).toEqual(['inbox', 'send'])
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(results(events).filter((r) => mail.some((c) => c.callId === r.callId)).map((r) => r.ok)).toEqual([true, true])
+  })
+
+  it("centralu-agents: recall, read_session and start_agent are Centralu calls with their own labels, and start_agent's answer carries the child's", async () => {
+    const { events } = await run('centralu-agents')
+    expect(calls(events).map((c) => c.summary.centralu?.tool)).toEqual(['recall', 'read_session', 'start_agent'])
+    expect(calls(events).map((c) => c.summary.centralu?.label)).toEqual(['Searched past conversations', 'Read a session', 'Started an agent'])
+    expect(results(events).map((r) => r.ok)).toEqual([true, true, true])
+    expect(results(events)[2]!.summary).toContain('answered')
+    expect(of(events, 'approval_request')).toEqual([])
+  })
+
+  it('centralu-compact: compact_self is a Centralu call whose answer names what will happen; the adapter itself compacts nothing', async () => {
+    const { events } = await run('centralu-compact')
+    expect(calls(events)).toMatchObject([{ summary: { centralu: { tool: 'compact_self', label: 'Asked to compact' } }, input: { focus: 'the naming decision' } }])
+    expect(results(events)).toMatchObject([{ ok: true, summary: expect.stringContaining('Compacting after this turn') }])
+    expect(of(events, 'compaction')).toEqual([])
+  })
+
+  it("mcp-app: a tool of an attached app is named by its app and tool, asks nothing as a read tool, and returns the app's words", async () => {
+    const { events } = await run('mcp-app')
+    const call = calls(events).find((c) => c.summary.tool === 'mcp__app-weather__forecast')
+    expect(call?.summary.centralu).toEqual({ tool: 'forecast', app: 'weather' })
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(results(events).find((r) => r.callId === call?.callId)).toMatchObject({ ok: true, summary: 'Forecast for Paris: sunny, 21 degrees.' })
+  })
+
+  it("tool-error: a command that exits with 3 and a Read of a missing file are failed results with the tool's words, and the turn still ends normally", async () => {
+    const { events } = await run('tool-error')
+    expect(results(events)).toMatchObject([{ ok: false, summary: 'Exit code 3\nboom' }, { ok: false, summary: expect.stringContaining('File does not exist') }])
+    expect(of(events, 'error')).toEqual([])
+    expect(ended(events)).toBe(1)
+  })
+
+  it('long-output: a result the CLI cut is kept as the CLI handed it, a preview that names where the whole output was saved', async () => {
+    const { events } = await run('long-output')
+    const [result] = results(events)
+    expect(result).toMatchObject({ ok: true, summary: expect.stringContaining('Output too large'), output: expect.stringContaining('Full output saved to') })
+    // What the CLI handed over is a short preview of 6000 lines, not the lines
+    expect(result!.output!.length).toBeLessThan(5000)
+    expect(result!.output).not.toContain('line 6000')
+    expect(ended(events)).toBe(1)
+  })
+
+  it('markdown: a long answer with a heading, a list, a code block and a table arrives as deltas that join into the Markdown the model wrote', async () => {
+    const { events } = await run('markdown')
+    const text = said(events)
+    expect(text).toMatch(/^#+ /m)
+    expect(text).toMatch(/^[-*] /m)
+    expect(text).toMatch(/```(?:ts|typescript)\n[\s\S]+\n```/)
+    expect(text).toMatch(/^\|.*\|\s*\n\|[\s:|-]+\|\s*\n(\|.*\|\s*\n?){3}/m)
+    expect(of(events, 'tool_call')).toEqual([])
+    expect(ended(events)).toBe(1)
+  })
+
+  it('image: a picture the agent reads is an image event with its type and bytes, beside a result with no text', async () => {
+    const { events } = await run('image')
+    expect(results(events)).toMatchObject([{ ok: true, summary: '' }])
+    expect(of(events, 'message_image')).toMatchObject([{ mime: 'image/png', data: expect.stringMatching(/^iVBOR/) }])
+    expect(said(events)).toMatch(/red/i)
+  })
+
+  it('powershell: a turn on the PowerShell tool is a command call, run under auto without a card, with its output', async () => {
+    const { events } = await run('powershell')
+    expect(calls(events)).toMatchObject([{ summary: { tool: 'PowerShell', title: 'Write-Output "ps-ok"' } }])
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(results(events)).toMatchObject([{ ok: true, summary: 'ps-ok' }])
+  })
+})
