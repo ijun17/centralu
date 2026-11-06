@@ -2229,7 +2229,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    is tapped, so a recording holds its stream-json as the SDK read and wrote it, and `claude/replay.test.ts` plays it
    through the real SDK and adapter (`streamJsonCodec`). A test that reads one message takes it from a recording
    (`claude/recorded.test-helpers.ts`); a hand-written message stays only for what no real run sends or cheaply can
-   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings.
+   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings. A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
    Codex's are made by `pnpm exec tsx scripts/frames-record.mts codex` (its smallest model, in a settings folder of its own:
    `CODEX_HOME` holds a copy of the sign-in alone, which is put back into the person's file if Codex refreshed it) and kept in
    `adapters/codex/recordings/codex-<version>/`; `codex/replay.test.ts` plays them through the real adapter (`codexCodec`: JSON-RPC

@@ -98,6 +98,18 @@ describe('scrubbing Claude Code’s frames', () => {
     const streamed = frames.filter((f) => f.msg.type === 'stream_event').map((f) => (f.msg.event as { delta: { partial_json: string } }).delta.partial_json)
     expect(JSON.parse(streamed.join(''))).toEqual({ command: 'Get-Content "<home>/Docs/a.txt"', content: 'one\ntwo' })
   })
+
+  it('numbers a session id cut across two streamed pieces as one id, the same as when it stands whole in another frame', () => {
+    const id = '3142d2fb-5f69-431e-b37f-2a6507fbb140'
+    const piece = (partial_json: string) => line('in', { type: 'stream_event', api_message_id: 'msg_01', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json } } })
+    const text = JSON.stringify({ file_path: `${CWD}\\tasks\\${id}\\a.output` })
+    const at = text.indexOf(id) + 13
+    const frames = run([piece(text.slice(0, at)), piece(text.slice(at)), line('in', { type: 'system', subtype: 'status', session_id: id })])
+    const streamed = frames.slice(0, 2).map((f) => (f.msg.event as { delta: { partial_json: string } }).delta.partial_json).join('')
+    const whole = String(frames[2]!.msg.session_id)
+    expect(JSON.parse(streamed)).toEqual({ file_path: `<cwd>/tasks/${whole}/a.output` })
+    expect(JSON.stringify(frames)).not.toContain('3142d2fb')
+  })
 })
 
 describe('scrubbing Codex’s frames', () => {
