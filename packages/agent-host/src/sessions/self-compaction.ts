@@ -226,7 +226,9 @@ export class SelfCompaction {
     const again = next ? this.refusedAt.get(sessionId) : undefined
     if (again) {
       const size = this.lastRequest.get(sessionId) ?? this.reading(sessionId, m)
-      if (size === null ? again.used === null : again.used !== null && Math.abs(size - again.used) < REFUSED_AGAIN_TOKENS) {
+      // Under the floor the answer is true only while the size is: a refusal at 99k and a request at 100.5k is not the same request
+      const same = size === null ? again.used === null : again.used !== null && Math.abs(size - again.used) < REFUSED_AGAIN_TOKENS && (again.used >= COMPACT_FLOOR_TOKENS || size < COMPACT_FLOOR_TOKENS)
+      if (same) {
         return { text: `Not compacted (${again.why}); nothing has changed since your last request, so no new turn is made for it. Continue in this turn.` }
       }
     }
@@ -330,9 +332,14 @@ export class SelfCompaction {
     const mine = this.compacting.get(id)
     // Not the tool's own compaction at its threshold (Claude says so): that is the person's turn running first, not Centralu's compact
     if (e.type === 'compaction' && mine && !mine.compacted && e.trigger !== 'auto') {
-      // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own
+      // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own. A failed one is a refusal for the step: nothing was
+      // compacted, and the step goes saying so, not "the compaction is done"
       mine.compacted = true
-      this.stage(id, mine, 'compacted')
+      if (e.failed && mine.then) {
+        mine.refused = `the tool reported the compaction failed${e.reason ? `: ${e.reason}` : ''}`
+        this.host.notice(id, `The compaction did not happen (${mine.refused}): the next step the agent set goes on without it`)
+      }
+      this.stage(id, mine, mine.refused === null ? 'compacted' : 'refused')
       if (!e.failed) this.host.notice(id, `Compacted by Centralu (${mine.why})`)
     }
     // The size at the turn's end has come: a request that waited for it is decided now
@@ -554,12 +561,7 @@ export class SelfCompaction {
   private settleThen(id: string, c: Compacting, looked = 0): void {
     this.stopSettling(id)
     if (!c.then) return
-    let queued: boolean | null
-    try {
-      queued = this.host.queued(id)
-    } catch {
-      queued = null
-    }
+    const queued = this.queuedNow(id)
     // The state of the session may not have caught up with the end of the turn yet (the event is heard first): looked at again in a moment, queue and all, since
     // the person's message can be typed in that moment; a session that stays busy (a card, a limit) is left to the end of its turn and the sweep
     const catching = queued === false && !this.host.ready(id)
@@ -576,6 +578,15 @@ export class SelfCompaction {
     }, queued === true ? THEN_QUEUE_MAX_MS : queued === null ? THEN_SETTLE_MS : THEN_LOOK_MS)
     timer.unref?.()
     this.settling.set(id, timer)
+  }
+
+  /** What waits behind the session's running turn (`SelfCompactionHost.queued`); null when the host cannot say */
+  private queuedNow(id: string): boolean | null {
+    try {
+      return this.host.queued(id)
+    } catch {
+      return null
+    }
   }
 
   private stopSettling(id: string): void {
@@ -733,7 +744,8 @@ export class SelfCompaction {
     if (this.now() - rec.at > THEN_KEEP_MS) return this.tell(id, rec.then, `it was kept for more than ${THEN_KEEP_MS / 60_000} minutes without going on, and what it followed is long past`)
     if (rec.stage === 'compacted' || rec.stage === 'refused') {
       // Known done: sent now if the session can take a turn; else (a limit or a card stands) it is held, and goes as soon as it can (`sweep`)
-      if (this.host.ready(id)) void this.sendThen(id, rec)
+      // (a session with no process holds nothing: only mail waiting for it is looked at, and a step waits for the turn that mail starts)
+      if (this.host.ready(id) && this.queuedNow(id) !== true) void this.sendThen(id, rec)
       else this.keepHeld(id, rec)
     } else void this.unknown(id, rec.then, rec.stage === 'sending' ? 'it was being sent' : rec.stage === 'asked' ? 'the turn had not ended' : 'the compact was sent and not yet reported done')
   }
@@ -810,7 +822,8 @@ export class SelfCompaction {
     // A compact the tool never reported: its `then` is never sent (it would follow a compaction that did not happen)
     for (const [id, c] of this.compacting) if (c.then && !c.compacted && now - c.sentAt >= COMPACT_STALE_MS) this.refuseFlight(id, c, 'the tool never reported the compaction')
     // A step held for a session that was not at rest when its moment came goes as soon as it is
-    for (const [id, c] of this.compacting) if (c.ended && c.then && !this.settling.has(id)) this.attempt(id, c)
+    // (looked at the way a turn's end looks at it: what waits goes first)
+    for (const [id, c] of this.compacting) if (c.ended && c.then && !this.settling.has(id)) this.settleThen(id, c)
     for (const m of this.host.sessions()) {
       // A held request whose card closed without an event is judged here at the latest (`releaseHeld`)
       if (this.pending.get(m.id)?.held) this.releaseHeld(m.id, m)

@@ -10,12 +10,17 @@ const wire = vi.hoisted(() => ({
   written: [] as Record<string, unknown>[],
   /** What the CLI says next; the test pushes, the adapter's stream reads */
   say: (_m: Record<string, unknown>) => {},
+  /** While set, the CLI reads no further input: what is sent meanwhile waits in the adapter's queue */
+  hold: null as Promise<void> | null,
 }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: ({ prompt }: { prompt: AsyncIterable<Record<string, unknown>> }) => {
     void (async () => {
-      for await (const u of prompt) wire.written.push(u)
+      for await (const u of prompt) {
+        wire.written.push(u)
+        await wire.hold
+      }
     })()
     const inbox: Record<string, unknown>[] = []
     let wake: (() => void) | null = null
@@ -190,6 +195,50 @@ describe('the inputs the CLI holds (`queuedInputs`, #2036)', () => {
     wire.say(result([uuidOfLast()]))
     await tick()
     expect(handle.queuedInputs?.()).toBe(0)
+    await handle.dispose()
+  })
+
+  it('counts only the messages in the adapter’s own queue, not a quiet note or a parent note waiting there while the CLI is not reading', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await session(events)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    let release!: () => void
+    wire.hold = new Promise<void>((r) => (release = r))
+    // One message the CLI has read and is busy with; the rest wait in the queue behind it
+    handle.send('being read', { origin: { kind: 'human' } })
+    await tick()
+    handle.send('<centralu-nudge/>', { origin: { kind: 'channel', server: 'centralu' }, quiet: true })
+    void handle.sendTracked?.('a parent note', undefined)
+    handle.send('waiting for a turn', { origin: { kind: 'human' } })
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(2)
+    wire.hold = null
+    release()
+    await handle.dispose()
+  })
+
+  it('does not count for ever an input a result that named nothing answered: the next result that names a later input clears it', async () => {
+    const events: NormalizedEvent[] = []
+    const handle = await session(events)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    handle.send('stopped before it was answered', { origin: { kind: 'human' } })
+    await tick()
+    const stale = uuidOfLast()
+    expect(handle.queuedInputs?.()).toBe(1)
+    // A Stop’s result names nothing
+    wire.say(result([]))
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(1)
+    // The next message is answered by a result that names it: what was read before it is done
+    handle.send('the next message', { origin: { kind: 'human' } })
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(2)
+    wire.say(result([uuidOfLast()]))
+    await tick()
+    expect(handle.queuedInputs?.()).toBe(0)
+    expect(stale).not.toBe(uuidOfLast())
     await handle.dispose()
   })
 })

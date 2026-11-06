@@ -403,7 +403,12 @@ export class ClaudeSession implements SessionHandle {
     const took = !retrying && this.sendTracked ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
     if (m.type === 'result' && !retrying) {
       const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
-      for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
+      const named = result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])
+      // The CLI reads its inputs in the order they were written, so one a later input's result names was read before it: what is left ahead of it was answered by a
+      // result that named nothing (a Stop's, say) or was cancelled. Left in, it would count as queued for ever and hold every later host note back
+      const first = [...this.personInputs].findIndex((id) => named.includes(id))
+      if (first > 0) for (const id of [...this.personInputs].slice(0, first)) this.personInputs.delete(id)
+      for (const id of named) this.personInputs.delete(id)
     }
     let completedInputs: string[] | undefined
     if (m.type === 'result' && !retrying && this.ledger.tracking && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {

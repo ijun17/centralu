@@ -1725,12 +1725,12 @@ the params with the method's schema and reads the answer with its result schema,
     the tool's queue and the mailbox delivers mail the moment the session rests, and a step sent beside either is folded into their turn (real run E2: the person's
     message ran inside the `then` turn and the "came first" line was missing). So the host **looks at what waits** (`SelfCompactionHost.queued`, from the manager) when the turn ends:
     the inputs the tool holds that no turn has answered (`SessionHandle.queuedInputs`: Claude counts what it wrote to the CLI and no result has named yet, and what is
-    still in its own queue, never a quiet note; Codex counts `MidTurnLedger.waiting`, the inputs behind a compact or review turn and the writes not yet answered, which at
+    still in its own queue, never a quiet note or a parent note (a result that names a later input clears the ones written before it: the CLI reads in order, and one a result that named nothing answered, a Stop's, would count for ever and hold every later step for the 60 s bound); Codex counts `MidTurnLedger.waiting`, the inputs behind a compact or review turn and the writes not yet answered, which at
     a compact's end are already written when the end is said), and mail that wakes the session and waits for it (`MessageService.wakingFor`, `MailHooks.waiting`: due or still
     in the 2-second debounce, held-out and quiet mail not counted). **Nothing waits: the step goes at once.** Something does: it waits, a turn that begins is theirs, and the
     step follows that turn's end with a line saying their message came first and weighs more. A step goes only when the session can take a turn (`SelfCompactionHost.ready`:
     `mailReceiver` is `ready`: no turn, card or limit, the host not leaving); else the end of the turn that runs, or the sweep, tries again, and the step stays in the store
-    meanwhile. The same gate stands in front of the claim, so a step that is not sent is not claimed. **Two bounds remain, both named in the code.** A queue the host can see but
+    meanwhile. The same gate stands in front of the claim, so a step that is not sent is not claimed. A step held for a session that could not take it yet, or kept by a host that found it (`resume`, `sweep`), is looked at the same way: what waits goes first. **Two bounds remain, both named in the code.** A queue the host can see but
     that never starts a turn (mail held back by the mailbox's own rules, a stuck queue) holds the step for `THEN_QUEUE_MAX_MS` (60 s) at most. **The one guess:** a tool that
     cannot say what it holds (`queuedInputs` absent, as an ACP agent) gets `THEN_SETTLE_MS` (3 s) after the compact turn's end for a queued turn to start, which is what the
     first version did for every tool, at the price of 3 s on each step and a wrong order when the queued turn started later than that.
@@ -1741,14 +1741,14 @@ the params with the method's schema and reads the answer with its result schema,
     **A repeat costs a tool call, not a turn.** The size of a refusal is remembered (`refusedAt`, per session, in memory). A `compact_self` with a `then` that comes again with the
     context within `REFUSED_AGAIN_TOKENS` (2,000) of it, by the size of the turn's last model request, else the tool's reading (two requests with no size read since a
     compaction are the same), is answered in the tool result: "Not compacted (reason); nothing has changed since your last request, so no new turn is made for it. Continue in
-    this turn." Nothing is stored or counted, and the session is never blocked. A step that did real work and grew the context asks the usual way, and a compaction forgets the
+    this turn." Nothing is stored or counted, and the session is never blocked. A step that did real work and grew the context asks the usual way, a request that is over the floor now is never answered with a refusal under it (99k, then 100.5k), and a compaction forgets the
     refusal. This also bounds the loop the context notice could make on Codex, where the context read 43.8k right after a compaction and 119k on the next turn (Codex kept a big
     user message), so the 46% notice fired again at once: a repeat at the same size costs a call. The warning below remains the bound for a context that does change.
     **The person's interrupt sends nothing.** Of the turn that asked, of the compact turn **before or after** the tool reported the compaction in it, or of the turn that ran
     first, or when a turn ends in an error (an errored or rate-limited session is not sent a turn): the session is **told it did not happen**, quietly, with the text
     of its `then` so it can carry on by itself: `SessionHandle.nudge` (Claude: quiet input read with its next input; Codex: steered into a running turn only, so a note
     it cannot take now waits for the next turn's start or request, as the context notices do), and the window gets a line from Centralu. A compaction the tool reported
-    as **failed** leaves the context as it was, and the step is still valid, so `then` goes. **Codex:** its compact request takes no focus (`takesFocus` compares the command
+    as **failed** leaves the context as it was, and the step is still valid, so `then` goes, kept and sent as a refusal (`refused`, "the tool reported the compaction failed: <its reason>"): the turn and the conversation line say nothing was compacted, not that the compaction is done. **Codex:** its compact request takes no focus (`takesFocus` compares the command
     with and without one), so with a `then` the focus line heads the `then` turn ("This tool's compact takes no focus. What you asked the summary to keep: ..."), and with
     none the answer of the tool says the focus line is not applied. A resting session that the sweep compacts has no `then`: it was at rest and stays so.
     **One compaction in flight per session.** A second `compact_self` while one is on its way (its command sent, queued behind a turn of the person's, or running) asks for no second

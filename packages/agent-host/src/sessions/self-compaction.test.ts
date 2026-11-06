@@ -463,7 +463,7 @@ describe('compact_self then (#2024)', () => {
     expect(w.nudges).toEqual([])
   })
 
-  it('sends a compaction the tool reported as failed on: the context is as it was, and the step still stands', async () => {
+  it('sends the step after a compaction the tool reported as failed, as a turn that says nothing was compacted and why: the context is as it was', async () => {
     const w = world()
     asked(w, undefined, 'next')
     w.startTurn()
@@ -471,6 +471,17 @@ describe('compact_self then (#2024)', () => {
     w.endTurn()
     await settled()
     expect(w.thens).toHaveLength(1)
+    expect(w.thens[0]![1]).toMatch(/did not compact the conversation \(the tool reported the compaction failed: Not enough messages to compact\.\), so it is as it was/)
+    expect(w.thens[0]![1]).not.toMatch(/The compaction you asked for with compact_self is done/)
+    expect(w.lines).toEqual(['Centralu sent the agent its next step: nothing was compacted'])
+    expect(w.notices.map((n) => n[1])).toContainEqual(expect.stringMatching(/The compaction did not happen \(the tool reported the compaction failed/))
+    expect(w.notices.map((n) => n[1])).not.toContainEqual(expect.stringMatching(/^Compacted by Centralu/))
+    // And it is kept as a refusal for a host that finds it
+    const kept = world()
+    asked(kept, undefined, 'next')
+    kept.startTurn()
+    kept.emit({ type: 'compaction', sessionId: 's1', failed: true })
+    expect(JSON.parse(kept.settings.m.get('compact_then:s1')!)).toMatchObject({ stage: 'refused', why: 'the tool reported the compaction failed' })
   })
 
   it('sends it all the same when the request was refused, as a turn that says it did not compact and why (under the floor, no size read)', async () => {
@@ -660,6 +671,33 @@ describe('compact_self then (#2024)', () => {
     expect(plain.thens).toHaveLength(1)
   })
 
+  it('keeps looking while the state catches up, as long as it takes up to a few seconds, and reads the queue on each look', async () => {
+    const w = world()
+    asked(w, undefined, 'next')
+    w.startTurn()
+    w.emit(compaction)
+    w.state.ready = false
+    w.endTurn()
+    // Several looks later the session is at rest, and nothing is queued: it goes
+    await vi.advanceTimersByTimeAsync(700)
+    expect(w.thens).toEqual([])
+    w.state.ready = true
+    await vi.advanceTimersByTimeAsync(300)
+    expect(w.thens).toHaveLength(1)
+    // And one who was typed to on a later look is waited for, not sent beside
+    const late = world()
+    asked(late, undefined, 'next')
+    late.startTurn()
+    late.emit(compaction)
+    late.state.ready = false
+    late.endTurn()
+    await vi.advanceTimersByTimeAsync(600)
+    late.state.queued = true
+    late.state.ready = true
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(late.thens).toEqual([])
+  })
+
   it('guesses only for a tool that cannot say what it holds: it waits a moment, and goes if no queued turn started', async () => {
     const w = world()
     asked(w, undefined, 'next')
@@ -756,6 +794,19 @@ describe('compact_self then (#2024)', () => {
       expect(w.sent).toEqual([['s1', '/compact']])
     })
 
+    it('is not the answer once the context is over the floor, though it is within a few tokens of a refusal under it', async () => {
+      const w = world({ context: { used: 99_000, window: 200_000, exactness: 'exact' } })
+      asks(w)
+      w.endTurn(undefined, 'after')
+      expect(w.thens).toHaveLength(1)
+      // 100.5k: not the same request. It is asked the usual way, and at the turn's end it compacts
+      w.startTurn()
+      w.emit({ type: 'usage_update', sessionId: 's1', tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }, request: { inputTokens: 100_500, cacheReadTokens: 0 } })
+      expect(w.c.request('s1', undefined, 'next').text).toMatch(/^Centralu compacts/)
+      w.endTurn(undefined, 'none')
+      expect(w.sent).toEqual([['s1', '/compact']])
+    })
+
     it('is never the answer to a request with no step, and is forgotten once a compaction went', async () => {
       const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
       asks(w)
@@ -798,7 +849,7 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens).toEqual([])
     w.state.ready = true
     w.c.sweep()
-    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(300)
     expect(w.thens).toHaveLength(1)
     w.c.sweep()
     await vi.advanceTimersByTimeAsync(0)
@@ -1181,6 +1232,27 @@ describe('compact_self then (#2024)', () => {
       await vi.advanceTimersByTimeAsync(0)
       expect(mine.nudges).toEqual([])
       expect(mine.thens).toEqual([])
+    })
+
+    it('looks at what waits for the session before it sends a kept step, as a turn’s end does: from a host that starts, and from the sweep', async () => {
+      const old = world()
+      old.settings.m.set(key, record({}))
+      const next = nextHost(old)
+      next.state.queued = true
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      // Mail waits for the session: its turn goes first
+      expect(next.thens).toEqual([])
+      expect(stored(old)).toMatchObject({ stage: 'compacted' })
+      next.c.sweep()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toEqual([])
+      // The turn that mail started begins and ends (nothing waits now): the step follows it
+      next.state.queued = false
+      next.startTurn()
+      next.endTurn()
+      expect(next.thens).toHaveLength(1)
+      expect(next.thens[0]![1]).toMatch(/came first/)
     })
 
     it('leaves a session whose process the keeper still holds to its adoption', async () => {
