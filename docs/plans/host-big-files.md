@@ -126,7 +126,10 @@ compensating `announce()` at the same time.
 **Drift (a question, §6):** `turnsLost` (after a crash) releases every unanswered row that is not a task as `lost`,
 requests included. `sessionsStopped` (a quit or a stop) skips requests, "answered by its own turn's end". After a crash
 nothing ends the request's turn, so this may be right, but nothing says so. The two loops should share one release
-step either way; which result for a request is the owner's.
+step either way; which result for a request is the owner's. **Decided** (owner): the sender of a request always learns it
+will not be answered, so a stop releases a request too, with the stop's cause, in one release step with `turnsLost`
+(`cutQuestions`). The report of the request's turn still tells the asker it was owed to; the stop notice tells the rest (an
+asker the same quit cut heard nothing before).
 
 **Guards:** `guards()` (1105–1116) still *refuses* `repeat`, `rate_limited` and `ask_rate`; the loop, cascade, host-cap
 and pair guards warn (mailbox.md D13, D32, #2014, #2035). The audit found no code that blocks agent mail beyond those
@@ -251,7 +254,7 @@ This round stops after 1–3.
 | Proposal | What changes | Lines | Risk |
 |---|---|---|---|
 | Drop the options of `memoryOs` no caller passes (`env`, `timePrecision`, `rmSync`, `now`, `cwd`, `sqlite`), fd 3 `overlapped` and `ctx.os/pid/cwd/env` | The fake's documented API (os-layer.md:519) shrinks; no production code and no test uses them | about 60 | Low |
-| `turnsLost` releases requests as `lost`, `sessionsStopped` does not | Which text a request's sender reads after a crash against after a quit | about 10 once the release step is shared | Medium: a person-visible notice |
+| `turnsLost` releases requests as `lost`, `sessionsStopped` does not (decided: both release them, §2) | Which text a request's sender reads after a crash against after a quit | about 10 once the release step is shared | Medium: a person-visible notice |
 | Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | about 15 | Medium: a loop that today stops would run |
 | "started from here" and "started here" in one wording | The text a model reads on a refusal | about 3 | Low |
 

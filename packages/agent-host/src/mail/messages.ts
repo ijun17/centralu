@@ -805,6 +805,8 @@ export class MessageService {
    * `needsReply` message, the person's too) is released with the cause, and each sender is told once, in one notice. The rows stay open, so a reply that
    * comes after the person continues the session still answers them. A question delivered in an earlier turn is not this stop's: it was read, and the
    * session may have answered it in conversation. A task is not released here: the old report path tells its owner until requests decide reports.
+   * A request to the orchestrator is (owner: its sender always learns it will not be answered, #1186): the turn's report tells the asker it was owed to,
+   * which the caller passes as `held`, and every other asker, or one that report misses (an asker the same quit cut), gets the stop notice.
    * `turnSeq` is the cut turn (none: nothing is released, as for a turn the mailbox never recorded)
    *
    * Who is woken (Q1): a sender that is at rest and waits on the stopped session, by a task it gave it that is still open or by a wait (`waitsOn`).
@@ -829,11 +831,7 @@ export class MessageService {
           if (turnSeq === null) continue
           const rows = this.records.watchedTo(address)
           const gave = new Set(rows.filter((r) => this.records.message(r.messageId)?.kind === 'task').flatMap((r) => this.records.message(r.messageId)?.sender ?? []))
-          for (const row of rows) {
-            if (row.releasedAt !== null || row.deliveredAt === null || row.answerId !== null || row.turnSeq !== turnSeq) continue
-            const m = this.records.message(row.messageId)
-            // A request to the orchestrator is answered by its own turn's end (§4.2), and a task by the report; neither is told twice
-            if (!m || m.kind === 'task' || !m.needsReply || m.sender === address || this.isRequest(m, address)) continue
+          for (const { row, message: m } of this.cutQuestions(address, turnSeq)) {
             if (!this.records.markReleased(row.messageId, address, now, why)) continue
             released++
             if (gave.has(m.sender) || this.opts.waitsOn?.(m.sender, address)) waiting.add(m.sender)
@@ -916,12 +914,21 @@ export class MessageService {
   turnsLost(close: () => readonly { address: string; turnSeq: number }[]): void {
     this.releaseAndTell((now, senders) => {
       for (const { address, turnSeq } of close()) {
-        for (const row of this.records.unansweredTo(address)) {
-          if (row.turnSeq !== turnSeq || row.settled !== null) continue
-          const m = this.records.message(row.messageId)
-          if (m && m.kind !== 'task' && this.records.markReleased(row.messageId, address, now, 'lost')) senders.add(m.sender)
-        }
+        for (const { row, message } of this.cutQuestions(address, turnSeq)) if (this.records.markReleased(row.messageId, address, now, 'lost')) senders.add(message.sender)
       }
+    })
+  }
+
+  /**
+   * The questions `address` left unanswered in its turn `turnSeq`, the rows a stop (`sessionsStopped`) or a lost turn (`turnsLost`) releases: each
+   * `needsReply` message delivered into that turn and not answered, settled or released, a request to the orchestrator included. Not a task (the old
+   * report path tells its owner, #698), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
+   */
+  private cutQuestions(address: string, turnSeq: number): { row: RecipientRow; message: MailRow }[] {
+    return this.records.unansweredTo(address).flatMap((row) => {
+      if (row.turnSeq !== turnSeq || row.settled !== null || row.releasedAt !== null) return []
+      const message = this.records.message(row.messageId)
+      return message && message.kind !== 'task' && message.sender !== address ? [{ row, message }] : []
     })
   }
 
