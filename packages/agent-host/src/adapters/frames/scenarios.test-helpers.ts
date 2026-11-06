@@ -107,12 +107,13 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'interrupt-tool',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     preset: 'auto',
     async run(d) {
       // Not `sleep 120`: Claude Code refuses a long sleep before it runs (measured), and nothing would be interrupted
       d.session().send('Run this shell command and wait for it: node -e "setTimeout(() => {}, 120000)"')
-      await d.waitFor('the command call', (e) => e.type === 'tool_call' && (e.summary.tool === 'Bash' || e.summary.tool === 'PowerShell'))
+      // Claude Code may look up a tool first (ToolSearch); the ACP tools name their shell their own way, so there it is any call that is not a file read
+      await d.waitFor('the command call', (e) => e.type === 'tool_call' && (d.tool === 'claude' ? e.summary.tool === 'Bash' || e.summary.tool === 'PowerShell' : e.summary.tool !== 'Read'))
       d.session().interrupt()
       await d.waitFor('the stop', (e) => e.type === 'state_change' && e.state === 'waiting_input')
       await turn(d, 'Say ok.')
@@ -197,7 +198,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'centralu-mail',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the mail tool of the centralu server to read your inbox, then send a message to "Docs worker" saying: use LICENSE. Then say done.')
@@ -205,7 +206,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'centralu-agents',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the recall tool of the centralu server to search for "naming". Then use its read_session tool on the session it found. Then use its start_agent tool with the task "list the notes". Then summarise all three in two sentences.')
@@ -231,7 +232,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // A command that exits with a non-zero code, and a Read of a file that is not there
     name: 'tool-error',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     preset: 'auto',
     async run(d) {
       await turn(d, 'Run this shell command and tell me its exit code: node -e "console.error(\'boom\'); process.exit(3)" . Then use the Read tool on missing-file.txt and tell me what happened.')
@@ -240,7 +241,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     // A command whose output is far past what the CLI hands the model
     name: 'long-output',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     preset: 'auto',
     async run(d) {
       await turn(d, 'Run this shell command and say only how many lines you saw at the end: node -e "for (let i = 1; i <= 6000; i++) console.log(\'line \' + i)"')
@@ -248,7 +249,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     name: 'markdown',
-    tools: ['claude'],
+    tools: ['claude', ...ACP_TOOLS],
     async run(d) {
       await turn(d, 'Without using any tool, answer in Markdown: a heading, a short bulleted list of three items, a TypeScript code block of a two-line function, and a table of three rows with columns Name and Value.')
     },
@@ -270,6 +271,14 @@ export const SCENARIOS: readonly Scenario[] = [
     preset: 'auto',
     async run(d) {
       await turn(d, 'Use the PowerShell tool to run: Write-Output "ps-ok". Then say done.')
+    },
+  },
+  {
+    // Cursor out of its plan's quota answers every prompt with a plain sentence and ends the turn; recorded on an account in that state
+    name: 'out-of-quota',
+    tools: ['cursor-agent'],
+    async run(d) {
+      await turn(d, 'Reply with exactly: hello')
     },
   },
   {

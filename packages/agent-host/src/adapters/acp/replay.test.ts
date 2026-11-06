@@ -11,7 +11,7 @@ import { detailOf } from './session.js'
 import { readUpdate, RequestPermission } from './wire.js'
 import type { AcpProfile } from './profile.js'
 import { callOrder, loadRecording, of, replaySpawner } from '../frames/replay.test-helpers.js'
-import { drive, SCENARIOS, scenariosFor } from '../frames/scenarios.test-helpers.js'
+import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
 
 /**
  * The adapter against recordings of the real tools (docs/plans/acp-adapter.md §10, #1498). Each recording was made by
@@ -36,13 +36,14 @@ const profile = (dir: string, version: string): AcpProfile => {
 
 async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number }> {
   const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
-  const named = SCENARIOS.find((s) => s.name === name)!
+  const tool = dir.replace(/-[^-]*$/, '')
+  const named = scenariosFor(tool).find((s) => s.name === name)!
   // Driven under the preset it was recorded with (`frames-record.mts` writes it; older recordings ran under Normal)
   const preset = PermissionPreset.safeParse(recording.header.preset)
   const scenario = preset.success ? { ...named, preset: preset.data } : named
   const { spawn, state, peers } = replaySpawner(recording)
   const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
-  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'))
+  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } } })
   return { events, problems: state.problems, left: state.left() }
 }
 
@@ -171,7 +172,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         }
         const { spawn, state, peers } = replaySpawner(recording)
         const adapter = new Kept(profile(dir, String(recording.header.version)), spawn, 60_000)
-        const scenario = SCENARIOS.find((s) => s.name === 'resume')!
+        const scenario = scenariosFor('cursor-agent').find((s) => s.name === 'resume')!
         const events = await drive(adapter, { ...scenario, preset: 'normal' }, '/work', 'replay-resume', 0, () => peers.at(-1)?.kill('SIGKILL'))
         expect(state.problems).toEqual([])
         expect(state.spawned).toBe(2)
@@ -196,6 +197,86 @@ for (const dir of readdirSync(RECORDINGS)) {
         const { events } = await replay(dir, 'queued')
         expect(of(events, 'turn_complete')).toHaveLength(2)
         expect(of(events, 'state_change').filter((e) => e.state === 'working')).toHaveLength(2)
+      })
+    }
+
+    if (names.includes('tool-error')) {
+      it('tool-error: a read of a missing file ends not ok with the tool’s words, a command’s stderr is its output, and the turn goes on to its end', async () => {
+        const { events } = await replay(dir, 'tool-error')
+        const reads = of(events, 'tool_call').filter((c) => c.summary.tool === 'Read')
+        expect(reads).toHaveLength(1)
+        expect(of(events, 'tool_result').find((r) => r.callId === reads[0]!.callId)).toMatchObject({ ok: false, summary: expect.stringContaining('missing-file.txt') })
+        expect(of(events, 'tool_output_delta').some((d) => d.text.includes('boom'))).toBe(true)
+        expect(of(events, 'turn_complete')).toHaveLength(1)
+        expect(of(events, 'error')).toEqual([])
+      })
+    }
+
+    if (names.includes('long-output')) {
+      it('long-output: a command whose output the tool cuts is one card, streamed in pieces, that keeps the tool’s own note of the cut', async () => {
+        const { events } = await replay(dir, 'long-output')
+        const calls = of(events, 'tool_call')
+        expect(calls).toHaveLength(1)
+        expect(of(events, 'tool_output_delta').length).toBeGreaterThan(5)
+        const result = of(events, 'tool_result')[0]!
+        expect(result).toMatchObject({ callId: calls[0]!.callId, ok: true })
+        expect(result.output).toContain('output truncated')
+        expect(result.output).toContain('line 6000')
+        expect(of(events, 'turn_complete')).toHaveLength(1)
+      })
+    }
+
+    if (names.includes('markdown')) {
+      it('markdown: a long Markdown answer arrives whole, as the pieces the tool streamed it in, with no tool call', async () => {
+        const { events } = await replay(dir, 'markdown')
+        const text = of(events, 'message_delta').map((e) => e.text).join('')
+        expect(text).toMatch(/^#+ \S/m)
+        expect(text).toMatch(/^- \S/m)
+        expect(text).toContain('```')
+        expect(text).toMatch(/^\| Name \| Value \|/m)
+        expect(of(events, 'tool_call')).toEqual([])
+        expect(of(events, 'turn_complete')).toHaveLength(1)
+      })
+    }
+
+    if (names.includes('interrupt-tool')) {
+      it('interrupt-tool: a Stop while a command runs sends the cancel again, ends the command’s card, and the next turn runs as a new one', async () => {
+        const recording = loadRecording(join(RECORDINGS, dir, 'interrupt-tool.jsonl'))
+        // The agent went on with the command after the first cancel, so the adapter sent it again (the replay uses every recorded frame)
+        expect(recording.frames.filter((f) => f.dir === 'out' && f.msg?.method === 'session/cancel')).toHaveLength(2)
+        const { events } = await replay(dir, 'interrupt-tool')
+        const call = of(events, 'tool_call')[0]!
+        expect(of(events, 'tool_result').filter((r) => r.callId === call.callId)).toHaveLength(1)
+        expect(of(events, 'state_change').filter((e) => e.state === 'waiting_input').map((e) => e.reason)).toEqual(['interrupted'])
+        expect(of(events, 'turn_complete')).toHaveLength(1)
+        expect(of(events, 'error')).toEqual([])
+      })
+    }
+
+    for (const name of ['centralu-mail', 'centralu-agents'].filter((n) => names.includes(n))) {
+      it(`${name}: Centralu’s tools reach the agent through the bridge as an MCP server, and each call is a card of its own, answered without asking`, async () => {
+        const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
+        const created = recording.frames.find((f) => f.msg?.method === 'session/new')!.msg as { params: { mcpServers: { name: string; args: string[] }[] } }
+        expect(created.params.mcpServers.map((m) => m.name)).toEqual(['centralu'])
+        const { events } = await replay(dir, name)
+        expect(of(events, 'approval_request')).toEqual([])
+        const calls = of(events, 'tool_call')
+        expect(calls.map((c) => c.summary.tool.replace(/^centralu[_-]/, ''))).toEqual(name === 'centralu-mail' ? ['mail', 'mail'] : ['recall', 'read_session', 'start_agent'])
+        // The answers are the fixed ones of `frames/fakes.test-helpers.ts`, as the real bridge relayed them
+        const results = of(events, 'tool_result')
+        expect(results.map((r) => r.ok)).toEqual(calls.map(() => true))
+        expect(results[0]!.output).toContain(name === 'centralu-mail' ? 'Docs worker' : 'naming question')
+        expect(of(events, 'turn_complete')).toHaveLength(1)
+      })
+    }
+
+    if (names.includes('out-of-quota')) {
+      it('out-of-quota: a plan out of quota answers with one plain sentence and a normal end of turn, which ends as a refusal in the provider’s words', async () => {
+        const recording = loadRecording(join(RECORDINGS, dir, 'out-of-quota.jsonl'))
+        expect(recording.frames.some((f) => f.dir === 'in' && (f.msg?.result as { stopReason?: string } | undefined)?.stopReason === 'end_turn')).toBe(true)
+        const { events } = await replay(dir, 'out-of-quota')
+        expect(of(events, 'error')).toMatchObject([{ error: { code: 'internal', message: expect.stringMatching(/refused the turn: Upgrade your plan to continue$/), retryable: false } }])
+        expect(of(events, 'turn_complete')).toEqual([])
       })
     }
   })

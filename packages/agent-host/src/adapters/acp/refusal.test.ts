@@ -132,8 +132,9 @@ describe('a provider refusal the tool only retries quietly', () => {
 
 /**
  * #1969: out of quota, Cursor (agent 2026.10.22, signed in) answers every prompt with the plain text "Upgrade your plan to
- * continue" and `end_turn`, with no error frame and nothing on stderr. The frames below are hand-written after that
- * measurement (chunked as the agent chunks a reply): the shapes follow the recordings, no quota recording exists yet.
+ * continue" and `end_turn`, with no error frame and nothing on stderr. The recording of that (`out-of-quota`, replayed in
+ * `replay.test.ts`) is the whole-answer case as the agent sends it. The frames below stay hand-written for what no run can be
+ * made to send: the answer chunked at other places, in other case, or as part of a longer answer.
  */
 describe('a provider refusal that arrives as the turn’s whole answer (Cursor out of quota)', () => {
   const cursor: AcpProfile = { ...cursorProfile(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => '2026.10.22' }
