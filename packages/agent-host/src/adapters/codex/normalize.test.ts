@@ -249,6 +249,12 @@ describe('streaming and tool calls', () => {
   })
 
   it('an MCP success carries the answer body', () => {
+    const { out } = real('mcp-call', 'item/completed', (p) => dig(p, 'item.type') === 'mcpToolCall')
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: true, summary: 'pong' })
+  })
+
+  // Hand-written: an answer of several parts, which the probe server's one-word answer is not
+  it('an MCP answer of several parts joins them', () => {
     const out = n('item/completed', {
       item: {
         type: 'mcpToolCall', id: 'm2', server: 'docs-mcp', tool: 'api_retriever',
@@ -611,14 +617,19 @@ describe('state and gauges', () => {
    * conversation window.
    */
   it('an MCP tool call shows the server and tool name', () => {
-    const out = n('item/started', {
-      item: { type: 'mcpToolCall', id: 'm1', server: 'browser', tool: 'list_tabs', status: 'inProgress' },
-    })
-    expect(out[0]).toMatchObject({
-      type: 'tool_call',
-      summary: { tool: 'list_tabs', title: 'browser: list_tabs' },
-    })
-    // Centralu's own say what they did instead, with the mark the card draws them by (#730)
+    const { out } = real('mcp-call', 'item/started', (p) => dig(p, 'item.type') === 'mcpToolCall')
+    expect(out[0]).toMatchObject({ type: 'tool_call', summary: { tool: 'ping', title: 'probe: ping' } })
+  })
+
+  it('Centralu’s own tools are drawn by what they did, with the mark the card draws them by (#730)', () => {
+    const { out } = real('centralu-read', 'item/started', (p) => dig(p, 'item.server') === 'centralu' && dig(p, 'item.tool') === 'read_session')
+    expect(out[0]).toMatchObject({ summary: { tool: 'read_session', title: 'Listed sessions', centralu: { tool: 'read_session', label: 'Listed sessions' } } })
+    const sent = real('centralu-mail', 'item/started', (p) => dig(p, 'item.tool') === 'mail' && dig(p, 'item.arguments.action') === 'send')
+    expect(sent.out[0]).toMatchObject({ summary: { tool: 'mail', centralu: { tool: 'mail' } } })
+  })
+
+  // Hand-written: a call named list_sessions, which no recording holds (in them the model lists through read_session)
+  it('a call of the old list_sessions is drawn the same way', () => {
     expect(n('item/started', { item: { type: 'mcpToolCall', id: 'm2', server: 'centralu', tool: 'list_sessions', status: 'inProgress' } })[0]).toMatchObject({
       summary: { tool: 'list_sessions', title: 'Listed sessions', centralu: { tool: 'list_sessions', label: 'Listed sessions' } },
     })
