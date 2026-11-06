@@ -54,7 +54,7 @@ async function main(): Promise<number> {
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
-  // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own, so none of the person's is read or written
+  // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
   if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
   let failed = 0
   // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
@@ -81,8 +81,8 @@ async function main(): Promise<number> {
       try {
         const run = runAs(tool, scenario)
         // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
-        const centralu = ACP_TOOLS.includes(tool) ? scenario.session?.().orchestratorTools : undefined
-        if (centralu) bridge = await startBridgeHost(centralu, scenario.session!().toolProfile ?? 'reader')
+        const given = ACP_TOOLS.includes(tool) ? scenario.session?.() : undefined
+        if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
         const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
         const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => seedFiles(cwd, files), tool, session })
         // One file per process, in the order they started (`recorder.ts`)

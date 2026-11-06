@@ -17,8 +17,16 @@ export async function startBridgeHost(tools: OrchestratorTools, profile: ToolPro
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   server.on('connection', (socket: WebSocket) => {
     socket.on('message', (raw) => {
-      const frame = JSON.parse(String(raw)) as { kind: string; id?: string; method?: string; params?: { sessionId?: string; name?: string; args?: Record<string, unknown> } }
-      if (frame.kind === 'hello') return void socket.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 0 }))
+      let frame: { kind: string; id?: string; method?: string; params?: { sessionId?: string; name?: string; args?: Record<string, unknown> } }
+      try {
+        frame = JSON.parse(String(raw))
+      } catch {
+        return
+      }
+      if (frame.kind === 'hello') {
+        if ((frame as { token?: string }).token !== token) return void socket.close(4001, 'refused')
+        return void socket.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: 1, currentSeq: 0 }))
+      }
       if (frame.kind !== 'rpc') return
       const answer = async (): Promise<unknown> => {
         if (frame.method === 'orchestrator.tools') return orchestratorToolSchemas(profile)

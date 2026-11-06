@@ -34,17 +34,31 @@ const profile = (dir: string, version: string): AcpProfile => {
   return { ...PROFILES[tool]!(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => version }
 }
 
-async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number }> {
+async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number; sent: Record<string, unknown>[] }> {
   const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
   const tool = dir.replace(/-[^-]*$/, '')
   const named = scenariosFor(tool).find((s) => s.name === name)!
   // Driven under the preset it was recorded with (`frames-record.mts` writes it; older recordings ran under Normal)
   const preset = PermissionPreset.safeParse(recording.header.preset)
   const scenario = preset.success ? { ...named, preset: preset.data } : named
-  const { spawn, state, peers } = replaySpawner(recording)
+  const { spawn: replayed, state, peers } = replaySpawner(recording)
+  // What the adapter wrote to the agent, parsed (the replay matches a request by its method alone)
+  const sent: Record<string, unknown>[] = []
+  const spawn = (spec: Parameters<typeof replayed>[0]) => {
+    const peer = replayed(spec)
+    let buffer = ''
+    peer.stdin.on('data', (d: Buffer) => {
+      buffer += String(d)
+      for (let n = buffer.indexOf('\n'); n >= 0; n = buffer.indexOf('\n')) {
+        if (buffer.slice(0, n).trim()) sent.push(JSON.parse(buffer.slice(0, n)) as Record<string, unknown>)
+        buffer = buffer.slice(n + 1)
+      }
+    })
+    return peer
+  }
   const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
   const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } } })
-  return { events, problems: state.problems, left: state.left() }
+  return { events, problems: state.problems, left: state.left(), sent }
 }
 
 for (const dir of readdirSync(RECORDINGS)) {
@@ -172,7 +186,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         }
         const { spawn, state, peers } = replaySpawner(recording)
         const adapter = new Kept(profile(dir, String(recording.header.version)), spawn, 60_000)
-        const scenario = scenariosFor('cursor-agent').find((s) => s.name === 'resume')!
+        const scenario = scenariosFor(dir.replace(/-[^-]*$/, '')).find((s) => s.name === 'resume')!
         const events = await drive(adapter, { ...scenario, preset: 'normal' }, '/work', 'replay-resume', 0, () => peers.at(-1)?.kill('SIGKILL'))
         expect(state.problems).toEqual([])
         expect(state.spawned).toBe(2)
@@ -207,6 +221,9 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(reads).toHaveLength(1)
         expect(of(events, 'tool_result').find((r) => r.callId === reads[0]!.callId)).toMatchObject({ ok: false, summary: expect.stringContaining('missing-file.txt') })
         expect(of(events, 'tool_output_delta').some((d) => d.text.includes('boom'))).toBe(true)
+        // As the tool reports it: `completed`, with the exit code only in its raw output (`metadata.exit: 3`). A command that failed reads ok (#2045)
+        const commands = of(events, 'tool_call').filter((c) => c.summary.tool === 'Bash')
+        expect(of(events, 'tool_result').find((r) => r.callId === commands[0]!.callId)?.ok).toBe(true)
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
       })
@@ -240,9 +257,9 @@ for (const dir of readdirSync(RECORDINGS)) {
     }
 
     if (names.includes('interrupt-tool')) {
-      it('interrupt-tool: a Stop while a command runs sends the cancel again, ends the command’s card, and the next turn runs as a new one', async () => {
+      it('interrupt-tool: a Stop while a command runs ends the command’s card and the turn as stopped, and the next turn runs as a new one', async () => {
         const recording = loadRecording(join(RECORDINGS, dir, 'interrupt-tool.jsonl'))
-        // The agent went on with the command after the first cancel, so the adapter sent it again (the replay uses every recorded frame)
+        // The agent updated the command after the first cancel, so the adapter sent the cancel once more (the replay uses every recorded frame)
         expect(recording.frames.filter((f) => f.dir === 'out' && f.msg?.method === 'session/cancel')).toHaveLength(2)
         const { events } = await replay(dir, 'interrupt-tool')
         const call = of(events, 'tool_call')[0]!
@@ -254,11 +271,12 @@ for (const dir of readdirSync(RECORDINGS)) {
     }
 
     for (const name of ['centralu-mail', 'centralu-agents'].filter((n) => names.includes(n))) {
-      it(`${name}: Centralu’s tools reach the agent through the bridge as an MCP server, and each call is a card of its own, answered without asking`, async () => {
-        const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
-        const created = recording.frames.find((f) => f.msg?.method === 'session/new')!.msg as { params: { mcpServers: { name: string; args: string[] }[] } }
+      it(`${name}: the adapter hands the agent Centralu’s bridge as an MCP server, and each call the agent makes through it is a card of its own`, async () => {
+        const { events, sent } = await replay(dir, name)
+        const created = sent.find((f) => f.method === 'session/new') as { params: { mcpServers: { name: string; env: { name: string; value: string }[] }[] } }
         expect(created.params.mcpServers.map((m) => m.name)).toEqual(['centralu'])
-        const { events } = await replay(dir, name)
+        expect(created.params.mcpServers[0]!.env.map((e) => e.name).sort()).toEqual(['CC_BRIDGE_TOKEN', 'CC_HOST_URL', 'CC_SESSION_ID'])
+        // The agent asked no permission for them under Normal: the recording holds no request
         expect(of(events, 'approval_request')).toEqual([])
         const calls = of(events, 'tool_call')
         expect(calls.map((c) => c.summary.tool.replace(/^centralu[_-]/, ''))).toEqual(name === 'centralu-mail' ? ['mail', 'mail'] : ['recall', 'read_session', 'start_agent'])

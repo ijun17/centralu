@@ -198,6 +198,8 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
   const claudeIds = (s: string): string =>
     s
       .replace(UUID_ANYWHERE, (u) => placeholderId(u.toLowerCase()))
+      // OpenCode's ids: `tool_…` names a tool output's file, and its leading digits are a time
+      .replace(/\btool_[A-Za-z0-9]{16,}/g, (t) => `tool_${numbered('tool', t).padStart(6, '0')}`)
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
       // A model response's items (Codex: `msg_`, `rs_` reasoning, `call_` and `fc_` tool calls) carry the provider's ids
       .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
