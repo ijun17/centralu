@@ -136,11 +136,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   box.turns = new MailTurns(store.mailbox, {
     ...(opts.now ? { now: opts.now } : {}),
     keepOpen: (id) => sessions.keptInTurn(id),
-    // A turn read back after a restart: the orchestrator's work message is a session's request, whose sender asks (§7.6)
-    askerOf: (sessionId, messageId) => {
-      const m = store.mailbox.message(messageId)
-      return m && reach.isOrchestrator(addressOf(sessionId)) && parseAddress(m.sender)?.kind === 'session' ? m.sender : undefined
-    },
+    // Whose request the turn is: the store's rows of it, not anything kept in memory (docs/plans/turn-owned-by-no-one.md §4.2)
+    askerIn: (id, turn) => service.requestsIn(addressOf(id), turn)[0]?.asker ?? null,
   })
   const mailTurns = box.turns
   const delivery = new MailDelivery(service, store.mailbox, sessions.mailSessions(), {
@@ -161,6 +158,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     project: (id) => projects().find((p) => p.id === id),
     untrusted: (projectId) => reach.untrusted(projectId),
     cites: (messageId) => store.mailbox.message(messageId)?.facts.cites ?? null,
+    requestsInTurn: (id) => {
+      const turn = mailTurns.current(id)
+      const requests = turn ? service.requestsIn(addressOf(id), turn) : []
+      return turn ? { turnSeq: turn.turnSeq, requests: requests.flatMap((r) => { const party = parseAddress(r.asker); return party?.kind === 'session' ? [{ sessionId: party.sessionId, messageId: r.messageId }] : [] }) } : null
+    },
   }
   const tool = new MailTool(service, store.mailbox, reach, {
     personMessage: (sessionId, seq) => {
@@ -184,7 +186,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const waitingOn = (ownerId: string, childId: string): number => service.waitingOn(addressOf(ownerId), addressOf(childId), mailTurns.latest(childId)?.messageId ?? null, owedOld)
 
   const hooks: MailHooks = {
-    askedBy: (id) => askedBy(askedByHost, mailTurns, id),
+    askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}) }),

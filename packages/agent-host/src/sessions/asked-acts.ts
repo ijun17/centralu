@@ -203,17 +203,17 @@ export function stepKind(name: string, args: Record<string, unknown>): 'undoable
 
 /**
  * The step as the person would be asked about it, or null for a read, which is free and leaves no record. `thread` is the thread of the turn (the
- * session's request): a post in it is the answer, and so is free; so is mail to the person. A post in another thread, or mail to anyone else,
+ * reaches someone else (`stepKind`). The thread is compared as the mail tool takes it, trimmed; with none (a turn of two askers) no post is the answer
  * reaches someone else (`stepKind`). The thread is compared as the mail tool takes it, trimmed
  */
-export function askedAct(name: string, args: Record<string, unknown>, thread: string): AskedStep | null {
+export function askedAct(name: string, args: Record<string, unknown>, thread: string | null): AskedStep | null {
   if (READS.has(name)) return null
   if (name === 'update_centralu' && args.action === 'check') return null
   if (name === 'agent_session' && typeof args.action === 'string' && AGENT_READS.has(args.action)) return null
   if (name === 'mail') {
     const action = args.action
     if (action === 'inbox' || action === 'read') return null
-    const inThread = typeof args.thread === 'string' && args.thread.trim() === thread
+    const inThread = thread !== null && typeof args.thread === 'string' && args.thread.trim() === thread
     // Answering, and marking handled, in the request's own thread; marking another thread handled would keep the orchestrator from being woken for it
     if ((action === 'reply' || action === 'update' || action === 'close' || action === 'handled') && inThread) return null
     if (action === 'send' && typeof args.to === 'string' && args.to.trim() === 'person') return null
@@ -229,9 +229,14 @@ export function stepOf(name: string, args: Record<string, unknown>): AskedStep {
   return act.length > (cli ? CLI_ACT_MAX : ACT_MAX) ? { tooLong: true } : { act }
 }
 
-/** The card's question (§9.7): who asked, from the host's record of the session and its project, and what for */
-export function askedQuestion(asker: { name: string; project: string | null; trusted: boolean }, act: string): string {
+type AskerNamed = { name: string; project: string | null; trusted: boolean }
+
+/** The card's question (§9.7): who asked, from the host's record of the session and its project, and what for. With requests of two sessions in the turn, it names each */
+export function askedQuestion(asker: AskerNamed & { also?: readonly AskerNamed[] }, act: string): string {
   // JSON-quoted: a session named `x" in project "centralu` cannot pass as another project
-  const where = asker.project === null ? 'with no project' : `in project ${JSON.stringify(oneLineText(asker.project, 80))}${asker.trusted ? '' : ' (not trusted)'}`
-  return `Session ${JSON.stringify(oneLineText(asker.name, 80))} ${where} asked the orchestrator to ${act}. It is the session's request, not yours.`
+  const who = (a: AskerNamed) =>
+    `${JSON.stringify(oneLineText(a.name, 80))} ${a.project === null ? 'with no project' : `in project ${JSON.stringify(oneLineText(a.project, 80))}${a.trusted ? '' : ' (not trusted)'}`}`
+  if (!asker.also?.length) return `Session ${who(asker)} asked the orchestrator to ${act}. It is the session's request, not yours.`
+  const all = [asker, ...asker.also].map(who)
+  return `Sessions ${all.slice(0, -1).join(', ')} and ${all.at(-1)} each asked the orchestrator for something in this turn, and Centralu cannot tell which of them this is for: ${act}. It is their request, not yours.`
 }

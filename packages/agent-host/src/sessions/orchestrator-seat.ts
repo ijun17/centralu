@@ -390,7 +390,9 @@ export function orchestratorToolsFor(
       const target = remote[0] ?? local[0]
       const trusted = target?.trusted === true
       const asker = host.askedBy?.(orchestratorId)
-      const preset = createdPreset(own, { trusted }, opts.preset, asker ? host.meta.get(asker.sessionId)?.permissionPreset ?? 'safe' : undefined)
+      // Held to the lowest asking session's preset: a turn with two askers (which fails closed) holds to the lower of them
+      const askerPreset = asker ? lowestPreset(...[asker, ...(asker.also ?? [])].map((a) => host.meta.get(a.sessionId)?.permissionPreset ?? 'safe')) : undefined
+      const preset = createdPreset(own, { trusted }, opts.preset, askerPreset)
       if (preset === null) {
         return {
           ok: false,

@@ -684,6 +684,11 @@ export class MailboxRecords {
     return this.rows(`r.recipient = ? AND m.needs_reply = 1 AND r.answer_id IS NULL AND COALESCE(r.settled, 'legacy') = 'legacy' ORDER BY m.created_at, m.id`, recipient)
   }
 
+  /** The rows delivered to `recipient` in its turn `turnSeq`, settled or not, with their messages, oldest first */
+  inTurn(recipient: string, turnSeq: number): PendingRow[] {
+    return this.withMessages(this.rows(`r.recipient = ? AND r.turn_seq = ? ORDER BY m.created_at, m.id`, recipient, turnSeq))
+  }
+
   /** The watched rows to `recipient` not settled */
   watchedTo(recipient: string): RecipientRow[] {
     return this.rows(`r.recipient = ? AND r.settled IS NULL AND ${WATCHED} ORDER BY m.created_at, m.id`, recipient)

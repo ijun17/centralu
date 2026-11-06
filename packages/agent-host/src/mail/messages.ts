@@ -44,7 +44,7 @@ import {
   wakesMessage,
   type SenderClass,
 } from './rules.js'
-import type { TurnNow } from './turns.js'
+import type { TurnNow, TurnRead } from './turns.js'
 
 /*
  * The message service (#1684, docs/plans/mailbox.md §16 M2): mail without threads. It stores and answers over `MailboxRecords` and asks `MailReach`
@@ -423,8 +423,8 @@ export class MessageService {
       const mine = m.sender === by
       const row = mine ? undefined : this.records.recipient(id, by)
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))
-      // A request is marked done in the turn it starts, where its words are shown (§7.6)
-      if (!mine && this.isRequest(m, by) && m.sender !== this.opts.turn?.(by)?.asker) throw refuse('not_allowed', REFUSAL_TEXT.withheld(id))
+      // A request is marked done in the turn it is in, where its words are shown (§7.6)
+      if (!mine && this.isRequest(m, by) && !this.inOpenTurn(m, row, this.opts.turn?.(by) ?? null)) throw refuse('not_allowed', REFUSAL_TEXT.withheld(id))
       // A task is settled by its report, not by its receiver saying it needs nothing: that would take the report from its owner
       if (!m.needsReply && (m.kind !== 'task' || !mine)) return { settled: 0, how: 'unwatched' }
       if (mine) {
@@ -441,17 +441,17 @@ export class MessageService {
   /**
    * `mail read` (§8.4): with no id the reader's unread mail, oldest first, at most 10 messages and about 20,000 characters, never half a message, marked
    * read; with an id that message and its chain back, at most 9 ancestors oldest first, phantoms for what the reader may not read (§5.5), and the
-   * message itself marked read. `before` is the older half of a chain. A request to the orchestrator is read only in its asker's turn (§7.6)
+   * message itself marked read. `before` is the older half of a chain. A request to the orchestrator is read only in the turn it was delivered in (§7.6)
    */
   read(reader: string, opts: { id?: string; before?: string } = {}): ReadView {
     return this.run(() => {
       const now = this.now()
-      const asker = this.opts.turn?.(reader)?.asker ?? null
+      const turn = this.opts.turn?.(reader) ?? null
       if (opts.id === undefined && opts.before === undefined) {
         const items: ReadItem[] = []
         let chars = 0
         for (const { message } of this.records.unreadFor(reader)) {
-          const item = this.item(message, reader, asker)
+          const item = this.item(message, reader, turn)
           // Work not delivered yet reaches the session by delivery, which a read here would take it out of (#1683)
           if (item.withheld || (item.row?.deliveredAt === null && (message.kind === 'task' || this.isRequest(message, reader)))) continue
           if (items.length >= READ_ITEMS || (items.length > 0 && chars + message.body.length > READ_CHARS)) break
@@ -467,7 +467,7 @@ export class MessageService {
       const chain = this.records.chain(id, READ_CHAIN)
       const oldest = chain.at(-1) ?? base
       const missing = oldest.replyTo !== null && chain.length < READ_CHAIN && this.records.message(oldest.replyTo) === undefined
-      const items = [...(missing ? [this.gone(oldest.replyTo ?? '')] : []), ...chain.reverse().map((m) => this.item(m, reader, asker)), ...(opts.id === undefined ? [] : [this.item(base, reader, asker)])]
+      const items = [...(missing ? [this.gone(oldest.replyTo ?? '')] : []), ...chain.reverse().map((m) => this.item(m, reader, turn)), ...(opts.id === undefined ? [] : [this.item(base, reader, turn)])]
       const read = opts.id === undefined ? undefined : items.at(-1)
       const marked = read && !read.phantom && !read.withheld && read.row ? this.records.markRead(reader, [base.id], now) : 0
       return { items, older: !missing && chain.length === READ_CHAIN && oldest.replyTo !== null ? oldest.id : null, marked }
@@ -476,7 +476,7 @@ export class MessageService {
 
   /** What the reader's `inbox` lists (S6): what waits for its answer, what is unread, what it asked and is not answered, and its mail held for the person */
   inbox(reader: string): InboxView {
-    const asker = this.opts.turn?.(reader)?.asker ?? null
+    const turn = this.opts.turn?.(reader) ?? null
     const messageOf = (row: RecipientRow) => this.records.message(row.messageId)
     const needReply = this.records
       .unansweredTo(reader)
@@ -484,12 +484,12 @@ export class MessageService {
         const m = messageOf(row)
         return m?.kind === 'message' && !isHidden(row) ? [m] : []
       })
-      .map((m) => this.item(m, reader, asker))
+      .map((m) => this.item(m, reader, turn))
     const listed = new Set(needReply.map((i) => i.message.id))
     const unread = this.records
       .unreadFor(reader)
       .filter((p) => !listed.has(p.message.id))
-      .map((p) => this.item(p.message, reader, asker))
+      .map((p) => this.item(p.message, reader, turn))
     const waiting = this.records.watchedFrom(reader).flatMap((row) => {
       const message = messageOf(row)
       return message?.kind === 'message' && message.needsReply ? [{ row, message }] : []
@@ -749,6 +749,24 @@ export class MessageService {
     })
   }
 
+  /**
+   * The sessions whose requests are in `orchestrator`'s turn `turn` (docs/plans/turn-owned-by-no-one.md §4.2), oldest first, each with its oldest request there, read
+   * from the rows the turn was given (`inOpenTurn`), settled or not: a request delivered into the turn makes the whole turn its asker's, and a
+   * restart or a swap keeps it, since the store holds the rows. A reminder for an asker (`facts.asker`) counts as its request
+   */
+  requestsIn(orchestrator: string, turn: TurnRead): { asker: string; messageId: string }[] {
+    if (!this.reach.isOrchestrator(orchestrator)) return []
+    const work = turn.messageId === null ? undefined : this.records.message(turn.messageId)
+    const given = [...(work ? [{ message: work, row: this.records.recipient(work.id, orchestrator) }] : []), ...this.records.inTurn(orchestrator, turn.turnSeq)]
+    const found = new Map<string, string>()
+    for (const { message: m, row } of given) {
+      if (!this.inOpenTurn(m, row, turn)) continue
+      const asker = this.isRequest(m, orchestrator) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
+      if (asker !== undefined && parseAddress(asker)?.kind === 'session' && !found.has(asker)) found.set(asker, m.id)
+    }
+    return [...found].map(([asker, messageId]) => ({ asker, messageId }))
+  }
+
   /** The person's Resume on a message held `loop` (D13): its rows are let go and never held `loop` again, and the question it answers is answered (D8). Returns the rows */
   resumeDepth(messageId: string): number {
     return this.run(() => {
@@ -993,6 +1011,15 @@ export class MessageService {
     return !(target && target.sender === recipient && (target.needsReply || target.kind === 'task'))
   }
 
+  /**
+   * Whether a message was given in the recipient's open turn (§4.2): its row names the turn, or it is the work message of a turn the delivery began,
+   * whose rows are marked once the tool took them. Not a row held from the recipient: what it was not woken for has not joined the turn
+   */
+  private inOpenTurn(m: Pick<MailRow, 'id'>, row: RecipientRow | undefined, turn: TurnRead | null): boolean {
+    if (!turn || !row || (row.held !== null && row.held !== 'released')) return false
+    return row.turnSeq === turn.turnSeq || (turn.by === 'mail' && turn.messageId === m.id)
+  }
+
   /** The message that started `sender`'s turn, when a message did (not the person, not the session itself): what a send in that turn is caused by (§8.2 step 6) */
   private causeOf(sender: string): string | null {
     const turn = this.opts.turn?.(sender) ?? null
@@ -1123,12 +1150,12 @@ export class MessageService {
     return mine !== null && mine === this.reach.projectOf(m.sender) ? 'a session of your project' : 'a session of another project'
   }
 
-  /** A message as `reader` sees it: whole, or a phantom without its words (§5.5), or a request whose words are for its asker's turn only (§7.6) */
-  private item(m: MailRow, reader: string, asker: string | null): ReadItem {
+  /** A message as `reader` sees it: whole, or a phantom without its words (§5.5), or a request whose words are for the turn it is in only (§7.6) */
+  private item(m: MailRow, reader: string, turn: TurnNow | null): ReadItem {
     const row = this.records.recipient(m.id, reader) ?? null
     const relation = this.relation(reader, m)
     if (m.sender !== reader && (!row || isHidden(row))) return { message: { ...m, body: '', facts: {} }, row: null, relation, phantom: row ? 'held' : 'not_sent' }
-    if (this.isRequest(m, reader) && m.sender !== asker) return { message: { ...m, body: '' }, row, relation, withheld: true }
+    if (this.isRequest(m, reader) && !this.inOpenTurn(m, row ?? undefined, turn)) return { message: { ...m, body: '' }, row, relation, withheld: true }
     return { message: m, row, relation }
   }
 
