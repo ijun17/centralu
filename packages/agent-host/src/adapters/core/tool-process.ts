@@ -63,7 +63,7 @@ export type ToolStart = {
   /** Under the keeper: the keeper's child, which outlives this host by design and so starts without the host watch */
   source?: ProcessSource
   /** This host's own start, `spawnLocalAgent` unless a test or an adapter passes another */
-  spawn?: (spec: AgentSpawnSpec) => AgentProcess
+  spawn?: (spec: LocalSpawnSpec) => AgentProcess
   /**
    * A stderr line as it may be read back (`stderrTail`, which a crash message carries to the screen): changed, or null to
    * leave it out. For a tool whose log names the person's account or a sign-in address (Antigravity, #59)
