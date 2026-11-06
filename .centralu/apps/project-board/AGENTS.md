@@ -815,6 +815,16 @@ looked into).
     fails half of them, and the bisect moves past the culprit and blames a later commit. What this does not catch: a flake that makes a
     run pass when it should fail (the commit after the real culprit is then blamed for the pass it got by chance), and a probe that
     fails once by chance in a hunt that is under way. Each failed run costs one more run of its failed jobs.
+- **A blame is taken back when the run passes (#2082, 2026-11-06)**: the guard blamed #2076 for one failure of a Windows job, filed
+  a revert and an issue, and a person's rerun of the run (attempt 2) then passed; both were closed by hand. A hunt that ended with
+  a revert or an issue (`guard.hunt`, which keeps the run's id and the attempt it saw fail, `attempt`) is retracted when that same run
+  completes `success` on a later attempt (`passedAfterBlame`, `retractRed` in main-revert.mjs): the revert pull request leaves the
+  merge queue (so it is not announced as closed without merging) and is closed with a comment, the issue is commented on and closed
+  as not planned, and the session that queued the commit gets a `main-green` message. A revert that has already landed is left
+  alone and the issue stays open with a comment, since putting a commit back is a person's call. A newer run that passes retracts
+  nothing: the commit may be what it fixed. Each step is written down as it is done (`hunt.retracted`), so a try that stopped
+  half way posts nothing twice. The first failure of a test is still rerun before any commit is blamed (above); this only covers a blame
+  that was filed anyway (a rerun by a person, a driver on an older build).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or

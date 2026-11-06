@@ -6,8 +6,8 @@ import { gitWrapper } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { SLOW } from './test-timing.js'
 import { g, GIT_ENV, githubStandIn } from './git-fixture.test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
-import { REPO_ROOT, R, SHA, ghCheck, ghRun, ghPr, type Gh, ghState, appRef, root, rt, fake, IDLE_SERVER, NO_TIERS, FAST_LAND, runtime, call, gh, patchGh, writes, ghCalls, filesNamed, queueFile, queueOnDisk, notices, until, polls, stateOf, short2, watch, seedQueue, landed, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
+import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, passedAfterBlame, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+import { REPO_ROOT, R, SHA, ghCheck, ghRun, ghPr, type Gh, ghState, appRef, root, rt, fake, IDLE_SERVER, NO_TIERS, FAST_LAND, runtime, call, gh, patchGh, writes, ghCalls, filesNamed, queueFile, queueOnDisk, notices, until, polls, stateOf, short2, watch, seedQueue, landed, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('agents find the board tool for the gh command they would type', { timeout: 60_000 * SLOW }, () => {
   it('names the gh command each tool replaces in its description, and help lists only tools that exist, the same text every time', async () => {
@@ -1129,3 +1129,80 @@ describe('the main guard blames a commit only for a test that fails again on a r
   })
 })
 
+
+describe("the main guard takes back its revert and issue when the run it blamed passes on a rerun (#2082)", { timeout: 120_000 * SLOW }, () => {
+  const rerunPassed = (id: number, sha: string, attempt: number) => ({ ...mainRun(id, sha, 'success'), run_attempt: attempt })
+  const stateOfIssue = (n: number) => (gh().issueStates ?? {})[n]
+  const closes = () => writes().filter((w) => w[0] === 'close')
+  const mainGreenNotices = () => notices().filter((e) => e.kind === 'main-green')
+
+  /** A guard that blamed #82, the only commit since the last green one (its rerun failed too), reverted it in #600 and filed #501; the guard is then waiting for the next run */
+  async function blamed() {
+    const repo = mainRepo([{ subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
+    const c2 = repo.shas[0]!
+    seedQueue([{ repo: R, pr: 82, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: c2, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} }])
+    guardRuntime(repo, {
+      branchRuns: { main: [mainRun(990, c2, 'failure'), mainRun(980, repo.green, 'success')] },
+      jobs: { 990: [failedJob(31, 'verify')] },
+      logs: { '31': 'FAIL unit tooling/a.test.ts > a test' },
+    })
+    await call('merge_queue')
+    await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    return { repo, c2 }
+  }
+
+  it('closes the revert (out of the queue first) and the issue, each with the reason, and tells the session that queued the commit', async () => {
+    const { repo, c2 } = await blamed()
+    expect(guardOnDisk().hunt).toMatchObject({ run: 990, attempt: 2, issue: 501, revert: { pr: 600 } })
+    // A person reruns the run; the same job passes
+    patchGh((s) => (s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }))
+    await until(() => !!guardOnDisk().hunt?.retracted?.done || guardOnDisk().hunt === null, 'the retraction')
+    await polls(8)
+    // Closed once each, with the reason; the revert is gone from the queue and was never announced as closed without merging
+    expect(closes()).toEqual([['close', '600', expect.stringContaining('passed when its jobs were run again (attempt 3)')]])
+    expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'not_planned' })
+    expect(gh().comments.filter((c: { issue: number }) => c.issue === 501)).toHaveLength(1)
+    expect(gh().comments.find((c: { issue: number }) => c.issue === 501).body).toContain('the failure was intermittent')
+    expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)
+    expect(notices().filter((e) => e.kind === 'closed')).toEqual([])
+    // The session that queued it hears that main is green: once
+    expect(mainGreenNotices()).toHaveLength(1)
+    expect(mainGreenNotices()[0]).toMatchObject({ owner: 'tester', text: expect.stringContaining(`main is green again at ${c2.slice(0, 7)}`) })
+    expect(guardOnDisk().hunt ?? null).toBe(null)
+    expect(guardOnDisk().green).toBe(c2)
+  })
+
+  it('leaves a revert that already landed alone, and only comments on the issue, which stays open', async () => {
+    const { repo, c2 } = await blamed()
+    patchGh((s) => {
+      s.prs['600'].state = 'MERGED'
+      s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
+    })
+    const onIssue = () => (gh().comments ?? []).filter((c: { issue: number }) => c.issue === 501)
+    await until(() => onIssue().length > 0, 'the comment')
+    await polls(8)
+    expect(closes()).toEqual([])
+    expect(stateOfIssue(501)).toBeUndefined()
+    expect(onIssue()).toHaveLength(1)
+    expect(onIssue()[0].body).toContain('had already landed')
+  })
+
+  it('closes nothing while the run is still failing, when only a newer run passed, or when the red run is another one', async () => {
+    const { repo, c2 } = await blamed()
+    const hunt = guardOnDisk().hunt
+    // A newer run passing says nothing about the run that was blamed: the commit may be what it fixed
+    patchGh((s) => (s.branchRuns = { main: [mainRun(995, 'a'.repeat(40), 'success'), mainRun(990, c2, 'failure'), mainRun(980, repo.green, 'success')] }))
+    await polls(10)
+    expect(closes()).toEqual([])
+    expect(stateOfIssue(501)).toBeUndefined()
+    expect(mainGreenNotices()).toEqual([])
+    const run = (over: object) => ({ id: 990, status: 'completed', conclusion: 'success', attempt: 3, ...over })
+    expect(passedAfterBlame({ hunt, runs: [run({ conclusion: 'failure' })] })).toBeNull()
+    expect(passedAfterBlame({ hunt, runs: [run({ status: 'in_progress', conclusion: null })] })).toBeNull()
+    expect(passedAfterBlame({ hunt, runs: [run({ attempt: 2 })] })).toBeNull()
+    expect(passedAfterBlame({ hunt, runs: [run({ id: 991 })] })).toBeNull()
+    expect(passedAfterBlame({ hunt: { ...hunt, retracted: { done: 'x' } }, runs: [run({})] })).toBeNull()
+    expect(passedAfterBlame({ hunt: { ...hunt, endedAt: undefined }, runs: [run({})] })).toBeNull()
+    expect(passedAfterBlame({ hunt, runs: [run({})] })).toMatchObject({ id: 990 })
+  })
+})

@@ -229,6 +229,17 @@ async function noteFlakes({ repo, runs, g, update }) {
   }
 }
 
+/**
+ * The run a finished hunt filed a revert or an issue for, when it has since passed on a later attempt than the one that failed
+ * (#2082: a person reran main's run after the guard blamed a commit, and the same job passed); null while it has not, or when
+ * there is nothing filed, or the retraction is done. A newer run that passes says nothing: the commit may be what a later one fixed.
+ */
+export function passedAfterBlame({ hunt, runs }) {
+  if (!hunt?.endedAt || hunt.retracted?.done || (hunt.issue == null && !hunt.revert?.pr)) return null
+  const run = runs.find((r) => String(r.id) === String(hunt.run))
+  return run && run.status === 'completed' && run.conclusion === 'success' && (run.attempt ?? 1) > (hunt.attempt ?? 1) ? run : null
+}
+
 /** The text of the step that failed first in a failed job's log; empty when the log cannot be read */
 async function failingStep(repo, job) {
   if (job?.id == null) return ''
@@ -271,7 +282,7 @@ export function carried(all, known, pos) {
  * found, and answers what to record (`outcome` and anything else), or null when another driver holds the
  * lease. `probeCommit` makes a commit without known culprits for a probe. Answers what it did.
  */
-export async function guardTick({ q, update, now = clock(), renew, act, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
+export async function guardTick({ q, update, now = clock(), renew, act, retract, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
   if (!QUEUE.guard) return { did: 'off' }
   const g = q.guard ?? {}
   if (g.nextAt && Date.parse(g.nextAt) > now) return { did: 'wait' }
@@ -280,6 +291,9 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const runs = await workflowRuns(repo, WORKFLOW, { event: 'push', branch: defaultBranch })
   const { green, red, unfinished } = mainVerdict(runs)
   await noteFlakes({ repo, runs, g, update })
+  // The run a revert and an issue were filed for passed when rerun: the guard takes them back (#2082)
+  const passed = retract ? passedAfterBlame({ hunt: g.hunt, runs }) : null
+  if (passed && !(await retract(g.hunt, passed))) return { did: 'yielded' }
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
   const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
@@ -304,7 +318,7 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const lastGreen = green ?? g.green ?? null
   const jobs = await diagnose(repo, red, { failingLine })
   const line = jobs.first && failingLine ? await failingLine(repo, jobs.first) : ''
-  const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, kind: jobs.kind, cause: jobs.cause, step: jobs.step ?? null, at: new Date(now).toISOString() }
+  const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, attempt: red.attempt ?? 1, kind: jobs.kind, cause: jobs.cause, step: jobs.step ?? null, at: new Date(now).toISOString() }
   const stop = async (why) => {
     const record = await act({ red: base, culprit: null, why })
     if (!record) return { did: 'yielded' }

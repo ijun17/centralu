@@ -220,6 +220,12 @@ if (args[0] === 'pr' && args[1] === 'view') {
   st.comments = [...(st.comments ?? []), { issue: Number(path.split('/')[4]), body: body.body }]
   write(['comment', path.split('/')[4]])
   out({ id: 700 + st.comments.length, html_url: 'https://github.com/ijun17/centralu/issues/' + path.split('/')[4] + '#issuecomment-1', user: { login: 'tester' }, created_at: '2026-10-23T00:00:00Z', body: body.body })
+} else if (path && /\/issues\/\d+$/.test(path) && args.includes('PATCH')) {
+  // An issue closed (or reopened) with its reason: the main guard takes back what it filed (#2082)
+  const body = JSON.parse(stdin)
+  st.issueStates = { ...st.issueStates, [path.split('/')[4]]: body }
+  write(['issue-state', path.split('/')[4], body.state])
+  out({ number: Number(path.split('/')[4]), state: body.state })
 } else if (path && args.includes('DELETE')) {
   write(['delete', path.split('/heads/')[1]])
 } else fail('fake gh: unexpected call ' + JSON.stringify(args) + ' (HTTP 400)')

@@ -808,6 +808,13 @@ export async function createIssue(repo, { title, body, labels }) {
   return { number: issue.number, url: issue.html_url ?? null }
 }
 
+/** Closes an issue as not planned after a comment saying why (the main guard's retraction, #2082). Nothing is closed if the comment fails. */
+export async function closeIssue(repo, number, comment) {
+  checkRepo(repo)
+  await postComment(repo, number, comment)
+  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: 'not_planned' }, `closing #${number}`)
+}
+
 /** Moves a pull request onto another base branch. */
 export async function setPrBase(repo, number, base) {
   checkRepo(repo)

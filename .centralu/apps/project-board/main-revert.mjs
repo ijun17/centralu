@@ -5,10 +5,10 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createIssue, createPr, prsWithHead, readRepo } from './github.mjs'
+import { closeIssue, closePr, createIssue, createPr, GitHubError, postComment, prsWithHead, readPr, readRepo } from './github.mjs'
 import { config } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
-import { enqueue, pushEvent } from './queue.mjs'
+import { dequeue, enqueue, pushEvent } from './queue.mjs'
 import { short } from './util.mjs'
 import { now as clock } from './clock.mjs'
 
@@ -207,4 +207,69 @@ export async function actOnRed(dir, found, { now = clock(), ref, update, renew =
     if (q.guard) delete q.guard.acting
   })
   return { outcome: revert ? 'reverting' : 'reported', issue: issue.number, ...(revert ? { revert } : {}) }
+}
+
+/**
+ * The failed run a revert and an issue were filed for passes on a later attempt (#2082: a person reran main's run after the
+ * guard had blamed #2076, and the same job passed): the commit is not shown to be at fault, so the guard takes its own work back.
+ * The revert leaves the merge queue and is closed with a comment, the issue is closed as not planned with a comment, and the
+ * session that queued the commit hears that main is green. A revert that has landed already is left alone, and the issue stays
+ * open with a comment, since putting a commit back is a person's call. Each step is written down as it is done, so a try that
+ * stopped half way carries on and posts nothing twice. Answers null when it no longer holds the lease.
+ */
+export async function retractRed(hunt, run, { now = clock(), ref, update, renew = () => true }) {
+  const repo = config.repository
+  const at = new Date(now).toISOString()
+  const pr = hunt.culprit ? prOfSubject(hunt.culprit.subject) : null
+  const name = hunt.culprit ? (pr ? ref(repo, pr) : short(hunt.culprit.sha)) : null
+  const mark = (patch) =>
+    update((q) => {
+      if (q.guard?.hunt?.red === hunt.red) q.guard.hunt.retracted = { ...(q.guard.hunt.retracted ?? {}), ...patch }
+    })
+  const done = hunt.retracted ?? {}
+  const passed = `Main's run at ${short(hunt.red)} (${run.url ?? `run ${run.id}`}) failed ${hunt.jobs?.length ? `in ${hunt.jobs.join(', ')} ` : ''}and then passed when its jobs were run again (attempt ${run.attempt ?? 2}), so the failure was intermittent${name ? ` and ${name} is not shown to be at fault` : ''}.`
+  const closing = "The merge queue's main guard filed this and closes it on its own once the run passes (#2082)."
+
+  let revert = done.revert ?? null
+  if (hunt.revert?.pr && !revert) {
+    if (!renew()) return null
+    let open = null
+    try {
+      open = await readPr(repo, hunt.revert.pr)
+    } catch (e) {
+      // A pull request that cannot be read is gone; a broken connection or a limit is tried again at the next step
+      if (!(e instanceof GitHubError) || e.kind !== 'not-found') throw e
+    }
+    revert = !open || open.state === 'CLOSED' ? 'gone' : open.state === 'MERGED' ? 'landed' : 'closed'
+    if (revert === 'closed') {
+      // Out of the queue first: a closed pull request still queued is announced to its owner as closed without merging
+      update((q) => void dequeue(q, { repo, pr: hunt.revert.pr, at }, ref))
+      const refused = await closePr(repo, hunt.revert.pr, `Closing this revert. ${passed} ${closing}`)
+      if (refused) throw new GitHubError('github', `could not close the revert ${ref(repo, hunt.revert.pr)}: ${refused}`)
+    }
+    mark({ revert })
+  }
+  let issue = done.issue ?? null
+  if (hunt.issue != null && !issue) {
+    if (!renew()) return null
+    if (revert === 'landed') {
+      await postComment(repo, hunt.issue, `${passed} The revert ${ref(repo, hunt.revert.pr)} had already landed, so it is left to a person: put the change back if it should be on main. ${closing}`)
+      issue = 'commented'
+    } else {
+      await closeIssue(repo, hunt.issue, `${passed}${revert === 'closed' ? ` The revert ${ref(repo, hunt.revert.pr)} is closed.` : ''} ${closing}`)
+      issue = 'closed'
+    }
+    mark({ issue })
+  }
+  update((q) => {
+    const item = hunt.culprit ? landedItem(q, hunt.culprit.sha, hunt.culprit.subject) : null
+    const text = `Merge queue: main is green again at ${short(hunt.red)}: the failed run passed when rerun (${run.url ?? `run ${run.id}`}). ${
+      revert === 'closed' ? `The revert ${ref(repo, hunt.revert.pr)} is closed${issue === 'closed' ? ' and ' : '.'}` : ''
+    }${issue === 'closed' ? `${revert === 'closed' ? '' : 'The issue '}${ref(repo, hunt.issue)} is closed.` : ''}${
+      revert === 'landed' ? ` The revert ${ref(repo, hunt.revert.pr)} had landed already: ${ref(repo, hunt.issue)} says what to do.` : ''
+    }`.trimEnd()
+    pushEvent(q, item ?? { repo, pr, owner: null }, { kind: 'main-green', text, notify: true, at, data: { ...(hunt.issue != null ? { issue: hunt.issue } : {}), ...(hunt.revert ? { revert: hunt.revert.pr } : {}) } })
+    if (q.guard?.hunt?.red === hunt.red) q.guard.hunt.retracted = { ...(q.guard.hunt.retracted ?? {}), done: at }
+  })
+  return { revert, issue }
 }
