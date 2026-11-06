@@ -1229,6 +1229,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
       // A host that can prove it holds the token is asked to, before the token goes out (#838)
       {
         redials: LINK_REDIALS,
+        stableMs: this.deps.stableMs ?? STABLE_MS,
         ...this.deps.client,
         url: endpoint.url,
         token: endpoint.token,

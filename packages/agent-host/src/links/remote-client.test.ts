@@ -149,6 +149,32 @@ describe('the link client (#82)', () => {
     expect(gaveUp).toHaveLength(1)
   })
 
+  it('counts the redials from a host that stayed up, not from a hello it dropped at once (`stableMs`)', async () => {
+    // A host that answers every hello and drops the connection at once: a crash in a resume, a migration
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    wss.on('connection', (ws) => {
+      ws.on('message', () => {
+        ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' }))
+        ws.close(1011)
+      })
+    })
+    const { opened, Counted } = counted()
+    const gaveUp: string[] = []
+    const c = new RemoteClient(
+      { url: `ws://127.0.0.1:${(wss.address() as { port: number }).port}`, token: TOKEN, maxBackoffMs: 20, redials: 2, stableMs: 60_000, WebSocketImpl: Counted },
+      { gaveUp: (r) => gaveUp.push(r) },
+    )
+    cleanups.push(() => c.close())
+    c.connect()
+    await eventually(() => gaveUp.length === 1)
+    // The first socket, then two redials, and no more: a hello that came and went did not give back the redials
+    expect(opened.n).toBe(3)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(opened.n).toBe(3)
+  })
+
   it('a client closed while it redials never says it gave up: the link closed it on purpose', async () => {
     const gone = await host()
     const { opened, Counted } = counted()

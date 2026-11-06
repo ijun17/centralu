@@ -76,6 +76,12 @@ export type RemoteClientOptions = {
    * host still runs there is the machine's to say, through its connection line, and only the link can ask that
    */
   redials?: number
+  /**
+   * How long a host has to stay up after its hello before the count of `redials` starts over. Absent: at the hello. The
+   * link sets it to the time its own backoff waits (linked-machine-connection.ts `STABLE_MS`): a host that answers and drops
+   * at once is not a host that is back, and counted from each hello it was dialled again every 200 ms for good
+   */
+  stableMs?: number
   /** The protocol number sent in hello. Only tests set it */
   protocolVersion?: number
   /**
@@ -127,6 +133,7 @@ export class RemoteClient {
   private attempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined
+  private stableTimer: ReturnType<typeof setTimeout> | undefined
   /** The refusal that came before the close, if one did: it names why the host closes */
   private refusal: ProtocolError | undefined
   private readonly WS: typeof WebSocket
@@ -327,7 +334,11 @@ export class RemoteClient {
       this.epoch = frame.streamEpoch
       this.cursorValid = true
       this.ready = true
-      this.attempt = 0
+      if (this.opts.stableMs === undefined) this.attempt = 0
+      else {
+        this.stableTimer = setTimeout(() => (this.attempt = 0), this.opts.stableMs)
+        this.stableTimer.unref?.()
+      }
       this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}), ...(frame.updateContinued ? { updateContinued: frame.updateContinued } : {}) })
       return
     }
@@ -436,6 +447,7 @@ export class RemoteClient {
   private clearTimers(): void {
     clearTimeout(this.reconnectTimer)
     clearTimeout(this.handshakeTimer)
+    clearTimeout(this.stableTimer)
     this.reconnectTimer = undefined
     this.handshakeTimer = undefined
   }
