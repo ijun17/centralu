@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -620,7 +620,10 @@ describe("the Windows shards, split by each file's measured time", () => {
     const source = (JSON.parse(text) as { source: string }).source
     expect(formatDurations(durations, source)).toBe(text)
     // A missing file only weighs the median; most having a time is what keeps the shards even
-    const { picked } = await pickedOnRepo()
+    const { all, picked } = await pickedOnRepo()
     expect(picked.filter((t) => durations[t] !== undefined).length / picked.length).toBeGreaterThan(0.8)
+    // And for the remote Node's Windows shards, which split by the same file (review of #2017: 94 of 525 had none, 6.0 and 9.1 minutes)
+    const remote = remoteNodeTests(all)
+    expect(remote.filter((t) => durations[t] !== undefined).length / remote.length).toBeGreaterThan(0.9)
   }, 120_000 * SLOW)
 })

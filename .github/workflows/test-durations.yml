@@ -1,10 +1,11 @@
 # Refreshes tooling/test-durations.json once a week, so the Windows shards stay balanced.
 #
-# build.yml splits the Windows unit tests into two shards by each file's measured time. The times go stale as
-# tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against 1769 s), and refreshing
-# them by hand (`tsx tooling/os-tests.ts --refresh-durations`) was forgotten. The Windows shards upload their vitest
-# JSON report as `windows-test-times-<shard>`; this takes those of the newest green push run of build.yml on main
-# that still has them.
+# build.yml splits the Windows unit tests, and the remote Node's host tests on Windows, into two shards each by each file's
+# measured time. The times go stale as tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against
+# 1769 s), and refreshing them by hand (`tsx tooling/os-tests.ts --refresh-durations`) was forgotten. The unit shards upload their
+# vitest JSON report as `windows-test-times-<shard>`; the remote Node's shards theirs as `windows-test-times-remote-node-<shard>`,
+# and they time the files the unit shards do not run (94 of 525 had no time, and the two shards of that job took 6.0 and 9.1
+# minutes). This takes those of the newest green push run of build.yml on main that still has the unit shards' reports.
 #
 # That run is often behind main (a push run is cancelled by the next landing). So the file written holds exactly the
 # test files of this checkout (`refreshDurations` in tooling/os-tests.ts): a time of the run for a file it timed, the
@@ -70,6 +71,11 @@ jobs:
               [[ "$behind" =~ ^[0-9]+$ ]] || behind=unknown
               age_days=$(( ($(date +%s) - $(date -d "$created" +%s)) / 86400 ))
               echo "Times of run $run, $behind commits and $age_days days behind $GITHUB_REF_NAME."
+              # The files only the remote Node's Windows job runs are timed by its own shards. A run from before that job kept
+              # its times has none: the unit shards' reports alone are enough, and those files weigh the median until a later run.
+              for shard in 1 2; do
+                gh run download "$run" -n "windows-test-times-remote-node-$shard" -D "$RUNNER_TEMP/times/remote-node-$shard" || echo "::notice::Run $run kept no times of the remote Node's Windows shard $shard."
+              done
               {
                 echo "run=$run"
                 echo "behind=$behind"
@@ -82,7 +88,12 @@ jobs:
           exit 1
 
       - name: Refresh the file
-        run: pnpm exec tsx tooling/os-tests.ts --refresh-durations "$RUNNER_TEMP/times/1/vitest-times.json" "$RUNNER_TEMP/times/2/vitest-times.json"
+        run: |
+          reports=("$RUNNER_TEMP/times/1/vitest-times.json" "$RUNNER_TEMP/times/2/vitest-times.json")
+          for shard in 1 2; do
+            [ -f "$RUNNER_TEMP/times/remote-node-$shard/vitest-times.json" ] && reports+=("$RUNNER_TEMP/times/remote-node-$shard/vitest-times.json")
+          done
+          pnpm exec tsx tooling/os-tests.ts --refresh-durations "${reports[@]}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

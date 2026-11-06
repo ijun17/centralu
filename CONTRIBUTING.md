@@ -240,7 +240,8 @@ no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
 CI's full tier runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
 (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus
-the `-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
+the `-webkit.spec.ts` twins in WebKit (on Windows in Chromium alone, leaving grid-ring.spec.ts to CI too: Playwright's WebKit there keeps only the
+text types of a drag, so every scenario that drags fails in it, #2022); `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm
 e2e` runs it the way one CI engine does. When a shard fails, the `e2e report` job uploads
 one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed tests (`pnpm exec playwright show-report
 <folder>` after unzipping it). A twin repeats its base spec in WebKit and adds nothing, since CI
@@ -432,6 +433,10 @@ Then ask these against your change. Put anything you could not check in **Not ex
   a release bump ([#625](https://github.com/ijun17/centralu/pull/625)).
 - **Can it wait forever?** A script waited on workflows that might never run
   ([#622](https://github.com/ijun17/centralu/pull/622)).
+- **Does an adapter change rest on what the tool really sends?** A fix tested on a fake's value passed
+  every test and did nothing on the real Codex, which answers another status
+  ([#2031](https://github.com/ijun17/centralu/pull/2031)). Add or cite a recording of a real run
+  ([agent-host.md §3](docs/agent-host.md#3-procedure-for-adding-a-new-tool-c3--the-reason-this-document-exists) step 3).
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).

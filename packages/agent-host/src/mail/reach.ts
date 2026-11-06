@@ -1,6 +1,6 @@
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { parseAddress, sessionAddress } from './address.js'
-import { HOLD_UNTRUSTED_OUT, MAX_DEPTH, type MailRefusal } from './rules.js'
+import { HOLD_UNTRUSTED_OUT, type MailRefusal } from './rules.js'
 
 /*
  * Who may write to whom, which project is trusted, and the one hold (docs/plans/mailbox.md §7.1 to §7.4), in one module so each rule has one
@@ -37,8 +37,8 @@ export type MailReach = {
   mayWrite(from: string, to: string, asRequest?: boolean): RefusalReason | null
   /** Whether the project is untrusted (§7.2): none is not, a project of this host is by its flag, one this host does not know is (fail closed) */
   untrusted(projectId: string | null): boolean
-  /** `policy` first (§7.4), then `loop` above `MAX_DEPTH` unless `released` (the person's Resume); null when nothing holds */
-  holdFor(m: Pick<MailRow, 'kind' | 'sender' | 'senderProject' | 'depth'>, recipient: string, released?: boolean): 'policy' | 'loop' | null
+  /** `policy` (§7.4): the one hold; null when nothing holds. Mail is never held for how much of it there is (#2014) */
+  holdFor(m: Pick<MailRow, 'kind' | 'senderProject'>, recipient: string): 'policy' | null
   /** The untrusted project a delegation by `callerId` to `target` leaves, or null (§7.4): the tool refuses it, S15 */
   refusesDelegation(callerId: string, target: DelegationTarget): string | null
   isOrchestrator(address: string): boolean
@@ -101,11 +101,10 @@ export function mailReach(host: ReachHost): MailReach {
       return asRequest && receiver.id === orchestrator && f.sessionId !== orchestrator && !host.orchestratorAsks() ? 'orchestrator_asks' : null
     },
 
-    holdFor(m, recipient, released = false) {
+    holdFor(m, recipient) {
       if (m.kind !== 'message') return null
       const receiver = sessionOf(recipient)
-      if (receiver?.info && leaves(m.senderProject, receiver.info.projectId)) return 'policy'
-      return !released && m.depth > MAX_DEPTH ? 'loop' : null
+      return receiver?.info && leaves(m.senderProject, receiver.info.projectId) ? 'policy' : null
     },
 
     refusesDelegation(callerId, target) {

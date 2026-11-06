@@ -42,7 +42,6 @@ const REFUSALS = [
   'own_message',
   'recipients',
   'not_yours',
-  'pair_rate',
   'repeat',
   'ask_rate',
   'orchestrator_asks',
@@ -122,18 +121,15 @@ export const HOUR_MS = 60 * MINUTE_MS
 export const READ_ITEMS = 10
 export const READ_CHARS = 20_000
 export const READ_CHAIN = 9
-/** Non-reply messages an hour from one session to one other: refused `pair_rate` (D13). Replies are not counted */
-export const PAIR_NEW_PER_HOUR = 5
 export const MAX_RECIPIENTS = 10
 /** A session of an untrusted project writing outside it waits for the person to trust the project (D12); false holds and refuses nothing */
 export const HOLD_UNTRUSTED_OUT = true
-/** Hops in a row of mail passed on (D9) above which a message is held `loop`; only the person's Resume lets it go */
-export const MAX_DEPTH = 4
-/** Mail-started turns an hour on the host before a wake that would start one is deferred, and the share a quiet session keeps (D13) */
-export const HOST_MAIL_TURNS_PER_HOUR = 120
-export const HOST_SHARE = 10
-/** Mail-started turns an hour between one pair of sessions, with no word from the person, before their mail is held `loop` (D13) */
-export const PAIR_TURNS_PER_HOUR = 20
+/**
+ * Mail-started turns an hour, with no word from the person, past which Centralu writes the person one warning (#2014): between one pair of sessions,
+ * and across the host. Mail is never held or deferred for them
+ */
+export const WARN_PAIR_TURNS_PER_HOUR = 20
+export const WARN_HOST_TURNS_PER_HOUR = 120
 /** The unanswered reminder's limits (§10.4), counted from the store so a swap or restart does not reset them */
 export const REMINDER = {
   /** After a session came to rest, before the first reminder */
@@ -163,13 +159,20 @@ export const REFUSAL_TEXT = {
   not_allowed: () => 'that is not a party that takes mail',
   withheld: (id: string) => `${id} is a request: its words are shown in the turn it starts, and it is marked done there.`,
   not_yours: (id: string) => `you were not sent ${id} and did not send it.`,
-  pair_rate: (name: string) => `you started ${PAIR_NEW_PER_HOUR} conversations with ${name} in the last hour; answer one of its messages instead, or wait.`,
   repeat: (name: string) => `you sent the same text to ${name} less than ${REPEAT_WINDOW_MS / 60_000} minutes ago.`,
   ask_rate: () => `your project's sessions asked the orchestrator ${ASKS_PER_HOUR} times in the last hour; wait, or write to the person.`,
   orchestrator_asks: () =>
     'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead',
   untrusted_project: (project: string, target: string) =>
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,
+} as const
+
+/** Centralu's warning to the person (#2014): what ran on, and that nothing was stopped */
+export const WARNING_TEXT = {
+  pair: (a: string, b: string, turns: number) =>
+    `${a} and ${b} started ${turns} turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.`,
+  host: (turns: number) =>
+    `Mail between sessions started ${turns} turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.`,
 } as const
 
 /** The text of a task written for a report mark an earlier build left with no task (§9.5) */
@@ -212,22 +215,6 @@ export function quietAnswer(
     m.kind === 'message' && !m.needsReply && !m.urgent && !receiver.request && target.kind === 'message' && !target.needsReply &&
     parseAddress(m.sender)?.kind === 'session' && m.sender !== receiver.parent && !receiver.owesTask
   )
-}
-
-/**
- * The depth of a `message` (D9, §8.2 step 6): hops in a row of mail passed on to a party that did not write the mail answered. `cause` is the message
- * that started the sender's turn, `about` the messages a reminder or a notice to a sender is about (the caller loads them), `recipients` the new
- * message's. The person's word resets it (§10.10: the orchestrator relaying for the person is a pair, depth 0); a task, a report or another notice,
- * or no cause, gives 0; a follow-up adds none
- */
-export function depthOf(cause: MailRow | null, about: readonly MailRow[], recipients: readonly string[]): number {
-  if (!cause || cause.sender === PERSON) return 0
-  const followUp = cause.kind === 'notice' && (cause.facts.reminder !== undefined || cause.facts.unanswered !== undefined)
-  if (cause.kind !== 'message' && !followUp) return 0
-  const base = followUp ? Math.max(0, ...about.map((m) => m.depth)) : cause.depth
-  // A reminder answers its askers; a notice to a sender answers the receivers it lists
-  const back = !followUp ? [cause.sender] : cause.facts.reminder !== undefined ? about.map((m) => m.sender) : (cause.facts.unanswered ?? []).map((u) => u.recipient)
-  return recipients.every((r) => back.includes(r)) ? base : base + 1
 }
 
 /** One group of the receiver's work due now: a task, or for the orchestrator one asker's requests (`key`) */

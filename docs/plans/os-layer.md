@@ -32,7 +32,7 @@ From `.github/workflows/build.yml` and the run of main `f369f5c` (run 4030385980
 |---|---|---|---|
 | `windows tests` | full | `pnpm lint`, `pnpm depcruise`, `pnpm typecheck`; no tests | 2.8 min |
 | `windows tests (vitest 1/2)`, `(vitest 2/2)` | quick (every pull request) and full | `vitest run --shard=N/2`: every test file of both vitest projects (`unit`, `app-runtime`), 687 files, halved by count | 19.1 and 11.4 min (vitest's own `Duration` 1,090 s and 625 s) |
-| `host tests, remote Node (windows-2022)` | full, when the host's tests changed | `vitest run packages/agent-host packages/protocol tooling/launcher-` on the remotes' pinned Node: 459 files | 17.8 min (vitest 895 s) |
+| `host tests, remote Node (windows-2022)` | full, when the host's tests changed | `vitest run packages/agent-host packages/protocol tooling/launcher-` on the remotes' pinned Node: 459 files | 17.8 min (vitest 895 s). Since 2026-11-06 in two shards, `(windows-2022 1/2)` and `(2/2)`, 524 files halved by measured time (`os-tests.ts --remote-node`): the one job had reached 18.6 min and its 20 min limit |
 
 The issue's batch-227 numbers (18.4 + 10.5 and 16.3 runner-minutes) are the same shape.
 
@@ -314,14 +314,17 @@ are `tooling/test-durations.json`, each test file's seconds on the Windows runne
 test) weighs the median of those it does, at least one second. Today: 256 and 174 files, 2,181 and 2,180 seconds.
 
 **Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
-artifact `windows-test-times-<shard>` (30 days). To refresh, from a green run on main:
+artifact `windows-test-times-<shard>` (30 days); so do the remote Node's two Windows shards (`host tests, remote Node`, which
+split by this same file), as `windows-test-times-remote-node-<shard>`. The unit shards alone left the files only that job runs
+(94 of 525) at the median, and its shards 6.0 and 9.1 minutes apart; the file now names both jobs' files (`timedTests`), seeded
+for those 92 from the log of run 42082742277. To refresh, from a green run on main:
 
 ```sh
 gh run download <run id> -p 'windows-test-times-*' -D /tmp/times
 pnpm exec tsx tooling/os-tests.ts --refresh-durations /tmp/times/*/vitest-times.json
 ```
 
-and commit the file. The file holds exactly the tests this checkout selects (`refreshDurations`): the run's time for a
+and commit the file. The file holds exactly the tests this checkout selects and the remote Node's job runs (`timedTests`, `refreshDurations`): the run's time for a
 file it timed, the current entry for one it did not, the median for a new one, nothing for a file that is gone, so a
 run from before a split or a delete does not bring the old names back. `.github/workflows/test-durations.yml` does this
 weekly: it takes the reports of the newest green push run of `build.yml` on main that has them (and says how many

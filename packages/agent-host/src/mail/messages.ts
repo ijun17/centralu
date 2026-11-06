@@ -26,7 +26,6 @@ import {
   HOUR_MS,
   MAX_RECIPIENTS,
   MINUTE_MS,
-  PAIR_NEW_PER_HOUR,
   READ_CHAIN,
   READ_CHARS,
   READ_ITEMS,
@@ -34,7 +33,6 @@ import {
   REPEAT_WINDOW_MS,
   bodyLimit,
   cutTask,
-  depthOf,
   dueAt,
   firstLineOf,
   flowsDownTo,
@@ -55,9 +53,8 @@ import type { TurnNow, TurnRead } from './turns.js'
  * **Who is calling is an argument, never a field of the input**, as `MailService`: a tool that spreads its arguments cannot name `person` or `centralu`.
  */
 
-export type QuietReason = 'budget'
-/** Why a row is left out of a delivery and kept for the person: the one hold (§7.4), or a pair's turns ran away (§7.5) */
-export type HoldReason = 'policy' | 'loop'
+/** Why a row is left out of a delivery and kept for the person: the one hold (§7.4). Mail is never held for how much of it there is (#2014) */
+export type HoldReason = 'policy'
 
 /** What a send names: resolved addresses (the tool resolves names), the text, and the flags a sender may set */
 export type SendInput = {
@@ -116,7 +113,8 @@ export type InboxView = {
   needReply: ReadItem[]
   unread: ReadItem[]
   waiting: { row: RecipientRow; message: MailRow }[]
-  held: { row: RecipientRow; message: MailRow; why: HoldReason }[]
+  /** `loop`: a row an earlier build held for its turns, which waits for the person's Resume */
+  held: { row: RecipientRow; message: MailRow; why: HoldReason | 'loop' }[]
 }
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
 /** The calls a wake names; `mailCalls` makes them. The same type as `MessageCalls`, under the name this file used before the thread frame went */
@@ -127,10 +125,6 @@ export type DrainOptions = {
   again?: boolean
   /** Left out, and nothing is written about it */
   skip?: (message: MailRow, row: RecipientRow) => boolean
-  /** Told of, but not a reason for a turn */
-  quiet?: (message: MailRow, row: RecipientRow) => QuietReason | null | undefined
-  /** Left out and held for the person */
-  holdBack?: (message: MailRow, row: RecipientRow) => HoldReason | null | undefined
 }
 export type DrainResult = {
   /** The wake frame; empty when there is nothing to say */
@@ -145,7 +139,6 @@ export type DrainResult = {
   /** Whether anything in it waits for an answer: it goes before the rest when many sessions are woken at once */
   needsReply: boolean
   line: string
-  quieted: { messageId: string; reason: QuietReason }[]
   heldBack: { messageId: string; reason: HoldReason }[]
   /** The task (or, for the orchestrator, the first request of its asker) a turn this delivery starts is the work of, or null */
   workMessage: string | null
@@ -198,6 +191,11 @@ export class MessageService {
     return sessionAddress(this.opts.hostId, sessionId)
   }
 
+  /** A session's name, or its address while the host gives none (`MailReach.labelOf`) */
+  labelOf(address: string): string {
+    return this.reach.labelOf(address)
+  }
+
   /** Hears every change once it has committed: a message written, and who it is for. A listener that throws is said on stderr */
   onChange(listener: (c: MailChange) => void): () => void {
     return this.listeners.add(listener)
@@ -230,8 +228,8 @@ export class MessageService {
   // ── Writing ──
 
   /**
-   * A session's or the person's message (D1 to D8). Guards: the post rate, `pair_rate`, `repeat`, `ask_rate` and the number of recipients. It records the
-   * cause, the depth and a clarification's task, holds what the one hold or the depth holds, delivers an answer that needs nothing quietly, and settles
+   * A session's or the person's message (D1 to D8). Guards: the post rate, `repeat`, `ask_rate` and the number of recipients. It records the
+   * cause and a clarification's task, holds what the one hold holds, delivers an answer that needs nothing quietly, and settles
    * (or, when the answer is held, marks) the sender's own row on the message it answers. An answer to a clarification is stored as a task (§9.7)
    */
   send(sender: string, input: SendInput): SendResult {
@@ -272,15 +270,13 @@ export class MessageService {
       // The person's message a request cites, checked here, in the send's transaction: evidence for the orchestrator's judgement (docs/plans/cited-requests.md §3)
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
-      this.guards(sender, cls, to, text, target, requests, now)
+      this.guards(sender, cls, to, text, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
-      const about = cause === null ? [] : this.aboutFollowUp(cause)
-      const depth = kind === 'message' ? depthOf(cause, about, to) : 0
       const urgent = input.urgent === true
       const senderProject = this.reach.projectOf(sender)
       // The hold judges what the message is to the one hold, whatever it is stored as
-      const holds = to.map((r) => this.reach.holdFor({ kind: 'message', sender, senderProject, depth }, r))
+      const holds = to.map((r) => this.reach.holdFor({ kind: 'message', senderProject }, r))
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
@@ -288,7 +284,7 @@ export class MessageService {
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
-        { sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
+        { sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -298,7 +294,7 @@ export class MessageService {
       // The sender's own row on what it answers: settled, or while the answer is held, marked so the question stays open (D8)
       if (target?.kind === 'message' && target.needsReply && this.records.recipient(target.id, sender)) {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
-        else this.answerHeld(target, stored, held[0]?.why ?? 'policy')
+        else this.answerHeld(target, stored)
       }
       return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
     })
@@ -525,14 +521,14 @@ export class MessageService {
 
   /**
    * What a delivery to `recipient` would send now, and which messages it covers (§8.2). It reads the rows as they are: what was read since is not in it,
-   * nor a reminder whose messages are settled, nor mail whose sender may no longer write. The one hold and the depth hold a row (`heldBack`, which the
+   * nor a reminder whose messages are settled, nor mail whose sender may no longer write. The one hold holds a row (`heldBack`, which the
    * delivery writes); a task is the work of the turn it starts, one to a wake, and for the orchestrator one asker's requests; everything else rides along
    */
   drain(recipient: string, opts: DrainOptions = {}): DrainResult {
     const now = this.now()
     const toOrchestrator = this.reach.isOrchestrator(recipient)
     const parent = this.reach.parentOf(recipient)
-    type Candidate = { row: RecipientRow; message: MailRow; down: boolean; quietFor: QuietReason | null | undefined; request: boolean }
+    type Candidate = { row: RecipientRow; message: MailRow; down: boolean; request: boolean }
     const candidates: Candidate[] = []
     const heldBack: DrainResult['heldBack'] = []
     for (const { row, message } of this.records.pendingFor(recipient, now, opts.again === true)) {
@@ -544,7 +540,7 @@ export class MessageService {
       }
       // A row an older build's person released goes as it is: never held again (§6.3)
       const releasedBefore = row.held === 'released' && message.facts.releasedTo?.includes(recipient) === true
-      const why = (releasedBefore ? null : this.reach.holdFor(message, recipient, row.held === 'released')) ?? opts.holdBack?.(message, row)
+      const why = releasedBefore ? null : this.reach.holdFor(message, recipient)
       if (why) {
         heldBack.push({ messageId: message.id, reason: why })
         continue
@@ -555,12 +551,11 @@ export class MessageService {
         message,
         request,
         down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toOrchestrator, fromParent: parent === message.sender }),
-        quietFor: sender === 'person' ? null : opts.quiet?.(message, row),
       })
     }
 
     // One turn, one task (D17): a delivery that starts a turn carries at most one task, or for the orchestrator one asker's requests
-    const wakesIt = (c: Candidate) => !c.quietFor && wakesMessage(c.message)
+    const wakesIt = (c: Candidate) => wakesMessage(c.message)
     const isWork = (c: Candidate) => (toOrchestrator ? c.request : c.message.kind === 'task')
     const groupOf = (c: Candidate) => (toOrchestrator ? c.message.sender : c.message.id)
     const picked = pickWork(
@@ -576,13 +571,11 @@ export class MessageService {
 
     const items: MessageFrameItem[] = []
     const relations = new Set<string>()
-    const quieted: DrainResult['quieted'] = []
     let wake = false
     let immediate = false
     let needsReply = false
-    for (const { row, message, down, quietFor } of kept) {
-      if (quietFor) quieted.push({ messageId: message.id, reason: quietFor })
-      else if (wakesMessage(message)) wake = true
+    for (const { row, message, down } of kept) {
+      if (wakesMessage(message)) wake = true
       if (message.urgent || message.sender === PERSON) immediate = true
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
@@ -600,7 +593,6 @@ export class MessageService {
       immediate,
       needsReply,
       line: items.length === 0 ? '' : deliveryLine(items.length, relations),
-      quieted,
       heldBack,
       workMessage,
       asker: turnStarts && toOrchestrator ? picked : null,
@@ -629,8 +621,8 @@ export class MessageService {
   }
 
   /**
-   * The person says send it: mail held `uncertain` or `failed` goes now, and from the person's window a row held for a session's budget. Mail held for
-   * the project's trust or the depth has its own way out. The delivery passes `budget` (a session's Resume), which the drain judges again
+   * The person says send it: mail held `uncertain` or `failed` goes now, and from the person's window a row an earlier build held for a session's
+   * budget. Mail held for the project's trust has its own way out, and so does a row an earlier build held `loop` (`resumeHeld`)
    */
   resendHeld(recipient: string, ids: readonly string[], why: readonly ('uncertain' | 'failed' | 'budget')[] = ['uncertain', 'failed']): number {
     return this.run(() => {
@@ -645,7 +637,7 @@ export class MessageService {
     })
   }
 
-  /** The delivery held these rows for the person (a guard, the one hold, a quiet wake that could not go): written, and the Inbox is told */
+  /** The delivery held these rows for the person (the one hold): written, and the Inbox is told */
   hold(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
     if (held.length === 0) return
     this.run(() => {
@@ -681,7 +673,7 @@ export class MessageService {
     })
   }
 
-  // ── Trust and the depth hold (§7.4, §7.5) ──
+  // ── Trust (§7.4), and the holds of earlier builds ──
 
   /**
    * The person dismissed what an untrusted project sent out (or the project was deleted): its `policy` rows are deleted, with their messages when no row
@@ -718,16 +710,10 @@ export class MessageService {
       for (const { row, senderProject } of this.records.heldPolicy()) {
         const m = senderProject === projectId ? this.records.message(row.messageId) : undefined
         if (!m) continue
-        // Trusted now, the row may still be held for the depth: then it stays held, its question stays open and its asker is told why (§7.4)
-        const why = this.reach.holdFor(m, row.recipient)
         // Let go, an unread row is delivered as the mail it is, also one an older build told of quietly while it held it (§6.3)
-        if (why === null) this.records.letGo(row.recipient, [m.id])
-        else this.records.hold(row.recipient, [m.id], why)
-        const question = m.replyTo === null ? undefined : this.records.message(m.replyTo)
-        if (why === null) {
-          if (question) this.records.settle(question.id, m.sender, 'answered', now, m.id)
-          pokes.add(row.recipient)
-        } else if (question) this.answerHeld(question, m, why)
+        this.records.letGo(row.recipient, [m.id])
+        if (m.replyTo !== null) this.records.settle(m.replyTo, m.sender, 'answered', now, m.id)
+        pokes.add(row.recipient)
       }
       const refused = this.records.refusedRecords(projectId)
       const byCaller = new Map<string, MailRow[]>()
@@ -777,8 +763,11 @@ export class MessageService {
     return [...found].map(([asker, messageId]) => ({ asker, messageId }))
   }
 
-  /** The person's Resume on a message held `loop` (D13): its rows are let go and never held `loop` again, and the question it answers is answered (D8). Returns the rows */
-  resumeDepth(messageId: string): number {
+  /**
+   * The person's Resume on a message an earlier build held `loop` (#2014): its rows are let go, marked `released` so a previous build still serving
+   * during a host swap does not hold them again, and the question it answers is answered (D8). Returns the rows
+   */
+  resumeHeld(messageId: string): number {
     return this.run(() => {
       const m = this.records.message(messageId)
       const rows = m ? this.records.recipients(messageId).filter((r) => r.held === 'loop') : []
@@ -1090,7 +1079,7 @@ export class MessageService {
   }
 
   /** The guards of a send, over the store so a restart does not reset them (§7.5) */
-  private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, target: MailRow | undefined, requests: readonly boolean[], now: number): void {
+  private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, requests: readonly boolean[], now: number): void {
     for (const r of to) {
       if ((cls === 'session' || cls === 'app') && this.records.sameBody(sender, r, text, now - REPEAT_WINDOW_MS)) throw refuse('repeat', REFUSAL_TEXT.repeat(this.reach.labelOf(r)))
     }
@@ -1099,31 +1088,20 @@ export class MessageService {
       throw refuse('rate_limited', `at most ${limit} posts a minute from ${cls === 'app' ? 'an app' : 'a session'}: wait a minute`)
     }
     for (const [i, r] of to.entries()) {
-      if (target === undefined && cls === 'session' && parseAddress(r)?.kind === 'session' && this.records.newSince(sender, r, now - HOUR_MS) >= PAIR_NEW_PER_HOUR) {
-        throw refuse('pair_rate', REFUSAL_TEXT.pair_rate(this.reach.labelOf(r)))
-      }
-      if (requests[i]) {
-        if (this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) throw refuse('ask_rate', REFUSAL_TEXT.ask_rate())
-      }
+      if (requests[i] && this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) throw refuse('ask_rate', REFUSAL_TEXT.ask_rate())
     }
   }
 
-  /** The messages a reminder or a notice to a sender is about, for the depth: a follow-up adds none (D9) */
-  private aboutFollowUp(cause: MailRow): MailRow[] {
-    const ids = cause.kind !== 'notice' ? [] : (cause.facts.of ?? cause.facts.unanswered?.map((u) => u.id) ?? [])
-    return ids.flatMap((id) => this.records.message(id) ?? [])
-  }
-
   /** The answer `answer` to `question` is held for the person: the question stays open (it keeps the answer's id) and its asker is told once, quietly (S14) */
-  private answerHeld(question: MailRow, answer: MailRow, why: HoldReason): void {
+  private answerHeld(question: MailRow, answer: MailRow): void {
     this.records.answerHeld(question.id, answer.sender, answer.id)
     if (parseAddress(question.sender)?.kind !== 'session') return
-    const reason = why === 'policy' ? `${this.reach.projectLabel(answer.senderProject ?? '')} is not trusted` : `it is the ${answer.depth}th hop in a row`
+    const reason = `${this.reach.projectLabel(answer.senderProject ?? '')} is not trusted`
     this.centralu(question.sender, {
       kind: 'notice',
       body: `${this.reach.labelOf(answer.sender)} answered your ${question.id} with ${answer.id}, and the answer is held for the person (${reason}). It reaches you if the person lets it through; until then Centralu does not remind ${this.reach.labelOf(answer.sender)} of it.`,
       facts: { quiet: true, answerHeld: { question: question.id, answer: answer.id } },
-      dedupeKey: `answer_held:${question.sender}:${answer.id}:${why}`,
+      dedupeKey: `answer_held:${question.sender}:${answer.id}:policy`,
     })
   }
 
@@ -1265,7 +1243,7 @@ export class MessageService {
   }
 }
 
-/** A row the reader was not told of (held by the one hold or the depth): its message reads as a phantom (§5.5) */
+/** A row the reader was not told of (held by the one hold, or `loop` by an earlier build): its message reads as a phantom (§5.5) */
 /** The dedupe key of a request that cites the person's message `seq` of its sender's conversation: one use (`UNIQUE(sender, dedupe_key)`) */
 const citeKey = (seq: number): string => `cite:${seq}`
 

@@ -1,7 +1,7 @@
 /**
  * The switch to the message tables (docs/plans/mailbox.md §16 M3a-host), over the host's own wiring (`hostMail`): what must hold when live mail moves,
  * and the seams between rules that the M2 review found misses at (D3 vs §7.6, delivery vs turns, turn end vs settling, an update's continue vs mail
- * turns, the host cap vs the person's words, the one hold vs a refused delegation). The last part is a seeded model of delivery, turns and settling.
+ * turns, the person's words vs the counts the warning reads, the one hold vs a refused delegation). The last part is a seeded model of delivery, turns and settling.
  */
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -9,7 +9,6 @@ import { PERSON } from './address.js'
 import { reportRecorder } from './delegation.js'
 import { at, hostWorld, NOW } from './host-mail.test-helpers.js'
 import { oldThread, type OldReceipt } from './v61.test-helpers.js'
-import { PAIR_TURNS_PER_HOUR } from './rules.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 const A = at('a')
@@ -149,18 +148,18 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
     return { first, next, request, seq }
   }
 
-  it('keeps that turn’s row, cause and depth: no new mail_turns row, no host-cap count, no depth hop', async () => {
+  it('keeps that turn’s row and cause: no new mail_turns row, nothing more for the host’s count', async () => {
     const { next, request, seq } = await continued()
     expect(turnsOf(next.store, 'orc')).toEqual([expect.objectContaining({ turnSeq: seq, starterId: request, endedAt: null })])
     expect(next.turns.current('orc')).toMatchObject({ turnSeq: seq, starter: request, messageId: request, asker: A })
-    // What the continued turn sends has the original turn's cause: an answer back to the asker keeps depth 0, a word on to another adds the one hop it would have
+    // What the continued turn sends has the original turn's cause, an answer back to the asker and a word on to another alike
     next.clock.t += 10
     const answer = next.mail.send(ORC, { to: [], replyTo: request, text: 'CI is green' })
     next.clock.t += 10
     const onward = next.mail.send(ORC, { to: [C], text: 'please rerun the flaky job', needsReply: false })
-    expect(answer.message).toMatchObject({ causeId: request, depth: 0 })
-    expect(onward.message).toMatchObject({ causeId: request, depth: 1 })
-    expect(next.turns.mailStartedSince(0)).toBe(1)
+    expect(answer.message).toMatchObject({ causeId: request })
+    expect(onward.message).toMatchObject({ causeId: request })
+    expect(next.store.mailbox.mailStartedSince(0)).toBe(1)
   })
 
   it('the request settles at the continued turn’s end, reported to the asker as its request turn', async () => {
@@ -179,7 +178,7 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
     expect(next.mail.send(ORC, { to: [], replyTo: request, text: 'late' }).message.causeId).toBeNull()
   })
 
-  it('the person’s own Continue after their Stop is the person’s word: a turn of theirs, what it sends starts at depth 0 and the pair guard counts anew', async () => {
+  it('the person’s own Continue after their Stop is the person’s word: a turn of theirs, what it sends has no cause, and the pair’s count starts anew', async () => {
     const { next } = await continued()
     // The person's Stop ended the turn; their Continue starts one of theirs
     next.endTurn('orc')
@@ -218,23 +217,21 @@ describe('the one hold and a refused delegation (§7.4, S15, S16)', () => {
   })
 })
 
-describe('the host cap and the person’s words (§7.5)', () => {
-  it('a wake that carries the person’s words goes over the cap, and its turn is the person’s: it counts toward nothing and what it sends starts at depth 0', async () => {
+describe('the person’s words and the warning’s counts (§7.5)', () => {
+  it('past the host’s count, mail still goes; a wake that carries the person’s words starts the person’s turn, which counts toward nothing', async () => {
     const w = started(hostWorld())
     const starter = w.mail.send(C, { to: [B], text: 'warm up', needsReply: false }).message.id
     for (let i = 0; i < 130; i++) w.store.mailbox.startTurn({ sessionId: i < 20 ? 'a' : 'c', turnSeq: 500 + i, messageId: null, starterId: starter, startedBy: 'mail', startedAt: w.clock.t })
     w.clock.t += 10
     const fromB = w.mail.send(B, { to: [A], text: 'a question', needsReply: true })
-    await w.advance(2_000)
-    const before = w.turns.mailStartedSince(0)
-    expect(w.row(fromB.message.id, A)!.deliveredAt).toBeNull()
-    w.mail.send(PERSON, { to: [A], text: 'please answer beta' })
+    const word = w.mail.send(PERSON, { to: [A], text: 'please answer beta' })
+    const before = w.store.mailbox.mailStartedSince(0)
     await w.advance(1)
+    expect(w.turns.current('a')!.starter).toBe(word.message.id)
+    expect(w.store.mailbox.mailStartedSince(0)).toBe(before)
+    w.endTurn('a')
+    await w.advance(31_000)
     expect(w.row(fromB.message.id, A)!.deliveredAt).not.toBeNull()
-    expect(w.turns.current('a')!.starter).not.toBe(fromB.message.id)
-    expect(w.turns.mailStartedSince(0)).toBe(before)
-    w.clock.t += 10
-    expect(w.mail.send(A, { to: [C], text: 'on it', needsReply: false }).message.depth).toBe(0)
   })
 })
 
@@ -261,24 +258,24 @@ describe('delivery and turns, turn end and settling', () => {
     expect(w.store.mailbox.watchedTo(ORC)).toEqual([])
   })
 
-  it('a host restarted mid-turn keeps the turn’s starter: what the turn sends after the restart has its cause and depth', async () => {
+  it('a host restarted mid-turn keeps the turn’s starter: what the turn sends after the restart has its cause', async () => {
     const first = started(hostWorld())
     const q = first.mail.send(A, { to: [B], text: 'can you pass this to gamma?' })
     await first.advance(2_000)
     first.stop()
     const next = started(hostWorld({ store: first.store, clock: first.clock, kept: new Set(['b']) }))
     next.clock.t += 10
-    expect(next.mail.send(B, { to: [C], text: 'from alpha', needsReply: false }).message).toMatchObject({ causeId: q.message.id, depth: 1 })
+    expect(next.mail.send(B, { to: [C], text: 'from alpha', needsReply: false }).message).toMatchObject({ causeId: q.message.id })
   })
 
-  it('the pair guard counts no turn twice across a restart that took a turn up', async () => {
+  it('the pair’s count counts no turn twice across a restart that took a turn up', async () => {
     const first = started(hostWorld())
     first.mail.send(A, { to: [B], text: 'ping' })
     await first.advance(2_000)
     first.stop()
     const next = started(hostWorld({ store: first.store, clock: first.clock, kept: new Set(['b']) }))
     expect(next.store.mailbox.pairTurnsSince(A, B, 0)).toBe(1)
-    expect(next.turns.pairLoopSpent(A, B)).toBe(PAIR_TURNS_PER_HOUR < 1)
+    expect(next.turns.pairTurns(A, B)).toBe(1)
   })
 })
 

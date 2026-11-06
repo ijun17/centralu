@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
+import { e2eEngine } from './engine.js'
 
 /**
  * Only the startup-screen test runs on its **own** server.
@@ -39,7 +40,8 @@ const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
 
 /**
  * The engine the suite runs in. Unset (`pnpm e2e`), Chromium, with the scenarios that most depend
- * on the engine run a second time in WebKit by their `-webkit.spec.ts` twins. `E2E_BROWSER` names
+ * on the engine run a second time in WebKit by their `-webkit.spec.ts` twins, except on Windows, where the
+ * app is Chromium and Playwright's WebKit cannot drag (engine.ts). `E2E_BROWSER` names
  * one engine and runs every spec in it, which is what CI does, once per engine (the `e2e (webkit)`
  * and `e2e (chromium)` jobs in .github/workflows/build.yml): WebKit is the desktop app on macOS and
  * Linux (WKWebView, WebKitGTK), Chromium is the app on Windows (WebView2).
@@ -49,7 +51,7 @@ const LINKED_SPEC = /linked-hosts(-webkit)?\.spec\.ts/
  * that). grid-ring.spec.ts is a WebKit scenario with no Chromium half, so the Chromium run leaves it
  * out too. Any other spec that picks WebKit itself fails the Chromium run, which installs no WebKit.
  */
-const ENGINE = process.env.E2E_BROWSER
+const ENGINE = e2eEngine()
 const BROWSER = ENGINE === 'webkit' ? 'webkit' : 'chromium'
 const WEBKIT_TWIN = /-webkit\.spec\.ts/
 const WEBKIT_ONLY = /grid-ring\.spec\.ts/

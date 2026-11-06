@@ -43,6 +43,8 @@ export const MailFacts = z.looseObject({
   covers: z.array(z.string()).optional(),
   clarifies: z.string().optional(),
   hostCap: z.boolean().optional(),
+  /** On Centralu's warning to the person (#2014): the pair of sessions whose mail started more turns in the hour than it warns at, and how many */
+  pairTurns: z.object({ sessions: z.array(z.string()), turns: z.number() }).optional(),
   answerHeld: z.object({ question: z.string(), answer: z.string() }).optional(),
   refused: z.object({ tool: z.string(), target: z.string(), firstLine: z.string(), projectId: z.string() }).optional(),
   trusted: z.object({ project: z.string(), refused: z.array(z.string()) }).optional(),
@@ -750,20 +752,9 @@ export class MailboxRecords {
     return this.count(`SELECT COUNT(*) AS n FROM mail WHERE sender = ? AND created_at >= ?`, sender, since)
   }
 
-  /** Messages (not tasks, which have their own bounds) from `sender` with a row to `recipient` that answer nothing, since `since` (the pair rate, §7.5) */
-  newSince(sender: string, recipient: string, since: number): number {
-    return this.count(
-      `SELECT COUNT(*) AS n FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-        WHERE m.sender = ? AND r.recipient = ? AND m.kind = 'message' AND m.reply_to IS NULL AND m.created_at >= ?`,
-      sender,
-      recipient,
-      since,
-    )
-  }
-
   /**
-   * Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair loop guard, §7.5). Only turns a session's
-   * message started: one the person started, by their words or their message, counts toward no guard (D13, Q-M3a-12)
+   * Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair's warning, §7.5). Only turns a session's
+   * message started: one the person started, by their words or their message, counts toward no warning (Q-M3a-12)
    */
   pairTurnsSince(a: string, b: string, since: number): number {
     return this.count(
@@ -1008,7 +999,7 @@ export class MailboxRecords {
   }
 
   /**
-   * Turns since `since` that mail from a session or a Centralu follow-up started (the host-wide cap, §7.5): `started_by = 'mail'`
+   * Turns since `since` that mail from a session or a Centralu follow-up started (the host's warning, §7.5): `started_by = 'mail'`
    * and a starter that is a session's message, or Centralu's reminder or notice of unanswered mail. The person's words and a
    * report do not count, nor a turn whose delivery was not taken (`canceled`). One session's when `session` is given
    */
@@ -1016,12 +1007,7 @@ export class MailboxRecords {
     return this.count(`SELECT COUNT(*) AS n FROM (${MAIL_STARTED}) WHERE (@session IS NULL OR session_id = @session)`, { since, session: session ?? null })
   }
 
-  /** When the oldest of `session`'s counted turns since `since` began (`mailStartedSince`): when the cap lets its next one go. Null when none */
-  oldestMailStartedSince(since: number, session: string): number | null {
-    return this.db.prepare<{ since: number; session: string }, { at: number | null }>(`SELECT MIN(started_at) AS at FROM (${MAIL_STARTED}) WHERE session_id = @session`).get({ since, session })?.at ?? null
-  }
-
-  /** When the person last started a turn of the session (their word, §7.5's pair guard), or null */
+  /** When the person last started a turn of the session (their word, §7.5's pair warning), or null */
   lastPersonTurn(sessionId: string): number | null {
     return this.db.prepare<[string], { at: number | null }>(`SELECT MAX(started_at) AS at FROM mail_turns WHERE session_id = ? AND started_by = 'person'`).get(sessionId)?.at ?? null
   }

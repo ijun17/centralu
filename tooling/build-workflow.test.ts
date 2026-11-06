@@ -8,7 +8,8 @@ import { parseDocument } from 'yaml'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { REMOTE_NODE_TESTS, balance, remoteNodeTests, timedTests } from './os-tests.js'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
 import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf } from '../.github/scripts/ci-changes.mjs'
 
@@ -177,10 +178,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(keep).toMatch(/- name: Upload the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
     expect(keep).toContain('name: windows-test-times-${{ matrix.shard }}\n')
     expect(keep).toContain('path: ${{ runner.temp }}\\vitest-times.json\n')
-    // Nowhere else is the selection used: the Linux jobs run every test
+    // Nowhere else is the selection used: the Linux jobs run every test (the macOS job, and the remote Node's Windows shards below, list their own)
     const verify = job('verify').body
     expect(verify).not.toMatch(/CC_TEST_FILES|os-tests/)
-    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(2)
+    expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(3)
   })
 
   // #1704: no CI job ran a unit test on a Mac, so macOS-only differences failed the release rehearsal instead of the pull request
@@ -980,5 +981,206 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
       expect(sample.includes('*'), sample).toBe(false)
       expect(screenChanged([sample]), p).toBe(true)
     }
+  })
+})
+
+type Step = { name?: string; uses?: string; run?: string; if?: string; id?: string; with?: Record<string, string>; env?: Record<string, string>; 'timeout-minutes'?: number; 'continue-on-error'?: boolean }
+type WorkflowJob = { steps: Step[]; 'timeout-minutes'?: number; strategy?: { matrix: Record<string, unknown> }; name?: string }
+const fullWorkflow = parseDocument(readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')).toJS() as { jobs: Record<string, WorkflowJob> }
+
+// 2026-11-05: `keeper e2e (linux)` sat in a bare `sudo apt-get update && apt-get install` until its 20-minute limit, on main and in a merge
+// batch (runs 42041432265, 42053421100). The Playwright jobs had a cache, limits and a retry since #1503 and #1601; the other two Linux jobs did not.
+describe('every Linux job that installs system packages does it through the apt-packages action (#1603)', () => {
+  const installers = ['bundle', 'keeper-linux']
+  const installStep = (id: string) => fullWorkflow.jobs[id]!.steps.find((s) => s.name === 'Install Linux system dependencies')!
+
+  it('has no bare apt-get in a workflow step: the keeper job and the Linux bundle go through the action, each step limited', () => {
+    expect(workflow).not.toMatch(/apt-get (?:update|install)/)
+    for (const id of installers) {
+      const step = installStep(id)
+      expect(step.uses, id).toBe('./.github/actions/apt-packages')
+      // The step's own limit, well under the job's, so a stuck mirror fails the step and not the job
+      expect(step['timeout-minutes'], id).toBeGreaterThan(0)
+      expect(step['timeout-minutes'], id).toBeLessThanOrEqual(10)
+      expect(step['timeout-minutes']!, id).toBeLessThan(fullWorkflow.jobs[id]!['timeout-minutes']! / 2)
+      expect(step.with!.key, id).toMatch(/^[\w-]+$/)
+      // What Tauri links the window against
+      expect(step.with!.packages, id).toMatch(/^libwebkit2gtk-4\.1-dev build-essential /)
+      expect(step.with!.packages, id).toContain('libayatana-appindicator3-dev')
+    }
+    // The bundle job is Linux, macOS and Windows: only Linux installs. The AppImage tooling's packages are its alone.
+    expect(installStep('bundle').if).toBe("runner.os == 'Linux'")
+    expect(installStep('bundle').with!.packages).toContain('patchelf')
+    // The two lists have each their own cache
+    expect(new Set(installers.map((id) => installStep(id).with!.key)).size).toBe(2)
+  })
+
+  it("the release's Linux platforms install the same packages the same way, not with a bare apt-get (review of #2017)", () => {
+    const releaseText = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+    expect(releaseText).not.toMatch(/apt-get (?:update|install)/)
+    const release = parseDocument(releaseText).toJS() as { jobs: Record<string, { steps: Step[] }> }
+    const step = release.jobs.platform!.steps.find((s) => s.name === 'Install Linux system dependencies')!
+    expect(step.uses).toBe('./.github/actions/apt-packages')
+    expect(step.if).toBe("runner.os == 'Linux'")
+    expect(step['timeout-minutes']).toBeGreaterThan(0)
+    expect(step['timeout-minutes']).toBeLessThanOrEqual(10)
+    // One list for the CI bundle and the release: they build the same app, and one cache key per list serves both
+    expect(step.with!.packages).toBe(installStep('bundle').with!.packages)
+    expect(step.with!.key).toBe(installStep('bundle').with!.key)
+  })
+
+  it("reads as setup to the merge queue: an install step that fails or runs out of time is the runner's, not the commit's", () => {
+    for (const id of installers) expect(installStep(id).name).toMatch(/^Install .*\bsystem dependencies\b/)
+    const step = 'Install Linux system dependencies'
+    const job = (notes: string[], conclusion: string) => ({ id: 1, name: 'keeper e2e (linux)', conclusion, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: step, conclusion }], notes })
+    // The step's own limit
+    expect(failureOf(job([`The action '${step}' has timed out after 9m0s.`], 'failure'))).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step })
+    // Both tries failing
+    expect(failureOf(job([], 'failure'))).toMatchObject({ real: false, cause: 'setup', step })
+    // The job's own limit, as GitHub worded it on run 42041432265
+    expect(failureOf(job(['The job has exceeded the maximum execution time of 20m0s', 'The operation was canceled.'], 'cancelled'))).toMatchObject({ real: false, cause: 'timeout', inSetup: true, step })
+  })
+
+  describe('the action', () => {
+    const action = parseDocument(readFileSync(new URL('../.github/actions/apt-packages/action.yml', import.meta.url), 'utf8')).toJS() as { inputs: Record<string, unknown>; runs: { using: string; steps: Step[] } }
+
+    it('restores the cache, installs, then saves it right after a successful install, by one exact key', () => {
+      expect(action.runs.using).toBe('composite')
+      expect(Object.keys(action.inputs).sort()).toEqual(['key', 'packages'])
+      expect(action.runs.steps.map((s) => s.name ?? s.uses)).toEqual([
+        'Read the runner image and the package list',
+        'Restore the apt packages of an earlier run',
+        'Put the apt packages where apt looks',
+        'Install the packages',
+        'Keep the apt packages this run downloaded',
+        expect.stringMatching(/^actions\/cache\/save@/),
+      ])
+      const [image, restore, , install, kept, save] = action.runs.steps as [Step, Step, Step, Step, Step, Step]
+      expect(restore.uses).toMatch(/^actions\/cache\/restore@[0-9a-f]{40}/)
+      // Found by one exact key, never by a prefix: another image's packages are not wanted. Saved under that same key.
+      expect(restore.with!.key).toContain('${{ steps.image.outputs.name }}')
+      expect(restore.with!.key).toContain('${{ inputs.key }}')
+      // And by the list, so a changed list is a cold cache once and not the old .deb files for ever (review of #2017)
+      expect(restore.with!.key).toContain('${{ steps.image.outputs.list }}')
+      expect(save.with!.key).toBe(restore.with!.key)
+      expect(restore.with).not.toHaveProperty('restore-keys')
+      // The runner's OS, version and architecture: the linux-x64 and linux-arm64 bundles cannot share .deb files
+      expect(image.run).toContain('${ImageOS')
+      expect(image.run).toContain('${ImageVersion')
+      expect(image.run).toContain('${RUNNER_ARCH')
+      // A hit is not saved again, and an empty folder is not saved (a hit that restores nothing)
+      expect(kept.if).toBe("steps.debs.outputs.cache-hit != 'true'")
+      expect(save.if).toBe("steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'")
+      // The install is the retrying script, with the list as words
+      expect(install.run).toContain('scripts/apt-install.sh')
+      expect(install.env!.PACKAGES).toBe('${{ inputs.packages }}')
+    })
+
+    // The step's own script, run as the runner runs it (bash): the key a list gets. Git's bash on Windows has sha256sum too.
+    const listKey = (packages: string): string => {
+      const image = action.runs.steps[0]!
+      const dir = mkdtempSync(join(tmpdir(), 'apt-key-'))
+      try {
+        const out = join(dir, 'out').replace(/\\/g, '/')
+        writeFileSync(out, '')
+        execFileSync('bash', ['-c', image.run!], { env: { ...process.env, PACKAGES: packages, GITHUB_OUTPUT: out, ImageOS: 'ubuntu24', ImageVersion: '1', RUNNER_ARCH: 'X64' } })
+        const line = readFileSync(out, 'utf8').split('\n').find((l) => l.startsWith('list='))
+        return line ?? ''
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('keys the cache by the package list: a changed list is a new key, a reordered or reflowed one is not', () => {
+      const a = listKey('libfoo-dev build-essential curl')
+      expect(a).toMatch(/^list=[0-9a-f]{16}$/)
+      // The same words in another order, or folded over lines as the `>-` list in build.yml is
+      expect(listKey('curl   libfoo-dev\nbuild-essential')).toBe(a)
+      // One package more, or one less, or another
+      expect(listKey('libfoo-dev build-essential curl wget')).not.toBe(a)
+      expect(listKey('libfoo-dev build-essential')).not.toBe(a)
+      expect(listKey('libfoo-dev build-essential file')).not.toBe(a)
+    })
+
+    it("carries no limit or continue-on-error of its own: the caller's step has the limit, and each try of the script", () => {
+      for (const s of action.runs.steps) {
+        expect(s, s.name).not.toHaveProperty('timeout-minutes')
+        expect(s, s.name).not.toHaveProperty('continue-on-error')
+      }
+    })
+  })
+})
+
+// 2026-11-05: `host tests, remote Node (windows-2022)` ran 18+ minutes of its 20, and was cancelled at the limit in 18 of the 34 runs of main
+// from 2026-11-04 02:31 to 2026-11-05 14:19 (13.2 to 18.6 minutes of tests in the others). Two shards, balanced by each file's time.
+describe('the host tests on the remote Node, on Windows, run in two shards (2026-11-06)', () => {
+  const remote = fullWorkflow.jobs['host-tests-remote-node']!
+  const rows = (remote.strategy!.matrix.include as { label: string; runner: string; shard: number; shards: number }[]) ?? []
+
+  it('runs Linux whole and Windows in two halves, each named as the board reads a check', () => {
+    expect(rows.map((r) => [r.label, r.runner, r.shard, r.shards])).toEqual([
+      ['ubuntu-24.04', 'ubuntu-24.04', 1, 1],
+      ['windows-2022 1/2', 'windows-2022', 1, 2],
+      ['windows-2022 2/2', 'windows-2022', 2, 2],
+    ])
+    expect(remote.name).toBe('host tests, remote Node (${{ matrix.label }})')
+    // A run the file filter skips reports the same names, or its checks would be missing from the required set
+    const skipped = fullWorkflow.jobs['host-tests-remote-node-skipped']!
+    expect(skipped.name).toBe(remote.name)
+    expect(skipped.strategy!.matrix.label).toEqual(rows.map((r) => r.label))
+    const names = (workflowCheckNames(readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')).names as string[]).filter((n) => n.startsWith('host tests, remote Node'))
+    expect([...new Set(names)].sort()).toEqual(['host tests, remote Node (ubuntu-24.04)', 'host tests, remote Node (windows-2022 1/2)', 'host tests, remote Node (windows-2022 2/2)'])
+  })
+
+  it("picks a shard's tests with os-tests.ts, and runs the whole set when not sharded", () => {
+    const pick = remote.steps.find((s) => s.name === "Pick this shard's tests")!
+    expect(pick.if).toBe('matrix.shards > 1')
+    expect(pick.run).toBe('pnpm exec tsx tooling/os-tests.ts --remote-node --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/remote-node-tests.txt"')
+    const tests = remote.steps.find((s) => s.name === 'pnpm test (host, protocol, launcher)')!
+    expect(tests.env!.CC_TEST_FILES).toBe("${{ matrix.shards > 1 && format('{0}/remote-node-tests.txt', runner.temp) || '' }}")
+    // The paths vitest filters by are the ones os-tests.ts lists for a shard: the two cannot drift apart
+    expect(tests.run!.replace(/^pnpm exec vitest run /, '').split(' --reporter')[0]!.split(' ')).toEqual([...REMOTE_NODE_TESTS])
+    expect(remote.steps.indexOf(pick)).toBeLessThan(remote.steps.indexOf(tests))
+    expect(remote['timeout-minutes']).toBe(20)
+  })
+
+  // review of #2017: tooling/test-durations.json was fed by the unit shards alone and lacked 94 of 525 of this job's files, so its two
+  // shards took 6.0 and 9.1 minutes. The job's own shards keep their times now, and the weekly refresh reads them.
+  it("keeps the Windows shards' own file times, which the weekly refresh reads beside the unit shards'", () => {
+    const tests = remote.steps.find((s) => s.name === 'pnpm test (host, protocol, launcher)')!
+    expect(tests.run).toContain('--reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"')
+    const keep = remote.steps.find((s) => s.name === 'Upload the test times')!
+    expect(remote.steps.indexOf(keep)).toBeGreaterThan(remote.steps.indexOf(tests))
+    // Even when a test failed; only the rows that run on Windows (the Linux row's times are not the Windows runner's)
+    expect(keep.if).toBe('${{ !cancelled() && matrix.shards > 1 }}')
+    expect(keep.uses).toMatch(/^actions\/upload-artifact@[0-9a-f]{40}/)
+    expect(keep.with).toMatchObject({ name: 'windows-test-times-remote-node-${{ matrix.shard }}', path: '${{ runner.temp }}/vitest-times.json' })
+    // The weekly job downloads them, without needing them (a run from before had none), and hands every report to the refresh
+    const weekly = parseDocument(readFileSync(new URL('../.github/workflows/test-durations.yml', import.meta.url), 'utf8')).toJS() as { jobs: Record<string, { steps: { name?: string; run?: string }[] }> }
+    const run = weekly.jobs.refresh!.steps.map((s) => s.run ?? '').join('\n')
+    expect(run).toContain('windows-test-times-remote-node-$shard')
+    expect(run).toMatch(/windows-test-times-remote-node-\$shard" -D [^\n]*\|\| echo "::notice::/)
+    expect(run).toContain('remote-node-$shard/vitest-times.json')
+    expect(run).toContain('--refresh-durations "${reports[@]}"')
+  })
+
+  it("times the files of both jobs in the one durations file: the unit shards' tests and the remote Node's, once each", () => {
+    const all = ['packages/agent-host/src/a.test.ts', 'packages/core/src/b.test.ts', 'packages/ui/src/c.test.tsx', 'tooling/launcher-serve.test.ts', 'tooling/os-layer.test.ts']
+    // The unit shards run a and the OS-touching tooling test; the remote Node's job runs a and the launcher's
+    expect(timedTests(['packages/agent-host/src/a.test.ts', 'tooling/os-layer.test.ts'], all)).toEqual(['packages/agent-host/src/a.test.ts', 'tooling/launcher-serve.test.ts', 'tooling/os-layer.test.ts'])
+  })
+
+  it('splits the set into disjoint halves that are together every test of it, by measured time', () => {
+    const all = ['packages/agent-host/src/a.test.ts', 'packages/agent-host/src/b.test.ts', 'packages/agent-host/src/c.test.ts', 'packages/protocol/src/d.test.ts', 'packages/core/src/e.test.ts', 'tooling/launcher-serve.test.ts', 'tooling/key-pairing-vector.test.ts', 'tooling/os-layer.test.ts']
+    const set = remoteNodeTests(all)
+    // The packages the job lists, the launcher's tests and the vector's; not core, not the rest of tooling
+    expect(set).toEqual(['packages/agent-host/src/a.test.ts', 'packages/agent-host/src/b.test.ts', 'packages/agent-host/src/c.test.ts', 'packages/protocol/src/d.test.ts', 'tooling/launcher-serve.test.ts', 'tooling/key-pairing-vector.test.ts'])
+    const durations: Record<string, number> = { 'packages/agent-host/src/a.test.ts': 100, 'packages/agent-host/src/b.test.ts': 60, 'packages/agent-host/src/c.test.ts': 50, 'packages/protocol/src/d.test.ts': 40, 'tooling/launcher-serve.test.ts': 30, 'tooling/key-pairing-vector.test.ts': 20 }
+    const [one = [], two = []] = balance(set, durations, 2)
+    expect([...one, ...two].sort()).toEqual([...set].sort())
+    expect(one.filter((t) => two.includes(t))).toEqual([])
+    const secs = (l: string[]) => l.reduce((n, t) => n + durations[t]!, 0)
+    // 300 seconds of files, about 150 in each half (by count, 100 and 60 and 50 would sit in one)
+    expect(Math.abs(secs(one) - secs(two))).toBeLessThanOrEqual(20)
   })
 })

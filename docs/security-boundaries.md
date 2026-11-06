@@ -476,11 +476,11 @@ from a session whose project is untrusted now (read live: no project is trusted,
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
 leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
 S15): `start_agent`, `create_session` with a first message, `agent_session send`, `send_to_session` with `reportBack`, `ask_project` and the
-linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (§7.5): a
-`message` more than 4 hops in a row from the person's word is held `loop` until the person's Resume; two sessions whose mail started more than
-20 turns in an hour with no word from the person are held `loop`; 5 new conversations an hour per ordered pair (`pair_rate`); identical
-repeats within 10 minutes (`repeat`); 5 requests an hour to the orchestrator per asker group (`ask_rate`, no one-open rule any more); the token
-guard; and the host-wide cap of 120 mail-started turns an hour, which defers a session over its share but never the person's words or a report.
+linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (§7.5):
+identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the orchestrator per asker group
+(`ask_rate`, no one-open rule any more). **Nothing holds, defers or refuses mail for how much of it there is** (#2014): past 20 mail-started
+turns an hour between two sessions with no word from the person, or 120 on the host, Centralu writes the person one warning an hour in the
+Inbox and the mail goes on. The accepted risk: a runaway exchange while the person is away keeps spending usage until they act on the warning.
 **Accepted gaps of the one hold** (§1.6, D11): what a trusted session read of an untrusted project (a session's words through `read_session`
 or `agent_session`, an `ask_project` answer, `recall`, a file, a handoff's note, a fork's copied conversation) it can send on by mail or a task
 unheld, and the receiver sees the sender, not the origin; a report's `answer` from a session of an untrusted project that a trusted session

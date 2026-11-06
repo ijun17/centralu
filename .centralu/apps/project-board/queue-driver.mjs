@@ -24,6 +24,8 @@ import {
   dispatchWorkflow,
   FATAL,
   GitHubError,
+  countsTowardLimit,
+  isOutage,
   markDraft,
   markReady,
   mergePr,
@@ -52,6 +54,7 @@ import {
   dueItem,
   emptyQueue,
   ERROR_LIMIT,
+  OUTAGE_LIMIT,
   errorReason,
   handoffReason,
   holdsApp,
@@ -732,6 +735,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   }
 
   patch.errors = 0
+  patch.outages = 0
   if (d.state === 'attention') {
     const key = noticeKey(d.reason, pr.headRefOid)
     if (key !== item.noticeKey) {
@@ -790,22 +794,31 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   try {
     r = await pollItem(item, { now, ref, renew, save, landed, opened: openedBy(readOpened(dir), item.repo, item.pr), readied: () => rememberReadied(dir, item), stillIntegrated: () => readQueue(dir).items.some((i) => itemKey(i) === key && ACTIVE.has(i.state) && i.auto) })
   } catch (e) {
-    const fatal = e instanceof GitHubError && FATAL.has(e.kind)
+    // An outage (a 5xx, a dropped connection, what FATAL names) pauses the queue and is no strike against the item
+    const fatal = isOutage(e)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
     if (!(e instanceof GitHubError)) console.error('[project-board] merge queue:', e)
     updateQueue(dir, (fresh) => {
       if (fatal) {
         const ms = Math.min(PAUSE_MAX_MS, Math.max(PAUSE_MIN_MS, (fresh.pause?.ms ?? 0) * 2))
-        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: e.kind, reason: message }
+        fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: FATAL.has(e.kind) ? e.kind : 'outage', reason: message }
       }
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
       if (!it) return
       Object.assign(it, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
-      if (fatal) return
       // The same failure on one item, poll after poll (a pull request gone, a refused write): the
-      // session hears about it once it is not a blip, and once per change
-      it.errors = (it.errors ?? 0) + 1
-      if (it.errors < ERROR_LIMIT) return
+      // session hears about it once it is not a blip, and once per change. An outage is no strike, unless it is
+      // a 5xx or a dropped answer that this one item meets every time (a poll that goes through starts the count over);
+      // no network, no login, a rate limit or no gh are the machine's, and pause for as long as they last
+      if (fatal) {
+        if (!countsTowardLimit(e)) return
+        it.outages = (it.outages ?? 0) + 1
+        if (it.outages < OUTAGE_LIMIT) return
+        it.errors = it.outages
+      } else {
+        it.errors = (it.errors ?? 0) + 1
+        if (it.errors < ERROR_LIMIT) return
+      }
       const reason = errorReason(ref(it.repo, it.pr), it.errors, message)
       const nk = noticeKey(reason, it.head)
       Object.assign(it, { state: 'attention', reason, nextAt: new Date(now + pollMs('attention')).toISOString() })

@@ -4,14 +4,12 @@ import { PERSON } from './address.js'
 import {
   HOLD_OTHER_MS,
   HOLD_UNTRUSTED_OUT,
-  HOST_MAIL_TURNS_PER_HOUR,
-  HOST_SHARE,
-  MAX_DEPTH,
   MAX_RECIPIENTS,
-  PAIR_NEW_PER_HOUR,
   REFUSAL_TEXT,
   REMINDER,
-  depthOf,
+  WARNING_TEXT,
+  WARN_HOST_TURNS_PER_HOUR,
+  WARN_PAIR_TURNS_PER_HOUR,
   flowsDownTo,
   pickWork,
   quietAnswer,
@@ -37,42 +35,14 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
   const NOW = 1_800_000_000_000
   const A = 'session:h1/a'
   const B = 'session:h1/b'
-  const C = 'session:h1/c'
   const row = (over: Partial<MailRow> = {}): MailRow => ({
     id: 'h1.m_1', sender: A, senderProject: null, kind: 'message', needsReply: false, replyTo: null, rootId: 'h1.m_1', causeId: null, depth: 0, urgent: false,
     body: 'x', facts: {}, dedupeKey: null, origin: 'mail', legacyThread: null, createdAt: NOW, ...over,
   })
 
   it('keeps every constant of the design in one place', () => {
-    expect([PAIR_NEW_PER_HOUR, MAX_RECIPIENTS, HOLD_UNTRUSTED_OUT, MAX_DEPTH, HOST_MAIL_TURNS_PER_HOUR, HOST_SHARE]).toEqual([5, 10, true, 4, 120, 10])
+    expect([MAX_RECIPIENTS, HOLD_UNTRUSTED_OUT, WARN_PAIR_TURNS_PER_HOUR, WARN_HOST_TURNS_PER_HOUR]).toEqual([10, true, 20, 120])
     expect(REMINDER).toEqual({ graceMs: 120_000, personQuietMs: 600_000, againMs: 1_200_000, perRow: 2, gapMs: 1_200_000, perDay: 6, warmMs: 3_000_000, unansweredAfterMs: 7_200_000 })
-  })
-
-  describe('depthOf (D9)', () => {
-    it('an answer back to the cause’s sender keeps its depth; a send on to another party adds one; with no cause it is 0', () => {
-      const cause = row({ sender: A, depth: 2 })
-      expect(depthOf(cause, [], [A])).toBe(2)
-      expect(depthOf(cause, [], [B])).toBe(3)
-      expect(depthOf(cause, [], [A, B])).toBe(3)
-      expect(depthOf(null, [], [B])).toBe(0)
-    })
-
-    it('a task, a report, another notice and the person’s word give 0', () => {
-      for (const over of [{ kind: 'task' as const }, { kind: 'report' as const }, { kind: 'notice' as const }, { sender: PERSON }]) {
-        expect(depthOf(row({ ...over, depth: 3 }), [], [C]), JSON.stringify(over)).toBe(0)
-      }
-    })
-
-    it('a reminder or a notice to a sender adds nothing: the highest depth of the messages it is about, back to their askers or receivers', () => {
-      const asked = [row({ id: 'h1.m_2', sender: A, depth: 1 }), row({ id: 'h1.m_3', sender: C, depth: 3 })]
-      const reminder = row({ kind: 'notice', sender: 'centralu', facts: { reminder: 1, of: ['h1.m_2', 'h1.m_3'] } })
-      expect(depthOf(reminder, asked, [A, C])).toBe(3)
-      expect(depthOf(reminder, asked, [A])).toBe(3)
-      expect(depthOf(reminder, asked, [B])).toBe(4)
-      const told = row({ kind: 'notice', sender: 'centralu', facts: { unanswered: [{ id: 'h1.m_2', recipient: B, why: 'waited' }] } })
-      expect(depthOf(told, [row({ id: 'h1.m_2', sender: A, depth: 2 })], [B])).toBe(2)
-      expect(depthOf(told, [row({ id: 'h1.m_2', sender: A, depth: 2 })], [C])).toBe(3)
-    })
   })
 
   describe('quietAnswer (D3)', () => {
@@ -136,8 +106,14 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
     expect(wakesMessage(row({ kind: 'notice', facts: { quiet: false } }))).toBe(true)
   })
 
+  it('warns the person in plain words, saying that nothing was stopped (#2014)', () => {
+    expect(WARNING_TEXT.pair('alpha', 'beta', 21)).toBe(
+      'alpha and beta started 21 turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.',
+    )
+    expect(WARNING_TEXT.host(121)).toBe('Mail between sessions started 121 turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.')
+  })
+
   it('says its refusals in the words of the design (S9, S15), and has a reason for each', () => {
-    expect(REFUSAL_TEXT.pair_rate('beta')).toBe('you started 5 conversations with beta in the last hour; answer one of its messages instead, or wait.')
     expect(REFUSAL_TEXT.repeat('beta')).toBe('you sent the same text to beta less than 10 minutes ago.')
     expect(REFUSAL_TEXT.ask_rate()).toBe("your project's sessions asked the orchestrator 5 times in the last hour; wait, or write to the person.")
     expect(REFUSAL_TEXT.recipients()).toBe('at most 10 recipients.')
@@ -145,7 +121,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
     expect(REFUSAL_TEXT.untrusted_project('Pex', 'session c')).toBe(
       'your project Pex is not trusted, so work you give outside it (to session c) waits for the person to trust Pex. Nothing was started. Centralu shows the person how, and tells you when Pex is trusted; give it again then.',
     )
-    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'pair_rate', 'repeat', 'ask_rate', 'orchestrator_asks', 'removed', 'untrusted_project']) {
+    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'repeat', 'ask_rate', 'orchestrator_asks', 'removed', 'untrusted_project']) {
       expect(refusalReason(refuse(reason as never, 'x')), reason).toBe(reason)
     }
   })
