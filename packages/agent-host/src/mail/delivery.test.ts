@@ -7,6 +7,7 @@ import { MailNotAtRest } from './delivery.js'
 import { deliveryWorld, settle } from './delivery.test-helpers.js'
 import { A, B, C, NOW, ORC, W, X } from './messages.test-helpers.js'
 import { PERSON } from './address.js'
+import { HOUR_MS } from './rules.js'
 import { turnsOf as turnRows } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
 let stop: (() => void) | null = null
@@ -419,6 +420,9 @@ describe('the warning to the person (#2014, §7.5)', () => {
     expect(told).toHaveLength(1)
     expect(told[0]!.facts.pairTurns).toEqual({ sessions: [A, B].sort(), turns: 21 })
     expect(told[0]!.body).toContain('started 21 turns of each other')
+    // It goes to the person only: no session has it as a recipient, and no wake carries it
+    expect(w.store.mailbox.recipients(told[0]!.id).map((r) => r.recipient)).toEqual([PERSON])
+    expect(w.delivered.some((d) => d.input.text.includes(told[0]!.id))).toBe(false)
     // Rounds go on past it, each delivered, and the hour's warning is not written again
     for (let i = 21; i < 26; i++) {
       w.endTurn(i % 2 === 1 ? 'b' : 'a')
@@ -430,6 +434,23 @@ describe('the warning to the person (#2014, §7.5)', () => {
     }
     expect(warnings(w)).toHaveLength(1)
     expect(w.to('a').length + w.to('b').length).toBe(26)
+  })
+
+  it('the pair’s warning is keyed by the pair and the clock hour, and is written again in the next hour while the exchange runs on', async () => {
+    const w = started({ delivery: { minWakeGapMs: 0 } })
+    const hourOf = (t: number) => Math.floor(t / HOUR_MS) * HOUR_MS
+    // A minute before an hour turns, so the rounds run across it
+    w.clock.t = hourOf(w.clock.t) + HOUR_MS - 60_000
+    let last = await askBack(w, 21)
+    const first = hourOf(w.clock.t)
+    expect(warnings(w).map((m) => m.dedupeKey)).toEqual([`pairturns:${[A, B].sort().join('|')}:${first}`])
+    for (let i = 21; i < 40; i++) {
+      w.endTurn(i % 2 === 1 ? 'b' : 'a')
+      last = w.send(i % 2 === 1 ? B : A, { replyTo: last, text: `round ${i}`, needsReply: true }).message.id
+      await w.advance(2_000)
+    }
+    expect(hourOf(w.clock.t)).toBe(first + HOUR_MS)
+    expect(warnings(w).map((m) => m.dedupeKey).sort()).toEqual([first, first + HOUR_MS].map((h) => `pairturns:${[A, B].sort().join('|')}:${h}`).sort())
   })
 
   it('the person’s word to either session counts the pair anew: no warning', async () => {
@@ -481,6 +502,33 @@ describe('the warning to the person (#2014, §7.5)', () => {
     const told = warnings(w)
     expect(told).toHaveLength(1)
     expect(told[0]!.body).toContain('turns on this computer in the last hour')
+  })
+
+  it('the host’s warning uses the key an earlier build’s cap notice used, so the two builds write one line an hour between them', async () => {
+    const w = started({ delivery: { warnHostTurns: 12 } })
+    const hour = Math.floor(w.clock.t / HOUR_MS) * HOUR_MS
+    // An earlier build serving during a swap wrote its cap notice this hour already
+    w.mail.notice(PERSON, { body: 'the earlier build’s line', facts: { hostCap: true }, dedupeKey: `hostcap:${PERSON}:${hour}` })
+    turnsOf(w, 'b', 12)
+    const one = w.send(A, { to: [B], text: 'one more', needsReply: false })
+    await w.advance(2_000)
+    expect(w.rowOf(one.message.id, B).deliveredAt).not.toBeNull()
+    expect(warnings(w).map((m) => m.body)).toEqual(['the earlier build’s line'])
+  })
+
+  it('the host’s warning is written again in the next clock hour', async () => {
+    const w = started({ delivery: { warnHostTurns: 12 } })
+    const hourOf = (t: number) => Math.floor(t / HOUR_MS) * HOUR_MS
+    w.clock.t = hourOf(w.clock.t) + HOUR_MS - 10_000
+    turnsOf(w, 'b', 12)
+    w.send(A, { to: [B], text: 'one more', needsReply: false })
+    await w.advance(2_000)
+    w.endTurn('b')
+    await w.advance(10_000)
+    w.send(A, { to: [C], text: 'in the next hour', needsReply: false })
+    await w.advance(2_000)
+    const first = hourOf(w.clock.t) - HOUR_MS
+    expect(warnings(w).map((m) => m.dedupeKey).sort()).toEqual([first, first + HOUR_MS].map((h) => `hostcap:${PERSON}:${h}`).sort())
   })
 
   it('the turns a person’s words or a report started do not count toward it', async () => {

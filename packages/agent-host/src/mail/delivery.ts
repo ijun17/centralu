@@ -94,7 +94,7 @@ export type MailDeliveryOptions = {
   maxAttempts?: number
   /** The turns mail starts, which the warning to the person counts (§7.5); without them nothing is counted */
   turns?: MailTurns
-  /** Mail-started turns an hour, between one pair and on the host, past which the person is warned once an hour (#2014) */
+  /** Mail-started turns an hour, between one pair and on the host, past which the person is warned once per clock hour (#2014) */
   warnPairTurns?: number
   warnHostTurns?: number
   /** When the delivery last ran, kept by the host: how long it was off tells how to start (§7.9) */
@@ -507,10 +507,7 @@ export class MailDelivery {
       this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
       this.records.markRead(recipient, drained.inline, deliveredAt)
     })
-    if (!quiet) {
-      this.lastWake.set(recipient, this.now())
-      this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
-    }
+    if (!quiet) this.lastWake.set(recipient, this.now())
     // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
     if (waiting) {
       this.left.delete(recipient)
@@ -518,6 +515,8 @@ export class MailDelivery {
       if (this.crowd?.length === 0) this.crowd = null
       this.crowdChanged()
     }
+    // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done
+    if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
   }
 
   /**
@@ -541,7 +540,7 @@ export class MailDelivery {
 
   /**
    * One quiet mail to the person when mail between sessions runs on with no word from them (#2014, §7.5): for each pair of this turn's receiver and
-   * a session whose mail it carries, past `warnPairTurns` in the hour, and for the host past `warnHostTurns`. At most one an hour each (its dedupe key
+   * a session whose mail it carries, past `warnPairTurns` in the hour, and for the host past `warnHostTurns`. At most one per clock hour each (its dedupe key
    * names the hour); nothing is held, deferred or refused for it, and it wakes no session
    */
   private warnIfRunning(recipient: string, messageIds: readonly string[], now: number): void {

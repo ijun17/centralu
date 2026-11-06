@@ -219,9 +219,9 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   `HOST_SHARE`).
   - **The warning.** When the turns mail between two sessions started in the last hour, counted since the person's last
     word to either, pass `WARN_PAIR_TURNS_PER_HOUR = 20`, Centralu writes the person one notice in the Inbox naming the
-    two sessions and the count (`facts.pairTurns`, S17). When the host's mail-started turns in the last hour pass
+    two sessions and the count (`facts.pairTurns`, S18). When the host's mail-started turns in the last hour pass
     `WARN_HOST_TURNS_PER_HOUR = 120`, one notice says so (`facts.hostCap`, the key an earlier build's cap notice used).
-    Each is written at most once an hour (its dedupe key names the pair or the host and the hour), it wakes no session,
+    Each is written at most once per clock hour (its dedupe key names the pair or the host and the hour), it wakes no session,
     and nothing waits for it. The figures are the ones the old guards used: on the owner's store the loop holds never
     caught a loop, and the only held rows were 5 `budget` rows from normal status checks between two sessions.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
@@ -752,7 +752,7 @@ task is never reminded: its report settles it.
 | `refused` | notice | `{ tool, target, firstLine, projectId }`: a delegation refused for the sender's untrusted project (§7.4); the record S16 is built from |
 | `trusted` | notice | `{ project, refused: string[] }`: the project is trusted now, and these refused calls may be given again (S16) |
 | `hostCap` | notice | the host's mail-started turns in the hour passed 120 (D32; an earlier build's notice of its cap); for the person only |
-| `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S17); for the person only |
+| `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S18); for the person only |
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
@@ -968,7 +968,8 @@ sender about its messages, that is the sender.
 | A caller told its refused calls may be given again (S16) | `trusted:<recipient>:<project id>:<trust time>` |
 | A handoff or the role's move | `handover:<recipient>:<message id>` |
 | A watch firing (§13) | `watch:<recipient>:<watch id>:<change>` |
-| The person told the host-wide cap applies (§7.5) | `hostcap:<recipient>:<the hour's start, ms>` |
+| The person warned about the host's mail-started turns (S19, D32; an earlier build's cap notice used the same key, so the two write one line an hour between them) | `hostcap:person:<the clock hour's start, ms>` |
+| The person warned about a pair (S18, D32) | `pairturns:<a>\|<b>:<the clock hour's start, ms>`, the two addresses sorted |
 
 ## 7. Reach, the hold and guards
 
@@ -1109,7 +1110,7 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
 | The untrusted asker's request hold (`delivery.ts:518-520`) | **folded** into §7.4 | | One rule for text leaving an untrusted project |
 | Cross-computer trust (old §11.9.4) | **keep** | one function, `mayReachAcross(from, to)` (§14) | Not about threads |
 | Chain and hop limit, 3 hops (owner, #1455; not built) | **keep, re-keyed** | over `cause_id` of `task`s (§14) | |
-| — (new, D32) | **add** | **The warning:** after a wake that started a turn, for each session whose mail it carried, `MailTurns.pairTurns(receiver, sender)` (`pairTurnsSince` since the latest of an hour ago and the person's last word to either) over `WARN_PAIR_TURNS_PER_HOUR = 20` writes the person S17, key `pairturns:<a>\|<b>:<hour>`; `MailTurns.hostTurns()` (`mailStartedSince`) over `WARN_HOST_TURNS_PER_HOUR = 120` writes S18, key `hostcap:person:<hour>`. Nothing is held, deferred or refused, and no session is woken | The person decides; mail between agents is never blocked |
+| — (new, D32) | **add** | **The warning:** after a wake that started a turn, for each session whose mail it carried, `MailTurns.pairTurns(receiver, sender)` (`pairTurnsSince` since the latest of an hour ago and the person's last word to either) over `WARN_PAIR_TURNS_PER_HOUR = 20` writes the person S18, key `pairturns:<a>\|<b>:<hour>`; `MailTurns.hostTurns()` (`mailStartedSince`) over `WARN_HOST_TURNS_PER_HOUR = 120` writes S19, key `hostcap:person:<hour>`. Nothing is held, deferred or refused, and no session is woken | The person decides; mail between agents is never blocked |
 | `thread_done`, `not_participant`, children reply in the shared thread only | **drop** | — | Communication limits #1684 removes |
 
 ### 7.6 The orchestrator: requests and their turns
@@ -1714,19 +1715,19 @@ repeats.
 
 Worst cases, counting mail-started turns, with no word from the person, as D32 leaves them: nothing stops a case but
 the agents' own judgement, the quiet answer (D3), the follow-up caps (§10.4), the post rate and the person acting on
-the warning (S17, S18). The accepted risk is that a runaway exchange while the person is away keeps spending usage
+the warning (S18, S19). The accepted risk is that a runaway exchange while the person is away keeps spending usage
 until then.
 
 | Case | What happens | What ends it | Worst turns |
 |---|---|---|---|
 | 1. Courtesy ping-pong: A asks B; B answers; A says "thanks"; B "you're welcome"; … | A's question wakes B; B's answer (to a needsReply message) wakes A; A's "thanks" is an answer that needs nothing to a message that needed nothing | D3's quiet answer: the "thanks" is delivered quiet and starts no turn, so the chain ends there. Depth does not grow (a pair) | 2 turns: B's answer and A's reading of it. If both set `needsReply=true` on every answer, the pair's loop guard holds the pair at 20 mail-started turns in the hour |
-| 2. A ring A → B → C → A of messages, each pair under 20 an hour | each hop goes to a party that did not write the mail it answers | the agents' judgement; no pair passes 20, so only the host's warning (S18) fires, past 120 an hour | unbounded until the person acts; the person is told once an hour past 120 |
+| 2. A ring A → B → C → A of messages, each pair under 20 an hour | each hop goes to a party that did not write the mail it answers | the agents' judgement; no pair passes 20, so only the host's warning (S19) fires, past 120 an hour | unbounded until the person acts; the person is told once per clock hour past 120 |
 | 3. Mutual wait: A asks B (R1); B, after R1 came in, asks A back (R2); both rest | R1 is covered at B by R2; R2 is not covered at A, since A sent R1 before R2 came in (§10.3) | one reminder to A, 2 minutes after rest; A answers R2, then B answers R1 | 1 reminder turn + 2 answer turns. If A ignores it: a second reminder 20 minutes after the first one's turn, R2 released 20 minutes later and B told; R1 released at 2 h and A told B is waiting (`waiting`): 4 follow-up turns in about 2 h |
 | 4. Slow loop: B never answers; A is told (D25); A asks B again; … | each round is two reminders to B, one notice to A, and A's new question in that notice's turn | the follow-up budget, 6 wakes a day per session, gives B at most 3 rounds of two reminders a day | about 4 turns per round of about 2 h 20 min: under 2 turns an hour, at most about 12 a day |
-| 5. Two `/loop` or timer sessions mailing each other | a timer's turn is self-started; each firing can start a new conversation | each conversation ends after its answer (case 1); past 20 mail-started turns in the hour the person is warned (S17) | as many as the timers fire, until the person acts |
-| 6. Fan-out: A writes to 10 sessions, each writes on to 10 others, … | every forward goes on | the post rate (30 a minute per session); past 120 on the host the person is warned (S18) | unbounded until the person acts |
-| Clarifications (§9.7) between a worker and its owner | a pair | the agents' judgement; past 20 in the hour the person is warned (S17); each answer is a task, reported once | until the person acts |
-| Any mix, host-wide | — | the host's warning (S18) | the person is told once an hour past 120 |
+| 5. Two `/loop` or timer sessions mailing each other | a timer's turn is self-started; each firing can start a new conversation | each conversation ends after its answer (case 1); past 20 mail-started turns in the hour the person is warned (S18) | as many as the timers fire, until the person acts |
+| 6. Fan-out: A writes to 10 sessions, each writes on to 10 others, … | every forward goes on | the post rate (30 a minute per session); past 120 on the host the person is warned (S19) | unbounded until the person acts |
+| Clarifications (§9.7) between a worker and its owner | a pair | the agents' judgement; past 20 in the hour the person is warned (S18); each answer is a task, reported once | until the person acts |
+| Any mix, host-wide | — | the host's warning (S19) | the person is told once per clock hour past 120 |
 
 **Realistic traces under the hop rule** (the recheck's item 4):
 
@@ -1887,7 +1888,7 @@ you". The other layouts of round 1 (A by counterpart, C by chain) are in git his
 | The guidance for held mail (§7.4) | per-message held rows | `<project> is not trusted: <n> messages from its sessions wait (to <names>). Trusting the project lets them through, in order.` Actions `Trust project…` (opens `TrustCard`) and `Dismiss` (`Dismissing drops these messages; their senders are told.` as its confirm line) |
 | A feed row for a released row | — | `"api" has not answered "docs" for 2 h; it is busy with its own work` / `… after two reminders` / `… it stopped with an error` |
 | The "needs a reply" mark and the person's toggle | — | `needs a reply` beside a message; the toggle under the box, on by default for a new message and off for an answer (D3) |
-| The host-wide cap's feed line (§7.5) | — | `Mail between sessions started 120 turns in the last hour; more wait until the hour has room.` |
+| The host's warning in the Inbox (§7.5, D32; nothing waits since D32) | — | S19: `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` The pair's is S18 |
 | The guidance when delegations were refused too | — | `… <n> messages from its sessions wait, and <m> tasks were refused (to <names>). Trusting the project lets the messages through, in order, and tells the sessions they can give the tasks again.` |
 | A linked machine's rollback across the mail switch (D28, S17), in Settings' error line and the tool's answer | — | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
 | The archive tool's description (`tool-definitions.ts:320`) | "unfinished mail threads it is assigned or owns" | "mail it has not answered or that waits for its report" |
@@ -1949,11 +1950,11 @@ names. Each call is written in its version-2 form; a version-1 process is told t
 | S12 | The report of a request turn (`askedReportBody`, `delegation.ts:240-244`) | finished: `[Centralu] The orchestrator ended its turn on your request. What it sent you in reply is its answer; if it sent nothing, it had none to give. Its other words in that turn are not passed on.` Otherwise: `[Centralu] The orchestrator's turn on your request did not finish (<outcome>). What it sent you in reply, if anything, has reached you. Ask again, or ask the person.` |
 | S13 | The notice to a sender whose held mail the person dismissed (§7.4), or whose project was deleted (§7.2), once per sender per dismissal, key `dropped:` (§6.5) | `The person dismissed <n> of your messages that were waiting for project <project> to be trusted (<ids>). They were not delivered and will not be.` |
 | S14 | The notice to an asker whose answer is held (D8), quiet, key `answer_held:` (§6.5) | `<name> answered your <id> with <answer id>, and the answer is held for the person (<project> is not trusted). It reaches you if the person lets it through; until then Centralu does not remind <name> of it.` |
-| S17 | The warning to the person about a pair (D32), in the Inbox, key `pairturns:` | `<name> and <name> started <n> turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.` |
-| S18 | The warning to the person about the host (D32), in the Inbox, key `hostcap:` | `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` |
 | S15 | A delegation tool's refusal (§7.4), as `Refused (untrusted_project): …` | `Refused (untrusted_project): your project <project> is not trusted, so work you give outside it (to <target>) waits for the person to trust <project>. Nothing was started. Centralu shows the person how, and tells you when <project> is trusted; give it again then.` |
 | S16 | The notice to a caller on trust (§7.4), key `trusted:` (§6.5) | `<project> is trusted now. The calls refused for it can be given again: <tool> to <target> ("<first line>"), …` (at most 10, then `and <n> more`) |
 | S17 | `rollback_machine`'s and `machines.rollback`'s refusal across the mail switch (D28); person-visible too, so Q2 | `<machine> cannot go back to Centralu <previous>: since <current> its mail is kept in a form <previous> cannot read, so mail waiting there would never arrive. Update it instead.` |
+| S18 | The warning to the person about a pair (D32), in the Inbox, key `pairturns:` | `<name> and <name> started <n> turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.` |
+| S19 | The warning to the person about the host (D32), in the Inbox, key `hostcap:` | `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` |
 
 ## 16. Slices
 
