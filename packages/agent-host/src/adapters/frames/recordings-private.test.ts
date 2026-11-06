@@ -31,7 +31,8 @@ const PRIVATE: readonly [string, RegExp][] = [
 const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
   ['an id that is not a placeholder', /\b(?!0{4}\d{4}-0000-4000-8000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
   ['an account address', /[\w.+-]+@[\w-]+\.[\w.-]+/],
-  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+/],
+  // Server and tool both named: a name streamed in pieces reads whole only in the joined reading, and its first piece alone (`mcp__central`) is no connector
+  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+?__[\w.-]+/],
 ]
 
 /** What Codex's recordings must also be free of: the app-server says the account's plan and the machine's name, and numbers a response's items */
@@ -57,6 +58,9 @@ function machineWords(): [string, RegExp][] {
   // The machine's name is in the frames a Codex app-server sends about its remote control; a CI runner's is no secret and a common word
   const host = hostname().split('.')[0] ?? ''
   if (host.length >= 4 && !process.env.CI) words.push(['this machine’s name', new RegExp(`\\b${escape(host)}\\b`, 'i')])
+  // The machine's name, as a host in a path or an address (`\\\\name\\share`, `user@name`, `name.local`): a bare word could be a month ("Jun") in a listing. Off CI, where a runner's name is a common word
+  const machine = hostname().split('.')[0] ?? ''
+  if (machine.length >= 3 && !process.env.CI) words.push(['this machine’s name', new RegExp(`[\\\\/@]${escape(machine)}\\b|\\b${escape(machine)}\\.(?:local|lan|home|internal)\\b`, 'i')])
   for (const form of new Set([homedir(), homedir().replace(/\\/g, '/'), homedir().replace(/\\/g, '\\\\')])) {
     if (form.length > 3) words.push(['this machine’s home folder', new RegExp(escape(form), 'i')])
   }
