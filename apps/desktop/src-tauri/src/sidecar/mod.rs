@@ -109,6 +109,10 @@ pub struct RelaunchInfo {
     /// switch the relaunched window makes. False only while an older keeper's host hands its agents to it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub restarts_host: bool,
+    /// The one case where running agents, terminals and commands keep going through the update: an older keeper whose host
+    /// hands them to it. Said only then, so a window that cannot tell (Windows, Linux, no keeper attached yet) never claims it
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub keeps_agents: bool,
     /// The keeper reports whether the host is busy, so "Automatic updates" can wait for idle and apply by itself.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub idle_reported: bool,
@@ -341,7 +345,7 @@ impl Supervisor {
 
     /// Where this window is the host's parent: stops the host for an update, as `host.stop { forUpdate }` stops a
     /// `centralu serve` host, and starts no other (#1895). The host the relaunched window starts continues the turns it
-    /// ended and opens its terminals and Run commands again. False with a keeper, which `announce_relaunch` asks.
+    /// ended and opens its terminals and Run commands again. False with a keeper, which `before_relaunch` asks.
     pub fn stop_host_for_update(&self) -> bool {
         if self.choice() != Choice::Direct {
             return false;
@@ -355,17 +359,33 @@ impl Supervisor {
     /// ended. An older keeper holds the host and agents until the new window attaches, whatever background mode says. Errs
     /// when the keeper cannot (one older than #352 answers "unknown op"; one that could not stop says why, and stopped
     /// nothing).
-    pub fn announce_relaunch(&self) -> Result<u64, String> {
+    /**
+     * What "Apply now" does before the relaunch (#352, #1895): Ok once the relaunch may go on, else why not, as the update line
+     * shows it. Where this window starts its host itself, it stops it for an update. A keeper of #1895 step 3 is asked to do
+     * that and exit; a refusal stops nothing and keeps the window, whatever background mode says, and gives the keeper's own
+     * reason. An older keeper is told to hold on through the relaunch; one that cannot is acceptable only with background mode
+     * on, where a window closing never stopped anything.
+     */
+    pub fn before_relaunch(&self) -> Result<(), String> {
+        if self.stop_host_for_update() {
+            return Ok(());
+        }
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => {
-                let link = self.link()?;
+                let link = self.link().map_err(|e| format!("Not relaunched: {e}."))?;
                 if link.stops_for_update() {
-                    return link.stop_for_update().map(|()| 0);
+                    return link.stop_for_update().map_err(|e| format!("Not relaunched: {e}."));
                 }
-                link.announce_relaunch()
+                match link.announce_relaunch() {
+                    Ok(_) => Ok(()),
+                    Err(_) if link.background() == Ok(true) => Ok(()),
+                    Err(e) => Err(format!(
+                        "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
+                    )),
+                }
             }
-            _ => Err("the host is not held by a keeper in this build".into()),
+            _ => Err("Not relaunched: the host is not held by a keeper in this build.".into()),
         }
     }
 

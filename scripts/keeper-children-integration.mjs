@@ -26,7 +26,9 @@
  *     dev server again and continues the cut claude turn with Centralu's note;
  *   - a host crash under that keeper ends the processes it started, and its turn shows stopped (no note, no reopening);
  *   - with background mode on and no window attached, the host keeps its own children running;
- *   - stop ("Quit completely") ends the keeper, the host and its children, and the host notes that the person quit.
+ *   - stop ("Quit completely") ends the keeper, the host and its children, and the host notes that the person quit;
+ *   - a keeper holding children whose host can stop for an update does not hand them on when a window switches it: it stops
+ *     for an update and ends, and the window starts a keeper of its own build.
  *
  * `--no-claude` leaves the parts that need no model and no network. CI runs exactly that (the `keeper` job in
  * `.github/workflows/build.yml`); the claude parts stay a manual run.
@@ -37,7 +39,7 @@
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, cleanupOnExit, familyOf, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, copyEarlierHost, familyOf, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { attachClient, BIN, buildKeeper, HOST_SRC, log, readyView, recordedOnce, session, startKeeper, started, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
@@ -65,8 +67,12 @@ async function scenario() {
   tempDirs.push(project)
   execFileSync('git', ['init', '-q'], { cwd: project })
   const sock = join(data, 'keeper.sock')
-  // A keeper of an earlier build: its hosts hand their children to it
-  const keeper = startKeeper(data, { env: { CC_KEEPER_HOLDS_CHILDREN: '1' } })
+  // A keeper of an earlier build, with a host of that build: the host hands its children to the keeper, and cannot stop for an
+  // update, so the keeper hands them on when it is switched
+  const earlier = mkdtempSync('/tmp/ckc-earlier-')
+  tempDirs.push(earlier)
+  copyEarlierHost(HOST_SRC, join(earlier, 'host'))
+  const keeper = startKeeper(data, { hostSource: join(earlier, 'host'), env: { CC_KEEPER_HOLDS_CHILDREN: '1' } })
   let view = await readyView(sock)
   if (!check(view, 'the keeper brings the host up', existsSync(join(data, 'keeper.log')) ? readFileSync(join(data, 'keeper.log'), 'utf8').slice(-2000) : '')) return
   const app = attachClient(sock)
@@ -210,6 +216,10 @@ async function transition({ data, sock, project, p, keeper, app, view, host, ter
   }, 90_000, 250)
   if (!check(view, 'the keeper and the host both end on this build', readFileSync(join(data, 'keeper.log'), 'utf8').slice(-2500))) return
   check(view.stopsForUpdate === true, 'the keeper of this build stops for an update')
+  check(
+    /handing the children this keeper holds on to the next keeper: its host cannot stop for an update/.test(readFileSync(join(data, 'keeper.log'), 'utf8')),
+    'the earlier keeper handed its children on because its host could not stop for an update, and said so',
+  )
   check(await waitFor(() => !alive(keeper.pid), 10_000), 'the earlier keeper has exited')
   const took = readFileSync(join(data, 'host.log'), 'utf8').match(/taking over \d+ kept: \d+ agents, \d+ terminals, \d+ command runs/g)?.at(-1) ?? ''
   check(/, 1 terminals, 1 command runs/.test(took) && (!claudeId || !/ 0 agents/.test(took)), 'the new host takes over what the earlier keeper held', took)
@@ -327,12 +337,51 @@ const cleanup = once((threw) => {
   for (const d of tempDirs) rmSync(d, { recursive: true, force: true })
 })
 
+/**
+ * Review of #1895 step 3: a keeper holding children handed them on in every handoff, so holding could pass from keeper to keeper.
+ * One whose host can stop for an update now stops for one when a window switches it, and hands nothing on.
+ */
+async function switchStopsInstead() {
+  log('\na holding keeper whose host stops for an update, switched by a window')
+  const data = mkdtempSync('/tmp/ckc-sw-')
+  tempDirs.push(data)
+  const project = mkdtempSync('/tmp/ckc-sw-proj-')
+  tempDirs.push(project)
+  execFileSync('git', ['init', '-q'], { cwd: project })
+  const sock = join(data, 'keeper.sock')
+  const keeper = startKeeper(data, { env: { CC_KEEPER_HOLDS_CHILDREN: '1' } })
+  const view = await readyView(sock)
+  if (!check(view, 'the keeper brings the host up')) return
+  const app = attachClient(sock)
+  await sleep(500)
+  check((await status(sock))?.stopsForUpdate === true, 'its host says it stops for an update')
+  const host = await hostClient(view.status.port, view.status.token)
+  const p = await host.call('projects.add', { path: project })
+  const term = await host.call('terminal.create', { projectId: p.id, cols: 80, rows: 24 })
+  const held = await waitFor(async () => (await heldChildren(data)).find((c) => c.alive && c.tag?.kind === 'terminal' && c.tag.id === term.terminalId), 10_000)
+  if (!check(held, 'the keeper holds the terminal')) return
+  heldPids.add(held.pid)
+  host.close()
+  const b = buildOf('switch-d')
+  const sw = await request(sock, { op: 'switch', source: { commit: b.commit, hostDir: b.host, bundlePath: b.bundle, version: '0.0.0-test' }, keeper: { exe: b.keeper } })
+  check(sw.ok, 'the switch is accepted', JSON.stringify(sw))
+  const ended = await waitFor(() => !alive(keeper.pid) && !alive(view.hostPid) && !alive(held.pid), 30_000, 250)
+  const keeperLog = readFileSync(join(data, 'keeper.log'), 'utf8')
+  check(ended, 'the keeper, its host and the terminal it held have ended', `keeper ${alive(keeper.pid)}, host ${alive(view.hostPid)}, terminal ${alive(held.pid)}`)
+  check(/not handing over the children this keeper holds: its host stops for an update instead/.test(keeperLog), 'it stopped for an update instead of handing over, and said so', keeperLog.slice(-1500))
+  check(!/handing over to keeper pid/.test(keeperLog), 'no keeper of the other build was started to take them')
+  check(/asked to stop \(the keeper, for an update\)/.test(readFileSync(join(data, 'host.log'), 'utf8')), 'the host heard it on its stdin, for an update')
+  check(!stoppedMark(data), 'and left no quit mark')
+  app.kill()
+}
+
 async function main() {
   if (!process.argv.includes('--no-build')) {
     buildKeeper()
   }
   if (!existsSync(BIN)) throw new Error(`no binary at ${BIN}`)
   await scenario()
+  await switchStopsInstead()
 }
 
 cleanupOnExit(cleanup, log)

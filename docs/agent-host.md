@@ -2913,23 +2913,27 @@ release is ad-hoc signed and only a tree the shell starts keeps its macOS permis
 
 | | Before (the keeper holds the children) | Since step 3 |
 |---|---|---|
-| "Apply now" | the keeper is told `relaunching` and holds the host; the new window switches the keeper (handoff) and the host (swap); agents go on | the window sends `{"op":"stop","forUpdate":true}` on `keeper.sock`; the keeper writes the host's stop line for an update (the one above), waits up to 15 s, answers, and exits; the window relaunches and opens the shell, which starts the new build's keeper. The next host continues the listed turns with Centralu's note and opens the terminals and Run commands again. No keeper runs a host of another build |
+| "Apply now" | the keeper is told `relaunching` and holds the host; the new window switches the keeper (handoff) and the host (swap); agents go on | the window sends `{"op":"stop","forUpdate":true}` on `keeper.sock`; the keeper writes the host's stop line for an update (the one above), waits up to 15 s, answers, and exits; the window relaunches and opens the shell, which starts the new build's keeper. The next host continues the listed turns with Centralu's note and opens the terminals and Run commands again. No keeper runs a host of another build. Only a window may ask (anyone else gets `window_only`: an agent's Bash could otherwise cut every turn and have it continued as an update's). A refusal (the keeper stopping, a switch under way, a host not up) stops nothing and is shown with its own reason; a "Quit completely" during the stop waits for it, and the relaunch is called off |
 | The automatic mode | waits for the keeper to report nothing busy, then relaunches | the same (`RelaunchCheck.idleReported`): with nothing busy the stop loses nothing |
 | A host crash | the keeper restarts it, and children re-attach mid-turn | the keeper restarts it by the same rules; the agents, terminals and commands end with it, and a turn in flight shows stopped with Continue, as on Windows and Linux. Only a stop for an update lists turns to continue |
 | "Quit completely", background mode off, idle exit | `stop` on the child service: the host stops its children and notes the person quit (#1143) | a plain `{"op":"stop"}` on the host's stdin (`STOP_LINE`): the same stop and the same mark |
 | Background mode, credential issuance (#1405), the front door, supervision, per-build copies | the keeper's | unchanged, the keeper's |
-| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents |
+| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents. A keeper still holding children (below) whose host can stop for an update stops for one and exits instead of handing over, and the window starts a keeper of its own build |
 
 The window knows the keeper does this from its view (`stopsForUpdate`); an older keeper lacks it and gets `relaunching` as before.
 `RelaunchCheck.restartsHost` is set then, and also for an older keeper whose host does not hand its agents over.
+`RelaunchCheck.keepsAgents` is set only for an older keeper whose host does: Settings says agents keep going only then, and a window
+that cannot tell (Windows, Linux, a browser, one not attached to a keeper yet) says only that restarting Centralu applies the update.
 
 *The transition from a keeper that holds children.* A person on an earlier build presses "Apply now" in that build's window, which
 tells its keeper `relaunching`; the new window attaches to that keeper and switches it, as before (its view has no
 `stopsForUpdate`). The old keeper hands itself over to the new build's keeper with everything it holds (§4.4), and the swapped host
 takes the children over. A keeper that received children this way keeps serving them for the rest of its life: its host goes on
-spawning through it, and nothing running is cut by the transition itself. Its next update or quit stops them (the host's stop for an
-update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell starts next
-serves none. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
+spawning through it, and nothing running is cut by the transition itself. Its next update, switch or quit stops them (the host's
+stop for an update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell
+starts next serves none. A handoff passes a child table on only while the keeper's host cannot stop for an update (an earlier
+build's host, or one not up), and keeper.log says so; otherwise the keeper stops for an update and exits instead
+(`handoff::held_children_on_handoff`), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
 (`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
 turns, and they would have ended as a quit's. Checked end to end by `scripts/keeper-children-integration.mjs`.
 

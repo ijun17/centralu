@@ -12,8 +12,9 @@ pub const HOLDS_CHILDREN_ENV: &str = "CC_KEEPER_HOLDS_CHILDREN";
  * their turns (`stop` with `forUpdate`). The one fact of the switch, read here only (docs/plans/keeper-removal.md §6).
  *
  * A keeper that takes over from a keeper of an earlier build that held children keeps serving them for the rest of its
- * life (`handoff::take`): its host takes them over and nothing running is cut. Its next update or quit stops them, and
- * the keeper the shell starts next serves none.
+ * life (`handoff::take`): its host takes them over and nothing running is cut. Its next update, switch or quit stops
+ * them, and the keeper the shell starts next serves none. It hands them on only while its host cannot stop for an
+ * update (`handoff::held_children_on_handoff`), and says so in keeper.log.
  *
  * The variable is for the keeper scripts that still test holding; step 4 deletes it with the child service.
  */

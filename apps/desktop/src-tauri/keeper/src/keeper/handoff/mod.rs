@@ -193,6 +193,28 @@ fn thaw(k: &Keeper, f: &Frozen) {
     }
 }
 
+/// What a handoff does with the children this keeper holds (#1895 step 3)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HeldOnHandoff {
+    /// It holds none: nothing to decide
+    NoneHeld,
+    /// Its host can stop for an update: it does, and this keeper ends instead of handing over, so holding never passes to
+    /// a keeper whose host could have ended it
+    StopInstead,
+    /// Its host cannot (an earlier build's, or a host not up): the children go on to the next keeper with the handoff, as
+    /// before, so nothing running is cut. That keeper's next update or switch ends them
+    HandOn,
+}
+
+/// `HeldOnHandoff` from whether this keeper serves the child socket and whether its host said it stops for an update
+pub(super) fn held_children_on_handoff(holds: bool, host_stops_for_update: bool) -> HeldOnHandoff {
+    match (holds, host_stops_for_update) {
+        (false, _) => HeldOnHandoff::NoneHeld,
+        (true, true) => HeldOnHandoff::StopInstead,
+        (true, false) => HeldOnHandoff::HandOn,
+    }
+}
+
 /**
  * Hands this keeper over to the keeper at `exe`, of build `target`. Returns only on failure, after
  * rolling everything back; on success the process exits.
@@ -210,10 +232,27 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
     if !exe.is_file() {
         return Err(format!("the new build's executable is not at {}", exe.display()));
     }
-    {
-        let st = k.state.lock().map_err(|_| "keeper state poisoned")?;
+    let held = {
+        let mut st = k.state.lock().map_err(|_| "keeper state poisoned")?;
         if st.stopping {
             return Err("the keeper is stopping".into());
+        }
+        let held = held_children_on_handoff(k.children.enabled(), st.host_stops_for_update);
+        if held == HeldOnHandoff::StopInstead {
+            st.stopping = true;
+        }
+        held
+    };
+    match held {
+        HeldOnHandoff::NoneHeld => {}
+        HeldOnHandoff::StopInstead => {
+            log("not handing over the children this keeper holds: its host stops for an update instead, and this keeper ends; the window starts a keeper of its own build, whose host continues what this one ended (#1895 step 3)");
+            k.end_for_update(crate::host_proc::STOP_FOR_UPDATE_WAIT);
+            log(&format!("stopped for an update instead of handing over (pid {})", k.info.pid));
+            std::process::exit(0);
+        }
+        HeldOnHandoff::HandOn => {
+            log("handing the children this keeper holds on to the next keeper: its host cannot stop for an update (an earlier build's, or not up)");
         }
     }
     let (mut child, mut ch) = spawn_successor(k, exe, target).map_err(|e| format!("could not start the new keeper: {e}"))?;

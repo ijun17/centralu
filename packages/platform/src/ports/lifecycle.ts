@@ -85,9 +85,15 @@ export type RelaunchCheck = {
    * Applying the update stops the agent host, and the next one continues from it (#1895): running turns go on once it is
    * back, and open terminals and Run commands start again. Without a keeper the window stops it before the relaunch; a
    * keeper of #1895 step 3 stops it and exits; with an older keeper the switch the relaunched window makes does. Absent
-   * only when an older keeper's host hands its agents to it, which holds them through the whole update
+   * only when an older keeper's host hands its agents to it, which holds them through the whole update (`keepsAgents`), and
+   * where the window cannot tell
    */
   restartsHost?: boolean
+  /**
+   * Running agents, terminals and commands keep going through the update: an older keeper's host hands them to it. Only
+   * this says so; a check without it (Windows, Linux, a browser, a window not attached to a keeper yet) claims nothing
+   */
+  keepsAgents?: boolean
   /**
    * The keeper reports whether the host is busy (`watchBusy`), so "Automatic updates" can wait for nothing to be running
    * and apply by itself. Absent without a keeper, where only a press applies

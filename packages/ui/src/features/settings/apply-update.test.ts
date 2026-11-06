@@ -233,17 +233,35 @@ describe('agentApplyVerdict', () => {
 
 /** #1895 step 3: what Settings says applying costs, and whether it applies by itself, follows what the update does */
 describe('applyWords', () => {
-  it('says agents keep going only where the keeper holds them through the update', () => {
-    expect(applyWords({ ...ready }).applying).toMatch(/keep going/)
+  const keepsGoing = /keep (going|running)/
+
+  it('says agents keep going only where the keeper says it holds them through the update', () => {
+    expect(applyWords({ ...ready, keepsAgents: true }).applying).toMatch(keepsGoing)
     for (const r of [{ ...ready, restartsHost: true }, { ...ready, restartsHost: true, idleReported: true }]) {
       const w = applyWords(r)
       expect(w.applying).toMatch(/running turns go on once the agent host is back/)
-      expect(`${w.applying} ${w.more}`).not.toMatch(/keep (going|running)/)
+      expect(`${w.applying} ${w.more}`).not.toMatch(keepsGoing)
+    }
+  })
+
+  /**
+   * Review of #1895 step 3: an absent `restartsHost` was read as "the keeper holds them", so Windows and Linux (whose check
+   * is empty), a browser, a window before its first check and one not attached to a keeper all promised that agents keep
+   * going and that the update applies by itself once idle, neither of which happens there
+   */
+  it('promises nothing it cannot tell: no keep-going and no applying by itself without a signal', () => {
+    const unknown = [undefined, null, { ready: false }, { ready: false, reason: 'not attached to the background keeper' }, { ...ready }]
+    for (const r of unknown) {
+      const w = applyWords(r)
+      expect(`${w.applying} ${w.hint} ${w.more}`, JSON.stringify(r)).not.toMatch(keepsGoing)
+      expect(`${w.hint} ${w.more}`, JSON.stringify(r)).not.toMatch(/applies a newer version|once nothing is busy|applied once/)
+      expect(w.applying).toMatch(/Restarting Centralu applies it/)
     }
   })
 
   it('promises applying by itself only where something reports idle', () => {
     expect(applyWords({ ...ready, restartsHost: true, idleReported: true }).hint).toMatch(/applies a newer version once nothing is busy/)
+    expect(applyWords({ ...ready, keepsAgents: true }).hint).toMatch(/applies a newer version once nothing is busy/)
     const direct = applyWords({ ...ready, restartsHost: true })
     expect(direct.hint).not.toMatch(/applies/)
     expect(direct.more).toMatch(/when you press Update/)

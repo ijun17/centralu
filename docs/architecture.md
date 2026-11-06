@@ -297,7 +297,8 @@ host that lacks `apps.recoverView` reports the same uncertainty instead of an un
 > the host spawns its own children inside the tree the shell started, so macOS permissions still follow the shell (§4.1), and an
 > update stops them and continues their turns: "Apply now" asks the keeper to stop the host for an update and exit, and the
 > relaunched window starts the new build's keeper through the shell. Supervision, background mode, credential issuance and the front
-> door stay. A keeper that takes over from a holding one keeps serving what it was handed until its next update or quit. What follows
+> door stay. A keeper that takes over from a holding one keeps serving what it was handed until its next update, switch or quit, and
+> hands it on only while its host cannot stop for an update. What follows
 > describes the holding, which the removal design of #1895 step 4 (`docs/plans/keeper-removal.md`, on its own branch) removes; the details are in
 > [agent-host.md](agent-host.md) §4.5, "The keeper holds no children".
 

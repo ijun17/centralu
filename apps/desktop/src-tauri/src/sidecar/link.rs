@@ -28,7 +28,8 @@ pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource)
  * (`keepsAgents`). Either way the keeper reports when the host is busy, so the automatic mode can still wait for idle.
  */
 pub(crate) fn with_keeper(info: RelaunchInfo, keeps_agents: Option<bool>, stops_for_update: bool) -> RelaunchInfo {
-    RelaunchInfo { restarts_host: stops_for_update || keeps_agents != Some(true), idle_reported: true, ..info }
+    let restarts_host = stops_for_update || keeps_agents != Some(true);
+    RelaunchInfo { restarts_host, keeps_agents: !restarts_host, idle_reported: true, ..info }
 }
 
 #[cfg(test)]
@@ -40,10 +41,10 @@ mod tests {
     fn apply_now_with_a_keeper_restarts_the_host_unless_an_older_one_keeps_its_agents() {
         let ready = RelaunchInfo { ready: true, ..Default::default() };
         let held = with_keeper(ready.clone(), Some(true), false);
-        assert!(!held.restarts_host, "an older keeper whose host hands its agents over: they keep going");
+        assert!(!held.restarts_host && held.keeps_agents, "an older keeper whose host hands its agents over: they keep going");
         for (keeps, stops_for_update) in [(Some(true), true), (Some(false), true), (None, true), (Some(false), false), (None, false)] {
             let stops = with_keeper(ready.clone(), keeps, stops_for_update);
-            assert!(stops.restarts_host, "{keeps:?} {stops_for_update}: the update stops the host");
+            assert!(stops.restarts_host && !stops.keeps_agents, "{keeps:?} {stops_for_update}: the update stops the host");
             assert!(stops.idle_reported && stops.ready);
         }
     }
@@ -86,6 +87,9 @@ fn is_news(before: Option<&(HostStatus, HostBuild)>, status: &HostStatus, after:
     before.is_none_or(|(was, built)| was != status || built != after)
 }
 
+/// How long "Quit completely" waits for a stop for an update under way: the request's own bound and the keeper's exit
+const QUIT_WAITS_FOR_THE_UPDATE_STOP: Duration = Duration::from_secs(45);
+
 #[derive(Default)]
 struct LinkState {
     info: Option<HostInfo>,
@@ -101,6 +105,10 @@ struct LinkState {
     attached: Option<client::Attached>,
     running: bool,
     shutting_down: bool,
+    /// "Apply now" is waiting for the keeper to stop for an update (`stop_for_update`), which takes up to 25 s
+    stopping_for_update: bool,
+    /// "Quit completely" came during that stop: it waited for it to end, and the relaunch does not happen
+    quit_after_stop: bool,
     /// The last start through the shell, for `HostBuild.shell`.
     shell: Option<crate::shell::Report>,
     /// The shell did not start a keeper once: every later start in this window's life is direct.
@@ -212,31 +220,47 @@ impl KeeperLink {
     }
 
     /// "Apply now" (#1895 step 3): the keeper stops the host for an update and exits, and this window stops attaching, so it
-    /// starts no keeper of its own build behind the relaunch. Returns once the keeper is gone, or says why it is not.
+    /// starts no keeper of its own build behind the relaunch. Returns once the keeper is gone. Err, in words that follow "Not
+    /// relaunched:", when the keeper refused (it stopped nothing, and this window attaches on as before) or a quit came
+    /// meanwhile (`stop`: the relaunch must not undo it).
     pub fn stop_for_update(&self) -> Result<(), String> {
         let keeper_pid = self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.keeper.pid));
         if let Ok(mut st) = self.state.lock() {
             st.shutting_down = true;
+            st.stopping_for_update = true;
         }
         let asked = client::stop_for_update(&self.sock);
-        if let Err(e) = &asked {
-            // Refused, and still answering: it stopped nothing, and this window goes on attaching as before
-            if client::alive(&self.sock) {
-                if let Ok(mut st) = self.state.lock() {
-                    st.shutting_down = false;
-                }
-                return Err(e.clone());
-            }
+        let refused = match &asked {
+            Ok(_) => None,
+            // Refused, and still answering: it stopped nothing
+            Err(e) if client::alive(&self.sock) => Some(e.clone()),
             // No answer, but its socket is gone: it is on its way out (it removes the socket first), so the relaunch goes on
             // once it has, rather than leave this window with neither a keeper nor a host
-            eprintln!("[window] the keeper did not answer the stop for an update ({e}); relaunching once it has exited");
-        }
+            Err(e) => {
+                eprintln!("[window] the keeper did not answer the stop for an update ({e}); relaunching once it has exited");
+                None
+            }
+        };
         // It answers just before it exits: the next keeper waits for its lock, but the relaunch need not race it
-        if let Some(pid) = keeper_pid {
+        if let (Some(pid), None) = (keeper_pid, &refused) {
             let wait = if asked.is_ok() { Duration::from_secs(5) } else { crate::host_proc::STOP_FOR_UPDATE_WAIT };
             crate::host_proc::wait_until(wait, || !centralu_keeper_core::os::pid_alive(pid));
         }
-        Ok(())
+        let quit = {
+            let Ok(mut st) = self.state.lock() else { return Err("the window's state is unreadable".into()) };
+            st.stopping_for_update = false;
+            if refused.is_some() && !st.quit_after_stop {
+                st.shutting_down = false;
+            }
+            st.quit_after_stop
+        };
+        if quit {
+            return Err("Centralu is quitting".into());
+        }
+        match refused {
+            Some(e) => Err(format!("{e}; nothing was stopped")),
+            None => Ok(()),
+        }
     }
 
     /// The system is ending (macOS), or is not after all: the keeper tells the host on its stdin (#1970)
@@ -610,8 +634,22 @@ impl KeeperLink {
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        if let Ok(mut st) = self.state.lock() {
-            st.shutting_down = true;
+        let mid_update = match self.state.lock() {
+            Ok(mut st) => {
+                st.shutting_down = true;
+                st.quit_after_stop |= st.stopping_for_update;
+                st.stopping_for_update
+            }
+            Err(_) => false,
+        };
+        if mid_update {
+            // "Quit completely" while "Apply now" has the keeper stopping for an update, its socket already gone: the quit
+            // waits for that stop to end, and `stop_for_update` then calls the relaunch off
+            crate::host_proc::wait_until(QUIT_WAITS_FOR_THE_UPDATE_STOP, || self.state.lock().map(|s| !s.stopping_for_update).unwrap_or(true));
+            // A keeper that refused that stop is still there, and this quit stops it
+            if !client::alive(&self.sock) {
+                return Ok(());
+            }
         }
         client::stop(&self.sock)
     }
@@ -633,5 +671,157 @@ impl KeeperLink {
                 a.close();
             }
         }
+    }
+}
+
+/// "Apply now" against a keeper of #1895 step 3, with a stand-in keeper on a socket: what the window does when the keeper
+/// refuses the stop for an update, does not answer it, or a quit comes while it runs
+#[cfg(test)]
+mod update_stop_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    use std::path::Path;
+
+    /// How the stand-in keeper takes `stop {forUpdate}`
+    #[derive(Clone, Copy)]
+    enum Takes {
+        /// Refuses it and answers on, as a keeper mid-switch does
+        Refuses,
+        /// Removes its socket and closes the connection without a word, as a keeper that went down mid-stop
+        Vanishes,
+        /// Removes its socket, takes `secs` to stop the host, then answers
+        StopsIn(u64),
+    }
+
+    /// A stand-in keeper at `dir/keeper.sock`, with background mode on. Every op it was sent is pushed to `ops`
+    fn stand_in_keeper(dir: &Path, takes: Takes, ops: Arc<Mutex<Vec<String>>>) -> PathBuf {
+        let sock = dir.join("keeper.sock");
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+        let path = sock.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { return };
+                let mut line = String::new();
+                if BufReader::new(s.try_clone().unwrap()).read_line(&mut line).is_err() {
+                    continue;
+                }
+                let req: Value = serde_json::from_str(&line).unwrap_or_default();
+                let op = req["op"].as_str().unwrap_or("").to_string();
+                let for_update = req["forUpdate"] == serde_json::json!(true);
+                ops.lock().unwrap().push(if for_update { "stop forUpdate".into() } else { op.clone() });
+                let answer = match (op.as_str(), for_update, takes) {
+                    ("stop", true, Takes::Refuses) => serde_json::json!({ "ok": false, "error": "a build switch is under way; apply the update once it has ended" }),
+                    ("stop", true, Takes::Vanishes) => {
+                        let _ = std::fs::remove_file(&path);
+                        return;
+                    }
+                    ("stop", true, Takes::StopsIn(secs)) => {
+                        let _ = std::fs::remove_file(&path);
+                        std::thread::sleep(Duration::from_secs(secs));
+                        let _ = s.write_all(b"{\"ok\":true}\n");
+                        return;
+                    }
+                    ("settings", ..) => serde_json::json!({ "ok": true, "background": true }),
+                    _ => serde_json::json!({ "ok": true }),
+                };
+                let _ = s.write_all(format!("{answer}\n").as_bytes());
+            }
+        });
+        sock
+    }
+
+    /// A window's link to the keeper at `sock`, whose view says it stops for an update. Its pid is one that has exited
+    fn link_to(sock: &Path) -> KeeperLink {
+        let mut gone = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let _ = gone.wait();
+        let view: KeeperView = serde_json::from_value(serde_json::json!({
+            "keeper": { "pid": gone.id(), "protocol": 1, "version": "0.0.0", "startedAt": 0, "dataDir": "/tmp" },
+            "status": { "state": "ready", "port": 1, "token": "t" },
+            "background": true, "attached": 1, "busy": false, "stopsForUpdate": true,
+        }))
+        .unwrap();
+        let mut link = KeeperLink::new(Facts::window(Env::current(), true, false), None, None, "0.0.0".into());
+        link.sock = sock.to_path_buf();
+        link.state.lock().unwrap().view = Some(view);
+        link
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = PathBuf::from(format!("/tmp/ccw-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Refused while the keeper still answers: nothing was stopped, the window says why and goes on attaching as before
+    #[test]
+    fn a_refused_stop_for_an_update_keeps_the_window_attached_and_says_why() {
+        let dir = scratch("refused");
+        let sock = stand_in_keeper(&dir, Takes::Refuses, Arc::default());
+        let link = link_to(&sock);
+        let e = link.stop_for_update().unwrap_err();
+        assert!(e.contains("a build switch is under way") && e.contains("nothing was stopped"), "{e}");
+        assert!(!link.shutting_down(), "the window stopped attaching to a keeper that is still there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// No answer, and the socket is gone: the keeper is on its way out, so the relaunch goes on rather than leave the window
+    /// with neither a keeper nor a host
+    #[test]
+    fn a_stop_for_an_update_with_no_answer_and_no_socket_goes_on_to_the_relaunch() {
+        let dir = scratch("vanished");
+        let sock = stand_in_keeper(&dir, Takes::Vanishes, Arc::default());
+        let link = link_to(&sock);
+        assert_eq!(link.stop_for_update(), Ok(()));
+        assert!(link.shutting_down(), "the window would start a keeper of its own build behind the relaunch");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /**
+     * Review of #1895 step 3: with background mode on, a refused stop for an update fell through to the relaunch (the check
+     * meant for an older keeper that cannot hold on), so the relaunched window found the same keeper and nothing applied.
+     * And the refusal said "With background mode off the running agents would stop", whatever the keeper's reason was.
+     */
+    #[test]
+    fn apply_now_refused_by_the_keeper_does_not_relaunch_even_with_background_mode_on() {
+        let dir = scratch("apply");
+        let ops = Arc::new(Mutex::new(Vec::new()));
+        let sock = stand_in_keeper(&dir, Takes::Refuses, ops.clone());
+        let sup = Supervisor::default();
+        *sup.inner.lock().unwrap() = Choice::Keeper;
+        *sup.keeper.lock().unwrap() = Some(Arc::new(link_to(&sock)));
+        let e = sup.before_relaunch().unwrap_err();
+        assert!(e.starts_with("Not relaunched: a build switch is under way"), "{e}");
+        assert!(!e.contains("background mode"), "{e}");
+        assert!(!ops.lock().unwrap().iter().any(|op| op == "relaunching"), "an older keeper's path was taken too: {:?}", ops.lock().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /**
+     * Review of #1895 step 3: "Quit completely" while the keeper stops for an update found its socket gone and failed, and the
+     * relaunch went ahead. The quit now waits for that stop to end, sends nothing to a keeper already gone, and the relaunch
+     * is called off.
+     */
+    #[test]
+    fn a_quit_during_the_stop_for_an_update_waits_for_it_and_calls_the_relaunch_off() {
+        let dir = scratch("quit");
+        let ops = Arc::new(Mutex::new(Vec::new()));
+        let sock = stand_in_keeper(&dir, Takes::StopsIn(1), ops.clone());
+        let link = Arc::new(link_to(&sock));
+        let applying = {
+            let link = link.clone();
+            std::thread::spawn(move || link.stop_for_update())
+        };
+        crate::host_proc::wait_until(Duration::from_secs(5), || ops.lock().unwrap().iter().any(|op| op == "stop forUpdate"));
+        let asked_at = Instant::now();
+        assert_eq!(link.stop(), Ok(()), "the quit failed");
+        let waited = asked_at.elapsed();
+        let applied = applying.join().unwrap();
+        assert_eq!(applied, Err("Centralu is quitting".into()), "the relaunch would go on after the quit");
+        assert!(waited >= Duration::from_millis(500), "the quit did not wait for the stop: {waited:?}");
+        assert_eq!(ops.lock().unwrap().iter().filter(|op| *op == "stop").count(), 0, "a plain stop went to a keeper on its way out");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
