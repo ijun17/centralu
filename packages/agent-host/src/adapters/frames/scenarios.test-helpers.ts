@@ -1,6 +1,7 @@
 import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { fakeApps, fakeCentraluTools } from './fakes.test-helpers.js'
+import type { ReplayState } from './replay.test-helpers.js'
 
 /**
  * The scenarios a recording is made of, at the level of the adapter contract (`SessionHandle`), so any adapter (ACP or a
@@ -534,7 +535,8 @@ export const scenariosFor = (tool: string): Scenario[] => SCENARIOS.filter((s) =
 /**
  * Drives `adapter` through one scenario; `bound` is how long a step may wait for a real CLI (0: no bound, for replays).
  * `how.session`: what the run adds to every session it opens (a model, no settings files); `how.seed`: puts the
- * scenario's files in the real working folder of a recording run
+ * scenario's files in the real working folder of a recording run; `how.replay`: the run is a replay, which ends at its first
+ * mismatch with the recording (`ReplayState.failed`) and says what it waits for when a step stalls
  */
 export async function drive(
   adapter: AgentAdapter,
@@ -543,8 +545,9 @@ export async function drive(
   sessionId: string,
   bound: number,
   killer: () => void,
-  how: { tool?: string; session?: Partial<CreateSessionOpts>; seed?: (files: Record<string, string | Buffer>) => void } = {},
+  how: { tool?: string; session?: Partial<CreateSessionOpts>; seed?: (files: Record<string, string | Buffer>) => void; replay?: Pick<ReplayState, 'failed' | 'waitingFor'> } = {},
 ): Promise<NormalizedEvent[]> {
+  const guard = <T>(step: Promise<T>): Promise<T> => (how.replay ? Promise.race([step, how.replay.failed]) : step)
   const events: NormalizedEvent[] = []
   let seen = 0
   let waiter: { pick(e: NormalizedEvent): boolean; resolve(e: NormalizedEvent): void } | null = null
@@ -562,11 +565,11 @@ export async function drive(
   const opts = { sessionId, cwd, permissionPreset: scenario.preset ?? ('normal' as const), projectTrusted: true, ...scenario.session?.(), ...how.session, ...(scenario.model ? { model: scenario.model } : {}) }
   if (scenario.signedOut) {
     // The refusal is the recording: no session opens
-    const refusal = await adapter.createSession(opts, emit).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string })
+    const refusal = await guard(adapter.createSession(opts, emit).then((h) => h.dispose().then(() => null), (e: unknown) => e as { code?: string }))
     if (refusal?.code !== 'not_logged_in') throw new Error(`${scenario.name}: expected a refusal as signed out, got ${refusal ? JSON.stringify(refusal.code) : 'a session'}`)
     return events
   }
-  let handle = await adapter.createSession(opts, emit)
+  let handle = await guard(adapter.createSession(opts, emit))
   const driver: Driver = {
     events,
     tool: how.tool ?? '',
@@ -580,7 +583,7 @@ export async function drive(
           if (pick(e)) return resolve(e)
         }
         // The bound only ends a run against a real CLI that stopped answering; a replay is ended by its test's timeout
-        const timer = bound > 0 ? setTimeout(() => reject(new Error(`${scenario.name}: no ${label} within ${bound} ms`)), bound) : null
+        const timer = bound > 0 ? setTimeout(() => reject(new Error(`${scenario.name}: no ${label} within ${bound} ms${how.replay ? `; the replay waits for ${how.replay.waitingFor()}` : ''}`)), bound) : null
         waiter = {
           pick,
           resolve: (e) => {
@@ -592,12 +595,12 @@ export async function drive(
     reopen: async () => {
       const externalId = handle.externalId ?? undefined
       await handle.dispose()
-      handle = await adapter.createSession({ ...opts, resumeExternalId: externalId }, emit)
+      handle = await guard(adapter.createSession({ ...opts, resumeExternalId: externalId }, emit))
     },
     kill: killer,
   }
   try {
-    await scenario.run(driver)
+    await guard(scenario.run(driver))
   } finally {
     // A scenario that failed leaves no process behind
     await handle.dispose()

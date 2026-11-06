@@ -20,10 +20,6 @@ async function replayAdopted(name: string) {
   const cwd = folder.path
   const { spawn, state } = replaySpawner(recording, codexCodec(cwd))
   const process = spawn({ command: 'codex', args: ['app-server'], env: {} }) as ReplayPeer
-  // A line the recording does not have fails the run at once, with what it was, rather than leaving a step waiting
-  const failed = new Promise<never>((_, reject) => {
-    process.onProblem = (problem) => reject(new Error(problem))
-  })
   const resume = recordedFrames(name).find((f) => f.dir === 'out' && f.msg.method === 'thread/resume')
   const threadId = (resume?.msg.params as { threadId: string }).threadId
   const events: NormalizedEvent[] = await driveAdopted(
@@ -33,7 +29,7 @@ async function replayAdopted(name: string) {
     process,
     threadId,
     0,
-    failed,
+    state.failed,
   ).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), sent: process.sent }
 }

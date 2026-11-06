@@ -89,11 +89,8 @@ async function replay(name: string) {
       orchestratorTools: {} as OrchestratorTools,
       orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 'replay' },
     },
-  })
-    .catch((e: unknown) => {
-      throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
-    })
-    .finally(() => folder.remove())
+    replay: state,
+  }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), lines: peers.flatMap((p) => p.lines) }
 }
 

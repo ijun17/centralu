@@ -47,7 +47,8 @@ describe('a recorded session as the agent of a host', () => {
     vi.spyOn(console, 'error').mockImplementation((line: unknown) => void lines.push(String(line)))
     const { handle } = await open(project('basic'))
     handle.send('Say something the recording does not hold')
-    await vi.waitFor(() => expect(lines.some((l) => l.startsWith(`${PROBLEM} basic: the adapter sent the message`))).toBe(true), { timeout: 10_000 * SLOW })
+    // Naming the recording, its line and where the two differ (#2068)
+    await vi.waitFor(() => expect(lines.some((l) => l.startsWith(`${PROBLEM} basic: claude-code-`) && l.includes('line 3: the message: first difference at content[0].text') && l.includes('the adapter sent "Say something the recording does not hold"'))).toBe(true), { timeout: 10_000 * SLOW })
     await handle.dispose()
   })
 

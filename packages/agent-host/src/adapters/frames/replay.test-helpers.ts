@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { isDeepStrictEqual } from 'node:util'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -15,14 +15,36 @@ import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
  * Nothing waits on a clock: a frame goes out when the adapter has sent what precedes it.
  */
 
-type Rec = { t: number; dir: 'in' | 'out' | 'exit'; msg?: Record<string, unknown>; code?: number | null; signal?: string | null }
+/** `line`: where the frame is in its file (the header is line 1), so a mismatch can name it */
+type Rec = { t: number; dir: 'in' | 'out' | 'exit'; msg?: Record<string, unknown>; code?: number | null; signal?: string | null; line?: number }
 
-export type Recording = { header: Record<string, unknown>; frames: Rec[] }
+/** `name`: the file as `<tool version>/<scenario>.jsonl`, for a failure to name */
+export type Recording = { name?: string; header: Record<string, unknown>; frames: Rec[] }
 
 export function loadRecording(path: string): Recording {
   const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
   const [head, ...frames] = lines
-  return { header: (head?.header ?? {}) as Record<string, unknown>, frames: frames as Rec[] }
+  return { name: `${basename(dirname(path))}/${basename(path)}`, header: (head?.header ?? {}) as Record<string, unknown>, frames: frames.map((f, i) => ({ ...f, line: i + 2 }) as Rec) }
+}
+
+/** Where `sent` first differs from `want`: the JSON path (empty for the whole value) and both values there */
+export function firstDifference(sent: unknown, want: unknown, path = ''): { path: string; want: unknown; sent: unknown } | null {
+  if (isDeepStrictEqual(want, sent)) return null
+  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object'
+  if (isObject(want) && isObject(sent) && Array.isArray(want) === Array.isArray(sent)) {
+    for (const k of new Set([...Object.keys(want), ...Object.keys(sent)])) {
+      const found = firstDifference(sent[k], want[k], Array.isArray(want) ? `${path}[${k}]` : path ? `${path}.${k}` : k)
+      if (found) return found
+    }
+  }
+  return { path, want, sent }
+}
+
+/** Null when `sent` is `want`, else where they differ, in words (`what`: the line being compared; `against`: where `want` comes from) */
+export function differs(what: string, sent: unknown, want: unknown, against = 'the recording'): string | null {
+  const d = firstDifference(sent, want)
+  const show = (v: unknown) => (v === undefined ? 'nothing' : JSON.stringify(v).slice(0, 200))
+  return d && `${what}: first difference at ${d.path || 'the line itself'}: ${against} has ${show(d.want)}, the adapter sent ${show(d.sent)}`
 }
 
 /** The recordings under `root`: one folder per tool version, with the scenarios recorded in it and each one's file */
@@ -51,8 +73,12 @@ export function temporaryFolder(prefix: string): { path: string; remove(): void 
   return { path, remove: () => rmSync(path, { recursive: true, force: true }) }
 }
 
-/** What went wrong in a replay; a test asserts it stays empty and that every frame was used */
-export type ReplayState = { problems: string[]; left(): number; spawned: number }
+/**
+ * What went wrong in a replay; a test asserts it stays empty and that every frame was used. `failed` rejects at the first
+ * mismatch with where it is (the recording, its line, the JSON path), so a run ends there instead of waiting out a step the
+ * adapter will never reach; `waitingFor` says what the replay waits for next, for a run that only stalls
+ */
+export type ReplayState = { problems: string[]; left(): number; spawned: number; failed: Promise<never>; waitingFor(): string }
 
 const idOf = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '')
 
@@ -96,10 +122,8 @@ export const jsonRpcCodec: FrameCodec = {
       if (want.id !== undefined && (typeof sent.id === 'string' || typeof sent.id === 'number')) ids.set(idOf(want.id), sent.id)
       return null
     }
-    if (idOf(sent.id) !== idOf(want.id) || !isDeepStrictEqual(sent.result ?? null, want.result ?? null)) {
-      return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
-    }
-    return null
+    if (idOf(sent.id) !== idOf(want.id)) return `the adapter answered ${describe(sent)} where the recording answers ${describe(want)}`
+    return differs('the adapter’s answer', sent.result ?? null, want.result ?? null)
   },
   rewrite(incoming, ids) {
     const msg = { ...incoming }
@@ -131,9 +155,8 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
       const problem = jsonRpcCodec.match(sent, recorded, ids)
       if (problem || typeof recorded.method !== 'string') return problem
       // A request is also the same by what it asks for (the launch policy, the text, the model), not by its method alone
-      if (!isDeepStrictEqual(withoutOwnId(sent.params ?? null, recorded.method), withoutOwnId(recorded.params ?? null, recorded.method))) {
-        return `the adapter sent ${recorded.method} with ${JSON.stringify(sent.params)} where the recording sends ${JSON.stringify(recorded.params)}`
-      }
+      const params = differs(`${recorded.method}’s params`, withoutOwnId(sent.params ?? null, recorded.method), withoutOwnId(recorded.params ?? null, recorded.method))
+      if (params) return params
       const mine = ownId(sent.params)
       const theirs = ownId(recorded.params)
       if (mine && theirs) ids.set(theirs, mine)
@@ -155,15 +178,33 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
 
 /**
+ * What Centralu writes into Claude's stream itself, not the CLI: its MCP server's answer to the CLI's `initialize` (the instructions)
+ * and `tools/list` (the tools), made from the tool definitions and instructions in this repository. `check` says whether such an
+ * answer's words are what that code makes, so the replay compares them with the code, not with the recorded copy, which every
+ * change to a tool would outdate. The rest of the answer (protocol version, capabilities, the envelope) and every other line are
+ * compared with the recording.
+ */
+type OwnMethod = 'initialize' | 'tools/list'
+export type OwnAnswers = { server: string; check(method: OwnMethod, result: Record<string, unknown>): string | null }
+
+const mcpMessage = (line: Record<string, unknown>) => (line.type === 'control_request' && record(line.request).subtype === 'mcp_message' ? { server: record(line.request).server_name, method: record(record(line.request).message).method } : null)
+/** An answer to the CLI's MCP request without the words Centralu wrote itself, for the rest of it to be compared */
+const withoutOwnWords = (response: unknown) => {
+  const body = record(record(response).response)
+  const result = Object.fromEntries(Object.entries(record(record(body.mcp_response).result)).filter(([k]) => k !== 'instructions' && k !== 'tools'))
+  return { ...record(response), response: { ...body, mcp_response: { ...record(body.mcp_response), result } } }
+}
+
+/**
  * Claude Code's stream-json (what the SDK speaks to the CLI): a line matches by its `type`, and further by what it asks or
  * answers: a control request by its `subtype`, the answer to the CLI's request (an approval, a hook) by its request id and
  * its verdict, a user message by its content. The ids the SDK and the adapter make up for themselves (a request id, an
  * input's uuid) differ per run, so each is mapped to the recorded one and the CLI's later references to it are rewritten.
- * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for. `hostAnswers`: the recording was made through a
- * real host, whose tools answered the CLI's calls to Centralu's server (`mcp_message`); the replay has no host, so what those
- * answers hold (the tools' list and descriptions, their words) is not compared, only that the adapter answers.
+ * `cwd`: the folder the session runs in, which the recording's `<cwd>` stands for. `own`: see {@link OwnAnswers}. `hostAnswers`: the
+ * recording was made through a real host, whose tools answered the CLI's calls to Centralu's server (`mcp_message`); the replay has
+ * no host, so what those answers hold (the tools' list and descriptions, their words) is not compared, only that the adapter answers.
  */
-export const streamJsonCodec = (cwd: string, opts: { hostAnswers?: boolean } = {}): FrameCodec => ({
+export const streamJsonCodec = (cwd: string, opts: { own?: OwnAnswers; hostAnswers?: boolean } = {}): FrameCodec => ({
   // Two inputs of the person are in the order they were sent; the lines around them are not
   unordered: (line) => line.type !== 'user',
   optionalAtEnd: (line) => line.type === 'control_request' && record(line.request).subtype === 'get_usage',
@@ -176,20 +217,34 @@ export const streamJsonCodec = (cwd: string, opts: { hostAnswers?: boolean } = {
   match(sent, want, ids) {
     if (sent.type !== want.type) return `the adapter sent ${describeLine(sent)} where the recording sends ${describeLine(want)}`
     if (want.type === 'control_request') {
-      if (!isDeepStrictEqual(sent.request, inFolder(want.request, cwd))) return `the adapter sent ${JSON.stringify(sent.request)} where the recording sends ${JSON.stringify(inFolder(want.request, cwd))}`
+      const request = differs(`the ${describeLine(want)} request`, sent.request, inFolder(want.request, cwd))
+      if (request) return request
       if (typeof want.request_id === 'string' && typeof sent.request_id === 'string') ids.set(want.request_id, sent.request_id)
     } else if (want.type === 'control_response') {
+      const asked = ids.get(`own ${String(record(want.response).request_id)}`)
       if (opts.hostAnswers && record(record(want.response).response).mcp_response !== undefined) {
-        return record(record(sent.response).response).mcp_response === undefined ? `the adapter answered ${JSON.stringify(sent)} where the recording answers a call to Centralu's server` : null
+        return record(record(sent.response).response).mcp_response === undefined ? `the adapter answered ${describeLine(sent)} where the recording answers a call to Centralu's server` : null
       }
-      if (!isDeepStrictEqual(sent.response, inFolder(want.response, cwd))) return `the adapter answered ${JSON.stringify(sent)} where the recording answers ${JSON.stringify(want)}`
+      if (opts.own && (asked === 'initialize' || asked === 'tools/list')) {
+        const problem = opts.own.check(asked, record(record(record(sent.response).response).mcp_response).result as Record<string, unknown>)
+        if (problem) return `the adapter’s answer to ${asked}: ${problem}`
+        const rest = differs('the adapter’s answer', withoutOwnWords(sent.response), withoutOwnWords(inFolder(want.response, cwd)))
+        if (rest) return rest
+      } else {
+        const answer = differs('the adapter’s answer', sent.response, inFolder(want.response, cwd))
+        if (answer) return answer
+      }
     } else if (want.type === 'user') {
-      if (!isDeepStrictEqual(sent.message, want.message)) return `the adapter sent the message ${JSON.stringify(sent.message)} where the recording sends ${JSON.stringify(want.message)}`
+      const message = differs('the message', sent.message, want.message)
+      if (message) return message
       if (typeof want.uuid === 'string' && typeof sent.uuid === 'string') ids.set(want.uuid, sent.uuid)
     }
     return null
   },
   rewrite(incoming, ids) {
+    // The CLI asks Centralu's server for what Centralu writes itself: note it, for the answer to be told from the CLI's
+    const asks = mcpMessage(incoming)
+    if (opts.own && asks?.server === opts.own.server && (asks.method === 'initialize' || asks.method === 'tools/list')) ids.set(`own ${String(incoming.request_id)}`, asks.method)
     const swap = (v: unknown): unknown => {
       if (typeof v === 'string') return ids.get(v) ?? inFolder(v, cwd)
       if (Array.isArray(v)) return v.map(swap)
@@ -239,11 +294,15 @@ export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcC
   let cursor = 0
   const frames = recording.frames
   const peers: ReplayPeer[] = []
-  const state: ReplayState = { problems: [], left: () => frames.length - cursor, spawned: 0 }
+  const state = { problems: [] as string[], spawned: 0 }
   if (onProblem) {
     const push = state.problems.push.bind(state.problems)
     state.problems.push = (...found) => (found.forEach(onProblem), push(...found))
   }
+  let fail!: (e: Error) => void
+  const failed = new Promise<never>((_, reject) => (fail = reject))
+  // A replay that ends well never reads it
+  failed.catch(() => {})
   const probe = codec.probe
   const asked = new Set(probe ? frames.flatMap((f) => (f.dir === 'out' && f.msg && probe.is(f.msg) ? [probe.requestId(f.msg)] : [])) : [])
   const answer = probe ? frames.find((f) => f.dir === 'in' && f.msg && probe.answers(f.msg, asked))?.msg : undefined
@@ -257,7 +316,8 @@ export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcC
   return {
     spawn: () => {
       state.spawned++
-      const peer = new ReplayPeer(take(), state.problems, codec, answer)
+      const peer = new ReplayPeer(take(), state.problems, codec, answer, recording.name)
+      peer.onProblem = (problem) => fail(new Error(problem))
       peers.push(peer)
       return peer
     },
@@ -269,6 +329,8 @@ export function replaySpawner(recording: Recording, codec: FrameCodec = jsonRpcC
       get spawned() {
         return state.spawned
       },
+      failed,
+      waitingFor: () => peers.at(-1)?.waitingFor() ?? 'a process to start',
     },
     peers,
   }
@@ -287,7 +349,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   readonly sent: string[] = []
   /** The lines themselves, as the adapter wrote them */
   readonly lines: Record<string, unknown>[] = []
-  /** Told of each mismatch as it happens, so a test can fail with it instead of waiting out a stalled step */
+  /** Told of each mismatch as it happens (`ReplayState.failed`), so a test can fail with it instead of waiting out a stalled step */
   onProblem: ((problem: string) => void) | undefined
   private readonly ids = new Map<string, string | number>()
   private buffer = ''
@@ -299,6 +361,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     private readonly codec: FrameCodec = jsonRpcCodec,
     /** A recorded answer to a probe, for the ones the adapter makes (`FrameCodec.probe`) */
     private readonly probeAnswer?: Record<string, unknown>,
+    /** The recording's name, for a mismatch to give */
+    private readonly recording = 'the recording',
   ) {
     super()
     this.stdin.on('data', (d: Buffer) => {
@@ -335,7 +399,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
     this.lines.push(msg)
     const expected = this.frames[this.i]
     if (!expected || expected.dir !== 'out' || !expected.msg) {
-      this.problem(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)
+      this.problem(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`, expected)
       return
     }
     let problem = this.codec.match(msg, expected.msg, this.ids)
@@ -346,16 +410,18 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
       problem = null
     }
     if (problem) {
-      this.problem(problem)
+      this.problem(problem, expected)
       return
     }
     this.i++
     this.pump()
   }
 
-  private problem(text: string): void {
-    this.problems.push(text)
-    this.onProblem?.(text)
+  /** `at`: the recorded frame the adapter's line was to be */
+  private problem(text: string, at?: Rec): void {
+    const found = `${this.recording}${at?.line ? ` line ${at.line}` : ''}: ${text}`
+    this.problems.push(found)
+    this.onProblem?.(found)
   }
 
   /**

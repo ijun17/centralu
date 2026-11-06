@@ -184,6 +184,16 @@ describe('scrubbing Codex’s frames', () => {
     const [seen] = macRun([line('in', { id: 'r-3', result: { text: 'Sent hub-5b0933ff.m_01M6QZP77M7RJ0EEHDRB14Z371 to x; project frames-record-centralu-read-3e7fwc' } })]).map((f) => f.msg)
     expect(JSON.stringify(seen)).toBe(JSON.stringify({ id: 'r-3', result: { text: 'Sent hub-00000001.m_00000000000000000000000001 to x; project frames-record-centralu-read' } }))
   })
+
+  it('drops the random suffix of a folder’s name that a streamed answer cuts into pieces (#2065)', () => {
+    const delta = (itemId: string, piece: string) => line('in', { method: 'item/agentMessage/delta', params: { threadId: 't', turnId: 'u', itemId, delta: piece } })
+    const pieces = ['Your project ', 'frames-record', '-other', '-B', 'GK', 'Z', 'To', ' is not trusted, nor frames-', 'data-', 'a1B2c3', '.']
+    // Another item's text is another text: what ends one item's name and starts another's is not joined into a name
+    const apart = [delta('m2', 'frames-record'), delta('m2', '-other'), delta('m3', '-B'), delta('m3', 'GKZTo')]
+    const frames = macRun([...pieces.map((p) => delta('m1', p)), ...apart]).map((f) => (f.msg.params as { delta: string }).delta)
+    expect(frames.slice(0, pieces.length).join('')).toBe('Your project frames-record-other is not trusted, nor frames-data.')
+    expect(frames.slice(pieces.length)).toEqual(['frames-record', '-other', '-B', 'GKZTo'])
+  })
 })
 
 describe('cutting a bulky text out of a recording', () => {

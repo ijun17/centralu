@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
-import type { AgentSpawnSpec } from '../contract.js'
-import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder } from '../frames/replay.test-helpers.js'
+import { instructionsFor, toolDefsFor } from '../../sessions/orchestrator-tools.js'
+import type { AgentSpawnSpec, CreateSessionOpts } from '../contract.js'
+import { callOrder, differs, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type OwnAnswers, type Recording } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
+import { CLAUDE_SUBAGENT_TOOL, ORCHESTRATOR_MCP_NAME } from './orchestrator-mcp.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
 
 /**
@@ -12,18 +14,36 @@ import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVer
  * what the CLI answered, and the tests below read the events it emitted. A scenario's lines were never written by hand.
  */
 
+/**
+ * What Centralu writes to the CLI itself, not the CLI: its server's answers to `initialize` and `tools/list`. They are made from the
+ * tool definitions and instructions in this repository, so they are checked against those (the tools by name, words and parameters),
+ * not against the copy a recording holds, which every change to a tool's words would outdate.
+ */
+function centraluAnswers(session: Partial<CreateSessionOpts>): OwnAnswers {
+  const profile = session.toolProfile ?? 'orchestrator'
+  return {
+    server: ORCHESTRATOR_MCP_NAME,
+    check(method, result) {
+      if (method === 'initialize') return differs('the instructions', result.instructions, instructionsFor(profile, undefined, (session.apps?.current().length ?? 0) > 0, CLAUDE_SUBAGENT_TOOL), 'the code')
+      const listed = Array.isArray(result.tools) ? result.tools.map((t: { name: string; description: string; inputSchema?: { properties?: object } }) => ({ name: t.name, description: t.description, parameters: Object.keys(t.inputSchema?.properties ?? {}) })) : result.tools
+      return differs('the tools', listed, toolDefsFor(profile).map((t) => ({ name: t.name, description: t.description, parameters: Object.keys(t.schema.shape) })), 'the code')
+    },
+  }
+}
+
 type Replayed = { events: NormalizedEvent[]; problems: string[]; left: number; spawned: number; started: AgentSpawnSpec[] }
 
-/** The recording of `scenario` played through the adapter; `cwd` is the folder the recording's `<cwd>` stands for */
-async function replay(dir: string, name: string): Promise<Replayed> {
+/** The recording of `scenario` played through the adapter (`edit`: changes the recording first, for a test of what a replay notices) */
+async function replay(dir: string, name: string, edit?: (recording: Recording) => void): Promise<Replayed> {
   const recording = loadRecording(recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === dir)!.file(name))
+  edit?.(recording)
   const named = scenariosFor('claude').find((s) => s.name === name)!
   // Driven under the preset it was recorded with
   const preset = PermissionPreset.safeParse(recording.header.preset)
   const scenario = preset.success ? { ...named, preset: preset.data } : named
   const folder = temporaryFolder('claude-replay-')
   const cwd = folder.path
-  const { spawn: replayed, state, peers } = replaySpawner(recording, streamJsonCodec(cwd))
+  const { spawn: replayed, state, peers } = replaySpawner(recording, streamJsonCodec(cwd, { own: centraluAnswers(scenario.session?.() ?? {}) }))
   const started: AgentSpawnSpec[] = []
   const spawn = (spec: AgentSpawnSpec) => (started.push(spec), replayed(spec))
   const adapter = replayedClaudeAdapter()
@@ -31,11 +51,8 @@ async function replay(dir: string, name: string): Promise<Replayed> {
   const events = await drive(adapter, scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'claude',
     session: { ...CLAUDE_REPLAY_SESSION, processSource: { spawn } },
-  })
-    .catch((e: unknown) => {
-      throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
-    })
-    .finally(() => folder.remove())
+    replay: state,
+  }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), spawned: state.spawned, started }
 }
 
@@ -52,6 +69,33 @@ for (const { dir, names: recorded } of recordedFolders(CLAUDE_RECORDINGS)) {
     }
   })
 }
+
+describe('what a replay notices', () => {
+  const own = recordedVersion('centralu-mail')
+  /** The recorded line of the adapter's answer to the CLI's `method` request */
+  const answerTo = (recording: Recording, method: string) => {
+    const asked = recording.frames.find((f) => f.dir === 'in' && (f.msg?.request as { message?: { method?: string } } | undefined)?.message?.method === method)!.msg!.request_id
+    return recording.frames.find((f) => f.dir === 'out' && (f.msg?.response as { request_id?: unknown } | undefined)?.request_id === asked)!.msg as { response: { response: { mcp_response: { result: unknown } } } }
+  }
+
+  it('a change to a Centralu tool’s words needs no new recording: the recorded tools and instructions can be anything', async () => {
+    const r = await replay(own, 'centralu-mail', (recording) => {
+      answerTo(recording, 'tools/list').response.response.mcp_response.result = 'not even a list'
+      Object.assign(answerTo(recording, 'initialize').response.response.mcp_response.result as object, { instructions: 'words from long ago' })
+    })
+    expect(r.problems).toEqual([])
+  })
+
+  it('a line the real CLI was sent that the adapter no longer sends fails at once, naming the recording, the line and the path', async () => {
+    let line: number | undefined
+    const run = replay(own, 'centralu-mail', (recording) => {
+      const verdict = recording.frames.find((f) => f.dir === 'out' && (f.msg?.response as { response?: { behavior?: string } } | undefined)?.response?.behavior === 'allow')!
+      ;(verdict.msg!.response as { response: { behavior: string } }).response.behavior = 'deny'
+      line = verdict.line
+    })
+    await expect(run).rejects.toThrow(`centralu-mail.jsonl line ${line}: the adapter’s answer: first difference at response.behavior: the recording has "deny", the adapter sent "allow"`)
+  })
+})
 
 const said = (events: NormalizedEvent[]) => of(events, 'message_delta').map((e) => e.text).join('')
 const ended = (events: NormalizedEvent[]) => of(events, 'turn_complete').length

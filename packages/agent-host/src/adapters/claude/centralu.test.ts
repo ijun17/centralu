@@ -44,11 +44,8 @@ async function replay(name: string) {
   const events: NormalizedEvent[] = await drive(new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' }), scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'claude',
     session: { model: 'haiku', processSource: { spawn }, orchestratorTools: notingCentraluTools(handed), toolProfile: 'reader' },
-  })
-    .catch((e: unknown) => {
-      throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
-    })
-    .finally(() => folder.remove())
+    replay: state,
+  }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), started, handed, waitingFor: peers.at(-1)?.waitingFor() }
 }
 
