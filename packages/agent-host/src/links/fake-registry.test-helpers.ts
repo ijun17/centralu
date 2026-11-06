@@ -114,7 +114,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  *
  * The data folder's lock (#1903): `--detach` refuses, as a host does, while `<data>/host.lock` names a live process.
  * With `realServe` (the URL of the real `serve.mjs`), `FAKE_HANGS=<version>` plays a version whose host takes the lock
- * and then hangs: a process started outside the session as the real launcher starts its host, which never listens,
+ * and then hangs: a process started outside the session as the real launcher starts its host, which never answers,
  * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
  * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`). It listens on a port of its own,
  * `<data>/hung.port`: `hungListening` is how a test tells that it lives (not by its pid: a freed pid goes to the next process, #2082).
@@ -163,6 +163,8 @@ const log = (s) => appendFileSync(d + '/events', s + '\\n')
 const lockPid = () => {
   try {
     const pid = JSON.parse(readFileSync(d + '/host.lock', 'utf8')).pid
+    // With the real launcher the lock is read as it reads it, by the pid and the time it started: a freed pid names the next process (#2082)
+    if (real) return real.lockHolderIsAlive(d) ? pid : null
     process.kill(pid, 0)
     return pid
   } catch {
@@ -205,7 +207,7 @@ if (real && a.startsWith('serve --switch')) {
     const hung = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', "require('net').createServer().listen(0,'127.0.0.1',function(){require('fs').writeFileSync(process.argv[1],String(this.address().port))});setInterval(function(){},1e6)", d + '/hung.port'], env: process.env, cwd: d })
     if (!hung.ok) throw new Error(hung.message)
     // The answer below says the host never answered: it is said once the process has listened, so what a test finds is what it left
-    for (let i = 0; i < 400 && !existsSync(d + '/hung.port'); i++) await new Promise((r) => setTimeout(r, 50))
+    for (let i = 0; i < 400 && !(existsSync(d + '/hung.port') && readFileSync(d + '/hung.port', 'utf8') !== ''); i++) await new Promise((r) => setTimeout(r, 50))
     writeFileSync(d + '/host.lock', JSON.stringify({ pid: hung.pid, started: real.processStartTime(hung.pid), at: Date.now(), by: 'serve' }))
     writeFileSync(d + '/hung', String(hung.pid))
     const free = createServer()
