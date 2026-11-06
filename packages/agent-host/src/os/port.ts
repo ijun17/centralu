@@ -449,7 +449,7 @@ export interface OsClock {
 
 export type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
 
-/** SQLite (better-sqlite3) on the real OS; in memory, the engine a test gives, whose files are not in the in-memory tree */
+/** SQLite (better-sqlite3) on the real OS; the in-memory OS has none (`ENOSYS`) */
 export interface OsSqlite {
   /** `':memory:'` opens a database with no file */
   open(path: HostPath, options?: SqliteOptions): Database.Database

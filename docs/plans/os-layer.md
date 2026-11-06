@@ -371,7 +371,7 @@ interface Os {
   tools: OsTools          // find (whichTool), program (programPath), resolve (resolveCommand)
   env: OsEnv              // get (any case on Windows), all, set, home, temp (read when asked), execPath, username, cwd()
   clock: OsClock          // now, setTimeout (unref'd), sleep (keeps the host alive while awaited)
-  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, the engine the test gives
+  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, ENOSYS
   traits: OsTraits        // foldsPathCase, hasProcessGroups, locksRunningPrograms, locksWatchedFolders,
                           // cpKeepsLinks, clonesFiles, measuresWithDu, hasPs, modesGuardFiles, hasWindowsFileNames
 }
@@ -516,8 +516,8 @@ show it are not run against a Mac (`linux: true`).
 Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
 `\\?\` paths, permissions beyond the owner's write bit (on Windows the read-only attribute; on POSIX the host is never root), PTYs, a watch on a single file (refused: stricter than both OSes), the null device (a child's
 `'ignore'` is the way to discard), a write through a link that leads nowhere (refused, where the OS makes the
-target), and SQLite: a test gives the engine (`memoryOs({ sqlite })`), and the database's files are not in the
-in-memory tree, so what renames, copies or removes them is tested on the real OS. NTFS's case table is the one measured
+target), an `'overlapped'` fd 3 (refused), and SQLite (`sqlite.open` is `ENOSYS`; no test gave an engine, so the
+option went, host-big-files.md §6): what opens, renames, copies or removes a database is tested on the real OS. NTFS's case table is the one measured
 on Windows 11; a volume formatted by an older Windows keeps an older table.
 
 ### 7.2 What each area needs, and whether the interface has it
