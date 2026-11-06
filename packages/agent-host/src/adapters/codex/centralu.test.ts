@@ -50,7 +50,7 @@ async function replay(name: string) {
       throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
     })
     .finally(() => folder.remove())
-  return { events, problems: state.problems, left: state.left() }
+  return { events, problems: state.problems, left: state.left(), lines: peers.flatMap((p) => p.lines) }
 }
 
 describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
@@ -62,6 +62,16 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
       expect(callOrder(r.events)).toEqual([])
     })
   }
+
+  // What the replay does not compare of a thread's start, asserted here: the adapter offers the bridge with the session's credential and runs its tools without a card
+  it('the session’s thread is started with Centralu’s bridge: its address and credential, and the tools approved without asking', async () => {
+    const { lines } = await replay('centralu-compact')
+    const start = lines.find((l) => l.method === 'thread/start')!.params as { config: { mcp_servers: { centralu: { env: Record<string, string>; default_tools_approval_mode: string; tool_timeout_sec: number } } } }
+    const bridge = start.config.mcp_servers.centralu
+    expect(bridge.env).toMatchObject({ CC_HOST_URL: 'ws://127.0.0.1:1', CC_BRIDGE_TOKEN: 'replay', CC_SESSION_ID: 'replay-centralu-compact' })
+    expect(bridge.default_tools_approval_mode).toBe('approve')
+    expect(bridge.tool_timeout_sec).toBeGreaterThan(0)
+  })
 
   const calls = (events: NormalizedEvent[]) => of(events, 'tool_call').map((c) => c.summary)
 

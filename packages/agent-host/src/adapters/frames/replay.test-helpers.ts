@@ -95,8 +95,8 @@ export const jsonRpcCodec: FrameCodec = {
 /**
  * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
  * answer, a file change, a command's output). `cwd`: that folder. `ignoreParams`: parameters of a request that are not compared, for a
- * recording whose values are not the replay's (the bridge's address and credential in a thread's `config`, the tools' instructions
- * in `developerInstructions`: words that change with the build)
+ * a thread's `thread/start` or `thread/resume`, for a recording whose values are not the replay's (the bridge's address and credential in
+ * `config`, the tools' instructions in `developerInstructions`: words that change with the build); a test asserts what it needs of them
  */
 export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[] } = {}): FrameCodec => {
   /** The id a run makes up for an input (`clientUserMessageId`), which the app-server says back on the input's item */
@@ -104,15 +104,18 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
     const id = (params as { clientUserMessageId?: unknown } | undefined)?.clientUserMessageId
     return typeof id === 'string' ? id : undefined
   }
-  const withoutOwnId = (params: unknown): unknown =>
-    params && typeof params === 'object' ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId' && !opts.ignoreParams?.includes(k))) : params
+  // The ignored parameters are a thread's own (`thread/start`, `thread/resume`): the same name in another request is compared
+  const withoutOwnId = (params: unknown, method: string): unknown =>
+    params && typeof params === 'object'
+      ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId' && !(opts.ignoreParams?.includes(k) && (method === 'thread/start' || method === 'thread/resume'))))
+      : params
   return {
     match(sent, want, ids) {
       const recorded = inFolder(want, cwd)
       const problem = jsonRpcCodec.match(sent, recorded, ids)
       if (problem || typeof recorded.method !== 'string') return problem
       // A request is also the same by what it asks for (the launch policy, the text, the model), not by its method alone
-      if (!isDeepStrictEqual(withoutOwnId(sent.params ?? null), withoutOwnId(recorded.params ?? null))) {
+      if (!isDeepStrictEqual(withoutOwnId(sent.params ?? null, recorded.method), withoutOwnId(recorded.params ?? null, recorded.method))) {
         return `the adapter sent ${recorded.method} with ${JSON.stringify(sent.params)} where the recording sends ${JSON.stringify(recorded.params)}`
       }
       const mine = ownId(sent.params)
@@ -255,6 +258,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   private i = 0
   /** The methods of the lines the adapter has sent, in order (an answer to the tool's request is `answer`): what a test asserts the adapter did */
   readonly sent: string[] = []
+  /** The lines themselves, as the adapter wrote them */
+  readonly lines: Record<string, unknown>[] = []
   /** Told of each mismatch as it happens, so a test can fail with it instead of waiting out a stalled step */
   onProblem: ((problem: string) => void) | undefined
   private readonly ids = new Map<string, string | number>()
@@ -299,6 +304,7 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
       return
     }
     this.sent.push(typeof msg.method === 'string' ? msg.method : 'answer')
+    this.lines.push(msg)
     const expected = this.frames[this.i]
     if (!expected || expected.dir !== 'out' || !expected.msg) {
       this.problem(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)

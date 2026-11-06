@@ -14,7 +14,8 @@
  * scenario starts use it too) and never touches the person's data folder: `CC_DATA_DIR` and `--db` are temporary.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,22 +87,29 @@ class Window {
 }
 
 /** The host from source, in a data folder of its own; resolves with its port and token once it says it is ready */
-function startHost(data: string, home: string, raw: string, token: string): Promise<{ child: ChildProcess; port: number }> {
-  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'packages/agent-host/src/main.ts'), '--port', '0', '--token', token, '--db', join(data, 'store.db')], {
+function startHost(data: string, home: string, raw: string, token: string, started: (child: ChildProcess) => void): Promise<{ child: ChildProcess; port: number }> {
+  // The token goes on stdin, not on the command line (every process of this user reads that); the host ends when the pipe does (`--watch-parent`)
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'packages/agent-host/src/main.ts'), '--port', '0', '--db', join(data, 'store.db'), '--watch-parent'], {
     cwd: ROOT,
     // A home folder of its own too: Codex reads the person's skills from `~/.agents`, and a model that is offered them may open them
-    env: { ...process.env, CC_DATA_DIR: data, CC_RECORD_FRAMES: raw, HOME: home, USERPROFILE: home },
-    stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, CC_DATA_DIR: data, CC_RECORD_FRAMES: raw, HOME: home, USERPROFILE: home, CC_HOST_TOKEN_ON_STDIN: '1' },
+    stdio: ['pipe', 'pipe', 'inherit'],
   })
+  started(child)
+  child.stdin!.write(`${JSON.stringify({ token })}\n`)
   return new Promise((resolve, reject) => {
     let buffer = ''
+    const timer = setTimeout(() => reject(new Error('the host was not ready within 60 s')), 60_000)
     child.once('exit', (code) => reject(new Error(`the host ended (${code}) before it was ready`)))
     child.stdout!.on('data', (d: Buffer) => {
       buffer += String(d)
       for (const line of buffer.split('\n')) {
         try {
           const ready = JSON.parse(line) as { ready?: boolean; port?: number }
-          if (ready.ready && ready.port) return resolve({ child, port: ready.port })
+          if (ready.ready && ready.port) {
+            clearTimeout(timer)
+            return resolve({ child, port: ready.port })
+          }
         } catch {
           // Not the ready line
         }
@@ -118,11 +126,13 @@ async function main(): Promise<number> {
   let failed = 0
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   const codexHome = temporaryCodexHome(data)
-  process.env.CODEX_HOME = join(data, 'codex-home')
   let host: ChildProcess | null = null
+  // What the run in progress has made, for an interrupted run to take away (the copy of the sign-in is in `data`)
+  const open: string[] = []
   const stop = () => {
     host?.kill('SIGKILL')
     codexHome.finish()
+    for (const dir of [...open, data]) rmSync(dir, { recursive: true, force: true })
     process.exit(130)
   }
   process.once('SIGINT', stop)
@@ -132,13 +142,13 @@ async function main(): Promise<number> {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
       mkdirSync(raw, { recursive: true })
+      open.push(folder, raw)
       const window = new Window()
       try {
-        const token = `record-${scenario.name}`
+        const token = randomBytes(24).toString('hex')
         const home = join(data, 'home')
         mkdirSync(home, { recursive: true })
-        const started = await startHost(data, home, raw, token)
-        host = started.child
+        const started = await startHost(data, home, raw, token, (child) => (host = child))
         await window.open(started.port, token)
         const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
         const open = async (prompt: string, name?: string): Promise<string> => {

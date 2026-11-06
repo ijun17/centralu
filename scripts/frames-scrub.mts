@@ -43,7 +43,7 @@ const BUILTIN_AGENTS = new Set(['general-purpose', 'Explore', 'Plan', 'statuslin
 /** The deltas of a streamed answer, and the field of each that holds the piece */
 const DELTA_FIELDS: Record<string, string> = { text_delta: 'text', thinking_delta: 'thinking', input_json_delta: 'partial_json' }
 
-const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+|ccb\d+:[\w-]+:[\w-]{16,})(?![\w-])/g
+const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b|\bccb\d+:[\w-]+:[\w-]{16,}/g
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g
 /** Another person's home or temp folder: what the machine's own folders did not already cover */
 const FOREIGN: readonly [RegExp, string][] = [
