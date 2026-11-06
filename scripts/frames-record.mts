@@ -21,6 +21,7 @@ import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.
 import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts } from '../packages/agent-host/src/adapters/contract.js'
+import { driveSwap, SWAP_SCENARIOS, type SwapScenario } from '../packages/agent-host/src/adapters/codex/swap-scenarios.test-helpers.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
@@ -47,7 +48,12 @@ async function main(): Promise<number> {
     console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
     return 2
   }
-  const chosen = scenariosFor(tool).filter((s) => names.length === 0 || names.includes(s.name))
+  const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
+  const chosen: { name: string; drive?: Scenario; swap?: SwapScenario }[] = [
+    ...scenariosFor(tool).filter(wanted).map((drive) => ({ name: drive.name, drive })),
+    // A conversation that changes hands with its app-server still running (a host swap under the keeper): Codex's
+    ...(tool === 'codex' ? SWAP_SCENARIOS.filter(wanted).map((swap) => ({ name: swap.name, swap })) : []),
+  ]
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
@@ -63,18 +69,30 @@ async function main(): Promise<number> {
   try {
     codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
     for (const scenario of chosen) {
+      codexHome?.settings(scenario.drive?.settings)
       // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
-      process.env.CC_RECORD_FRAMES = raw
+      // A swap scenario records from the swap on: the host that adopts a process taps it from then
+      if (scenario.swap) delete process.env.CC_RECORD_FRAMES
+      else process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
       const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(spec))
       const adapter = adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
       try {
-        const run = runAs(tool, scenario)
-        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
+        let run: { preset?: string }
+        let events
+        if (scenario.swap) {
+          const swap = scenario.swap
+          run = { preset: swap.preset }
+          const first = { sessionId: `${sessionId}-first`, cwd, permissionPreset: swap.preset ?? ('normal' as const), projectTrusted: true, ...sessionFor(tool, spawn).session, ...(swap.model ? { model: swap.model } : {}) }
+          events = await driveSwap(adapter, swap, first, sessionId, () => last, () => void (process.env.CC_RECORD_FRAMES = raw), 300_000)
+        } else {
+          run = runAs(tool, scenario.drive!)
+          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...sessionFor(tool, spawn) })
+        }
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
@@ -100,6 +118,25 @@ async function main(): Promise<number> {
   return failed ? 1 : 0
 }
 
+/** The MCP server a scenario with `settings: 'mcp'` configures: stdio, one tool, `ping`, which answers `pong` */
+const PROBE_MCP = `let buf = ''
+const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n')
+process.stdin.on('data', (c) => {
+  buf += c
+  for (let nl; (nl = buf.indexOf('\\n')) >= 0; ) {
+    const line = buf.slice(0, nl).trim()
+    buf = buf.slice(nl + 1)
+    if (!line) continue
+    const { id, method, params } = JSON.parse(line)
+    if (method === 'initialize') send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'probe', version: '1' } } })
+    else if (method === 'tools/list') send({ jsonrpc: '2.0', id, result: { tools: [{ name: 'ping', description: 'Answers pong.', inputSchema: { type: 'object', properties: { note: { type: 'string' } } } }] } })
+    else if (method === 'tools/call') send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'pong' }] } })
+    else if (id !== undefined) send({ jsonrpc: '2.0', id, result: {} })
+  }
+})
+process.stdin.on('end', () => process.exit(0))
+`
+
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
 const ADAPTER_FOLDER: Record<string, string> = { claude: 'claude', codex: 'codex' }
 
@@ -117,7 +154,7 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
  * that file changed meanwhile (another Codex refreshed it: its token is the newer one and stays). The put-back is a rename, so
  * the file is never half written.
  */
-function temporaryCodexHome(parent: string): { finish(): void } {
+function temporaryCodexHome(parent: string): { finish(): void; settings(which: Scenario['settings']): void } {
   const real = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'auth.json')
   const home = join(parent, 'codex-home')
   mkdirSync(home, { recursive: true })
@@ -128,6 +165,14 @@ function temporaryCodexHome(parent: string): { finish(): void } {
   process.env.CODEX_HOME = home
   let done = false
   return {
+    // The settings file a scenario asks for (`Scenario.settings`), or none
+    settings(which) {
+      const config = join(home, 'config.toml')
+      if (which !== 'mcp') return rmSync(config, { force: true })
+      const server = join(home, 'probe-mcp.mjs')
+      writeFileSync(server, PROBE_MCP)
+      writeFileSync(config, `[mcp_servers.probe]\ncommand = "node"\nargs = [${JSON.stringify(server)}]\n`)
+    },
     finish() {
       if (done) return
       done = true

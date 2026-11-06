@@ -249,6 +249,12 @@ describe('streaming and tool calls', () => {
   })
 
   it('an MCP success carries the answer body', () => {
+    const { out } = real('mcp-call', 'item/completed', (p) => dig(p, 'item.type') === 'mcpToolCall')
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: true, summary: 'pong' })
+  })
+
+  // Hand-written: an answer of several parts, which the probe server's one-word answer is not
+  it('an MCP answer of several parts joins them', () => {
     const out = n('item/completed', {
       item: {
         type: 'mcpToolCall', id: 'm2', server: 'docs-mcp', tool: 'api_retriever',
@@ -611,14 +617,12 @@ describe('state and gauges', () => {
    * conversation window.
    */
   it('an MCP tool call shows the server and tool name', () => {
-    const out = n('item/started', {
-      item: { type: 'mcpToolCall', id: 'm1', server: 'browser', tool: 'list_tabs', status: 'inProgress' },
-    })
-    expect(out[0]).toMatchObject({
-      type: 'tool_call',
-      summary: { tool: 'list_tabs', title: 'browser: list_tabs' },
-    })
-    // Centralu's own say what they did instead, with the mark the card draws them by (#730)
+    const { out } = real('mcp-call', 'item/started', (p) => dig(p, 'item.type') === 'mcpToolCall')
+    expect(out[0]).toMatchObject({ type: 'tool_call', summary: { tool: 'ping', title: 'probe: ping' } })
+  })
+
+  // Hand-written until Centralu's own calls are recorded: its tools say what they did instead, with the mark the card draws them by (#730)
+  it('Centralu’s own tools are drawn by what they did', () => {
     expect(n('item/started', { item: { type: 'mcpToolCall', id: 'm2', server: 'centralu', tool: 'list_sessions', status: 'inProgress' } })[0]).toMatchObject({
       summary: { tool: 'list_sessions', title: 'Listed sessions', centralu: { tool: 'list_sessions', label: 'Listed sessions' } },
     })
