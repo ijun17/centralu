@@ -3,6 +3,7 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { DEFAULT_AUTO_COMPACT } from '@cc/protocol'
 import type { SessionIdle } from '../idle.js'
 import { managerWorld, projectDirs } from './manager.test-helpers.js'
+import { settingThenKeep } from './then-keep.js'
 import { COMPACT_FLOOR_TOKENS, IDLE_COMPACT_MINUTES, SelfCompaction, type SelfCompactionHost } from './self-compaction.js'
 
 /**
@@ -16,13 +17,25 @@ function info(over: Partial<SessionInfo> = {}): SessionInfo {
   return { id: 's1', tool: 'claude', state: 'waiting_input', live: true, context: { used: 150_000, window: 200_000, exactness: 'exact' }, ...over } as SessionInfo
 }
 
-function world(initial: Partial<SessionInfo> = {}) {
+/** The setting store as a map, shared by the two hosts of a swap: `updateAppSetting` is one step here, as it is one transaction in the store */
+function memorySettings() {
+  const m = new Map<string, string>()
+  return {
+    m,
+    appSetting: (k: string) => m.get(k) ?? null,
+    setAppSetting: (k: string, v: string) => void m.set(k, v),
+    deleteAppSetting: (k: string) => void m.delete(k),
+    updateAppSetting: (k: string, next: (c: string | null) => string) => void m.set(k, next(m.get(k) ?? null)),
+  }
+}
+
+function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) {
   const sessions = new Map<string, SessionInfo>([['s1', info(initial)]])
   const sent: [string, string][] = []
   const notices: [string, string][] = []
   const thens: [string, string][] = []
   const nudges: string[] = []
-  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, failThen: false, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
+  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, failThen: false, thenGate: null as Promise<void> | null, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
     session: (id) => sessions.get(id),
@@ -36,10 +49,12 @@ function world(initial: Partial<SessionInfo> = {}) {
       if (state.failSend) throw new Error('no process')
       sent.push([id, text])
     },
-    sendThen: (id, text) => {
+    sendThen: async (id, text) => {
+      if (state.thenGate) await state.thenGate
       if (state.failThen) throw new Error('no process')
       thens.push([id, text])
     },
+    keep: settingThenKeep(settings),
     nudge: (_id, text) => {
       if (state.nudgeTaken) nudges.push(text)
       return state.nudgeTaken
@@ -68,7 +83,7 @@ function world(initial: Partial<SessionInfo> = {}) {
     emit(e, true)
     if (reading === 'after' && m().context) read(m().context!.used)
   }
-  return { c, state, sent, thens, nudges, notices, m, emit, startTurn, endTurn, read }
+  return { c, state, sent, thens, nudges, notices, m, emit, startTurn, endTurn, read, settings }
 }
 
 describe('compact_self (#1451)', () => {
@@ -419,7 +434,6 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens).toHaveLength(1)
     expect(w.thens[0]![1]).toContain('Continue with step 3 of the plan')
     expect(w.thens[0]![1]).not.toMatch(/came first/)
-    expect(w.notices.map((n) => n[1])).toContain('Centralu sent the agent its next step after the compaction')
     // The turn it starts is the session’s own, not the compact’s, and sends nothing again
     w.startTurn()
     expect(w.c.compactTurn('s1')).toBe(false)
@@ -552,7 +566,7 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens[0]![1]).toContain('second')
   })
 
-  it('tells the session when the next step could not be sent', () => {
+  it('tells the session when the next step could not be sent', async () => {
     const w = world()
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     w.state.failThen = true
@@ -560,6 +574,7 @@ describe('compact_self then (#2024)', () => {
     w.startTurn()
     w.emit(compaction)
     w.endTurn()
+    await vi.advanceTimersByTimeAsync(0)
     expect(w.thens).toEqual([])
     expect(w.nudges).toEqual([expect.stringMatching(/the session could not take it/)])
     expect(err).toHaveBeenCalledWith(expect.stringContaining('could not send the next step'))
@@ -584,6 +599,171 @@ describe('compact_self then (#2024)', () => {
     // Given once
     w.emit(request)
     expect(w.nudges).toHaveLength(1)
+  })
+
+  describe('across a host swap or restart (#2024)', () => {
+    const key = 'compact_then:s1'
+    const stored = (w: ReturnType<typeof world>) => (w.settings.m.get(key) ? JSON.parse(w.settings.m.get(key)!) : null)
+    /** The host after the swap: the same store, a session that is there, nothing in memory */
+    const nextHost = (old: ReturnType<typeof world>) => world({}, old.settings)
+
+    it('keeps the step in the store from the request on, stage by stage, and clears it once it went', async () => {
+      const w = world()
+      w.startTurn()
+      w.c.request('s1', undefined, 'Continue with step 3')
+      expect(stored(w)).toMatchObject({ stage: 'asked', then: 'Continue with step 3' })
+      w.endTurn()
+      expect(stored(w)).toMatchObject({ stage: 'sent' })
+      w.startTurn()
+      w.emit(compaction)
+      expect(stored(w)).toMatchObject({ stage: 'compacted' })
+      w.endTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(w.thens).toHaveLength(1)
+      expect(stored(w)).toBeNull()
+      // A request with no step keeps nothing, and a replacement without one clears it
+      const plain = world()
+      plain.startTurn()
+      plain.c.request('s1')
+      expect(plain.settings.m.size).toBe(0)
+      plain.c.request('s1', undefined, 'next')
+      expect(stored(plain)).not.toBeNull()
+      plain.c.request('s1')
+      expect(stored(plain)).toBeNull()
+    })
+
+    it('sends the step once from the new host when the compaction was reported done, and the old host finds it taken', async () => {
+      const old = world()
+      asked(old, undefined, 'Continue with step 3')
+      old.startTurn()
+      old.emit(compaction)
+      // The host swaps before the compact turn ends: the new host starts
+      const next = nextHost(old)
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toHaveLength(1)
+      expect(next.thens[0]![1]).toContain('Continue with step 3')
+      expect(next.nudges).toEqual([])
+      // The old host, not yet gone, sees the compact turn end: the claim is gone, nothing is sent twice
+      old.endTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(old.thens).toEqual([])
+      expect(stored(old)).toBeNull()
+    })
+
+    it('keeps the step for the new host to send when the old one left before it could', async () => {
+      const old = world()
+      asked(old, undefined, 'next')
+      old.startTurn()
+      old.emit(compaction)
+      // The shutdown plan stops the compactor before the sessions are let go of: a late event of the leaving host sends nothing
+      old.c.stop()
+      old.endTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(old.thens).toEqual([])
+      expect(stored(old)).toMatchObject({ stage: 'compacted' })
+      const next = nextHost(old)
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toHaveLength(1)
+      // And a second recovery (another adoption, a restart again) finds nothing to send
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toHaveLength(1)
+    })
+
+    it('puts the step back for the next host when this host is leaving as it is being sent, and tells the session nothing', async () => {
+      const old = world()
+      asked(old, undefined, 'next')
+      old.startTurn()
+      old.emit(compaction)
+      let leave!: () => void
+      old.state.thenGate = new Promise<void>((r) => (leave = r))
+      old.state.failThen = true
+      // The compact turn ends: the step is claimed and on its way; the host is let go of, and the delivery is refused as the leaving host refuses it
+      old.endTurn()
+      expect(stored(old)).toMatchObject({ stage: 'sending' })
+      old.c.stop()
+      leave()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(stored(old)).toMatchObject({ stage: 'compacted' })
+      expect(old.nudges).toEqual([])
+      expect(old.notices.map((n) => n[1])).not.toContainEqual(expect.stringMatching(/did not happen/))
+      const next = nextHost(old)
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toHaveLength(1)
+    })
+
+    it('carries the person-came-first line and the Codex focus line across the swap', async () => {
+      const old = world({ tool: 'codex' })
+      asked(old, 'keep the PR number', 'next')
+      old.startTurn()
+      old.endTurn()
+      old.startTurn()
+      old.emit(compaction)
+      const next = nextHost(old)
+      next.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens[0]![1]).toMatch(/came first/)
+      expect(next.thens[0]![1]).toMatch(/What you asked the summary to keep: keep the PR number/)
+    })
+
+    it('tells the session quietly, with the text of its step, when the new host cannot tell how far the request came', async () => {
+      for (const [stage, how] of [
+        ['asked', /the turn had not ended/],
+        ['sent', /not yet reported done/],
+        ['sending', /it was being sent/],
+      ] as const) {
+        const old = world()
+        old.settings.m.set(key, JSON.stringify({ stage, then: 'Continue with step 3', focusAside: null, ahead: false }))
+        const next = nextHost(old)
+        next.c.recover()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(next.thens, stage).toEqual([])
+        expect(next.nudges, stage).toEqual([expect.stringContaining('Continue with step 3')])
+        expect(next.nudges[0], stage).toMatch(/changed hosts/)
+        expect(next.nudges[0], stage).toMatch(how)
+        expect(next.notices.map((n) => n[1]), stage).toEqual([expect.stringMatching(/changed hosts/)])
+        expect(stored(next), stage).toBeNull()
+        // Told once
+        next.c.recover()
+        expect(next.nudges, stage).toHaveLength(1)
+      }
+    })
+
+    it('keeps a note the tool could not take in the store, and gives it once the new host’s tool can', () => {
+      const old = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+      old.state.nudgeTaken = false
+      old.startTurn()
+      old.c.request('s1', undefined, 'Continue with step 3')
+      old.endTurn(undefined, 'after')
+      expect(JSON.parse(old.settings.m.get('compact_notes:s1')!)).toEqual([expect.stringContaining('Continue with step 3')])
+      const next = nextHost(old)
+      next.c.recover()
+      expect(next.nudges).toEqual([expect.stringContaining('Continue with step 3')])
+      expect(next.settings.m.has('compact_notes:s1')).toBe(false)
+    })
+
+    it('leaves a session whose process the keeper still holds to its adoption, and a request in flight in this host to itself', async () => {
+      const old = world()
+      asked(old, undefined, 'next')
+      old.startTurn()
+      old.emit(compaction)
+      const next = nextHost(old)
+      next.c.recover(() => false)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(next.thens).toEqual([])
+      expect(stored(old)).toMatchObject({ stage: 'compacted' })
+      // This host's own request is not the last host's leftover
+      const mine = nextHost(old)
+      mine.startTurn()
+      mine.c.request('s1', undefined, 'mine')
+      mine.c.recover()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mine.nudges).toEqual([])
+      expect(mine.thens).toEqual([])
+    })
   })
 
   describe('the size read since a compaction (#2024)', () => {

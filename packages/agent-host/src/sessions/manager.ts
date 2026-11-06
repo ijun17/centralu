@@ -41,6 +41,7 @@ import { HandoffNotes, type HandoffNotesHost } from './handoff-notes.js'
 import { SessionStarts, freshStartKey, type SessionStartsHost } from './session-start.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 import { SelfCompaction } from './self-compaction.js'
+import { settingThenKeep } from './then-keep.js'
 import { ContextNudges } from './context-nudges.js'
 import { ToolRegistry, type ToolRegistryHost } from './tool-registry.js'
 import { ApprovalRules } from './approval-rules.js'
@@ -555,7 +556,10 @@ export class SessionManager {
         return this.adapters.get(tool)?.compactCommand?.(focus) ?? '/compact'
       },
       send: (id, text) => this.events.sendCompact(id, text),
-      sendThen: (id, text) => this.events.sendThen(id, text),
+      // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
+      sendThen: (id, text) =>
+        this.events.deliverMail(id, { text, quiet: false, line: 'Centralu sent the agent its next step after the compaction', label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => true }),
+      keep: settingThenKeep(this.store.settings),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
@@ -1050,6 +1054,8 @@ export class SessionManager {
   /** Starts compacting the sessions at rest over the lower share (#1451); the shutdown plan stops it before the sessions are let go of */
   startSelfCompaction(): void {
     this.selfCompaction.start()
+    // What the last host left of a `compact_self` (#2024); a process the keeper kept is looked at once it is adopted (`adoptKept`)
+    this.selfCompaction.recover((id) => !this.keeperOpts.keptSessions?.has(id))
   }
 
 
@@ -1257,6 +1263,8 @@ export class SessionManager {
         const adopted = r.resumed ? this.handles.get(k.sessionId) : undefined
         // Reopened in a new process rather than taken over (ACP, #1562 review): the turn it ran is over, as if not re-attached. Centralu cut it, so it continues it (#1966)
         if (adopted?.takesOverTurn === false && inTurn(m.state)) await this.continueLostTurn(m)
+        // Its `compact_self` the old host left: the step goes in if the compaction was done, else the agent is told (#2024)
+        this.selfCompaction.recover((id) => id === k.sessionId)
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
         if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {

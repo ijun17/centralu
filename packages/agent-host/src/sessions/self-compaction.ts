@@ -36,6 +36,12 @@ import { inTurn, type SessionIdle } from '../idle.js'
  * `then` goes after the compact with a line saying that message came first. A compaction the tool reported as failed leaves the context as
  * it was, so `then` still goes. A tool whose compact takes no focus (Codex) gets the focus line at the head of the `then` turn; with no
  * `then` the tool's answer says the focus was not applied.
+ * **Across a host swap or restart.** A `then` is kept in the store from the request on (`ThenKeep`, the setting `compact_then:<session>`, a key an older build
+ * ignores), with its `stage`: `asked` (the turn runs), `sent` (the compact command went), `compacted` (the tool reported the compaction), `sending`. The step from
+ * `compacted` to `sending` is one transaction (`claim`): of the old host and the new, only the one that makes it sends, so a `then` goes at most once. A host that
+ * starts (`recover`; for a session the keeper kept, after its adoption) sends a `compacted` one, the compaction being known done, waking the session if it has no
+ * process; for any other stage it cannot tell how far things came (the request or the compact was in the middle, or the send was), so the session is told quietly, with
+ * the text of its `then`, that Centralu changed hosts. A note the tool cannot take yet is kept in the store too (`compact_notes:<session>`) until it is taken.
  * **No loop guard but the floor.** A `then` turn that asks again at once finds a context far under the floor and is dropped, so nothing
  * loops; a context that grew back over it did real work. After a compaction only a size read since it counts for the floor (`unread`):
  * Codex reports none, and the reading kept from before would let a small context pass.
@@ -53,6 +59,21 @@ const READING_WAIT_MS = 5_000
 const FOCUS_MAX_CHARS = 300
 /** The longest `then` a request takes: it is a prompt, so it is refused rather than cut */
 export const THEN_MAX_CHARS = 4_000
+
+/** How far a request with a `then` has come; the next host reads it to know what it can still do */
+export type ThenStage = 'asked' | 'sent' | 'compacted' | 'sending'
+/** A pending `then` as the store keeps it */
+export type StoredThen = { stage: ThenStage; then: string; focusAside: string | null; ahead: boolean }
+/** The store side of a `then` and of the notes owed a session: per session, in the setting store, so the host after a swap or a restart finds them */
+export type ThenKeep = {
+  read(sessionId: string): StoredThen | null
+  write(sessionId: string, record: StoredThen): void
+  clear(sessionId: string): void
+  /** Moves a `compacted` record to `sending` in one transaction; true only for the caller that moved it. The other host of a swap finds it moved (or gone) and sends nothing */
+  claim(sessionId: string): boolean
+  notes(sessionId: string): string[]
+  writeNotes(sessionId: string, notes: string[]): void
+}
 
 export type SelfCompactionHost = {
   sessions(): SessionInfo[]
@@ -72,7 +93,9 @@ export type SelfCompactionHost = {
   /** Sends the tool's compact command to the session as a turn of its own; throws when it cannot */
   send(sessionId: string, text: string): void
   /** Sends text as an ordinary turn of the session's own, in Centralu's channel and with no user row (`SessionEvents.sendThen`); throws when it cannot */
-  sendThen(sessionId: string, text: string): void
+  sendThen(sessionId: string, text: string): Promise<void>
+  /** What a host swap or restart must not lose (`ThenKeep`) */
+  keep: ThenKeep
   /** A note read with the session's next input, starting nothing (`SessionHandle.nudge`): whether the tool took it. False when it cannot now */
   nudge(sessionId: string, text: string): boolean | Promise<boolean>
   /** A line in the conversation, in Centralu's name */
@@ -152,6 +175,8 @@ export class SelfCompaction {
     const line = focus?.replace(/\s+/g, ' ').trim().slice(0, FOCUS_MAX_CHARS) || null
     const before = this.pending.get(sessionId)
     this.pending.set(sessionId, { focus: line, then: next, endedAt: null, held: false, size: null })
+    if (next) this.save(sessionId, { stage: 'asked', then: next, focusAside: null, ahead: false })
+    else if (before?.then) this.erase(sessionId)
     const aside = line !== null && !this.takesFocus(sessionId, m.tool)
     const after = next
       ? `The next turn starts from the summary with your \`then\`${aside ? ' (the focus line at its head: this tool\'s compact takes none)' : ''}. If nothing is compacted, \`then\` is not sent and you are told at your next input. End your turn now.`
@@ -229,6 +254,7 @@ export class SelfCompaction {
     if (e.type === 'compaction' && mine && !mine.compacted && e.trigger !== 'auto') {
       // Done, or failed (the tool's own marker says why): either way Centralu waits for a turn of the session's own
       mine.compacted = true
+      this.stage(id, mine, 'compacted')
       if (!e.failed) this.host.notice(id, `Compacted by Centralu (${mine.why})`)
     }
     // The size at the turn's end has come: a request that waited for it is decided now
@@ -256,7 +282,10 @@ export class SelfCompaction {
       if (stopped) {
         this.lose(id, c, 'the turn was interrupted before the compaction')
         this.compacting.delete(id)
-      } else c.ahead = true
+      } else {
+        c.ahead = true
+        this.stage(id, c, 'sent')
+      }
     }
     if (!live) return
     // The request goes with a turn that was stopped: it is theirs
@@ -337,6 +366,28 @@ export class SelfCompaction {
     this.clearWait(id)
   }
 
+  /** The store is a safeguard for a host that leaves: a failing write is logged and the request goes on in memory */
+  private save(id: string, record: StoredThen): void {
+    try {
+      this.host.keep.write(id, record)
+    } catch (err) {
+      console.error(`[compact] ${id.slice(0, 8)}: could not keep the next step for a host swap: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  private erase(id: string): void {
+    try {
+      this.host.keep.clear(id)
+    } catch {
+      // The next host reads it as it stood, and tells the session
+    }
+  }
+
+  /** The stage the record of a compaction in flight is at: kept as it moves */
+  private stage(id: string, c: Compacting, stage: ThenStage): void {
+    if (c.then) this.save(id, { stage, then: c.then, focusAside: c.focusAside, ahead: c.ahead })
+  }
+
   /** Ends a request that will not compact, and tells the session when it had a `then` that now will not be sent */
   private drop(id: string, why: string): void {
     const req = this.pending.get(id)
@@ -361,36 +412,63 @@ export class SelfCompaction {
     if (then) this.tell(id, then, why)
   }
 
+  /** The text of the turn that carries the agent's next step */
+  private thenTurn(then: string, ahead: boolean, focusAside: string | null): string {
+    return [
+      '[Centralu] The compaction you asked for with compact_self is done. This is the step you set with `then`.',
+      ...(ahead ? ['A message from the person ran before the compaction and came first: what they asked weighs more than this step.'] : []),
+      ...(focusAside ? [`This tool's compact takes no focus. What you asked the summary to keep: ${focusAside}`] : []),
+      '',
+      then,
+    ].join('\n')
+  }
+
   /** The compact turn has ended: the agent's next step goes in as a turn of its own */
   private proceed(id: string, c: Compacting): void {
     const then = c.then
     if (!then) return
     c.then = null
-    const text = [
-      '[Centralu] The compaction you asked for with compact_self is done. This is the step you set with `then`.',
-      ...(c.ahead ? ['A message from the person ran before the compaction and came first: what they asked weighs more than this step.'] : []),
-      ...(c.focusAside ? [`This tool's compact takes no focus. What you asked the summary to keep: ${c.focusAside}`] : []),
-      '',
-      then,
-    ].join('\n')
+    void this.sendThen(id, { stage: 'compacted', then, focusAside: c.focusAside, ahead: c.ahead })
+  }
+
+  /** Claims the step, so the other host of a swap does not send it too, and sends it; a send that fails tells the session */
+  private async sendThen(id: string, rec: StoredThen): Promise<void> {
+    let won = true
     try {
-      this.host.notice(id, 'Centralu sent the agent its next step after the compaction')
-      this.host.sendThen(id, text)
+      won = this.host.keep.claim(id)
     } catch (err) {
-      this.tell(id, then, 'the session could not take it')
+      // Not kept (a failing store): sent from memory, as before the step was kept
+      console.error(`[compact] ${id.slice(0, 8)}: could not claim the next step: ${err instanceof Error ? err.message : String(err)}`)
+    }
+    if (!won) return
+    try {
+      await this.host.sendThen(id, this.thenTurn(rec.then, rec.ahead, rec.focusAside))
+      this.erase(id)
+    } catch (err) {
+      // This host is leaving and the step was not given up: it goes back to what it was, for the next host to send
+      if (this.stopped) return this.save(id, rec)
+      this.tell(id, rec.then, 'the session could not take it')
       console.error(`[compact] ${id.slice(0, 8)}: could not send the next step: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   /** Tells the session, quietly, that its `then` was not sent; the person's window gets a line too */
   private tell(id: string, then: string, why: string): void {
+    this.erase(id)
     this.host.notice(id, `The compaction did not happen (${why}): the next step the agent set was not sent`)
     this.deliver(id, `[Centralu] Your compact_self request did not compact (${why}), so your \`then\` was not sent. It was: ${then}`)
   }
 
+  /** A host that took over could not tell how far a request had come: the session is told what it was, to go on by itself */
+  private unknown(id: string, then: string, how: string): void {
+    this.erase(id)
+    this.host.notice(id, `Centralu changed hosts while a compaction was asked for (${how}): the agent was told its next step`)
+    this.deliver(id, `[Centralu] Centralu changed hosts while your compact_self request was pending (${how}), so it cannot tell whether the conversation was compacted or your \`then\` was sent. If you were not continued, go on with it yourself. It was: ${then}`)
+  }
+
   private deliver(id: string, text: string): void {
     if (this.stopped) return
-    const hold = (): void => void this.owed.set(id, [...(this.owed.get(id) ?? []), text].slice(-3))
+    const hold = (): void => this.hold(id, text)
     try {
       const took = this.host.nudge(id, text)
       if (took === true) return
@@ -401,11 +479,55 @@ export class SelfCompaction {
     }
   }
 
+  /** A note the tool cannot take now waits, in the store too, for a turn of the session or a request of its running turn */
+  private hold(id: string, text: string): void {
+    const notes = [...(this.owed.get(id) ?? []), text].slice(-3)
+    this.owed.set(id, notes)
+    try {
+      this.host.keep.writeNotes(id, notes)
+    } catch {
+      // Kept in memory for this host
+    }
+  }
+
+  /**
+   * A host that starts, or has adopted a session's process after a swap: sends the `then` of a compaction known done, tells the session of every other
+   * (the request or the compact was in the middle when the host changed, or the send was), and tries the notes the old host could not give. `only` limits it to
+   * the sessions a caller has settled the process of: the ones the keeper kept wait for their adoption
+   */
+  recover(only?: (sessionId: string) => boolean): void {
+    if (this.stopped) return
+    for (const m of this.host.sessions()) {
+      if (only && !only(m.id)) continue
+      // In flight in this host: not one the last host left
+      if (this.pending.has(m.id) || this.compacting.has(m.id)) continue
+      let rec: StoredThen | null = null
+      let notes: string[] = []
+      try {
+        rec = this.host.keep.read(m.id)
+        notes = this.host.keep.notes(m.id)
+      } catch (err) {
+        console.error(`[compact] ${m.id.slice(0, 8)}: could not read what a host swap kept: ${err instanceof Error ? err.message : String(err)}`)
+        continue
+      }
+      if (notes.length > 0 && !this.owed.has(m.id)) this.owed.set(m.id, notes)
+      if (rec?.stage === 'compacted') void this.sendThen(m.id, rec)
+      else if (rec?.stage === 'sending') this.unknown(m.id, rec.then, 'it was being sent')
+      else if (rec) this.unknown(m.id, rec.then, rec.stage === 'asked' ? 'the turn had not ended' : 'the compact was sent and not yet reported done')
+      if (this.owed.has(m.id)) this.flushOwed(m.id)
+    }
+  }
+
   /** The notes the tool could not take at the time, tried again: a turn of the session has begun, or its running turn made a request */
   private flushOwed(id: string): void {
     const notes = this.owed.get(id)
     if (!notes) return
     this.owed.delete(id)
+    try {
+      this.host.keep.writeNotes(id, [])
+    } catch {
+      // Given below, or held again
+    }
     for (const text of notes) this.deliver(id, text)
   }
 
@@ -443,7 +565,9 @@ export class SelfCompaction {
     // A tool whose compact takes no focus gets the same text with or without it: the line then heads the `then` turn
     const focusAside = focus !== null && text === this.host.command(id, tool, null) ? focus : null
     try {
-      this.compacting.set(id, { why, sentAt: this.now(), started: false, compacted: false, ended: false, then, focusAside, ahead: false })
+      const entry: Compacting = { why, sentAt: this.now(), started: false, compacted: false, ended: false, then, focusAside, ahead: false }
+      this.compacting.set(id, entry)
+      this.stage(id, entry, 'sent')
       this.host.send(id, text)
     } catch (err) {
       this.compacting.delete(id)
