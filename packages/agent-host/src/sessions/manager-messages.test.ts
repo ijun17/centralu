@@ -313,7 +313,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     const { s, h } = await openSession()
     h.emitDelta('what it was saying')
     await new Promise((r) => setTimeout(r, 0))
-    await mgr.send(s.id, 'stop, do this first')
+    await mgr.inputs.send(s.id, 'stop, do this first')
     h.emitDelta('new answer')
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
@@ -410,7 +410,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-att-'))
     const img = join(dir, 'shot.png')
     writeFileSync(img, Buffer.from('PNG bytes'))
-    await mgr.send(s.id, 'take a look at this screen', [
+    await mgr.inputs.send(s.id, 'take a look at this screen', [
       { kind: 'image', path: img, name: 'shot.png', mime: 'image/png', bytes: 9 },
       // A file removed by the 500MB cap cleanup — only the path remains, and the screen shows it as a name
       // chip.

@@ -69,22 +69,22 @@ describe('nothing else is stamped', () => {
 
   it('another session\'s delivery, also with the person\'s flag passed along by mistake', async () => {
     const s = await session()
-    await mgr.send(s.id, 'do this', undefined, { sessionId: 'caller', name: 'Caller' })
-    await mgr.send(s.id, 'and this', undefined, { sessionId: 'caller', name: 'Caller' }, true)
+    await mgr.inputs.send(s.id, 'do this', undefined, { sessionId: 'caller', name: 'Caller' })
+    await mgr.inputs.send(s.id, 'and this', undefined, { sessionId: 'caller', name: 'Caller' }, true)
     expect(adapter.last!.origins).toEqual([undefined, undefined])
   })
 
   it('a send with no flag: a builder request or a Centralu frame the host sends on the person\'s click', async () => {
     const s = await session()
-    await mgr.send(s.id, '[Centralu] A frame')
+    await mgr.inputs.send(s.id, '[Centralu] A frame')
     expect(adapter.last!.origins).toEqual([undefined])
   })
 
   it('an app\'s notice, an inline app view\'s message, and a report', async () => {
     const s = await session()
     const app = { appId: 'project-board', projectId: null, name: 'Project board' }
-    await mgr.appNotice(s.id, 'merged #77', app)
-    await mgr.sendFromApp(s.id, 'from the view', app)
+    await mgr.inputs.appNotice(s.id, 'merged #77', app)
+    await mgr.inputs.sendFromApp(s.id, 'from the view', app)
     await (mgr as unknown as { reports: ChildReports }).reports.tellSession(s.id, '[Centralu] The session ended its turn.', { sessionId: 'child', name: 'Child' }, true)
     expect(adapter.last!.sent).toHaveLength(3)
     expect(adapter.last!.origins).toEqual([undefined, undefined, undefined])

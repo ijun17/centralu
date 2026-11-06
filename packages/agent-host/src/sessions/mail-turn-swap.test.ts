@@ -111,7 +111,7 @@ describe('an owner the keeper handed over after a swap', () => {
       { sessionId: parent, tool: 'claude', process: new FakeProcess() },
       { sessionId: child, tool: 'claude', process: new FakeProcess() },
     ])
-    await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
+    await b.mgr.inputs.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
     const reports = () => read().between('centralu', addressOf(parent), 'report')
     await until(() => reports().length === 1)
@@ -163,7 +163,7 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     // The helper is done; the session has a turn of its own, and ends it
     const handed = read().tasks(addressOf(child), helper)[0]!
     b.m.service.report(handed.id, { outcome: 'finished', body: '[Centralu] The helper finished.' })
-    await b.mgr.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
+    await b.mgr.inputs.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
     await until(() => reports().length === 2)
     expect(reports().map((m) => m.facts.outcome)).toEqual(['waiting', 'finished'])

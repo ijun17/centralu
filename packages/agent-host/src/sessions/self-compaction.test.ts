@@ -1717,7 +1717,7 @@ describe('on the session manager (#1451)', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir('compact-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     const tools = adapter.lastOrchestratorTools!
     const h = adapter.last!
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     h.emitContext(150_000, 200_000)
     return { id: s.id, h, tools }
   }
@@ -1850,7 +1850,7 @@ describe('on the session manager (#1451)', () => {
     // The person types while the compact turn runs: the tool queues it behind the compact
     let queued = 0
     h.queuedInputs = () => queued
-    await world.mgr.send(id, 'wait, use the other branch', undefined, undefined, true)
+    await world.mgr.inputs.send(id, 'wait, use the other branch', undefined, undefined, true)
     queued = 1
     h.finishTurn()
     // The tool starts the queued message’s turn late, past any guess; nothing is sent beside it

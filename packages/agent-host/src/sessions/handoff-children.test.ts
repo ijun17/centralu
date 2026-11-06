@@ -250,7 +250,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     h.claude.handles.get(child)!.answer('first done')
     await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
     // The person works in the child; the parent's next job waits in its queue (#677)
-    await h.mgr.send(child, 'person work')
+    await h.mgr.inputs.send(child, 'person work')
     const queued = await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })
     expect(queued).toMatchObject({ ok: true, state: 'queued' })
     const heir = await handOff(h, project, parent)
@@ -271,7 +271,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     await h.mgr.updateSettings(parent, { permissionPreset: 'auto' })
     // A session of the project the original did not start, busy with the person's work
     const other = (await h.mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
-    await h.mgr.send(other, 'person work')
+    await h.mgr.inputs.send(other, 'person work')
     expect(await h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy up', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
     await writeHandoffNote(project, parent, 'NOTE BODY: where things stand')
     // The session taking over is not auto
@@ -303,7 +303,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     h.claude.handles.get(heir)!.answer('I have read the note')
     await eventually(() => cardIn(heir)?.requestId === requestId)
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`handle: ${requestId}`)
-    h.mgr.respondApproval(heir, requestId, 'allow')
+    h.mgr.inputs.respondApproval(heir, requestId, 'allow')
     await call
     await eventually(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
     const child = h.mgr.listSessions().find((s) => s.askedBy === heir)!.id
@@ -748,7 +748,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const { project, parent } = await parentOf(h)
     const heir = await handOff(h, project, parent, false)
     const child = await settledChild(h, parent)
-    await h.mgr.send(child, 'person work')
+    await h.mgr.inputs.send(child, 'person work')
     expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
     await h.mgr.trash.trashSession(parent)
 

@@ -75,7 +75,7 @@ describe('new work sent by mail after the first was reported', () => {
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: more.id })
-    expect(w.mgr.reportOwed(helper)?.callerId).toBe(owner)
+    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(owner)
 
     await turnEnds(helper, 'two files written')
     await w.until(() => outcomes(more.id).length === 1)
@@ -98,7 +98,7 @@ describe('new work sent by mail after the first was reported', () => {
     m.service.send(addr(bystander), { to: [addr(helper)], text: 'just an aside' })
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
-    expect(w.mgr.reportOwed(helper)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: null })
     expect(outcomes(taskOf(owner, helper).id)).toEqual(['finished'])
   })
@@ -128,7 +128,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(c, 'Z done')
     await w.until(() => outcomes(z.id).length === 1)
     expect(read.taskRow(z.id, c)).toMatchObject({ settled: 'reported' })
-    expect(w.mgr.reportOwed(c)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(c)).toBeNull()
     expect(read.taskRow(x.id, b)).toMatchObject({ settled: null })
     handleOf(b).acceptsAtOnce = true
     await due(b)
@@ -146,7 +146,7 @@ describe('new work sent by mail after the first was reported', () => {
     handleOf(helper).sendTracked = (): Promise<void> => Promise.reject(new Error('the tool failed'))
     const more = mailTask(owner, helper, 'Now write TWO files')
     await due(helper)
-    expect(w.mgr.reportOwed(helper)).toBeNull()
+    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
     expect(outcomes(more.id)).toEqual([])
     expect(read.taskRow(more.id, helper)).toMatchObject({ settled: null })
   })
@@ -185,7 +185,7 @@ describe('new work sent by mail after the first was reported', () => {
     expect(outcomes(forA.id)).toEqual(['paused'])
     expect(read.taskRow(forA.id, helper)).toMatchObject({ settled: null })
     expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
-    expect(w.mgr.reportOwed(helper)?.callerId).toBe(a)
+    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(a)
   })
 
   it('A’s paused work ending during B’s turn is settled when that turn ends: nothing else would start its timer (#1474)', async () => {

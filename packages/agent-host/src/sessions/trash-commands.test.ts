@@ -321,7 +321,7 @@ describe('delete_session', () => {
     const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
     children.markReport(s.id, caller.id)
     const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => {
-      await mgr.send(s.id, 'one more thing')
+      await mgr.inputs.send(s.id, 'one more thing')
     })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('is not at rest any more')
@@ -350,7 +350,7 @@ describe('delete_session', () => {
     expect((await run(orc.id, 'delete_session', { sessionId: 's-nothing' })).text).toMatch(/No session \[s-nothing\] is listed/)
     expect((await run(orc.id, 'delete_session', { sessionId: '../x' })).isError).toBe(true)
     const busy = await newSession('Busy')
-    await mgr.send(busy.id, 'work on it')
+    await mgr.inputs.send(busy.id, 'work on it')
     await eventually(() => mgr.listSessions().find((s) => s.id === busy.id)?.state === 'working')
     const r = await run(orc.id, 'delete_session', { sessionId: busy.id })
     expect(r.isError).toBe(true)

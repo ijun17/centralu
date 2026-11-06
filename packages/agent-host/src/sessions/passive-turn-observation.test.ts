@@ -27,7 +27,7 @@ describe("observing a person's turn never owns it", () => {
       tool: 'claude',
       permissionPreset: 'normal',
     })
-    await w.mgr.send(target.id, 'the person starts work')
+    await w.mgr.inputs.send(target.id, 'the person starts work')
     return { observer: observer.id, target: target.id }
   }
 
@@ -38,7 +38,7 @@ describe("observing a person's turn never owns it", () => {
       const result = w.mgr.agentSession(observer, { sessionId: target, action })
       if (action === 'status')
         expect(await result).toMatchObject({ ok: true, state: 'working', reported: false })
-      w.mgr.interrupt(observer)
+      w.mgr.inputs.interrupt(observer)
       expect(handle(target).interrupted).toBe(0)
       expect(w.mgr.listSessions().find((s) => s.id === target)?.state).toBe('working')
       expect(w.mgr.waitsOn(observer)).toEqual([])

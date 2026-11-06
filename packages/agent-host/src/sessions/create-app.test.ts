@@ -184,12 +184,12 @@ describe('create_app (the orchestrator)', () => {
     await eventually(() => !!card())
     expect(card()!.detail).toEqual({ kind: 'project_create', name: 'clock', path: join(home, 'clock') })
     expect(existsSync(join(home, 'clock'))).toBe(false)
-    mgr.respondApproval(orch.id, card()!.requestId, 'allow')
+    mgr.inputs.respondApproval(orch.id, card()!.requestId, 'allow')
     const user = await asked
     expect(user.text).toContain(`Created the "Clock" app (a new project of its own, id clock): ${join(home, 'clock')}`)
     const refused = mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock2', name: 'Clock' })
     await eventually(() => !!card())
-    mgr.respondApproval(orch.id, card()!.requestId, 'deny')
+    mgr.inputs.respondApproval(orch.id, card()!.requestId, 'deny')
     expect((await refused).text).toContain('The person did not approve it')
     expect(existsSync(join(home, 'clock2'))).toBe(false)
 

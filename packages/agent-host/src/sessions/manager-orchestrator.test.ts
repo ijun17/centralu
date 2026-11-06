@@ -509,7 +509,7 @@ describe("the orchestrator's tools see only this app's sessions", () => {
    */
   it('an orchestrator that switched tools inherits the past conversation', async () => {
     const orc = await mgr.orchestrator()
-    await mgr.send(orc.id, 'Look at the Alpha project status')
+    await mgr.inputs.send(orc.id, 'Look at the Alpha project status')
     mgr['store'].messages.appendMessages([
       {
         sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id), role: 'assistant', kind: 'text',
@@ -696,7 +696,7 @@ describe("an ordinary session's reader set (#320)", () => {
    */
   it("is still an ordinary worker to provenance: words it sources reach the orchestrator as a notice, not as text", async () => {
     const { a1, orc } = await setup()
-    await mgr.send(orc.id, 'READER_SOURCED_SENTINEL', undefined, { sessionId: a1.id, name: 'me' })
+    await mgr.inputs.send(orc.id, 'READER_SOURCED_SENTINEL', undefined, { sessionId: a1.id, name: 'me' })
     const sent = adapter.handleOf(orc.id)!.sent
     expect(sent.some((t) => t.includes('READER_SOURCED_SENTINEL'))).toBe(false)
     expect(sent.some((t) => t.includes('sourceSessionId') && t.includes(a1.id))).toBe(true)
@@ -1180,7 +1180,7 @@ describe('coordinator sessions an older build left — an orchestrator-type with
       { kind: 'file', path: 'docs/coordinator.md', name: 'coordinator.md' },
       { kind: 'file', path: 'docs/member notes.md', name: 'member notes.md' },
     ]
-    await mgr.send(c.id, directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
+    await mgr.inputs.send(c.id, directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
 
     expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/coordinator.md\n@docs/member notes.md`)
   })

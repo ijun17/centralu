@@ -165,7 +165,7 @@ describe('a host leaving (#839)', () => {
   it('a turn that ends during a handover does not apply a deferred restart', async () => {
     const id = await session()
     const kept = claude.last
-    await mgr.send(id, 'work')
+    await mgr.inputs.send(id, 'work')
     // A model change mid-turn waits for the turn's end (#164)
     await mgr.updateSettings(id, { model: 'other' })
     let release!: () => void

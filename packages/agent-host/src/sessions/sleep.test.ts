@@ -226,7 +226,7 @@ describe('a session put to sleep, on the manager', () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     // One finished turn, so there is a conversation to resume
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     adapter.last.emit({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'hi' })
     adapter.last.emit({ type: 'turn_complete', sessionId: s.id })
     return s.id
@@ -241,7 +241,7 @@ describe('a session put to sleep, on the manager', () => {
     expect(live(id)).toBe(false)
     expect(events).toContainEqual({ type: 'session_live', sessionId: id, live: false, reason: 'asleep' })
 
-    await mgr.send(id, 'are you there?')
+    await mgr.inputs.send(id, 'are you there?')
     expect(adapter.created).toHaveLength(2)
     expect(adapter.last.opts.resumeExternalId).toBe(`ext-${id}`)
     expect(adapter.last.sent).toEqual(['are you there?'])
@@ -293,7 +293,7 @@ describe('a session put to sleep, on the manager', () => {
     const id = await idleSession()
     adapter.holdDispose()
     const sleeping = mgr.sleepSession(id)
-    const sent = mgr.send(id, 'quick question')
+    const sent = mgr.inputs.send(id, 'quick question')
     await new Promise((r) => setTimeout(r, 20))
     // Not beside the old one
     expect(adapter.created).toHaveLength(1)
@@ -311,7 +311,7 @@ describe('a session put to sleep, on the manager', () => {
     const next = build(store)
     expect(next.m.listSessions().find((s) => s.id === id)!.live).toBe(false)
     expect(adapter.created).toHaveLength(1)
-    await next.m.send(id, 'back again')
+    await next.m.inputs.send(id, 'back again')
     expect(adapter.last.opts.resumeExternalId).toBe(`ext-${id}`)
     expect(adapter.last.sent).toEqual(['back again'])
     await next.m.disposeAll()
@@ -348,12 +348,12 @@ describe('a session put to sleep, on the manager', () => {
   it('a wake starts the process with the options it was created with, and the conversation to resume', async () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', model: 'm1', effort: 'high' })) as { id: string }
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     adapter.last.emit({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'hi' })
     adapter.last.emit({ type: 'turn_complete', sessionId: s.id })
     const created = adapter.last.opts
     expect(await mgr.sleepSession(s.id)).toBe(true)
-    await mgr.send(s.id, 'again')
+    await mgr.inputs.send(s.id, 'again')
     const woken = adapter.last.opts
     expect(woken).not.toBe(created)
 

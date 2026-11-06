@@ -28,7 +28,7 @@ describe('a turn the tool opens for an earlier message', () => {
 
   it("names a sender's message given at rest an input id, and says whose it is when the tool opens a turn for it", async () => {
     const id = await w.callerSession()
-    await w.mgr.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
     const inputId = handleOf(id).ids.at(-1)
     expect(inputId).toEqual(expect.any(String))
     // Sent at rest, the session is working already; the tool opens the turn of an earlier message after it
@@ -40,10 +40,10 @@ describe('a turn the tool opens for an earlier message', () => {
     const id = await w.callerSession()
     // The tool says which inputs a turn took in, as Claude does: none of them here
     handleOf(id).turnInputs = () => []
-    await w.mgr.send(id, 'first', undefined, FROM)
+    await w.mgr.inputs.send(id, 'first', undefined, FROM)
     const first = handleOf(id).ids.at(-1)
     handleOf(id).answer('done')
-    await w.mgr.send(id, 'second', undefined, FROM)
+    await w.mgr.inputs.send(id, 'second', undefined, FROM)
     // The session is working again from `second`; the tool now opens the turn it runs for `first`'s note
     opens(id, [first!])
     expect(opened()).toMatchObject({ origin: { seq: rowOf(id, 'first'), from: FROM } })
@@ -52,10 +52,10 @@ describe('a turn the tool opens for an earlier message', () => {
   it("keeps nothing of another session's messages on this computer: only a hub reads what a turn ran for", async () => {
     const id = await w.callerSession()
     // A control: a hub's message is kept
-    await w.mgr.send(id, 'a note from the hub', undefined, FROM)
+    await w.mgr.inputs.send(id, 'a note from the hub', undefined, FROM)
     expect(w.store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
     const other = await w.callerSession()
-    await w.mgr.send(other, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
+    await w.mgr.inputs.send(other, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
     // The message goes in named as any other (#1639), and nothing is kept for a hub
     expect(handleOf(other).ids.at(-1)).toEqual(expect.any(String))
     expect(w.store.settings.appSetting(`input_origins:${other}`)).toBeNull()
@@ -64,11 +64,11 @@ describe('a turn the tool opens for an earlier message', () => {
   it('says nothing for a person’s message, or an input no sender gave', async () => {
     const id = await w.callerSession()
     // A control: the hub's message is named
-    await w.mgr.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
     opens(id, [handleOf(id).ids.at(-1)!])
     expect(opened()).toHaveProperty('origin')
     handleOf(id).answer('done')
-    await w.mgr.send(id, 'typed by the person')
+    await w.mgr.inputs.send(id, 'typed by the person')
     // Named too (#1639), but no sender is kept for it: the turn it opens has no origin
     opens(id, [handleOf(id).ids.at(-1)!])
     expect(opened()).not.toHaveProperty('origin')
@@ -88,9 +88,9 @@ describe('the answer of the turn a hub asks about', () => {
 
   it("is the turn run for a note alone, though the note's row was stored in the turn before it", async () => {
     const id = await w.callerSession()
-    await w.mgr.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
     // The note goes into the running turn: its row comes before that turn's words
-    await w.mgr.send(id, 'a note', undefined, FROM)
+    await w.mgr.inputs.send(id, 'a note', undefined, FROM)
     handleOf(id).answer('first answer')
     // The tool runs the note as a turn of its own
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
@@ -103,8 +103,8 @@ describe('the answer of the turn a hub asks about', () => {
 
   it("is the turn before's when the next has said nothing yet, as the end that is being read was that turn's", async () => {
     const id = await w.callerSession()
-    await w.mgr.send(id, 'the task', undefined, FROM)
-    await w.mgr.send(id, 'a note', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'a note', undefined, FROM)
     handleOf(id).answer('first answer')
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
     handleOf(id).answer('second answer')
@@ -118,8 +118,8 @@ describe('the answer of the turn a hub asks about', () => {
     ;(w.mgr as unknown as { children: ChildOwnership }).children = new ChildOwnership(w.store)
   }
   const note = async (id: string) => {
-    await w.mgr.send(id, 'the task', undefined, FROM)
-    await w.mgr.send(id, 'a note', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'a note', undefined, FROM)
     handleOf(id).answer('first answer')
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
   }
@@ -168,8 +168,8 @@ describe('what is kept for the turns a hub may be owed', () => {
   /** A hub's task, then a note into the running turn: the note is given after the turn began */
   async function withNote() {
     const id = await w.callerSession()
-    await w.mgr.send(id, 'the task', undefined, FROM)
-    await w.mgr.send(id, 'a note', undefined, FROM)
+    await w.mgr.inputs.send(id, 'the task', undefined, FROM)
+    await w.mgr.inputs.send(id, 'a note', undefined, FROM)
     return id
   }
 
@@ -241,7 +241,7 @@ describe('what is kept for the turns a hub may be owed', () => {
     const id = await withNote()
     // A control: something is kept until then
     expect(origins(id)).not.toBeNull()
-    w.mgr.interrupt(id)
+    w.mgr.inputs.interrupt(id)
     expect(origins(id)).toBeNull()
   })
 
@@ -255,7 +255,7 @@ describe('what is kept for the turns a hub may be owed', () => {
     // A tool whose sessions can sleep
     Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true, sleep: true })
     expect(await w.mgr.sleepSession(id)).toBe(true)
-    await w.mgr.send(id, 'typed by the person')
+    await w.mgr.inputs.send(id, 'typed by the person')
     expect(origins(id)).toBeNull()
   })
 

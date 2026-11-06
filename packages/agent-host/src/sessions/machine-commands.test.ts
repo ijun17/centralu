@@ -228,7 +228,7 @@ describe('add_machine', () => {
     expect(card(orc.id)!.text).toContain('connects there with your ssh keys, first to see what runs there')
     expect(card(orc.id)!.text).toContain('centralu serve --connection')
     expect(card(orc.id)!.text).toContain('Nothing is installed')
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     expect(ops.calls.map((c) => c[0])).toEqual(['resolve', 'probe', 'add'])
@@ -287,7 +287,7 @@ describe('add_machine', () => {
     await eventually(() => !!card(orc.id))
     // Linked meanwhile, from the Machines screen
     ops.ops.add({ name: 'Box', sshTarget: 'me@box', shell: 'posix' })
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/already linked that way, as Box/)

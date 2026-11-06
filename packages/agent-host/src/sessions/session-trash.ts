@@ -81,7 +81,7 @@ export type SessionTrashHost = {
   readonly restartPolicy: RestartPolicy
   /** A wake or a resume under way (`SessionManager.resuming`): the session is about to take a turn */
   readonly resuming: ReadonlyMap<string, unknown>
-  /** A queued note not yet taken by the session (`SessionManager.inputsHeld`) */
+  /** A queued note not yet taken by the session (`TurnInputs.inputsHeld`) */
   inputsHeld: (sessionId: string) => boolean
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   stopWatchingReconnect: (sessionId: string) => void

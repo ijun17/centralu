@@ -60,7 +60,7 @@ describe('a turn its process took with it (#839)', () => {
     await w.until(() => told().length === 1)
     expect(told()[0]).toContain('stopped before finishing')
     // The person's own turn in the child afterwards is not the parent's to hear about
-    await w.mgr.send(child, 'something else')
+    await w.mgr.inputs.send(child, 'something else')
     handleOf(child)!.answer('Unrelated answer.')
     await new Promise((r) => setImmediate(r))
     expect(told()).toHaveLength(1)

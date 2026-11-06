@@ -40,8 +40,8 @@ async function lastHost(crashedAt: number, o: { queued?: boolean } = {}) {
   const inTurn = await mk()
   const crashed = await mk()
   const idle = await mk()
-  await w.mgr.send(inTurn, 'a long job')
-  await w.mgr.send(crashed, 'another job')
+  await w.mgr.inputs.send(inTurn, 'a long job')
+  await w.mgr.inputs.send(crashed, 'another job')
   vi.setSystemTime(crashedAt)
   if (o.queued) {
     // As the Claude adapter's close does with a follow-up still queued (`undeliveredError`, adapters/session-kit.ts): the manager closes the crashed handle

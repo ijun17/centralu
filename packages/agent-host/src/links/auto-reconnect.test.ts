@@ -429,7 +429,7 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
     const call = hub.mgr.startAgent('h1', { task: 'question: proceed?', machine: 'Laptop' })
     const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
     await eventually(() => !!card())
-    await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+    await hub.mgr.inputs.respondApproval('h1', card()!.requestId, 'allow')
     expect(await call).toMatchObject({ ok: true })
     const owed = () => (hub.mgr as unknown as { children: { linkedReports: Map<string, unknown> } }).children.linkedReports.size
     await eventually(() => owed() === 1)
@@ -455,7 +455,7 @@ describe('a child working on a machine whose Auto reconnect is off (#1341)', () 
     await hub.call('machines.reconnect', { machineId: 'm1' })
     await eventually(() => hub.row().status === 'connected')
     const child = remote.mgr.listSessions().find((s: any) => s.pendingQuestions?.length) as any
-    remote.mgr.answerQuestion(child.id, child.pendingQuestions[0].requestId, [{ answers: ['Yes'] } as any])
+    remote.mgr.inputs.answerQuestion(child.id, child.pendingQuestions[0].requestId, [{ answers: ['Yes'] } as any])
     await eventually(async () => (await said()).includes('answered: Yes'))
     await eventually(() => owed() === 0)
   })
@@ -781,7 +781,7 @@ describe('the person’s Disconnect and Connect (#1134)', () => {
 
     // Someone at that machine works in the session meanwhile
     const there = s.id.slice('m1.'.length)
-    await remote.mgr.send(there, 'while you were away')
+    await remote.mgr.inputs.send(there, 'while you were away')
     /*
      * Wait for the turn there to have answered and ended: its reply stored, the session resting after it. Waiting for
      * `idle` passed at once, since the session is still idle when send returns and its turn starts 20 ms later (the
@@ -968,7 +968,7 @@ describe("an agent's call on a machine nothing here will connect is answered at 
     const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Laptop' })
     const card = () => hub.mgr.listSessions().find((x) => x.id === 'h1')?.pendingApproval
     await eventually(() => !!card())
-    await hub.mgr.respondApproval('h1', card()!.requestId, 'allow')
+    await hub.mgr.inputs.respondApproval('h1', card()!.requestId, 'allow')
     expect(await call).toMatchObject({ ok: true })
   })
 })

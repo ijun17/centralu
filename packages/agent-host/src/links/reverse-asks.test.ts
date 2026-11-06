@@ -115,7 +115,7 @@ async function hubHost(machinePort: number, o: { name?: string; reverse?: boolea
   const answer = async (decision: 'allow' | 'deny') => {
     await eventually(() => !!card())
     const c = card()!
-    await mgr.respondApproval('h1', c.requestId, decision)
+    await mgr.inputs.respondApproval('h1', c.requestId, decision)
     await eventually(() => card()?.requestId !== c.requestId)
     return c
   }
@@ -306,7 +306,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
 
   it('refuses a session of the hub busy with a turn that is not the asker’s', async () => {
     const { machine, hub } = await rig()
-    await hub.mgr.send('h1', 'please approve my command')
+    await hub.mgr.inputs.send('h1', 'please approve my command')
     await eventually(() => hub.mgr.listSessions().find((s) => s.id === 'h1')?.state === 'waiting_approval')
     expect(await machine.ask({ project: hub.projectName, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('busy with a turn that is not yours') })
   })

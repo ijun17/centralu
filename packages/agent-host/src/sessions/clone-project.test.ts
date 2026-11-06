@@ -184,7 +184,7 @@ describe('create_project with git (the orchestrator)', () => {
     expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(centralu, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })
     expect(readdirSync(centralu)).toEqual([])
 
-    mgr.respondApproval(orc.id, pending.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, pending.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('a clone of')

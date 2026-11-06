@@ -135,7 +135,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     const call = apps.call('app-helper', 'poke', { to: 1 })
     await eventually(() => !!card())
     expect(card()!.text).toBe(`Session "Fix login" in project "Acme" asked the orchestrator to run app-helper.poke {"to":1}. It is the session's request, not yours.`)
-    mgr.respondApproval(orc.id, card()!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     const refused = await call
     expect(refused.isError).toBe(true)
     expect(JSON.stringify(refused.content)).toContain('the person did not allow it')
@@ -143,7 +143,7 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     // Allowed, it runs; and a tool that only reads is not asked about
     const allowed = apps.call('app-helper', 'poke', { to: 2 })
     await eventually(() => !!card())
-    mgr.respondApproval(orc.id, card()!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card()!.requestId, 'allow')
     expect(await allowed).toMatchObject({ isError: false, content: [{ type: 'text', text: 'poked 2' }] })
     await apps.tools('app-helper')
     expect((await apps.call('app-helper', 'peek', {})).isError).toBe(false)

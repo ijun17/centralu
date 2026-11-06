@@ -197,7 +197,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
       const answer = w.answerCapabilities
       timers.after(5, () => {
         try {
-          w.mgr.respondApproval(e.sessionId, e.requestId, answer)
+          w.mgr.inputs.respondApproval(e.sessionId, e.requestId, answer)
         } catch {
           // the card was already closed in the meantime
         }

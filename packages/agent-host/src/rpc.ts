@@ -296,14 +296,14 @@ export function createRpcHandler(
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
       const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined
-      await mgr.send(sessionId, text, attachments, undefined, true, intent, fromScript)
+      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, fromScript)
       return { ok: true as const }
     },
-    'agents.reportOwed': async (p) => ({ owed: mgr.reportOwed(p.sessionId) }),
-    'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.respondApproval(sessionId, requestId, decision, scope, matcher)),
-    'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.answerQuestion(sessionId, requestId, answers)),
+    'agents.reportOwed': async (p) => ({ owed: mgr.inputs.reportOwed(p.sessionId) }),
+    'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.inputs.respondApproval(sessionId, requestId, decision, scope, matcher)),
+    'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.inputs.answerQuestion(sessionId, requestId, answers)),
     'agents.models': async (p) => mgr.toolQueries.listModels(p.tool),
-    'agents.interrupt': async (p) => ack(mgr.interrupt(p.sessionId)),
+    'agents.interrupt': async (p) => ack(mgr.inputs.interrupt(p.sessionId)),
     'agents.stopBackgroundTask': async ({ sessionId, taskId }) => ack(await mgr.sessionSettings.stopBackgroundTask(sessionId, taskId)),
     'agents.clearBackgroundTasks': async (p) => ack(mgr.sessionSettings.clearBackgroundTasks(p.sessionId)),
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
@@ -519,7 +519,7 @@ export function createRpcHandler(
       const ref = owner?.ref ?? views?.describe(instanceId)?.app ?? null
       if (!ref) throw rpcError('This app view is not open')
       const name = externalApps?.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)?.name
-      await mgr.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
+      await mgr.inputs.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
     },
     'apps.readResource': async ({ appId, projectId, uri, instanceId }) => {
@@ -623,14 +623,14 @@ export function createRpcHandler(
     },
     'apps.sendError': async ({ appId, projectId, at }) => {
       return sendErrorToBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
         { appId, projectId },
         at,
       )
     },
     'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }) => {
       return askBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.send(id, t, a) },
+        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
         { ref: { appId, projectId }, text, attachments, instanceId },
       )
     },

@@ -128,7 +128,7 @@ describe.skipIf(keeperless)('a session put to sleep under the keeper (#568)', ()
     expect(keeper!.ops('spawn')).toHaveLength(1)
 
     // A message wakes it there: a new child, resuming the same conversation
-    await b.mgr.send(s.id, 'still there?')
+    await b.mgr.inputs.send(s.id, 'still there?')
     await until(() => keeper!.ops('spawn').length === 2)
     await until(() => keeper!.alive('c2'))
     expect(adapter.created.at(-1)!.opts.resumeExternalId).toBe('ext-1')

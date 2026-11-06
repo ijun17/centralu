@@ -25,7 +25,7 @@ export function commandRig<C extends string>(mgr: () => SessionManager, about: s
     await eventually(() => !!card(orcId))
     const question = card(orcId)!.text
     await whileStanding?.()
-    mgr().respondApproval(orcId, card(orcId)!.requestId, decision)
+    mgr().inputs.respondApproval(orcId, card(orcId)!.requestId, decision)
     return { question, r: await call }
   }
 

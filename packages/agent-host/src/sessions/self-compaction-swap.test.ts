@@ -52,7 +52,7 @@ async function asking(a: ReturnType<typeof host>, until: 'asked' | 'sent' | 'com
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: dir('compact-then-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
   const tools = a.claude.lastOrchestratorTools!
   const h = a.claude.last!
-  await a.mgr.send(s.id, 'hello')
+  await a.mgr.inputs.send(s.id, 'hello')
   h.emitContext(150_000, 200_000)
   h.emitEvent({ type: 'state_change', sessionId: s.id, state: 'working' })
   expect(tools.compactSelf!(undefined, STEP).text).toMatch(/with your `then`/)

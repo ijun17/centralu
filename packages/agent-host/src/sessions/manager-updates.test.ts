@@ -152,7 +152,7 @@ describe('ordinary session update consent (#581)', () => {
       const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action })
       if (preset !== 'auto') {
         await vi.waitFor(() => expect(mgr.listSessions().find((s) => s.id === session.id)?.pendingApproval?.detail.kind).toBe('centralu_update'))
-        mgr.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
+        mgr.inputs.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
       }
       expect((await call).isError === true).toBe(preset !== 'auto')
     }
@@ -163,7 +163,7 @@ describe('ordinary session update consent (#581)', () => {
       await mgr.updateSettings(session.id, { permissionPreset: 'normal' })
       const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'check' })
       await vi.waitFor(() => expect(mgr.listSessions().find((s) => s.id === session.id)?.pendingApproval).toBeTruthy())
-      mgr.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
+      mgr.inputs.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
       expect((await call).isError).toBe(true)
     }
   })
@@ -263,14 +263,14 @@ describe('applying an installed update for an agent (#665)', () => {
     const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
     expect(w.relaunches).toEqual([])
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'allow')
     expect((await call).isError).toBeUndefined()
     expect(w.relaunches).toHaveLength(1)
 
     // "Always" on the apply card covers the next apply of this session, with no card
     const always = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)).toBeTruthy())
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'always', 'project')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'always', 'project')
     expect((await always).isError).toBeUndefined()
     expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBeUndefined()
     expect(card(session.id)).toBeUndefined()
@@ -281,7 +281,7 @@ describe('applying an installed update for an agent (#665)', () => {
     // Denied: nothing goes to the window, and the agent is told not to ask again
     const denied = mgr.runOrchestratorTool(other.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(other.id)).toBeTruthy())
-    mgr.respondApproval(other.id, card(other.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(other.id, card(other.id)!.requestId, 'deny')
     expect(await denied).toMatchObject({ isError: true, text: expect.stringContaining('did not allow') })
     expect(w.relaunches).toHaveLength(3)
     expect(w.asked.filter((e) => e.type === 'update_apply_go')).toHaveLength(3)
@@ -296,11 +296,11 @@ describe('applying an installed update for an agent (#665)', () => {
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const install = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'install' })
     await vi.waitFor(() => expect(card(session.id)).toBeTruthy())
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'always')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'always')
     await install
     const apply = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'deny')
     expect((await apply).isError).toBe(true)
   })
 
@@ -345,12 +345,12 @@ describe('applying an installed update for an agent (#665)', () => {
     // The host is still at rest, yet the second call is carded; so is another session's, as the failure is the host's
     const again = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'deny')
     expect((await again).isError).toBe(true)
     const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const third = mgr.runOrchestratorTool(other.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(other.id)).toBeTruthy())
-    mgr.respondApproval(other.id, card(other.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(other.id, card(other.id)!.requestId, 'deny')
     await third
     expect(w.relaunches).toHaveLength(1)
   })
@@ -384,7 +384,7 @@ describe('applying an installed update for an agent (#665)', () => {
     const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
     expect(w.relaunches).toEqual([])
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(session.id, card(session.id)!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     // At rest from now on: the same session is not asked
     atRest = true

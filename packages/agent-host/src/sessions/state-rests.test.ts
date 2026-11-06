@@ -139,7 +139,7 @@ describe('a session at rest stays at rest (#428)', () => {
     h.turn()
     h.ev({ type: 'question_request', requestId: 'q1', questions: QUESTION })
     expect(info()).toMatchObject({ state: 'waiting_approval', pendingQuestions: [{ requestId: 'q1' }] })
-    mgr.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
     expect(info()).toMatchObject({ state: 'waiting_input', pendingQuestions: [] })
     expect(events.at(-1)).toMatchObject({ type: 'state_change', sessionId: s.id, state: 'waiting_input' })
     expect(busy()).toBe(false)
@@ -149,7 +149,7 @@ describe('a session at rest stays at rest (#428)', () => {
     const { mgr, s, h, info } = await session()
     h.turn()
     h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    mgr.respondApproval(s.id, 'r1', 'allow')
+    mgr.inputs.respondApproval(s.id, 'r1', 'allow')
     expect(info()).toMatchObject({ state: 'waiting_input', pendingApproval: null })
   })
 
@@ -157,15 +157,15 @@ describe('a session at rest stays at rest (#428)', () => {
     const { mgr, s, h, info } = await session()
     h.send()
     h.ev({ type: 'question_request', requestId: 'q1', questions: QUESTION })
-    mgr.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
     expect(info().state).toBe('working')
     // A turn that started while the card was open owns the session too: no rest is restored under it
     h.turn()
     h.ev({ type: 'question_request', requestId: 'q2', questions: QUESTION })
     h.ev({ type: 'state_change', state: 'working' })
     h.ev({ type: 'question_request', requestId: 'q3', questions: QUESTION })
-    mgr.answerQuestion(s.id, 'q2', [{ question: 'Which?', answers: ['A'] }])
-    mgr.answerQuestion(s.id, 'q3', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q2', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q3', [{ question: 'Which?', answers: ['A'] }])
     expect(info().state).toBe('working')
   })
 
@@ -173,9 +173,9 @@ describe('a session at rest stays at rest (#428)', () => {
     const { mgr, s, h, info } = await session()
     h.turn()
     h.quiet = true
-    await mgr.send(s.id, 'please approve')
+    await mgr.inputs.send(s.id, 'please approve')
     h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    mgr.respondApproval(s.id, 'r1', 'allow')
+    mgr.inputs.respondApproval(s.id, 'r1', 'allow')
     // Its answer comes next: the session is still in that turn, not back at rest
     expect(info().state).toBe('working')
   })
@@ -184,12 +184,12 @@ describe('a session at rest stays at rest (#428)', () => {
     const { mgr, s, h, info } = await session()
     h.turn()
     h.quiet = true
-    await mgr.send(s.id, 'a message the tool never acts on')
+    await mgr.inputs.send(s.id, 'a message the tool never acts on')
     // Long after, still no word from the tool: a card now is one between turns
     const later = Date.now() + ASK_WINDOW_MS + 1
     vi.spyOn(Date, 'now').mockReturnValue(later)
     h.ev({ type: 'question_request', requestId: 'q1', questions: QUESTION })
-    mgr.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
     expect(info().state).toBe('waiting_input')
   })
 
@@ -197,14 +197,14 @@ describe('a session at rest stays at rest (#428)', () => {
     const { mgr, claude, s, h, info } = await session()
     h.turn()
     h.quiet = true
-    await mgr.send(s.id, 'a message the tool never acts on')
+    await mgr.inputs.send(s.id, 'a message the tool never acts on')
     // A restart resumes the session at rest (`settleState`): the input before it is not a turn any more
     await mgr.restartSession(s.id)
     expect(info().state).toBe('idle')
     const fresh = claude.handles.get(s.id)!
     expect(fresh).not.toBe(h)
     fresh.ev({ type: 'question_request', requestId: 'q1', questions: QUESTION })
-    mgr.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
+    mgr.inputs.answerQuestion(s.id, 'q1', [{ question: 'Which?', answers: ['A'] }])
     expect(info().state).toBe('idle')
   })
 
@@ -219,7 +219,7 @@ describe('a session at rest stays at rest (#428)', () => {
     await b.mgr.adoptKept([{ sessionId: a.s.id, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     const adopted = b.claude.handles.get(a.s.id)!
     adopted.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    b.mgr.respondApproval(a.s.id, 'r1', 'allow')
+    b.mgr.inputs.respondApproval(a.s.id, 'r1', 'allow')
     expect(b.mgr.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
     expect(b.mgr.sessionIdle(a.s.id)).toEqual({ idle: true })
     expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()

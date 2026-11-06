@@ -446,7 +446,7 @@ export class ChildReports {
    * the session, whoever started it, was reported as the assigned work ("The assigned work failed" for a person's
    * failed `/compact`). The mark and the pause end here, stored as well, so a host swap keeps them ended; the caller is
    * told once. A report not paused is a turn of the caller's still running, which the person's message joins: it
-   * stays owed. A message from the caller itself, another session or an app never comes here (`SessionManager.send`).
+   * stays owed. A message from the caller itself, another session or an app never comes here (`TurnInputs.send`).
    */
   async personTookOver(sessionId: string): Promise<void> {
     const callerId = this.host.children.awaitingReport.get(sessionId)

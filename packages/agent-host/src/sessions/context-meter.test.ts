@@ -195,7 +195,7 @@ describe('on the session manager (#1492)', () => {
     const p = (await rpc('projects.add', { path: dir('meter-') })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir('meter-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     const h = adapter.last!
-    await mgr.send(s.id, 'hello')
+    await mgr.inputs.send(s.id, 'hello')
     // The reading that gives the window; the turn's end of the first turn
     h.emitContext(20_000, 200_000)
     h.finishTurn()

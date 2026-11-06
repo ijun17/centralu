@@ -225,13 +225,13 @@ describe('apps.sendError', () => {
     // The newly created building session is asleep and fails to wake up — a failure removes the
     // mark (so it can be clicked again)
     const again = (await rpc('apps.createBuilder', { appId: 'notes', projectId })) as SessionInfo
-    const send = mgr.send.bind(mgr)
-    mgr.send = async () => {
+    const send = mgr.inputs.send.bind(mgr.inputs)
+    mgr.inputs.send = async () => {
       throw new Error('Could not resume the conversation: gone')
     }
     await expect(rpc('apps.sendError', { appId: 'notes', projectId, at: latest!.at })).rejects.toThrow('Could not resume the conversation: gone')
     expect((await errorsOf('notes')).latest?.sentAt).toBeNull()
-    mgr.send = send
+    mgr.inputs.send = send
     await expect(rpc('apps.sendError', { appId: 'notes', projectId, at: latest!.at })).resolves.toEqual({ sessionId: again.id })
   })
   /*

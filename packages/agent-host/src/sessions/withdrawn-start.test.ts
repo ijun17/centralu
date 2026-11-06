@@ -39,7 +39,7 @@ describe('a start request withdrawn while its child is made (#839)', () => {
       adapter.handles.set(opts.sessionId, h)
       return h
     }
-    w.mgr.respondApproval(s, requestId, 'allow')
+    w.mgr.inputs.respondApproval(s, requestId, 'allow')
     await w.until(() => starting)
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
     release()

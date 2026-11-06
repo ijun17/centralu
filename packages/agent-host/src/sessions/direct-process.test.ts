@@ -127,7 +127,7 @@ describe('a session’s own process without a keeper, for real', () => {
     expect(await goneWithin(first.helper, GONE_MS)).toBe(true)
     expect(h.mgr.listSessions().find((x) => x.id === s)!.live).toBe(false)
 
-    await h.mgr.send(s, 'still there?')
+    await h.mgr.inputs.send(s, 'still there?')
     expect(h.adapter.created).toHaveLength(2)
     const second = h.adapter.created.at(-1)!
     expect(second.opts.resumeExternalId).toBe(first.externalId)

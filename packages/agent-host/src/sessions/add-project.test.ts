@@ -77,7 +77,7 @@ describe('add_project on this computer', () => {
     })
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
 
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBeFalsy()
     const listed = (await rpc('projects.list', {})) as { id: string; path: string; name: string; trusted: boolean }[]
@@ -97,7 +97,7 @@ describe('add_project on this computer', () => {
     await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail).toMatchObject({ path: plain, git: false, origin: null })
     expect(card(orc.id)!.detail.text).toContain('not a git repository')
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     expect((await call).isError).toBeFalsy()
     const [added] = (await rpc('projects.list', {})) as { id: string; path: string; trusted: boolean }[]
     // The sidebar's call for the same folder finds that project, as it would one it had added itself
@@ -110,7 +110,7 @@ describe('add_project on this computer', () => {
     const orc = await mgr.orchestrator()
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/did not approve/)
@@ -145,7 +145,7 @@ describe('add_project on this computer', () => {
     await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
   })
@@ -157,7 +157,7 @@ describe('add_project on this computer', () => {
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
     rmSync(plain, { recursive: true })
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'allow')
     const r = await call
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/changed while the card stood/)
@@ -173,7 +173,7 @@ describe('add_project on this computer', () => {
     const call = addProject(orc.id, { path: '~/Desktop/site' })
     await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail.path).toBe(site)
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     await call
   })
 
@@ -264,7 +264,7 @@ describe('who may call them', () => {
     const orc = await mgr.orchestrator()
     const call = addProject(orc.id, { path: other })
     await eventually(() => !!card(orc.id))
-    mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+    mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     expect((await call).isError).toBe(true)
     expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })).isError).toBeFalsy()
   })

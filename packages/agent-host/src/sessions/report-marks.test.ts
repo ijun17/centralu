@@ -115,7 +115,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     // Not called finished: a turn that had not started yet would look the same
     expect(stored(parent)).toEqual([])
     // The person's own turn in the child afterwards is the child's, not the assigned work
-    await b.mgr.send(child, 'person work')
+    await b.mgr.inputs.send(child, 'person work')
     b.claude.handles.get(child)!.answer('person answer')
     await new Promise((r) => setTimeout(r, 20))
     expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
@@ -209,7 +209,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     // The person writes while it is at rest: their turn starts, and is in flight when this host lets go
-    await a.mgr.send(child, 'a question of the person')
+    await a.mgr.inputs.send(child, 'a question of the person')
     expect(a.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
     expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'person' })

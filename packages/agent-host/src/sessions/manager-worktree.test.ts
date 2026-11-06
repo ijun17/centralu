@@ -1027,7 +1027,7 @@ describe('worktree sessions', () => {
       const deletion = remove(s, managerId)
       await waiting
       expect(existsSync(s.worktree!.path)).toBe(true)
-      await expect(wtMgr.send(s.id, 'keep working')).rejects.toThrow('being removed')
+      await expect(wtMgr.inputs.send(s.id, 'keep working')).rejects.toThrow('being removed')
       await expect(wtMgr.resumeSession(s.id)).rejects.toThrow('being removed')
       release()
       expect((await deletion).isError).not.toBe(true)
@@ -1151,7 +1151,7 @@ describe('worktree sessions', () => {
       const agent = remove(s, managerId)
       await vi.waitFor(() => expect(snapshot).toHaveBeenCalledOnce())
       await wtMgr.trash.restoreSession(helper.id)
-      await expect(wtMgr.send(helper.id, 'wake up in the folder')).rejects.toThrow('worktree is being removed')
+      await expect(wtMgr.inputs.send(helper.id, 'wake up in the folder')).rejects.toThrow('worktree is being removed')
       expect(wtMgr.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
       release()
       const r = await agent
@@ -1753,7 +1753,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     store.sessions.upsertSession(wtRow('stranger', p.id, { worktree: null }))
     const m2 = boot()
     expect(m2.waitsOn('old-mgr')).toEqual([])
-    await m2.send('wt-a', 'keep going')
+    await m2.inputs.send('wt-a', 'keep going')
     await new Promise((res) => setTimeout(res, 0))
     expect(m2.waitsOn('old-mgr')).toEqual(['wt-a'])
     // Owning is askedBy, not being in the same project
@@ -1781,7 +1781,7 @@ describe('after the worktree manager (#561 part 3)', () => {
       { kind: 'file', path: 'docs/review.md', name: 'review.md' },
       { kind: 'file', path: 'docs/review notes.md', name: 'review notes.md' },
     ]
-    await m2.send('worker', directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
+    await m2.inputs.send('worker', directive, attachments, { sessionId: orc.id, name: 'Orchestrator' })
 
     expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/review.md\n@docs/review notes.md`)
   })

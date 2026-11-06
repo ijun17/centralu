@@ -60,7 +60,7 @@ describe('auto Centralu boundaries (#603)', () => {
         const pending = start(id)
         await w.until(() => !!w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
         const card = w.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!
-        w.mgr.respondApproval(id, card.requestId, 'deny')
+        w.mgr.inputs.respondApproval(id, card.requestId, 'deny')
         expect((await pending).ok).toBe(false)
       } else {
         expect(await start(id)).toMatchObject({ ok: true })
@@ -69,7 +69,7 @@ describe('auto Centralu boundaries (#603)', () => {
       for (const access of ['delegate', 'apps'] as const) {
         const call = w.mgr.consents.ensureProjectAccess(id, w.target.id, access, { text: 'check' })
         await w.until(() => !!w.card(id))
-        w.mgr.respondApproval(id, w.card(id)!.requestId, 'deny')
+        w.mgr.inputs.respondApproval(id, w.card(id)!.requestId, 'deny')
         expect((await call).ok).toBe(false)
       }
     },
@@ -273,7 +273,7 @@ describe('auto Centralu boundaries (#603)', () => {
     await w.mgr.updateSettings(id, { permissionPreset: 'safe' })
     const call = w.mgr.consents.ensureProjectAccess(id, w.target.id, 'apps', { text: 'x' })
     await w.until(() => !!w.card(id))
-    w.mgr.respondApproval(id, w.card(id)!.requestId, 'deny')
+    w.mgr.inputs.respondApproval(id, w.card(id)!.requestId, 'deny')
     expect((await call).ok).toBe(false)
   })
 
@@ -293,7 +293,7 @@ describe('auto Centralu boundaries (#603)', () => {
     const wait = w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'wait' })
     handle(child.sessionId).answer('done')
     expect(await wait).toMatchObject({ ok: true, state: 'done', answer: 'done' })
-    await w.mgr.send(child.sessionId, 'a person starts a turn')
+    await w.mgr.inputs.send(child.sessionId, 'a person starts a turn')
     expect(await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'stop' })).toMatchObject({
       ok: true,
       state: 'stopped',

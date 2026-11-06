@@ -229,6 +229,12 @@ Manager line counts are after each pull request.
   `MailSessionsView` (`mgr.mail`). `sessionInfo` and `orchestratorId` stay: they are the session lookup. `parts()` gains
   the `events` getter the view needs, and `waitsOn`'s doc, which sat above `stoppedWords`, is back on `waitsOn`. The
   new module's host type and imports are the 37 lines the move adds (D2).
+- **7, turn inputs** (`manager.ts` 2,582 to 2,377; `sessions/turn-inputs.ts`, 240 lines, a move of 205): `send`,
+  `sendFromApp`, `appNotice`, `respondApproval`, `answerQuestion`, `interrupt`, `reportOwed`, `inputsHeld`, `turnRunning`
+  and the two waits on a turn they read (`agentRuns`, `turnObservers`), as they were, on `TurnInputs` (`mgr.inputs`).
+  `send` and `respondApproval` were no stubs, so D1 did not keep them: the router and the tests call `mgr.inputs.send`.
+  `parts()` gains the `approvalRules` getter; `rpc.test.ts`'s fake manager carries `inputs`. Deep tier: the link tests
+  send and approve.
 
 ### 6.2 Work in flight
 
