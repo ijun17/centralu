@@ -48,12 +48,13 @@ describe('the thread in the inbox', () => {
     expect(render(null).html).toBe('')
   })
 
-  it('names the thread, its state, who it is between and what is next, with a way to open each session in it', () => {
+  it('names the conversation, its state and who it is between, with a way to open each session in it, and reads no Next line even from a host that sends one', () => {
     const { html, text } = render(view())
     expect(text).toContain('Land #12')
     expect(text).toContain('Running')
     expect(text).toContain('You → Parser')
-    expect(text).toContain('Next: write the parser')
+    expect(text).not.toContain('Next:')
+    expect(text).not.toContain('write the parser')
     expect(html).toContain('data-testid="mail-open-s1"')
     expect(text).toContain('Open Parser')
   })
@@ -111,6 +112,23 @@ describe('the thread in the inbox', () => {
     const done = render(view({ thread: { ...view().thread, state: 'done', outcome: 'finished' } }))
     expect(done.html).not.toContain('data-testid="mail-reply"')
     expect(done.html).not.toContain('data-testid="mail-finish"')
-    expect(done.text).toContain('This thread is done')
+    expect(done.text).toContain('This is done')
+    expect(done.text).not.toContain('thread')
+  })
+
+  it('offers no reply box on a chain with nothing of the person’s to answer (mail between sessions held for them), and keeps the acts; a host that does not say has the box', () => {
+    const held = render(view({ canReply: false }))
+    expect(held.html).not.toContain('data-testid="mail-reply"')
+    expect(held.html).not.toContain('data-testid="mail-send"')
+    expect(held.html).toContain('data-testid="mail-finish"')
+    expect(render(view({ canReply: true })).html).toContain('data-testid="mail-reply"')
+    expect(render(view()).html).toContain('data-testid="mail-reply"')
+  })
+
+  it('words the reply box as a reply, and the person never reads the word thread', () => {
+    const open = render(view({ more: true }))
+    expect(open.html).toContain('placeholder="Reply"')
+    expect(open.html).toContain('aria-label="Your reply"')
+    expect(open.text).not.toMatch(/thread/i)
   })
 })

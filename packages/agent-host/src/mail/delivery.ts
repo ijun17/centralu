@@ -39,6 +39,18 @@ export class MailNotAtRest extends Error {
   }
 }
 
+/**
+ * `deliver` found that every message it was about to send was withdrawn meanwhile (the person closed the chain while the session woke): nothing was sent. Handled
+ * as `MailNotAtRest` is, and the withdrawn rows are not tried again (they are not waiting)
+ */
+export class MailWithdrawn extends MailNotAtRest {
+  constructor() {
+    super()
+    this.message = 'What was to be sent was withdrawn: nothing is sent'
+    this.name = 'MailWithdrawn'
+  }
+}
+
 export type MailInput = {
   /** The wake frame (§7.3) */
   text: string
@@ -46,6 +58,8 @@ export type MailInput = {
   quiet: boolean
   /** The compact line the conversation keeps of it (§9.2), in Centralu's words */
   line: string
+  /** Asked right before the send, with the other waits' checks: false when everything in it was withdrawn since (the send is then `MailWithdrawn`) */
+  wanted?: () => boolean
   /**
    * The turn this starts is the work of a task this session gave, or of its request to the orchestrator (§7.6): the end of the turn is reported to it,
    * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
@@ -480,7 +494,7 @@ export class MailDelivery {
     const delivered: { at?: number } = {}
     const reportTo = quiet ? undefined : this.reportTarget(recipient, drained)
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, ...(reportTo ? { reportTo } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(reportTo ? { reportTo } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)

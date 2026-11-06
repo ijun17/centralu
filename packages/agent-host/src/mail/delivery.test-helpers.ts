@@ -1,5 +1,5 @@
 import { parseAddress } from './address.js'
-import { MailDelivery, type MailDeliveryOptions, type MailInput, type MailSessions, type ReceiverState } from './delivery.js'
+import { MailDelivery, MailWithdrawn, type MailDeliveryOptions, type MailInput, type MailSessions, type ReceiverState } from './delivery.js'
 import { MessageService, type SendInput, type SendResult } from './messages.js'
 import { world as messageWorld } from './messages.test-helpers.js'
 import { MailTurns } from './turns.js'
@@ -19,6 +19,8 @@ export function deliveryCore(clock: { t: number }) {
     delivered.push({ sessionId, input })
     if (late) lates.push(late)
     if (behaviour.hold) await behaviour.hold
+    // The session's gate, right before the send (`SessionEvents.deliverMail`)
+    if (input.wanted && !input.wanted()) throw new MailWithdrawn()
     if (behaviour.fail) throw behaviour.fail
   }
   const schedule: NonNullable<MailDeliveryOptions['schedule']> = (ms, fn) => {

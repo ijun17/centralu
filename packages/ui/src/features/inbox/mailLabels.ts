@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailParty, MailThreadRow } from '@cc/protocol/client'
+import type { MailHeldRow, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
  * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;
@@ -43,7 +43,7 @@ export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): s
 export function heldLabel(reason: string): { why: string; action: string; kind: 'resume-thread' | 'resume-session' | 'release' } {
   switch (reason) {
     case 'loop':
-      return { why: 'Paused: this thread started many turns without a word from you', action: 'Resume', kind: 'resume-thread' }
+      return { why: 'Paused: these messages started many turns without a word from you', action: 'Resume', kind: 'resume-thread' }
     case 'budget':
       return { why: 'Paused: this session has used its share of turns started by mail', action: 'Resume', kind: 'resume-session' }
     case 'policy':
@@ -74,4 +74,12 @@ export function crowdText(n: number): string {
 export function replyKind(messages: readonly { sender: MailParty; kind: string }[]): 'answer' | 'note' {
   const last = messages.findLast((m) => m.sender.kind !== 'person' && m.sender.kind !== 'centralu' && m.kind !== 'event')
   return last?.kind === 'question' ? 'answer' : 'note'
+}
+
+/**
+ * Whether closing this thread would stop the turn going on it, so it is asked first. Only a host of an older build does: it stops the turn
+ * and says nothing of `canReply`, which a host of this build always sends and which closes without stopping anything
+ */
+export function closeStopsWork(view: Pick<MailThreadView, 'canReply'> & { thread: Pick<MailThreadRow, 'working'> }): boolean {
+  return view.canReply === undefined && view.thread.working === true
 }

@@ -4,6 +4,7 @@
  * `close` are gone with threads.
  */
 import { afterEach, describe, expect, it } from 'vitest'
+import { PERSON } from './address.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { oldThread } from './v61.test-helpers.js'
 
@@ -82,6 +83,23 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     const w = world()
     const r = w.run('x', { action: 'send', to: 'a', text: 'hello' })
     expect(r.text).toContain('Held: your project px is not trusted')
+  })
+})
+
+describe('an answer to a request its sender withdrew', () => {
+  it('still goes, and the answer says the request was withdrawn; an answer to one that stands says nothing of it', () => {
+    const w = world()
+    const q = w.mail.send(A, { to: [B], text: 'Is #12 still open?', needsReply: true })
+    const p = w.mail.send(A, { to: [B], text: 'Is #13 still open?', needsReply: true })
+    w.store.mailbox.settle(q.message.id, B, 'withdrawn', Date.now())
+    const late = w.run('b', { action: 'reply', thread: q.message.id, text: 'yes' })
+    expect(late.text).toContain(`It answers ${q.message.id} from alpha (its sender withdrew it).`)
+    expect(w.row(q.message.id, B)!.settled).toBe('withdrawn')
+    expect(w.run('b', { action: 'reply', thread: p.message.id, text: 'yes' }).text).not.toContain('withdrew')
+    // The person's own request, closed from the Inbox
+    const ask = w.mail.send(PERSON, { to: [B], text: 'Which branch?', needsReply: true })
+    w.store.mailbox.settle(ask.message.id, B, 'withdrawn', Date.now())
+    expect(w.run('b', { action: 'reply', thread: ask.message.id, text: 'main' }).text).toContain('(the person withdrew it)')
   })
 })
 

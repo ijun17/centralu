@@ -150,14 +150,30 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread?.messages.map((m) => m.body)).toEqual(['which?'])
   })
 
-  it('closing a thread a session is working on reads back the host’s close: done as dropped, no longer working', async () => {
+  it('says what failed when a close is refused, and the same for a thread that cannot be opened', async () => {
+    const platform = attached()
+    const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })
+    await useStore.getState().openMailThread(id)
+    platform.mail.close = async () => {
+      throw new Error('disk full')
+    }
+    expect(await useStore.getState().closeMail('dropped')).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not close this mail: disk full')
+    platform.mail.thread = async () => {
+      throw new Error('gone')
+    }
+    await useStore.getState().openMailThread(id)
+    expect(useStore.getState().toast).toBe('Could not open this mail: gone')
+  })
+
+  it('closing a thread a session is working on reads back the host’s close at once: done as dropped, no longer working, and nothing stopped', async () => {
     const platform = attached()
     const id = platform.seedMail({ subject: 'work', from: worker, body: 'do it', kind: 'assign', state: 'running', assignee: worker, working: true })
     await useStore.getState().openMailThread(id)
     expect(useStore.getState().mailThread?.thread).toMatchObject({ state: 'running', working: true })
     expect(await useStore.getState().closeMail('dropped')).toBe(true)
     await vi.waitFor(() => expect(useStore.getState().mailThread?.thread).toMatchObject({ state: 'done', outcome: 'dropped', working: false }))
-    expect(platform.mockMail.calls).toEqual(['stop:s1'])
+    expect(platform.mockMail.calls).toEqual([])
   })
 })
 

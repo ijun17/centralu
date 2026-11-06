@@ -57,6 +57,8 @@ export const MailFacts = z.looseObject({
   releasedTo: z.array(z.string()).optional(),
   /** On a chain's root: how the person last closed the chain (Mark done `finished`, Drop `dropped`), which the window shows while it stays done */
   closed: z.object({ outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), at: z.number() }).optional(),
+  /** On Centralu's notice to a session whose work the person closed in the Inbox: the chain, how it was closed, and the person's requests in it that were withdrawn (at most ten) */
+  chainClosed: z.object({ root: z.string(), outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), withdrawn: z.array(z.string()).max(10) }).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
   /** On a request to the orchestrator: the person's message in the sender's conversation that Centralu checked it cites (docs/plans/cited-requests.md §3) */
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
@@ -566,7 +568,7 @@ export class MailboxRecords {
 
   /** The rows held for the person to act on, the earliest due first */
   heldRows(): RecipientRow[] {
-    return this.rows(`${HELD} AND r.read_at IS NULL ORDER BY r.due_at, r.message_id, r.recipient`)
+    return this.rows(`${HELD} AND r.read_at IS NULL AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone') ORDER BY r.due_at, r.message_id, r.recipient`)
   }
 
   /** Every row held `policy`, with its message's `sender_project`: what the person's trust or Dismiss acts on (§7.4) */

@@ -3,7 +3,7 @@
  * wait for the resume, so the delivery looks again when it ends, and sends nothing from the leaving host.
  */
 import { describe, expect, it } from 'vitest'
-import { MailNotAtRest } from '../mail/delivery.js'
+import { MailNotAtRest, MailWithdrawn } from '../mail/delivery.js'
 import { SessionEvents, type SessionEventsHost } from './session-events.js'
 
 function world() {
@@ -11,6 +11,7 @@ function world() {
   const events: unknown[] = []
   let leaving = false
   let atRest = true
+  let wanted = true
   let finishResume!: () => void
   const resumed = new Promise<void>((r) => (finishResume = r))
   const handles = new Map<string, { send(text: string): void }>()
@@ -31,8 +32,8 @@ function world() {
   }
   const sessionEvents = new SessionEvents(host as unknown as SessionEventsHost)
   Object.assign(sessionEvents, { onEvent: (e: unknown) => void events.push(e) })
-  const gate = { leaving: () => leaving, atRest: () => atRest }
-  return { sessionEvents, sent, events, leave: () => (leaving = true), personTypes: () => (atRest = false), gate, finishResume, handles }
+  const gate = { leaving: () => leaving, atRest: () => atRest, wanted: () => wanted }
+  return { sessionEvents, sent, events, leave: () => (leaving = true), personTypes: () => (atRest = false), withdraw: () => (wanted = false), gate, finishResume, handles }
 }
 
 describe('mail for a session that is being woken (§4.2, §7.1)', () => {
@@ -55,6 +56,30 @@ describe('mail for a session that is being woken (§4.2, §7.1)', () => {
     w.personTypes()
     await expect(w.sessionEvents.deliverMail('s1', { ...input, quiet: true }, w.gate)).rejects.toBeInstanceOf(MailNotAtRest)
     expect(w.sent).toEqual([])
+  })
+})
+
+describe('mail the person withdrew while it waited (plan C12)', () => {
+  const input = { text: 'mail', quiet: false, line: '✉ 1 message' }
+
+  it('is not sent into the session that woke for it: the delivery is refused, and nothing is sent or shown', async () => {
+    const w = world()
+    const delivery = w.sessionEvents.deliverMail('s1', input, w.gate)
+    const refused = expect(delivery).rejects.toBeInstanceOf(MailWithdrawn)
+    w.withdraw()
+    w.finishResume()
+    await refused
+    expect(w.sent).toEqual([])
+    expect(w.events).toEqual([])
+  })
+
+  it('also quiet mail for a process that is live: the check is right before the send', async () => {
+    const w = world()
+    w.handles.set('s1', { send: (text: string) => void w.sent.push(text) })
+    w.withdraw()
+    await expect(w.sessionEvents.deliverMail('s1', { ...input, quiet: true }, w.gate)).rejects.toBeInstanceOf(MailWithdrawn)
+    expect(w.sent).toEqual([])
+    expect(w.events).toEqual([])
   })
 })
 

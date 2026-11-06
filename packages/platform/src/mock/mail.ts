@@ -16,6 +16,8 @@ type Thread = {
   messages: MailMessage[]
   /** The seq the person has read up to */
   read: number
+  /** Whether the person has something here to answer (the host's `canReply`) */
+  canReply: boolean
 }
 
 /**
@@ -44,9 +46,11 @@ export class MailMock {
     kind?: string
     state?: string
     assignee?: MailParty | null
-    /** A turn of the thread is going in its assignee: Drop and Mark done ask first, and closing stops that turn and tells the session (3.10) */
+    /** A turn of the thread is going in its assignee: closing tells that session and stops nothing (C12) */
     working?: boolean
     held?: { reason: string; recipient: MailParty }
+    /** Mail between sessions that is only held for the person: nothing of theirs to answer, so the window offers no reply box */
+    onlyHeld?: boolean
   }): string {
     const id = `mock.t_${this.clock.next()}`
     const now = this.clock.now()
@@ -68,7 +72,7 @@ export class MailMock {
       updatedAt: now,
       last: { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: now },
     }
-    this.threads.set(id, { row, messages: [message], read: 0 })
+    this.threads.set(id, { row, messages: [message], read: 0, canReply: !spec.onlyHeld })
     if (spec.held) {
       this.heldRows.push({ messageId: message.id, threadId: id, subject: spec.subject, sender: spec.from, recipient: spec.held.recipient, kind: message.kind, reason: spec.held.reason, preview: spec.body.slice(0, 140), since: now })
       row.held = 1
@@ -95,6 +99,7 @@ export class MailMock {
       more: false,
       older,
       follows: [],
+      canReply: t.canReply,
     }
   }
 
@@ -141,13 +146,9 @@ export class MailMock {
     },
     close: async (threadId, outcome) => {
       const t = this.must(threadId)
-      // As the host does (3.10): the session whose turn is on the thread is stopped, and told in Centralu's words without a wake
+      // As the host does (C12): the session whose turn is on the thread is told in Centralu's words without a wake, and its turn goes on
       const helper = t.row.working ? t.row.assignee?.sessionId : null
-      if (helper) {
-        this.calls.push(`stop:${helper}`)
-        this.emit({ type: 'state_change', sessionId: helper, state: 'waiting_input', reason: 'interrupted' })
-        this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it a thread of its was closed' })
-      }
+      if (helper) this.emit({ type: 'notice', sessionId: helper, level: 'info', from: 'Centralu', label: 'mail', text: '✉ Centralu told it the person closed its work' })
       t.row.state = 'done'
       t.row.outcome = outcome ?? 'finished'
       t.row.working = false

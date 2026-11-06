@@ -105,5 +105,11 @@ export const MailThreadView = z.object({
   older: z.boolean().default(false),
   /** Done threads this one follows up */
   follows: z.array(z.object({ id: z.string(), subject: z.string() })).default([]),
+  /**
+   * Whether the person has something in this chain to answer: a message to them from a session that is still here, or their own message to one that is
+   * (the target `mail.reply` writes to). False for a chain of mail between sessions that is only held for them; the window offers no reply box then.
+   * Absent from a host of an older build, which the window reads as true
+   */
+  canReply: z.boolean().optional(),
 })
 export type MailThreadView = z.infer<typeof MailThreadView>

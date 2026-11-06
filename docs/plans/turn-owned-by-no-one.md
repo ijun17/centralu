@@ -1,6 +1,6 @@
 # A turn belongs to no one: requests carry their own answers (#1948)
 
-> **Status: decided 2026-11-05 (§11); P1 built, P2 to P12 not.** Read from main at `eafd28253`. The design landed with its
+> **Status: decided 2026-11-05 (§11); P1 built, P11's close (C12) and the Next line (B8) built 2026-11-06, P2 to P10 and the rest of P11 not.** Read from main at `eafd28253`. The design landed with its
 > first implementation PR (P1, §8). It follows the owner's decisions on #1948 of 2026-11-04 (Targets 1 to 4, the
 > Inbox, Continue) and of 2026-11-05 (an agent's turn belongs to no one; the composer's "Working for X" choice goes).
 > It covers the audit items B1 to B9 and C1 to C12 of the comment "Audit: what the old (pre-mailbox) model still leaves
@@ -389,7 +389,7 @@ after the last of P4, P5, P8 shipped, together with mailbox M7, so `min_reader_v
 | B4/B5 relayed notices (`tellSession`, `tellNoteRefused`, `tellQueuedFailed`, `tellEnd`, five sites in `remote-agents.ts`) | Mail `notice`s for seats that read mail (`canReadMail`, `manager.ts:2462`); the legacy `coordinator`/`scoped` seats nothing creates keep the relayed notice. The five remote sites stay until mail crosses links | P10 |
 | B6 `queued_requests`, `ifBusy: 'queue'`, the note/queue/fork menu | A send to a busy session is a mail row that joins the turn or waits (Target 2). `note` and `queue` go; `fork` stays as its own choice (Q5) | P8 |
 | B7 handoff moves both worlds | `MessageService.handOver` only, plus the sent-task rule (§3.4) | P9 |
-| B8 thread-shaped fields (`state`, `next`, `blocked`, `blockers`, `follows`, `protocol/src/entities/mail.ts`) | The host keeps filling constants for older windows; the window stops reading `state`/`next` when its layout changes (owner) | P11 |
+| B8 thread-shaped fields (`state`, `next`, `blocked`, `blockers`, `follows`, `protocol/src/entities/mail.ts`) | The host keeps filling constants for older windows; the window stops reading `state`/`next` when its layout changes (owner). **`next` done 2026-11-06:** the window no longer reads it (the "Next: …" line never drew since #1914 filled null); the field stays and the host fills null. The state pill (Open / Running / In review / Done) stays, computed from the messages (owner) | P11 |
 | B9 the Inbox and the mail list | Owner's layout (§9.2); session-state rows become mail (owner 2026-11-04) | P11 |
 | C1 the composer choice end to end | Removed (owner) | P3 |
 | C2 the turn-starter engine (`TurnStarter`, `report_turn`, `turn_inputs`, `starterFor`, `decide`, `restate`) | Removed once nothing reads `by`; `turn_span` stays (hub reads, stopped-turn words) | P7 |
@@ -402,7 +402,7 @@ after the last of P4, P5, P8 shipped, together with mailbox M7, so `min_reader_v
 | C9 `personNote` | `personSince` (§2.4) | P6 |
 | C10 linked copy of C1/C2 | §5 | P3, P6 |
 | C11 asked gate | Re-keyed (§4.2) | P2 |
-| C12 closing a chain stops "the session whose turn is on it" (`MailPerson.close`, `mail/person.ts:162`; `mailWorkClosed`, `manager.ts:1049`) | Closing withdraws the person's open requests in the chain and tells each recipient once ("The person withdrew `<id>`; do not continue it"). It stops no turn: the turn may carry other requests. The person's Stop is the way to stop (owner decides the dialog, §9.2) | P11 |
+| C12 closing a chain stops "the session whose turn is on it" (`MailPerson.close`, `mail/person.ts:162`; `mailWorkClosed`, `manager.ts:1049`) | Closing withdraws the person's open requests in the chain and tells each recipient once ("The person withdrew `<id>`; do not continue it"). It stops no turn: the turn may carry other requests. The person's Stop is the way to stop (owner decides the dialog, §9.2). **Done 2026-11-06** (owner): no dialog, no Stop beside the acts; the requests settle `withdrawn` (one not delivered yet never is); the notice is `facts.chainClosed`, one per session per close, given into a live quiet-input process in its turn and otherwise with its next mail; a reply after the close lands in the same chain, listed again as unread (`mailbox.md` Q-M3a-21) | P11 |
 | A5 `input_origins`, `legacyHeld` | Window passed (§6); removed with C2 | P7 |
 
 ## 8. Pull requests
@@ -454,10 +454,11 @@ P5 and P6. P6 before P7. P8 after P6 (it changes what a wake carries, which the 
   (`ReportChoice.tsx`).
 - The Inbox gets stop notices for the person's own requests (Inbox mail and script tasks). Where they sit beside the
   session-state rows (B9) is open.
-- Closing a chain (C12): today "`<assignee>` is working on this. Stop its work and close the thread?" with "Stop and
-  close" (`MailThread.tsx:78-113`). Proposed: no dialog; closing withdraws the person's requests and tells the
-  session. Whether the window offers the session's Stop beside it is the owner's.
-- The thread-shaped labels (`state`, "Next: …") in the mail list (B8, `mailLabels.ts:25`, `MailThread.tsx:31,61`).
+- Closing a chain (C12): **decided and built 2026-11-06.** It was "`<assignee>` is working on this. Stop its work and
+  close the thread?" with "Stop and close". Now: no dialog and no Stop beside Mark done / Drop; closing withdraws the
+  person's requests and tells the session.
+- The thread-shaped labels: "Next: …" is gone from the window (B8, built 2026-11-06); `state` stays as the pill, from the
+  messages. The reply box says "Reply", and the window's words say messages and replies, not threads.
 - Nothing in the conversation changes: the stopped line and Continue stay (#1947), for the person's messages.
 
 ## 10. Three issues against this model

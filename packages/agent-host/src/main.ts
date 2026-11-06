@@ -442,13 +442,14 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   legacyChain: (threadId) => store.legacyChain(threadId, undefined, 100),
   projectLabel: (projectId) => hostMailbox.reach.projectLabel(projectId),
   untrusted: (projectId) => hostMailbox.reach.untrusted(projectId),
-  // A session's turn on a chain, from the turn records while the session is in a turn: what Mark done and Drop ask about and stop (3.10)
+  // A session's turn on a chain, from the turn records while the session is in a turn: the session Mark done and Drop tell, though they stop nothing (C12)
   turnOn: (id) => {
     const s = mgr.sessionInfo(id)
     const turn = s && inTurn(s.state) ? hostMailbox.turns.current(id) : undefined
-    return turn && { work: turn.messageId ?? turn.starter, startedAt: turn.startedAt }
+    return turn && { work: turn.messageId ?? turn.starter }
   },
-  closed: (c) => void mgr.mailWorkClosed(c),
+  tellsNow: (id) => mgr.tellsMailNow(id),
+  tell: (id, text) => mgr.tellMailNow(id, text),
 })
 /*
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
