@@ -1,18 +1,19 @@
 import { defineConfig } from '@playwright/test'
 import { assertBrowserSandbox } from '../browser-sandbox.js'
+import { uxEngine } from './engine.js'
 
 /**
  * The task-cost suite (#518, docs/ux-metrics.md): `pnpm ux`.
  *
  * Its own config and server, apart from `pnpm e2e`: the tasks are `*.task.ts`, which the main
- * suite does not match, and they run in one engine, WebKit by default, the desktop app on macOS
- * and Linux. Geometry is part of the numbers (Fitts's law reads the boxes on screen), so the window
+ * suite does not match, and they run in one engine, the desktop app's: WebKit on macOS and Linux,
+ * Chromium on Windows (engine.ts). Geometry is part of the numbers (Fitts's law reads the boxes on screen), so the window
  * is the desktop app's default size (apps/desktop/src-tauri/tauri.conf.json) and the engine is
  * fixed: a baseline and a run are only comparable in the same engine and size. Its own port, never
  * attaching to a dev server already up, so the numbers are always this checkout's.
  */
 const port = Number(process.env.UX_PORT ?? '5196')
-const engine = process.env.E2E_BROWSER === 'chromium' ? 'chromium' : 'webkit'
+const engine = uxEngine()
 assertBrowserSandbox(engine)
 
 export default defineConfig({

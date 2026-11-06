@@ -7,7 +7,7 @@ vi.mock('../e2e/browser-sandbox.js', async (load) => {
   return { assertBrowserSandbox: (engine: string) => actual.assertBrowserSandbox(engine, 'darwin', process.env) }
 })
 
-afterEach(() => { vi.unstubAllEnvs(); vi.resetModules() })
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.resetModules() })
 
 describe('repository runner guidance stays out of Centralu children', () => {
   it('is in AGENTS.md and never in the generic child task frame', () => {
@@ -20,6 +20,8 @@ describe('repository runner guidance stays out of Centralu children', () => {
 
 describe('UX checks the sandbox when its config loads, without launching a browser', () => {
   it.each([undefined, 'webkit'])('refuses E2E_BROWSER=%s in seatbelt, including CI=1', async (engine) => {
+    // Seatbelt is macOS's; the engine left unset is WebKit there, and Chromium on Windows (e2e/ux/engine.ts)
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     vi.stubEnv('CODEX_SANDBOX', 'seatbelt')
     vi.stubEnv('CI', '1')
     vi.stubEnv('E2E_BROWSER', engine)
