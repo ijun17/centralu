@@ -1,0 +1,473 @@
+{
+ "meta": {
+  "mode": "live",
+  "at": "2026-11-06T05:31:06.605Z",
+  "commit": "0b479ac1d",
+  "versions": {
+   "claude": "2.1.316 (Claude Code)",
+   "codex": "codex-cli 0.160.0",
+   "node": "v26.12.1"
+  },
+  "reps": 2,
+  "clis": [
+   "codex"
+  ],
+  "prompts": {
+   "comment": "#564 option B: start_agent for work in another CLI or a worktree, long work, or work the person will follow; the CLI's own subagents for short helper work inside the turn. Placeholders as in prompts.json. Run under safe, consent cards declined, so no child is started and nothing is written. helper-search expects no Centralu call (the built-in Agent tool is the right answer; the run's calls say whether it was used).",
+   "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+   "preset": "safe",
+   "selection": [
+    {
+     "id": "start-codex",
+     "profile": "reader",
+     "prompt": "Have Codex write a one-line shell command that counts the files in this folder, then tell me what it wrote.",
+     "expect": [
+      "start_agent"
+     ]
+    },
+    {
+     "id": "start-agent",
+     "profile": "reader",
+     "prompt": "Hand this to another agent and tell me what it says: summarize what this folder contains in one sentence.",
+     "expect": [
+      "start_agent"
+     ]
+    },
+    {
+     "id": "start-long",
+     "profile": "reader",
+     "prompt": "Hand off building a CSV-to-JSON converter for this repo, with tests. It is a long job and I want to check on its progress myself later.",
+     "expect": [
+      "start_agent"
+     ]
+    },
+    {
+     "id": "helper-search",
+     "profile": "reader",
+     "prompt": "Use a helper to search the code here for TODO comments and give me the list.",
+     "expect": []
+    },
+    {
+     "id": "none-math",
+     "profile": "reader",
+     "prompt": "What is 17 times 23? Answer with the number only.",
+     "expect": []
+    },
+    {
+     "id": "none-files",
+     "profile": "reader",
+     "prompt": "List the files in this project's top folder.",
+     "expect": []
+    },
+    {
+     "id": "none-commit",
+     "profile": "reader",
+     "prompt": "Write a one-line commit message for a change that fixes a typo in README.md. Reply with the message only.",
+     "expect": []
+    }
+   ]
+  }
+ },
+ "summary": {
+  "definitions": {
+   "claude": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "instructionChannel": "server",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 7606,
+     "deferredChars": 0,
+     "instructionsChars": 2961,
+     "prefixHash": "c6680e895fb1"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "instructionChannel": "server",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 2169,
+     "deferredChars": 0,
+     "instructionsChars": 379,
+     "prefixHash": "df4a551db394"
+    },
+    "builder": {
+     "profile": "builder",
+     "instructionChannel": "server",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 822,
+     "prefixHash": "c220d1208e2a"
+    },
+    "reader": {
+     "profile": "reader",
+     "instructionChannel": "server",
+     "tools": 12,
+     "residentTools": 6,
+     "residentChars": 2889,
+     "deferredChars": 2895,
+     "instructionsChars": 413,
+     "prefixHash": "20f5d93108d5"
+    }
+   },
+   "codex": {
+    "orchestrator": {
+     "profile": "orchestrator",
+     "instructionChannel": "developer",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 7606,
+     "deferredChars": 0,
+     "instructionsChars": 3019,
+     "prefixHash": "b70cfe1ef90d"
+    },
+    "scoped": {
+     "profile": "scoped",
+     "instructionChannel": "developer",
+     "tools": 3,
+     "residentTools": 3,
+     "residentChars": 2169,
+     "deferredChars": 0,
+     "instructionsChars": 431,
+     "prefixHash": "1082cfe2857f"
+    },
+    "builder": {
+     "profile": "builder",
+     "instructionChannel": "developer",
+     "tools": 1,
+     "residentTools": 1,
+     "residentChars": 610,
+     "deferredChars": 0,
+     "instructionsChars": 874,
+     "prefixHash": "8c533c2c0dbc"
+    },
+    "reader": {
+     "profile": "reader",
+     "instructionChannel": "developer",
+     "tools": 12,
+     "residentTools": 12,
+     "residentChars": 5784,
+     "deferredChars": 0,
+     "instructionsChars": 471,
+     "prefixHash": "e3a2b95d5b11"
+    }
+   }
+  },
+  "selection": {
+   "codex": {
+    "start-codex": {
+     "profile": "reader",
+     "expect": [
+      "start_agent"
+     ],
+     "runs": [
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "none",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19121,
+       "output": 128,
+       "cacheWrite": 0,
+       "uncached": 6833,
+       "rebuilds": 0
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "none",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19121,
+       "output": 93,
+       "cacheWrite": 0,
+       "uncached": 6833,
+       "rebuilds": 0
+      }
+     ]
+    },
+    "start-agent": {
+     "profile": "reader",
+     "expect": [
+      "start_agent"
+     ],
+     "runs": [
+      {
+       "called": [
+        "start_agent"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false,
+       "reached": true,
+       "viaRun": false,
+       "discovery": 0,
+       "requests": 3,
+       "tokens": 58230,
+       "output": 240,
+       "cacheWrite": 0,
+       "uncached": 7414,
+       "rebuilds": 0
+      },
+      {
+       "called": [
+        "start_agent"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false,
+       "reached": true,
+       "viaRun": false,
+       "discovery": 0,
+       "requests": 3,
+       "tokens": 58229,
+       "output": 242,
+       "cacheWrite": 0,
+       "uncached": 14197,
+       "rebuilds": 1
+      }
+     ]
+    },
+    "start-long": {
+     "profile": "reader",
+     "expect": [
+      "start_agent"
+     ],
+     "runs": [
+      {
+       "called": [
+        "start_agent"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false,
+       "reached": true,
+       "viaRun": false,
+       "discovery": 0,
+       "requests": 3,
+       "tokens": 58609,
+       "output": 412,
+       "cacheWrite": 0,
+       "uncached": 7665,
+       "rebuilds": 0
+      },
+      {
+       "called": [
+        "start_agent"
+       ],
+       "calls": 2,
+       "verdict": "right",
+       "steps": 2,
+       "firstArgsValid": null,
+       "firstArgs": {},
+       "firstOk": false,
+       "reached": true,
+       "viaRun": false,
+       "discovery": 0,
+       "requests": 4,
+       "tokens": 79400,
+       "output": 539,
+       "cacheWrite": 0,
+       "uncached": 16168,
+       "rebuilds": 1
+      }
+     ]
+    },
+    "helper-search": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [
+        "start_agent"
+       ],
+       "calls": 2,
+       "verdict": "wrong",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 3,
+       "tokens": 58255,
+       "output": 285,
+       "cacheWrite": 0,
+       "uncached": 7439,
+       "rebuilds": 0
+      },
+      {
+       "called": [],
+       "calls": 3,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 4,
+       "tokens": 77797,
+       "output": 216,
+       "cacheWrite": 0,
+       "uncached": 7653,
+       "rebuilds": 0
+      }
+     ]
+    },
+    "none-math": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19111,
+       "output": 5,
+       "cacheWrite": 0,
+       "uncached": 6823,
+       "rebuilds": 0
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19111,
+       "output": 5,
+       "cacheWrite": 0,
+       "uncached": 6823,
+       "rebuilds": 0
+      }
+     ]
+    },
+    "none-files": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [],
+       "calls": 1,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 2,
+       "tokens": 38305,
+       "output": 67,
+       "cacheWrite": 0,
+       "uncached": 7073,
+       "rebuilds": 0
+      },
+      {
+       "called": [],
+       "calls": 1,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 2,
+       "tokens": 38305,
+       "output": 71,
+       "cacheWrite": 0,
+       "uncached": 7073,
+       "rebuilds": 0
+      }
+     ]
+    },
+    "none-commit": {
+     "profile": "reader",
+     "expect": [],
+     "runs": [
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19120,
+       "output": 11,
+       "cacheWrite": 0,
+       "uncached": 6832,
+       "rebuilds": 0
+      },
+      {
+       "called": [],
+       "calls": 0,
+       "verdict": "right",
+       "steps": null,
+       "firstArgsValid": null,
+       "firstArgs": null,
+       "firstOk": null,
+       "reached": false,
+       "viaRun": null,
+       "discovery": 0,
+       "requests": 1,
+       "tokens": 19120,
+       "output": 11,
+       "cacheWrite": 0,
+       "uncached": 6832,
+       "rebuilds": 0
+      }
+     ]
+    }
+   }
+  }
+ }
+}
