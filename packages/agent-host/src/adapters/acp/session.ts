@@ -534,8 +534,8 @@ class AcpWire implements ToolWire {
     const u = read.update
     switch (u.sessionUpdate) {
       case 'usage_update':
-        // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
-        if (u.used > 0 && u.size > 0) {
+        // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again. A share above 1 is a misread field (#1654)
+        if (u.used > 0 && u.size > 0 && u.used <= u.size) {
           this.emit({ type: 'context_update', sessionId: this.sessionId, used: u.used, window: u.size, exactness: 'exact' })
           this.lastUsed = u.used
           if (turn) turn.used = u.used
