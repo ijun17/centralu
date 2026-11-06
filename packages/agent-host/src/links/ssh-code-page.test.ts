@@ -43,7 +43,7 @@ describe('which reg.exe reads the ANSI code page', () => {
     ['a rooted path with no drive', '\\Windows'],
   ])('does not start it from SystemRoot as %s', async (_what, root) => {
     process.env.SystemRoot = root
-    const { unescapeBytes } = await import('./tunnel.js')
+    const { unescapeBytes } = await import('./ssh-text.js')
     unescapeBytes(needsCodePage)
     expect(started).toEqual([windowsRoot])
   })

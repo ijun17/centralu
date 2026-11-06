@@ -14,7 +14,6 @@ import {
   autostartCommand,
   connectionCommand,
   detachCommand,
-  lastLine,
   parseConnectionLine,
   hubNameForRemote,
   powershell,
@@ -28,6 +27,7 @@ import {
   type RemoteSpec,
   type SshTunnelOptions,
 } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
 import { fakeExe } from '../fake-exe.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'

@@ -1,4 +1,5 @@
-import { autostartCommand, lastLine, NOT_FOUND, parseAutostart, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
+import { autostartCommand, NOT_FOUND, parseAutostart, type RemoteAutostart, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
 
 /**

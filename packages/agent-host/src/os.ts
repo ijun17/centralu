@@ -10,6 +10,7 @@
  * Each takes the platform as a parameter, defaulting to this host's, so tests can ask about another.
  */
 
+import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { posix, win32, type PlatformPath } from 'node:path'
 import { APP_NAME, APP_SLUG, type HostLogon } from '@cc/protocol'
@@ -252,4 +253,31 @@ export function systemStoppingQueries(platform: Platform = HOST_PLATFORM): reado
     ['systemctl', 'is-system-running'],
     ['systemctl', '--user', 'is-system-running'],
   ]
+}
+
+/** TextDecoder's names for the ANSI code pages whose number is not its name (`windows-1252` and the like are) */
+const CODE_PAGE_NAMES: Record<string, string> = { '932': 'shift_jis', '936': 'gbk', '949': 'euc-kr', '950': 'big5', '65001': 'utf-8' }
+let ansiDecoder: TextDecoder | null | undefined
+
+/**
+ * Bytes in this Windows machine's ANSI code page as text; null elsewhere, or when they do not decode. The code page is
+ * read from the registry once, the first time it is needed: a failed ssh is rare, and Node has no other way to ask.
+ */
+export function ansiText(bytes: Buffer): string | null {
+  if (ansiDecoder === undefined) {
+    ansiDecoder = null
+    if (process.platform !== 'win32') return null
+    try {
+      const out = execFileSync(systemTool(['reg.exe']), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      const page = /\bACP\s+REG_SZ\s+(\d+)/.exec(out)?.[1]
+      if (page) ansiDecoder = new TextDecoder(CODE_PAGE_NAMES[page] ?? `windows-${page}`, { fatal: true })
+    } catch {
+      // no registry answer, or a code page TextDecoder does not know: the escapes stay
+    }
+  }
+  try {
+    return ansiDecoder?.decode(bytes) ?? null
+  } catch {
+    return null
+  }
 }

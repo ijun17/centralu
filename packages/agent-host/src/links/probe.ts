@@ -1,6 +1,7 @@
 import type { MachineProbe } from '@cc/protocol'
 import { runSsh, SshRunFailure } from './ssh-run.js'
-import { lastLine, powershell, WSL_DISTRO_RE } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
+import { powershell, WSL_DISTRO_RE } from './tunnel.js'
 import { rpcError } from '../rpc-error.js'
 
 /**

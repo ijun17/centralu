@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { NotPublished, VERSION_WORD, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
 import { floorOf } from './node-floor.js'
-import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
+import { remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
  * The hub's installer for a linked machine (docs/plans/remote-hub.md §10.2, phase 3 step 3): over the

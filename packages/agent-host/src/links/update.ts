@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
 import { VERSION_WORD } from './registry.js'
-import { lastLine, thisHubName, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
+import { thisHubName, NOT_FOUND, remoteScript, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 import { tryParseJson } from '../json-value.js'
 
 /**

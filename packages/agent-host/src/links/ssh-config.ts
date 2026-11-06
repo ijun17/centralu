@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, normalize, parse, sep } from 'node:path'
 import { runSsh, SshRunFailure } from './ssh-run.js'
-import { lastLine } from './tunnel.js'
+import { lastLine } from './ssh-text.js'
 
 /**
  * The hosts of the person's ssh config, for the Add machine dialog (#514): the dialog lists them,
