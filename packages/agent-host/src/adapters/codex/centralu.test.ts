@@ -59,7 +59,8 @@ async function host(d: Driver, spec: CentraluScenario, hostSent: (method: string
   }
   if (spec.after) {
     d.session().send(spec.after, named())
-    await d.waitFor('the end of the turn after', (e) => ended(e) && e.type === 'turn_complete')
+    // A failed turn would end it too: it must be the turn's normal end
+    expect((await d.waitFor('the end of the turn after', ended)).type).toBe('turn_complete')
   }
 }
 
@@ -162,7 +163,9 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(of(events, 'turn_complete')).toHaveLength(4)
   })
 
-  it('centralu-compact-real: guards the state after a compaction — the compaction turn ends as a turn of its own, and the next turn builds on the summary, not on the old context', async () => {
+  // Most of what is read here is Codex's own doing (no model text in the compaction turn, the answer 'after', a context that starts again small); what the adapter does is read the
+  // context from the last request (`last`), not Codex's running total, and end the compaction turn as a turn of its own: the recording continues past it, so the turn after still runs
+  it('centralu-compact-real: guards the context reading after a compaction — it comes from the last request, not the running total, and the compaction turn ends as its own turn before the next one runs', async () => {
     const { events } = await replay('centralu-compact-real')
     const at = events.findIndex((e) => e.type === 'compaction')
     const started = events.findIndex((e) => e.type === 'activity' && e.activity === 'compacting')
@@ -176,6 +179,7 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     // The context starts again from the summary: the turn after it is some thousands of tokens, where the one before the compaction was over 120k
     const used = of(after, 'context_update').map((c) => c.used)
     expect(used.length).toBeGreaterThan(0)
+    // Codex's running total at this point is over 800k tokens: reading it would show the gauge full
     expect(Math.max(...used)).toBeLessThan(30_000)
     expect(of(events.slice(0, started), 'context_update').at(-1)!.used).toBeGreaterThan(120_000)
     expect(of(after, 'compaction')).toEqual([])
@@ -217,20 +221,21 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(results.at(-1)!.summary).toContain('two')
   })
 
-  it('centralu-agent-stop: guards the cards that end a child — a running child is stopped and then put in the archive, each drawn by what it did and answered ok', async () => {
+  // The adapter's part is the card each call is drawn as (its label and the session it names, `centraluMark`) and that the calls end ok; the words of the results are the host's, passed through
+  it('centralu-agent-stop: guards how the calls that end a child are drawn — start, stop and delete are three cards of Centralu’s, the last two naming the session the model gave, and each ends ok', async () => {
     const { events } = await replay('centralu-agent-stop')
     expect(calls(events).map((c) => c.centralu?.label)).toEqual(['Started an agent', 'Stopped an agent', 'Deleted an agent'])
     const [start, stop, del] = calls(events)
     expect(start!.tool).toBe('start_agent')
     expect([stop!.tool, del!.tool]).toEqual(['agent_session', 'agent_session'])
-    // The two calls on the child name the same session
+    // Both name the session the model gave (the recording holds the handle the model used, `ses-2`, not the id the start answered with)
     expect(stop!.centralu?.sessionId).toBeDefined()
     expect(del!.centralu?.sessionId).toBe(stop!.centralu?.sessionId)
     const results = of(events, 'tool_result')
     expect(results.every((r) => r.ok)).toBe(true)
     expect(results[1]!.summary).toContain('Stopped the codex session')
     expect(results[2]!.summary).toContain('to the session archive')
-    // The child was working when it was stopped: it was not waited for
+    // The host's words: the child was working when it was stopped, and the delete moved it to the archive
     expect(results[0]!.summary).toContain('is working on it')
     expect(of(events, 'turn_complete')).toHaveLength(1)
   })

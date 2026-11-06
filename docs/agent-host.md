@@ -2313,8 +2313,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    the host's part at the point of the recording where it acted.
    **Codex's own automatic compaction is not recordable on 0.160.0 with the limits tried:** the run reached 233k of the 258,400-token
    window, with `model_auto_compact_token_limit` set to 155,040, and Codex never compacted by itself. Only Centralu's compaction
-   (`trigger: manual`) is recorded, and the adapter's `auto` trigger is covered by the hand-written frames in `codex/compact.test.ts`
-   until a run on a later version triggers it.
+   (`trigger: manual`) is recorded. The adapter's `auto` trigger is only checked by the hand-written frames in `codex/compact.test.ts`,
+   which model an automatic compaction as a turn of its own where a real one may run inside a regular turn, until a run on a later
+   version triggers it.
    Claude Code's are recorded the same way (`frames-record-host.mts claude`; `claude/centralu-scenarios.test-helpers.ts`: start_agent,
    agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
    sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
