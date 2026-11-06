@@ -1,4 +1,4 @@
-import { loadRecording, recordedFolders } from '../frames/replay.test-helpers.js'
+import { loadRecording, recordedFolders, type Recording } from '../frames/replay.test-helpers.js'
 
 /**
  * What the real Codex app-server sent, for the tests that read one answer or notification rather than a whole session
@@ -8,6 +8,19 @@ import { loadRecording, recordedFolders } from '../frames/replay.test-helpers.js
  */
 
 export const CODEX_RECORDINGS = `${import.meta.dirname}/recordings`
+
+/** What the recordings were made with, which a replay's session is given again: the smallest model, at the lowest effort */
+export const CODEX_REPLAY_SESSION = { model: 'gpt-5.6-luna', effort: 'low' } as const
+
+/** The config the recorded session's first `thread/start` set on the thread */
+const threadConfig = (recording: Recording): { mcp_servers?: Record<string, unknown>; project_doc_max_bytes?: number } | undefined =>
+  (recording.frames.find((f) => f.dir === 'out' && f.msg?.method === 'thread/start')?.msg?.params as { config?: object } | undefined)?.config
+
+/** Whether the recorded session had Centralu's tools: its `thread/start` offers the bridge, which a replay's session is given only then */
+export const hasCentraluBridge = (recording: Recording): boolean => threadConfig(recording)?.mcp_servers?.centralu !== undefined
+
+/** Whether the recorded session's folder was trusted: an untrusted one is marked so in its thread's config, and its project documents are not read */
+export const wasProjectTrusted = (recording: Recording): boolean => threadConfig(recording)?.project_doc_max_bytes !== 0
 
 /** The recorded app-server version's folder: the newest, as a re-recording on a version bump replaces the old one */
 export const recordedVersion = (): string => {
@@ -23,6 +36,15 @@ export type Frame = { dir: 'in' | 'out'; msg: Record<string, unknown> }
 /** The frames of `scenario` in the order they went, the process lines of every process it started */
 export function recordedFrames(scenario: string): Frame[] {
   return loadRecording(fileOf(scenario)).frames.flatMap((f) => (f.dir !== 'exit' && f.msg ? [{ dir: f.dir, msg: f.msg }] : []))
+}
+
+/** The result the app-server answered a host's `skills/list` with: the first recording made through a host that holds one (the folder it asked for stays `<cwd>`) */
+export function recordedSkillsList(): Record<string, unknown> {
+  for (const name of recordedFolders(CODEX_RECORDINGS).find((f) => f.dir === recordedVersion())!.names) {
+    const result = recordedAnswers(name, 'skills/list')[0]?.result
+    if (result) return result
+  }
+  throw new Error('no recording made through a host holds an answer to skills/list')
 }
 
 /** The notifications the app-server sent in `scenario`, in order, with the given method (any when absent) */

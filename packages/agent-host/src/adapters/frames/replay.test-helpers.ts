@@ -111,6 +111,8 @@ export type FrameCodec = {
     requestId(line: Record<string, unknown>): string
     /** The answer to `asked`, made from a recorded one */
     answer(asked: Record<string, unknown>, recorded: Record<string, unknown>): Record<string, unknown>
+    /** What stands for the recorded answer where the recording holds none, if the tool would have answered: left unanswered when absent */
+    readonly unrecorded?: Record<string, unknown>
   }
 }
 
@@ -136,20 +138,44 @@ export const jsonRpcCodec: FrameCodec = {
  * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
  * answer, a file change, a command's output). `cwd`: that folder. `ignoreParams`: parameters of a request that are not compared, for a
  * a thread's `thread/start` or `thread/resume`, for a recording whose values are not the replay's (the bridge's address and credential in
- * `config`, the tools' instructions in `developerInstructions`: words that change with the build); a test asserts what it needs of them
+ * `config`, the tools' instructions in `developerInstructions`: words that change with the build); a test asserts what it needs of them.
+ * `ignoreConfig`: paths into a thread's `config` that are not compared either (each a list of keys: the bridge, the trust list, the compaction
+ * limit of the host that recorded); the rest of the config is.
+ * `skills`: the session is a host's, which asks for the session's commands (`skills/list`) when it likes, so that is a probe, answered from the
+ * recording if it holds an answer and else with this result, which an app-server answered a host with (`recordedSkillsList`).
+ * `host`: the recording is of the driver alone and is played to a session of a host, which names every message it sends where the driver names
+ * none: the name is accepted, and the app-server's echo of the message (an item with `clientId: null`) carries it, as the app-server's echo of a
+ * named message does in the recordings made through a host. A recording made through a host holds the names its host gave, and is compared as it is.
  */
-export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[] } = {}): FrameCodec => {
+export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]; ignoreConfig?: readonly (readonly string[])[]; skills?: Record<string, unknown>; host?: boolean } = {}): FrameCodec => {
   /** The id a run makes up for an input (`clientUserMessageId`), which the app-server says back on the input's item */
   const ownId = (params: unknown): string | undefined => {
     const id = (params as { clientUserMessageId?: unknown } | undefined)?.clientUserMessageId
     return typeof id === 'string' ? id : undefined
   }
   // The ignored parameters are a thread's own (`thread/start`, `thread/resume`): the same name in another request is compared
-  const withoutOwnId = (params: unknown, method: string): unknown =>
-    params && typeof params === 'object'
-      ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId' && !(opts.ignoreParams?.includes(k) && (method === 'thread/start' || method === 'thread/resume'))))
-      : params
+  const withoutOwnId = (params: unknown, method: string): unknown => {
+    if (!params || typeof params !== 'object') return params
+    const own = method === 'thread/start' || method === 'thread/resume'
+    const kept = Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId' && !(own && opts.ignoreParams?.includes(k))))
+    const config = (kept as { config?: unknown }).config
+    return own && opts.ignoreConfig && config && typeof config === 'object' ? { ...kept, config: opts.ignoreConfig.reduce<unknown>((c, path) => without(c, path), config) } : kept
+  }
+  /** The names the host gave messages whose recorded echo has none, in the order they were sent, and the one each echoing item was given */
+  const unnamed: string[] = []
+  const given = new Map<string, string>()
   return {
+    ...(opts.skills
+      ? {
+          probe: {
+            is: (line) => line.method === 'skills/list',
+            answers: (line, asked) => line.method === undefined && asked.has(idOf(line.id)),
+            requestId: (line) => idOf(line.id),
+            answer: (asked, recorded) => ({ ...inFolder(recorded, cwd), id: asked.id }),
+            unrecorded: { result: opts.skills },
+          },
+        }
+      : {}),
     match(sent, want, ids) {
       const recorded = inFolder(want, cwd)
       const problem = jsonRpcCodec.match(sent, recorded, ids)
@@ -160,6 +186,7 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
       const mine = ownId(sent.params)
       const theirs = ownId(recorded.params)
       if (mine && theirs) ids.set(theirs, mine)
+      else if (mine && opts.host) unnamed.push(mine)
       else if (mine || theirs) return `the adapter sent ${recorded.method} ${mine ? 'with' : 'without'} an input id where the recording ${mine ? 'has none' : 'has one'}`
       return null
     },
@@ -170,9 +197,26 @@ export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]
         if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)]))
         return v
       }
-      return inFolder(swap(jsonRpcCodec.rewrite(incoming, ids)), cwd) as Record<string, unknown>
+      const msg = inFolder(swap(jsonRpcCodec.rewrite(incoming, ids)), cwd) as Record<string, unknown>
+      const item = (msg.params as { item?: { type?: string; id?: string; clientId?: unknown } } | undefined)?.item
+      if (opts.host && item?.type === 'userMessage' && item.clientId === null && item.id) {
+        // The app-server says a named message back on its item, the same name on the start and the end of it
+        if (!given.has(item.id) && unnamed.length > 0) given.set(item.id, unnamed.shift()!)
+        if (given.has(item.id)) item.clientId = given.get(item.id)
+      }
+      return msg
     },
   }
+}
+
+/** `value` without what is at `path` (a list of keys), the objects on the way copied, and left out when nothing else is in them */
+const without = (value: unknown, path: readonly string[]): unknown => {
+  const [key, ...rest] = path
+  if (!value || typeof value !== 'object' || key === undefined || !(key in value)) return value
+  const object = value as Record<string, unknown>
+  if (rest.length === 0) return Object.fromEntries(Object.entries(object).filter(([k]) => k !== key))
+  const inner = without(object[key], rest)
+  return inner && typeof inner === 'object' && Object.keys(inner).length === 0 ? without(object, [key]) : { ...object, [key]: inner }
 }
 
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
@@ -392,7 +436,8 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   private received(msg: Record<string, unknown>): void {
     if (this.codec.probe?.is(msg)) {
       // A recording that holds no answer to one (the tool ended first) leaves the adapter's query unanswered, as the tool did
-      if (this.probeAnswer) this.say(`${JSON.stringify(this.codec.probe.answer(msg, this.probeAnswer))}\n`)
+      const answer = this.probeAnswer ?? this.codec.probe.unrecorded
+      if (answer) this.say(`${JSON.stringify(this.codec.probe.answer(msg, answer))}\n`)
       return
     }
     this.sent.push(typeof msg.method === 'string' ? msg.method : 'answer')
@@ -429,7 +474,10 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
    * client registers its wait for an answer after writing the request (Codex's does), so an answer in the same call is lost
    */
   private say(line: string): void {
-    queueMicrotask(() => this.stdout.write(line))
+    // The process may end between the call and the microtask (the host deleting a session): a line to a process that ended is lost, as to a real one
+    queueMicrotask(() => {
+      if (!this.stdout.writableEnded) this.stdout.write(line)
+    })
   }
 
   private pump(): void {
