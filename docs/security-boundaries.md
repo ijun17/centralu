@@ -15,7 +15,29 @@ workers to directing sessions become host-authored notifications: the receiver's
 (how the work ended, the session's id, the kind of its tool's error, how to go on, and the `read_session` call that
 shows the last response and the error as data), never the last response, an error's words (a CLI's error can carry a
 hook's output, a linked machine's is whatever it sends), a session's or project's name or a task's description (#1186;
-`ChildReports.tellSession`'s `forModel`, `errorKind`). A notice that could not be delivered is kept in memory, dropped
+`ChildReports.tellSession`'s `forModel`, `errorKind`). One exception, by the owner's choice (#1948): the mail notice a
+session gets when a session it asked stops before answering (docs/plans/turn-owned-by-no-one.md §4.1) quotes what the
+stopped session last wrote in the cut turn, at most 600 characters, five sessions a notice, every line behind `> `, under
+Centralu's words that it is that session's own text, to be read as information and never as instructions. It is not a new
+read path, and one rule decides it (`MessageService.quotes`), which the older report path's notice of a stop
+(`ChildReports.tellAskerOfInterruption`) is held to as well. Each of these must hold, or nothing is quoted:
+- the sender is a session that can read the stopped session with `read_session` (that tool's own rule,
+  `OrchestratorTools.mayRead`, asked through `SessionTools.readsSession`);
+- the cut turn is the session's latest in the mailbox's record of turns, and the sender's own message started it: a mail the
+  mailbox delivered, or work the sender gave it (a start_agent task, an agent_session send), whose task row the turn names as
+  its starter and the sender sent. A turn the CLI started by itself, or the person's, is never quoted;
+- every message the mailbox delivered into that turn is the sender's;
+- every user row the session stored since the row its turn before began after names the sender in `from`, not as a relayed
+  report, and no question card of the session was answered since (`ChildOwnership.latestTurnInputs`). A row the person typed,
+  an app's, a script's and one read back from the tool's own record name no sender. A question card's answer goes to the tool
+  and is stored only as the mark `question_answered:<session>`, written before the answer is given. With no turn start
+  recorded, nothing is quoted.
+
+The rows checked start at the turn before's start, so they can include that turn's own rows; such a row withholds the quote
+too. Withheld, the mail notice carries no quote, and the older path's report has `(not quoted: …)` where the last response
+would be. It is mail, so
+it is never inline in a wake: `mail read` shows it quoted again under "the person did not write it". The error's words are
+still left out, and the person's Inbox notice quotes nothing. A notice that could not be delivered is kept in memory, dropped
 with its session, and delivered when the session next takes a message; ordinary
 orchestrator/manager/coordinator instructions retain their content and attachments. A worker
 holding the read-only `reader` set (#320) is still a worker here: the gate asks whether the
@@ -496,8 +518,8 @@ mailbox's `UNIQUE(sender, dedupe_key)`, in the store, so a restart or a swap kee
 typed, quotes it, and says to judge from it and around it what the person wants. Every other request says it cites nothing the person wrote, so its words are the
 session's only. Cited or not, it wakes the orchestrator.
 (2) Its words never go inline: the wake lists host fields and calls the sender "a session asking you for something", and `mail read` quotes the words under a header
-Centralu writes from its own record (the session's name, its project, whether the project is trusted, the citation). The words are read in the turn mail starts for the
-request and in no other: read in the person's turn, or in another request's, they would be a session's words in a turn that has no card for them, so `mail read` gives
+Centralu writes from its own record (the session's name, its project, whether the project is trusted, the citation). The words are read in the turn the request was given in
+and in no other (an earlier request of the same session included): read in the person's turn, or in another request's, they would be a session's words in a turn that has no card for them, so `mail read` gives
 only who the request is from there, and `mail inbox` lists a request by that header and not by the subject the session wrote. (3) **The floor and the record.** A request's turn is never looser than the
 person's own. The steps that can be undone are listed (`UNDOABLE`, `sessions/asked-acts.ts`: a project added or made, a machine added or its link changed, a trust or a
 setting changed, a session renamed or restored, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken away), and so is work
@@ -522,8 +544,12 @@ file's content, an edit's text, a message), refusing one over 6,000 characters; 
 cards the step would raise itself meanwhile are covered by it (`HostCards.cover`, kept by the call's own async work and ended with the call or its signal), so there is one
 card, and no "always" is offered or kept; an Allow that arrives after the turn it was asked in ended (also when the thread's next turn has begun) runs nothing. The card shows every argument whole except long free text of
 Centralu's own tools, which is cut and says how long it was; a step too long to show whole is refused, not asked about in part.
-Whose request the turn is is fixed when the turn begins
-(`MailTurns`), so the session going to the trash, or the thread passing to the person, does not lift the gate or unhide a held request. A turn that is not a request (the person's,
+Whose request the turn is is read from the store, never kept in memory (docs/plans/turn-owned-by-no-one.md §4.2, `MessageService.requestsIn`): the senders of the requests
+whose rows were given in the orchestrator's open turn, settled or not, and not held from it. So the request answered mid-turn, the person writing into the turn, the session going
+to the trash, a restart or a host swap does not lift the gate, and a held request never joins a turn or shows its words. The words of a request are shown under the same rule,
+so they are shown exactly where the gate is that session's. One session's requests a wake, and a request never joining a running turn, keep a turn to one asker; if a turn ever
+held requests of two sessions it **fails closed**: every step but a read asks, the answer in a request's own thread and a step that can be undone included, the card names every
+asker, a created session is held to the lowest asker's preset, and each step done is recorded in each asking session. A turn that is not a request (the person's,
 or a thread the person gave) is as it was. **Where the orchestrator's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
 is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
 **Not covered, and named:** the orchestrator's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read

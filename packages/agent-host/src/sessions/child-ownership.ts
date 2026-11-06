@@ -174,6 +174,11 @@ const MAX_INPUT_ORIGINS = 64
  */
 export const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
 const TURN_STARTS_KEPT = 8
+/**
+ * The last row stored when a question card of the session was last answered (#1948), in `question_answered:<session>`: the answer goes
+ * to the tool and is stored nowhere else, so a stop notice that quotes the turn knows the turn took the person's answer in
+ */
+export const questionAnsweredKey = (sessionId: string) => `question_answered:${sessionId}`
 type TurnSpan = { latest?: { since: number; ended?: true }; previous?: { since: number }; starts?: readonly number[] }
 function readTurnSpan(raw: string | null): TurnSpan {
   if (raw === null) return {}
@@ -784,6 +789,7 @@ export class ChildOwnership {
     this.dropInputOrigins(sessionId)
     this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
     this.store.settings.deleteAppSetting(turnInputsKey(sessionId))
+    this.store.settings.deleteAppSetting(questionAnsweredKey(sessionId))
     this.entries.delete(sessionId)
     this.spentAt.delete(sessionId)
     this.named.delete(sessionId)
@@ -833,6 +839,29 @@ export class ChildOwnership {
   latestTurnRows(sessionId: string): { after: number } | undefined {
     const since = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId))).latest?.since
     return since === undefined ? undefined : { after: since }
+  }
+  /** A question card of the session was answered (#1948): the answer went to the tool, into the turn running (`latestTurnInputs`) */
+  noteQuestionAnswered(sessionId: string): void {
+    this.store.settings.setAppSetting(questionAnsweredKey(sessionId), String(this.store.messages.nextSeq(sessionId) - 1))
+  }
+  /**
+   * Who gave each thing that may have entered the session's latest turn (#1948): every user row stored since the turn before it began (every
+   * row, with no turn before), as the session id that sent it, or null for one no session sent (the person, an app, a script, a relayed report,
+   * words read back from the tool's own record), and a null for a question card answered since. The turn before's own rows count too. Mail
+   * given in leaves no user row: the mailbox has those. No turn seen to begin: one null
+   */
+  latestTurnInputs(sessionId: string): (string | null)[] {
+    const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
+    if (!span.latest) return [null]
+    const from = span.previous?.since ?? 0
+    const answered = Number(this.store.settings.appSetting(questionAnsweredKey(sessionId)) ?? NaN)
+    const rows = this.store.messages.loadUserRowsFrom(sessionId, from).map((row) => {
+      const p = asObj(row.payload)
+      const sender = asObj(p.from).sessionId
+      // Only a session's own message names it (`from`): the person's, an app's, a script's and the tool's own record's rows name none
+      return typeof sender === 'string' && p.relayed !== true ? sender : null
+    })
+    return answered >= from ? [...rows, null] : rows
   }
   /** The mailbox's way of hearing that a turn started (§6), set by the host when it has one */
   private turnStartedHook: ((sessionId: string, turn: TurnStart) => void) | undefined
