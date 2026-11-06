@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
@@ -52,6 +52,11 @@ class Window {
           else p?.reject(new Error(f.error?.message ?? 'host error'))
         } else if (f.kind === 'event' && f.event) {
           this.events.push(f.event)
+          // A card a session raises (a tool that reaches another project asks the person first) is allowed: a recording needs the call to go through
+          if (f.event.type === 'approval_request') {
+            console.error(`[record] allowed a card of ${String((f.event as { detail?: { kind?: string } }).detail?.kind)}`)
+            void this.rpc('agents.respondApproval', { sessionId: f.event.sessionId, requestId: (f.event as { requestId?: string }).requestId, decision: 'allow' })
+          }
           for (const l of this.listeners) l(f.event)
         }
       })
@@ -128,11 +133,11 @@ async function main(): Promise<number> {
   const codexHome = temporaryCodexHome(data)
   let host: ChildProcess | null = null
   // What the run in progress has made, for an interrupted run to take away (the copy of the sign-in is in `data`)
-  const open: string[] = []
+  const open_: string[] = []
   const stop = () => {
     host?.kill('SIGKILL')
     codexHome.finish()
-    for (const dir of [...open, data]) rmSync(dir, { recursive: true, force: true })
+    for (const dir of [...open_, data]) rmSync(dir, { recursive: true, force: true })
     process.exit(130)
   }
   process.once('SIGINT', stop)
@@ -142,7 +147,7 @@ async function main(): Promise<number> {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
       mkdirSync(raw, { recursive: true })
-      open.push(folder, raw)
+      open_.push(folder, raw)
       const window = new Window()
       try {
         const token = randomBytes(24).toString('hex')
@@ -151,8 +156,16 @@ async function main(): Promise<number> {
         const started = await startHost(data, home, raw, token, (child) => (host = child))
         await window.open(started.port, token)
         const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
-        const open = async (prompt: string, name?: string): Promise<string> => {
-          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: project.id, cwd: folder, tool: 'codex', model: MODEL, effort: 'low', permissionPreset: 'auto', ...(name ? { name } : {}) })
+        if (scenario.trusted) await window.rpc('projects.setTrusted', { projectId: project.id, trusted: true })
+        // A second project when the scenario reaches one: its folder's name is the project's
+        let otherProject: { id: string } | null = null
+        const other = scenario.otherProject ? realpathSync(mkdtempSync(join(tmpdir(), 'frames-record-other-'))) : null
+        if (other) {
+          open_.push(other)
+          otherProject = await window.rpc<{ id: string }>('projects.add', { path: other })
+        }
+        const open = async (prompt: string, where?: { projectId: string; cwd: string }): Promise<string> => {
+          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: where?.projectId ?? project.id, cwd: where?.cwd ?? folder, tool: 'codex', model: MODEL, effort: 'low', permissionPreset: 'auto' })
           const id = made.id ?? made.sessionId!
           await turn(id, prompt)
           return id
@@ -163,9 +176,12 @@ async function main(): Promise<number> {
           const e = await done
           if (e.type === 'error') throw new Error(`the turn "${text.slice(0, 30)}" failed: ${JSON.stringify(e.error)}`)
         }
+        const said = (text: string) => (other ? text.replaceAll('{other}', basename(other)) : text)
         for (const helper of scenario.helpers) await open(helper)
-        const main = await open(scenario.turns[0]!)
-        for (const text of scenario.turns.slice(1)) await turn(main, text)
+        if (scenario.otherSession && other && otherProject) await open(scenario.otherSession, { projectId: otherProject.id, cwd: other })
+        const main = await open(said(scenario.turns[0]!))
+        for (const text of scenario.turns.slice(1)) await turn(main, said(text))
+        for (const next of scenario.then ?? []) await window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)
         // The recording of the session the scenario keeps: the one whose Codex process made the tool calls
         const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
         const frames = files.flatMap((f) => readFileSync(join(raw, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
@@ -173,7 +189,7 @@ async function main(): Promise<number> {
         const dir = join(CODEX_FOLDER, `codex-${codexVersion.replace(/^codex-cli /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
         const header = { header: { tool: 'codex', version: codexVersion, scenario: scenario.name, preset: 'auto', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10), host: true } }
-        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder)].map((l) => JSON.stringify(l)).join('\n') + '\n')
+        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder, undefined, { cutText: scenario.cutText })].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] codex ${scenario.name} (through a host): ${frames.length} frames -> ${dir}`)
       } catch (e) {
         failed++
@@ -184,6 +200,8 @@ async function main(): Promise<number> {
         await new Promise((r) => setTimeout(r, 1500))
         host?.kill('SIGKILL')
         await removeDir(folder)
+        for (const dir of open_.splice(2)) await removeDir(dir)
+        open_.length = 0
         if (!keepRaw) await removeDir(raw)
       }
     }
