@@ -81,6 +81,7 @@ test('a run\'s line stands 8px from the bubbles around it, and its press area ke
   const sid = await newSession(page, 'alpha')
   await seed(page, sid, [user(1), said(2, 'Reading first.'), thought(3), tool(4), tool(5), said(6, 'Done.'), user(7, 'again'), said(8, 'Alone.')])
   await expect(page.getByTestId('fold-line')).toHaveCount(1)
+  await rest(page.getByTestId('chat-stream'))
 
   const m = await page.evaluate(() => {
     const top = (e: Element) => e.getBoundingClientRect().top

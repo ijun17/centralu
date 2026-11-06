@@ -384,8 +384,8 @@ export function ChatStream({
               measurements are undisturbed.
             */
               /*
-              The line of a folded run stands 8px from the bubble above and 8px from the bubble below (owner,
-              2026-11-07: it was 16 each side): the row before it and the line's own row take 4px of bottom
+              The line of a folded run stands 8px from an answer bubble above and 8px from one below (owner,
+              2026-11-07: it was 16 each side; after the person's message the row keeps its 24px): the row before it and the line's own row take 4px of bottom
               padding instead of 12, and the line's own 4px stays, so the space is the line's, not the bubbles'.
               A row that is not next to a line keeps the 12px the bubbles stand apart by.
             */
