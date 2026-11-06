@@ -2,6 +2,7 @@ packages:
   - packages/*
   - apps/*
   - e2e
+  - tooling/eslint-import-resolver-cc
 allowBuilds:
   better-sqlite3: true
   esbuild: true

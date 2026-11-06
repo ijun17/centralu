@@ -69,6 +69,7 @@
     "@types/node": "^22.13.0",
     "dependency-cruiser": "^16.9.0",
     "eslint": "^9.20.0",
+    "eslint-import-resolver-cc": "workspace:*",
     "eslint-plugin-boundaries": "^5.0.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.11.0",
