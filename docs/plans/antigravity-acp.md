@@ -498,18 +498,18 @@ one by one on Windows):
 | Deep review: a sign-in timeout is `timed_out`, an ineligible answer carries its page, no address in the message | `sign-in.test.ts` (the agent's real frames) |
 | Deep review: no compaction for an agent that advertises none; `compact_self` says so; the commands of a load's replay kept | `acp/session.test.ts`, `sessions/self-compaction.test.ts` |
 
-### 10.1 1.5.0, recorded through the adapter (2026-11-06)
+### 10.1 1.5, recorded through the adapter (2026-11-06)
 
-The installed `agy` 1.5.0 has `agy acp`. `scripts/frames-record.mts antigravity` drives the real adapter and profile through the
+The installed `agy` has `agy acp` (1.5.0 when this was begun; the CLI updated itself to 1.5.2 during the work, and the scenarios were recorded again on it). Between the two, the comparison of every frame's shape found only the version, a `config_option_update` in 1.5.2 and the order of a shell call's announcement; what follows holds for both. `scripts/frames-record.mts antigravity` drives the real adapter and profile through the
 scenarios of `frames/scenarios.test-helpers.ts` against it (`permissions`, `deny`, `load`, `signed-out`, `centralu-mail`,
 `centralu-agents`), in a data folder, `--gemini-dir` and home of its own; the sign-in token is a copy that is put back if the agent
-refreshed it, as Codex's is. It is not the pinned archive: Centralu runs 1.4.3, so `recordings/antigravity-1.5.0/` is what a bump
+refreshed it, as Codex's is. The model is set to `gemini-3.8-flash-low` (the agent starts on a dearer one, and the adapter sets none) by a proxy around `agy acp` that asks `session/set_model` once the session is open and swallows the answer (`scripts/frames-record-agy-model.mjs`); the recording's header names it. It is not the pinned archive: Centralu runs 1.4.3, so `recordings/antigravity-1.5.2/` is what a bump
 meets, and `replay.test.ts` has a second block for it. `antigravity-1.4.3/` stays whole, because the tests of the pinned agent
 (the edit's two ids, `Cwd`, `allow_always`, the MCP cards) read it, and `sign-in` and `mcp` could not be recorded again (a
 person in a browser; two servers of the spike's own, which the adapter does not attach). What changed in the frames (#2048 has
 the ones that matter):
 
-| | 1.4.3 | 1.5.0 |
+| | 1.4.3 | 1.5 |
 |---|---|---|
 | Edit in the folder, read outside it | asked (edit), refused (outside read) | no request, both done |
 | `usage_update` (`used`, `size`) | after every step | none; only the prompt's final `usage` |

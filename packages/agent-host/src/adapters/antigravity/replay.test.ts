@@ -13,13 +13,13 @@ import { agyRecording, driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFOR
  * by the spike's own client, so what the adapter sends is matched by method and by its answers to the agent's requests
  * (`jsonRpcCodec`), not by every parameter. Each test waits for events, never for time.
  *
- * A second set, of 1.5.0 (the installed `agy acp`, the next release after the pinned one), was recorded through this adapter by
- * `scripts/frames-record.mts antigravity`; its tests say what the adapter makes of the frames 1.5.0 sends, which is not yet the
+ * A second set, of 1.5.2 (the installed `agy acp`, the next release after the pinned one), was recorded through this adapter by
+ * `scripts/frames-record.mts antigravity`; its tests say what the adapter makes of the frames 1.5 sends, which is not yet the
  * release Centralu runs (#2048). The 1.4.3 ones stay: they are the pinned agent's.
  */
 
 const recording = agyRecording
-const recording15 = (name: string) => agyRecording(name, '1.5.0')
+const recording15 = (name: string) => agyRecording(name, '1.5.2')
 
 const data: { done(): void }[] = []
 afterEach(() => {
@@ -189,8 +189,8 @@ describe('Antigravity 1.4.3, replayed', () => {
   })
 })
 
-describe("Antigravity's agent as `agy acp` 1.5.0 runs it, replayed", () => {
-  it('permissions: a command asked and allowed; an edit and a read outside the folder are made without a card (1.5.0 asks for neither); the shell result is the command’s output', async () => {
+describe("Antigravity's agent as `agy acp` 1.5.2 runs it, replayed", () => {
+  it('permissions: a command asked and allowed; an edit and a read outside the folder are made without a card (1.5.2 asks for neither); the shell result is the command’s output', async () => {
     const w = world(recording15('permissions'))
     const handle = await open(w)
     await turn(w, handle, 'Do these three steps', 'allow')
@@ -206,17 +206,17 @@ describe("Antigravity's agent as `agy acp` 1.5.0 runs it, replayed", () => {
     expect(cards[0]!.detail).toMatchObject({ kind: 'command', command: 'echo hello-from-shell', cwd: '/work' })
     const results = new Map(of(w.events, 'tool_result').map((r) => [r.callId, r]))
     const calls = of(w.events, 'tool_call')
-    expect(calls.map((c) => c.summary.tool)).toEqual(['Bash', 'Read', 'Edit', 'Read'])
+    expect(calls.map((c) => c.summary.tool)).toEqual(['Bash', 'Edit', 'Read'])
     expect(results.get(calls[0]!.callId)).toMatchObject({ ok: true, output: expect.stringContaining('hello-from-shell') })
-    // The edit is one call that ends ok and marks its file; a read ends ok with the text the agent did not hand back
-    expect(results.get(calls[2]!.callId)).toMatchObject({ ok: true })
+    // The edit is one call that ends ok and marks its file; the read outside the folder ends ok, with no text of the file in the frames
+    expect(results.get(calls[1]!.callId)).toMatchObject({ ok: true })
     expect(of(w.events, 'files_touched')).toHaveLength(1)
-    expect(calls.filter((c) => c.summary.tool === 'Read').map((c) => results.get(c.callId)?.ok)).toEqual([true, true])
+    expect(calls.filter((c) => c.summary.tool === 'Read').map((c) => results.get(c.callId)?.ok)).toEqual([true])
     // The tree is noted while the command runs, so a Stop ends the command's own process group (spike §9)
     expect(w.notes.length).toBeGreaterThan(0)
-    // The turn's tokens, with the cached part told apart
-    expect(of(w.events, 'usage_update').at(-1)?.tokens).toMatchObject({ inputTokens: 16557, cacheReadTokens: 22293 })
-    expect(of(w.events, 'agent_version').map((e) => e.version)).toEqual(['1.5.0'])
+    // The turn's tokens, from the usage the agent ends the prompt with (its only reading in 1.5: no `usage_update` runs through the turn)
+    expect(of(w.events, 'usage_update').at(-1)?.tokens).toMatchObject({ inputTokens: 29437, outputTokens: 257 })
+    expect(of(w.events, 'agent_version').map((e) => e.version)).toEqual(['1.5.2'])
   })
 
   it('permissions: the agent stays in its default mode, with no client reads offered and no tool filter sent', async () => {

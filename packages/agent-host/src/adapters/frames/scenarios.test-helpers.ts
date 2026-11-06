@@ -41,13 +41,13 @@ export type Scenario = {
   /** A model the scenario asks for in place of the run's (a failed turn names one that does not exist) */
   model?: string
   preset?: PermissionPreset
+  /** The tool is to refuse to open a session (it is signed out): the run opens none and the scenario is the refusal */
+  signedOut?: boolean
   /**
    * The tool's own settings for the run (Codex: its settings folder holds them): `mcp` sets it up with a small MCP server,
    * `probe`, whose one tool `ping` answers `pong`
    */
   settings?: 'mcp'
-  /** The tool is to refuse to open a session (it is signed out): the run opens none and the scenario is the refusal */
-  signedOut?: boolean
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */

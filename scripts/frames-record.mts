@@ -11,16 +11,14 @@
  * Cursor's and Claude's spend the person's plan (Claude on its smallest model, with no settings file read), so run
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
  * link) is a temporary one; so are OpenCode's XDG folders. A scenario that gives an ACP agent Centralu's tools (`centralu-*`) runs
- * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
+ * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). Antigravity runs the installed `agy acp`
+ * (`frames-record-agy.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFileSync } from 'node:child_process'
 import { AcpAdapter } from '../packages/agent-host/src/adapters/acp/adapter.js'
-import { AntigravityAdapter, antigravityProfile, type AgyProfile } from '../packages/agent-host/src/adapters/antigravity/index.js'
-import { fakeInstall, HOST_TEST_ARCHIVE } from '../packages/agent-host/src/adapters/antigravity/agent-files.test-helpers.js'
 import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.js'
 import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
@@ -30,12 +28,13 @@ import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
 import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
+import { AGY_MODEL, temporaryAgy } from './frames-record-agy.mts'
 import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
 const TOOLS = ['cursor-agent', 'opencode', 'claude', 'codex', 'antigravity']
-const ACP_TOOLS = ['cursor-agent', 'opencode']
+const ACP_TOOLS = ['cursor-agent', 'opencode', 'antigravity']
 
 class RecordingAdapter extends AcpAdapter {
   readonly tool = 'recording'
@@ -58,7 +57,7 @@ async function main(): Promise<number> {
   const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
   const [tool, ...names] = args
   if (!tool || !TOOLS.includes(tool)) {
-    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex | antigravity> [scenario ...] [--raw <folder>]')
+    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
     return 2
   }
   const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
@@ -112,7 +111,7 @@ async function main(): Promise<number> {
         } else {
           run = runAs(tool, scenario.drive!)
           // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
-          const given = ACP_TOOLS.includes(tool) || tool === 'antigravity' ? scenario.drive!.session?.() : undefined
+          const given = ACP_TOOLS.includes(tool) ? scenario.drive!.session?.() : undefined
           if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
           const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
           events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
@@ -152,7 +151,7 @@ async function main(): Promise<number> {
 
 /** The model a recording of `tool` runs on, for its header (OpenCode: its free models, no choice made) */
 function modelOf(tool: string): string {
-  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
+  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, antigravity: AGY_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
 }
 
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
@@ -163,56 +162,6 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
   if (tool === 'claude') return { session: { model: CLAUDE_MODEL, noSettingFiles: true, processSource: { spawn } } }
   if (tool === 'codex') return { session: { model: CODEX_MODEL, effort: 'low', processSource: { spawn } } }
   return {}
-}
-
-/**
- * Antigravity as the installed `agy` runs it (`agy acp`), in a folder of its own: the profile's data folder, `GEMINI_HOME`, `--gemini-dir`
- * and the process's home are all inside the run's temporary folder, so no setting, skill, conversation or log of the person's is read or
- * written. It holds a copy of the sign-in token alone (none for a signed-out scenario). The agent refreshes the access token from the
- * refresh token; if the copy changed, `finish` puts it back into the person's file unless that file changed meanwhile, as Codex's is.
- * The adapter is the real one with the real profile, but for what it starts: `agy acp` in place of the pinned archive's server
- * (Centralu pins a registry release; the installed CLI is the next one), and the version it reports.
- */
-function temporaryAgy(parent: string, scenario: string, signedOut: boolean): { adapter(spawn: (spec: AgentSpawnSpec) => AgentProcess): AgentAdapter; finish(): void } {
-  const dir = join(parent, `agy-${scenario}`)
-  const profile = antigravityProfile({ dataDir: dir })
-  fakeInstall(profile.home, HOST_TEST_ARCHIVE)
-  const home = join(dir, 'home')
-  mkdirSync(home, { recursive: true })
-  const real = join(homedir(), '.gemini', 'antigravity-cli', 'antigravity-oauth-token')
-  const copy = join(profile.home.geminiHome, 'antigravity-cli', 'antigravity-oauth-token')
-  if (!signedOut) {
-    if (!existsSync(real)) throw new Error('agy is not signed in: sign in with the agy CLI first')
-    mkdirSync(dirname(copy), { recursive: true })
-    copyFileSync(real, copy)
-  }
-  const before = signedOut ? '' : readFileSync(copy, 'utf8')
-  const version = execFileSync('agy', ['--version'], { encoding: 'utf8' }).trim()
-  const recorded: AgyProfile = {
-    ...profile,
-    async launch() {
-      const started = await profile.launch()
-      if (!started) throw new Error('the profile does not launch')
-      return { ...started, command: 'agy', args: ['acp', '--gemini-dir', profile.home.geminiHome, '--disable-telemetry'], env: { ...started.env, HOME: home, USERPROFILE: home } }
-    },
-    installedVersion: async () => version,
-  }
-  let done = false
-  return {
-    adapter: (spawn) => new AntigravityAdapter(recorded, spawn),
-    finish() {
-      if (done || signedOut) return
-      done = true
-      if (!existsSync(copy) || !existsSync(real)) return
-      const now = readFileSync(copy, 'utf8')
-      if (now === before) return
-      if (readFileSync(real, 'utf8') !== before) return console.error("[record] the sign-in was refreshed during the run, and the person's own file was too: left as it is")
-      const next = `${real}.${process.pid}.tmp`
-      writeFileSync(next, now, { mode: 0o600 })
-      renameSync(next, real)
-      console.log("[record] the sign-in was refreshed during the run: kept in the person's token file")
-    },
-  }
 }
 
 /**
