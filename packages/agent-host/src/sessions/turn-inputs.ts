@@ -169,8 +169,11 @@ export class TurnInputs {
     // already landed, this never broadcasts a denial or reports a failure (#158)
     if (!landed && this.host.hostCards.answeredApprovals.get(requestId) === sessionId) return
     if (landed) {
-      this.host.hostCards.answeredApprovals.set(requestId, sessionId)
-      if (this.host.hostCards.answeredApprovals.size > 256) this.host.hostCards.answeredApprovals.delete(this.host.hostCards.answeredApprovals.keys().next().value!)
+      const answered = this.host.hostCards.answeredApprovals
+      answered.set(requestId, sessionId)
+      // The oldest goes once more than 256 are kept
+      const oldest = answered.keys().next()
+      if (answered.size > 256 && !oldest.done) answered.delete(oldest.value)
     }
 
     if (!landed) {
