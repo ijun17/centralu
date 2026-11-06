@@ -71,6 +71,42 @@ test('a run between two bubbles is one line that opens in place and folds again'
   await expect(page.getByTestId('msg-reasoning')).toHaveCount(0)
 })
 
+/**
+ * The line of a run stands close to the bubbles around it (owner, 2026-11-07): about 8px of space between its words and
+ * the bubble above, and the same below, half of the 16px it had. The line's press area stays as tall as before (its
+ * words and 4px each side), and two bubbles with no line between keep the 12px they stand apart by.
+ */
+test('a run\'s line stands 8px from the bubbles around it, and its press area keeps its height', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  await seed(page, sid, [user(1), said(2, 'Reading first.'), thought(3), tool(4), tool(5), said(6, 'Done.'), user(7, 'again'), said(8, 'Alone.')])
+  await expect(page.getByTestId('fold-line')).toHaveCount(1)
+
+  const m = await page.evaluate(() => {
+    const top = (e: Element) => e.getBoundingClientRect().top
+    const bottom = (e: Element) => e.getBoundingClientRect().bottom
+    const bubbles = [...document.querySelectorAll('[data-bubble]')]
+    const words = document.querySelector('[data-testid="fold-summary"]')!
+    const line = document.querySelector('[data-testid="fold-line"]')!
+    const rowOf = (e: Element) => e.closest('[data-index]') as HTMLElement
+    return {
+      above: top(words) - bottom(bubbles[0]!),
+      below: top(bubbles[1]!) - bottom(words),
+      press: bottom(line) - top(line),
+      words: bottom(words) - top(words),
+      // The row of a bubble with no line beside it keeps the gap bubbles stand apart by
+      plainPad: getComputedStyle(rowOf(bubbles[2]!)).paddingBottom,
+    }
+  })
+  expect(m.above).toBeGreaterThan(7)
+  expect(m.above).toBeLessThan(9)
+  expect(m.below).toBeGreaterThan(7)
+  expect(m.below).toBeLessThan(9)
+  // Words and 4px each side: the line is at least as tall as it was
+  expect(m.press).toBeGreaterThanOrEqual(m.words + 8 - 0.5)
+  expect(m.plainPad).toBe('12px')
+})
+
 test('a decided approval, a marker, an image and an app view stay on the page and split the run', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const sid = await newSession(page, 'alpha')

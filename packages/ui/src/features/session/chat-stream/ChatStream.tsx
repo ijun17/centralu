@@ -383,12 +383,20 @@ export function ChatStream({
               visibility, so its position and size stay the same and the virtual scroller's
               measurements are undisturbed.
             */
+              /*
+              The line of a folded run stands 8px from the bubble above and 8px from the bubble below (owner,
+              2026-11-07: it was 16 each side): the row before it and the line's own row take 4px of bottom
+              padding instead of 12, and the line's own 4px stays, so the space is the line's, not the bubbles'.
+              A row that is not next to a line keeps the 12px the bubbles stand apart by.
+            */
               className={`absolute left-0 w-full min-w-0 ${
                 chat[v.index]?.kind === 'user'
                   ? 'pb-6 pt-3'
                   : joinsNext(bubbleOf(chat, v.index))
                     ? ''
-                    : 'pb-3'
+                    : folds.heads.has(v.index + 1) || (head && !head.open)
+                      ? 'pb-1'
+                      : 'pb-3'
               } ${v.index === stickyIndex && sticky.stickyCovers ? 'invisible' : ''} ${
                 inMotion ? (mine.kind === 'in' ? 'cc-fade' : 'cc-fade-out') : ''
               } ${
