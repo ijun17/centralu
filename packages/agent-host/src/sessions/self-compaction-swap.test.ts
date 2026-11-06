@@ -121,6 +121,19 @@ describe('compact_self then across a host swap (#2024)', () => {
     expect(store.settings.appSetting(`compact_then:${id}`)).toBeNull()
   })
 
+  it('warns the person through the mailbox hook when a session passes 6 cycles in an hour, on the sixth step that goes before it', async () => {
+    const warned: [string, number][] = []
+    const a = host()
+    a.mgr.useMail({ sessionGone: () => undefined, sessionChanged: () => undefined, compactCycles: (id, count) => void warned.push([id, count]) })
+    const { id, h } = await asking(a, 'compacted')
+    // Six cycles went in the hour before this one
+    const now = Date.now()
+    store.settings.setAppSetting(`compact_cycles:${id}`, JSON.stringify([1, 2, 3, 4, 5, 6].map((n) => now - n * 60_000)))
+    h.finishTurn()
+    await expect.poll(() => warned).toEqual([[id, 7]])
+    expect(stepsSentTo(h)).toHaveLength(1)
+  })
+
   it('keeps a note for the session in the store until its tool can take it', async () => {
     const a = host()
     const { id } = await asking(a, 'asked')

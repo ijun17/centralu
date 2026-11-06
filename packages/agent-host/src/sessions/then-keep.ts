@@ -18,6 +18,8 @@ export type ThenSettings = {
 
 const thenKey = (id: string) => `compact_then:${id}`
 const notesKey = (id: string) => `compact_notes:${id}`
+const cyclesKey = (id: string) => `compact_cycles:${id}`
+const HOUR_MS = 60 * 60_000
 
 /** A stored step reads as null when it is not one (never written, cleared, or a shape this build does not know) */
 const Stored = z.object({
@@ -27,6 +29,7 @@ const Stored = z.object({
   ahead: z.boolean().catch(false),
 })
 const Notes = z.array(z.string())
+const Times = z.array(z.number())
 
 const readStep = (raw: string | null) => readJson(raw, Stored.nullable(), null)
 
@@ -46,6 +49,15 @@ export function settingThenKeep(settings: ThenSettings): ThenKeep {
       // A key that was not there is not left behind as an empty one
       if (!won && settings.appSetting(thenKey(id)) === '') settings.deleteAppSetting(thenKey(id))
       return won
+    },
+    cycle(id, at) {
+      let count = 0
+      settings.updateAppSetting(cyclesKey(id), (current) => {
+        const times = [...readJson(current, Times, []).filter((t) => t > at - HOUR_MS && t <= at), at]
+        count = times.length
+        return JSON.stringify(times)
+      })
+      return count
     },
     notes: (id) => readJson(settings.appSetting(notesKey(id)), Notes, []),
     writeNotes(id, notes) {

@@ -57,6 +57,8 @@ const COMPACT_STALE_MS = 30 * 60_000
 /** A request whose turn ended waits this long for the tool's size reading before it goes by the one it has */
 const READING_WAIT_MS = 5_000
 const FOCUS_MAX_CHARS = 300
+/** More compact then-step cycles than this in an hour, of one session, and the person gets one warning (#2024); nothing is held, refused or delayed for it */
+export const WARN_COMPACT_CYCLES_PER_HOUR = 6
 /** The longest `then` a request takes: it is a prompt, so it is refused rather than cut */
 export const THEN_MAX_CHARS = 4_000
 
@@ -71,6 +73,8 @@ export type ThenKeep = {
   clear(sessionId: string): void
   /** Moves a `compacted` record to `sending` in one transaction; true only for the caller that moved it. The other host of a swap finds it moved (or gone) and sends nothing */
   claim(sessionId: string): boolean
+  /** Records that a compaction of the session went on to its next step at `at`, and answers how many did in the hour up to it (kept, so a swap does not start the count again) */
+  cycle(sessionId: string, at: number): number
   notes(sessionId: string): string[]
   writeNotes(sessionId: string, notes: string[]): void
 }
@@ -96,6 +100,8 @@ export type SelfCompactionHost = {
   sendThen(sessionId: string, text: string): Promise<void>
   /** What a host swap or restart must not lose (`ThenKeep`) */
   keep: ThenKeep
+  /** The person is warned that the session went through `count` compaction cycles in the hour (the mailbox's warning to the person, once per clock hour; the session is not stopped) */
+  warnCycles(sessionId: string, count: number): void
   /** A note read with the session's next input, starting nothing (`SessionHandle.nudge`): whether the tool took it. False when it cannot now */
   nudge(sessionId: string, text: string): boolean | Promise<boolean>
   /** A line in the conversation, in Centralu's name */
@@ -444,11 +450,22 @@ export class SelfCompaction {
     try {
       await this.host.sendThen(id, this.thenTurn(rec.then, rec.ahead, rec.focusAside))
       this.erase(id)
+      this.counted(id)
     } catch (err) {
       // This host is leaving and the step was not given up: it goes back to what it was, for the next host to send
       if (this.stopped) return this.save(id, rec)
       this.tell(id, rec.then, 'the session could not take it')
       console.error(`[compact] ${id.slice(0, 8)}: could not send the next step: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /** A compaction went on to its next step: past `WARN_COMPACT_CYCLES_PER_HOUR` in the hour the person is warned. A warning that cannot be written leaves the session as it was */
+  private counted(id: string): void {
+    try {
+      const count = this.host.keep.cycle(id, this.now())
+      if (count > WARN_COMPACT_CYCLES_PER_HOUR) this.host.warnCycles(id, count)
+    } catch (err) {
+      console.error(`[compact] ${id.slice(0, 8)}: could not count the cycle: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

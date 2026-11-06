@@ -4,7 +4,7 @@ import { DEFAULT_AUTO_COMPACT } from '@cc/protocol'
 import type { SessionIdle } from '../idle.js'
 import { managerWorld, projectDirs } from './manager.test-helpers.js'
 import { settingThenKeep } from './then-keep.js'
-import { COMPACT_FLOOR_TOKENS, IDLE_COMPACT_MINUTES, SelfCompaction, type SelfCompactionHost } from './self-compaction.js'
+import { COMPACT_FLOOR_TOKENS, IDLE_COMPACT_MINUTES, SelfCompaction, WARN_COMPACT_CYCLES_PER_HOUR, type SelfCompactionHost } from './self-compaction.js'
 
 /**
  * Compacting at a turn's end (#1451): the agent's compact_self, and a session at rest over the lower share. The first
@@ -35,6 +35,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
   const notices: [string, string][] = []
   const thens: [string, string][] = []
   const nudges: string[] = []
+  const warned: [string, number][] = []
   const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, failThen: false, thenGate: null as Promise<void> | null, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
@@ -55,6 +56,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
       thens.push([id, text])
     },
     keep: settingThenKeep(settings),
+    warnCycles: (id, count) => void warned.push([id, count]),
     nudge: (_id, text) => {
       if (state.nudgeTaken) nudges.push(text)
       return state.nudgeTaken
@@ -83,7 +85,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
     emit(e, true)
     if (reading === 'after' && m().context) read(m().context!.used)
   }
-  return { c, state, sent, thens, nudges, notices, m, emit, startTurn, endTurn, read, settings }
+  return { c, state, sent, thens, nudges, notices, warned, m, emit, startTurn, endTurn, read, settings }
 }
 
 describe('compact_self (#1451)', () => {
@@ -763,6 +765,57 @@ describe('compact_self then (#2024)', () => {
       await vi.advanceTimersByTimeAsync(0)
       expect(mine.nudges).toEqual([])
       expect(mine.thens).toEqual([])
+    })
+  })
+
+  describe('a session that keeps compacting and going on (#2024)', () => {
+    /** One cycle: the agent asks with a step, the compact runs, the step goes and its turn runs */
+    async function cycle(w: ReturnType<typeof world>) {
+      asked(w, undefined, 'next')
+      w.startTurn()
+      w.emit(compaction)
+      w.endTurn()
+      await vi.advanceTimersByTimeAsync(0)
+      w.startTurn()
+      w.endTurn()
+    }
+
+    it('warns the person once it passes 6 cycles in an hour, and holds back, refuses and delays nothing', async () => {
+      const w = world()
+      for (let i = 1; i <= WARN_COMPACT_CYCLES_PER_HOUR; i++) await cycle(w)
+      expect(w.warned).toEqual([])
+      await cycle(w)
+      expect(w.warned).toEqual([['s1', WARN_COMPACT_CYCLES_PER_HOUR + 1]])
+      // The session keeps working: the 7th went, and an 8th is asked, compacted and continued as the others
+      expect(w.thens).toHaveLength(WARN_COMPACT_CYCLES_PER_HOUR + 1)
+      await cycle(w)
+      expect(w.thens).toHaveLength(WARN_COMPACT_CYCLES_PER_HOUR + 2)
+      expect(w.warned.at(-1)).toEqual(['s1', WARN_COMPACT_CYCLES_PER_HOUR + 2])
+      // The count is told on every cycle past the threshold; the mailbox writes one line an hour from it
+      expect(w.sent).toHaveLength(WARN_COMPACT_CYCLES_PER_HOUR + 2)
+    })
+
+    it('counts the hour before the last step, not all that went before, and the count survives a swap', async () => {
+      const old = world()
+      for (let i = 0; i < 4; i++) await cycle(old)
+      // The host after the swap goes on counting from the store
+      const next = world({}, old.settings)
+      for (let i = 0; i < 3; i++) await cycle(next)
+      expect(next.warned).toEqual([['s1', 7]])
+      // An hour later the earlier ones no longer count
+      next.state.now += 61 * MIN
+      await cycle(next)
+      expect(next.warned).toEqual([['s1', 7]])
+    })
+
+    it('does not count a step that was not sent', async () => {
+      const w = world({ context: { used: 60_000, window: 200_000, exactness: 'exact' } })
+      for (let i = 0; i < 8; i++) {
+        w.startTurn()
+        w.c.request('s1', undefined, 'next')
+        w.endTurn(undefined, 'after')
+      }
+      expect(w.warned).toEqual([])
     })
   })
 

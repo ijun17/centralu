@@ -117,6 +117,8 @@ export type MailHooks = {
   handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
   /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
   openWork?(sessionId: string): { unanswered: string[]; owed: string[] }
+  /** A session went through `count` compaction cycles in the hour (`compact_self` with `then`, #2024): the person gets one warning, the mailbox's, once per clock hour */
+  compactCycles?(sessionId: string, count: number): void
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
@@ -560,6 +562,7 @@ export class SessionManager {
       sendThen: (id, text) =>
         this.events.deliverMail(id, { text, quiet: false, line: 'Centralu sent the agent its next step after the compaction', label: 'compaction' }, { leaving: () => this.handingOver || this.disposing, atRest: () => true }),
       keep: settingThenKeep(this.store.settings),
+      warnCycles: (id, count) => this.mailHooks?.compactCycles?.(id, count),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
