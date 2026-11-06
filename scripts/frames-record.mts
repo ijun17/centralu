@@ -2,7 +2,7 @@
 /**
  * Records the scenarios against an installed CLI (docs/plans/acp-adapter.md §10.5, #1498):
  *
- *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]
+ *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude | codex | antigravity> [scenario ...] [--raw <folder>]
  *
  * Each scenario (`adapters/frames/scenarios.test-helpers.ts`) drives the real adapter, as the host would, in a new
  * temporary folder; the adapter's own recorder writes the frames, and they are scrubbed into
@@ -11,7 +11,8 @@
  * Cursor's and Claude's spend the person's plan (Claude on its smallest model, with no settings file read), so run
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
  * link) is a temporary one; so are OpenCode's XDG folders. A scenario that gives an ACP agent Centralu's tools (`centralu-*`) runs
- * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
+ * the real stdio bridge against a host of fixed answers (`scripts/frames-bridge-host.mts`). Antigravity runs the installed `agy acp`
+ * (`frames-record-agy.mts`). `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -27,12 +28,13 @@ import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
 import { startBridgeHost, type BridgeHost } from './frames-bridge-host.mts'
+import { AGY_MODEL, temporaryAgy } from './frames-record-agy.mts'
 import { removeDir, temporaryClaudeConfig, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 
 const ADAPTERS = fileURLToPath(new URL('../packages/agent-host/src/adapters/', import.meta.url))
-const TOOLS = ['cursor-agent', 'opencode', 'claude', 'codex']
-const ACP_TOOLS = ['cursor-agent', 'opencode']
+const TOOLS = ['cursor-agent', 'opencode', 'claude', 'codex', 'antigravity']
+const ACP_TOOLS = ['cursor-agent', 'opencode', 'antigravity']
 
 class RecordingAdapter extends AcpAdapter {
   readonly tool = 'recording'
@@ -55,7 +57,7 @@ async function main(): Promise<number> {
   const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
   const [tool, ...names] = args
   if (!tool || !TOOLS.includes(tool)) {
-    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
+    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex | antigravity> [scenario ...] [--raw <folder>]')
     return 2
   }
   const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
@@ -67,6 +69,7 @@ async function main(): Promise<number> {
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
+  let agy: ReturnType<typeof temporaryAgy> | null = null
   // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
   if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
   let claudeConfig: { finish(): void; mcpConfig(): string } | null = null
@@ -75,6 +78,7 @@ async function main(): Promise<number> {
   const stop = () => {
     codexHome?.finish()
     claudeConfig?.finish()
+    agy?.finish()
     rmSync(data, { recursive: true, force: true })
     process.exit(130)
   }
@@ -93,7 +97,8 @@ async function main(): Promise<number> {
       else process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
       const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(tool === 'claude' ? claudeFlags(spec, scenario.drive?.settings, claudeConfig) : spec))
-      const adapter = adapterFor(tool, spawn)
+      agy = tool === 'antigravity' ? temporaryAgy(data, scenario.name, scenario.drive?.signedOut === true) : null
+      const adapter = agy ? agy.adapter(spawn) : adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
       let bridge: BridgeHost | null = null
@@ -132,6 +137,12 @@ async function main(): Promise<number> {
         await bridge?.close()
         await removeDir(cwd)
         if (!keepRaw) rmSync(raw, { recursive: true, force: true })
+        // Last: a token file that is gone or changed must not stop the rest of the cleanup
+        try {
+          agy?.finish()
+        } catch (e) {
+          console.error(`[record] could not put the sign-in back: ${(e as Error).message}`)
+        }
       }
     }
   } finally {
@@ -144,7 +155,7 @@ async function main(): Promise<number> {
 
 /** The model a recording of `tool` runs on, for its header (OpenCode: its free models, no choice made) */
 function modelOf(tool: string): string {
-  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
+  return { claude: CLAUDE_MODEL, codex: CODEX_MODEL, antigravity: AGY_MODEL, 'cursor-agent': CURSOR_MODEL }[tool] ?? 'default'
 }
 
 /**
@@ -159,7 +170,7 @@ function claudeFlags(spec: AgentSpawnSpec, settings: Scenario['settings'], confi
 }
 
 /** The folder each non-ACP tool's adapter, and so its recordings, live in */
-const ADAPTER_FOLDER: Record<string, string> = { claude: 'claude', codex: 'codex' }
+const ADAPTER_FOLDER: Record<string, string> = { claude: 'claude', codex: 'codex', antigravity: 'antigravity' }
 
 /** What a session of `tool` is opened with in a recording run: the cheapest model, and the process the run can kill (`die`) */
 function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess): { session?: Partial<CreateSessionOpts> } {

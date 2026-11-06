@@ -17,7 +17,7 @@ import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIM
 import { KNOWN_UPDATES } from './known-updates.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
-import { AcpNormalizer, requestInput, tokenUsage } from './normalize.js'
+import { AcpNormalizer, pathsOf, requestInput, tokenUsage } from './normalize.js'
 import {
   blockText,
   InitializeResult,
@@ -534,8 +534,8 @@ class AcpWire implements ToolWire {
     const u = read.update
     switch (u.sessionUpdate) {
       case 'usage_update':
-        // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again
-        if (u.used > 0 && u.size > 0) {
+        // Measured: a cancelled turn reads `used: 0` just before it ends, and the next turn reads the real size again. A share above 1 is a misread field (#1654)
+        if (u.used > 0 && u.size > 0 && u.used <= u.size) {
           this.emit({ type: 'context_update', sessionId: this.sessionId, used: u.used, window: u.size, exactness: 'exact' })
           this.lastUsed = u.used
           if (turn) turn.used = u.used
@@ -753,9 +753,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 function editPaths(call: ToolCallFields): string[] {
   const input = asObj(call.rawInput)
-  const fromDiffs = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [c.path] : []))
-  const named = [str(input.filePath), str(input.path), str(input.file_path)].filter(Boolean)
-  return [...new Set([...fromDiffs, ...(call.locations ?? []).map((l) => l.path), ...named])]
+  return [...new Set([...pathsOf(call), ...[str(input.filePath), str(input.path), str(input.file_path)].filter(Boolean)])]
 }
 
 /** The approval card for an ACP tool call, by its kind (the request carries the call, measured on OpenCode 1.19.4) */

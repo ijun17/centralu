@@ -269,7 +269,8 @@ function hasInput(v: unknown): boolean {
   return typeof v === 'object' && v !== null && Object.keys(v).some((k) => k !== 'cwd')
 }
 
-function pathsOf(u: ToolCallFields): string[] {
+/** The files a call names in its locations and diffs */
+export function pathsOf(u: ToolCallFields): string[] {
   const fromDiffs = (u.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [c.path] : []))
   return [...new Set([...(u.locations ?? []).map((l) => l.path), ...fromDiffs])]
 }
