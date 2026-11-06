@@ -77,7 +77,6 @@ written twice; it is B1 below.
 | B3 | Say a disconnected machine is not connected | `linked-sessions.ts` `list`: `waitsForPerson ? NOT_CONNECTED : NOT_REACHABLE` | `recall`: `"(not reachable right now)"` always | The model reads "not reachable" for a machine the person disconnected and retries, where `list` tells it to ask the person | Confirmed (wording) | #2095 |
 | B4 | Ask a machine for `host.hubAuto` | `linked-machine-ops.ts` `hubAuto`: never connects, maps "Unknown method" to `'older'` | `linked-sessions.ts` `hubAuto` through `viaMachine`: waits for the link, returns the raw error | An older machine is `older` to the window and "Unknown method: host.hubAuto …" to the model | Confirmed (wording) | #2097 (one reading, `hub-auto.ts`) |
 | B5 | Reset the backoff when a host answers | `remote-client.ts:330` `attempt = 0` at every `hello_ok` | `linked-machine-connection.ts` `STABLE_MS` (60 s): "a host that answers and stops again at once reset it every time" | A real host behind a proxy that cuts the connection 50 ms after its hello, `redials: 5`, 8 s: 30 connections, 30 hellos, `gaveUp` never. Such a host is redialled every 200 ms for good, the link never reads the connection line again, and each hello repeats the list reads, `offerAsks`, `watchCredentials` and a resync | Confirmed (run) | #2104 |
-| B6 | The remote's `dev` flag | `doOpen` → `check({ dev: false })` | `onHello` → `dev: h.build.commit === 'dev'` | A real remote host with `commit: 'dev'` at beta.1 (below `MIN_SUPPORTED_VERSION`): the line check holds it at `versions_differ` as the older side though its hello would let it in; a release at that version is held, as it should be. Until the hello the row also names a dev build as older (the Update offer appears, then goes) | Confirmed (run) | #2106: the line says it (`install.current.source`) |
 | B7 | "Not installed" | `tunnel.ts` ×2: the marker **or** exit 127 | `autostart`, `update`, `remote-dev`: the marker only | A POSIX remote whose launcher is there and whose Node is gone exits 127 (`env: node: No such file or directory`) with no marker: the row says "Centralu is not installed … run npm i -g centralu" and hides the remote's words. The lookup already prints the marker when nothing is found | Confirmed (a fake ssh with the launcher's own 127) | #2102 |
 | B8 | The data folder rule | `data-dir.ts` `chooseDataDir` (`CC_DATA_DIR`, else `~/.centralu`, `~/.centralu-dev` for `CC_DEV=1`) | `remote-dev.ts` `hubDataDir`: no `CC_DEV` | `CC_DEV=1` without `CC_DATA_DIR`: `pnpm remote-dev` opens the real `~/.centralu` store, not the dev hub's | Confirmed | #2100 |
 
@@ -110,6 +109,15 @@ lines): it is the fake transport of the link tests, so it stays.
 - **What becomes `previous` after an update** (`update.ts` against `dev-build.ts`): the two never see the same input. An update
   runs the switch from the new version and keeps the old `current`; a dev build over a dev build keeps the release before
   both. That an update from a dev build leaves the dev build as the way back is a policy, and an owner question (§6).
+
+- **The remote's `dev` flag, before and after its hello** (B6 of the first draft, #2106, closed): `doOpen` checks the line with
+  `dev: false`, `onHello` with `dev: h.build.commit === 'dev'`. Only a host run from source says `commit: 'dev'`, and it has no
+  install source on its line, so the line cannot tell it. A `pnpm remote-dev` build is made by `bundle.mjs`, which stamps the git
+  sha as the commit: its hello says `dev: false` too, and `versions.ts` compares a local build (`<base>.local.N`) by its base
+  release. The two checks agree for every input a link meets. The pull request read the line's install source as `dev`, which no
+  real host pairs with a `dev` hello, and made the two disagree the other way; a reviewer reran it with a real sha and it changed
+  nothing. Whether a remote-dev build older than the hub should be exempt from that comparison, as a from-source host is, is a
+  policy of `versions.ts` and an owner question (§6).
 
 ### 2.5 Between `links/` and the rest of the host
 
@@ -151,8 +159,8 @@ the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allow
 | 4 | **B4**: one reading of `host.hubAuto` (`hub-auto.ts`) | #2097 | fix | 6 / 10 (+20 new file, +28 test) |
 | 5 | **B8**: `pnpm remote-dev` reads the dev hub's data folder | #2100 | fix | 4 / 4 (+9 test) |
 | 6 | **B7**: exit 127 is not "not installed" | #2102 | fix | 2 / 2 (+10 test) |
-| 7 | **B5**: the client's redials come back for a host that stays up | #2104 | fix | 1 / 13 (+26 test) |
-| 8 | **B6**: a dev remote is judged as one before its hello | #2106 | fix | 2 / 2 (+12 test) |
+| 7 | **B5**: the client's redials stop at hellos that drop at once (short-lived hellos counted apart) | #2104 | fix | 1 / 27 (+46 test) |
+| 8 | ~~B6~~: a dev remote judged as one before its hello | #2106, closed | dropped | see §2.4a |
 | 9 | **`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts` | branch `centralu/links-split-ssh-text`, opened once #2092 lands | move | 148 / 150 (+6 import lines) |
 | 10 | **Deletions**: the dead `hidden` set, `lastWords` and `read` through `viaSession` (D1), the update's `sleep` (D9), two doc comments back above their methods | #2110 | deletion | 75 / 69 (-6) |
 | 10a | What the deletions of §2.3 would still do, measured and found not to shrink: D2 and D3 as helpers (+4 lines, one source), D5 (a shared reader adds what it saves), D6, D7, D11 (a decision on one spelling each, across files) | not made | | 0 |
@@ -200,6 +208,7 @@ for the remote goes into `remote-command.ts`, a line it prints into `connection-
 |---|---|---|---|
 | `Unknown method` read one way in `linked-hubs.ts`, `method-rights.ts` and the rest (D6) | A hub error that only mentions the phrase is no longer read as "from before" | ~0 | Low |
 | Keep a dev build as the way back after an update from it (`update.ts`), or lead back to the release before it as a dev-over-dev build does (`dev-build.ts`) | Rollback after an update from a dev build goes to the release, not to the dev build | ~-4 | Low; a policy, and the two operations never see the same input |
+| Treat a `pnpm remote-dev` build older than the hub as a dev build in the version check (`versions.ts`, today a local build is compared by its base release), on the line and in the hello alike | A remote-dev build at an old base release is let in, with no Update offer, instead of held at `versions_differ` | ~0 | Low; a policy of `versions.ts`; both checks would need the same signal (a field in the hello or the line's install source) |
 | Drop `DirectTunnel` and the optional `exec` / `startHost` of `Tunnel` | None; the link tests' fake transport becomes a real fake ssh | ~-30 | Medium: rewrites the test world |
 
 ## 7. Decisions for the owner
