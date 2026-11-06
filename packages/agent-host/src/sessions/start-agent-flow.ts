@@ -14,7 +14,7 @@ import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
-import { AgentStartGates } from './agent-start-gates.js'
+import { AgentStartGates, agentStartGateError } from './agent-start-gates.js'
 import { AgentConsents } from './agent-consents.js'
 import { AgentChoices } from './agent-choices.js'
 import { AgentStartRequests } from './agent-start-requests.js'
@@ -24,6 +24,7 @@ import {
   ORCHESTRATOR_PLACE,
   START_AGENT_CALL_MS,
   START_AGENT_SETUP_MS,
+  UNTRUSTED_START,
   agentStartPending,
   agentStartPersonText,
   orchestratorPlace,
@@ -213,7 +214,7 @@ export class AgentStartFlow {
       return done({ ok: false, error: 'A session the orchestrator starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
     }
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
-      return done({ ok: false, error: `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}` })
+      return done({ ok: false, error: UNTRUSTED_START })
     }
     /*
      * The same job already waiting on the person (#673 review): a call cut short by a host swap's drain is told to call
@@ -360,7 +361,7 @@ export class AgentStartFlow {
     requestId?: string,
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
     const done = (r: ChildRunResult) => ({ done: r })
-    const refused = this.agentStartGateError(callerId, project.id)
+    const refused = agentStartGateError(this.host, callerId, project.id)
     if (refused) return done({ ok: false, error: refused })
     const caller = this.host.meta.get(callerId)!
     if (approvedPreset && !presetWithin(caller.permissionPreset, approvedPreset)) {
@@ -391,11 +392,6 @@ export class AgentStartFlow {
     } finally {
       release()
     }
-  }
-
-  /** `AgentStartGates.agentStartGateError` (agent-start-gates.ts), kept on the flow for its callers */
-  private agentStartGateError(...a: Parameters<AgentStartGates['agentStartGateError']>): ReturnType<AgentStartGates['agentStartGateError']> {
-    return this.gates.agentStartGateError(...a)
   }
 
   /** `AgentStartGates.reservePlace` (agent-start-gates.ts), kept on the flow for its callers */
@@ -488,7 +484,7 @@ export class AgentStartFlow {
     const callerNow = this.host.meta.get(callerId)
     const withdrawn = requestId ? this.host.children.agentStarts.get(requestId)?.ended : undefined
     const late = (withdrawn && 'error' in withdrawn ? `The request was withdrawn while its session was being made. ${withdrawn.error}` : null) ??
-      this.agentStartGateError(callerId, project.id) ??
+      agentStartGateError(this.host, callerId, project.id) ??
       (callerNow && !presetWithin(child.permissionPreset, callerNow.permissionPreset)
         ? `This session's permissions were lowered to ${callerNow.permissionPreset} while the session was being made.`
         : null)

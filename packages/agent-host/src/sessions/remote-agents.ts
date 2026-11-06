@@ -8,7 +8,8 @@ import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
 import { errorKind } from './error-kind.js'
-import { agentDepthRefusal, depthOf } from './agent-depth.js'
+import { depthOf } from './agent-depth.js'
+import { agentStartGateError } from './agent-start-gates.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } from './ask-project.js'
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
@@ -16,7 +17,7 @@ import type { LinkedEvent } from './linked-reports.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
-import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
+import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS, UNTRUSTED_START } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
 
@@ -384,9 +385,12 @@ export class RemoteAgents {
         ? 'The orchestrator starts a session on a linked machine with create_session; start_agent with a machine is for a project\'s session.'
         : 'This session belongs to no project, so it cannot start agents.' }
     }
+    // Said, and an `auto` caller's crossing logged, before anything is asked, as by a local start's first gate
+    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
+    if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
+    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) return { ok: false, error: UNTRUSTED_START }
     const refused = this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
-    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)!
     // Counted under the caller's project, as a local child is (#1038); checked before anything is asked
     const full = this.places.agentCeilingError(callerId, project.id)
     if (full) return { ok: false, error: full }
@@ -1491,16 +1495,10 @@ export class RemoteAgents {
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
   }
 
-  /** What start_agent and a send rest on in the caller, read again after a card: here, in a trusted project, above the depth */
+  /** What start_agent and a send rest on in the caller, read again after a card and before each send: a local start's (`agentStartGateError`) */
   private gateError(callerId: string): string | null {
-    const caller = this.host.meta.get(callerId)
-    if (!caller) return 'The session that asked is no longer here.'
-    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
-    if (!project) return 'This session\'s project is no longer registered.'
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
-      return `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}`
-    }
-    return agentDepthRefusal(this.host, callerId, 'start agents')
+    // Never the orchestrator's place (`''`): a caller here is a project's session, and one with none has none registered
+    return agentStartGateError(this.host, callerId, this.host.meta.get(callerId)?.projectId || null)
   }
 
   /** The caller's preset as it is now; `safe` for one gone, so nothing is decided on a preset no one has */
