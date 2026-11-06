@@ -123,12 +123,14 @@ export class OverloadRetry {
   /**
    * A message into the session takes the retry away (`SessionEvents.deliver`): the error it stood in for, or null when none stood.
    * Same as `cancel`, with the error handed back for the case that the message does not go in (`lost`). Not one handed to the
-   * tool: its turn is running and the message joins it like any message into a running turn, with nothing taken and nothing owed
+   * tool: its turn is running and the message joins it like any message into a running turn, with nothing owed; only the record of the note goes
    */
   supersede(sessionId: string): string | null {
     const w = this.waiting.get(sessionId)
     if (w?.phase === 'handed') {
       this.used.delete(sessionId)
+      // The person's turn now: a late refusal of the note is not a failure of theirs (`fire` ignores it once the entry is gone)
+      this.waiting.delete(sessionId)
       return null
     }
     this.cancel(sessionId)

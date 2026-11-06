@@ -54,6 +54,11 @@ class Handle implements SessionHandle {
     }
     return () => take()
   }
+  /** The tool turns the input it holds down on its own (not for a stop) */
+  refuseHeld(e: Error) {
+    this.pending?.fail(e)
+    this.pending = null
+  }
   respondApproval() {
     return true
   }
@@ -319,6 +324,15 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
       take()
       await vi.advanceTimersByTimeAsync(1)
       expect(errors(id)).toHaveLength(0)
+    })
+
+    it('a message of the person’s joined it: the note refused afterwards is not a failure of theirs', async () => {
+      const { a, id } = await handed()
+      await a.mgr.send(id, 'try again yourself')
+      a.adapter.last.refuseHeld(new Error('the tool turned the note down'))
+      await vi.advanceTimersByTimeAsync(1)
+      expect(errors(id)).toHaveLength(0)
+      expect(a.session(id).state).toBe('working')
     })
 
     it('a message of the person’s starts the count over, as it does for a retry that waits', async () => {
