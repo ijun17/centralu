@@ -1,0 +1,197 @@
+#!/usr/bin/env -S npx tsx
+/**
+ * Records what Codex really sends and receives for Centralu's own tools (`mail`, `start_agent`, `read_session`, `compact_self`),
+ * which only a real host can serve (#1498):
+ *
+ *   pnpm exec tsx scripts/frames-record-host.mts [scenario ...] [--raw <folder>]
+ *
+ * It starts the agent host from source (`packages/agent-host/src/main.ts`) in a temporary data folder, with the frame recorder
+ * on (`CC_RECORD_FRAMES`) and a Codex settings folder of its own (`frames-record-kit.mts`), and drives it over its WebSocket as a
+ * window does: adds a project, creates sessions, sends the scenario's prompts. The Codex session's app-server is started by the
+ * host with Centralu's real bridge, so the tool calls go the whole way, bridge and host included; the recording holds the lines
+ * between the host and that app-server, scrubbed into `adapters/codex/recordings/codex-<version>/<scenario>.jsonl`, which
+ * `codex/centralu.test.ts` replays through the adapter. It spends model calls (Codex's smallest model; the sessions the
+ * scenario starts use it too) and never touches the person's data folder: `CC_DATA_DIR` and `--db` are temporary.
+ */
+import { spawn, type ChildProcess } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
+import { scrub } from './frames-scrub.mts'
+import { CENTRALU_SCENARIOS } from '../packages/agent-host/src/adapters/codex/centralu-scenarios.test-helpers.js'
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
+const CODEX_FOLDER = join(ROOT, 'packages/agent-host/src/adapters/codex/recordings')
+const MODEL = 'gpt-5.6-luna'
+
+type Event = { type: string; sessionId?: string; [k: string]: unknown }
+
+/** A window's connection to the host: hello, calls, and the events it pushes */
+class Window {
+  readonly events: Event[] = []
+  private socket!: WebSocket
+  private nextId = 1
+  private readonly pending = new Map<string, { resolve(v: unknown): void; reject(e: Error): void }>()
+  private readonly listeners = new Set<(e: Event) => void>()
+
+  async open(port: number, token: string): Promise<void> {
+    this.socket = new WebSocket(`ws://127.0.0.1:${port}`)
+    await new Promise<void>((resolve, reject) => {
+      this.socket.addEventListener('error', () => reject(new Error('the host did not accept the connection')))
+      this.socket.addEventListener('open', () => this.socket.send(JSON.stringify({ kind: 'hello', token, protocolVersion: 1 })))
+      this.socket.addEventListener('message', (m) => {
+        const f = JSON.parse(String(m.data)) as { kind: string; id?: string; ok?: boolean; result?: unknown; error?: { message?: string }; event?: Event }
+        if (f.kind === 'hello_ok') resolve()
+        else if (f.kind === 'res' && f.id) {
+          const p = this.pending.get(f.id)
+          this.pending.delete(f.id)
+          if (f.ok) p?.resolve(f.result)
+          else p?.reject(new Error(f.error?.message ?? 'host error'))
+        } else if (f.kind === 'event' && f.event) {
+          this.events.push(f.event)
+          for (const l of this.listeners) l(f.event)
+        }
+      })
+    })
+  }
+
+  rpc<T = unknown>(method: string, params: unknown): Promise<T> {
+    const id = String(this.nextId++)
+    this.socket.send(JSON.stringify({ kind: 'rpc', id, method, params }))
+    return new Promise<T>((resolve, reject) => this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject }))
+  }
+
+  /** The next event, from now on, that `pick` accepts; rejects after `ms` */
+  waitFor(label: string, pick: (e: Event) => boolean, ms = 300_000): Promise<Event> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.listeners.delete(on)
+        reject(new Error(`no ${label} within ${ms} ms`))
+      }, ms)
+      const on = (e: Event) => {
+        if (!pick(e)) return
+        clearTimeout(timer)
+        this.listeners.delete(on)
+        resolve(e)
+      }
+      this.listeners.add(on)
+    })
+  }
+
+  close(): void {
+    this.socket.close()
+  }
+}
+
+/** The host from source, in a data folder of its own; resolves with its port and token once it says it is ready */
+function startHost(data: string, home: string, raw: string, token: string, started: (child: ChildProcess) => void): Promise<{ child: ChildProcess; port: number }> {
+  // The token goes on stdin, not on the command line (every process of this user reads that); the host ends when the pipe does (`--watch-parent`)
+  const child = spawn(process.execPath, ['--import', 'tsx', join(ROOT, 'packages/agent-host/src/main.ts'), '--port', '0', '--db', join(data, 'store.db'), '--watch-parent'], {
+    cwd: ROOT,
+    // A home folder of its own too: Codex reads the person's skills from `~/.agents`, and a model that is offered them may open them
+    env: { ...process.env, CC_DATA_DIR: data, CC_RECORD_FRAMES: raw, HOME: home, USERPROFILE: home, CC_HOST_TOKEN_ON_STDIN: '1' },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  })
+  started(child)
+  child.stdin!.write(`${JSON.stringify({ token })}\n`)
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const timer = setTimeout(() => reject(new Error('the host was not ready within 60 s')), 60_000)
+    child.once('exit', (code) => reject(new Error(`the host ended (${code}) before it was ready`)))
+    child.stdout!.on('data', (d: Buffer) => {
+      buffer += String(d)
+      for (const line of buffer.split('\n')) {
+        try {
+          const ready = JSON.parse(line) as { ready?: boolean; port?: number }
+          if (ready.ready && ready.port) {
+            clearTimeout(timer)
+            return resolve({ child, port: ready.port })
+          }
+        } catch {
+          // Not the ready line
+        }
+      }
+    })
+  })
+}
+
+async function main(): Promise<number> {
+  const args = process.argv.slice(2)
+  const rawAt = args.indexOf('--raw')
+  const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
+  const chosen = CENTRALU_SCENARIOS.filter((s) => args.length === 0 || args.includes(s.name))
+  let failed = 0
+  const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
+  const codexHome = temporaryCodexHome(data)
+  let host: ChildProcess | null = null
+  // What the run in progress has made, for an interrupted run to take away (the copy of the sign-in is in `data`)
+  const open: string[] = []
+  const stop = () => {
+    host?.kill('SIGKILL')
+    codexHome.finish()
+    for (const dir of [...open, data]) rmSync(dir, { recursive: true, force: true })
+    process.exit(130)
+  }
+  process.once('SIGINT', stop)
+  process.once('SIGTERM', stop)
+  try {
+    for (const scenario of chosen) {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
+      const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
+      mkdirSync(raw, { recursive: true })
+      open.push(folder, raw)
+      const window = new Window()
+      try {
+        const token = randomBytes(24).toString('hex')
+        const home = join(data, 'home')
+        mkdirSync(home, { recursive: true })
+        const started = await startHost(data, home, raw, token, (child) => (host = child))
+        await window.open(started.port, token)
+        const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
+        const open = async (prompt: string, name?: string): Promise<string> => {
+          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: project.id, cwd: folder, tool: 'codex', model: MODEL, effort: 'low', permissionPreset: 'auto', ...(name ? { name } : {}) })
+          const id = made.id ?? made.sessionId!
+          await turn(id, prompt)
+          return id
+        }
+        const turn = async (id: string, text: string) => {
+          const done = window.waitFor(`the end of the turn "${text.slice(0, 30)}"`, (e) => e.sessionId === id && (e.type === 'turn_complete' || e.type === 'error'))
+          await window.rpc('agents.send', { sessionId: id, text })
+          const e = await done
+          if (e.type === 'error') throw new Error(`the turn "${text.slice(0, 30)}" failed: ${JSON.stringify(e.error)}`)
+        }
+        for (const helper of scenario.helpers) await open(helper)
+        const main = await open(scenario.turns[0]!)
+        for (const text of scenario.turns.slice(1)) await turn(main, text)
+        // The recording of the session the scenario keeps: the one whose Codex process made the tool calls
+        const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
+        const frames = files.flatMap((f) => readFileSync(join(raw, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
+        const codexVersion = (await import('../packages/agent-host/src/adapters/codex/index.js').then((m) => new m.CodexAdapter().installedVersion())) ?? 'unknown'
+        const dir = join(CODEX_FOLDER, `codex-${codexVersion.replace(/^codex-cli /, '').split(/[-\s]/)[0]}`)
+        mkdirSync(dir, { recursive: true })
+        const header = { header: { tool: 'codex', version: codexVersion, scenario: scenario.name, preset: 'auto', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10), host: true } }
+        writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder)].map((l) => JSON.stringify(l)).join('\n') + '\n')
+        console.log(`[record] codex ${scenario.name} (through a host): ${frames.length} frames -> ${dir}`)
+      } catch (e) {
+        failed++
+        console.error(`[record] codex ${scenario.name}: ${(e as Error).message}`)
+      } finally {
+        window.close()
+        host?.kill('SIGTERM')
+        await new Promise((r) => setTimeout(r, 1500))
+        host?.kill('SIGKILL')
+        await removeDir(folder)
+        if (!keepRaw) await removeDir(raw)
+      }
+    }
+  } finally {
+    codexHome.finish()
+    await removeDir(data)
+  }
+  return failed ? 1 : 0
+}
+
+process.exit(await main())

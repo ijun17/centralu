@@ -149,6 +149,14 @@ describe(`what the adapter makes of the app-server’s real turns (${recordedVer
     expect(ended(events)).toBe(1)
   })
 
+  it('mcp-call: a call to a tool of the person’s MCP server is one call named by server and tool, with its answer', async () => {
+    const { events } = await run('mcp-call')
+    expect(of(events, 'tool_call')).toMatchObject([{ summary: { tool: 'ping', title: 'probe: ping' } }])
+    expect(of(events, 'tool_result')).toMatchObject([{ ok: true, summary: 'pong' }])
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(ended(events)).toBe(1)
+  })
+
   it('files: a file created and then deleted with the patch tool are two calls, each marking its file', async () => {
     const { events } = await run('files')
     expect(of(events, 'tool_call').map((c) => c.summary.tool)).toEqual(['Edit', 'Edit'])

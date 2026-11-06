@@ -40,6 +40,11 @@ export type Scenario = {
   /** A model the scenario asks for in place of the run's (a failed turn names one that does not exist) */
   model?: string
   preset?: PermissionPreset
+  /**
+   * The tool's own settings for the run (Codex: its settings folder holds them): `mcp` sets it up with a small MCP server,
+   * `probe`, whose one tool `ping` answers `pong`
+   */
+  settings?: 'mcp'
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   run(d: Driver): Promise<void>
@@ -167,6 +172,16 @@ export const SCENARIOS: readonly Scenario[] = [
     preset: 'auto',
     async run(d) {
       await turn(d, 'Run this shell command and wait until it finishes: sleep 12 && echo long-done . Then say done.')
+    },
+  },
+  {
+    // A call to a tool of an MCP server the person set up: its arguments and its answer
+    name: 'mcp-call',
+    tools: ['codex'],
+    preset: 'auto',
+    settings: 'mcp',
+    async run(d) {
+      await turn(d, 'Call the ping tool of the probe MCP server once, then tell me in one word what it answered.')
     },
   },
   {

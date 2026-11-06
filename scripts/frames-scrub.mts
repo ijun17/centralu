@@ -24,6 +24,8 @@
  *   (`C--Users-name-…`) is a placeholder too; the deltas of a streamed answer or tool input are scrubbed joined, as chunks are;
  * - Codex's app-server: its ids are UUIDs (kept in shape and numbered, as Claude's) and the provider's `msg_`, `rs_`, `call_` ids;
  *   the host's name (`remoteControl/status/changed`), the account's plan and how much of its allowance was used are replaced;
+ * - Centralu's bridge in a Codex thread's config (`frames-record-host.mts`): the node program, the bridge file, the host's port and the
+ *   session's credential are placeholders;
  * - stderr is dropped.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -41,11 +43,14 @@ const BUILTIN_AGENTS = new Set(['general-purpose', 'Explore', 'Plan', 'statuslin
 /** The deltas of a streamed answer, and the field of each that holds the piece */
 const DELTA_FIELDS: Record<string, string> = { text_delta: 'text', thinking_delta: 'thinking', input_json_delta: 'partial_json' }
 
-const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g
+const SECRET = /\b(?:figd_[\w-]+|sk-[\w-]{16,}|ghp_\w{20,}|gho_\w{20,}|xox[abp]-[\w-]+|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b|\bccb\d+:[\w-]+:[\w-]{16,}/g
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g
 /** Another person's home or temp folder: what the machine's own folders did not already cover */
 const FOREIGN: readonly [RegExp, string][] = [
   [/(?:\/private)?\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+\/T(?=[/\\\s"'`]|$)/g, '<tmp>'],
+  // The folders above the temp folder, as a tool lists the ancestors of the one it works in (Codex's `projects` trust map)
+  [/(?:\/private)?\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+(?=[\s"'`]|$)/g, '<tmp-parent>'],
+  [/(?:\/private)?\/var\/folders\/[^/\s"'`]+(?=[\s"'`]|$)/g, '<tmp-parent>'],
   [/\b[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"'`<>]+/g, '<home>'],
   [/(?<![\w<])(?:\\|\/)?Users[\\/]+(?!Shared\b)[^\\/\s"'`<>]+(?=[\\/])/g, '<home>'],
   [/\/home\/[^/\s"'`<>]+/g, '<home>'],
@@ -190,6 +195,11 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
       // The directory the run's settings and threads were in, whose name is random
       .replace(/frames-data-[A-Za-z0-9]+/g, 'frames-data')
+      // The folder a recording run works in, which a tool also names without its path (a project's name, a session's title)
+      .replace(/(frames-record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g, '$1')
+      // The ids of a host's mailbox: the hub's (one per host) and a message's (a ULID)
+      .replace(/\bhub-[0-9a-f]{8}\b/g, 'hub-00000001')
+      .replace(/\bm_[0-9A-Z]{26}\b/g, (m) => `m_${numbered('mail', m).padStart(26, '0')}`)
   // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server and its apps' are not
   const mcpNames = (s: string): string =>
     s.replace(/\bmcp__(.+?)__(\w+)/g, (all, server: string, tool: string) =>
@@ -215,6 +225,11 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'serverName') return stable('server', v)
       // Codex: the account's plan, which says more of the person than the recording needs
       if (key === 'planType') return '<plan>'
+      // Centralu's bridge, as the host puts it in a Codex thread's config: the program, its file, the host's address and the session's credential
+      if (key === 'CC_BRIDGE_TOKEN' || key === 'CC_HOST_CREDENTIAL') return '<secret>'
+      if (key === 'CC_HOST_URL') return 'ws://127.0.0.1:<port>'
+      if (/orchestrator-bridge\.mjs$/.test(v)) return '<bridge>'
+      if (key === 'command' && /(?:^|[\\/])node(?:\.exe)?$/.test(v)) return '<node>'
       // Codex: a thread's rollout file is named for the minute it began in local time, which says the time zone
       if (key === 'path' && /rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/.test(v)) return walk(v.replace(/rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/, 'rollout-2000-01-01T00-00-00-'), 'rolloutPath')
       // Codex: the machine's system, as `initialize` answers with it
@@ -228,6 +243,13 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'tools') return v.filter((t) => typeof t !== 'string' || !t.startsWith('mcp__') || t.startsWith('mcp__centralu__') || t.startsWith('mcp__app-')).map((t) => walk(t))
       if (key === 'models') return v.slice(0, 3).map((m) => walk(m))
       if (key === 'commands' || key === 'agents' || key === 'skillFrontmatter') return v.map((item) => ownSetup(key, item, command, agent, walk))
+      // Codex's `skills/list`: those of the CLI stay (scope `system`); the person's own (`user`, `repo`: from their home folder, a plugin, the project) keep a number and nothing else
+      if (key === 'skills' && v.some((x) => x && typeof x === 'object' && 'scope' in x && 'path' in x)) {
+        return v.map((item) => {
+          const i = (item ?? {}) as Record<string, unknown>
+          return i.scope === 'system' || typeof i.name !== 'string' ? walk(item) : { name: stable('skill', i.name), description: '', path: '<skill>', scope: i.scope, enabled: i.enabled, pluginId: null }
+        })
+      }
       return v.map((x) => walk(x, key === 'user_message_uuids' ? key : undefined))
     }
     if (v && typeof v === 'object') {
@@ -245,7 +267,8 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
         const list = Array.isArray(o.availableCommands) ? o.availableCommands : []
         return { ...o, availableCommands: list.map((_c, i) => ({ name: `command-${i + 1}` })) }
       }
-      return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, walk(x, k)]))
+      // A name that is a path (Codex's `projects` trust map is keyed by folder) is a path like any other text
+      return Object.fromEntries(Object.entries(o).map(([k, x]) => [/[\\/]/.test(k) ? scrubPieces([k], places)[0]! : k, walk(x, k)]))
     }
     // Codex: how much of the account's allowance was used, and when it resets, are the person's, not the protocol's
     if (typeof v === 'number' && key === 'usedPercent') return 12
