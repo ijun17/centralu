@@ -17,21 +17,21 @@ import { SessionHeader } from './SessionHeader.jsx'
 import { AwayNote, DormantNote, ErrorNote, InterruptedNote } from './SessionNotes.jsx'
 import { EMPTY_CHAT } from './empty.js'
 import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
-import { COMPOSER_REACH, FOLDED_SLIVER } from './foldedComposer.js'
+import { COMPOSER_REACH } from './foldedComposer.js'
 
 /**
- * When a grid or project-screen panel folds its composer (owner, 2026-10-20): once the open composer, at its resting
- * one-line height, would take more than a third of the panel. A one-line composer is about 95px, so a two-row grid on
- * an ordinary window (panels of 330–420px) keeps it open, and three rows (about 270px) fold it; a larger text size
- * makes the composer taller against the same panel and folds sooner.
+ * When a grid or project-screen panel folds its composer (owner, 2026-11-07, doubling the 2026-10-20 line): once the open
+ * composer, at its resting one-line height, would take more than a sixth of the panel. A one-line composer is about
+ * 95px, so a panel under about 570px folds it: the two-row grid of an ordinary window (panels of 330–420px) as well
+ * as a three-row one. It stays a share of the composer's own height, not a pixel height, so a larger text size
+ * (a taller composer against the same panel) folds sooner, as it did at a third.
  *
- * Unfolding waits until it would take under 32%, so a panel dragged slowly across the line does not flip at every pixel.
+ * Unfolding waits until it would take under 16%, so a panel dragged slowly across the line does not flip at every pixel.
  * The folded card also measures a few pixels taller than the open one (its own border and padding), which widens that
- * band a little: with the usual composer, a panel folds below about 285px and opens again above about 312px. How much
- * of the folded card shows (`FOLDED_SLIVER`) moves the card without resizing it, so it is not part of these numbers.
+ * band a little: with the usual composer, a panel folds below about 570px and opens again above about 620px.
  */
-const FOLD_SHARE = 1 / 3
-const UNFOLD_SHARE = 0.32
+const FOLD_SHARE = 1 / 6
+const UNFOLD_SHARE = 0.16
 
 /** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
 const CommandRunnerOverlay = lazyComponent(() =>
@@ -102,8 +102,8 @@ export function SessionPane({
    *
    * Collapsing came from a two-row grid leaving too little room to read (a user, 2026-09-10) — of a
    * 370px cell, the input area took up 95px, and only 22px of that was the actual text field.
-   * Collapsed, **a sliver of the rounded card** remains (`FOLDED_SLIVER`), and it rises above the conversation
-   * once a hand comes near the bottom. It was a setting until 2026-10-20; now the pane decides by
+   * Collapsed, the card sits wholly below the pane's bottom edge (owner, 2026-11-07), and it rises above the
+   * conversation once a hand comes near the bottom. It was a setting until 2026-10-20; now the pane decides by
    * its own height (`FOLD_SHARE`), so a tall panel keeps the composer open and a short one folds it.
    */
   foldWhenShort?: boolean
@@ -307,8 +307,8 @@ export function SessionPane({
       /*
        * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
        * a fake element** — laying down a transparent detection plate would take that much area
-       * away from selecting conversation text or clicking links. The zone reaches 22px above
-       * the sliver (FOLDED_SLIVER): easy to aim for, while not triggering while passing
+       * away from selecting conversation text or clicking links. The zone is the bottom
+       * 54px (COMPOSER_REACH), since nothing of the folded card shows to aim at: easy to aim for, while not triggering while passing
        * through the middle of the conversation.
        */
       onMouseMove={
@@ -458,8 +458,8 @@ export function SessionPane({
       )}
 
       {/*
-        Collapsed (requested by a user on 2026-09-10): a rounded card shows a sliver of itself
-        from below, then rises. **Not explained in words** — the rounded corners themselves say
+        Collapsed (requested by a user on 2026-09-10): a rounded card waits wholly below the pane's
+        bottom edge (owner, 2026-11-07), then rises. **Not explained in words** — the rounded corners themselves say
         this is a card that can rise.
 
         Still absolutely positioned (does not touch the conversation's layout height). But it
@@ -485,70 +485,38 @@ export function SessionPane({
                 composerUp
                   ? /*
                      * The shadow's job is **to separate the card from the text it covers.**
-                     * It covers the most while raised, so it is cast further — the darkness is
-                     * kept the same as when collapsed (measured: both bottom out at 12, over
-                     * the pane's floor colour then, #1d1d1d; it is #141414 since #362 and #0f0f0f from #725 to 2026-11-05, #120e0a since), only the
-                     * spread distance is increased.
-                     * 25px here, 18px when collapsed.
+                     * It covers the most while raised, so it is cast far (25px). Its darkness
+                     * was tuned with a ruler (it bottoms out at 12 over the pane's floor then,
+                     * #1d1d1d; the floor is #120e0a since, and the shadow was not re-tuned). At rest
+                     * the card is out of sight and casts none.
                      */
                     'translate-y-0 shadow-(--shadow-dock-raised)'
                   : /*
-                     * At rest, **a sliver of the card remains**: FOLDED_SLIVER (32px), set by
-                     * the inline translate below from that one constant (the raised state is `translate-y-0`).
+                     * At rest the card is **wholly below the pane's bottom edge** (owner,
+                     * 2026-11-07): `translate-y-full` moves it down by its own height, and the
+                     * pane's `overflow-clip` hides it. Nothing of it shows, shadow included, so
+                     * the shadow is off here and fades in as the card rises (it is in the
+                     * transition above).
                      *
-                     * It showed 26px at first, then 16 (reported by a user on 2026-09-11:
-                     * "the input is not visible"): the card's pt-1 (4px) plus the form's py-3
-                     * (12px), the most that still hid the input field, whose top border is the
-                     * very next line. The owner chose to show more on 2026-11-06, so the 32px
-                     * shown now also reveals the top 16px of the input field: a resting card
-                     * reads as a place to write, not only as an edge. The rule "must hide the
-                     * input field" no longer holds, and nothing here depends on it.
+                     * The pane showed 26px of the card at first, then 16 (reported by a user on
+                     * 2026-09-11: "the input is not visible"), then 32 (2026-11-06, #2018). The
+                     * owner meant the fold height, not the sliver, in that last one and wants it
+                     * all the way down, as it was before: the bottom edge of a short panel is not
+                     * a place to show a half of an input field.
                      *
                      * The card is moved, not resized, so what reads its height is untouched: the
                      * space reserved under the conversation (composerH), and the fold and unfold
                      * shares, which are taken from the open composer's resting height.
                      *
-                     * bg-surface-raised stays on the input field, so the part of it that shows
-                     * is a field, not a hole in the pane's floor.
-                     *
-                     * This does not make the height hard to reach — what triggers the rise is
-                     * not the card but the pane's bottom strip (COMPOSER_REACH, 54px: larger
-                     * than the sliver), so a hand summons the card from the same spot as
-                     * before.
-                     *
-                     * The background is still the same color as the pane's floor, and the
-                     * card's border is darker too (line is darker than the pane's line-strong). It
-                     * is shape, not brightness, that says the card is there. A shadow is still
-                     * cast here too (reported by a user on 2026-09-11). Cast short, but not
-                     * faint — with only a sliver showing, brightness alone cannot say it,
-                     * so this shadow alone is what says the card is **resting on** the pane.
-                     *
-                     * The darkness was tuned with a ruler, not by eye: the pane's floor was
-                     * #1d1d1d then (#141414 since #362, #0f0f0f from #725 to 2026-11-05, #120e0a since; not re-tuned), so on screen, black barely moves at all — a ruler with fewer than
-                     * ten marks on it. Measured in pixels, over a floor of 18, this shadow's
-                     * darkest line comes out to **12**. That value came from five rounds of
-                     * measuring: 12 → 6 (too dark) → 9 ("halfway") → 10 ("just a touch
-                     * lighter") → 12 ("bring the darkness back down", specified by a user on
-                     * 2026-09-12). Each notch was one round of feedback, and after it got
-                     * longer, it landed back on the original value — the problem was never the
-                     * darkness, it just was not noticeable because it was **too short**.
-                     *
-                     * Darkness and **length move independently**. "Longer, same darkness"
-                     * (specified by a user on 2026-09-12) can only hold if increasing the blur
-                     * is paired with lowering the alpha — increasing blur alone spreads the same
-                     * ink thinner and lightens the darkest point along with it, and raising
-                     * alpha alone darkens it. Length was narrowed down the same way, by
-                     * measuring: 13px (too short) → 25px (too long) → **18px** (the midpoint,
-                     * specified by a user on 2026-09-12). While raised: 18 → 32 → 25px. The
-                     * darkest point was held fixed at 12 while only the length moved — reducing
-                     * blur concentrates the same ink into a narrower band and darkens that
-                     * point, so the alpha is lowered every time to bring it back to 12.
+                     * What raises it is not the card but the pane's bottom strip
+                     * (COMPOSER_REACH, 54px), so a hand summons it from anywhere along the
+                     * bottom, though nothing marks the spot. Focus (a key into the field) and a
+                     * file dropped on the pane raise it too.
                      */
-                    'shadow-(--shadow-dock)'
+                    'translate-y-full shadow-none'
               }`
             : undefined
         }
-        style={fold && !composerUp ? { translate: `0 calc(100% - ${FOLDED_SLIVER}px)` } : undefined}
         ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}

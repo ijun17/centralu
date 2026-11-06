@@ -389,7 +389,8 @@ export function GridView() {
                     sessionId={id}
                     /*
                   Folding the composer exists **only in the grid** and on project screens (user request, 2026-09-10),
-                  and since 2026-10-20 only when the panel is short (SessionPane's FOLD_SHARE): the focus view has
+                  and since 2026-10-20 only when the panel is short (SessionPane's FOLD_SHARE, under about 570px since 2026-11-07,
+                  twice the first line): the focus view has
                   plenty of room, and folding there would only leave the person having to unfold it every time.
                 */
                     foldWhenShort
