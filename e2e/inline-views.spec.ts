@@ -271,7 +271,7 @@ test('a view scrolled far out of view sends teardown then collapses into a place
   // The conversation grows long enough to push that row far up (following the bottom)
   // Answers, not tool calls: the calls between them would fold into one line (#2007)
   for (let i = 0; i < 60; i++) {
-    await emit(page, { type: 'message_delta', sessionId: sid, role: 'assistant', text: `more ${i} `.repeat(40) })
+    await emit(page, { type: 'message_delta', sessionId: sid, role: 'assistant', text: `more ${i}` })
     await emit(page, { type: 'turn_complete', sessionId: sid })
   }
   await scrollChat(page, 'bottom')
