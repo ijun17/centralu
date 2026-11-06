@@ -61,6 +61,17 @@ describe('the context reading during a Claude turn', () => {
     await handle.dispose()
   })
 
+  it('drops a reading above the window: a share above 1 is a misread field (#1654)', async () => {
+    cli.asked = 0
+    cli.size = 1_200_000
+    const { handle, readings } = await start()
+    cli.feed?.(assistant(1_200_000, null))
+    await until(() => cli.asked > 0)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(readings()).toEqual([])
+    await handle.dispose()
+  })
+
   it("does not read for a subagent's request, not even in a trailing read", async () => {
     cli.asked = 0
     cli.size = 50_000

@@ -164,13 +164,14 @@ describe('the ACP session against a scripted agent', () => {
     ])
   })
 
-  it('reads the context share from usage_update, and drops the zero a cancelled turn reads', async () => {
+  it('reads the context share from usage_update, and drops the zero a cancelled turn reads and a share above 1', async () => {
     const w = world()
     const s = await w.start()
     s.send('go')
     const peer = w.peers[0]!
     await peer.next(isPrompt)
     peer.update(SID, { sessionUpdate: 'usage_update', used: 0, size: 200_000 })
+    peer.update(SID, { sessionUpdate: 'usage_update', used: 250_000, size: 200_000 })
     peer.update(SID, { sessionUpdate: 'usage_update', used: 11_176, size: 200_000 })
     peer.update(SID, { sessionUpdate: 'something_new', x: 1 })
     peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
