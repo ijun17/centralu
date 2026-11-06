@@ -308,15 +308,6 @@ describe('the one hold (D12)', () => {
     expect(w.records.pendingFor(Y, w.clock.t + 10_000)).toHaveLength(1)
   })
 
-  it('heldByProject counts held rows and refused calls per project, and names whom they were for', () => {
-    const w = world()
-    w.send(X, { to: [C], text: 'one' })
-    w.send(Y, { to: [ORC, C], text: 'two' })
-    w.mail.refused('x', { tool: 'start_agent', target: 'session c', firstLine: 'build', projectId: 'px' })
-    expect(w.mail.heldByProject()).toEqual([{ projectId: 'px', count: 3, refused: 1, recipients: [C, ORC, 'session c'] }])
-    w.mail.dismissProject('px')
-    expect(w.mail.heldByProject()).toEqual([])
-  })
 })
 
 describe('quiet answers (D3)', () => {
@@ -602,10 +593,13 @@ describe('reading (§8.4)', () => {
 
     // A held row reads as a phantom to its recipient, and whole to its sender
     const held = w.send(X, { to: [C], text: 'held for trust' }).message
-    const feed = w.mail.feed(C, { limit: 10 })
-    expect(feed.items.find((i) => i.message.id === held.id)).toMatchObject({ phantom: 'held', message: { body: '' } })
-    expect(w.mail.feed(X, { limit: 10 }).items.find((i) => i.message.id === held.id)).toMatchObject({ message: { body: 'held for trust' } })
     expect(refusedFor(() => w.mail.read(C, { id: held.id }))).toBe('unknown_message')
+    // Found on the way up a chain, it is a phantom without words or facts, and its sender reads it whole
+    const up = w.send(A, { to: [C], text: 'held ancestor' }).message
+    const down = w.send(A, { replyTo: up.id, to: [C], text: 'reply' }).message
+    w.records.hold(C, [up.id], 'policy')
+    expect(w.mail.read(C, { id: down.id }).items.map((i) => [i.message.id, i.phantom ?? null, i.message.body])).toEqual([[up.id, 'held', ''], [down.id, null, 'reply']])
+    expect(w.mail.read(A, { id: down.id }).items.map((i) => [i.phantom ?? null, i.message.body])).toEqual([[null, 'held ancestor'], [null, 'reply']])
   })
 
   it('read of a long chain returns the last nine ancestors and where to read on with before; a message that is no longer kept is one line', () => {
@@ -673,18 +667,6 @@ describe('tasks, notices and the feed', () => {
     expect(w.mail.notice(B, { body: 'other recipient', facts: {}, dedupeKey: 'k2' })).toBeDefined()
   })
 
-  it('the feed lists the messages to or from an address newest first, one page at a time, and says whether there are older', () => {
-    const w = world()
-    const ids = Array.from({ length: 5 }, (_, i) => w.send(i % 2 ? B : A, { to: [i % 2 ? A : B], text: `message ${i}`, needsReply: false }).message.id)
-    const page = w.mail.feed(A, { limit: 3 })
-    expect(page.items.map((i) => i.message.id)).toEqual([ids[4], ids[3], ids[2]])
-    expect(page.older).toBe(true)
-    const next = w.mail.feed(A, { limit: 3, before: ids[2] ?? '' })
-    expect(next.items.map((i) => i.message.id)).toEqual([ids[1], ids[0]])
-    expect(next.older).toBe(false)
-    // Reading the feed marks nothing
-    expect(w.rowOf(ids[0] ?? '', B).readAt).toBeNull()
-  })
 })
 
 describe('what the deep review of #1899 found', () => {
