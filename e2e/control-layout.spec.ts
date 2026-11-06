@@ -197,14 +197,35 @@ test('the keyboard resizes the sidebar from its handle', async ({ page }) => {
 test('The window has a hairline edge that moves nothing', async ({ page }) => {
   await setup(page)
   const edge = page.getByTestId('app-edge')
+  // Four strips, each a border of its own, not a bordered box the size of the window (#2034: that box was a layer of its own, as large as the window)
   const look = await edge.evaluate((el) => {
-    const s = getComputedStyle(el)
-    return { width: s.borderTopWidth, color: s.borderTopColor, line: getComputedStyle(document.documentElement).getPropertyValue('--color-line').trim() }
+    const line = getComputedStyle(document.documentElement).getPropertyValue('--color-line').trim()
+    const probe = document.createElement('span')
+    probe.style.color = line
+    document.body.append(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    const [top, bottom, left, right] = [...el.children].map((c) => getComputedStyle(c)) as [CSSStyleDeclaration, CSSStyleDeclaration, CSSStyleDeclaration, CSSStyleDeclaration]
+    return {
+      color,
+      count: el.children.length,
+      top: [top.borderTopWidth, top.borderTopColor],
+      bottom: [bottom.borderTopWidth, bottom.borderTopColor],
+      left: [left.borderLeftWidth, left.borderLeftColor],
+      right: [right.borderLeftWidth, right.borderLeftColor],
+    }
   })
-  expect(look.width).toBe('1px')
   expect(look.color).not.toBe('rgba(0, 0, 0, 0)')
+  expect(look.count).toBe(4)
+  for (const side of [look.top, look.bottom, look.left, look.right]) expect(side).toEqual(['1px', look.color])
   const win = page.viewportSize()!
   expect(await edge.boundingBox()).toMatchObject({ x: 0, y: 0, width: win.width, height: win.height })
+  // top, bottom, left, right: one pixel thick, along the whole side
+  const boxes = await edge.locator('> span').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON()))
+  expect(boxes[0]).toMatchObject({ x: 0, y: 0, width: win.width, height: 1 })
+  expect(boxes[1]).toMatchObject({ x: 0, y: win.height - 1, width: win.width, height: 1 })
+  expect(boxes[2]).toMatchObject({ x: 0, y: 0, width: 1, height: win.height })
+  expect(boxes[3]).toMatchObject({ x: win.width - 1, y: 0, width: 1, height: win.height })
   expect((await page.getByTestId('app-header').boundingBox())!.y).toBe(0)
   // It lets the pointer through to what is under it
   expect(await edge.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none')
