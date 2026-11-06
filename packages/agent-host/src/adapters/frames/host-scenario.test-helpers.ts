@@ -18,6 +18,8 @@ export type HostScenario = {
   otherSession?: string
   /** A text longer than this many characters is cut in the recording (a bulky output that only fills the context): the tool's own figures stay */
   cutText?: number
-  /** Events of the recorded session the run waits for once the turns have ended, in order (the host starts turns and compactions of its own) */
+  /** Events of the recorded session the run waits for once the turns have ended, all at once and in any order (the host starts turns and compactions of its own) */
   then?: readonly { type: string; label: string }[]
+  /** One more turn sent to the recorded session once the `then` events have come, and waited for (what the session is like after them) */
+  after?: string
 }

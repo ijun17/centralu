@@ -16,7 +16,11 @@ export const CENTRALU_SCENARIOS: readonly CentraluScenario[] = [
     cutText: 2000,
     // About 28k tokens of the model's context for each, so four pass the floor
     turns: ['Run this same shell command four times, one call each, and look at its whole output every time (the command follows the colon): head -c 160000 /dev/urandom | base64 | fold -w 100', 'Say done. Then call the compact_self tool.'],
-    then: [{ type: 'compaction', label: 'the compaction' }],
+    then: [
+      { type: 'compaction', label: 'the compaction' },
+      { type: 'turn_complete', label: 'the end of the compaction turn' },
+    ],
+    after: 'Reply with exactly: after',
   },
   {
     // The other session answers by mail, and the host starts a turn of this one from the answer
@@ -30,6 +34,12 @@ export const CENTRALU_SCENARIOS: readonly CentraluScenario[] = [
     name: 'centralu-agent-session',
     helpers: [],
     turns: ['Use start_agent with wait false to start an agent for this job: Reply with exactly: one . Give it tool codex, model gpt-5.6-luna and effort low. Then use agent_session to send it the message "Reply with exactly: two" and wait for its answer. Tell me both of its answers.'],
+  },
+  {
+    // A child that is still working is stopped, then put in the session archive
+    name: 'centralu-agent-stop',
+    helpers: [],
+    turns: ['Use start_agent with wait false to start an agent for this job: Run the shell command sleep 120 and then reply with exactly: late . Give it tool codex, model gpt-5.6-luna and effort low. Once it has started, use agent_session to stop it, then use agent_session to delete it. Tell me what each call answered.'],
   },
   {
     // Work given to another project while the person has not trusted this one: refused, with nothing started

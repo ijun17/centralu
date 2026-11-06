@@ -44,16 +44,23 @@ async function host(d: Driver, spec: CentraluScenario, hostSent: (method: string
     }
     await d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
   }
-  if (spec.then?.some((t) => t.type === 'turn_complete')) {
+  const compacts = spec.then?.some((t) => t.type === 'compaction')
+  if (!compacts && spec.then?.some((t) => t.type === 'turn_complete')) {
     // The answer arrives by mail and the host starts a turn from it, as the mailbox's channel input
     const [wake] = hostSent('turn/start').slice(spec.turns.length)
     d.session().send(wake!, { origin: { kind: 'channel', server: 'centralu' }, ...named() })
     await d.waitFor('the end of the turn the mail starts', ended)
   }
-  if (spec.then?.some((t) => t.type === 'compaction')) {
+  if (compacts) {
     // Centralu's own compact, as `SessionEvents.sendCompact` sends it
     d.session().send('/compact', { compact: true })
     await d.waitFor('the compaction', (e) => e.type === 'compaction')
+    await d.waitFor('the end of the compaction turn', (e) => e.type === 'turn_complete')
+  }
+  if (spec.after) {
+    d.session().send(spec.after, named())
+    // A failed turn would end it too: it must be the turn's normal end
+    expect((await d.waitFor('the end of the turn after', ended)).type).toBe('turn_complete')
   }
 }
 
@@ -148,9 +155,37 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(of(events, 'activity').map((a) => a.activity)).toEqual(['compacting', null])
     const used = of(events, 'context_update').map((c) => c.used)
     expect(Math.max(...used)).toBeGreaterThan(120_000)
-    expect(used.at(-1)).toBeLessThan(10_000)
-    // The compaction turn's own end is not in the recording (it was cut when the compaction item completed): the two turns before it ended as the session's
-    expect(of(events, 'turn_complete')).toHaveLength(2)
+    // The reading the compaction turn itself reports, between its start and its marker, is the summary's size
+    const started = events.findIndex((e) => e.type === 'activity' && e.activity === 'compacting')
+    const marker = events.findIndex((e) => e.type === 'compaction')
+    expect(of(events.slice(started, marker), 'context_update').map((c) => c.used)).toEqual([expect.any(Number)])
+    expect(of(events.slice(started, marker), 'context_update')[0]!.used).toBeLessThan(10_000)
+    expect(of(events, 'turn_complete')).toHaveLength(4)
+  })
+
+  // Most of what is read here is Codex's own doing (no model text in the compaction turn, the answer 'after', a context that starts again small); what the adapter does is read the
+  // context from the last request (`last`), not Codex's running total, and end the compaction turn as a turn of its own: the recording continues past it, so the turn after still runs
+  it('centralu-compact-real: guards the context reading after a compaction — it comes from the last request, not the running total, and the compaction turn ends as its own turn before the next one runs', async () => {
+    const { events } = await replay('centralu-compact-real')
+    const at = events.findIndex((e) => e.type === 'compaction')
+    const started = events.findIndex((e) => e.type === 'activity' && e.activity === 'compacting')
+    const compactionEnd = events.findIndex((e, i) => i > at && e.type === 'turn_complete')
+    expect(compactionEnd).toBeGreaterThan(at)
+    // No text of the model's comes between the compaction and the end of its turn; the turn after it is the one that answers
+    expect(events.slice(at, compactionEnd).some((e) => e.type === 'message_delta')).toBe(false)
+    const after = events.slice(compactionEnd + 1)
+    expect(after.filter((e) => e.type === 'message_delta').map((e) => (e as { text: string }).text).join('')).toContain('after')
+    expect(after.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+    // The context starts again from the summary: the turn after it is some thousands of tokens, where the one before the compaction was over 120k
+    const used = of(after, 'context_update').map((c) => c.used)
+    expect(used.length).toBeGreaterThan(0)
+    // Codex's running total at this point is over 800k tokens: reading it would show the gauge full
+    expect(Math.max(...used)).toBeLessThan(30_000)
+    expect(of(events.slice(0, started), 'context_update').at(-1)!.used).toBeGreaterThan(120_000)
+    expect(of(after, 'compaction')).toEqual([])
+    expect(of(events, 'error')).toEqual([])
+    // The session was not left working: the last event of the recording is the end of the turn after the compaction
+    expect(events.at(-1)).toMatchObject({ type: 'turn_complete' })
   })
 
   it('centralu-compact-real: guards the tool-call cards — compact_self is drawn as Centralu’s and succeeds, once per call, however many times the model asked', async () => {
@@ -184,6 +219,25 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(results.every((r) => r.ok)).toBe(true)
     expect(results.at(-1)!.summary).toContain('one')
     expect(results.at(-1)!.summary).toContain('two')
+  })
+
+  // The adapter's part is the card each call is drawn as (its label and the session it names, `centraluMark`) and that the calls end ok; the words of the results are the host's, passed through
+  it('centralu-agent-stop: guards how the calls that end a child are drawn — start, stop and delete are three cards of Centralu’s, the last two naming the session the model gave, and each ends ok', async () => {
+    const { events } = await replay('centralu-agent-stop')
+    expect(calls(events).map((c) => c.centralu?.label)).toEqual(['Started an agent', 'Stopped an agent', 'Deleted an agent'])
+    const [start, stop, del] = calls(events)
+    expect(start!.tool).toBe('start_agent')
+    expect([stop!.tool, del!.tool]).toEqual(['agent_session', 'agent_session'])
+    // Both name the session the model gave (the recording holds the handle the model used, `ses-2`, not the id the start answered with)
+    expect(stop!.centralu?.sessionId).toBeDefined()
+    expect(del!.centralu?.sessionId).toBe(stop!.centralu?.sessionId)
+    const results = of(events, 'tool_result')
+    expect(results.every((r) => r.ok)).toBe(true)
+    expect(results[1]!.summary).toContain('Stopped the codex session')
+    expect(results[2]!.summary).toContain('to the session archive')
+    // The host's words: the child was working when it was stopped, and the delete moved it to the archive
+    expect(results[0]!.summary).toContain('is working on it')
+    expect(of(events, 'turn_complete')).toHaveLength(1)
   })
 
   it('centralu-ask-project: guards ask_project’s card and its answer — the other project’s session answers and the answer is the result', async () => {
