@@ -2306,10 +2306,16 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    Past the host's own rules, the same script records the situations a host creates around a session: a context filled past
    `COMPACT_FLOOR_TOKENS` by four commands' output so `compact_self` really compacts (`centralu-compact-real`: the nudge steered into a
    running turn, refused by the app-server when the turn was ending, then `thread/compact/start` and the context falling from 124k to 6k;
-   a bulky output is cut in the recording, `cutText`); a session woken by mail (`centralu-wake`); `agent_session` send and wait;
-   and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
-   session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
-   compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
+   a bulky output is cut in the recording, `cutText`; the recording goes on past the compaction turn's own end into one more short turn,
+   `after`, which shows the context read again from the summary); a session woken by mail (`centralu-wake`); `agent_session` send and
+   wait, and stop then delete of a child that is still working (`centralu-agent-stop`); and `ask_project` to a second project, refused
+   while the project is untrusted and answered once trusted and once the other project has a session. `codex/centralu.test.ts` plays
+   the host's part at the point of the recording where it acted.
+   **Codex's own automatic compaction is not recordable on 0.160.0 with the limits tried:** the run reached 233k of the 258,400-token
+   window, with `model_auto_compact_token_limit` set to 155,040, and Codex never compacted by itself. Only Centralu's compaction
+   (`trigger: manual`) is recorded. The adapter's `auto` trigger is only checked by the hand-written frames in `codex/compact.test.ts`,
+   which model an automatic compaction as a turn of its own where a real one may run inside a regular turn, until a run on a later
+   version triggers it.
    Claude Code's are recorded the same way (`frames-record-host.mts claude`; `claude/centralu-scenarios.test-helpers.ts`: start_agent,
    agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
    sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
