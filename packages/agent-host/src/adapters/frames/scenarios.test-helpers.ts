@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { fakeApps, fakeCentraluTools } from './fakes.test-helpers.js'
@@ -294,8 +293,8 @@ export const SCENARIOS: readonly Scenario[] = [
     name: 'permissions',
     tools: ['antigravity'],
     async run(d) {
-      const outside = join(d.cwd, '..', 'frames-outside', 'secret.txt')
-      d.seed({ 'notes.txt': 'line one\n', [join('..', 'frames-outside', 'secret.txt')]: 'The secret word is plover.\n' })
+      const outside = `${d.cwd}/../frames-outside/secret.txt`
+      d.seed({ 'notes.txt': 'line one\n', '../frames-outside/secret.txt': 'The secret word is plover.\n' })
       const asked = await answeredTurn(d, `Do these three steps in order, using your tools: 1) run the shell command \`echo hello-from-shell\`; 2) append a new line with the text \`edited\` to notes.txt in the current folder; 3) read the file ${outside} and tell me its exact contents. Then summarise in one line.`, 'allow')
       if (asked.length === 0) throw new Error('permissions: nothing was asked about')
     },

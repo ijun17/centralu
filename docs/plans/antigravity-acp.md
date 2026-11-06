@@ -498,6 +498,30 @@ one by one on Windows):
 | Deep review: a sign-in timeout is `timed_out`, an ineligible answer carries its page, no address in the message | `sign-in.test.ts` (the agent's real frames) |
 | Deep review: no compaction for an agent that advertises none; `compact_self` says so; the commands of a load's replay kept | `acp/session.test.ts`, `sessions/self-compaction.test.ts` |
 
+### 10.1 1.5.0, recorded through the adapter (2026-11-06)
+
+The installed `agy` 1.5.0 has `agy acp`. `scripts/frames-record.mts antigravity` drives the real adapter and profile through the
+scenarios of `frames/scenarios.test-helpers.ts` against it (`permissions`, `deny`, `load`, `signed-out`, `centralu-mail`,
+`centralu-agents`), in a data folder, `--gemini-dir` and home of its own; the sign-in token is a copy that is put back if the agent
+refreshed it, as Codex's is. It is not the pinned archive: Centralu runs 1.4.3, so `recordings/antigravity-1.5.0/` is what a bump
+meets, and `replay.test.ts` has a second block for it. `antigravity-1.4.3/` stays whole, because the tests of the pinned agent
+(the edit's two ids, `Cwd`, `allow_always`, the MCP cards) read it, and `sign-in` and `mcp` could not be recorded again (a
+person in a browser; two servers of the spike's own, which the adapter does not attach). What changed in the frames (#2048 has
+the ones that matter):
+
+| | 1.4.3 | 1.5.0 |
+|---|---|---|
+| Edit in the folder, read outside it | asked (edit), refused (outside read) | no request, both done |
+| `usage_update` (`used`, `size`) | after every step | none; only the prompt's final `usage` |
+| Centralu's bridge call | `_meta.mcp.server`, a card, result text | `name` `mcp_centralu_mail`, no `_meta`, no card, no result text |
+| Tool call | `pending`, then its request | `in_progress` with `name` and `args`; a shell call turns `pending` and asks |
+| Shell result | `rawOutput.combinedOutput`, `exitCode` | `rawOutput.output` ("Command exited with code 0." first), `exit_code` |
+| Permission options | `allow_always` for a command, with a warning | `allow` and `deny` only |
+| Modes, config | `default`, `auto_edit`, `yolo`; `thinking_level` | `default`, `accept-edits`, `plan`; `thought_level` |
+| `initialize` | `mcpCapabilities`, `agentInfo` `antigravity-acp` | no `mcpCapabilities`; `agentInfo` `Antigravity ACP Server`; `close` and `load` in `sessionCapabilities` |
+| New updates | none | `session_info_update` (the title), `agent_thought_chunk`, the prompt echoed as `user_message_chunk` |
+| Signed out | `-32000` with `data.message` naming the settings file | `-32000 Authentication required`, no `data` |
+
 ## 11. Open questions and follow-ups
 
 1. Role text through `_meta.antigravity.systemPrompt.append`, which would let Antigravity be the orchestrator or an

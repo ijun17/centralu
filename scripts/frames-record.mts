@@ -2,7 +2,7 @@
 /**
  * Records the scenarios against an installed CLI (docs/plans/acp-adapter.md §10.5, #1498):
  *
- *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]
+ *   pnpm exec tsx scripts/frames-record.mts <cursor-agent | opencode | claude | codex | antigravity> [scenario ...] [--raw <folder>]
  *
  * Each scenario (`adapters/frames/scenarios.test-helpers.ts`) drives the real adapter, as the host would, in a new
  * temporary folder; the adapter's own recorder writes the frames, and they are scrubbed into
