@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { homedir, userInfo } from 'node:os'
+import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -30,7 +30,8 @@ const PRIVATE: readonly [string, RegExp][] = [
 const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
   ['an id that is not a placeholder', /\b(?!0{4}\d{4}-0000-4000-8000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
   ['an account address', /[\w.+-]+@[\w-]+\.[\w.-]+/],
-  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+/],
+  // Server and tool both named: a name streamed in pieces reads whole only in the joined reading, and its first piece alone (`mcp__central`) is no connector
+  ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+?__[\w.-]+/],
 ]
 
 /**
@@ -47,6 +48,9 @@ function machineWords(): [string, RegExp][] {
   } catch {
     // No user name to look for
   }
+  // The machine's name, as the user name: off CI, where a runner's name is a common word
+  const machine = hostname().split('.')[0] ?? ''
+  if (machine.length >= 3 && !process.env.CI) words.push(['this machine’s name', new RegExp(`\\b${escape(machine)}\\b`, 'i')])
   for (const form of new Set([homedir(), homedir().replace(/\\/g, '/'), homedir().replace(/\\/g, '\\\\')])) {
     if (form.length > 3) words.push(['this machine’s home folder', new RegExp(escape(form), 'i')])
   }

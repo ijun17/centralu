@@ -232,6 +232,21 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(results('approval')[1]).toMatchObject({ summary: 'Denied by user' })
   })
 
+  it("a command that exits with a code, and a Read of a file that is not there, are failed results in the tool's own words (recorded)", () => {
+    const results = recordedWhere('tool-error', (m) => m.type === 'user' && JSON.stringify(m).includes('"tool_result"')).flatMap(n).filter((e) => e.type === 'tool_result')
+    expect(results).toMatchObject([{ ok: false, summary: 'Exit code 3\nboom' }, { ok: false, summary: expect.stringContaining('File does not exist') }])
+  })
+
+  it("Centralu's own tools and an app's, as the CLI named them, are marked with what they did (recorded)", () => {
+    const marks = (scenario: string) =>
+      recordedWhere(scenario, (m) => m.type === 'assistant')
+        .flatMap(n)
+        .flatMap((e) => (e.type === 'tool_call' && e.summary.tool.startsWith('mcp__') ? [e.summary.centralu] : []))
+    expect(marks('centralu-agents')).toMatchObject([{ tool: 'recall' }, { tool: 'read_session' }, { tool: 'start_agent', label: 'Started an agent' }])
+    expect(marks('centralu-mail')).toMatchObject([{ tool: 'mail' }, { tool: 'mail' }])
+    expect(marks('mcp-app')).toEqual([{ tool: 'forecast', app: 'weather' }])
+  })
+
   it('a result of text blocks reads as its text on the card, not as their JSON (#843)', () => {
     const out = n({
       type: 'user',
@@ -258,22 +273,13 @@ describe('tool calls (the actual shape from the spike)', () => {
    * An image carried in a tool result (#40). The measured shape (from a Read of an image file):
    * content: [{type:'image', source:{type:'base64', data, media_type}}]
    */
-  it('a tool_result\'s image block becomes a message_image (the measured shape)', () => {
-    const out = n({
-      type: 'user',
-      message: {
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'tu1',
-            content: [{ type: 'image', source: { type: 'base64', data: 'aWJs', media_type: 'image/png' } }],
-          },
-        ],
-      },
-    })
+  it("a tool_result's image block becomes a message_image (recorded: a Read of a PNG)", () => {
+    const [result] = recordedWhere('image', (m) => m.type === 'user' && JSON.stringify(m).includes('"tool_result"'))
+    const out = n(result)
     // The tool line stays as-is (what actually ran), and the image comes out separately.
-    expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1' })
-    expect(out[1]).toEqual({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs' })
+    expect(out[0]).toMatchObject({ type: 'tool_result', ok: true, summary: '' })
+    expect(out[1]).toMatchObject({ type: 'message_image', sessionId: 's1', mime: 'image/png', data: expect.stringMatching(/^iVBORw0KGgo/) })
+    expect(out).toHaveLength(2)
   })
 
   it('an image that is too large explains why instead of rendering it', () => {

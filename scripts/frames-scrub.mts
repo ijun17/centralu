@@ -52,7 +52,14 @@ const FOREIGN: readonly [RegExp, string][] = [
 /** The kinds of update whose text an agent streams in pieces */
 const CHUNKED = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
 
-export type ScrubPlaces = { cwd: string; home?: string; tmp?: string; user?: string }
+export type ScrubPlaces = {
+  cwd: string
+  home?: string
+  tmp?: string
+  user?: string
+  /** What a UUID in a text becomes, so that one cut across two streamed chunks (a path with a session id in it) is replaced whole */
+  uuid?: (id: string) => string
+}
 
 /** A Windows path also appears without its drive (measured: an OpenCode tool title), and with `/` for `\` */
 function variants(p: string): string[] {
@@ -61,7 +68,7 @@ function variants(p: string): string[] {
 }
 
 /** Where in `s` something must be replaced, earliest first and never overlapping */
-function spans(s: string, places: Required<ScrubPlaces>): { start: number; end: number; with: string }[] {
+function spans(s: string, places: Places): { start: number; end: number; with: string }[] {
   const found: { start: number; end: number; with: string }[] = []
   const literal = (needle: string, replacement: string) => {
     for (let i = s.indexOf(needle); i >= 0; i = s.indexOf(needle, i + needle.length)) found.push({ start: i, end: i + needle.length, with: replacement })
@@ -79,6 +86,7 @@ function spans(s: string, places: Required<ScrubPlaces>): { start: number; end: 
   }
   for (const [re, replacement] of FOREIGN) pattern(re, replacement)
   if (places.user.length >= 3) pattern(new RegExp(`\\b${places.user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '<user>')
+  if (places.uuid) for (const m of s.matchAll(UUID_ANYWHERE)) found.push({ start: m.index, end: m.index + m[0].length, with: places.uuid(m[0].toLowerCase()) })
   pattern(SECRET, '<secret>')
   pattern(EMAIL, '<email>')
   // Earliest first, the longest where two start together; one that overlaps a kept one is dropped
@@ -152,8 +160,10 @@ function separatorsAfterFolders(joined: string, found: readonly { start: number;
   return { slashes, drops }
 }
 
-function withDefaults(p: ScrubPlaces): Required<ScrubPlaces> {
-  return { cwd: p.cwd, home: p.home ?? homedir(), tmp: p.tmp ?? tmpdir(), user: p.user ?? safeUser() }
+type Places = Required<Omit<ScrubPlaces, 'uuid'>> & Pick<ScrubPlaces, 'uuid'>
+
+function withDefaults(p: ScrubPlaces): Places {
+  return { cwd: p.cwd, home: p.home ?? homedir(), tmp: p.tmp ?? tmpdir(), user: p.user ?? safeUser(), ...(p.uuid ? { uuid: p.uuid } : {}) }
 }
 
 function safeUser(): string {
@@ -165,7 +175,6 @@ function safeUser(): string {
 }
 
 export function scrub(frames: readonly Frame[], cwd: string, home: string = homedir(), more: Omit<ScrubPlaces, 'cwd' | 'home'> = {}): unknown[] {
-  const places: ScrubPlaces = { cwd, home, ...more }
   const ids = new Map<string, string>()
   const counters: Record<string, number> = {}
   const stable = (kind: string, value: string) => {
@@ -180,9 +189,13 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     if (!ids.has(key)) ids.set(key, String((counters[kind] = (counters[kind] ?? 0) + 1)))
     return ids.get(key)!
   }
+  // One already a placeholder (a text scrubbed joined, then each piece again) is not numbered twice
+  const placeholderId = (u: string): string => /^0{4}\d{4}-0000-4000-8000-/.test(u) ? u : `${numbered('uuid', u).padStart(8, '0')}-0000-4000-8000-${u.endsWith(CENTRALU_INPUT_MARK) ? CENTRALU_INPUT_MARK : numbered('tail', u).padStart(12, '0')}`
+  // Ids in a streamed text are replaced where the text is scrubbed joined, so one cut across two chunks goes whole
+  const places: ScrubPlaces = { cwd, home, ...more, ...(more.uuid ? {} : { uuid: placeholderId }) }
   const claudeIds = (s: string): string =>
     s
-      .replace(UUID_ANYWHERE, (u) => `${numbered('uuid', u.toLowerCase()).padStart(8, '0')}-0000-4000-8000-${u.toLowerCase().endsWith(CENTRALU_INPUT_MARK) ? CENTRALU_INPUT_MARK : numbered('tail', u.toLowerCase()).padStart(12, '0')}`)
+      .replace(UUID_ANYWHERE, (u) => placeholderId(u.toLowerCase()))
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
       .replace(/^(msg|req)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
   // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server and its apps' are not

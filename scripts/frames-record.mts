@@ -60,7 +60,7 @@ async function main(): Promise<number> {
       const sessionId = `record-${scenario.name}`
       try {
         const run = runAs(tool, scenario)
-        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string>) => seedFiles(cwd, files), tool, ...(tool === 'claude' ? { session: { model: CLAUDE_MODEL, noSettingFiles: true } } : {}) })
+        const events = await drive(adapter, run, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => seedFiles(cwd, files), tool, ...(tool === 'claude' ? { session: { model: CLAUDE_MODEL, noSettingFiles: true } } : {}) })
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
@@ -86,7 +86,7 @@ async function main(): Promise<number> {
 }
 
 /** The files a scenario asks the tool to find in its working folder */
-function seedFiles(cwd: string, files: Record<string, string>): void {
+function seedFiles(cwd: string, files: Record<string, string | Buffer>): void {
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(dirname(join(cwd, name)), { recursive: true })
     writeFileSync(join(cwd, name), text)

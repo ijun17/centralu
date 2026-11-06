@@ -2214,7 +2214,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    is tapped, so a recording holds its stream-json as the SDK read and wrote it, and `claude/replay.test.ts` plays it
    through the real SDK and adapter (`streamJsonCodec`). A test that reads one message takes it from a recording
    (`claude/recorded.test-helpers.ts`); a hand-written message stays only for what no real run sends or cheaply can
-   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings.
+   (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings. A scenario
+   that needs Centralu's own tools or an attached app runs with the fixed answers of `frames/fakes.test-helpers.ts` (the
+   tool and its calls are real, the host behind the tools is not), the same in a recording run and in its replay.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,
