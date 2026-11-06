@@ -57,7 +57,7 @@ async function main(): Promise<number> {
   const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
   const [tool, ...names] = args
   if (!tool || !TOOLS.includes(tool)) {
-    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex> [scenario ...] [--raw <folder>]')
+    console.error('usage: frames-record.mts <cursor-agent | opencode | claude | codex | antigravity> [scenario ...] [--raw <folder>]')
     return 2
   }
   const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
