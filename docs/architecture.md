@@ -50,7 +50,7 @@ Large changes were **expected** in this project from the start. The architecture
 The heart of it: **the only place that knows an implementation is the apps entry point.** Everything else knows only interfaces and schemas.
 
 The table is `boundaries/element-types` in `eslint.config.js`, which judges an import by the path it resolves to:
-`tooling/eslint-alias-resolver.cjs` reads the `@cc/*` aliases from `tsconfig.json` `paths` (an `@cc/` specifier not there
+`tooling/eslint-import-resolver-cc` reads the `@cc/*` aliases from `tsconfig.json` `paths` (an `@cc/` specifier not there
 is a lint error, #1847). A ui test may take `platform/mock` (the `ui-test` element). `tooling/boundaries.test.ts` holds a
 refused and an allowed import per row.
 

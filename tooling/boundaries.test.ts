@@ -99,23 +99,24 @@ describe('common layer boundary', () => {
 
 /*
  * `boundaries/element-types` is the table of docs/architecture.md §2, one allow-list per layer. It judges an import by what
- * it resolves to (tooling/eslint-alias-resolver.cjs), and for a long time resolved none of the `@cc/*` imports the packages
+ * it resolves to (tooling/eslint-import-resolver-cc), and for a long time resolved none of the `@cc/*` imports the packages
  * use, so it judged nothing (#1847). One case per layer: what it may import and what it may not. An allowed import is
  * checked next to a refused one, since on its own it passes whether or not the rule reads anything.
  */
 describe('layer table (boundaries/element-types)', () => {
-  type Style = 'import' | 'export' | 'dynamic'
+  type Style = 'import' | 'export' | 'named-export' | 'dynamic'
   const refused = async (filePath: string, from: string, style: Style = 'import') => {
     const code = {
       import: `import { a } from '${from}'\nexport const b = a`,
       export: `export * from '${from}'`,
+      'named-export': `export { a } from '${from}'`,
       dynamic: `export const b = () => import('${from}')`,
     }[style]
     return ruleIds(await lint(filePath, code)).includes('boundaries/element-types')
   }
 
   it.each([
-    { file: 'packages/protocol/src/x.ts', allowed: ['zod', './other.js'], refused: ['@cc/core', '@cc/common', '../../core/src/index.js'] },
+    { file: 'packages/protocol/src/x.ts', allowed: ['zod', './other.js'], refused: ['@cc/core', '@cc/common', '../../core/src/index.js', '../../core/src', '../../core/src/session'] },
     { file: 'packages/common/src/x.ts', allowed: ['./other.js'], refused: ['@cc/core', '@cc/protocol'] },
     { file: 'packages/core/src/x.ts', allowed: ['@cc/common', '@cc/protocol'], refused: ['@cc/platform/ports', '@cc/ui'] },
     { file: 'packages/platform/src/ports/x.ts', allowed: ['@cc/protocol'], refused: ['@cc/common', '@cc/core'] },
@@ -125,14 +126,16 @@ describe('layer table (boundaries/element-types)', () => {
     { file: 'packages/ui/src/x.test.tsx', allowed: ['@cc/platform/mock', '@cc/core'], refused: ['@cc/platform/tauri'] },
     // `agent-host/src/apps/` is a folder of the host, not the apps layer
     { file: 'packages/agent-host/src/adapters/x.ts', allowed: ['@cc/common', '../../apps/contract.js'], refused: ['@cc/core', '@cc/ui'] },
-    { file: 'apps/web/src/x.ts', allowed: ['@cc/platform/web', '@cc/ui'], refused: ['../../../packages/agent-host/src/index.js'] },
+    { file: 'packages/platform/src/x.ts', allowed: ['@cc/protocol', './ports/index.js'], refused: ['@cc/core', '@cc/ui', './web/index.js'] },
+    { file: 'packages/platform/src/web/x.ts', allowed: ['../capabilities.js', '../engine.js'], refused: ['../../../ui/src/index.js'] },
+    { file: 'apps/web/src/x.ts', allowed: ['@cc/platform/web', '@cc/ui'], refused: ['../../../packages/agent-host/src/index.js', '../../../packages/agent-host/src'] },
   ])('$file takes only what its row allows', async ({ file, allowed, refused: banned }) => {
     for (const from of banned) expect(await refused(file, from), `${file} importing ${from}`).toBe(true)
     for (const from of allowed) expect(await refused(file, from), `${file} importing ${from}`).toBe(false)
   })
 
   it('judges a re-export and a dynamic import as it judges an import', async () => {
-    for (const style of ['export', 'dynamic'] as const) {
+    for (const style of ['export', 'named-export', 'dynamic'] as const) {
       expect(await refused('packages/protocol/src/x.ts', '@cc/core', style)).toBe(true)
       expect(await refused('packages/core/src/x.ts', '@cc/common', style)).toBe(false)
     }

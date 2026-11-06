@@ -3,7 +3,6 @@ import tseslint from 'typescript-eslint'
 import boundaries from 'eslint-plugin-boundaries'
 import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
-import { join } from 'node:path'
 import { IGNORES } from './tooling/eslint-ignores.js'
 import platformChecks from './tooling/eslint-platform-checks.js'
 import agentAdapterChecks from './tooling/eslint-agent-adapter-checks.js'
@@ -119,10 +118,12 @@ export default tseslint.config(
     plugins: { boundaries },
     settings: {
       'boundaries/include': ['packages/**/*', 'apps/**/*'],
+      // The contract test runs the platform against a real host, so it imports both
+      'boundaries/ignore': ['packages/platform/src/platform.contract.test.ts'],
       // The plugin reads only `import` by default: `export * from` and `import()` cross a layer the same
       'boundaries/dependency-nodes': ['import', 'export', 'dynamic-import'],
-      // What an import resolves to is tooling/eslint-alias-resolver.cjs (#1847)
-      'import/resolver': { [join(import.meta.dirname, 'tooling/eslint-alias-resolver.cjs')]: {} },
+      // What an import resolves to is tooling/eslint-import-resolver-cc (#1847); a workspace package, so the plugin finds it by name
+      'import/resolver': { cc: {} },
       'boundaries/elements': [
         { type: 'protocol', mode: 'full', pattern: 'packages/protocol/src/**/*' },
         { type: 'common', mode: 'full', pattern: 'packages/common/src/**/*' },
@@ -130,6 +131,10 @@ export default tseslint.config(
         { type: 'ports', mode: 'full', pattern: 'packages/platform/src/ports/**/*' },
         // Listed before `platform-impl`: the first element a file matches is its type
         { type: 'platform-mock', mode: 'full', pattern: 'packages/platform/src/mock/**/*' },
+        // The platform's own helpers, beside its ports, web, mock and tauri folders 
+        // Listed before `platform-shared`. A test of the platform may run any of its implementations
+        { type: 'platform-test', mode: 'full', pattern: 'packages/platform/src/*.test.ts' },
+        { type: 'platform-shared', mode: 'full', pattern: 'packages/platform/src/*.ts' },
         { type: 'platform-impl', mode: 'full', pattern: 'packages/platform/src/(web|tauri)/**/*' },
         // Listed before `ui`: the first element a file matches is its type. Tests take the mock platform (docs/platform-abstraction.md §6)
         { type: 'ui-test', mode: 'full', pattern: 'packages/ui/src/**/*.test.{ts,tsx}' },
@@ -148,8 +153,10 @@ export default tseslint.config(
             { from: 'common', allow: ['common'] },
             { from: 'core', allow: ['core', 'common', 'protocol'] },
             { from: 'ports', allow: ['ports', 'protocol'] },
-            { from: 'platform-impl', allow: ['platform-impl', 'ports', 'common', 'protocol'] },
-            { from: 'platform-mock', allow: ['platform-mock', 'ports', 'common', 'protocol'] },
+            { from: 'platform-test', allow: ['platform-test', 'platform-shared', 'platform-impl', 'platform-mock', 'ports', 'common', 'protocol'] },
+            { from: 'platform-shared', allow: ['platform-shared', 'ports', 'common', 'protocol'] },
+            { from: 'platform-impl', allow: ['platform-impl', 'platform-shared', 'ports', 'common', 'protocol'] },
+            { from: 'platform-mock', allow: ['platform-mock', 'platform-shared', 'ports', 'common', 'protocol'] },
             { from: 'ui-test', allow: ['ui-test', 'ui', 'core', 'common', 'ports', 'platform-mock', 'protocol'] },
             { from: 'ui', allow: ['ui', 'core', 'common', 'ports', 'protocol'] },
             { from: 'agent-host', allow: ['agent-host', 'common', 'protocol'] },
