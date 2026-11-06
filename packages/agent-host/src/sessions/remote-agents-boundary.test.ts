@@ -47,6 +47,10 @@ class Machine {
   readGate: Promise<void> | null = null
   /** The error the hub's send gets, as a link that dropped as it went */
   sendError: string | null = null
+  /** What a stop does there as the hub's interrupt reaches it (its turn ends), the error it gets instead, and a gate the deletion waits at */
+  onInterrupt: (() => void) | null = null
+  interruptError: string | null = null
+  deleteGate: Promise<void> | null = null
   private seq = 0
   private cards = 0
 
@@ -141,8 +145,15 @@ class Machine {
       createSession: async () => ({ ok: true, sessionId: CHILD, name: 'Child' }),
       projects: async () => ({ projects: [{ id: 'm1.p', machineId: 'm1', machine: 'Box', name: 'app', path: '/app' }], away: [] }),
       origin: async () => ({ ok: true, origin: 'git@github.com:me/app.git' }),
-      interrupt: async () => ({ ok: true }),
-      deleteSession: async () => ({ ok: true }),
+      interrupt: async () => {
+        if (this.interruptError) return { ok: false, error: this.interruptError }
+        this.onInterrupt?.()
+        return { ok: true }
+      },
+      deleteSession: async () => {
+        if (this.deleteGate) await this.deleteGate
+        return { ok: true }
+      },
       backgroundTasks: async () => (this.reachable ? [{ sessionId: CHILD, tasks: this.live }] : null),
     } as unknown as LinkedSessions
   }
@@ -713,6 +724,52 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       expect(await hub.act('stop')).toMatchObject({ ok: true, state: 'stopped' })
       machine.selfTurnEnds()
       await flush()
+      expect(notes()).toHaveLength(0)
+    })
+
+    it("is kept when the stop before a deletion does not go, and not sent to a child being deleted whose stopped turn ends first", async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      machine.interruptError = 'Box is not reachable right now'
+      expect(await hub.act('delete')).toMatchObject({ ok: false, error: expect.stringContaining('before deleting it') })
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toHaveLength(1)
+      machine.interruptError = null
+      // The deletion is still on its way when the stopped turn's end has been read there
+      let release!: () => void
+      machine.deleteGate = new Promise<void>((resolve) => (release = resolve))
+      machine.onInterrupt = () => machine.selfTurnEnds()
+      const deleting = hub.act('delete')
+      await flush()
+      expect(notes()).toHaveLength(0)
+      release()
+      expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
+
+    it('is not sent to a child being deleted at rest, when the turn that freed it ended just before', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      // The held note's read of the child is answered late; the deletion's own read is not
+      machine.reads = 0
+      let answer!: () => void
+      const late = new Promise<void>((resolve) => (answer = resolve))
+      machine.onRead = (n) => {
+        machine.readGate = n === 1 ? late : null
+      }
+      machine.selfTurnEnds()
+      await flush()
+      let release!: () => void
+      machine.deleteGate = new Promise<void>((resolve) => (release = resolve))
+      const deleting = hub.act('delete')
+      await eventually(() => machine.reads === 2)
+      answer()
+      await flush()
+      expect(notes()).toHaveLength(0)
+      release()
+      expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
       expect(notes()).toHaveLength(0)
     })
 

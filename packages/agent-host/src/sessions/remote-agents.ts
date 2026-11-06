@@ -681,19 +681,8 @@ export class RemoteAgents {
         return this.sendAtRest(rec, callerId, text, label, reader)
       }
       case 'stop': {
-        // Stopped by the one it would report to: nothing more is owed. Taken down first, as the stopped turn's end can
-        // reach the hub before the machine's answer does; put back if the stop does not go
-        const owed = this.host.children.linkedReports.get(rec.sessionId)
-        if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-        // The stopped turn's end must not send what was held for it
-        const held = rec.queued
-        this.setQueued(rec.sessionId, [])
-        const r = await reader.interrupt(rec.sessionId)
-        if (!r.ok) {
-          if (held) this.setQueued(rec.sessionId, held)
-          if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
-          return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
-        }
+        const r = await this.interruptFor(rec, callerId, reader)
+        if (!r.ok) return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
         return { ok: true, state: 'stopped', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
       }
       case 'delete': {
@@ -709,15 +698,10 @@ export class RemoteAgents {
         const now = await stateOf()
         if (!now.ok) return now
         if (now.running) {
-          // Nothing is owed of a child being deleted, and its stopped turn's end may come in first; put back if the stop fails
-          const owed = this.host.children.linkedReports.get(rec.sessionId)
-          if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-          const stopped = await reader.interrupt(rec.sessionId)
-          if (!stopped.ok) {
-            if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
-            return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
-          }
-        }
+          const stopped = await this.interruptFor(rec, callerId, reader)
+          if (!stopped.ok) return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
+          // At rest, the turn that freed it may have just set a held note going (`drain`, which reads the record again)
+        } else this.setQueued(rec.sessionId, [])
         /*
          * The worktree made for it there goes with it when nothing would be lost (#1161 item 3): the machine decides, as
          * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
@@ -1037,6 +1021,23 @@ export class RemoteAgents {
     // The turn may have ended while the caller chose
     this.scheduleDrain(rec.sessionId)
     return { ok: true, tool: rec.tool, state: 'queued', sessionId: rec.sessionId, sessionName: rec.name, queueId: entry.id, position: (same ? held.indexOf(same) : held.length) + 1 }
+  }
+
+  /**
+   * Stops the child's turn there for a stop or a deletion by the one it would report to: nothing more is owed, and its
+   * end must not send what was held for it. Both are taken down first, as the stopped turn's end can reach the hub before
+   * the machine's answer does, and put back if the stop does not go
+   */
+  private async interruptFor(rec: RemoteAgent, callerId: string, reader: LinkedSessions): ReturnType<LinkedSessions['interrupt']> {
+    const owed = this.host.children.linkedReports.get(rec.sessionId)
+    if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+    const held = this.of(rec.sessionId)?.queued
+    this.setQueued(rec.sessionId, [])
+    const r = await reader.interrupt(rec.sessionId)
+    if (r.ok) return r
+    if (held) this.setQueued(rec.sessionId, held)
+    if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
+    return r
   }
 
   private setQueued(sessionId: string, queued: { id: string; text: string }[]): void {
