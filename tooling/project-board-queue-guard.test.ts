@@ -1154,6 +1154,9 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5, retracted: { done: 'x' } } } }, NOW)).toMatchObject({ drives: false })
     expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', outcome: 'explained' } } }, NOW)).toMatchObject({ drives: false })
     expect(guardDrives({ ...none, guard: { acting: { red: 'a' } } }, NOW)).toEqual({ drives: true })
+    // A rerun it asked for lately (its landing may be older: the rerun waits on runners), but not one from long ago
+    expect(guardDrives({ ...none, items: [merged(4)], guard: { reruns: { 5: { at: new Date(NOW - hour).toISOString() } } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, items: [merged(30)], guard: { reruns: { 5: { at: new Date(NOW - 20 * hour).toISOString() } } } }, NOW)).toMatchObject({ drives: false })
     // A person's word decides, either way
     expect(guardDrives(none, NOW, true)).toEqual({ drives: true })
     expect(guardDrives({ ...none, items: [{ state: 'waiting' }] }, NOW, false)).toMatchObject({ drives: false })

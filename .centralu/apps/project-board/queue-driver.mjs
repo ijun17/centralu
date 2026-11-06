@@ -164,6 +164,8 @@ export function guardDrives(q, now, role = null) {
   const g = q.guard ?? {}
   const own = g.hunt && (!g.hunt.endedAt || ((g.hunt.issue != null || g.hunt.revert) && !g.hunt.retracted?.done))
   if (g.acting || own) return { drives: true }
+  // A rerun it asked for lately: it may wait on runners past the landing's window, and a failure it confirms is still its to hunt
+  if (Object.values(g.reruns ?? {}).some((r) => now - Date.parse(r.at) < GUARD_LANDED_MS)) return { drives: true }
   if (q.items.some((i) => i.state === 'merged' && now - Date.parse(i.updatedAt) < GUARD_LANDED_MS)) return { drives: true }
   return { drives: false, why: 'it holds no queued work and landed nothing lately' }
 }
