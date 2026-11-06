@@ -31,7 +31,7 @@ async function play(name: string, record: boolean) {
   const rec = loadRecording(`${import.meta.dirname}/../acp/recordings/${TOOL}/${name}.jsonl`)
   const { spawn, state, peers } = replaySpawner(rec)
   const profile = { ...cursorProfile(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => String(rec.header.version) }
-  const events: NormalizedEvent[] = await drive(new ReplayAdapter(profile, spawn, 60_000), SCENARIOS.find((s) => s.name === name)!, '/work', 'tap-replay', 0, () => peers.at(-1)?.kill('SIGKILL'))
+  const events: NormalizedEvent[] = await drive(new ReplayAdapter(profile, spawn, 60_000), SCENARIOS.find((s) => s.name === name)!, '/work', 'tap-replay', 0, () => peers.at(-1)?.kill('SIGKILL'), { replay: state })
   return { rec, events, problems: state.problems }
 }
 

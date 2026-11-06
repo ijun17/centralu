@@ -12,8 +12,9 @@
  * - the working folder, the home folder and the temp folder become `<cwd>`, `<home>` and `<tmp>`, in each form a path
  *   takes (with or without its drive, `\` or `/`); so does any other person's home or temp folder on Windows, macOS and
  *   Linux (`C:\Users\<name>`, `/Users/<name>`, `/home/<name>`, `/private/var/folders/…/T`), and the user name alone;
- * - text the agent streams in chunks is scrubbed joined, then split again where it was (#1562 review: a path split across two
- *   chunks kept the user name);
+ * - text the agent streams in chunks (ACP and Claude chunks, Codex's item deltas) is scrubbed joined, then split again where it was
+ *   (#1562 review: a path split across two chunks kept the user name); so is the name of a folder a recorder made, whose six random
+ *   characters go and whose name stays (`frames-record-other-BGKZTo` reads `frames-record-other`, #2065);
  * - session, tool call and message ids become stable placeholders;
  * - anything shaped like a credential or an email address is removed, and so is the value of an environment entry named
  *   like one (the bridge's `CC_BRIDGE_TOKEN` in `session/new`);
@@ -56,6 +57,13 @@ const FOREIGN: readonly [RegExp, string][] = [
   [/\/home\/[^/\s"'`<>]+/g, '<home>'],
 ]
 
+/**
+ * A folder a recorder makes with a random suffix (`mkdtemp`, six characters): the run's data folder, and the folders a scenario works
+ * in, which a tool also names without their path (a project's name in an answer). The name keeps what the folder is for. Found in the
+ * text joined, like a path, since a streamed answer may cut the suffix across pieces
+ */
+const RECORDER_FOLDER = /\bframes-(?:data|record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g
+
 /** The kinds of update whose text an agent streams in pieces */
 const CHUNKED = new Set(['agent_message_chunk', 'agent_thought_chunk', 'user_message_chunk'])
 
@@ -93,6 +101,7 @@ function spans(s: string, places: Places): { start: number; end: number; with: s
     for (const m of s.matchAll(re)) found.push({ start: m.index, end: m.index + m[0].length, with: replacement })
   }
   for (const [re, replacement] of FOREIGN) pattern(re, replacement)
+  for (const m of s.matchAll(RECORDER_FOLDER)) found.push({ start: m.index, end: m.index + m[0].length, with: m[0].slice(0, -7) })
   if (places.user.length >= 3) pattern(new RegExp(`\\b${places.user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '<user>')
   if (places.uuid) for (const m of s.matchAll(UUID_ANYWHERE)) found.push({ start: m.index, end: m.index + m[0].length, with: places.uuid(m[0].toLowerCase()) })
   pattern(SECRET, '<secret>')
@@ -210,10 +219,6 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       .replace(/\btoolu_\w+/g, (t) => `toolu_${numbered('toolu', t).padStart(6, '0')}`)
       // A model response's items (Codex: `msg_`, `rs_` reasoning, `call_` and `fc_` tool calls) carry the provider's ids
       .replace(/^(msg|req|rs|call|fc|ws|resp)_\w+$/, (m, kind: string) => `${kind}_${numbered(kind, m).padStart(6, '0')}`)
-      // The directory the run's settings and threads were in, whose name is random
-      .replace(/frames-data-[A-Za-z0-9]+/g, 'frames-data')
-      // The folder a recording run works in, which a tool also names without its path (a project's name, a session's title)
-      .replace(/(frames-record-[a-z-]+?)-[A-Za-z0-9]{6}\b/g, '$1')
       // The ids of a host's mailbox: the hub's (one per host) and a message's (a ULID)
       .replace(/\bhub-[0-9a-f]{8}\b/g, 'hub-00000001')
       .replace(/\bm_[0-9A-Z]{26}\b/g, (m) => `m_${numbered('mail', m).padStart(26, '0')}`)
@@ -333,6 +338,11 @@ function chunkOf(msg: unknown): Chunk | null {
     const u = acp.params?.update
     if (!u?.sessionUpdate || !CHUNKED.has(u.sessionUpdate) || u.content?.type !== 'text' || typeof u.content.text !== 'string') return null
     return { kind: u.sessionUpdate, session: String(acp.params?.sessionId ?? ''), holder: u.content as Record<string, string>, field: 'text' }
+  }
+  // Codex's app-server: the text of an item, in notifications of its own
+  const codex = msg as { method?: string; params?: { threadId?: string; itemId?: string; summaryIndex?: number; delta?: unknown } } | null
+  if (codex?.method && /^item\/.*delta$/i.test(codex.method) && typeof codex.params?.delta === 'string') {
+    return { kind: codex.method, session: `${codex.params.threadId}:${codex.params.itemId}:${codex.params.summaryIndex ?? ''}`, holder: codex.params as Record<string, string>, field: 'delta' }
   }
   const claude = msg as { type?: string; event?: { type?: string; index?: number; delta?: Record<string, unknown> }; api_message_id?: string } | null
   const delta = claude?.type === 'stream_event' && claude.event?.type === 'content_block_delta' ? claude.event.delta : undefined

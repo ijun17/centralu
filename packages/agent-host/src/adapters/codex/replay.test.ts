@@ -33,11 +33,8 @@ async function replay(dir: string, name: string): Promise<Replayed> {
   const events = await drive(new CodexAdapter(), scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'codex',
     session: { model: 'gpt-5.6-luna', effort: 'low', processSource: { spawn } },
-  })
-    .catch((e: unknown) => {
-      throw new Error(`${e instanceof Error ? e.message : String(e)}; the replay found: ${JSON.stringify(state.problems)}, and waits for ${peers.at(-1)?.waitingFor()}`)
-    })
-    .finally(() => folder.remove())
+    replay: state,
+  }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), spawned: state.spawned, started }
 }
 

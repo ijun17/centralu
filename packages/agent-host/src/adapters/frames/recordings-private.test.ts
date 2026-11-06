@@ -23,6 +23,8 @@ const PRIVATE: readonly [string, RegExp][] = [
   ['a macOS home folder', /(?<![\w<])\/Users\/(?!<|Shared\b)[^/\s"'`]+/],
   ['a macOS temp folder', /\/var\/folders\/[^/\s"'`]+\/[^/\s"'`]+\/T\b/],
   ['a Linux home folder', /(?<![\w<])\/home\/(?!<)[^/\s"'`]+/],
+  // What `mkdtemp` made for a recorder: the folder's name keeps what it is for, and its six random characters go (#2065)
+  ['a recorder’s temporary folder with its random suffix', /\bframes-(?:data|raw|record-[a-z-]+?)-[A-Za-z0-9]{6}\b/],
   ['a bridge token', /ccb\d+:[\w-]+:[\w-]{16,}/],
   ['the account’s plan in Antigravity’s `tier`', /"tier":\{"name":"(?!<plan>|Antigravity Starter Quota")/],
   ['an OpenCode tool output id that is not a placeholder', /\btool_(?!\d{6}\b)[A-Za-z0-9]{16,}/],
@@ -75,7 +77,7 @@ type Line = {
   msg?: {
     method?: string
     type?: string
-    params?: { update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } }
+    params?: { delta?: unknown; update?: { sessionUpdate?: string; content?: { text?: unknown }; availableCommands?: { name?: unknown }[] } }
     /** Claude Code's stream-json */
     event?: { delta?: Delta }
     commands?: Command[]
@@ -87,6 +89,8 @@ type Line = {
 function joinedChunks(lines: readonly Line[]): string {
   return lines
     .map((l) => {
+      // Codex's items stream in notifications of their own
+      if (/^item\/.*delta$/i.test(l.msg?.method ?? '') && typeof l.msg?.params?.delta === 'string') return l.msg.params.delta
       const u = l.msg?.params?.update
       if (u && /_chunk$/.test(u.sessionUpdate ?? '') && typeof u.content?.text === 'string') return u.content.text
       // A line of Claude Code's that is no stream event is between the pieces of a block, not a break in it

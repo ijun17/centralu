@@ -168,7 +168,8 @@ async function main(): Promise<number> {
         const project = await window.rpc<{ id: string }>('projects.add', { path: folder })
         window.expected = scenario.cards ?? []
         if (scenario.trusted) await window.rpc('projects.setTrusted', { projectId: project.id, trusted: true })
-        // A second project when the scenario reaches one: its folder's name is the project's
+        // A second project when the scenario reaches one: its folder's name is the project's. Its random suffix is dropped by name
+        // (`RECORDER_FOLDER` in frames-scrub.mts), also where an answer streams it in pieces, so the prefix stays `frames-record-`
         let otherProject: { id: string } | null = null
         const other = scenario.otherProject ? realpathSync(mkdtempSync(join(tmpdir(), 'frames-record-other-'))) : null
         if (other) {

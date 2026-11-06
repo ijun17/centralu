@@ -173,6 +173,15 @@ describe('scrubbing Codex’s frames', () => {
     const [seen] = macRun([line('in', { id: 'r-3', result: { text: 'Sent hub-5b0933ff.m_01M6QZP77M7RJ0EEHDRB14Z371 to x; project frames-record-centralu-read-3e7fwc' } })]).map((f) => f.msg)
     expect(JSON.stringify(seen)).toBe(JSON.stringify({ id: 'r-3', result: { text: 'Sent hub-00000001.m_00000000000000000000000001 to x; project frames-record-centralu-read' } }))
   })
+
+  it('drops the random suffix of a folder’s name that a streamed answer cuts into pieces (#2065)', () => {
+    const delta = (itemId: string, piece: string) => line('in', { method: 'item/agentMessage/delta', params: { threadId: 't', turnId: 'u', itemId, delta: piece } })
+    const pieces = ['Your project ', 'frames-record', '-other', '-B', 'GK', 'Z', 'To', ' is not trusted, nor frames-', 'data-', 'a1B2c3', '.']
+    const frames = macRun([...pieces.map((p) => delta('m1', p)), delta('m2', '-B'), delta('m2', 'GKZTo')]).map((f) => (f.msg.params as { delta: string }).delta)
+    expect(frames.slice(0, pieces.length).join('')).toBe('Your project frames-record-other is not trusted, nor frames-data.')
+    // Another item's text is another text: its pieces are not joined to the first one's
+    expect(frames.slice(pieces.length)).toEqual(['-B', 'GKZTo'])
+  })
 })
 
 describe('cutting a bulky text out of a recording', () => {

@@ -57,7 +57,7 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
     return peer
   }
   const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
-  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } } })
+  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } }, replay: state })
   return { events, problems: state.problems, left: state.left(), sent }
 }
 
@@ -187,7 +187,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         const { spawn, state, peers } = replaySpawner(recording)
         const adapter = new Kept(profile(dir, String(recording.header.version)), spawn, 60_000)
         const scenario = scenariosFor(dir.replace(/-[^-]*$/, '')).find((s) => s.name === 'resume')!
-        const events = await drive(adapter, { ...scenario, preset: 'normal' }, '/work', 'replay-resume', 0, () => peers.at(-1)?.kill('SIGKILL'))
+        const events = await drive(adapter, { ...scenario, preset: 'normal' }, '/work', 'replay-resume', 0, () => peers.at(-1)?.kill('SIGKILL'), { replay: state })
         expect(state.problems).toEqual([])
         expect(state.spawned).toBe(2)
         expect(of(events, 'usage_update').map((e) => e.tokens.costUsd)).toEqual([expect.closeTo(0.0123, 6), expect.closeTo(0.0188, 6)])
