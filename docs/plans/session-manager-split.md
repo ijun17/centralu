@@ -245,6 +245,19 @@ Manager line counts are after each pull request.
   not compile. `parts()` gains the `starts` and `inputs` getters and `refuseWhileLettingGo`, which stays with host tenure.
   A failed fork's reason is read with `errorMessage(err)` instead of `(err as Error).message` (lint counts a moved assertion
   as new): the same text for anything with a `message`, and the thrown value's text, not `undefined`, for anything else.
+- **10, host tenure** (`manager.ts` 1,972 to 1,427; `sessions/host-tenure.ts`, 640 lines, a move of 545): the
+  constructor's restore at start (`restoreAtStart`, called where the block stood), `adoptKept`, `turnLostInSwap`, the
+  turns an update cut (`continueCutTurns`, `sendUpdateNote`, `continueLostTurn`, `notContinued`, `stopForUpdate`,
+  `takeUpdateEnded`, `updateContinued`), the quit notices (`tellQuitNotices`, `quitTold`, `quitTellEnded`), `keptInTurn`,
+  `endKept`, the letting go (`lettingGo`, `refuseWhileLettingGo`, `disposeAll`, `disposeEverything`, `detachAll`,
+  `leaveHost`) and the eleven fields they own, as they were, on `HostTenure` (`mgr.tenure`), with `KeptAgent` and the
+  adoption's idle wait. Nothing in it is extended (#1895). `disposing`, `handingOver`, `quitNotices`, `lettingGo` and
+  `refuseWhileLettingGo` are public: `parts()` and the constructor's lambdas read them. The shutdown plan takes
+  `sessions: mgr.tenure`; `parts()` gains the `processes`, `mail`, `merges`, `files` and `selfCompaction` getters and
+  `stopSelfCompaction`. `HostTenure` is made first in the constructor, so every getter that reads it finds it. Two moved
+  lines are rewritten because lint counts a moved finding as new: an adapter with no `settle` gives `Promise.resolve()`
+  rather than `undefined` to `Promise.allSettled` (settled the same), and the queued requests' check reads the session
+  without `!` (`restoreQueued` asks only of a request whose session is here).
 
 ### 6.2 Work in flight
 
