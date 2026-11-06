@@ -1142,7 +1142,19 @@ jobs:
           CC_TEST_FILES: ${{ matrix.shards > 1 && format('{0}/remote-node-tests.txt', runner.temp) || '' }}
         # And the key-pairing vector (#1711): the remote Node differs from Node 22 in node:crypto. The list in os-tests.ts
         # (`REMOTE_NODE_TESTS`) is these same five.
-        run: pnpm exec vitest run packages/agent-host packages/protocol packages/common tooling/launcher- tooling/key-pairing-vector
+        # The JSON report is each file's time on this runner: the Windows shards keep it (below), and it refreshes
+        # tooling/test-durations.json with the files only this job runs (.github/workflows/test-durations.yml).
+        run: pnpm exec vitest run packages/agent-host packages/protocol packages/common tooling/launcher- tooling/key-pairing-vector --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
+
+      # Only the sharded rows: the Linux row's times are not the Windows runner's, which the split is made for
+      - name: Upload the test times
+        if: ${{ !cancelled() && matrix.shards > 1 }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-test-times-remote-node-${{ matrix.shard }}
+          path: ${{ runner.temp }}/vitest-times.json
+          retention-days: 30
+          if-no-files-found: warn
 
   host-tests-remote-node-skipped:
     name: host tests, remote Node (${{ matrix.label }})

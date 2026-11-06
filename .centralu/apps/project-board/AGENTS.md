@@ -347,7 +347,8 @@ the batch as `failures`), and `decideRun` decides from it, for an item's head an
   with no answer (`lost` with gh's "EOF", and no status: a refusal in GraphQL's words, `gh pr ready`, carries none and stays a
   refusal). A poll or a batch step that fails so pauses the whole queue with a growing wait (kind `outage` for a 5xx) and
   adds nothing to the item's `errors`; a 4xx (a pull request gone, a refused write, 404 or 422) still counts, and three in a
-  row still go to attention `error`. A 5xx that one item meets every time (a poll that goes through starts the count over)
+  row still go to attention `error`. A 5xx or a dropped answer that one item meets every time (a poll that goes through starts the count over; not what `FATAL` names:
+  no network, no login, a rate limit and no gh are the machine's and pause for as long as they last)
   is counted apart (`outages`) and goes to attention after `OUTAGE_LIMIT` (6) of them, about 45 minutes of pauses, so one
   item's broken read cannot hold the whole queue for ever. A batch counts the same. The inner places that read a refusal (a
   refused rerun, a refused dispatch) are unchanged.

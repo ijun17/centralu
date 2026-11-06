@@ -807,9 +807,10 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
       Object.assign(it, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
       // The same failure on one item, poll after poll (a pull request gone, a refused write): the
       // session hears about it once it is not a blip, and once per change. An outage is no strike, unless it is
-      // a 5xx that this one item meets every time (a poll that goes through starts the count over)
+      // a 5xx or a dropped answer that this one item meets every time (a poll that goes through starts the count over);
+      // no network, no login, a rate limit or no gh are the machine's, and pause for as long as they last
       if (fatal) {
-        if (!(e.status >= 500)) return
+        if (FATAL.has(e.kind) && !(e.status >= 500)) return
         it.outages = (it.outages ?? 0) + 1
         if (it.outages < OUTAGE_LIMIT) return
         it.errors = it.outages

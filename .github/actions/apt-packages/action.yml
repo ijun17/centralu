@@ -16,19 +16,27 @@ inputs:
 runs:
   using: composite
   steps:
-    # The image (its OS and version) is in the key: another image's packages are not wanted, and a new image version is a cold
-    # cache once. The cache is found by its exact key and never by a prefix.
-    - name: Read the runner image
+    # The image (its OS and version) and the list are in the key: another image's packages are not wanted, a new image version is
+    # a cold cache once, and a changed list must not find the .deb files of the old one (they would be restored for ever, and the
+    # new list never saved: an install that finds its packages missing goes to the network for them, with the mirror we cache
+    # against). The list is hashed sorted, so the order and the spacing it is written in do not matter. The cache is found by its
+    # exact key and never by a prefix.
+    - name: Read the runner image and the package list
       id: image
       shell: bash
-      run: echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}-${RUNNER_ARCH:-unknown}" >> "$GITHUB_OUTPUT"
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        echo "name=${ImageOS:-unknown}-${ImageVersion:-unknown}-${RUNNER_ARCH:-unknown}" >> "$GITHUB_OUTPUT"
+        # Unquoted on purpose: the list is words
+        echo "list=$(echo $PACKAGES | tr ' ' '\n' | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
     - name: Restore the apt packages of an earlier run
       id: debs
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/apt-debs
-        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ inputs.key }}
+        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ steps.image.outputs.list }}-${{ inputs.key }}
 
     - name: Put the apt packages where apt looks
       shell: bash
@@ -53,4 +61,4 @@ runs:
       if: steps.debs.outputs.cache-hit != 'true' && steps.kept.outputs.count != '0'
       with:
         path: ${{ runner.temp }}/apt-debs
-        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ inputs.key }}
+        key: apt-debs-${{ runner.os }}-${{ steps.image.outputs.name }}-${{ steps.image.outputs.list }}-${{ inputs.key }}

@@ -30,7 +30,8 @@
  *                                                        (`pnpm os:tighten`); never adds one
  *   tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...
  *                                                        rewrites tooling/test-durations.json from the reports, for the
- *                                                        tests this checkout selects (`refreshDurations`)
+ *                                                        tests this checkout selects and the remote Node's (`timedTests`,
+ *                                                        `refreshDurations`)
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -53,6 +54,13 @@ export const REMOTE_NODE_TESTS = ['packages/agent-host', 'packages/protocol', 'p
 
 /** The tests of `all` that the remote Node's job runs: a path starting with one of `REMOTE_NODE_TESTS`, as vitest's filter reads it */
 export const remoteNodeTests = (all: readonly string[]): string[] => all.filter((t) => REMOTE_NODE_TESTS.some((p) => t.startsWith(p)))
+
+/**
+ * The files whose times `tooling/test-durations.json` holds: those the Windows unit shards run (`selected`) and those the
+ * remote Node's Windows shards run (`remoteNodeTests`). The two overlap; the unit shards alone left the rest (94 of 525) at the
+ * median, and the remote Node's shards, which split by these times too, 6.0 and 9.1 minutes apart.
+ */
+export const timedTests = (selected: readonly string[], all: readonly string[]): string[] => [...new Set([...selected, ...remoteNodeTests(all)])].sort()
 
 /** What a file says about the OS, and what it imports */
 export type Scan = {
@@ -288,8 +296,8 @@ export async function vitestFiles(listed?: string): Promise<string[]> {
 
 /**
  * Each test file's time on the Windows runner, in seconds, by repository path. Read by `balance`; rewritten by
- * `--refresh-durations` from the Windows shards' vitest JSON reports, which build.yml keeps as the
- * `windows-test-times-<shard>` artifacts of every run (docs/plans/os-layer.md §6.4).
+ * `--refresh-durations` from the Windows shards' vitest JSON reports (the unit shards' and the remote Node's), which build.yml keeps as
+ * the `windows-test-times-<shard>` and `windows-test-times-remote-node-<shard>` artifacts of every run (docs/plans/os-layer.md §6.4).
  */
 export const DURATIONS = 'tooling/test-durations.json'
 
@@ -526,7 +534,8 @@ async function main(argv: string[]) {
   if (argv.includes('--refresh-durations')) {
     const reports = argv.filter((a) => !a.startsWith('--'))
     if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
-    const tests = await repo.selectTests(await vitestFiles())
+    const all = await vitestFiles()
+    const tests = timedTests(await repo.selectTests(all), all)
     console.error(refreshDurationsFile(`${ROOT}${DURATIONS}`, reports, tests))
     return
   }

@@ -121,8 +121,8 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
       if (!fb || !BATCH_ACTIVE.has(fb.state)) return
       Object.assign(fb, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
       if (fatal) {
-        // As an item's: an outage is no strike, unless it is a 5xx that this batch meets every time
-        if (!(e.status >= 500)) return
+        // As an item's: an outage is no strike, unless it is a 5xx or a dropped answer that this batch meets every time
+        if (FATAL.has(e.kind) && !(e.status >= 500)) return
         fb.outages = (fb.outages ?? 0) + 1
         if (fb.outages < OUTAGE_LIMIT) return
         fb.errors = fb.outages
