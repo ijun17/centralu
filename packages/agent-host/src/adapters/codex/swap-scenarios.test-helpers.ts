@@ -108,6 +108,8 @@ export async function driveAdopted(
   process: AgentProcess,
   externalId: string,
   bound: number,
+  /** Rejects when the run cannot go on (a replay that met a line it does not have): the scenario then fails with that, not by waiting */
+  failed?: Promise<never>,
 ): Promise<NormalizedEvent[]> {
   let handle: SessionHandle | null = null
   const second = side(() => handle!, bound, `${scenario.name} (after the swap)`)
@@ -119,7 +121,7 @@ export async function driveAdopted(
   }
   handle = await adapter.createSession({ ...opts, resumeExternalId: externalId, processSource }, second.emit)
   try {
-    await scenario.after(second.side)
+    await (failed ? Promise.race([scenario.after(second.side), failed]) : scenario.after(second.side))
   } finally {
     await handle.dispose()
   }
@@ -143,10 +145,23 @@ export async function driveSwap(
   let first: SessionHandle | null = null
   const before = side(() => first!, bound, `${scenario.name} (before the swap)`)
   first = await adapter.createSession(firstOpts, before.emit)
-  await scenario.before(before.side)
-  const live = process()
-  if (!live || !first.externalId || !first.detach) throw new Error(`${scenario.name}: nothing to hand over (process ${live ? 'found' : 'missing'}, thread ${first.externalId ?? 'unnamed'})`)
-  await first.detach()
-  startRecording()
-  return driveAdopted(adapter, scenario, { ...firstOpts, sessionId: secondId }, live, first.externalId, bound)
+  let live: AgentProcess | null = null
+  try {
+    await scenario.before(before.side)
+    live = process()
+    if (!live || !first.externalId || !first.detach) throw new Error(`${scenario.name}: nothing to hand over (process ${live ? 'found' : 'missing'}, thread ${first.externalId ?? 'unnamed'})`)
+    await first.detach()
+    startRecording()
+  } catch (e) {
+    // The app-server was never handed over: it ends here, not when the recorder does
+    await first.dispose().catch(() => {})
+    live?.kill('SIGKILL')
+    throw e
+  }
+  try {
+    return await driveAdopted(adapter, scenario, { ...firstOpts, sessionId: secondId }, live, first.externalId, bound)
+  } catch (e) {
+    live.kill('SIGKILL')
+    throw e
+  }
 }

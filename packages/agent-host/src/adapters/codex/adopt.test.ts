@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { callOrder, codexCodec, loadRecording, of, recordedFolders, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
+import { callOrder, codexCodec, loadRecording, of, recordedFolders, ReplayPeer, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { CodexAdapter } from './index.js'
 import { CODEX_RECORDINGS, recordedFrames, recordedVersion } from './recorded.test-helpers.js'
 import { driveAdopted, SWAP_SCENARIOS } from './swap-scenarios.test-helpers.js'
@@ -19,7 +19,11 @@ async function replayAdopted(name: string) {
   const folder = temporaryFolder('codex-adopt-')
   const cwd = folder.path
   const { spawn, state } = replaySpawner(recording, codexCodec(cwd))
-  const process = spawn({ command: 'codex', args: ['app-server'], env: {} })
+  const process = spawn({ command: 'codex', args: ['app-server'], env: {} }) as ReplayPeer
+  // A line the recording does not have fails the run at once, with what it was, rather than leaving a step waiting
+  const failed = new Promise<never>((_, reject) => {
+    process.onProblem = (problem) => reject(new Error(problem))
+  })
   const resume = recordedFrames(name).find((f) => f.dir === 'out' && f.msg.method === 'thread/resume')
   const threadId = (resume?.msg.params as { threadId: string }).threadId
   const events: NormalizedEvent[] = await driveAdopted(
@@ -29,8 +33,9 @@ async function replayAdopted(name: string) {
     process,
     threadId,
     0,
+    failed,
   ).finally(() => folder.remove())
-  return { events, problems: state.problems, left: state.left() }
+  return { events, problems: state.problems, left: state.left(), sent: process.sent }
 }
 
 describe(`adopting an app-server that keeps running (${recordedVersion()})`, () => {
@@ -45,9 +50,11 @@ describe(`adopting an app-server that keeps running (${recordedVersion()})`, () 
 
   it('adopt-running: a thread answered as active names its running turn through the turns page, and a Stop reaches that turn', async () => {
     const r = await replayAdopted('adopt-running')
-    const asked = recordedFrames('adopt-running').flatMap((f) => (f.dir === 'out' ? [f.msg.method] : []))
-    expect(asked.slice(0, 3)).toEqual(['initialize', 'thread/resume', 'thread/turns/list'])
-    expect(asked).toContain('turn/interrupt')
+    // What the adapter itself sent (not what the recording holds)
+    expect(r.sent.slice(0, 3)).toEqual(['initialize', 'thread/resume', 'thread/turns/list'])
+    expect(r.sent).toContain('turn/interrupt')
+    expect(r.problems).toEqual([])
+    expect(r.left).toBe(0)
     expect(r.events.filter((e) => e.type === 'state_change' && e.reason === 'interrupted')).toHaveLength(1)
     expect(of(r.events, 'error')).toEqual([])
     expect(of(r.events, 'turn_complete')).toHaveLength(1)
@@ -55,9 +62,11 @@ describe(`adopting an app-server that keeps running (${recordedVersion()})`, () 
 
   it('adopt-failed: a thread the kept process answers as systemError has no running turn: nothing is asked about one, and the next turn starts and fails once', async () => {
     const r = await replayAdopted('adopt-failed')
-    const asked = recordedFrames('adopt-failed').flatMap((f) => (f.dir === 'out' ? [f.msg.method] : []))
-    expect(asked).not.toContain('thread/turns/list')
-    expect(asked).not.toContain('turn/interrupt')
+    expect(r.sent.slice(0, 2)).toEqual(['initialize', 'thread/resume'])
+    expect(r.sent).not.toContain('thread/turns/list')
+    expect(r.sent).not.toContain('turn/interrupt')
+    expect(r.problems).toEqual([])
+    expect(r.left).toBe(0)
     expect(of(r.events, 'error')).toHaveLength(1)
     expect(of(r.events, 'error')[0]!.error.data).toMatchObject({ reason: 'model_rejected' })
   })

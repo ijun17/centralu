@@ -250,6 +250,10 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
   signalCode: NodeJS.Signals | null = null
   killed = false
   private i = 0
+  /** The methods of the lines the adapter has sent, in order (an answer to the tool's request is `answer`): what a test asserts the adapter did */
+  readonly sent: string[] = []
+  /** Told of each mismatch as it happens, so a test can fail with it instead of waiting out a stalled step */
+  onProblem: ((problem: string) => void) | undefined
   private readonly ids = new Map<string, string | number>()
   private buffer = ''
   private ended = false
@@ -291,9 +295,10 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
       if (this.probeAnswer) this.say(`${JSON.stringify(this.codec.probe.answer(msg, this.probeAnswer))}\n`)
       return
     }
+    this.sent.push(typeof msg.method === 'string' ? msg.method : 'answer')
     const expected = this.frames[this.i]
     if (!expected || expected.dir !== 'out' || !expected.msg) {
-      this.problems.push(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)
+      this.problem(`the adapter sent ${describe(msg)} where the recording has ${expected ? describeRec(expected) : 'nothing more'}`)
       return
     }
     let problem = this.codec.match(msg, expected.msg, this.ids)
@@ -304,11 +309,16 @@ export class ReplayPeer extends EventEmitter implements AgentProcess {
       problem = null
     }
     if (problem) {
-      this.problems.push(problem)
+      this.problem(problem)
       return
     }
     this.i++
     this.pump()
+  }
+
+  private problem(text: string): void {
+    this.problems.push(text)
+    this.onProblem?.(text)
   }
 
   /**
