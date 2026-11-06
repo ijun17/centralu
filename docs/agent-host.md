@@ -2230,6 +2230,12 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    through the real SDK and adapter (`streamJsonCodec`). A test that reads one message takes it from a recording
    (`claude/recorded.test-helpers.ts`); a hand-written message stays only for what no real run sends or cheaply can
    (a malformed block, a turn limit), with its reason beside it. A CLI update shows as a diff of the recordings.
+   Codex's are made by `pnpm exec tsx scripts/frames-record.mts codex` (its smallest model, in a settings folder of its own:
+   `CODEX_HOME` holds a copy of the sign-in alone, which is put back into the person's file if Codex refreshed it) and kept in
+   `adapters/codex/recordings/codex-<version>/`; `codex/replay.test.ts` plays them through the real adapter (`codexCodec`: JSON-RPC
+   with the recorded `<cwd>` read as the replay's folder), and `normalize.test.ts` and `compact.test.ts` take their
+   notifications from them (`codex/recorded.test-helpers.ts`). The tests that mock the whole client stay hand-written: they set
+   up races (a response before its notification, a late `turn/start` answer) that no recording can be made to repeat.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

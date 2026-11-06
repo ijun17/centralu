@@ -10,14 +10,21 @@ import type { ClaudeMessage } from './json.js'
 
 export const CLAUDE_RECORDINGS = `${import.meta.dirname}/recordings`
 
-/** The recorded CLI version's folder: the newest, as a re-recording on a version bump replaces the old one */
-export const recordedVersion = (): string => {
+/**
+ * The recorded CLI version's folder: the newest, as a re-recording on a version bump replaces the old one. Of `scenario`: the
+ * newest that holds it, since a scenario recorded later comes from a later CLI than the rest
+ */
+export const recordedVersion = (scenario?: string): string => {
   const numbers = (dir: string) => dir.replace(/^claude-code-/, '').split('.').map(Number)
   const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
-  return recordedFolders(CLAUDE_RECORDINGS).map((f) => f.dir).sort(newer).at(-1)!
+  return recordedFolders(CLAUDE_RECORDINGS)
+    .filter((f) => scenario === undefined || f.names.includes(scenario))
+    .map((f) => f.dir)
+    .sort(newer)
+    .at(-1)!
 }
 
-const fileOf = (scenario: string): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === recordedVersion())!.file(scenario)
+const fileOf = (scenario: string): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === recordedVersion(scenario))!.file(scenario)
 
 /** Lines the SDK answers or reads itself and never hands to the adapter */
 const CONTROL = new Set(['control_request', 'control_response', 'control_cancel_request', 'keep_alive'])

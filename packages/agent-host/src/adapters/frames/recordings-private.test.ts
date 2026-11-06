@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { homedir, userInfo } from 'node:os'
+import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ const ROOTS = [
   fileURLToPath(new URL('../acp/recordings/', import.meta.url)),
   fileURLToPath(new URL('../antigravity/recordings/', import.meta.url)),
   fileURLToPath(new URL('../claude/recordings/', import.meta.url)),
+  fileURLToPath(new URL('../codex/recordings/', import.meta.url)),
 ]
 
 const PRIVATE: readonly [string, RegExp][] = [
@@ -33,6 +34,12 @@ const CLAUDE_PRIVATE: readonly [string, RegExp][] = [
   ['a connector of the person', /\bmcp__(?!centralu__|app-|server-\d+__)[\w.-]+/],
 ]
 
+/** What Codex's recordings must also be free of: the app-server says the account's plan and the machine's name, and numbers a response's items */
+const CODEX_PRIVATE: readonly [string, RegExp][] = [
+  ['the account’s plan', /"planType":"(?!<plan>)/],
+  ['a response item id that is not a placeholder', /\b(?:msg|rs|call|fc|ws|resp)_(?!\d{6}\b)[0-9a-f]{16,}/],
+]
+
 /**
  * The words of the machine the test runs on. The user name is looked for only off CI: a recording is made and
  * scrubbed on a person's machine, so that is where their name could leak, while a CI runner's account is a common
@@ -47,6 +54,9 @@ function machineWords(): [string, RegExp][] {
   } catch {
     // No user name to look for
   }
+  // The machine's name is in the frames a Codex app-server sends about its remote control; a CI runner's is no secret and a common word
+  const host = hostname().split('.')[0] ?? ''
+  if (host.length >= 4 && !process.env.CI) words.push(['this machine’s name', new RegExp(`\\b${escape(host)}\\b`, 'i')])
   for (const form of new Set([homedir(), homedir().replace(/\\/g, '/'), homedir().replace(/\\/g, '\\\\')])) {
     if (form.length > 3) words.push(['this machine’s home folder', new RegExp(escape(form), 'i')])
   }
@@ -96,7 +106,7 @@ describe('the committed recordings', () => {
       const text = readFileSync(file, 'utf8')
       const lines = text.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Line)
       const readings = [text, joinedChunks(lines)]
-      const found = [...PRIVATE, ...(/[\\/]claude[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...machineWords()].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
+      const found = [...PRIVATE, ...(/[\\/](?:claude|codex)[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...(/[\\/]codex[\\/]recordings[\\/]/.test(file) ? CODEX_PRIVATE : []), ...machineWords()].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
       expect(found).toEqual([])
       const commands = lines.flatMap((l) => l.msg?.params?.update?.availableCommands ?? []).map((c) => c.name)
       expect(commands.filter((c) => typeof c !== 'string' || !/^command-\d+$/.test(c))).toEqual([])
