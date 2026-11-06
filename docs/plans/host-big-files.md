@@ -14,7 +14,7 @@ split in flight and is not touched here; §3.3 names the one place where a chang
 | File | Lines | Deletable with no change of behaviour | Same job done elsewhere | Drift (the two copies disagree) | Split by role |
 |---|---|---|---|---|---|
 | `os/memory.ts` | 1,729 | about 45–55 | about 40 more (`found()`, `statSync`/`lstatSync`, mode formula, detach), and about 15 against `os/real.ts` | 2 (dangling link on PATH, ctime on `fchmod`/`utimes`), both in a test fake | 7 modules, about 1,300 moved, about +150 added |
-| `mail/messages.ts` | 1,392 | about 45 (three methods nothing in production calls, aliases, stale comments) | about 30 (`changedIds`, group-by, hidden check) | 1 (`turnsLost` against `sessionsStopped`), a question for the owner, not a refactor | 9 modules, about 1,250 moved, about +250–350 added |
+| `mail/messages.ts` | 1,392 | about 45 (three methods nothing in production calls, aliases, stale comments) | about 30 (`changedIds`, group-by, hidden check) | 1 (`turnsLost` against `sessionsStopped`), a question for the owner, not a refactor (decided since: both release requests, §2) | 9 modules, about 1,250 moved, about +250–350 added |
 | `sessions/remote-agents.ts` | 1,560 | about 25 | about 35 more with `start-agent-flow.ts`, `agent-start-gates.ts`, `queued-requests.ts` | 3 (start gate wording and log, `delete` against `stop`, "started here") | 3 modules, about 600 moved, about +90 added |
 
 The split is a move, not a saving: each new module adds its host type and imports (about 20–40 lines), as D2 of
@@ -123,7 +123,7 @@ sequence three times (`letGo`, then `settle`, then poke or announce) where `trus
 one effect, and unifying them changes who announces: left for a later pull request that can read `person.ts`'s
 compensating `announce()` at the same time.
 
-**Drift (a question, §6):** `turnsLost` (after a crash) releases every unanswered row that is not a task as `lost`,
+**Drift (a question, §6; decided):** `turnsLost` (after a crash) releases every unanswered row that is not a task as `lost`,
 requests included. `sessionsStopped` (a quit or a stop) skips requests, "answered by its own turn's end". After a crash
 nothing ends the request's turn, so this may be right, but nothing says so. The two loops should share one release
 step either way; which result for a request is the owner's. **Decided** (owner): the sender of a request always learns it
