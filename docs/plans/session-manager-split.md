@@ -6,8 +6,8 @@ the shape it ends in (§5) and the pull requests that get there (§6). Changes o
 are listed for the owner to decide (§7) and are not in any pull request here. A record like the rest of `plans/`, so not
 mirrored in Korean. Nothing on screen changes.
 
-Measured on main at `9f1d57cba` (2026-10-31). Line numbers are main's. Paths are under `packages/agent-host/src/`
-unless they say otherwise.
+Measured on main at `9f1d57cba` (2026-10-31), and again at `dea0c0985` (2026-11-06, §1.2, §6.1). Line numbers are those
+of 2026-10-31's main. Paths are under `packages/agent-host/src/` unless they say otherwise.
 
 ## 1. What is in the file
 
@@ -25,19 +25,21 @@ compile.
 
 ### 1.2 The numbers
 
-3,204 lines:
+3,204 lines on 2026-10-31; 2,974 on 2026-11-06, after PRs 2, 3, 4 and 8 of §6 and 21 commits of other work. The second
+count calls a member with one statement of at most six lines a one-call method, and counts the class's own doc and braces
+with the imports:
 
-| What | Members | Lines |
-|---|---|---|
-| Imports, exported types (`MailHooks`, `KeptAgent`, `ManagerParts`, …), re-exports | | 186 |
-| Fields | 83 | 218 |
-| Constructor (wiring the modules, the restore at start) | 1 | 271 |
-| `parts()`: what the moved-out modules reach of the manager | 1 | 376 |
-| `seat()`: what the orchestrator tools reach of it | 1 | 61 |
-| Forwarding stubs (`x(...a) { return this.<module>.x(...a) }`) | 116 | 467 |
-| Other one-call methods (`listSessions`, `sessionInfo`, the `use*` setters, …) | 23 | 122 |
-| Methods with logic | 75 | 1,274 |
-| Blank lines between members | | 229 |
+| What | Members 10-31 | Lines 10-31 | Members 11-06 | Lines 11-06 |
+|---|---|---|---|---|
+| Imports, exported types (`MailHooks`, `KeptAgent`, `ManagerParts`, …), re-exports | | 186 | | 212 |
+| Fields | 83 | 218 | 84 | 226 |
+| Constructor (wiring the modules, the restore at start) | 1 | 271 | 1 | 359 |
+| `parts()`: what the moved-out modules reach of the manager | 1 | 376 | 1 | 375 |
+| `seat()`: what the orchestrator tools reach of it | 1 | 61 | 1 | 42 |
+| Forwarding stubs (`x(...a) { return this.<module>.x(...a) }`) | 116 | 467 | 36 | 150 |
+| Other one-call methods (`listSessions`, `sessionInfo`, the `use*` setters, …) | 23 | 122 | 34 | 131 |
+| Methods with logic | 75 | 1,274 | 67 | 1,330 |
+| Blank lines between members | | 229 | | 149 |
 
 ### 1.3 Why it is big again
 
@@ -47,6 +49,13 @@ left a stub behind, and every module's host was added to `parts()`. By 2026-10-3
 (#1626: 147), usage history and compaction (#1483, #1478, #1504: 111). New logic landed in the manager because the state
 it needed lives there. The stubs and `parts()` grow with every module, so moving code out without deleting the stubs
 leaves the file about as long.
+
+It grew again after the deletions: from 2,665 lines once #1765 (PR 8) landed to 2,974 on 2026-11-06, 21 commits adding
+500 lines and removing 191. The largest were the asked gate's asker read from the request rows (#2037: 98 added, 22
+removed), the turns a swap or an update cuts and what an update stopped (#1966, #1905, #1968: 137 added), the capacity
+retry (#2010: 41), a request citing the person's message (#1940: 38) and the senders told of a stop (#1997: 35). Nearly
+all of it is host tenure, the mailbox's view of sessions and the constructor's restore at start, the groups PRs 6 and 10
+move.
 
 ## 2. The forwarding stubs (467 lines)
 
@@ -160,12 +169,12 @@ Each is a pure deletion or a pure move. Existing tests stay as they are. `tsc` p
 | 2 | **Dead code and copies** of §4 | `manager.ts`, `ui-preferences.ts`, `ask-project-flow.ts` | ~35 | nothing |
 | 3 | **The other rpc-only stubs** (33: trash, project registry, layout, preferences, record, tool queries, app sessions, approval rules, host cards, project creation, tool registry, `markRead`, `onEvent`), with the `parts()`/`seat()` entries that called them | `manager.ts`, `rpc.ts` | ~165 | nothing |
 | 4 | **`seat()` on `parts()`** | `manager.ts` | ~29 | nothing |
-| 5 | **The stubs `main.ts` reaches** (5, §2): `main.ts` passes the module instead of the manager to `AgentVersionService` (`sessions: mgr`) and `attachInlineViews` | `manager.ts`, `main.ts`, `agent-versions.ts`, `inline-views.ts`, the probe script | ~25 | key pairing (#1711) edits `main.ts`: after its slices land |
-| 6 | **The mailbox's view of sessions** moved to `sessions/mail-sessions.ts` | `manager.ts`, new file | ~170 (moved) | nothing in flight |
-| 7 | **Turn inputs** moved to `sessions/turn-inputs.ts` | `manager.ts`, new file | ~210 (moved) | nothing in flight |
-| 8 | **`parts()` forwards to exposed modules**, module by module where no test builds the host | `manager.ts`, the modules | ~56 | depends on the module |
-| 9 | **Processes** moved to `sessions/session-processes.ts` | `manager.ts`, new file | ~390 (moved) | the session core (#1654) PRs 6–9 |
-| 10 | **Host tenure** moved to `sessions/host-tenure.ts` | `manager.ts`, new file | ~315 (moved) | the session core (#1654) PRs 6–9; touches every module, so last |
+| 5 | **The stubs `main.ts` reaches** (5, §2): `main.ts` passes the module instead of the manager to `AgentVersionService` (`sessions: mgr`) and `attachInlineViews`. On 2026-11-06 with the 21 other stubs `main.ts`, `rpc.ts` and tests reach (§6.1a, PR 3) and `directedFromHub`, `refreshToolDefinitions`: every stub but the eight verbs of D1, in two pull requests, 5a the 12 no test of `links/` calls, 5b the 16 those tests call (the deep tier: `links/` and a line of `security-boundaries.md`) | `manager.ts`, `main.ts`, `rpc.ts`, `agent-versions.ts`, `inline-views.ts`, the tests | ~25; 146 with the others (5a 63, 5b 83) | none: no key pairing (#1711) branch is open |
+| 6 | **The mailbox's view of sessions** moved to `sessions/mail-sessions.ts` | `manager.ts`, new file | ~170; 206 on 2026-11-06 (moved) | nothing in flight |
+| 7 | **Turn inputs** moved to `sessions/turn-inputs.ts` | `manager.ts`, new file | ~210; 206 on 2026-11-06 (moved) | nothing in flight |
+| 8 | **`parts()` forwards to exposed modules**, module by module where no test builds the host | `manager.ts`, the modules | ~56; 36 forwards left on 2026-11-06, 38 after PR 5 | depends on the module |
+| 9 | **Processes** moved to `sessions/session-processes.ts` | `manager.ts`, new file | ~390; 396 on 2026-11-06 (moved) | nothing in flight (§6.2) |
+| 10 | **Host tenure** moved to `sessions/host-tenure.ts` | `manager.ts`, new file | ~315; 434 on 2026-11-06, and the constructor's restore at start (moved) | touches every module, so last |
 
 ### 6.1a What landed
 
@@ -200,14 +209,24 @@ Manager line counts are after each pull request.
   (`appSessions`) and `askCapability` (`hostCards`); `HandoffChildren`, `ProjectConsents`, `RoutedCards`, `LaunchInputs`,
   `UpdatesAsked`, `SessionTools` and `SessionAppWiring` read the module off the host. The other 34 wait for a pull request
   that also rewrites those tests' hosts.
+- **5a, the stubs nothing in `links/` calls** (`manager.ts` 2,974 to 2,911, re-measured first: §1.2, §6.1): 12 stubs,
+  `useProjectsHome`, `directedFromHub`, `forgetWatchHolder`, `refreshToolDefinitions`, `builderBusy`, `mcpProposals`,
+  `useExternalApps`, `loadSubagentMessages` and the four PR 5 named. `main.ts`, `rpc.ts`, the e2e linked host and the
+  tests call the module (`mgr.apps.useExternalApps`, `mgr.launches.refreshToolDefinitions`); `launches` and `linkedHost`
+  are public `readonly`. `attachInlineViews` takes `mgr.apps`. `AgentVersionService` gets the two notes as their own
+  dependency, `notes: mgr.sessionSettings`, required, so a construction that forgets them does not compile: as optional
+  members of `sessions` they would have gone quiet with the stubs, with nothing failing. The probe script §2 names is gone.
 
 ### 6.2 Work in flight
 
 - **The shared session core (#1654).** Its PRs 6–9 (PR 5 is in flight on its own branch) change `adapters/` and `adapters/core/` (the ledger, the decision
   order, events). The manager's process code (`switchTool`, `restartSession`, `sleepSession`, `handleSink`) and host
   tenure (`adoptKept`, the swap and dispose paths) read what those PRs reshape: `SessionHandle`, the sink, adopting a
-  kept process. PRs 9 and 10 here wait for them. PRs 1–8 do not touch `adapters/`.
-- **Key pairing (#1711).** Its branches edit `links/` and `main.ts`. Only PR 5 here touches `main.ts`, so it waits.
+  kept process. PRs 9 and 10 here wait for them. PRs 1–8 do not touch `adapters/`. On 2026-11-06 that work had landed
+  as #2052, #2054, #2057 and #2058; what is left of it (the tool process onto `Os`) does not touch `manager.ts`, so PRs 9
+  and 10 no longer wait.
+- **Key pairing (#1711).** Its branches edit `links/` and `main.ts`. Only PR 5 here touches `main.ts`, so it waits. On
+  2026-11-06 no branch of it was open, so PR 5 went with the other stubs.
 - **#1334** (an app hears of its project's sessions, open since 2026-10-20) adds 15 lines to `manager.ts` and edits
   `session-app-wiring.ts`. PR 3 removes `SessionAppWiring` stubs near its hunk. A rebase there is a few lines.
 

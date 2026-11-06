@@ -329,7 +329,7 @@ export function createRpcHandler(
     'agents.autoCompact': async (p) => mgr.autoCompactFor(p.sessionId),
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(p.sessionId),
-    'agents.mcpProposals': async () => ({ proposals: mgr.mcpProposals() }),
+    'agents.mcpProposals': async () => ({ proposals: mgr.orchestratorSlot.mcpProposals() }),
     'agents.resolveMcpProposal': async ({ name, approve }) => {
       const r = await mgr.orchestratorSlot.resolveMcpProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
@@ -366,7 +366,7 @@ export function createRpcHandler(
        */
       const { sessionId, by, ...settings } = p
       // `by` comes only from a hub's orchestrator, which directs no orchestrator nor coordinator here (#1941 review)
-      if (by) mgr.directedFromHub(sessionId)
+      if (by) mgr.linkedHost.directedFromHub(sessionId)
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {
@@ -740,7 +740,7 @@ export function createRpcHandler(
       return mgr.record.messageImage(sessionId, path)
     },
     'messages.subagent': async ({ sessionId, parentCallId, afterSeq, limit }) => {
-      return mgr.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
+      return mgr.record.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },
     'messages.subagentTrashed': async ({ sessionId, parentCallId }) => {
       return mgr.trash.subagentTrashed(sessionId, parentCallId)

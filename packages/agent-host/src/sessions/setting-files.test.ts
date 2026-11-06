@@ -127,7 +127,7 @@ beforeEach(async () => {
     ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.appSessions.builderBusy(ref) })
   rt.refresh()
   openManager()
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
@@ -137,7 +137,7 @@ beforeEach(async () => {
 function openManager(): void {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
 }
 

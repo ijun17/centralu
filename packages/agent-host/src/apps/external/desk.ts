@@ -405,7 +405,7 @@ export class BrokerDesk {
    */
   private schemas = new AjvJsonSchemaValidator()
 
-  /** The host's core fills in the body (`SessionManager.useExternalApps`). Empties it if null */
+  /** The host's core fills in the body (`SessionAppWiring.useExternalApps`). Empties it if null */
   attach(host: BrokerHost | null): void {
     this.host = host
   }

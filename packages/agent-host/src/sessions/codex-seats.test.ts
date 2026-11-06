@@ -85,13 +85,13 @@ beforeEach(async () => {
   codex.readExternalHistory = undefined
   codex.detect = async () => ({ tool: 'codex', installed: true, loggedIn: true, detail: 'test' })
   const adapters = new Map<ToolName, AgentAdapter>([['codex', codex]])
-  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.appSessions.builderBusy(ref) })
   rt.refresh()
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   // Where an app made without a project goes (#1141): this test's ~/Centralu
-  mgr.useProjectsHome(() => join(root, 'Centralu'))
+  mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))
   mgr.prLookup = async () => null
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   store.projects.setProjectDefaultTool(projectId, 'codex')

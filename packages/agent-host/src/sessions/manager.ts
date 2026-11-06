@@ -243,7 +243,7 @@ export class SessionManager {
   /** The sidebar order of sessions and the grid's panels (session-layout.ts) */
   readonly layout: SessionLayout
   /** A linked machine's events and work owed there, and what a hub reads of and sends to this host (linked-host.ts) */
-  private readonly linkedHost: LinkedHost
+  readonly linkedHost: LinkedHost
   /** What is changed on a session: settings, name, read mark, background tasks, CLI move notices (session-settings.ts) */
   readonly sessionSettings: SessionSettings
   /**
@@ -270,7 +270,7 @@ export class SessionManager {
   /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts, #1693) */
   private readonly overloadRetry: OverloadRetry
   /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
-  private readonly launches: LaunchRecords
+  readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
   readonly merges: MergeChecks
   /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
@@ -789,11 +789,6 @@ export class SessionManager {
     return this.projectCreation.addProject(...a)
   }
 
-  /** `ProjectCreation.useProjectsHome` (project-creation.ts), kept on the manager for its callers */
-  useProjectsHome(...a: Parameters<ProjectCreation['useProjectsHome']>): ReturnType<ProjectCreation['useProjectsHome']> {
-    return this.projectCreation.useProjectsHome(...a)
-  }
-
   /**
    * The start gate for new agent sessions (#686, `memory-gate.ts`): wired by main.ts, and by the tests that are about
    * it. Without one every start goes ahead, so a test machine short of memory does not queue unrelated tests' children.
@@ -992,11 +987,6 @@ export class SessionManager {
   /** `LinkedHost.observeLinked` (linked-host.ts), kept on the manager for its callers */
   observeLinked(...a: Parameters<LinkedHost['observeLinked']>): ReturnType<LinkedHost['observeLinked']> {
     return this.linkedHost.observeLinked(...a)
-  }
-
-  /** `LinkedHost.directedFromHub` (linked-host.ts), kept on the manager for its callers */
-  directedFromHub(...a: Parameters<LinkedHost['directedFromHub']>): ReturnType<LinkedHost['directedFromHub']> {
-    return this.linkedHost.directedFromHub(...a)
   }
 
   /** `LinkedHost.sendFromHub` (linked-host.ts), kept on the manager for its callers */
@@ -1987,11 +1977,6 @@ export class SessionManager {
     return { ...m.worktree, ...state }
   }
 
-  /** `ProjectFiles.forgetWatchHolder` (dev-services/project-files.ts), kept on the manager for its callers */
-  forgetWatchHolder(...a: Parameters<ProjectFiles['forgetWatchHolder']>): ReturnType<ProjectFiles['forgetWatchHolder']> {
-    return this.files.forgetWatchHolder(...a)
-  }
-
   /** `UiPreferenceStore.uiPreferences` (ui-preferences.ts), kept on the manager for its callers */
   uiPreferences(...a: Parameters<UiPreferenceStore['uiPreferences']>): ReturnType<UiPreferenceStore['uiPreferences']> {
     return this.prefs.uiPreferences(...a)
@@ -2184,14 +2169,6 @@ export class SessionManager {
   private endTurnWithProcess(sessionId: string): void {
     const m = this.meta.get(sessionId)
     if (m && inTurn(m.state)) this.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
-  }
-
-  /**
-   * A keeper keeps a process's tool definitions over a host swap: `LaunchRecords.refreshToolDefinitions`
-   * (launch-records.ts), kept on the manager for its callers
-   */
-  refreshToolDefinitions(): Promise<void> {
-    return this.launches.refreshToolDefinitions()
   }
 
   private partsHost: ManagerParts | undefined
@@ -2669,11 +2646,6 @@ export class SessionManager {
     return orchestratorToolsFor(this.seat(), orchestratorId, scopeIds, ownProject, hubView)
   }
 
-  /** `AppSessions.builderBusy` (app-sessions.ts), kept on the manager for its callers */
-  builderBusy(...a: Parameters<AppSessions['builderBusy']>): ReturnType<AppSessions['builderBusy']> {
-    return this.appSessions.builderBusy(...a)
-  }
-
   /** The caller's own preset, read at the boundary, never its project's or parent's preset. */
   private autoBoundaryOpen(sessionId: string, boundary?: string): boolean {
     if (this.meta.get(sessionId)?.permissionPreset !== 'auto') return false
@@ -2712,11 +2684,6 @@ export class SessionManager {
     })
   }
 
-  /** `OrchestratorSlot.mcpProposals` (orchestrator-slot.ts), kept on the manager for its callers */
-  mcpProposals(...a: Parameters<OrchestratorSlot['mcpProposals']>): ReturnType<OrchestratorSlot['mcpProposals']> {
-    return this.orchestratorSlot.mcpProposals(...a)
-  }
-
   /** `OrchestratorSlot.runOrchestratorTool` (orchestrator-slot.ts), kept on the manager for its callers */
   runOrchestratorTool(...a: Parameters<OrchestratorSlot['runOrchestratorTool']>): ReturnType<OrchestratorSlot['runOrchestratorTool']> {
     return this.orchestratorSlot.runOrchestratorTool(...a)
@@ -2740,31 +2707,6 @@ export class SessionManager {
   /** Whether Automatic updates are on and the host idle, for an agent's apply to go with no card (#1509, updates-asked.ts) — wired by the host */
   useUpdateAtRest(atRest: (besidesSessionId: string) => boolean): void {
     this.updatesAsked.updateAtRest = atRest
-  }
-
-  /** `SessionSettings.noteAgentMoved` (session-settings.ts), kept on the manager for its callers */
-  noteAgentMoved(...a: Parameters<SessionSettings['noteAgentMoved']>): ReturnType<SessionSettings['noteAgentMoved']> {
-    return this.sessionSettings.noteAgentMoved(...a)
-  }
-
-  /** `SessionSettings.noteAgentMoveFailed` (session-settings.ts), kept on the manager for its callers */
-  noteAgentMoveFailed(...a: Parameters<SessionSettings['noteAgentMoveFailed']>): ReturnType<SessionSettings['noteAgentMoveFailed']> {
-    return this.sessionSettings.noteAgentMoveFailed(...a)
-  }
-
-  /** `SessionAppWiring.useExternalApps` (session-app-wiring.ts), kept on the manager for its callers */
-  useExternalApps(...a: Parameters<SessionAppWiring['useExternalApps']>): ReturnType<SessionAppWiring['useExternalApps']> {
-    return this.apps.useExternalApps(...a)
-  }
-
-  /** `SessionAppWiring.sessionAppsHub` (session-app-wiring.ts), kept on the manager for its callers */
-  sessionAppsHub(...a: Parameters<SessionAppWiring['sessionAppsHub']>): ReturnType<SessionAppWiring['sessionAppsHub']> {
-    return this.apps.sessionAppsHub(...a)
-  }
-
-  /** `SessionAppWiring.recordAppView` (session-app-wiring.ts), kept on the manager for its callers */
-  recordAppView(...a: Parameters<SessionAppWiring['recordAppView']>): ReturnType<SessionAppWiring['recordAppView']> {
-    return this.apps.recordAppView(...a)
   }
 
   /**
@@ -2800,11 +2742,6 @@ export class SessionManager {
     if (cleared) this.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'error_cleared' })
     this.sessionSettings.markRead(sessionId, seq)
     return { cleared, newer }
-  }
-
-  /** `SessionRecord.loadSubagentMessages` (session-record.ts), kept on the manager for its callers */
-  loadSubagentMessages(...a: Parameters<SessionRecord['loadSubagentMessages']>): ReturnType<SessionRecord['loadSubagentMessages']> {
-    return this.record.loadSubagentMessages(...a)
   }
 
   /** `SessionRecord.loadMessages` (session-record.ts), kept on the manager for its callers */

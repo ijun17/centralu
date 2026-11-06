@@ -90,7 +90,7 @@ export type InlineViewsDeps = {
   rt: ExternalApps
   views: ViewHost
   hub: SessionAppsHub
-  /** The path an event is emitted through — on the host, the manager's record and broadcast (`SessionManager.recordAppView`) */
+  /** The path an event is emitted through — on the host, the manager's record and broadcast (`SessionAppWiring.recordAppView`) */
   emit: (e: AppViewEvent) => void
   log?: (line: string) => void
   limits?: Partial<InlineLimits>
@@ -515,15 +515,15 @@ function resultViewUri(result: CallToolResult): string | null {
 /**
  * The host's seam — main.ts and the tests wire this in with the same function. Listens for calls
  * on the manager's own attachment (hub), and emits events through the manager's record and
- * broadcast path. Call this after the runtime has been attached to the manager (`useExternalApps`).
+ * broadcast path (`mgr.apps`, session-app-wiring.ts). Call this after the runtime has been attached (`useExternalApps`).
  */
 export function attachInlineViews(
-  mgr: { sessionAppsHub(): SessionAppsHub | null; recordAppView(e: AppViewEvent): void },
+  apps: { sessionAppsHub(): SessionAppsHub | null; recordAppView(e: AppViewEvent): void },
   rt: ExternalApps,
   views: ViewHost,
   opts: { log?: (line: string) => void; limits?: Partial<InlineLimits> } = {},
 ): InlineViews {
-  const hub = mgr.sessionAppsHub()
+  const hub = apps.sessionAppsHub()
   if (!hub) throw new Error('attachInlineViews: the session manager has no external apps (call useExternalApps first)')
-  return new InlineViews({ rt, views, hub, emit: (e) => mgr.recordAppView(e), ...opts })
+  return new InlineViews({ rt, views, hub, emit: (e) => apps.recordAppView(e), ...opts })
 }

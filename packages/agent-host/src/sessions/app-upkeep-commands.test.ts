@@ -46,7 +46,7 @@ beforeEach(() => {
   })
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, () => {})
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   const handler = createRpcHandler(mgr, agents, { externalApps: rt })
   rpc = (method, params) => handler(method, params)
   mgr.useWindowRpc(rpc)

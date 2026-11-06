@@ -238,7 +238,7 @@ describe('background work across a host swap (#648)', () => {
     change(id, b)
     const restart = vi.spyOn(b.mgr, 'restartSession')
 
-    await b.mgr.refreshToolDefinitions()
+    await b.mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(restart).toHaveBeenCalledWith(id, cause)
     expect(b.session(id).live).toBe(true)
@@ -252,7 +252,7 @@ describe('background work across a host swap (#648)', () => {
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     b.claude.fingerprint = 'v2'
-    await b.mgr.refreshToolDefinitions()
+    await b.mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(notices(id)).toEqual([expect.stringContaining('before Centralu was updated')])
   })
@@ -273,7 +273,7 @@ describe('background work across a host swap (#648)', () => {
     else {
       if (settings === 'definitions') store.settings.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
       else b.claude.fingerprint = 'v2'
-      await b.mgr.refreshToolDefinitions()
+      await b.mgr.launches.refreshToolDefinitions()
     }
     expect(old.disposed).toBe(false)
     if (settings === 'launch') expect(restart).not.toHaveBeenCalled()

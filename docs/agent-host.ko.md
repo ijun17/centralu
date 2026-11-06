@@ -770,7 +770,7 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
 | 바탕화면이 아니라 `~/Centralu`(오너, 2026-10-12. #515의 첫 빌드는 바탕화면을 썼다) | 권한 창이 없다: macOS에서 바탕화면은 보호된 폴더라, 처음 들여다볼 때(대화상자에 이름을 입력할 때) Centralu 이름으로 접근 권한을 물었다. 홈의 폴더는 보호되지 않는다. 눈에 보인다: 사람이 자기 작업을 찾는 Finder나 탐색기에서 보인다. 어디서나 한 규칙: 바탕화면 알려진 폴더를 찾지 않고(Windows의 PowerShell, Linux의 XDG), 바탕화면이 없는 WSL 배포판이나 서버도 노트북과 같은 폴더를 쓴다 |
 | 데이터 폴더(`~/.centralu`)와 따로 | 데이터 폴더는 앱의 것이라 제거할 때 지워질 수 있다. 프로젝트는 사람의 작업이라 함께 지워지면 안 된다 |
 
-호스트는 `main.ts`가 연결해 줄 때만 기본 위치를 안다(`SessionManager.useProjectsHome`). 없으면 `parent` 없는
+호스트는 `main.ts`가 연결해 줄 때만 기본 위치를 안다(`ProjectCreation.useProjectsHome`). 없으면 `parent` 없는
 호출은 거절된다. 그래서 테스트와 linked-hosts e2e(임시 `HOME`의 `Centralu`를 준다)는 실행하는 사람의 홈에 손대지
 않는다.
 

@@ -1542,7 +1542,7 @@ the mock shows too). It is made on first use.
 | `~/Centralu`, not the Desktop (owner, 2026-10-12; the first build of #515 used the Desktop) | No permission prompt: on macOS the Desktop is a protected folder, and the first look into it (typing a name in the dialog) asked for access in Centralu's name; a folder of the home is not protected. Visible: it is found in Finder or Explorer, where a person looks for their work. One rule everywhere: no Desktop known-folder lookup (PowerShell on Windows, XDG on Linux), and a WSL distro or a server, which have no Desktop, get the same folder as a laptop |
 | Apart from the data folder (`~/.centralu`) | The data folder is the app's and an uninstall may remove it; projects are the person's work and must not go with it |
 
-The host only has a default location when `main.ts` wires one in (`SessionManager.useProjectsHome`); without it a
+The host only has a default location when `main.ts` wires one in (`ProjectCreation.useProjectsHome`); without it a
 call with no `parent` is refused. That is what keeps tests and the linked-hosts e2e (which give a temporary `HOME`'s
 `Centralu`) out of the home of whoever runs them.
 
@@ -3119,7 +3119,7 @@ agent CLI. Linked projects keep a missing default too; creating a session there 
 **Tool definitions after a host switch (#581).**
 
 The keeper can preserve an agent process across a Centralu update, but that process also preserves the Centralu MCP
-definitions it was started with. `SessionManager.refreshToolDefinitions()` compares the profile's served definitions
+definitions it was started with. `LaunchRecords.refreshToolDefinitions()` compares the profile's served definitions
 and instructions using `residentCost(...).prefixHash`; the adapter declares the serving form in
 the adapter capabilities (`toolDeferral` and `instructionChannel`), rather than the manager naming a CLI.
 The hash is kept in an app setting per session.

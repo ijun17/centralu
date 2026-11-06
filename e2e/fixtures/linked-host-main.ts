@@ -53,7 +53,7 @@ const store = new Store(values.db!)
 const adapters = scriptedAdapters()
 const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e), () => null, join(dirname(values.db!), 'worktrees'))
 // A new project's ~/Centralu (#515) is the one in this host's temporary HOME, never the home of whoever runs the suite
-mgr.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
+mgr.projectCreation.useProjectsHome(() => projectsHome(process.platform, process.env.HOME!))
 let up = false
 const toScreens = (f: Parameters<HostServer['pushTerminal']>[0]) => {
   if (up) server.pushTerminal(f)
@@ -127,7 +127,7 @@ externalApps.refresh()
 onExternalAppListChanged(externalApps, () => {
   if (up) server.broadcast({ type: 'external_apps_changed' })
 })
-mgr.useExternalApps(externalApps)
+mgr.apps.useExternalApps(externalApps)
 const httpSecret = randomBytes(32).toString('base64url')
 let port = 0
 const views: ViewHost = new ViewHost({

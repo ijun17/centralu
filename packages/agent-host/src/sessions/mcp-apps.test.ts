@@ -40,7 +40,7 @@ let rpc: ReturnType<typeof createRpcHandler>
 
 /** Connects the manager to the runtime — this is also the moment the legacy registry is migrated (the same seam as the host's main) */
 function connect(): void {
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
 }
 
 beforeEach(() => {
@@ -97,14 +97,14 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     connect()
     const orc = await mgr.orchestrator()
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: 'test server' })
-    expect(mgr.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
+    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
     // Nothing exists yet at the proposal stage
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
     expect(userApps()).toEqual([])
 
     const before = adapter.seen.length
     expect(await mgr.orchestratorSlot.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
-    expect(mgr.mcpProposals()).toEqual([])
+    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
 
     // A headless app: only a server command, no home. The app stands without starting (it starts the first time it is needed)
     const m = readManifest('echoer')
@@ -136,7 +136,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
     const before = adapter.seen.length
     await mgr.orchestratorSlot.resolveMcpProposal('figma', false)
-    expect(mgr.mcpProposals()).toEqual([])
+    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
     expect(userApps()).toEqual([])
     expect(adapter.seen.length).toBe(before)
   })
@@ -150,7 +150,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
 
     const builtin = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'control', command: 'npx', args: [] })
     expect(builtin.isError).toBe(true)
-    expect(mgr.mcpProposals()).toEqual([])
+    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
   })
 
   it('if a different app with the same id appeared while it was awaiting approval, it fails instead of overwriting, and the proposal stays', async () => {
@@ -162,7 +162,7 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     expect(r.ok).toBe(false)
     expect(r.error).toContain('taken')
     expect(readManifest('taken').server).toEqual(SERVER)
-    expect(mgr.mcpProposals().map((p) => p.name)).toEqual(['taken'])
+    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['taken'])
   })
 })
 

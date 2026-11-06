@@ -88,7 +88,7 @@ beforeEach(async () => {
     timing: { graceMs: 500, backoffBaseMs: 10, maxFailures: 1, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   views = new ViewHost({
     secret: 'builder-requests-test-secret-0123456789ab',
     allowedOrigins: ['http://127.0.0.1:5174'],

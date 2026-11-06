@@ -30,7 +30,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
     store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
   })
@@ -39,7 +39,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(false)
     expect(adapter.handleOf(session.id)).toBe(old)
   })
@@ -52,7 +52,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const restart = vi.spyOn(mgr, 'restartSession')
     old.emitApproval('held-card')
     store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(false)
     await rpc('agents.respondApproval', { sessionId: session.id, requestId: 'held-card', decision: 'allow' })
     expect(old.disposed).toBe(false)
@@ -71,7 +71,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const old = adapter.handleOf(session.id)!
     adapter.launchFingerprint = 'v2'
 
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
 
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
@@ -90,7 +90,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const restart = vi.spyOn(mgr, 'restartSession')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     if (state === 'working') {
       expect(old.disposed).toBe(false)
       old.finishTurn()
@@ -105,7 +105,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const usage = await rpc('agents.usage', { tool: 'claude' }) as { cache: { windows: { rebuildCauses: Record<string, number> }[] } }
     expect(usage.cache.windows[0]!.rebuildCauses).toEqual({ launch_settings: 1 })
 
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     expect(adapter.handleOf(session.id)).toBe(current)
     expect(restart).toHaveBeenCalledTimes(1)
     restart.mockRestore()
@@ -117,7 +117,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
 
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
 
     expect(old.disposed).toBe(false)
     expect(adapter.handleOf(session.id)).toBe(old)
@@ -130,7 +130,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     await rpc('agents.send', { sessionId: session.id, text: 'work' })
     adapter.launchFingerprint = 'v2'
 
-    await mgr.refreshToolDefinitions()
+    await mgr.launches.refreshToolDefinitions()
     expect(old.disposed).toBe(false)
 
     old.finishTurn()

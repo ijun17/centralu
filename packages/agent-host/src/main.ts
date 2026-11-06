@@ -377,7 +377,7 @@ const mgr = new SessionManager(
   },
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
-mgr.useProjectsHome(() => projectsHome())
+mgr.projectCreation.useProjectsHome(() => projectsHome())
 // New agent sessions start only while the machine has memory for them (#686); wired here, in tests only where it is the subject
 mgr.useMemoryGate(new MemoryGate())
 /*
@@ -403,7 +403,7 @@ const externalApps = new ExternalApps({
   // Every time an entry visible in the run panel starts or ends — the signal for the run panel to re-read (the UI store carries this to RunsPanel)
   emitRunsChanged: appRunChanges.emit,
   // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
-  builderBusy: (ref) => mgr.builderBusy(ref),
+  builderBusy: (ref) => mgr.appSessions.builderBusy(ref),
   // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
   shared: (ref) => readShared(store.settings, ref),
   // A user-folder app registered as a project in place is that project's root app now (#1141)
@@ -414,7 +414,7 @@ externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
 onExternalAppListChanged(externalApps, () => events.push({ type: 'external_apps_changed' }))
 // Attaches apps to a session (A-5) — the manager and the runtime know nothing about each other; this is where they are wired together
-mgr.useExternalApps(externalApps)
+mgr.apps.useExternalApps(externalApps)
 /*
  * User-folder apps become projects in place (#1141): each one, once, with what was kept under its old key carried to its
  * new one, and the sessions this manager already loaded moved with it. It runs once this host is ready (below).
@@ -525,6 +525,7 @@ const autoApplyAgentVersions = flagSetting(store.settings, AUTO_APPLY_AGENT_VERS
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
+  notes: mgr.sessionSettings,
   // Not listening yet: the first window asks
   publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: autoApplyAgentVersions.read,
@@ -591,7 +592,7 @@ const views: ViewHost = new ViewHost({
  * the view opens under that card. Calls are heard through the manager's own attachment, and events
  * go out through the manager's record and broadcast path (inline-views.ts).
  */
-const inlineViews = attachInlineViews(mgr, externalApps, views)
+const inlineViews = attachInlineViews(mgr.apps, externalApps, views)
 /*
  * The views the previous host had open, if it handed them over in a planned ending (#280 step 4,
  * view-handover.ts). Before listen(), so the first client to reconnect already finds them.
@@ -848,7 +849,7 @@ const server = new HostServer({
   onClientGone: (client) => {
     views.holderGone(client)
     // The folders only that window had open stop being watched (#842 item 6)
-    mgr.forgetWatchHolder(client)
+    mgr.files.forgetWatchHolder(client)
     // A window told to relaunch closing is its relaunch; one that had not answered is one less to wait for (#665)
     updateApply.clientGone(client)
     // A hub that offered on that connection is not reachable until it offers again (#550)
@@ -996,8 +997,8 @@ sleeper.start()
 mgr.startSelfCompaction()
 
 // The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
-if (held) void mgr.adoptKept(held.kept.agents).then(() => mgr.refreshToolDefinitions())
-else void mgr.refreshToolDefinitions()
+if (held) void mgr.adoptKept(held.kept.agents).then(() => mgr.launches.refreshToolDefinitions())
+else void mgr.launches.refreshToolDefinitions()
 
 /*
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:

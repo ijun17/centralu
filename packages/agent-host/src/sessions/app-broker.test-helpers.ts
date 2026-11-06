@@ -215,7 +215,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     timing: { idleMs: 60_000, graceMs: 500, probeTimeoutMs: 3_000, connectTimeoutMs: 10_000, ...timing },
   })
   rt.refresh()
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   const projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })

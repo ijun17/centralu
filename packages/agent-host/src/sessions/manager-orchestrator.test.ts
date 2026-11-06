@@ -1021,7 +1021,7 @@ describe('the commands tier through the host (#512)', () => {
 
     const server = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'propose_mcp_server', args: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] } })
     expect(server.isError).toBeFalsy()
-    expect(mgr.mcpProposals()).toEqual([expect.objectContaining({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] })])
+    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([expect.objectContaining({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'] })])
 
     // By its own name the command is no longer a tool of the seat
     await expect(mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'other', content: 'x' })).rejects.toThrow(/Not a tool of this session/)

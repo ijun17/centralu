@@ -105,7 +105,7 @@ beforeEach(() => {
   events = []
   const agents = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]]) as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, (e) => events.push(e))
-  mgr.useProjectsHome(() => centralu)
+  mgr.projectCreation.useProjectsHome(() => centralu)
   const handler = createRpcHandler(mgr, agents)
   rpc = (method, params) => handler(method, params)
 })

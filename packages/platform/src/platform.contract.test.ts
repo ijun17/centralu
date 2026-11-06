@@ -194,6 +194,7 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const agentVersions = new AgentVersionService({
     tools: () => [],
     sessions: mgr,
+    notes: mgr.sessionSettings,
     publish: (status) => server.broadcast({ type: 'agent_versions', status }),
   })
   // The person's side of the mailbox over this store (#1347), wired as main.ts wires it; its delivery is not started, so nothing is delivered
@@ -1467,7 +1468,7 @@ describe('Platform contract: new app (web + real host)', () => {
     store.projects.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
-    mgr.useExternalApps(rt)
+    mgr.apps.useExternalApps(rt)
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
     const port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })
@@ -1586,10 +1587,10 @@ describe('Platform contract: app import (web + real host)', () => {
     const store = new Store()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-    mgr.useProjectsHome(() => join(fixture, 'Centralu'))
+    mgr.projectCreation.useProjectsHome(() => join(fixture, 'Centralu'))
     const rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
-    mgr.useExternalApps(rt)
+    mgr.apps.useExternalApps(rt)
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })
     const port = await server.listen()
     const platform = createWebPlatform({ hostUrl: `ws://127.0.0.1:${port}`, token: 'contract', WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket })

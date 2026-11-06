@@ -128,7 +128,7 @@ describe('watch sets per window, through the RPC door (#842 item 6)', () => {
     await rpc('fs.watch', { projectId: a.id, paths: [''] }, { client: 1 })
     expect(mgr.watchedDirCount(a.id)).toBe(2)
 
-    mgr.forgetWatchHolder(2)
+    mgr.files.forgetWatchHolder(2)
     expect(mgr.watchedDirCount(a.id)).toBe(1)
   })
 })

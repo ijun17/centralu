@@ -89,17 +89,17 @@ beforeEach(async () => {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   // Where an app made without a project goes (#1141): this test's ~/Centralu
-  mgr.useProjectsHome(() => join(root, 'Centralu'))
+  mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))
   rt = new ExternalApps({
     projects: () => store.projects.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     // The same seam as the host's main (C-4) — the manager knows whether the building session is mid-turn
-    builderBusy: (ref) => mgr.builderBusy(ref),
+    builderBusy: (ref) => mgr.appSessions.builderBusy(ref),
     timing: { turnEndDebounceMs: 50, reloadQuietMs: 300 },
   })
   rt.refresh()
-  mgr.useExternalApps(rt)
+  mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })
@@ -293,7 +293,7 @@ describe('the app restarts at the end of its building session\'s turn (C-4)', ()
     await rt.tools(ref)
     const emit = claude.sinks.get(builder!.id)!
     emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
-    expect(mgr.builderBusy(ref)).toBe(true)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(true)
     const server = join(app.dir, 'server.mjs')
     writeFileSync(
       server,
@@ -307,10 +307,10 @@ describe('the app restarts at the end of its building session\'s turn (C-4)', ()
     expect(rt.knownTools(ref)!.map((t) => t.name)).not.toContain('added')
     // Waiting on approval also counts as mid-turn
     emit({ type: 'approval_request', sessionId: builder!.id, requestId: 'r1', detail: { kind: 'command', command: 'ls' } } as never)
-    expect(mgr.builderBusy(ref)).toBe(true)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(true)
     emit({ type: 'state_change', sessionId: builder!.id, state: 'working' })
     emit({ type: 'turn_complete', sessionId: builder!.id })
-    expect(mgr.builderBusy(ref)).toBe(false)
+    expect(mgr.appSessions.builderBusy(ref)).toBe(false)
     await until(() => rt.knownTools(ref)?.map((t) => t.name) ?? [], (names) => names.includes('added'))
   })
 })
