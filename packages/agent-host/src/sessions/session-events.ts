@@ -370,7 +370,7 @@ export class SessionEvents {
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)
     // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
-    if (endedTurn && e.sessionId && !this.host.hubAskTurns.has(e.sessionId) && this.host.store.settings.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.host.store.settings.deleteAppSetting(hubAskDepthKey(e.sessionId))
+    if (endedTurn && e.sessionId) this.endHubAsk(e.sessionId)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.host.hostCards.raiseHostAsks(e.sessionId)
@@ -433,6 +433,16 @@ export class SessionEvents {
   }
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
+  /**
+   * A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a turn, here
+   * and by a turn the host ends itself (`SessionManager.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
+   * the one that takes the mark (`LinkedHost.sendFromHub`)
+   */
+  endHubAsk(sessionId: string): void {
+    const key = hubAskDepthKey(sessionId)
+    if (!this.host.hubAskTurns.has(sessionId) && this.host.store.settings.appSetting(key) !== null) this.host.store.settings.deleteAppSetting(key)
+  }
+
   applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
     const from = m.state
     // An illegal transition is ignored and logged, as the window does (docs/state-management.md §2)

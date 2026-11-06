@@ -2109,11 +2109,17 @@ Implementation rules:
   host swallowed, which a kept process does not replay, so the leaving host ends the turn with that error now ("Centralu was
   going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. It says so before the host is marked as leaving, so the
   end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
-  no process when the time comes ends the same way. Known gap: a hard crash of the host during the wait leaves a kept Codex
-  session `working` (the next host adopts an idle process; #2020). **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
+  no process when the time comes ends the same way. **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
   fails, before the host sees the error: the failure takes the mark down only when no retry stands once the error was seen
   (`OverloadRetry.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
-  tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029). **Claude** is not covered: its CLI retries a 529 itself
+  tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029).
+  **A crash of the host** during the wait ends nothing, and the kept process has already ended its turn: the
+  next host adopts it (`adoptKept`) idle while the stored state is `working`. The Codex handle answers `adoptedIdle()` (the
+  app-server's `thread.status` at the resume was not `active`, measured with codex-cli 0.160.0: `systemError` after a turn failed for capacity, `idle` after a completed or interrupted one, `active` while a turn runs, and nothing was sent since), and the manager then ends the turn as one a swap
+  could not continue (`turnLostInSwap`: idle, the "stopped" line, the interruption, its requester told, and the hub task's depth mark taken down by the rule that takes it down at any end of a turn, which #2015 keeps while the wait stands). The retry is not resumed (it
+  lived in the dead host). The same holds for a turn whose end the dead host had already read; an end that fell in the gap reaches the next host as a frame the
+  keeper buffered and ends normally (and a retry that frame starts in the new host stands). A tool that cannot say (Claude's CLI, silent until its
+  next frame) is taken to go on (#2020). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.

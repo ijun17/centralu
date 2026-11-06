@@ -110,6 +110,11 @@ export class MidTurnLedger {
     return ids
   }
 
+  /** The conversation is open and nothing is in it: no turn runs, and no input waits to be written or answered */
+  get quiet(): boolean {
+    return this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0 && !this.blocking
+  }
+
   /** A turn runs: one the tool started, or one an input of ours started */
   get turnRunning(): boolean { return this.running !== null }
 
