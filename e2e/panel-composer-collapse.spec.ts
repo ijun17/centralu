@@ -57,7 +57,7 @@ const COMPOSER_REACH = 54
  * The collapsed composer in the grid (user request, 2026-09-10).
  *
  * Reading space was tight in a two-row grid — out of a 370px panel, the input area took 95px,
- * while the actual text field was only 22px. Collapsed, the rounded card shows only its top edge,
+ * while the actual text field was only 22px. Collapsed, the rounded card shows a sliver of itself,
  * and when a cursor arrives at the bottom, it **rises over the conversation.** It covers rather
  * than pushes, so the line being read does not move.
  */
@@ -365,4 +365,103 @@ test('a panel tall enough keeps the composer open, and the focus view never fold
   const v = (await view.boundingBox())!
   const c = (await view.getByTestId('composer-shell').boundingBox())!
   expect(c.y + c.height).toBeLessThanOrEqual(v.y + v.height + 1)
+})
+
+/**
+ * A folded composer shows 32px of its card at rest (owner, 2026-11-06; it showed 16 before). The card's top is read off
+ * the page against the bottom of the pane once it holds still, and a hand 40px up, over the conversation but inside
+ * the strip that raises it, still raises the card.
+ */
+test('a folded composer shows 32px of its card above the pane bottom', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  const b = await newSession(page, 'alpha', 'claude', 'two')
+  await openGrid(page, [a, b])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  await expect(shell).not.toHaveAttribute('data-up', 'true')
+  const card = await settled(shell)
+  const pane = (await panel.getByTestId('session-view').boundingBox())!
+  expect(Math.round(pane.y + pane.height - card.y)).toBe(32)
+
+  // The strip that raises it is taller than what shows, so a hand reaching for the sliver is inside it
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 40)
+  await expect(shell).toHaveAttribute('data-up', 'true')
+})
+
+/**
+ * The pinned copy of the last message leaves while the pane is folded, and its original shows (owner, 2026-11-06).
+ *
+ * A short panel gives the composer's fold the room it takes from the conversation, and the copy at the top took more
+ * of what was left. It slides up and fades; the original row, hidden while the copy speaks for it, is drawn instead so
+ * the message is not gone from the stream; a taller window brings the copy back and hides the original again.
+ */
+test('the pinned message leaves while the pane is folded and comes back when it opens', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'pinned question')
+  await page.evaluate((sid: string) => {
+    const m = (window as never as { __mock: any }).__mock
+    for (let i = 0; i < 60; i++) m.emit({ type: 'message_delta', sessionId: sid, role: 'assistant', text: `answer line ${i}\n\n` })
+    m.emit({ type: 'turn_complete', sessionId: sid })
+  }, a)
+  // The copy appears in a pane that is already folded: its first drawn state is the hidden one (nothing flashes)
+  await page.evaluate(() => {
+    const w = window as never as { __firstOpacity: string[] }
+    w.__firstOpacity = []
+    new MutationObserver(() => {
+      const el = document.querySelector('[data-testid^="grid-panel-"] [data-testid="sticky-user"]')
+      if (el && w.__firstOpacity.length === 0) w.__firstOpacity.push(getComputedStyle(el).opacity)
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const stream = panel.getByTestId('chat-stream')
+  const banner = panel.getByTestId('sticky-user')
+  await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
+  const toEnd = () => stream.evaluate((el) => (el.scrollTop = el.scrollHeight))
+  const original = () =>
+    stream.evaluate((el) => {
+      const row = [...el.querySelectorAll<HTMLElement>('[data-index]')].find((r) => r.querySelector('[data-testid="msg-user"]'))
+      return row ? getComputedStyle(row).visibility : 'gone'
+    })
+
+  await expect.poll(async () => { await toEnd(); return banner.count() }).toBe(1)
+  await expect(banner).toHaveAttribute('data-folded', 'true')
+  expect(await page.evaluate(() => (window as never as { __firstOpacity: string[] }).__firstOpacity)).toEqual(['0'])
+  await expect(banner).toHaveCSS('opacity', '0')
+  const hiddenAt = (await banner.boundingBox())!
+  expect(hiddenAt.y + hiddenAt.height).toBeLessThanOrEqual((await stream.boundingBox())!.y)
+  // The original is drawn once the copy has gone, a moment after it starts to leave
+  await expect.poll(original).toBe('visible')
+
+  // A taller window opens the composer: the copy comes back by a transition, and the original hides behind it
+  await page.evaluate(() => {
+    const w = window as never as { __moves: Promise<string[]> }
+    w.__moves = new Promise((resolve) => {
+      const watch = new MutationObserver(() => {
+        const el = document.querySelector('[data-testid="sticky-user"]') as HTMLElement
+        if (el.dataset.folded === 'true') return
+        watch.disconnect()
+        void getComputedStyle(el).translate
+        resolve(el.getAnimations().map((x) => (x as CSSTransition).transitionProperty))
+      })
+      watch.observe(document.querySelector('[data-testid="sticky-user"]')!, { attributes: true, attributeFilter: ['data-folded'] })
+    })
+  })
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 800 })
+  const moves = await page.evaluate(() => (window as never as { __moves: Promise<string[]> }).__moves)
+  expect(moves.sort()).toEqual(['opacity', 'translate'])
+  await expect.poll(async () => { await toEnd(); return banner.getAttribute('data-folded') }).toBeNull()
+  await expect(banner).toHaveCSS('opacity', '1')
+  await expect.poll(original).toBe('hidden')
+
+  // Short again: it leaves again, and the original is drawn once it has gone
+  await page.setViewportSize(SHORT_WINDOW)
+  await expect(banner).toHaveAttribute('data-folded', 'true')
+  await expect(banner).toHaveCSS('opacity', '0')
+  await expect.poll(original).toBe('visible')
 })

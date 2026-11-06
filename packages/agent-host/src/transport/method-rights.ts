@@ -83,12 +83,12 @@ const switchedOn = (key: string) => (params: unknown): boolean => fields(params)
 /**
  * The preferences that widen what agents may do, or hide the person's own notice of a card
  * (as the orchestrator's `set_preferences` cards them): a ceiling or depth set at all (raising or
- * removing it), the hub-auto switch turned on, approval notifications or their sound turned off
+ * removing it), approval notifications or their sound turned off. The hub-auto switch is not among them: turning it on
+ * or off runs unasked (owner decision 2026-11-05)
  */
 const prefsWiden = (params: unknown): boolean => {
   const patch = fields(fields(params).patch)
   if ('agentCeiling' in patch || 'agentDepth' in patch) return true
-  if ('hubAuto' in patch && patch.hubAuto !== false) return true
   const notify = fields(patch.notifyPolicy)
   return notify.approval === false || notify.sound === false
 }
@@ -334,8 +334,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'machines.activity': 'everyday',
   /** Ends an update's wait for the sessions there (#1399): the update fails and nothing is switched, as Disconnect only narrows */
   'machines.cancelUpdate': 'everyday',
-  /** Without `allowed` it only reads the switch */
-  'machines.hubAuto': { asks: (params) => 'allowed' in fields(params) && fields(params).allowed !== false, when: 'it turns the switch on' },
+  /** Reads the switch, or turns it on or off: neither asks (owner decision 2026-11-05) */
+  'machines.hubAuto': 'everyday',
   'machines.setAsks': { asks: switchedOn('on'), when: 'it turns the switch on' },
   'machines.askConsents': 'everyday',
   'machines.withdrawAsk': 'everyday',
@@ -379,7 +379,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'grid.get': 'everyday',
   'grid.set': 'window',
   'prefs.get': 'everyday',
-  'prefs.set': { asks: prefsWiden, when: 'it sets the agent ceiling or depth, turns hub auto on, or turns approval notifications or their sound off' },
+  'prefs.set': { asks: prefsWiden, when: 'it sets the agent ceiling or depth, or turns approval notifications or their sound off' },
   'themes.list': 'everyday',
   'themes.save': 'everyday',
   'themes.import': 'everyday',

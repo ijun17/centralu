@@ -51,7 +51,18 @@ export type AgentRunRequest = {
   prompt: string
   /** The shape of the answer (JSON Schema, an object at the root). If present, this makes the tool produce structured output */
   schema?: Record<string, unknown>
+  /**
+   * Who has a call open into the requesting app now, whatever run id the app cited (`DeskApps.agentCallers`): the agent
+   * never runs above the lowest of them (owner decision 2026-11-05, `appAgentPreset`)
+   */
+  callers: AgentCaller[]
 }
+
+/**
+ * Where one open call into an app starts (`AppCalls.agentCallers`): a session (its own call, or an inline view in its
+ * conversation), a screen the person opened in the window, or a chain that can no longer be followed
+ */
+export type AgentCaller = { kind: 'session'; sessionId: string } | { kind: 'person' } | { kind: 'unknown' }
 
 export type AgentRunResult = {
   /** The session that received this request — a new one is created for every request */
@@ -90,6 +101,12 @@ export type DeskApps = {
    * parent has already ended).
    */
   origin(runId: string): CapabilityOrigin | null
+  /**
+   * Where every call open into this app now starts (owner decision 2026-11-05), not only the cited run's: an app could
+   * cite a run of its own that a screen holds open while it serves a session's call. A call another app made counts
+   * that app's own callers, so an app called through `call_app` inherits its caller's cap
+   */
+  agentCallers(ref: AppRef): AgentCaller[]
   /**
    * The person denied this run's request (D-4) — either they pressed Deny right there, or it is a
    * remembered denial. If the requesting app's tool fails because of this, that failure is not a bug
@@ -569,7 +586,7 @@ export class BrokerDesk {
     let r: AgentRunResult
     try {
       r = await host.runAgent(
-        { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}) },
+        { app: app.ref, appName: app.name, tool: picked.tool, prompt, ...(schema ? { schema } : {}), callers: this.apps.agentCallers(app.ref) },
         {
           signal: call.signal,
           progress: call.progress,

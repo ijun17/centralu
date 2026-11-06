@@ -211,7 +211,7 @@ export class SessionStarts {
 
     const id = randomUUID()
     // Started from a linked computer (#1273): `auto` there only as this computer's switch allows, read at this start
-    const permissionPreset = presetFromHub(params, this.host.uiPreferences())
+    const permissionPreset = presetFromHub(params, this.host.uiPreferences(), this.host.store.projects.projectRoots().some((p) => p.id === params.projectId && p.trusted))
 
     /*
      * Worktree session (FR-2 option). Created **before the adapter is launched** — it has to be

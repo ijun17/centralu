@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buildLauncherEarly } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { removeTree, removeWithin } from './remove-tree.js'
 
 /*
@@ -9,7 +10,7 @@ import { removeTree, removeWithin } from './remove-tree.js'
  * (`vitest-data-dir.ts`), removed when the run ends. A file removes its own when it ends; this takes what a file could not
  * (a file with every test skipped runs no hooks, and a worker can be ended between files), and fails the run, naming what
  * is left, when even that cannot be removed. It also holds what files share (the fake programs' launcher,
- * `fake-exe.test-helpers.ts`).
+ * `fake-exe.test-helpers.ts`, built here on Windows).
  *
  * Vitest runs a global setup once per project, in one process, so each project makes a folder and the last one's name is
  * what the workers inherit (`CC_TEST_RUN_TMP`): the others stay empty, and each is removed. A global teardown has no hook
@@ -33,5 +34,7 @@ export default async function setup(): Promise<() => Promise<void>> {
   )
   const root = mkdtempSync(join(tmpdir(), 'cr-'))
   process.env.CC_TEST_RUN_TMP = root
+  // Before any worker needs a fake program: the compile is slow on a cold runner and must not run inside a test's hook
+  buildLauncherEarly()
   return () => removeTree(root)
 }

@@ -9,7 +9,7 @@ import type { UiPreferences } from '@cc/protocol'
  *
  * Excluded by design, with the reason on each: sign-ins and credentials, OS permission prompts, pairing a machine and
  * the privacy choices only the person grants never reach the orchestrator; none of those is a field of this record, so what
- * is excluded here is the rest of the record that is retired or widens what other computers may do.
+ * is excluded here is the rest of the record that is retired or has no field of the orchestrator's yet.
  */
 export type PreferenceReach =
   | { tool: 'set_preferences' | 'set_agent_limits'; field: string }
@@ -31,7 +31,7 @@ export const PREFERENCE_COVERAGE: Record<keyof UiPreferences, PreferenceReach> =
   agentDepth: { tool: 'set_agent_limits', field: 'agentDepth' },
   agentModels: { tool: 'set_preferences', field: 'agentModels' },
   hubAuto: {
-    excluded: 'A grant: it lets a linked computer\'s auto session run auto here. Widening what agents may do without the person is the person\'s alone (docs/agent-host.md §1.4).',
+    excluded: 'No set_preferences field yet: the call the window makes (prefs.set, and machines.hubAuto for a linked machine) turns it on or off with no card, with the limited credential too (owner decision 2026-11-05, method-rights.ts).',
   },
   foldedGroups: { tool: 'set_preferences', field: 'foldedGroups' },
   notifyPolicy: { tool: 'set_preferences', field: 'notifications' },

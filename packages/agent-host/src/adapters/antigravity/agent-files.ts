@@ -1,9 +1,9 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
@@ -35,6 +35,9 @@ import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from '.
  *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
  *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
  *                            removed when that process's sign-in or session ends)
+ *
+ * Where the data folder's path cannot be put in `BROWSER`, a helper's folder is `.sign-in-<owner>-<random>/` in the person's
+ * own folder instead (`spareFolder`)
  *
  * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
@@ -452,10 +455,13 @@ const mb = (bytes: number) => Math.round(bytes / (1024 * 1024))
 export type BrowserFolder = {
   /**
    * What `BROWSER` is set to in the agent's process: a command its launcher (Python's `webbrowser`) runs with the address.
-   * Empty where none can be written (a path holding the list separator `BROWSER` is split at, or `%s`): the agent's
-   * launcher would then start the browser itself, so a session and a sign-in refuse to start (`NO_HELPER`)
+   * Empty where none can be written (every place for it has a path holding the list separator `BROWSER` is split at, or
+   * `%s`): the agent's launcher would then start the browser itself, so a session and a sign-in refuse to start, saying
+   * `why`
    */
   browser: string
+  /** With no `browser`: which path holds which character, in plain words, for the refusal to show as it is. Else empty */
+  why: string
   /**
    * Calls `found` with each address the helper hands over (a watch, and a look now for one written before the watch
    * began). Each is taken once: the file is removed as it is read, so a later process on the same folder is not told of it
@@ -463,6 +469,66 @@ export type BrowserFolder = {
   watch(found: (text: string) => void): void
   /** Ends the watch and removes the folder */
   remove(): Promise<void>
+}
+
+/** Where `browserFolder` may put the helper; each stands in for its real one in tests */
+export type HelperPlaces = {
+  /** The Node that runs the Windows helper (`process.execPath`) */
+  node?: string
+  /** The folder a helper's folder goes in when the data folder's path cannot be given to `BROWSER` (`spareFolder`) */
+  spare?: string
+}
+
+/**
+ * The person's own folder for a helper's folder when the data folder's path cannot be given to `BROWSER` (#1688): per
+ * user by the OS's defaults and never emptied by age, as a temporary folder is (a cleaner removing a live helper would
+ * send the agent's launcher on to the real browser), and never a folder other users share (`/tmp`, or a TEMP set to
+ * `C:\Temp`, whose ACL a new file would inherit). Built from the home folder alone: `LOCALAPPDATA` and `XDG_CACHE_HOME`
+ * may name a shared folder too. Its name is neither the Windows installer's folder (`%LOCALAPPDATA%\Centralu`) nor the
+ * app's own (`app.centralu`), which an update or uninstall would touch
+ */
+export function spareFolder(platform: Platform = HOST_PLATFORM, home: string = homedir()): string {
+  const p = pathsOf(platform)
+  const own = platform === 'win32' ? p.join(home, 'AppData', 'Local') : platform === 'darwin' ? p.join(home, 'Library', 'Caches') : p.join(home, '.cache')
+  return p.join(own, 'centralu-antigravity')
+}
+
+/** What `notOwnFolder` judges of one folder: `link` as `lstat` sees it, the rest as `stat` does */
+export type FolderFact = { path: string; link: boolean; dir: boolean; uid: number; mode: number }
+
+/** The spare folder itself (not followed if it is a link) and every folder above it, from its real parent up to the root */
+async function folderFacts(spare: string): Promise<{ folder: FolderFact; above: FolderFact[] }> {
+  const fact = (path: string, s: { isSymbolicLink(): boolean; isDirectory(): boolean; uid: number; mode: number }): FolderFact => ({
+    path,
+    link: s.isSymbolicLink(),
+    dir: s.isDirectory(),
+    uid: s.uid,
+    mode: s.mode,
+  })
+  const folder = fact(spare, await lstat(spare))
+  const above: FolderFact[] = []
+  for (let p = await realpath(dirname(spare)); ; p = dirname(p)) {
+    above.push(fact(p, await stat(p)))
+    if (dirname(p) === p) break
+  }
+  return { folder, above }
+}
+
+/**
+ * Why a POSIX spare folder is not the person's alone, or empty. The folder itself: a real folder, not a link, owned by
+ * `uid`, that no group or other user can write. Every folder above it, resolved (so a `~/.cache` that is a link is
+ * accepted where it leads somewhere only the person or root can change, and refused where it leads into another user's
+ * folder): owned by `uid` or root, and writable by no one else unless sticky (as `/tmp` is: there no one renames
+ * another's entry). Anyone who could write one of them could rename the person's folder and put their own in its place
+ */
+export function notOwnFolder(facts: { folder: FolderFact; above: readonly FolderFact[] }, uid: number): string {
+  const { folder } = facts
+  if (folder.link) return 'is a link'
+  if (!folder.dir) return 'is not a folder'
+  if (folder.uid !== uid) return 'belongs to another user'
+  if ((folder.mode & 0o022) !== 0) return 'can be changed by other users'
+  const open = facts.above.find((f) => (f.uid !== uid && f.uid !== 0) || ((f.mode & 0o022) !== 0 && (f.mode & 0o1000) === 0))
+  return open ? `is inside ${open.path}, which other users can change` : ''
 }
 
 /**
@@ -476,11 +542,43 @@ export type BrowserFolder = {
  *   `'<node>' '<dir>/open-url.mjs' %s`: Python's launcher splits a `BROWSER` entry holding `%s` with `shlex` and runs it
  *   with no shell (CPython 3.14 `webbrowser.get`, the agent's runtime), so the address reaches the helper whole. The
  *   helper exits 0, so the launcher does not fall back to the default browser
+ *
+ * A path holding the separator the launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in it
+ * (#1688). Where the data folder's path holds one, the folder is made in the person's own folder instead (`spareFolder`),
+ * so only that path holding one too (or it cannot be written), or on Windows a Node path with one, leaves no helper.
+ * Each path is judged as made and absolute (the agent runs in the session's folder, so a relative path would name
+ * another file there), and that string is the one used
  */
-export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, node: string = process.execPath): Promise<BrowserFolder> {
+export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, places: HelperPlaces = {}): Promise<BrowserFolder> {
+  const node = places.node ?? process.execPath
+  const sep = platform === 'win32' ? ';' : ':'
+  const nodeBad = platform === 'win32' ? unusableIn(node, sep) : ''
+  if (nodeBad) return noHelper(`the Node program Centralu runs on is at ${node}, and Antigravity cannot be given a path with ${nodeBad} in it. Install Centralu (or that Node) in a folder whose path has none.`)
   await mkdir(home.root, { recursive: true })
   await removeStale(home.root, '.sign-in-')
-  const dir = await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`))
+  let dir = resolve(await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`)))
+  const dataBad = unusableIn(dir, sep)
+  if (dataBad) {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    const spare = resolve(places.spare ?? spareFolder(platform))
+    const data = `Centralu's data folder is at ${home.root}, and Antigravity cannot be given a path with ${dataBad} in it`
+    const move = 'Move the data folder to a path without them.'
+    const spareBad = unusableIn(join(spare, '.sign-in-x'), sep)
+    if (spareBad) return noHelper(`${data}; nor ${spareBad} in ${spare}, the folder Centralu tries instead. ${move}`)
+    try {
+      await mkdir(spare, { recursive: true, mode: 0o700 })
+      // Not the person's alone (POSIX): another user who can change it, or a folder above it, could put their own helper
+      // in place of the person's, which the agent then runs as the person (deep review of #2012)
+      const uid = platform === 'win32' ? undefined : process.getuid?.()
+      const notOwn = uid === undefined ? '' : notOwnFolder(await folderFacts(spare), uid)
+      if (notOwn) return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, ${notOwn}. ${move}`)
+      await removeStale(spare, '.sign-in-')
+      dir = resolve(await mkdtemp(join(spare, `.sign-in-${ownerTag()}-`)))
+    } catch (err) {
+      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${typeof code === 'string' ? ` (${code})` : ''}. ${move}`)
+    }
+  }
   await chmod(dir, 0o700).catch(() => {})
   let browser: string
   if (platform === 'win32') {
@@ -495,10 +593,15 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     await chmod(helper, 0o700)
     browser = usableBrowser(helper, ':') ? helper : ''
   }
+  if (browser === '') {
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${unusableIn(dir, sep)}).`)
+  }
   let watcher: FSWatcher | null = null
   const taken = new Set<string>()
   return {
     browser,
+    why: '',
     watch(found) {
       const look = () => {
         let names: string[]
@@ -561,7 +664,20 @@ export function windowsBrowserCommand(node: string, script: string): string {
 /** In single quotes, as both `sh` and `shlex` read them: nothing is escaped inside, and a `'` is closed, escaped and reopened */
 const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
 
-const usableBrowser = (path: string, listSep: string) => !path.includes(listSep) && !path.includes('%s')
+const usableBrowser = (path: string, listSep: string) => unusableIn(path, listSep) === ''
+
+/**
+ * What in `path` cannot be in `BROWSER`, in words (`";" and "%s"`), or empty: the separator its launcher splits it at, and
+ * `%s` (where it puts the address)
+ */
+const unusableIn = (path: string, listSep: string): string =>
+  [listSep, '%s']
+    .filter((c) => path.includes(c))
+    .map((c) => `"${c}"`)
+    .join(' and ')
+
+/** No helper, and why: nothing on disk to remove */
+const noHelper = (why: string): BrowserFolder => ({ browser: '', why, watch() {}, async remove() {} })
 
 /** The person's browser on this machine, started apart from the host and never through a shell */
 export function openInBrowser(url: string, platform: Platform = HOST_PLATFORM): void {

@@ -4,8 +4,9 @@ import { presetWithin } from './start-agent.js'
 /**
  * The preset a session another computer starts here runs under (#1273, `CreateSessionParams.fromHub`): start_agent
  * with a machine, from the computer this one is linked to as its hub. `auto` only when the hub carries it from an
- * `auto` caller and this computer's "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`, read at
- * each start); anything else is the preset the hub gave, `normal` at most, as before (#838, #1038).
+ * `auto` caller, this computer's "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`, read at
+ * each start) and the project here is trusted (an untrusted project stays `normal` at most, owner decision 2026-11-05);
+ * anything else is the preset the hub gave, `normal` at most, as before (#838, #1038).
  *
  * The hub holds this computer's token, so the switch does not stand against a hub that is not Centralu's own: it is
  * the person's say over what Centralu's start_agent carries here. A start without `fromHub` (the person's window, an
@@ -14,10 +15,11 @@ import { presetWithin } from './start-agent.js'
 export function presetFromHub(
   params: Pick<CreateSessionParams, 'permissionPreset' | 'fromHub'>,
   prefs: Pick<UiPreferences, 'hubAuto'>,
+  projectTrusted: boolean,
 ): PermissionPreset {
   const given = params.permissionPreset ?? 'normal'
   if (!params.fromHub) return given
-  if (params.fromHub.callerPreset === 'auto' && hubAutoOf(prefs)) return 'auto'
+  if (params.fromHub.callerPreset === 'auto' && hubAutoOf(prefs) && projectTrusted) return 'auto'
   return presetWithin(given, 'normal') ? given : 'normal'
 }
 
