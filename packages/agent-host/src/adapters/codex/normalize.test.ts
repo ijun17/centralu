@@ -463,12 +463,20 @@ describe('state and gauges', () => {
   })
 
   it('tokenUsage → usage_update (+ context_update when a window exists)', () => {
-    const { params, out } = real('basic', 'thread/tokenUsage/updated')
+    // A reading where the thread's running spend differs from the last request's, so reading the wrong one shows
+    const { params, out } = real('basic', 'thread/tokenUsage/updated', (p) => dig(p, 'tokenUsage.total.totalTokens') !== dig(p, 'tokenUsage.last.totalTokens'))
     // `last` is what fills the window; `total` is the thread's running spend and feeds usage_update only
     const total = dig(params, 'tokenUsage.total') as { inputTokens: number; cachedInputTokens: number; outputTokens: number }
     // Codex counts the cached tokens inside its input tokens; the protocol keeps them apart (TokenUsage)
     expect(out[0]).toMatchObject({ type: 'usage_update', tokens: { inputTokens: total.inputTokens - total.cachedInputTokens, outputTokens: total.outputTokens, cacheReadTokens: total.cachedInputTokens } })
     expect(out[1]).toMatchObject({ type: 'context_update', used: dig(params, 'tokenUsage.last.totalTokens'), window: dig(params, 'tokenUsage.modelContextWindow'), exactness: 'exact' })
+  })
+
+  // Hand-written: the app-server of 0.160.0 names the window `modelContextWindow` inside `tokenUsage`; an older one put it beside it
+  it('an older Codex’s window beside the usage is read too, and a turn/completed with no turn is still a finished turn', () => {
+    const usage = { total: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 }, last: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80, totalTokens: 120 } }
+    expect(n('thread/tokenUsage/updated', { tokenUsage: usage, contextWindow: 1_000_000 })[1]).toMatchObject({ type: 'context_update', used: 120, window: 1_000_000, exactness: 'exact' })
+    expect(n('turn/completed', {})).toEqual([{ type: 'turn_complete', sessionId: S }])
   })
 
   // #850 item 20: the running reading and the request's own reading split input two ways, and only the request clamped

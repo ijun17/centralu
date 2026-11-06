@@ -215,6 +215,10 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       if (key === 'serverName') return stable('server', v)
       // Codex: the account's plan, which says more of the person than the recording needs
       if (key === 'planType') return '<plan>'
+      // Codex: a thread's rollout file is named for the minute it began in local time, which says the time zone
+      if (key === 'path' && /rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/.test(v)) return walk(v.replace(/rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/, 'rollout-2000-01-01T00-00-00-'), 'rolloutPath')
+      // Codex: the machine's system, as `initialize` answers with it
+      if (key === 'userAgent') return v.replace(/\([^)]*\d+\.\d+[^)]*; [\w-]+\)/, '(<os>; <arch>)')
       if (key === 'signature' && v.length > 40) return '<signature>'
       return mcpNames(claudeIds(scrubPieces([v], places, key === 'partial_json')[0]!))
     }

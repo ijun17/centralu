@@ -96,10 +96,39 @@ export const jsonRpcCodec: FrameCodec = {
  * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
  * answer, a file change, a command's output). `cwd`: that folder
  */
-export const codexCodec = (cwd: string): FrameCodec => ({
-  match: (sent, want, ids) => jsonRpcCodec.match(sent, inFolder(want, cwd), ids),
-  rewrite: (incoming, ids) => inFolder(jsonRpcCodec.rewrite(incoming, ids), cwd),
-})
+export const codexCodec = (cwd: string): FrameCodec => {
+  /** The id a run makes up for an input (`clientUserMessageId`), which the app-server says back on the input's item */
+  const ownId = (params: unknown): string | undefined => {
+    const id = (params as { clientUserMessageId?: unknown } | undefined)?.clientUserMessageId
+    return typeof id === 'string' ? id : undefined
+  }
+  const withoutOwnId = (params: unknown): unknown => (params && typeof params === 'object' ? Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'clientUserMessageId')) : params)
+  return {
+    match(sent, want, ids) {
+      const recorded = inFolder(want, cwd)
+      const problem = jsonRpcCodec.match(sent, recorded, ids)
+      if (problem || typeof recorded.method !== 'string') return problem
+      // A request is also the same by what it asks for (the launch policy, the text, the model), not by its method alone
+      if (!isDeepStrictEqual(withoutOwnId(sent.params ?? null), withoutOwnId(recorded.params ?? null))) {
+        return `the adapter sent ${recorded.method} with ${JSON.stringify(sent.params)} where the recording sends ${JSON.stringify(recorded.params)}`
+      }
+      const mine = ownId(sent.params)
+      const theirs = ownId(recorded.params)
+      if (mine && theirs) ids.set(theirs, mine)
+      else if (mine || theirs) return `the adapter sent ${recorded.method} ${mine ? 'with' : 'without'} an input id where the recording ${mine ? 'has none' : 'has one'}`
+      return null
+    },
+    rewrite(incoming, ids) {
+      const swap = (v: unknown): unknown => {
+        if (typeof v === 'string') return ids.get(v) ?? v
+        if (Array.isArray(v)) return v.map(swap)
+        if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, swap(x)]))
+        return v
+      }
+      return inFolder(swap(jsonRpcCodec.rewrite(incoming, ids)), cwd) as Record<string, unknown>
+    },
+  }
+}
 
 const record = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
 

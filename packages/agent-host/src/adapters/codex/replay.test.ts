@@ -95,13 +95,15 @@ describe(`what the adapter makes of the app-server’s real turns (${recordedVer
   it('interrupt-approval: a Stop while a command waits for the person ends the card and the turn', async () => {
     const { events } = await run('interrupt-approval')
     expect(of(events, 'approval_request')).toHaveLength(1)
+    expect(of(events, 'approval_resolved').map((e) => e.decision)).toEqual(['deny'])
     expect(of(events, 'error')).toEqual([])
     expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
   })
 
-  it('queued: a message sent while a turn runs is answered after it, and both turns end', async () => {
+  it('queued: a message sent while a turn runs joins that turn (the app-server steers it in), and both are answered by the one turn that ends', async () => {
     const { events } = await run('queued')
-    expect(ended(events)).toBeGreaterThanOrEqual(1)
+    expect(ended(events)).toBe(1)
+    expect(said(events)).toMatch(/\b(?:four|4)\b/i)
     expect(of(events, 'error')).toEqual([])
   })
 

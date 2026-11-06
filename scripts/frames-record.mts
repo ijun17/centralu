@@ -12,7 +12,7 @@
  * them by hand. It never starts a host, and its data folder (`CC_DATA_DIR`, where Windows keeps the Claude program's
  * link) is a temporary one. `--raw`: keep the unscrubbed frames in that folder (they hold paths and ids: not to commit).
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,9 +50,18 @@ async function main(): Promise<number> {
   const chosen = scenariosFor(tool).filter((s) => names.length === 0 || names.includes(s.name))
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
-  const codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
+  let codexHome: { finish(): void } | null = null
   let failed = 0
+  // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
+  const stop = () => {
+    codexHome?.finish()
+    rmSync(data, { recursive: true, force: true })
+    process.exit(130)
+  }
+  process.once('SIGINT', stop)
+  process.once('SIGTERM', stop)
   try {
+    codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
     for (const scenario of chosen) {
       // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
@@ -104,7 +113,9 @@ function sessionFor(tool: string, spawn: (spec: AgentSpawnSpec) => AgentProcess)
 /**
  * A Codex settings folder of its own for the run (`CODEX_HOME`), so no setting, skill, hook or thread of the person's is read or
  * written. It holds a copy of the sign-in alone. Codex rotates the refresh token when it refreshes one, which would leave the
- * person's own file with a token it no longer accepts: if the copy changed, `finish` puts it back into the person's file.
+ * person's own file with a token it no longer accepts: if the copy changed, `finish` puts it back into the person's file, unless
+ * that file changed meanwhile (another Codex refreshed it: its token is the newer one and stays). The put-back is a rename, so
+ * the file is never half written.
  */
 function temporaryCodexHome(parent: string): { finish(): void } {
   const real = join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'auth.json')
@@ -115,12 +126,18 @@ function temporaryCodexHome(parent: string): { finish(): void } {
   copyFileSync(real, copy)
   const before = readFileSync(copy, 'utf8')
   process.env.CODEX_HOME = home
+  let done = false
   return {
     finish() {
-      if (readFileSync(copy, 'utf8') !== before) {
-        writeFileSync(real, readFileSync(copy), { mode: 0o600 })
-        console.log('[record] the sign-in was refreshed during the run: kept in the person\'s auth file')
-      }
+      if (done) return
+      done = true
+      const now = readFileSync(copy, 'utf8')
+      if (now === before) return
+      if (readFileSync(real, 'utf8') !== before) return console.error('[record] the sign-in was refreshed during the run, and the person\'s own file was too: left as it is')
+      const next = `${real}.${process.pid}.tmp`
+      writeFileSync(next, now, { mode: 0o600 })
+      renameSync(next, real)
+      console.log('[record] the sign-in was refreshed during the run: kept in the person\'s auth file')
     },
   }
 }
