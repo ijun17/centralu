@@ -2260,6 +2260,13 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    and `ask_project` to a second project, refused while the project is untrusted and answered once trusted and once the other project has a
    session. `codex/centralu.test.ts` plays the host's part at the point of the recording where it acted. Codex's own automatic
    compaction did not run in a recording even at 233k of 258k tokens, so only Centralu's compaction is recorded.
+   Claude Code's are recorded the same way (`frames-record-host.mts claude`; `claude/centralu-scenarios.test-helpers.ts`: start_agent,
+   agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
+   sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
+   does not compare the host's answers to the CLI's `mcp_message` calls (`streamJsonCodec`'s `hostAnswers`). A Claude scenario's own
+   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled
+   --thinking-display summarized`, since the adapter never asks for the text and the CLI sends it empty otherwise; `'tasks'`: `--tools TaskCreate,...`,
+   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
 4. Write down the vendor surface you depend on, and give it a drift check (see §3.1) —
    hand-won protocol knowledge rots silently otherwise. Fill in the contract's `surface`
    (`adapters/contract/surface.ts`, #270) too: how to read what the tool offers without a turn,

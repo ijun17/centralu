@@ -217,10 +217,10 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       // The ids of a host's mailbox: the hub's (one per host) and a message's (a ULID)
       .replace(/\bhub-[0-9a-f]{8}\b/g, 'hub-00000001')
       .replace(/\bm_[0-9A-Z]{26}\b/g, (m) => `m_${numbered('mail', m).padStart(26, '0')}`)
-  // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server and its apps' are not
+  // A tool of the person's connectors is `mcp__<server>__<tool>`: both names are theirs; Centralu's own server, its apps' and the recorder's probe server are not
   const mcpNames = (s: string): string =>
     s.replace(/\bmcp__(.+?)__(\w+)/g, (all, server: string, tool: string) =>
-      server === 'centralu' || server.startsWith('app-') || /^server-\d+$/.test(server) ? all : `mcp__${stable('server', server)}__${stable('tool', `${server}__${tool}`)}`,
+      server === 'centralu' || server === 'probe' || server.startsWith('app-') || /^server-\d+$/.test(server) ? all : `mcp__${stable('server', server)}__${stable('tool', `${server}__${tool}`)}`,
     )
   // Of the commands, skills and agents only what ships with the CLI stays: the rest is the person's, and keeps its number
   const builtinCommands = new Set<string>()
@@ -259,7 +259,7 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
     if (Array.isArray(v)) {
       // Size, not secrecy: the picture of the window as a grid, and the connectors' tools, are the bulk of a context reading and of the init lists
       if (key === 'gridRows' || key === 'mcpTools') return []
-      if (key === 'tools') return v.filter((t) => typeof t !== 'string' || !t.startsWith('mcp__') || t.startsWith('mcp__centralu__') || t.startsWith('mcp__app-')).map((t) => walk(t))
+      if (key === 'tools') return v.filter((t) => typeof t !== 'string' || !t.startsWith('mcp__') || t.startsWith('mcp__centralu__') || t.startsWith('mcp__probe__') || t.startsWith('mcp__app-')).map((t) => walk(t))
       if (key === 'models') return v.slice(0, 3).map((m) => walk(m))
       if (key === 'commands' || key === 'agents' || key === 'skillFrontmatter') return v.map((item) => ownSetup(key, item, command, agent, walk))
       // Codex's `skills/list`: those of the CLI stay (scope `system`); the person's own (`user`, `repo`: from their home folder, a plugin, the project) keep a number and nothing else
