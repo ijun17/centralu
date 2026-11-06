@@ -75,8 +75,10 @@ describe('a session another machine starts, at the depth it gives (#1038)', () =
  * preset the hub gave, `normal` at most. The window's own start is not touched.
  */
 describe('a session a linked computer starts, under the preset it carries (#1273)', () => {
-  const create = async (more: Record<string, unknown>) => {
+  // A trusted project unless said otherwise: an untrusted one stays `normal` at most (owner decision 2026-11-05)
+  const create = async (more: Record<string, unknown>, trusted = true) => {
     const project = (await rpc('projects.add', { path: repo(`app-${Math.random().toString(36).slice(2)}`, null) })) as { id: string; path: string }
+    if (trusted) await rpc('projects.setTrusted', { projectId: project.id, trusted: true })
     return (await rpc('agents.createSession', { projectId: project.id, cwd: project.path, tool: 'claude', agentDepth: 1, ...more })) as { id: string; permissionPreset: string; startedFromHub?: boolean }
   }
 
@@ -85,6 +87,11 @@ describe('a session a linked computer starts, under the preset it carries (#1273
     const child = await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } })
     expect(child).toMatchObject({ permissionPreset: 'auto', startedFromHub: true })
     expect(store.settings.appSetting(`started_from_hub:${child.id}`)).toBe('true')
+  })
+
+  it("runs an auto caller's child under normal in an untrusted project, the switch on", async () => {
+    expect(await rpc('host.hubAuto', {})).toEqual({ allowed: true })
+    expect(await create({ permissionPreset: 'normal', fromHub: { callerPreset: 'auto' } }, false)).toMatchObject({ permissionPreset: 'normal', startedFromHub: true })
   })
 
   it('runs it under normal once the person turns the switch off, and says so to the hub', async () => {

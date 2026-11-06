@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import type { AgentSpawnSpec } from '../contract.js'
-import { agyHome, browserFolder, windowsBrowserCommand } from './agent-files.js'
+import { agyHome, browserFolder, notOwnFolder, spareFolder, windowsBrowserCommand, type FolderFact } from './agent-files.js'
 import { InstallFailure } from './failure.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
 import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
-import { driven, fakeInstall, fakeSignIn, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, leftovers, runBrowser, sessionOpts, tempData, TEST_ARCHIVE } from './agent-files.test-helpers.js'
+import { chmodPath, driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, isAbsolutePath, leftovers, linkTo, pathIn, relativeTo, runBrowser, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
 
 /**
  * The agent's browser (review of #1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
@@ -266,46 +266,171 @@ describe('a stored sign-in that stopped working, in a session', () => {
 })
 
 /**
- * Where no helper can be written (a data folder holding `;` on Windows), the agent's launcher would start the browser itself,
- * inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started
+ * A path holding the separator the agent's launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in
+ * it (#1688). A data folder with one has the helper made in the person's own folder instead (`spareFolder`); only where
+ * that cannot be either (or, on Windows, Node's own path has one) is there no helper, and then the agent's launcher would
+ * start the browser itself, inside the host's job on Windows, and a sign-in that stopped working would hang the start again: refused, not started,
+ * naming the path and the character, and not offered as worth retrying
  */
-describe('no BROWSER helper', () => {
-  function noHelper() {
+describe('a path BROWSER cannot carry', () => {
+  function badData(name: string, archive = AGY_RELEASE.archives['windows-x86_64']) {
     const t = temp()
-    const dataDir = `${t.dir}/data;x`
+    const dataDir = pathIn(t.dir, name)
+    // Made by `browserFolder` itself (0700), as the real one is
+    const spare = pathIn(t.dir, 'spare')
     const home = agyHome(dataDir, AGY_RELEASE.version)
-    const archive = AGY_RELEASE.archives['windows-x86_64']
     fakeInstall(home, archive)
     fakeSignIn(home)
     const spawned: AgentSpawnSpec[] = []
+    // An agent that starts a session, should one be started
+    const script: PeerScript = async (method) => (method === 'initialize' ? { result: INIT } : method === 'session/new' ? { result: { sessionId: SID } } : { result: null })
     const spawn = (spec: AgentSpawnSpec) => {
       spawned.push(spec)
-      return new FakeAcpPeer(() => ({ hold: true }))
+      return new FakeAcpPeer(script)
     }
-    return { dataDir, home, archive, spawned, spawn }
+    return { dataDir, spare, home, archive, spawned, spawn }
   }
 
-  it('a session is refused before the agent starts, and leaves no folder', async () => {
-    const n = noHelper()
-    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64' }), n.spawn)
-    const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
-      () => null,
-      (e: unknown) => e,
-    )
-    expect(String((err as Error).message)).toMatch(/cannot start here/)
-    expect(n.spawned).toEqual([])
+  it("a data folder holding ; on Windows has the helper in the person's own folder, which works and is removed after", async () => {
+    const n = badData('data;x')
+    const folder = await browserFolder(n.home, 'win32', { spare: n.spare })
+    expect(folder.why).toBe('')
+    expect(folder.browser).not.toContain(';')
+    expect(folder.browser).toContain(pathIn(n.spare, '.sign-in-'))
+    const got = handedOver(folder)
+    expect(await runBrowser(folder.browser, ADDRESS)).toBe(0)
+    expect(await got).toBe(ADDRESS)
+    await folder.remove()
+    expect(inFolder(n.spare)).toEqual([])
     expect(leftovers(n.home, '.sign-in-')).toEqual([])
   })
 
-  it('a sign-in is refused before the agent starts, and opens nothing', async () => {
-    const n = noHelper()
+  it("a data folder holding %s has the helper in the person's own folder, on this OS too", async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    const folder = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: n.spare })
+    expect(folder.browser).not.toContain('data%sx')
+    expect(folder.browser).toContain(pathIn(n.spare, '.sign-in-'))
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+    await folder.remove()
+    expect(inFolder(n.spare)).toEqual([])
+  })
+
+  it('a folder to fall back on that cannot be written leaves no helper, and says so in plain words', async () => {
+    const n = badData('data;x')
+    folder(n.spare)
+    write(pathIn(n.spare, 'a-file'), '')
+    const spare = pathIn(n.spare, 'a-file', 'below')
+    const none = await browserFolder(n.home, 'win32', { spare })
+    expect(none.browser).toBe('')
+    expect(none.why).toContain(n.home.root)
+    expect(none.why).toContain(spare)
+    expect(none.why).toMatch(/could not be written to/)
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+  })
+
+  it('a relative data folder still gives an absolute helper path (the agent runs in the session folder)', async () => {
+    const t = temp()
+    const home = agyHome(relativeTo(t.dir), AGY_RELEASE.version)
+    const folder = await browserFolder(home, 'win32')
+    expect(isAbsolutePath(folder.browser.split("' '")[1] ?? '')).toBe(true)
+    await folder.remove()
+  })
+
+  it('the folder to fall back on is refused where another user could change it or a folder above it, a link, or not a folder', () => {
+    const me = 501
+    const own = (path: string, mode = 0o40700): FolderFact => ({ path, link: false, dir: true, uid: me, mode })
+    const above = [own('/home/o/.cache', 0o40755), own('/home/o', 0o40750), { ...own('/home', 0o40755), uid: 0 }, { ...own('/', 0o40755), uid: 0 }]
+    const spare = own('/home/o/.cache/centralu-antigravity')
+    expect(notOwnFolder({ folder: spare, above }, me)).toBe('')
+    expect(notOwnFolder({ folder: { ...spare, mode: 0o40770 }, above }, me)).toBe('can be changed by other users')
+    expect(notOwnFolder({ folder: { ...spare, mode: 0o40707 }, above }, me)).toBe('can be changed by other users')
+    expect(notOwnFolder({ folder: { ...spare, link: true, dir: false }, above }, me)).toBe('is a link')
+    expect(notOwnFolder({ folder: { ...spare, dir: false }, above }, me)).toBe('is not a folder')
+    expect(notOwnFolder({ folder: { ...spare, uid: 502 }, above }, me)).toBe('belongs to another user')
+    // A ~/.cache that leads into /tmp: the sticky /tmp is fine, a folder there another user made is not
+    const viaTmp = [own('/tmp/c'), { ...own('/tmp', 0o41777), uid: 0 }, { ...own('/', 0o40755), uid: 0 }]
+    expect(notOwnFolder({ folder: spare, above: viaTmp }, me)).toBe('')
+    expect(notOwnFolder({ folder: spare, above: [{ ...own('/tmp/c'), uid: 502 }, ...viaTmp.slice(1)] }, me)).toBe('is inside /tmp/c, which other users can change')
+    expect(notOwnFolder({ folder: spare, above: [own('/home/o/.cache', 0o40775), ...above.slice(1)] }, me)).toBe('is inside /home/o/.cache, which other users can change')
+  })
+
+  it.skipIf(process.platform === 'win32')('on macOS and Linux, a fallback folder other users can change, or one that is a link, is refused for real', async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    folder(n.spare)
+    chmodPath(n.spare, 0o775)
+    const shared = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: n.spare })
+    expect(shared.browser).toBe('')
+    expect(shared.why).toContain(`${n.spare}, the folder Centralu tries instead, can be changed by other users`)
+    const real = pathIn(n.spare, 'real')
+    folder(real)
+    chmodPath(real, 0o700)
+    const link = pathIn(n.spare, 'link')
+    linkTo(real, link)
+    const linked = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: link })
+    expect(linked.browser).toBe('')
+    expect(linked.why).toContain('is a link')
+    expect(inFolder(real)).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32')('on macOS and Linux, a fallback folder below a link (a ~/.cache elsewhere) is used where it leads to the person\'s own', async () => {
+    const n = badData('data%sx', HOST_TEST_ARCHIVE)
+    const cache = pathIn(n.spare, 'cache-elsewhere')
+    folder(cache)
+    chmodPath(cache, 0o700)
+    const dotCache = pathIn(n.spare, 'dot-cache')
+    linkTo(cache, dotCache)
+    const folderIn = await browserFolder(n.home, HOST_TEST_PLATFORM, { spare: pathIn(dotCache, 'centralu-antigravity') })
+    expect(folderIn.why).toBe('')
+    expect(folderIn.browser).toContain(pathIn(dotCache, 'centralu-antigravity', '.sign-in-'))
+    await folderIn.remove()
+  })
+
+  it("the folder to fall back on is the person's own on each OS, from the home folder alone, never a temporary one", () => {
+    expect(spareFolder('win32', String.raw`C:\Users\o`)).toBe(String.raw`C:\Users\o\AppData\Local\centralu-antigravity`)
+    expect(spareFolder('darwin', '/Users/o')).toBe('/Users/o/Library/Caches/centralu-antigravity')
+    expect(spareFolder('linux', '/home/o')).toBe('/home/o/.cache/centralu-antigravity')
+  })
+
+  it("a session in a data folder holding ; starts, with the helper in the person's own folder", async () => {
+    const n = badData('data;x')
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { spare: n.spare } }), n.spawn)
+    const handle = await adapter.createSession(sessionOpts('agy-spare'), driven().emit)
+    expect(n.spawned).toHaveLength(1)
+    expect(n.spawned[0]?.env?.BROWSER).toContain(pathIn(n.spare, '.sign-in-'))
+    await handle.dispose()
+  })
+
+  it('a session is refused, not worth retrying, before the agent starts, naming the path and the character', async () => {
+    const n = badData('data')
+    const node = String.raw`C:\tools;old\node.exe`
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: n.dataDir, platform: 'win32', arch: 'x64', helperPlaces: { node, spare: n.spare } }), n.spawn)
+    const err = await adapter.createSession(sessionOpts('agy-nh'), driven().emit).then(
+      () => null,
+      (e: unknown) => e as Error & { code?: string; retryable?: boolean },
+    )
+    expect(err?.code).toBe('refused')
+    expect(err?.retryable).toBe(false)
+    expect(err?.message).toContain(node)
+    expect(err?.message).toContain('";"')
+    expect(n.spawned).toEqual([])
+    expect(leftovers(n.home, '.sign-in-')).toEqual([])
+    expect(inFolder(n.spare)).toEqual([])
+  })
+
+  it('a sign-in is refused before the agent starts, names both folders when neither can carry it, and opens nothing', async () => {
+    const n = badData('data;x')
+    const spare = pathIn(n.spare, 'tmp%sx')
     const opened: string[] = []
-    const err = await runSignIn(n.home, n.archive, new AbortController().signal, { platform: 'win32', openUrl: (u) => opened.push(u), spawn: n.spawn }).then(
+    const err = await runSignIn(n.home, n.archive, new AbortController().signal, { platform: 'win32', helperPlaces: { spare }, openUrl: (u) => opened.push(u), spawn: n.spawn }).then(
       () => null,
       (e: unknown) => e,
     )
     expect(err).toBeInstanceOf(InstallFailure)
-    expect((err as InstallFailure).message).toMatch(/cannot sign in here/)
+    const message = (err as InstallFailure).message
+    expect(message).toContain(n.home.root)
+    expect(message).toContain(spare)
+    expect(message).toContain('";"')
+    expect(message).toContain('"%s"')
     expect(n.spawned).toEqual([])
     expect(opened).toEqual([])
     expect(leftovers(n.home, '.sign-in-')).toEqual([])

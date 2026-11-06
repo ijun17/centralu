@@ -4,7 +4,7 @@ import type { AppLifecycle } from './app-lifecycle.js'
 import type { AppEntry, Blocker, OpenRun } from './app-entry.js'
 import type { AppProcess } from './app-process.js'
 import { RUN_META } from './broker.js'
-import type { CapabilityDenial, CapabilityOrigin } from './desk.js'
+import type { AgentCaller, CapabilityDenial, CapabilityOrigin } from './desk.js'
 import type { HeldErrorBundle } from './errors.js'
 import { NOTICE_META } from './notices.js'
 import type { AppRef } from './ref.js'
@@ -89,6 +89,30 @@ export class AppCalls {
    * an app. For a screen, the answer is that screen's app (the question is attributed to its fixed
    * screen). If a parent along the way has already ended, this cannot be followed — returns null.
    */
+  /**
+   * Where every call open into this app now starts, for what its agent may run under (owner decision 2026-11-05,
+   * `DeskApps.agentCallers`): a session's own call, or an inline view's (rooted at its conversation); a screen the person
+   * opened in the window; and for a call another app made, that app's own callers, all of them, so an app reached
+   * through `call_app` is held as its caller is. A parent that already ended is `unknown`
+   */
+  agentCallers(ref: AppRef, seen = new Set<string>()): AgentCaller[] {
+    const key = `${ref.projectId ?? ''}/${ref.appId}`
+    if (seen.has(key)) return []
+    seen.add(key)
+    const out: AgentCaller[] = []
+    for (const run of this.openRuns.values()) {
+      if (run.entry.ref.appId !== ref.appId || run.entry.ref.projectId !== ref.projectId) continue
+      const c = run.caller
+      if (c.kind === 'session') out.push({ kind: 'session', sessionId: c.sessionId })
+      else if (c.kind === 'view') out.push(c.sessionId ? { kind: 'session', sessionId: c.sessionId } : { kind: 'person' })
+      else {
+        const parent = this.openRuns.get(c.parentRunId)
+        out.push(...(parent ? this.agentCallers(parent.entry.ref, seen) : [{ kind: 'unknown' as const }]))
+      }
+    }
+    return out
+  }
+
   chainOrigin(runId: string): CapabilityOrigin | null {
     let run = this.openRuns.get(runId)
     for (let hops = 0; run && run.caller.kind === 'app' && hops < 32; hops++) run = this.openRuns.get(run.caller.parentRunId)
