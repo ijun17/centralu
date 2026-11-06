@@ -33,7 +33,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   vi.restoreAllMocks()
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -418,9 +418,9 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: false })
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
 
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
     const next = host(new Set([child]))
-    await next.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(parent)
     next.claude.handles.get(child)!.answer('finished under the next host')
     await eventually(() => reports(next.claude.handles.get(parent), child).length === 1)
@@ -432,10 +432,10 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     const heir = await handOff(h, project, parent)
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
 
     const next = host(new Set([child]))
-    await next.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
     expect(await next.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
     next.claude.handles.get(child)!.answer('finished under the next host')
@@ -592,7 +592,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const { project, parent } = await parentOf(h)
     const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent)
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
 
     const next = host()
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
@@ -605,7 +605,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent, false)
     const own = await startChild(h, heir, 'its own work')
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
 
     // The record of what moved is memory only; the successor's marker and the child's owner are stored
     const next = host()
@@ -625,7 +625,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = await settledChild(h, second)
     const third = await handOff(h, project, second, false)
     expect(owner(child)).toBe(third)
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
 
     const next = host()
     // second owned it when the handoff moved it, so second is told where it went; first never owned it

@@ -205,7 +205,7 @@ describe('what a session is to the delivery', () => {
     const worker = await create()
     const h = handleOf(worker.id)
     const before = h.sent.length
-    await w.mgr.detachAll()
+    await w.mgr.tenure.detachAll()
     const input = { text: 'mail', quiet: false, line: '✉ 1 message' }
     await expect(w.mgr.mail.mailSessions().deliver(worker.id, input)).rejects.toThrow()
     await expect(w.mgr.mail.mailSessions().deliver(worker.id, { ...input, quiet: true })).rejects.toThrow()

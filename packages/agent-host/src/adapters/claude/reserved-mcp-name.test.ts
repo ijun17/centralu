@@ -63,7 +63,7 @@ beforeEach(() => {
 
 // The sessions end before their data folder goes, so none writes into it as it is removed
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   await removeTree(dataDir)
 })

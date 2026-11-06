@@ -107,7 +107,7 @@ beforeEach(() => {
   mgr.prLookup = async () => null
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })

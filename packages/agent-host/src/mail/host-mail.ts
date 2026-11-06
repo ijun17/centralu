@@ -37,7 +37,7 @@ export type HostMailSessions = {
   mailSessions(): MailSessions
   /** The sessions whose running work `id` waits on (`SessionProcesses.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
   waitsOn?(id: string): string[]
-  /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`SessionManager.quitTold`) */
+  /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`HostTenure.quitTold`) */
   quitTold?(id: string): { told: string[]; held: string[] }
   /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`MailSessionsView.stoppedWords`) */
   stoppedWords?(id: string): string | null
@@ -49,7 +49,7 @@ export type HostMailSessions = {
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'keptInTurn' | 'quitTold' | 'mail' | 'processes'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'tenure' | 'mail' | 'processes'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mail.mailSeats(orchestratorHasMailCommand)
@@ -60,11 +60,11 @@ export function mailSessionsOf(
     orchestratorId: () => mgr.orchestratorId(),
     orchestratorAsks: () => mgr.mail.orchestratorAsks(),
     mailCommand: (id) => seats.mailCommand(id),
-    keptInTurn: (id) => mgr.keptInTurn(id),
+    keptInTurn: (id) => mgr.tenure.keptInTurn(id),
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
     waitsOn: (id) => mgr.processes.waitsOn(id),
-    quitTold: (id) => mgr.quitTold(id),
+    quitTold: (id) => mgr.tenure.quitTold(id),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),

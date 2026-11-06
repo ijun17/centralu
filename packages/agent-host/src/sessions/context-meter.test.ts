@@ -186,7 +186,7 @@ describe('on the session manager (#1492)', () => {
   })
   afterEach(async () => {
     vi.useRealTimers()
-    await world.mgr.disposeAll()
+    await world.mgr.tenure.disposeAll()
     world.store.close()
   })
 

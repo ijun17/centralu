@@ -3309,7 +3309,7 @@ is the report, written as told. At each ready a report mark with no task gets on
 **Turns** (§8.2). The delivery begins a turn with its work message (a task, or for the orchestrator one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and
 A turn the person or the CLI started has no cause. A turn continued after a restart or an update (kept by the keeper,
-or cut by an update's stop and continued, `SessionManager.keptInTurn`) writes no new row: its open row is read back with its starter, work and
+or cut by an update's stop and continued, `HostTenure.keptInTurn`) writes no new row: its open row is read back with its starter, work and
 asker, so neither count below counts it again. Nothing holds or defers mail for how much of it there is (#2014): past 20 mail-started turns an
 hour between two sessions, counted from the store since the person's last word to either, or past 120 on the host, the delivery writes the
 person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An orchestrator made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
@@ -3822,7 +3822,7 @@ the person's Continue would.
 
 - **Which.** One definition, recorded by the host that stops, at the moment it stops: the sessions in a turn as it lets
   its sessions go (`cutTurns` in idle.ts: working, or waiting on an approval or a question, `turnCut`), read in the same
-  step as their processes end and after it took its last call (`SessionManager.disposeAll`). So a turn that began after
+  step as their processes end and after it took its last call (`HostTenure.disposeAll`). So a turn that began after
   the hub read what runs is listed too, and a person's Stop the host took before it stopped leaves its session out.
   Background work alone is not a turn and is not continued, but it is told (below, "What else the stop ended").
 - **Told it is an update.** Every stop of the hub's after which a host starts again in that folder (the update's, the
@@ -3922,7 +3922,7 @@ the person's Continue would.
   told it stopped.
 - **A swap's cut is continued the same way** (#1966). A turn a host swap cut that its tool cannot take over (a kept process that could
   not be re-attached; ACP, which reopens the conversation in a new process and so marks `takesOverTurn = false`) gets the same Continue
-  through the same door (`SessionManager.sendUpdateNote`, `continueLostTurn` from `adoptKept`), the state kept `working` while the new
+  through the same door (`HostTenure.sendUpdateNote`, `continueLostTurn` from `adoptKept`), the state kept `working` while the new
   process comes up (`continuingTurns`). Only when that send fails does it end as above. A turn cut by the person's own quit (`markQuit`,
   no list, no swap) is not continued, as before (#1947). A kept process that could not be re-attached is stopped first and waited for (up to 5 s, then killed)
   before its conversation is resumed, so two CLIs do not write one transcript.

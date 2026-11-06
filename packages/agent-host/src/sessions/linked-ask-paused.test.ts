@@ -65,7 +65,7 @@ async function hub(o: { tasks?: boolean } = {}) {
     backgroundTasks: async () => (o.tasks === false ? null : []),
   } as unknown as LinkedSessions
   mgr.useLinkedReader(reader)
-  cleanup.push(() => void mgr.disposeAll())
+  cleanup.push(() => void mgr.tenure.disposeAll())
 
   const event = (e: Record<string, unknown>) => mgr.linkedHost.observeLinked({ sessionId: 'm1.w1', ...e } as never)
   const tasks = (live: BackgroundTask[], ended?: BackgroundTask[]) => event({ type: 'background_tasks', live, ...(ended ? { ended } : {}) })

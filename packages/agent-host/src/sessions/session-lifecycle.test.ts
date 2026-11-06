@@ -273,7 +273,7 @@ describe('A reply cut by replacing the process stays one row (#213)', () => {
   it.each([
     ['a restart', (id: string) => rpc('agents.restartSession', { sessionId: id })],
     ['a tool switch', (id: string) => rpc('agents.switchTool', { sessionId: id, tool: 'codex' })],
-    ['shutting down', () => mgr.disposeAll()],
+    ['shutting down', () => mgr.tenure.disposeAll()],
   ])("the dying process's last delta during %s grows the open row", async (_, replace) => {
     const id = await newSession()
     const old = claude.last
@@ -300,7 +300,7 @@ describe('A reply cut by replacing the process stays one row (#213)', () => {
     old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'I will com' })
     old.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'mit' }) // held in memory, under the flush bar
 
-    const closing = mgr.disposeAll()
+    const closing = mgr.tenure.disposeAll()
     // The supervisor may kill the host here, while the processes are still going down
     expect(replies(id)).toEqual(['I will commit'])
     await closing
@@ -333,7 +333,7 @@ describe('A reply cut by replacing the process stays one row (#213)', () => {
 describe('a setting changed while waking or restarting still reaches the process (#162)', () => {
   it('leaves a process that ends up running with safe if it is switched to safe while an asleep auto session is waking', async () => {
     const id = await newSession('auto')
-    await mgr.disposeAll() // an asleep session (the same state as a host restart)
+    await mgr.tenure.disposeAll() // an asleep session (the same state as a host restart)
     claude.hold()
     const asked = claude.asked.length
     const waking = rpc('agents.resumeSession', { sessionId: id })
@@ -455,7 +455,7 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 describe('deleting or switching tools while a session is waking up (#163)', () => {
   async function sleeping() {
     const id = await newSession()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     return id
   }
   const listed = () => store.sessions.listSessions().map((x) => x.id)
@@ -665,7 +665,7 @@ describe('when a tool\'s list is full, being absent from the list does not mean 
 
   it('wakes a conversation even 250 newer conversations behind it', async () => {
     const id = await newSession()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     listing.rows = newer(250)
 
     const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
@@ -675,7 +675,7 @@ describe('when a tool\'s list is full, being absent from the list does not mean 
 
   it('when the list really is complete, still says "no record," as before', async () => {
     const id = await newSession()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     listing.rows = newer(3)
 
     const r = (await rpc('agents.resumeSession', { sessionId: id })) as { resumed: boolean; reason?: string }
@@ -685,7 +685,7 @@ describe('when a tool\'s list is full, being absent from the list does not mean 
 
   it('when resuming fails for a different reason, returns the real error even with a full list', async () => {
     const id = await newSession()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     listing.rows = newer(250)
     listing.failWith = 'API Error: 529 overloaded'
 
@@ -706,7 +706,7 @@ describe('shutting down gives closed processes a moment to leave (#353)', () => 
       await new Promise((r) => setTimeout(r, 10))
       settled = true
     }
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     expect(order).toEqual(['disposed', 'settle'])
     expect(settled).toBe(true)
   })

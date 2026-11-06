@@ -133,12 +133,12 @@ describe('a host restart under the keeper', () => {
     store.settings.setAppSetting(key, oldFingerprint)
     a.claude.last.pendingOutputOnDetach = working
     a.claude.last.emit({ type: 'state_change', sessionId: session.id, state: working ? 'working' : 'idle' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([session.id]))
     try {
       const kept = new FakeProcess() as unknown as AgentProcess
-      await b.mgr.adoptKept([{ sessionId: session.id, tool: 'claude', process: kept }])
+      await b.mgr.tenure.adoptKept([{ sessionId: session.id, tool: 'claude', process: kept }])
       const adopted = b.claude.last
       expect(adopted.opts.processSource?.adopt?.process).toBe(kept)
       expect(b.mgr.listSessions().find((s) => s.id === session.id)?.state).toBe(working ? 'working' : 'idle')
@@ -168,7 +168,7 @@ describe('a host restart under the keeper', () => {
       expect(b.claude.last).toBe(live)
       expect(restart).toHaveBeenCalledTimes(!current && preset !== 'safe' ? 1 : 0)
     } finally {
-      await b.mgr.disposeAll()
+      await b.mgr.tenure.disposeAll()
     }
   })
 
@@ -183,11 +183,11 @@ describe('a host restart under the keeper', () => {
     expect(a.claude.last.opts.autoCompactTokens).toBe(120_000)
     // The person raises the share while it runs, and the host is swapped
     await a.rpc('prefs.set', { patch: { autoCompact: { share: 0.8 } } })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([second.id]))
     try {
-      await b.mgr.adoptKept([{ sessionId: second.id, tool: 'claude', process: new FakeProcess() }])
+      await b.mgr.tenure.adoptKept([{ sessionId: second.id, tool: 'claude', process: new FakeProcess() }])
       // The process still has what it was started with; it reports the cap, which says only "at least"
       b.claude.last.emit({ type: 'context_update', sessionId: second.id, used: 1, window: 153_000, exactness: 'exact', model: 'claude-haiku-4-5' })
       const third = await b.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
@@ -197,7 +197,7 @@ describe('a host restart under the keeper', () => {
       // The adopted process is handed the window it was started with, for the adapter to compare where it compacts against
       expect(b.claude.created.find((h) => h.opts.sessionId === second.id)?.opts.autoCompactCeiling).toBe(153_000)
     } finally {
-      await b.mgr.disposeAll()
+      await b.mgr.tenure.disposeAll()
     }
   })
 
@@ -205,7 +205,7 @@ describe('a host restart under the keeper', () => {
     const a = host()
     const id = await workingSession(a)
     expect(a.claude.last.opts.processSource).toBeDefined()
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     expect(a.claude.last.detached).toBe(true)
     expect(a.claude.last.disposed).toBe(false)
     expect(store.sessions.listSessions().find((s) => s.id === id)!.state).toBe('working')
@@ -216,12 +216,12 @@ describe('a host restart under the keeper', () => {
   it('the next host re-attaches the kept process and the session stays live and working', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([id]))
     expect(b.mgr.listSessions().find((s) => s.id === id)!.state).toBe('working')
     const kept = new FakeProcess() as unknown as AgentProcess
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
     const handle = b.claude.last
     expect(handle.opts.processSource?.adopt?.process).toBe(kept)
     expect(handle.opts.resumeExternalId).toBe('ext-1')
@@ -241,14 +241,14 @@ describe('a host restart under the keeper', () => {
     // The person's task, as the script's first message wrote it under the old host
     const first = wireHostMail(a.mgr, store)
     const task = first.service.task(PERSON, addressOf(id), { text: 'a long job', origin: 'script', delivered: true })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([id]))
     wireHostMail(b.mgr, store)
     b.claude.createSession = async () => {
       throw new Error('the conversation is gone')
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
     const read = mailReader(store)
     const reports = read.reportsOn(task.id)
     expect(reports).toHaveLength(1)
@@ -266,14 +266,14 @@ describe('a host restart under the keeper', () => {
   it('a kept process that cannot be re-attached is continued like a turn an update cut, not marked stopped (#1966)', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([id]))
     const create = b.claude.createSession.bind(b.claude)
     b.claude.createSession = async (opts, emit) => {
       if (opts.processSource?.adopt) throw new Error('the process is gone')
       return create(opts, emit)
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
     expect(b.claude.last.sent).toHaveLength(1)
     expect(b.claude.last.sent[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
     const s = b.mgr.listSessions().find((x) => x.id === id)!
@@ -285,7 +285,7 @@ describe('a host restart under the keeper', () => {
   it('waits for the old process to exit before it resumes the conversation, then kills it after a bound (#1966 review)', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([id]))
     const old = new FakeProcess()
     const create = b.claude.createSession.bind(b.claude)
@@ -301,7 +301,7 @@ describe('a host restart under the keeper', () => {
       if (signal === 'SIGTERM') setTimeout(() => { old.exited = true; old.emit('exit', 0, null) }, 50)
       return true
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
     expect(resumedBeforeExit).toBe(false)
     expect(old.kills).toEqual(['SIGTERM'])
     expect(b.claude.last.sent).toHaveLength(1)
@@ -310,7 +310,7 @@ describe('a host restart under the keeper', () => {
   it('kills an old process that does not exit within the bound, and resumes', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([id]))
     const old = new FakeProcess()
     const create = b.claude.createSession.bind(b.claude)
@@ -318,7 +318,7 @@ describe('a host restart under the keeper', () => {
       if (opts.processSource?.adopt) throw new Error('the process is gone')
       return create(opts, emit)
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: old }])
     expect(old.kills).toEqual(['SIGTERM', 'SIGKILL'])
     expect(b.claude.last.sent).toHaveLength(1)
   })
@@ -326,7 +326,7 @@ describe('a host restart under the keeper', () => {
   it('a tool that reopens the conversation instead of taking the turn over is continued too (#1966)', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([id]))
     const create = b.claude.createSession.bind(b.claude)
     b.claude.createSession = async (opts, emit) => {
@@ -334,7 +334,7 @@ describe('a host restart under the keeper', () => {
       h.takesOverTurn = false
       return h
     }
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
     expect(b.claude.last.sent).toHaveLength(1)
     expect(b.claude.last.sent[0]).toContain('Continue where you stopped.')
     const s = b.mgr.listSessions().find((x) => x.id === id)!
@@ -346,7 +346,7 @@ describe('a host restart under the keeper', () => {
   it('a session with no kept process is still reset to idle at startup', async () => {
     const a = host()
     const id = await workingSession(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host()
     expect(b.mgr.listSessions().find((s) => s.id === id)!.state).toBe('idle')
   })
@@ -354,7 +354,7 @@ describe('a host restart under the keeper', () => {
   it('a kept process whose session is gone is stopped — nobody could address it', async () => {
     const b = host()
     const kept = new FakeProcess()
-    await b.mgr.adoptKept([{ sessionId: 'deleted', tool: 'claude', process: kept }])
+    await b.mgr.tenure.adoptKept([{ sessionId: 'deleted', tool: 'claude', process: kept }])
     expect(kept.kills).toEqual(['SIGTERM'])
     expect(b.claude.created).toHaveLength(0)
   })

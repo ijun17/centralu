@@ -43,7 +43,7 @@ beforeEach(() => {
   rpc = (method, params) => handler(method, params)
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -122,7 +122,7 @@ describe('projects.create', () => {
   it('is refused without a parent on a host that was given no default location — a test never writes in a real home', async () => {
     const bare = new SessionManager(store, new Map(), () => {})
     await expect(bare.projectCreation.createProject('x')).rejects.toThrow(/no default location/)
-    await bare.disposeAll()
+    await bare.tenure.disposeAll()
   })
 
   it('previews where the folder would go, and why it would be refused, without making anything', async () => {

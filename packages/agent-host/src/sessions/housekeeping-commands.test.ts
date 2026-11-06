@@ -43,7 +43,7 @@ beforeEach(async () => {
   await rpc('projects.setTrusted', { projectId: project.id, trusted: true })
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })

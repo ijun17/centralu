@@ -52,7 +52,7 @@ async function machineHost(o: { without?: readonly string[]; sessions?: readonly
   const close = async () => {
     if (closed) return
     closed = true
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   }
   cleanups.push(close)
@@ -107,7 +107,7 @@ async function hubHost(machinePort: number, o: { name?: string; reverse?: boolea
     if (stopped) return
     stopped = true
     await links.stop()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   }
   cleanups.push(stop)

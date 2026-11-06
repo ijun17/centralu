@@ -63,6 +63,6 @@ describe('notices kept for a session that could not be woken', () => {
     const forget = vi.spyOn((mgr as unknown as { reports: ChildReports }).reports, 'forgetHeld')
     await mgr.trash.trashSession(s.id)
     expect(forget).toHaveBeenCalledWith(s.id)
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
   })
 })

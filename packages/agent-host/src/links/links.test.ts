@@ -98,7 +98,7 @@ async function remoteHost(
     ...(o.elevated ? { elevated: o.elevated } : {}),
     ...(o.logon ? { logon: o.logon } : {}),
     ...(o.handover ? { handover: o.handover } : {}),
-    ...(o.before1618 ? {} : { updateContinued: () => mgr.updateContinued() }),
+    ...(o.before1618 ? {} : { updateContinued: () => mgr.tenure.updateContinued() }),
     ...(o.full ? { fullCredentials: o.full, credentialSweepMs: 20 } : {}),
   })
   await o.beforeListen?.(mgr)
@@ -107,7 +107,7 @@ async function remoteHost(
   const close = async () => {
     if (closed) return
     closed = true
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   }
   cleanups.push(close)
@@ -162,7 +162,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   links.start()
   cleanups.push(async () => {
     await links.stop()
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     await server.close()
   })
   return { server, mgr, links, store, port }
@@ -1596,7 +1596,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
         runs.push('stop')
         readsAtStop = reads
         stops.push(true)
-        running.mgr.stopForUpdate()
+        running.mgr.tenure.stopForUpdate()
         await running.close()
         line = { ...line, hostRunning: false }
       },
@@ -1893,7 +1893,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       hub.links.followHub()
       await eventually(() => ran().includes('prune'))
       // The host the update started continued it, once, on its own data folder's word
-      await eventually(() => remote().mgr.updateContinued().some((c) => c.sessionId === s.id))
+      await eventually(() => remote().mgr.tenure.updateContinued().some((c) => c.sessionId === s.id))
       expect(remote().mgr.listSessions().find((x) => x.id === s.id)?.state).not.toBe('idle')
     })
 
@@ -3245,7 +3245,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // Trashed there while the hub could not see it
     const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
     await there.trash.trashSession(a.sessionId.slice('m1.'.length))
-    await there.disposeAll()
+    await there.tenure.disposeAll()
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
     await eventually(async () => (await list()).length === 1)
@@ -3430,7 +3430,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const endsWhileDown = await begin('please approve the command')
     const endsAfter = await begin('please approve this one as well')
     await hub.links.stop()
-    await hub.mgr.disposeAll()
+    await hub.mgr.tenure.disposeAll()
     await hub.server.close()
     await allow(endsWhileDown)
     // Its turn ends there while no hub hears it
@@ -3537,7 +3537,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => status(hub) !== 'connected')
     const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
     await there.trash.trashSession(a.slice('m1.'.length))
-    await there.disposeAll()
+    await there.tenure.disposeAll()
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
     await eventually(() => ceiling() === null)
@@ -3607,7 +3607,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       // The host goes, listing the turns it ends (`host.stop { forUpdate }`); its sessions' rows stay as they stood
       stop: async () => {
         runs.push('stop for update')
-        running.mgr.stopForUpdate()
+        running.mgr.tenure.stopForUpdate()
         await running.close()
         line = { ...line, hostRunning: false }
       },

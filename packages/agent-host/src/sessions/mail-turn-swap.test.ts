@@ -27,7 +27,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-mail-turn-swap-')))
 })
 afterEach(async () => {
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -78,10 +78,10 @@ describe('a session the keeper handed over after a swap', () => {
     a.claude.handles.get(child)!.answer('first turn')
     // Mail written under the old host, still waiting when it leaves
     const waiting = a.m.service.send(PERSON, { to: [addressOf(child)], text: 'also run the linter' }).message
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // The process is one an earlier build started; the receive rule is the seat's, as for any other
     expect(b.mgr.mail.canReadMail(child)).toBe(true)
     const later = wireHostMail(b.mgr, store, { now: () => Date.now() + 10_000 })
@@ -104,10 +104,10 @@ describe('an owner the keeper handed over after a swap', () => {
     const { parent, child } = await parentAndChild(a)
     const [task] = read().tasks(addressOf(parent), child)
     expect(task).toBeDefined()
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([parent, child]))
-    await b.mgr.adoptKept([
+    await b.mgr.tenure.adoptKept([
       { sessionId: parent, tool: 'claude', process: new FakeProcess() },
       { sessionId: child, tool: 'claude', process: new FakeProcess() },
     ])
@@ -153,11 +153,11 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     expect(reports()[0]!.facts).toMatchObject({ outcome: 'waiting', waitingOn: 1 })
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
     expect(marksOf(a).get(child)).toBe(parent)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     // The next host: the child's process is kept, at rest, and what it handed on is still going
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(marksOf(b).get(child)).toBe(parent)
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
     // The helper is done; the session has a turn of its own, and ends it
@@ -190,9 +190,9 @@ describe('a parent that waits for what it handed on, across a swap', () => {
     // The helper's session was archived while the old host served: its task is gone
     a.m.service.partyGone(addressOf(helper))
     expect(read().taskRow(read().tasks(addressOf(child), helper)[0]!.id, helper)).toMatchObject({ settled: 'gone' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(marksOf(b).has(child)).toBe(false)
   })
 })
@@ -226,7 +226,7 @@ describe('a rollback to an earlier build, then forward', () => {
       store.mailbox.markDelivered(addressOf(helper), [note.message.id], Date.now(), null)
       expect(store.mailbox.recipient(note.message.id, addressOf(helper))).toMatchObject({ deliveredAt: expect.any(Number), readAt: null, settled: null })
     }
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     store.children.clearReportMark(helper)
     ;(store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
       .prepare('UPDATE mail_recipients SET settled = NULL, settled_at = NULL WHERE message_id = ?')
@@ -234,7 +234,7 @@ describe('a rollback to an earlier build, then forward', () => {
 
     // This build again: the step after ready settles the task no old path owes any more, so nothing counts the helper as going
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
     const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.mail.oldOwes(o, c) })
     expect(result.settled).toBe(1)
@@ -264,10 +264,10 @@ describe('the turn of a session the keeper kept', () => {
     expect(turnsOf(store, child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, messageId: task.id, starterId: task.id })])
     // A turn of a session that is not kept (its process went with the old host)
     store.mailbox.startTurn({ sessionId: 'gone-with-the-old-host', turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: 1 })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     // What the delivery does when it starts
     b.m.turns.closeStale()
     expect(turnsOf(store, child)).toEqual([expect.objectContaining({ startedBy: 'caller', endedAt: null, outcome: null, messageId: task.id })])
@@ -288,9 +288,9 @@ describe('the turn of a session the keeper kept', () => {
     a.claude.handles.get(child)!.answer('finished during the swap')
     // The old host did not see the end (a crash): the row is still open in the store
     store.mailbox.startTurn({ sessionId: child, turnSeq: 9, messageId: null, starterId: null, startedBy: 'caller', startedAt: 1 })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host(new Set([child]))
-    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     b.m.turns.closeStale()
     expect(turnsOf(store, child).find((t) => t.turnSeq === 9)).toMatchObject({ outcome: 'lost' })
   })
@@ -309,7 +309,7 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
     expect(a.claude.handles.get(helper)!.sent.some((t) => t.includes(question.id))).toBe(true)
     expect(due.turns.current(helper)).toMatchObject({ by: 'mail', starter: question.id })
     // The host is killed in the turn: no end is recorded, and no keeper keeps the process (not an update's stop either)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host()
     await deliverTo(b.m, addressOf(helper))
@@ -338,7 +338,7 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
     const due = wireHostMail(a.mgr, store, { now: () => Date.now() + 60_000 })
     await deliverTo(due, addressOf(child))
     expect(due.turns.current(child)).toMatchObject({ by: 'mail', starter: question.id })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     const b = host()
     await deliverTo(b.m, addressOf(child))

@@ -103,7 +103,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await views.dispose()
   await rt.dispose()
   store.close()

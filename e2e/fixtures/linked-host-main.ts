@@ -172,7 +172,7 @@ const stop = async () => {
   await externalApps.dispose()
   terminals.disposeAll()
   commands.disposeAll()
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await server.close()
   store.close()
   process.exit(0)

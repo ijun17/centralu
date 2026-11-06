@@ -314,7 +314,7 @@ describe('automatic continuation', () => {
     // The state after a host restart: the record and external_id exist, only the process is missing.
     // Bring down only the process (the same state as a host restart) — this used to be produced by
     // archive/restore.
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     expect(mgr.isLive(s.id)).toBe(false)
 
     await rpc('agents.send', { sessionId: s.id, text: 'keep going' })
@@ -336,7 +336,7 @@ describe('automatic continuation', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
     // Bring down only the process (the same state as a host restart) — this used to be produced by
     // archive/restore.
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     // A situation where the tool itself fails to start.
     adapter.failCreate = 'Could not start the tool'
 
@@ -479,7 +479,7 @@ describe('a settings change actually takes effect', () => {
     })) as { id: string }
     // Bring down only the process (the same state as a host restart) — this used to be produced by
     // archive/restore.
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
 
     await rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: 'auto' })
     expect(mgr.listSessions().find((x) => x.id === s.id)!.permissionPreset).toBe('auto')
@@ -544,7 +544,7 @@ describe('disposeAll runs to completion even if one fails', () => {
       throw new Error('This process refuses to die')
     }
 
-    await expect(mgr.disposeAll()).resolves.toBeUndefined()
+    await expect(mgr.tenure.disposeAll()).resolves.toBeUndefined()
     expect(h2.disposed).toBe(true)
     expect(mgr.isLive(s1.id)).toBe(false)
     expect(mgr.isLive(s2.id)).toBe(false)
@@ -738,7 +738,7 @@ describe('while-alive facts are carried in the list', () => {
     await handler('agents.usage', { tool: 'claude' })
     // Offered once: the reader keeps its own answer after that
     expect(seeds).toEqual([read, undefined])
-    await next.disposeAll()
+    await next.tenure.disposeAll()
   })
 
   it('tells the screen an old answer is being read again, and a settle brings the new totals with their new time, after a restart or not (#1623)', async () => {
@@ -777,7 +777,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(sessionsOf(fresh)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 30 }, { id: 'messages' }] })
     expect(sessionsOf(fresh).asOf).toBeGreaterThan(oldAt)
     expect(store.usage.localTotals('claude')?.asOf).toBe(clock)
-    await first.m.disposeAll()
+    await first.m.tenure.disposeAll()
 
     // A restart a day later: the kept totals come back at once, provisional, and a settle brings the new read
     clock += 86_400_000
@@ -789,7 +789,7 @@ describe('while-alive facts are carried in the list', () => {
     const settledAgain = second.ask('agents.usage', { tool: 'claude', settle: true })
     release(table(31))
     expect(sessionsOf(await settledAgain)).toMatchObject({ asOf: clock, rows: [{ id: 'sessions', value: 31 }, { id: 'messages' }] })
-    await second.m.disposeAll()
+    await second.m.tenure.disposeAll()
   })
 
   it('does not keep a provisional answer, nor totals that say nothing of when they were read (#1623)', async () => {
@@ -876,7 +876,7 @@ describe('while-alive facts are carried in the list', () => {
     const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
     const restored = (await createRpcHandler(next, new Map<ToolName, AgentAdapter>([['claude', adapter]]))('agents.usage', { tool: 'claude' })) as { cache: { windows: { id: string; requests: number }[] } }
     expect(restored.cache.windows.find((w) => w.id === 'today')!.requests).toBe(2)
-    await next.disposeAll()
+    await next.tenure.disposeAll()
 
     // In the trash the session can come back, and so do its rows; only the purge takes them
     await rpc('agents.deleteSession', { sessionId: s.id })

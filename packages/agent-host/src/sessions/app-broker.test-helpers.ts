@@ -246,7 +246,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
     async dispose() {
       // The timers still to fire land while the store is open, before and after the sessions are let go of (#1354)
       await timers.settle()
-      await mgr.disposeAll()
+      await mgr.tenure.disposeAll()
       await rt.dispose()
       await timers.settle()
       store.close()

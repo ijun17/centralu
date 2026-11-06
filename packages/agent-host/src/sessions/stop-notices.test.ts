@@ -358,7 +358,7 @@ describe('a turn ends without finishing', () => {
 describe('who is not told, or told another way', () => {
   it.each(['handingOver', 'disposing'] as const)('a host that is leaving (%s) writes nothing: the turns it cuts are continued or marked by the next one', async (leaving) => {
     const { asker, child } = await asked()
-    const host = w.mgr as unknown as Record<typeof leaving, boolean>
+    const host = w.mgr.tenure as unknown as Record<typeof leaving, boolean>
     host[leaving] = true
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'x', retryable: false } })
     await new Promise((r) => setTimeout(r, 20))

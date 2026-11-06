@@ -181,13 +181,13 @@ describe.skipIf(keeperless)('moving a session to a newly installed CLI under the
     const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
     await until(() => keeper!.alive('c1'))
     // The host leaves for a restart; the keeper keeps the agent
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     a.held.children.close()
 
     adapter.cli = '2.1.290'
     const b = await host(adapter)
     expect(b.held.kept.agents.map((k) => k.version)).toEqual(['2.1.282'])
-    await b.mgr.adoptKept(b.held.kept.agents)
+    await b.mgr.tenure.adoptKept(b.held.kept.agents)
     // Adopted, not restarted: the same child, which does not announce its version again
     expect(keeper!.alive('c1')).toBe(true)
     expect(b.mgr.listSessions().find((x) => x.id === s.id)!.agentVersion).toBe('2.1.282')

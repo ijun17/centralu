@@ -129,7 +129,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   vi.useRealTimers()
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -524,8 +524,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   const folder = memoryUpdateFolder
   /** The hub's update stops the host: what is in a turn is listed as the sessions are let go of */
   const stopForUpdate = async (h: ReturnType<typeof host>) => {
-    h.mgr.stopForUpdate()
-    await h.mgr.disposeAll()
+    h.mgr.tenure.stopForUpdate()
+    await h.mgr.tenure.disposeAll()
   }
 
   it("is listed by the stop, continued once with Centralu's note; its parent hears nothing until the continued turn's end, which says so (#1966)", async () => {
@@ -544,9 +544,9 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(b, child).interruption ?? null).toBeNull()
     // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626 review)
     expect(sentTo(b, child)).toHaveLength(0)
-    expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
+    expect(b.mgr.tenure.updateContinued().map((c) => c.sessionId)).toEqual([child])
     // The mail turn of the cut turn is read back, not closed lost (mailbox §8.2 step 6, Q-M3a-3)
-    expect(b.mgr.keptInTurn(child)).toBe(true)
+    expect(b.mgr.tenure.keptInTurn(child)).toBe(true)
     await eventually(() => sentTo(b, child).length === 1)
     expect(sentTo(b, child)[0]).toContain('Centralu on this machine was updated while your turn was running')
     expect(sentTo(b, child)[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
@@ -554,7 +554,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await eventually(() => f.ids() === null)
     // And the conversation is past the listed row: a list left behind could name no later turn (#1626 review 1b)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)
-    expect(b.mgr.updateContinued().map((c) => c.sessionId)).toEqual([child])
+    expect(b.mgr.tenure.updateContinued().map((c) => c.sessionId)).toEqual([child])
     // Not the person's message: no user row, and the line says what happened
     expect(store.messages.loadMessages(child, 50).filter((m) => m.role === 'user')).toHaveLength(1)
     expect(lines(child).some((l) => l.includes('Centralu was updated during this turn, which stopped it; Centralu continued it'))).toBe(true)
@@ -589,7 +589,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await eventually(() => f.ids() === null)
     // And a start after that finds nothing listed and sends nothing again
     c.claude.handles.get(child)!.answer('done')
-    await c.mgr.disposeAll()
+    await c.mgr.tenure.disposeAll()
     const d = host({ updateResume: f })
     await startNoticesRan()
     await new Promise((r) => setTimeout(r, 50))
@@ -614,7 +614,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await eventually(() => info(b, child).state !== 'working')
     // Later the person gives it a new turn, and their own stop (a quit, `serve --stop`) cuts it
     await b.mgr.inputs.send(child, 'now the header')
-    await b.mgr.disposeAll()
+    await b.mgr.tenure.disposeAll()
     f.remove = remove
     const c = host({ updateResume: f })
     // A quit's turn, told as one: not continued, not said to be an update's
@@ -658,7 +658,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(old, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
     await old.mgr.inputs.send(child, 'Continue')
     // Updated again by hand: the person's stop of that host cuts the turn they gave it
-    await old.mgr.disposeAll()
+    await old.mgr.tenure.disposeAll()
     const b = host({ updateResume: f })
     expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
     await startNoticesRan()
@@ -753,7 +753,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     }
     await eventually(() => accept !== undefined)
     // A plain stop, not an update's: it lists nothing, and the list the first update left is still there
-    const stopping = b.mgr.disposeAll()
+    const stopping = b.mgr.tenure.disposeAll()
     accept!()
     await stopping
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
@@ -810,7 +810,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(lines(stopped).some((l) => l.includes('Centralu continued it'))).toBe(false)
 
     // The person's own stop (a quit, `serve --stop`) with the continued turn running: listed for no one, it ends as before
-    await b.mgr.disposeAll()
+    await b.mgr.tenure.disposeAll()
     expect(f.ids()).toBeNull()
     const c = host({ updateResume: f })
     expect(info(c, cut)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
@@ -909,7 +909,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // The stopped mark is a row too: past the listed one (#1626 review 1b)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)
     // No longer named to a hub as going on
-    expect(b.mgr.updateContinued()).toEqual([])
+    expect(b.mgr.tenure.updateContinued()).toEqual([])
   })
 })
 
@@ -917,8 +917,8 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
   const sentTo = (h: ReturnType<typeof host>, id: string) => h.claude.handles.get(id)?.sent ?? []
   const lines = (id: string) => store.messages.loadMessages(id, 50).map((m) => JSON.stringify(m.payload))
   const stopForUpdate = async (h: ReturnType<typeof host>) => {
-    h.mgr.stopForUpdate()
-    await h.mgr.disposeAll()
+    h.mgr.tenure.stopForUpdate()
+    await h.mgr.tenure.disposeAll()
   }
   /** A session that started a dev server in the background with a Bash call and ended its turn, the server still running */
   async function withDevServer(h: ReturnType<typeof host>) {
@@ -1051,7 +1051,7 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
     const quit = memoryUpdateFolder()
     const b = host({ updateResume: quit })
     await withDevServer(b)
-    await b.mgr.disposeAll()
+    await b.mgr.tenure.disposeAll()
     expect(quit.files.size).toBe(0)
   })
 
@@ -1163,7 +1163,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     const { id, h } = await working(a)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     // The next host watches the session from its own first event; this one says nothing after leaving
     expect(interruptions(id)).toEqual([])
@@ -1176,7 +1176,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     // The process still speaks while it is let go: its tool begins retrying then
     h.dispose = async () => h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     expect(interruptions(id)).toEqual([])
   })

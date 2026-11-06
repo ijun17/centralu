@@ -29,7 +29,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   vi.useRealTimers()
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -72,7 +72,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('outlives a host swap: the call answers "pending", the next host raises the card, and its approval starts the child with the report', async () => {
     const a = host()
     const { parent, call, requestId } = await asking(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     // Letting go is not the person's answer: the call says the request is still waiting, and nothing ended it
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId })])
@@ -97,7 +97,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('a refusal under the next host is told to the caller as a message', async () => {
     const a = host()
     const { parent, requestId } = await asking(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host()
     b.mgr.inputs.respondApproval(parent, requestId, 'deny')
     await eventually(() => !!b.claude.handles.get(parent)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
@@ -108,7 +108,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('is dropped by the next host when the session that asked is gone', async () => {
     const a = host()
     const { parent, requestId } = await asking(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     // Another build trashed it meanwhile; the row this one left is all that remains
     store.children.putAgentStartRequest(requestId, 'no-such-session', { ...store.children.listAgentStartRequests()[0]!.request as object, callerId: 'no-such-session' })
     host()
@@ -146,7 +146,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('withdrawn while raised between turns, the session goes back to its rest too', async () => {
     const a = host()
     const { parent, requestId } = await asking(a)
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     const b = host()
     expect(b.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('waiting_approval')
     expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
@@ -166,7 +166,7 @@ describe('a start allowed but waiting for memory (#686)', () => {
     // Allowed on the card, then queued: the same handle, now waiting for memory
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId, lowMemory: { floor: '2.0 GB' } })
     expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, request: expect.objectContaining({ allowed: true }) })])
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     // Letting go ends the wait without starting anything, and keeps the request for the next host
     expect(children(a.mgr, parent)).toEqual([])
     expect(store.children.listAgentStartRequests()).toHaveLength(1)

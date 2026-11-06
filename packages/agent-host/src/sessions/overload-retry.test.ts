@@ -128,7 +128,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
     adapters,
     (e) => {
       events.push(e)
-      if (e.type === 'error') leavingAtError.push(Boolean((mgr as unknown as { handingOver: boolean; disposing: boolean }).handingOver || (mgr as unknown as { disposing: boolean }).disposing))
+      if (e.type === 'error') leavingAtError.push(Boolean((mgr.tenure as unknown as { handingOver: boolean; disposing: boolean }).handingOver || (mgr.tenure as unknown as { disposing: boolean }).disposing))
     },
     undefined,
     dir,
@@ -237,7 +237,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
   it('a host that quits during the wait ends the turn with the error it stood in for, and no later host sends anything', async () => {
     const { a, id } = await working()
     a.adapter.last.emit(overloaded(id))
-    await a.mgr.disposeAll()
+    await a.mgr.tenure.disposeAll()
     expect(errors(id)).toHaveLength(1)
     expect(errors(id)[0]!.error.message).toContain('Selected model is at capacity')
     expect(errors(id)[0]!.error.message).toMatch(/going to retry this turn, but it restarted first/)
@@ -252,11 +252,11 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
   it('a host swap during the wait ends it the same way, so a kept process is not left in a turn nobody continues', async () => {
     const { a, id } = await working()
     a.adapter.last.emit(overloaded(id))
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
     expect(errors(id)).toHaveLength(1)
     expect(errors(id)[0]!.error.message).toMatch(/going to retry this turn, but it restarted first/)
     const b = host(new Set([id]))
-    await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
+    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
     expect(b.session(id).state).toBe('error')
     await vi.advanceTimersByTimeAsync(DELAYS_MS[0] * 2)
     expect(a.adapter.last.sent).toHaveLength(0)
@@ -346,7 +346,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
 
     it('a host that leaves ends nothing for it: the tool’s turn leaves as any turn does', async () => {
       const { a, id } = await handed()
-      await a.mgr.detachAll()
+      await a.mgr.tenure.detachAll()
       expect(errors(id)).toHaveLength(0)
       expect(a.session(id).state).toBe('working')
     })
@@ -357,7 +357,7 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
       leavingAtError = []
       const { a, id } = await working()
       a.adapter.last.emit(overloaded(id))
-      await a.mgr[leave]()
+      await a.mgr.tenure[leave]()
       expect(errors(id)).toHaveLength(1)
       expect(leavingAtError).toEqual([false])
     }
