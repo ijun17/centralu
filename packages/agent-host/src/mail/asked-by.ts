@@ -37,7 +37,7 @@ export type AskedByHost = {
   untrusted: MailReach['untrusted']
   /** The checked citation a message carries (`facts.cites`), or null */
   cites(messageId: string): { seq: number; at: number } | null
-  /** The sessions with a request in the orchestrator's open turn, oldest first, each with its oldest request there (`MessageService.requestsInTurn`); null outside a turn */
+  /** The sessions with a request in the orchestrator's open turn, oldest first, each with its oldest request there (`MessageService.requestsIn`); null outside a turn */
   requestsInTurn(orchestratorId: string): { turnSeq: number; requests: { sessionId: string; messageId: string }[] } | null
 }
 

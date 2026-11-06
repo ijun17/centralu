@@ -2330,8 +2330,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    UI: it types the prompts the recording holds, presses Stop and restarts the agent where it holds them, and checks
    against what the recording holds the bubbles in their order, the tool calls (their number and names, and that they fold
    into lines), the Centralu call marks and the compaction marks, and that the adapter sent the tool nothing the
-   recording does not hold. The spec is a Playwright project of its own, listed first (`replay` in `e2e/playwright.config.ts`: a shard is a run of
-   tests in the order of the projects, so it falls in the first shard, not the last with the linked project's), and the tests of its worker share
+   recording does not hold. The spec is a Playwright project of its own (`replay` in `e2e/playwright.config.ts`: a shard is a run of
+   tests in the order of the projects, so as part of one cut it fell all in one shard, and its single worker was a floor under that shard's time; CI plays
+   it on its own, cut across every shard, `.github/scripts/e2e-shard.sh`), and the tests of its worker share
    one host, each reading only what the host says from the moment its run began and deleting its session when it is done. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
    Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line); a question card is
    answered with the option the recording holds. A test fails for a

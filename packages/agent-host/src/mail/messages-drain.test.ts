@@ -199,16 +199,6 @@ describe('what one wake carries', () => {
     expect(w.mail.drain(C).messageIds).toEqual([fromX.id, deep.id])
   })
 
-  it('turnStarted writes the turn on the rows that were delivered, and leaves the others', () => {
-    const w = world()
-    const m1 = w.send(A, { to: [B], text: 'one' }).message
-    const m2 = w.send(A, { to: [B], text: 'two' }).message
-    due(w)
-    w.records.markDelivered(B, [m1.id], w.clock.t, null)
-    w.mail.turnStarted(B, [m1.id, m2.id], 7)
-    expect(w.rowOf(m1.id, B)).toMatchObject({ turnSeq: 7, deliveredAt: w.clock.t })
-    expect(w.rowOf(m2.id, B)).toMatchObject({ turnSeq: null, deliveredAt: null })
-  })
 })
 
 describe('parties that go and parties that take over (§7.7)', () => {

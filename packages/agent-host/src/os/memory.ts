@@ -27,7 +27,6 @@ import type {
   RunSyncResult,
   SqliteOptions,
   StartOptions,
-  Timer,
   WatchListener,
   WriteOptions,
 } from './port.js'
@@ -116,7 +115,6 @@ export type ProgramContext = {
 
 /** A program: its exit code, or nothing for 0. Throwing writes the error to stderr and exits 1. */
 export type Program = (ctx: ProgramContext) => number | void | Promise<number | void>
-/** A program `runSync` can run: it answers at once */
 /**
  * A program `runSync` can run: it answers at once, with its output as text (UTF-8) or bytes (a tool writing in a
  * console code page), and `ms`, how long it would take, for `timeoutMs`
@@ -302,7 +300,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     setTimeout: (fn, ms) => {
       const t = { at: nowMs + Math.max(0, ms), seq: timerSeq++, fn }
       timers.push(t)
-      return { cancel: () => void timers.splice(timers.indexOf(t) >>> 0, timers.includes(t) ? 1 : 0) }
+      return { cancel: () => void timers.splice(timers.indexOf(t) >>> 0, 1) }
     },
     sleep: (ms, o) =>
       new Promise<void>((resolve, reject) => {
@@ -397,43 +395,29 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     let dir = root
     const native: string[] = []
     const given: string[] = []
+    const at = (parent: DirNode, name: string, node: Node | undefined, nat: string[], giv: string[]): Found => ({
+      parent,
+      name,
+      node,
+      native: rootPath + nat.join(P.sep),
+      given: rootPath + giv.join(P.sep),
+    })
     for (const [i, part] of parts.entries()) {
       const last = i === parts.length - 1
       if (part === '.') {
-        if (last)
-          return {
-            parent: dir.parent ?? dir,
-            name: '.',
-            node: dir,
-            native: rootPath + native.join(P.sep),
-            given: rootPath + given.join(P.sep),
-          }
+        if (last) return at(dir.parent ?? dir, '.', dir, native, given)
         continue
       }
       if (part === '..') {
         dir = dir.parent ?? dir
         native.pop()
         given.pop()
-        if (last)
-          return {
-            parent: dir.parent ?? dir,
-            name: '..',
-            node: dir,
-            native: rootPath + native.join(P.sep),
-            given: rootPath + given.join(P.sep),
-          }
+        if (last) return at(dir.parent ?? dir, '..', dir, native, given)
         continue
       }
       const entry = dir.entries.get(fold(part))
       if (!entry) {
-        if (last)
-          return {
-            parent: dir,
-            name: part,
-            node: undefined,
-            native: rootPath + [...native, part].join(P.sep),
-            given: rootPath + [...given, part].join(P.sep),
-          }
+        if (last) return at(dir, part, undefined, [...native, part], [...given, part])
         throw fsError('ENOENT', syscall, p)
       }
       const node = entry.node
@@ -466,19 +450,12 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       }
       native.push(entry.name)
       given.push(part)
-      if (last)
-        return {
-          parent: dir,
-          name: entry.name,
-          node,
-          native: rootPath + native.join(P.sep),
-          given: rootPath + given.join(P.sep),
-        }
+      if (last) return at(dir, entry.name, node, native, given)
       if (node.kind !== 'dir') throw fsError(windows ? 'ENOENT' : 'ENOTDIR', syscall, p)
       dir = node
     }
     // The root itself
-    return { parent: root, name: '', node: root, native: rootPath, given: rootPath }
+    return at(root, '', root, [], [])
   }
 
   /** `lookup`, or null when a folder on the way (or the link's target) is missing */
@@ -525,7 +502,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     recursive: boolean
     listener: WatchListener
     closed: boolean
-    errors: EventEmitter
   }
   const watches = new Set<Watch>()
   const notify = (dir: DirNode, name: string, event: 'rename' | 'change') => {
@@ -616,6 +592,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       fold(a.name) < fold(b.name) ? -1 : fold(a.name) > fold(b.name) ? 1 : 0,
     )
 
+  function readdir(p: string, o?: { recursive?: boolean }): string[]
+  function readdir(p: string, o: { withFileTypes: true; recursive?: boolean }): OsDirent[]
+  function readdir(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[]
   function readdir(p: string, o?: { withFileTypes?: boolean; recursive?: boolean }): string[] | OsDirent[] {
     const entriesOf = (dir: string): OsDirent[] => {
       const f = lookup(dir, true, 'scandir')
@@ -661,7 +640,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (f.node) {
       if (o.exclusive) throw fsError('EEXIST', syscall, p)
       if (f.node.kind === 'dir') throw fsError('EISDIR', syscall, p)
-      if (f.node.kind === 'link') throw fsError(windows ? 'EPERM' : 'ELOOP', syscall, p)
+      if (f.node.kind === 'link') throw fsError('ELOOP', syscall, p)
       if (windows && runningFiles.has(f.node)) throw fsError('EBUSY', syscall, p)
       refuseReadOnly(f.node, syscall, p)
       return f.node
@@ -749,7 +728,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         if (windows && written !== a.name) {
           a.parent.entries.delete(fold(a.name))
           link(a.parent, written, a.node)
-          touch(a.parent)
           notify(a.parent, a.name, 'rename')
         }
         return
@@ -891,7 +869,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     write: boolean
     append: boolean
     pos: number
-    closed: boolean
   }
   const fds = new Map<number, Fd>()
   let fdSeq = 3
@@ -929,7 +906,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
       write: access !== constants.O_RDONLY,
       append: (f & constants.O_APPEND) !== 0,
       pos: 0,
-      closed: false,
     })
     // An open folder holds nothing on Windows: it is opened to share its deletion too
     if (node.kind === 'file') hold(openFiles, node)
@@ -937,7 +913,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   const fdOf = (fd: number, syscall: string): Fd => {
     const d = fds.get(fd)
-    if (!d || d.closed) throw fsError('EBADF', syscall)
+    if (!d) throw fsError('EBADF', syscall)
     return d
   }
   function readFd(
@@ -975,7 +951,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   function closeFd(fd: number) {
     const d = fdOf(fd, 'close')
-    d.closed = true
     fds.delete(fd)
     if (d.node.kind === 'file') release(openFiles, d.node)
   }
@@ -1002,7 +977,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   function watch(p: string, o: { recursive?: boolean }, listener: WatchListener): OsWatcher {
     const n = existing(p, true, 'watch')
     if (n.kind !== 'dir') throw fsError('ENOTDIR', 'watch', p)
-    const w: Watch = { dir: n, recursive: !!o.recursive, listener, closed: false, errors: new EventEmitter() }
+    const w: Watch = { dir: n, recursive: !!o.recursive, listener, closed: false }
     watches.add(w)
     hold(watchedDirs, n)
     const watcher: OsWatcher = {
@@ -1012,10 +987,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         watches.delete(w)
         release(watchedDirs, n)
       },
-      on: (_event, fn) => {
-        w.errors.on('error', fn)
-        return watcher
-      },
+      on: () => watcher,
     }
     return watcher
   }
@@ -1043,35 +1015,24 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     return stream
   }
 
-  function statSync(p: string): OsStats
-  function statSync(p: string, o: { throwIfNoEntry: false }): OsStats | undefined
-  function statSync(p: string, o?: { throwIfNoEntry: false }): OsStats | undefined {
+  const statAt = (p: string, follow: boolean, syscall: string, o?: { throwIfNoEntry: false }): OsStats | undefined => {
     try {
-      return statOf(existing(p, true, 'stat'))
+      return statOf(existing(p, follow, syscall))
     } catch (e) {
       // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
       if (o?.throwIfNoEntry === false && errnoCode(e) === 'ENOENT') return undefined
       throw e
     }
+  }
+  function statSync(p: string): OsStats
+  function statSync(p: string, o: { throwIfNoEntry: false }): OsStats | undefined
+  function statSync(p: string, o?: { throwIfNoEntry: false }): OsStats | undefined {
+    return statAt(p, true, 'stat', o)
   }
   function lstatSync(p: string): OsStats
   function lstatSync(p: string, o: { throwIfNoEntry: false }): OsStats | undefined
   function lstatSync(p: string, o?: { throwIfNoEntry: false }): OsStats | undefined {
-    try {
-      return statOf(existing(p, false, 'lstat'))
-    } catch (e) {
-      // Node's `throwIfNoEntry` hides ENOENT only: a path through a file still throws ENOTDIR (measured on Linux)
-      if (o?.throwIfNoEntry === false && errnoCode(e) === 'ENOENT') return undefined
-      throw e
-    }
-  }
-  function readdirSync(p: string, o?: { recursive?: boolean }): string[]
-  function readdirSync(p: string, o: { withFileTypes: true; recursive?: boolean }): OsDirent[]
-  function readdirSync(
-    p: string,
-    o?: { withFileTypes?: boolean; recursive?: boolean },
-  ): string[] | OsDirent[] {
-    return readdir(p, o)
+    return statAt(p, false, 'lstat', o)
   }
   function readFileSync(p: string): Buffer
   function readFileSync(p: string, encoding: 'utf8'): string
@@ -1146,7 +1107,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     },
     statSync,
     lstatSync,
-    readdirSync,
+    readdirSync: readdir,
     readFileSync,
     writeFileSync: writeFile,
     appendFileSync: (p, data, o) => writeFile(p, data, { flag: 'a', mode: o?.mode }),
@@ -1234,15 +1195,20 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   // ---- processes ----
   type Proc = {
     row: ProcessRow
-    child: MemoryChild
     traps: Array<(signal: NodeJS.Signals) => boolean | void>
     ended: AbortController
     terminate: (exit: OsExit) => void
   }
-  const programs = new Map<string, { program: Program; sync?: SyncProgram }>()
+  type Registered = { program: Program; sync?: SyncProgram }
+  const programs = new Map<string, Registered>()
   const procs = new Map<number, Proc>()
   const table: ProcessRow[] = []
   let pidSeq = windows ? 4000 : 2000
+  const nextPid = () => {
+    const pid = pidSeq
+    pidSeq += windows ? 4 : 1
+    return pid
+  }
   const HOST_PID = windows ? 1200 : 1000
 
   const programKey = (path: string) => pathKey(path, family, cwd)
@@ -1252,7 +1218,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     command: string,
     cwdPath: string,
     childEnv: Env,
-  ): { path: string } | { error: string } {
+  ): { path: string; entry: Registered } | { error: string } {
     const isFile = (p: string) => {
       try {
         return existing(p, true, 'spawn').kind === 'file'
@@ -1275,8 +1241,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     for (const c of candidates) {
       if (!isFile(c)) continue
       if (windows && /\.(cmd|bat)$/i.test(c)) return { error: 'EINVAL' }
-      if (programs.has(programKey(c))) return { path: c }
-      return { error: 'EACCES' }
+      const entry = programs.get(programKey(c))
+      return entry ? { path: c, entry } : { error: 'EACCES' }
     }
     return { error: 'ENOENT' }
   }
@@ -1370,11 +1336,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     const found = findProgram(command, cwdPath, childEnv)
     if ('error' in found) return fail(found.error)
-    const entry = programs.get(programKey(found.path))
-    if (!entry) return fail('EACCES')
+    const { entry } = found
     const programNode = existing(found.path, true, 'spawn')
-    const pid = pidSeq
-    pidSeq += windows ? 4 : 1
+    const pid = nextPid()
     const contained = o.contained !== false
     const row: ProcessRow = {
       pid,
@@ -1447,7 +1411,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     const proc: Proc = {
       row,
-      child,
       traps: [],
       ended,
       terminate: (exit) => {
@@ -1499,7 +1462,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     later(() => {
       child.emit('spawn')
       Promise.resolve()
-        .then(() => entry.program({ ...ctx, os: memory }))
+        .then(() => entry.program(ctx))
         .then(
           (code) => proc.terminate({ code: typeof code === 'number' ? code : 0, signal: null }),
           (e: unknown) => {
@@ -1588,8 +1551,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         stderr: text(Buffer.alloc(0)),
         error: fsError(found.error, `spawnSync ${command}`, command),
       }
-    const entry = programs.get(programKey(found.path))
-    if (!entry?.sync)
+    const { entry } = found
+    if (!entry.sync)
       throw new Error(
         `memoryOs: ${found.path} has no answer for runSync (programs.add(path, program, { sync }))`,
       )
@@ -1600,8 +1563,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
           ? o.input
           : Buffer.from(o.input).toString('utf8')
     const r = entry.sync({ args, cwd: cwdPath, env: o.env ?? env.all(), input })
-    const pid = pidSeq
-    pidSeq += windows ? 4 : 1
+    const pid = nextPid()
     const stdout = bytes(r.stdout ?? '')
     const stderr = bytes(r.stderr ?? '')
     const max = o.maxBuffer ?? SYNC_MAX_BUFFER
@@ -1633,23 +1595,18 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const shell = (line: string): [string, string[]] =>
     windows ? [commandInterpreter(env.all()), ['/d', '/s', '/c', line]] : ['/bin/sh', ['-c', line]]
 
+  const runIn: OsProcesses['run'] = (command, args, o = {}) =>
+    runChild(
+      { processes: { stop }, clock, files },
+      (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+      o,
+    )
+
   const processes: OsProcesses = {
     start: (command, args, o = {}) => startProcess(command, args, o, HOST_PID, HOST_PID),
-    run: (command, args, o = {}) =>
-      runChild(
-        { processes: { stop }, clock, files },
-        (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
-        o,
-      ),
+    run: runIn,
     runSync,
-    runShell: (line, o = {}) => {
-      const [command, args] = shell(line)
-      return runChild(
-        { processes: { stop }, clock, files },
-        (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
-        o,
-      )
-    },
+    runShell: (line, o = {}) => runIn(...shell(line), o),
     stop,
     alive: (pid) => pid === HOST_PID || procs.get(pid)?.row.alive === true,
     signal: (pid, signal) => {
@@ -1725,5 +1682,3 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   return memory
 }
-
-export type { Timer }

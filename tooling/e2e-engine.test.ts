@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { e2eEngine } from '../e2e/engine.js'
+import { e2eEngine, e2eReplayPart } from '../e2e/engine.js'
 
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.resetModules() })
 
@@ -24,5 +24,25 @@ describe('the engine pnpm e2e runs in (#2022)', () => {
     expect(config.metadata?.e2eBrowser).toBe('chromium')
     const app = config.projects?.find((p) => p.name === 'app')
     expect(app?.testIgnore).toEqual(expect.arrayContaining([/-webkit\.spec\.ts/]))
+  })
+})
+
+describe('the part of the suite a CI shard plays (E2E_REPLAY)', () => {
+  it('is the whole suite when unset, the replay alone for "only", everything else for "skip", and refuses any other word', () => {
+    expect(e2eReplayPart({})).toBeUndefined()
+    expect(e2eReplayPart({ E2E_REPLAY: '' })).toBeUndefined()
+    expect(e2eReplayPart({ E2E_REPLAY: 'only' })).toBe('only')
+    expect(e2eReplayPart({ E2E_REPLAY: 'skip' })).toBe('skip')
+    expect(() => e2eReplayPart({ E2E_REPLAY: 'no' })).toThrow(/"only".*"skip"/)
+  })
+
+  it.each([
+    [undefined, ['replay', 'app', 'startup', 'recovery', 'linked']],
+    ['only', ['replay']],
+    ['skip', ['app', 'startup', 'recovery', 'linked']],
+  ] as const)('E2E_REPLAY=%s: the config lists the projects %j', async (part, projects) => {
+    vi.stubEnv('E2E_REPLAY', part)
+    const { default: config } = await import('../e2e/playwright.config.js')
+    expect(config.projects?.map((p) => p.name)).toEqual(projects)
   })
 })

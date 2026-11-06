@@ -146,7 +146,7 @@ export class Router {
         if (method === 'apps.list' && isObj(params) && typeof params.machine === 'string') {
           return this.byMachine(method, params, { result: (r, q) => (Array.isArray(r) ? r.map((a) => q.app(a)) : r) }, ctx)
         }
-        return this.merge(method as RpcMethodName, params)
+        return this.merge(method as RpcMethodName, params, ctx)
     }
   }
 
@@ -292,7 +292,7 @@ export class Router {
    * mirror for it, marked `unreachable` and with `live` as last known, so the UI neither drops
    * them nor tries to wake them (§5, "Recovery").
    */
-  private async merge(method: RpcMethodName, params: unknown): Promise<unknown> {
+  private async merge(method: RpcMethodName, params: unknown, ctx?: RpcContext): Promise<unknown> {
     const machines = [...this.opts.machines()]
     switch (method) {
       case 'sessions.list':
@@ -300,9 +300,9 @@ export class Router {
       case 'projects.list':
         return this.mergeLists(machines, 'projects', params)
       case 'projects.reorder':
-        return this.reorderProjects(machines, params)
+        return this.reorderProjects(machines, params, ctx)
       case 'approvals.deleteRule':
-        return this.deleteRule(machines, params)
+        return this.deleteRule(machines, params, ctx)
       default:
         return this.mergeSimple(method, machines, params)
     }
@@ -373,7 +373,7 @@ export class Router {
    * out of it: a stale window cannot move what it never saw. The kept order forgets a project the hub no longer lists,
    * unless it is a linked machine's, which may only be out of reach.
    */
-  private async reorderProjects(machines: RoutedMachine[], params: unknown): Promise<unknown> {
+  private async reorderProjects(machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
     // Checked before anything is kept or sent, as the hub's own handler would check it
     const { orderedIds } = RpcMethods['projects.reorder'].params.parse(params)
     const kept = this.opts.order?.read() ?? []
@@ -392,7 +392,7 @@ export class Router {
         // A machine the order names none of is not asked to reorder anything; its list still belongs in the answer
         if (!ordered) return this.listOf(m, 'projects')
         try {
-          return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds: ordered })) as unknown[]
+          return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds: ordered }, ctx)) as unknown[]
         } catch {
           return this.present(m, 'projects', m.lastKnown('projects') ?? [], true)
         }
@@ -406,13 +406,13 @@ export class Router {
     return machines.length > 0 ? this.inPersonsOrder(all) : all
   }
 
-  private async deleteRule(machines: RoutedMachine[], params: unknown): Promise<unknown> {
+  private async deleteRule(machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
     const id = isObj(params) ? params.id : undefined
     const folded = typeof id === 'number' ? decodeNumber(id) : null
     if (!folded) return this.opts.local('approvals.deleteRule', params)
     const m = machines.find((x) => x.q.slot === folded.slot)
     if (!m) throw rpcError('That rule belongs to a machine that is no longer linked')
-    return this.forward(m, 'approvals.deleteRule', { id: folded.n })
+    return this.forward(m, 'approvals.deleteRule', { id: folded.n }, ctx)
   }
 
   /** The other merges: every reachable machine, each answer in the hub's terms, combined by kind */

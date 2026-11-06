@@ -48,7 +48,7 @@ import type { TurnNow, TurnRead } from './turns.js'
 /*
  * The message service (#1684, docs/plans/mailbox.md §16 M2): mail without threads. It stores and answers over `MailboxRecords` and asks `MailReach`
  * who may write to whom and what is held. It delivers nothing and wakes nobody, never calls `MailTurns` or the manager (what it needs of a session's
- * turn comes through the `turn` option), and nothing in the host calls it before slice M3a.
+ * turn comes through the `turn` option).
  *
  * **Who is calling is an argument, never a field of the input**, as `MailService`: a tool that spreads its arguments cannot name `person` or `centralu`.
  */
@@ -117,8 +117,6 @@ export type InboxView = {
   held: { row: RecipientRow; message: MailRow; why: HoldReason | 'loop' }[]
 }
 export type HandedOverMessage = { messageId: string; firstLine: string; kind: MailKind; unread: boolean; /** The session (its address) a Centralu message is about: a report's child */ about?: string }
-/** The calls a wake names; `mailCalls` makes them. The same type as `MessageCalls`, under the name this file used before the thread frame went */
-export type MailCalls = MessageCalls
 
 export type DrainOptions = {
   /** Mail that is told of once more, delivered and still unread */
@@ -170,7 +168,7 @@ export class MessageService {
       /** `MailTurns.current`: the session's turn now (§8.2 step 6) */
       turn?: (sessionAddress: string) => TurnNow | null
       /** How a wake names its calls to this session; the tool at the version-2 schema when absent */
-      calls?: (sessionAddress: string) => MailCalls
+      calls?: (sessionAddress: string) => MessageCalls
       /** The newest message the person typed in this session (`MessageRecords.newestPersonMessage`); none cites anything when absent */
       personSaid?: (sessionId: string) => { seq: number; ts: number } | null
       /** Whether the session runs no turn now: a stop notice wakes only a sender that is at rest (docs/plans/turn-owned-by-no-one.md §4.1, Q1). At rest when absent */
@@ -512,12 +510,6 @@ export class MessageService {
     return { needReply, unread, waiting, held }
   }
 
-  /** The messages to or from `address`, newest first, as the address reads them (the person's Inbox feed, M6's `mail.inbox`, §12.2). Marks nothing */
-  feed(address: string, opts: { before?: string; limit: number }): { items: ReadItem[]; older: boolean } {
-    const found = this.records.feedOf(address, { ...(opts.before === undefined ? {} : { before: opts.before }), limit: opts.limit + 1 })
-    return { items: found.slice(0, opts.limit).map((m) => this.item(m, address, null)), older: found.length > opts.limit }
-  }
-
   /**
    * Whether mail that wakes `recipient` waits for it, due or not yet (the debounce makes a message wait a moment before it is due): a turn of its own is
    * coming, which a note of the host's should follow. Reads only; mail that is held out or settled is not waiting
@@ -610,11 +602,6 @@ export class MessageService {
       workMessage,
       asker: turnStarts && toOrchestrator ? picked : null,
     }
-  }
-
-  /** The delivery began a turn for `recipient` (it called `MailTurns.begin`): the rows it delivered were delivered in that turn */
-  turnStarted(recipient: string, messageIds: readonly string[], turnSeq: number): void {
-    this.run(() => this.records.markTurn(recipient, messageIds, turnSeq))
   }
 
   /**
@@ -794,30 +781,6 @@ export class MessageService {
       if (m && rows.length > 0) this.changed(m, [...rows.map((r) => r.recipient), PERSON])
       return rows.length
     })
-  }
-
-  /** One line for the person's guidance per project with mail held for its trust or delegations refused (§7.4) */
-  heldByProject(): { projectId: string; count: number; refused: number; recipients: string[] }[] {
-    const byProject = new Map<string, { count: number; refused: number; recipients: Set<string> }>()
-    const entry = (projectId: string) => {
-      const kept = byProject.get(projectId) ?? { count: 0, refused: 0, recipients: new Set<string>() }
-      byProject.set(projectId, kept)
-      return kept
-    }
-    for (const { row, senderProject } of this.records.heldPolicy()) {
-      if (senderProject === null) continue
-      const e = entry(senderProject)
-      e.count++
-      e.recipients.add(row.recipient)
-    }
-    for (const { message } of this.records.refusedRecords()) {
-      const e = message.facts.refused ? entry(message.facts.refused.projectId) : undefined
-      if (e) {
-        e.refused++
-        e.recipients.add(message.facts.refused?.target ?? '')
-      }
-    }
-    return [...byProject].map(([projectId, e]) => ({ projectId, count: e.count, refused: e.refused, recipients: [...e.recipients] })).sort((a, b) => a.projectId.localeCompare(b.projectId))
   }
 
   // ── Parties that go, parties that take over (§7.7) ──
@@ -1266,10 +1229,10 @@ export class MessageService {
   }
 }
 
-/** A row the reader was not told of (held by the one hold, or `loop` by an earlier build): its message reads as a phantom (§5.5) */
 /** The dedupe key of a request that cites the person's message `seq` of its sender's conversation: one use (`UNIQUE(sender, dedupe_key)`) */
 const citeKey = (seq: number): string => `cite:${seq}`
 
+/** A row the reader was not told of (held by the one hold, or `loop` by an earlier build): its message reads as a phantom (§5.5) */
 const isHidden = (row: RecipientRow): boolean => (HIDDEN_HOLDS as readonly string[]).includes(row.held ?? '')
 
 /** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */
