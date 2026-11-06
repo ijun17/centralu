@@ -163,7 +163,7 @@ async fn apply_update_relaunch(app: AppHandle) -> Result<(), String> {
             return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
         }
         // Where this window starts its host itself (#1895), the host is stopped for an update, and given the time it needs,
-        // before the relaunch ends it; with a keeper, the keeper holds it
+        // before the relaunch ends it; a keeper does the same and exits (step 3), or, older, holds it through the relaunch
         if !sup.stop_host_for_update() {
             if let Err(e) = sup.announce_relaunch() {
                 if sup.background() != Ok(true) {

@@ -9,8 +9,8 @@
  * Switching is a blue-green swap: the keeper starts the new build next to the running host, the
  * running host gets up to 10 seconds to finish the calls it serves itself (orchestrator and app
  * tools, RPCs), and the front door moves to the new host. Whether agents survive depends on the
- * running host: with step 2 it hands them over (`keepsAgents`); before that, the swap's detach still
- * stops them, as a quit does.
+ * running host: a host of #280 step 2 to #1895 step 2 hands them over (`keepsAgents`); since #1895 step 3 the running
+ * host stops them for an update and the new one continues the turns it ended (`keepsAgents: false`).
  *
  * A keeper that cannot hand itself over leaves the host swap to go ahead under it, and then stays
  * on its build until it next starts (#387, `keeperStaysBehind`). The bar says so calmly and offers
@@ -85,10 +85,9 @@ export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean; sameBuild
   return {
     confirm,
     loses:
-      `This build cannot hand running agents over yet, so running turns stop and agent processes, ` +
-      `terminals and commands restart on the new build. Conversations are saved and resume there; ` +
-      `waiting approvals have to be asked again. Tool calls Centralu serves itself get up to ${DRAIN_WORDS} ` +
-      `to finish first.`,
+      `Running turns stop and go on once the new build is up, and open terminals and commands start again ` +
+      `there. A waiting approval or question is asked again. Tool calls Centralu serves itself get up to ` +
+      `${DRAIN_WORDS} to finish first.`,
   }
 }
 

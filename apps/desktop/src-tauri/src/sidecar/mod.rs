@@ -104,10 +104,14 @@ pub struct RelaunchInfo {
     /// The bundle the relaunch starts from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_path: Option<String>,
-    /// The relaunch stops the host and the next one continues what it ended (#1895), where a keeper would hold it through
-    /// the relaunch.
+    /// Applying the update stops the host and the next one continues what it ended (#1895): this window before the relaunch
+    /// where it starts the host, the keeper (which then exits) where it is of #1895 step 3, and with an older keeper the
+    /// switch the relaunched window makes. False only while an older keeper's host hands its agents to it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub restarts_host: bool,
+    /// The keeper reports whether the host is busy, so "Automatic updates" can wait for idle and apply by itself.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub idle_reported: bool,
 }
 
 #[derive(Clone, Default)]
@@ -337,8 +341,7 @@ impl Supervisor {
 
     /// Where this window is the host's parent: stops the host for an update, as `host.stop { forUpdate }` stops a
     /// `centralu serve` host, and starts no other (#1895). The host the relaunched window starts continues the turns it
-    /// ended and opens its terminals and Run commands again. False with a keeper, which holds the host through a
-    /// relaunch (`announce_relaunch`).
+    /// ended and opens its terminals and Run commands again. False with a keeper, which `announce_relaunch` asks.
     pub fn stop_host_for_update(&self) -> bool {
         if self.choice() != Choice::Direct {
             return false;
@@ -347,13 +350,21 @@ impl Supervisor {
         true
     }
 
-    /// Tells the keeper the window is about to relaunch (#352), so it holds the host and agents
-    /// until the new window attaches, whatever background mode says. Errs when the keeper cannot
-    /// (one older than #352 answers "unknown op").
+    /// Tells the keeper the window is about to relaunch (#352). A keeper of #1895 step 3 stops the host for an update and
+    /// exits (`stopsForUpdate`): the relaunched window starts the new build's keeper, and its host continues what this one
+    /// ended. An older keeper holds the host and agents until the new window attaches, whatever background mode says. Errs
+    /// when the keeper cannot (one older than #352 answers "unknown op"; one that could not stop says why, and stopped
+    /// nothing).
     pub fn announce_relaunch(&self) -> Result<u64, String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link()?.announce_relaunch(),
+            Choice::Keeper => {
+                let link = self.link()?;
+                if link.stops_for_update() {
+                    return link.stop_for_update().map(|()| 0);
+                }
+                link.announce_relaunch()
+            }
             _ => Err("the host is not held by a keeper in this build".into()),
         }
     }

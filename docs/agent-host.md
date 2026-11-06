@@ -2396,7 +2396,7 @@ by hand) used to run the keeper in the window's executable; it now fails to star
 
 | Where | Variables | Mode | What runs | Why |
 |---|---|---|---|---|
-| macOS release | none | `ThroughShell` | the window opens `<data>/shell/Centralu.app` through LaunchServices, which starts `centralu-keeper` from `<data>/content/<version>/` and the host from that verified copy (§4.1) | the shell holds macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)) |
+| macOS release | none | `ThroughShell` | the window opens `<data>/shell/Centralu.app` through LaunchServices, which starts `centralu-keeper` from `<data>/content/<version>/` and the host from that verified copy (§4.1). Since #1895 step 3 the keeper serves no child socket, so the host spawns its agents, terminals and commands itself, inside the same tree, and an update stops and continues them (§4.5, "The keeper holds no children") | the shell holds macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)) |
 | macOS release | `CC_SHELL_UNPINNED=1` | `ThroughShell` | the same, and a shell the window carries unpinned is opened too | checking the path by hand with a temporary `CC_DATA_DIR` |
 | macOS release, the shell fell back (refused, not carried, unpinned, not installable, not opened, no report) | none | `KeeperBeside` | the window starts the `centralu-keeper` next to its own executable; the host runs from `<data>/hosts/<key>/` | agents must keep working; the window does so for the rest of its life |
 | macOS release | `CC_KEEPER_HOST_SOURCE` (any value) | `KeeperBeside` | the keeper beside the window, running the named folder (a blank value: the bundled host) | the keeper scripts' way of naming a host, which the shell would not run |
@@ -2612,8 +2612,10 @@ alone, another one is loaded, a failure takes the first load's failure path.
 
 ### 4.3 The children the keeper holds, seen from the host (#280, option C step 2)
 
-The design is in [architecture.md](architecture.md) §4.3. Under the keeper (`CC_KEEPER=1`) the host connects to
-`<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
+The design is in [architecture.md](architecture.md) §4.3. Since #1895 step 3 a keeper started fresh serves no child socket
+(`holds_children` in `server/start.rs`, the one place of the switch; `CC_KEEPER_HOLDS_CHILDREN=1` turns it back on for the keeper
+scripts that still test it), so this section describes a keeper of an earlier build, and one that took over from it (§4.5). Under the
+keeper (`CC_KEEPER=1`) the host connects to `<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
 that would not bind), the host spawns its own children and every ending stops them, exactly as without a keeper.
 `pnpm dev`, e2e, a debug app and Windows never take this path.
 
@@ -2901,6 +2903,34 @@ quit's. The update line says so (`RelaunchCheck.restartsHost`). Only where `rela
 bundle the update replaced (macOS). No Linux package or Windows install is a bundle, so those keep "Restart Centralu to finish
 updating", and the busy report is the keeper's, so nothing applies by itself without one. A swap whose host holds no agents (a
 keeper without its child service) is the same stop: the drain begins it before it lets them go, and the host that takes over continues what it ended.
+
+**The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
+the removal design of #1895 step 4 (`docs/plans/keeper-removal.md`, on its own branch)). The macOS release keeps its shape, shell then keeper then host, because the
+release is ad-hoc signed and only a tree the shell starts keeps its macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)
+§1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket
+(`holds_children`), so the host finds none, spawns its own children as on every other machine, and every ending stops them:
+
+| | Before (the keeper holds the children) | Since step 3 |
+|---|---|---|
+| "Apply now" | the keeper is told `relaunching` and holds the host; the new window switches the keeper (handoff) and the host (swap); agents go on | the window sends `{"op":"stop","forUpdate":true}` on `keeper.sock`; the keeper writes the host's stop line for an update (the one above), waits up to 15 s, answers, and exits; the window relaunches and opens the shell, which starts the new build's keeper. The next host continues the listed turns with Centralu's note and opens the terminals and Run commands again. No keeper runs a host of another build |
+| The automatic mode | waits for the keeper to report nothing busy, then relaunches | the same (`RelaunchCheck.idleReported`): with nothing busy the stop loses nothing |
+| A host crash | the keeper restarts it, and children re-attach mid-turn | the keeper restarts it by the same rules; the agents, terminals and commands end with it, and a turn in flight shows stopped with Continue, as on Windows and Linux. Only a stop for an update lists turns to continue |
+| "Quit completely", background mode off, idle exit | `stop` on the child service: the host stops its children and notes the person quit (#1143) | a plain `{"op":"stop"}` on the host's stdin (`STOP_LINE`): the same stop and the same mark |
+| Background mode, credential issuance (#1405), the front door, supervision, per-build copies | the keeper's | unchanged, the keeper's |
+| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents |
+
+The window knows the keeper does this from its view (`stopsForUpdate`); an older keeper lacks it and gets `relaunching` as before.
+`RelaunchCheck.restartsHost` is set then, and also for an older keeper whose host does not hand its agents over.
+
+*The transition from a keeper that holds children.* A person on an earlier build presses "Apply now" in that build's window, which
+tells its keeper `relaunching`; the new window attaches to that keeper and switches it, as before (its view has no
+`stopsForUpdate`). The old keeper hands itself over to the new build's keeper with everything it holds (§4.4), and the swapped host
+takes the children over. A keeper that received children this way keeps serving them for the rest of its life: its host goes on
+spawning through it, and nothing running is cut by the transition itself. Its next update or quit stops them (the host's stop for an
+update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell starts next
+serves none. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
+(`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
+turns, and they would have ended as a quit's. Checked end to end by `scripts/keeper-children-integration.mjs`.
 
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. The
 relaunch itself loses nothing a keeper holds, but the relaunched window then switches the host by itself, and that

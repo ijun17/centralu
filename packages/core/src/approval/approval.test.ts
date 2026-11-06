@@ -182,12 +182,11 @@ describe('update cards (#581, #665)', () => {
     expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'install' })).toBe('Allow this session to install a Centralu update?')
   })
 
-  // #665 review: "running agents keep going" alone hid what the host switch right after the relaunch stops
-  it('says that applying relaunches the window and that the host switch after it stops long Centralu tool calls', () => {
-    expect(CENTRALU_APPLY_QUESTION).toContain('running agents keep going')
-    expect(CENTRALU_APPLY_QUESTION).toContain('switches the agent host')
-    expect(CENTRALU_APPLY_QUESTION).toContain('after 10 seconds')
-    expect(CENTRALU_APPLY_QUESTION).toContain('child agents')
+  // #665 review: what applying costs must be said. Since #1895 step 3 the host restarts and every running turn, the asker's too, is cut and continued
+  it('says that applying relaunches the window, restarts the host, and that running turns stop and go on', () => {
+    expect(CENTRALU_APPLY_QUESTION).toContain('the agent host restarts')
+    expect(CENTRALU_APPLY_QUESTION).toContain('this one included, stop and go on')
+    expect(CENTRALU_APPLY_QUESTION).not.toContain('keep going')
     expect(isCentraluApply({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY })).toBe(true)
     expect(isCentraluApply({ kind: 'other', raw: 'a tool the adapter did not recognise' })).toBe(false)
   })

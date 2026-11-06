@@ -82,18 +82,26 @@ export type RelaunchCheck = {
   /** The version a relaunch would start, when the bundle says */
   version?: string
   /**
-   * The relaunch stops the agent host, which the next one continues from (#1895): running turns go on once it is back, and
-   * open terminals and Run commands start again. Absent when a keeper holds the host through the relaunch
+   * Applying the update stops the agent host, and the next one continues from it (#1895): running turns go on once it is
+   * back, and open terminals and Run commands start again. Without a keeper the window stops it before the relaunch; a
+   * keeper of #1895 step 3 stops it and exits; with an older keeper the switch the relaunched window makes does. Absent
+   * only when an older keeper's host hands its agents to it, which holds them through the whole update
    */
   restartsHost?: boolean
+  /**
+   * The keeper reports whether the host is busy (`watchBusy`), so "Automatic updates" can wait for nothing to be running
+   * and apply by itself. Absent without a keeper, where only a press applies
+   */
+  idleReported?: boolean
 }
 
 /**
  * "Apply now" (#352): relaunching the window into the version the host just installed.
  *
- * Only a desktop app can offer this. With a keeper, the keeper is told first and holds the host and every agent
- * through the relaunch, whatever background mode says, and the new window then switches the keeper and host to its
- * build. Without one, the window stops its host for an update first (#1895: `RelaunchCheck.restartsHost`). A platform that
+ * Only a desktop app can offer this. The host is stopped for an update first and the next one continues what it ended
+ * (#1895: `RelaunchCheck.restartsHost`): by the window where it starts the host itself, by the keeper, which then exits,
+ * where it has one (step 3). An older keeper is told instead and holds the host through the relaunch, and the new window
+ * switches the keeper and host to its build. A platform that
  * cannot leaves `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
  */
 export interface RelaunchPort {

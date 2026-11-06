@@ -75,6 +75,9 @@ import { buildKeeper, HOST_SRC, log, readyView, recordedOnce, started, STEPS, TA
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
+// Keepers that hold their hosts' children, as every keeper did before #1895 step 3: a handoff carries them (the move to a keeper
+// that holds none starts from such a handoff, keeper-children-integration.mjs). Step 4 deletes this script with the holding
+process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const BIN = join(TARGET, 'debug', 'centralu')
 const KEEPER_BIN = join(TARGET, 'debug', 'centralu-keeper')

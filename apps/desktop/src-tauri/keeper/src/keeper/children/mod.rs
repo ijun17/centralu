@@ -219,9 +219,14 @@ impl Children {
         Ok(Children { shared: Some(shared) })
     }
 
-    /// A keeper whose child socket could not be bound: hosts fall back to spawning their own.
+    /// A keeper whose child socket could not be bound, or that holds no children (#1895 step 3): hosts spawn their own.
     pub fn disabled() -> Children {
         Children { shared: None }
+    }
+
+    /// Whether the child socket is served: hosts then spawn through it
+    pub fn enabled(&self) -> bool {
+        self.shared.is_some()
     }
 
     /// Who the current host is, asked on every connection: the socket answers it, and a standby

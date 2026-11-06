@@ -21,9 +21,32 @@ pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource)
     keeper.is_some_and(|b| b.same_build(app))
 }
 
+/**
+ * "Apply now" with a keeper (#1895 step 3). A keeper that stops for an update (`stops_for_update`) stops the host that way and
+ * exits, and the relaunched window starts the new build's. An older keeper holds the host through the relaunch and the
+ * relaunched window switches it, which stops the host for an update too unless that host hands its agents to the keeper
+ * (`keepsAgents`). Either way the keeper reports when the host is busy, so the automatic mode can still wait for idle.
+ */
+pub(crate) fn with_keeper(info: RelaunchInfo, keeps_agents: Option<bool>, stops_for_update: bool) -> RelaunchInfo {
+    RelaunchInfo { restarts_host: stops_for_update || keeps_agents != Some(true), idle_reported: true, ..info }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1895 step 3: "Apply now" restarts the host unless an older keeper's host hands its agents over, and the update line must say so
+    #[test]
+    fn apply_now_with_a_keeper_restarts_the_host_unless_an_older_one_keeps_its_agents() {
+        let ready = RelaunchInfo { ready: true, ..Default::default() };
+        let held = with_keeper(ready.clone(), Some(true), false);
+        assert!(!held.restarts_host, "an older keeper whose host hands its agents over: they keep going");
+        for (keeps, stops_for_update) in [(Some(true), true), (Some(false), true), (None, true), (Some(false), false), (None, false)] {
+            let stops = with_keeper(ready.clone(), keeps, stops_for_update);
+            assert!(stops.restarts_host, "{keeps:?} {stops_for_update}: the update stops the host");
+            assert!(stops.idle_reported && stops.ready);
+        }
+    }
 
     /// #461: a keeper that cannot say its build (older than #280 step 4) is another build, never
     /// "can't tell", so the window offers to restart it rather than leaving it be.
@@ -178,7 +201,37 @@ impl KeeperLink {
     /// bundle the update did not touch (`pnpm app:open` opens the build output in place) or from
     /// no bundle at all (`pnpm app:dev`).
     pub fn relaunch_info(&self) -> RelaunchInfo {
-        super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev))
+        let keeps_agents = self.state.lock().ok().and_then(|st| st.view.as_ref().and_then(|v| v.keeps_agents));
+        let info = super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev));
+        with_keeper(info, keeps_agents, self.stops_for_update())
+    }
+
+    /// Whether the keeper stops for an update and exits, as a keeper of #1895 step 3 says in its view
+    pub fn stops_for_update(&self) -> bool {
+        self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.stops_for_update)).unwrap_or(false)
+    }
+
+    /// "Apply now" (#1895 step 3): the keeper stops the host for an update and exits, and this window stops attaching, so it
+    /// starts no keeper of its own build behind the relaunch. Returns once the keeper is gone, or says why it is not.
+    pub fn stop_for_update(&self) -> Result<(), String> {
+        let keeper_pid = self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.keeper.pid));
+        if let Ok(mut st) = self.state.lock() {
+            st.shutting_down = true;
+        }
+        if let Err(e) = client::stop_for_update(&self.sock) {
+            // Still attached and nothing stopped: this window goes on attaching as before
+            if client::alive(&self.sock) {
+                if let Ok(mut st) = self.state.lock() {
+                    st.shutting_down = false;
+                }
+            }
+            return Err(e);
+        }
+        // It answers just before it exits: the next keeper waits for its lock, but the relaunch need not race it
+        if let Some(pid) = keeper_pid {
+            crate::host_proc::wait_until(Duration::from_secs(5), || !centralu_keeper_core::os::pid_alive(pid));
+        }
+        Ok(())
     }
 
     /// The system is ending (macOS), or is not after all: the keeper tells the host on its stdin (#1970)

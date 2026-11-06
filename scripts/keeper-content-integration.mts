@@ -49,6 +49,9 @@ import { buildShellExe, TAURI_DIR } from './shell-bundle.mjs'
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
+// Keepers that hold their hosts' children, so a handoff through content carries a terminal, as before #1895 step 3. Step 4
+// deletes this script with the handoff
+process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const flag = (name: string) => {
