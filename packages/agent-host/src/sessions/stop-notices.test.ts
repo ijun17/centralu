@@ -32,12 +32,15 @@ const handleOf = (id: string): CrossHandle => (w.adapters.get('claude')!.handles
 type Internals = {
   meta: Map<string, { interruption?: unknown; state: string }>
   restartPolicy: { continuingTurns: Set<string> }
-  turnLostInSwap(m: unknown): void
-  quitRequesters: Map<string, { requester: string; told?: boolean }>
-  quitTellEnded(sessionId: string, told: string | undefined): void
   selfCompaction: { compactTurn(id: string): boolean }
 }
 const inside = () => w.mgr as unknown as Internals
+type TenureInternals = {
+  turnLostInSwap(m: unknown): void
+  quitRequesters: Map<string, { requester: string; told?: boolean }>
+  quitTellEnded(sessionId: string, told: string | undefined): void
+}
+const tenure = () => w.mgr.tenure as unknown as TenureInternals
 
 /** `asker` asks `child` a question, delivered into the turn the child is in now (`working` starts one) */
 function ask(asker: string, child: string, text = 'which branch is the release on?'): MailRow {
@@ -497,7 +500,7 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     const second = ask(other, child, 'and the tag?')
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
     // The start found `asker` to be told by `tellAskerOfInterruption`, and that path told it before the mailbox was ready
-    inside().quitRequesters.set(child, { requester: asker, told: true })
+    tenure().quitRequesters.set(child, { requester: asker, told: true })
 
     m.afterReady()
     expect(stopNotices(asker)).toEqual([])
@@ -512,7 +515,7 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     const { asker, child } = await asked()
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
     inside().meta.get(asker)!.interruption = { reason: 'quit', at: Date.now() }
-    inside().quitRequesters.set(child, { requester: asker, told: false })
+    tenure().quitRequesters.set(child, { requester: asker, told: false })
     m.afterReady()
     expect(stopNotices(asker)).toHaveLength(1)
     m.delivery.stop()
@@ -523,13 +526,13 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     const two = await asked()
     for (const { child, asker } of [one, two]) {
       inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
-      inside().quitRequesters.set(child, { requester: asker })
+      tenure().quitRequesters.set(child, { requester: asker })
     }
     m.afterReady()
     expect(stopNotices(one.asker)).toEqual([])
     expect(stopNotices(two.asker)).toEqual([])
-    inside().quitTellEnded(one.child, one.asker)
-    inside().quitTellEnded(two.child, undefined)
+    tenure().quitTellEnded(one.child, one.asker)
+    tenure().quitTellEnded(two.child, undefined)
     expect(stopNotices(one.asker)).toEqual([])
     expect(read.row(one.question.id, addr(one.child))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
     expect(stopNotices(two.asker)).toHaveLength(1)
@@ -563,7 +566,7 @@ describe('a stop found at the next start, or a cut turn that could not be contin
 
   it('a cut turn Centralu could not continue is told as a stop that wakes the asker that waits', async () => {
     const { asker, child, question } = await asked(true)
-    inside().turnLostInSwap(inside().meta.get(child))
+    tenure().turnLostInSwap(inside().meta.get(child))
     await w.until(() => stopNotices(asker).length === 1)
     const message = stopNotices(asker)[0]!.message
     expect(message.facts.unanswered).toEqual([{ id: question.id, recipient: addr(child), why: 'uncontinued' }])
