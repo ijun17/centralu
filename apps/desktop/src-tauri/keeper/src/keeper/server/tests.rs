@@ -540,11 +540,13 @@ fn only_the_accepted_window_executable_gets_the_token() {
 }
 
 /**
- * #2117: installing an update replaces the window's executable under the running window, and macOS then names no path for
- * its pid. The window that attached before the install can still stop the keeper for the update; a process started from the
- * same file that never attached cannot. This test binary, copied to the accepted path and run twice, is both processes: one
- * attaches, then the file is replaced, then each connects. Linux still names such a file (with ` (deleted)`, which the path
- * rule takes), so the reader is made to fail there as macOS's does; on macOS the keeper's own reader is checked too.
+ * #2117: installing an update replaces the app bundle under the running window, as `centralu install` does
+ * (`packaging/npm/centralu/bin/swap.mjs`): the new bundle is copied beside it as `<app>.new`, the old one renamed aside to
+ * `<app>.old-<time>`, the new one renamed in, the old one deleted. macOS then names no path for the window's pid (the real
+ * apply's ENOENT); a file replaced in place instead keeps naming the old path, which now names the new file. The window that
+ * attached before the install can still stop the keeper for the update; a process started from the same file that never
+ * attached cannot, whatever its path reads. This test binary, as the bundle's window executable, run twice, is both
+ * processes: one attaches, then the bundle is swapped, then each connects and the keeper judges it as it judges the op.
  */
 #[test]
 fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() {
@@ -575,9 +577,14 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
         let k = k.clone();
         thread::spawn(move || accept_loop(&k));
     }
-    let window = data.join("centralu");
-    fs::copy(std::env::current_exe().unwrap(), &window).unwrap();
-    k.state.lock().unwrap().desired.bundle_path = Some(window.to_string_lossy().to_string());
+    let app = data.join("Centralu.app");
+    let bundle_with_window = |app: &Path| {
+        fs::create_dir_all(app.join("Contents").join("MacOS")).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), app.join("Contents").join("MacOS").join("centralu")).unwrap();
+    };
+    bundle_with_window(&app);
+    let window = app.join("Contents").join("MacOS").join("centralu");
+    k.state.lock().unwrap().desired.bundle_path = Some(app.to_string_lossy().to_string());
     let judge_sock = data.join("judge.sock");
     let judging = UnixListener::bind(&judge_sock).unwrap();
     let start = |attach: bool| {
@@ -603,32 +610,22 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
     let (mut window_proc, _window_out) = start(true);
     let (mut stranger, _stranger_out) = start(false);
     assert_eq!(k.attached_windows().len(), 1, "the copy at the accepted path attached as a window");
-    // The update: the file at the window's path is replaced, as the install's rename does
-    fs::remove_file(&window).unwrap();
-    fs::copy(std::env::current_exe().unwrap(), &window).unwrap();
-    let like_macos = |pid: u32| match crate::os::exe_of_pid(pid) {
-        Ok(p) if p.to_string_lossy().ends_with(" (deleted)") => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
-        other => other,
-    };
+    // The update, as swap.mjs makes it: the new bundle beside, the old one aside, the new one in, the old one deleted
+    let staging = data.join("Centralu.app.new");
+    let aside = data.join("Centralu.app.old-1");
+    bundle_with_window(&staging);
+    fs::rename(&app, &aside).unwrap();
+    fs::rename(&staging, &app).unwrap();
+    fs::remove_dir_all(&aside).unwrap();
     let judged = |child: &mut std::process::Child| {
         writeln!(child.stdin.as_mut().unwrap()).unwrap();
         let (s, _) = judging.accept().unwrap();
-        let pid = crate::os::peer_pid(&s).unwrap();
-        assert_eq!(pid, child.id());
-        let seam = window_peer::judge_pid_for_update(pid, &k.window_exes(), &k.attached_windows(), like_macos, crate::os::process_started);
-        let real = crate::os::exe_of_pid(pid).is_err().then(|| k.judge_window_for_update(&s));
-        (seam, real)
+        assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
+        k.judge_window_for_update(&s)
     };
-    let (seam, real) = judged(&mut window_proc);
-    assert_eq!(seam, Ok(()), "the attached window after its executable was replaced");
-    if let Some(real) = real {
-        assert_eq!(real, Ok(()), "the keeper's own judgement, where the kernel names no path");
-    }
-    let (seam, real) = judged(&mut stranger);
-    assert!(seam.as_ref().is_err_and(|e| e.contains("no window attached")), "{seam:?}");
-    if let Some(real) = real {
-        assert!(real.is_err(), "the keeper's own judgement of a process that never attached");
-    }
+    assert_eq!(judged(&mut window_proc), Ok(()), "the attached window after its executable was replaced");
+    let stranger_judged = judged(&mut stranger);
+    assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
     for mut c in [window_proc, stranger] {
         let _ = c.kill();
         let _ = c.wait();

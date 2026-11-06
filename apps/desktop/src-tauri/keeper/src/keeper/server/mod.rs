@@ -206,8 +206,8 @@ pub(super) struct Window {
     /// then do its views carry the front door's token. Read from the kernel when it attached, or
     /// when another keeper handed it over (the peer's record travels with the socket).
     pub(super) full: bool,
-    /// For a window (`full`), its pid and start as it attached (#2117): a stop for an update from that process is still
-    /// its own after an update replaced its executable, which macOS then no longer names (`window_peer::judge_for_update`).
+    /// For a window (`full`), its pid and start as it attached (#2117): what a stop for an update is judged by, since after
+    /// an install macOS names no executable, or the old path, for it (`window_peer::judge_for_update`).
     pub(super) peer: Option<window_peer::Attached>,
     /// Shared with the writer, not duplicated: one descriptor for both.
     pub(super) stream: Arc<UnixStream>,
@@ -386,9 +386,10 @@ impl Keeper {
         window_peer::judge(stream, &self.window_exes())
     }
 
-    /// The same for a stop for an update, which also takes a window attached now whose executable an update replaced (#2117).
+    /// Whether the peer may stop the keeper for an update: a window attached now, by pid and start, whatever its executable
+    /// reads after an install (#2117, `window_peer::judge_for_update`).
     pub(super) fn judge_window_for_update(&self, stream: &UnixStream) -> Result<(), String> {
-        window_peer::judge_for_update(stream, &self.window_exes(), &self.attached_windows())
+        window_peer::judge_for_update(stream, &self.attached_windows())
     }
 
     /// The windows attached now, as each was judged when it attached (#2117).
