@@ -539,6 +539,103 @@ fn only_the_accepted_window_executable_gets_the_token() {
     let _ = fs::remove_dir_all(&data);
 }
 
+/**
+ * #2117: installing an update replaces the window's executable under the running window, and macOS then names no path for
+ * its pid. The window that attached before the install can still stop the keeper for the update; a process started from the
+ * same file that never attached cannot. This test binary, copied to the accepted path and run twice, is both processes: one
+ * attaches, then the file is replaced, then each connects. Linux still names such a file (with ` (deleted)`, which the path
+ * rule takes), so the reader is made to fail there as macOS's does; on macOS the keeper's own reader is checked too.
+ */
+#[test]
+fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    const NAME: &str = "keeper::server::tests::a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update";
+    // The copy, run again: it attaches when asked, waits for a line, then connects to the judging socket and waits there
+    if let Ok(judge) = std::env::var("CCK_TEST_JUDGE_SOCK") {
+        let _attached = std::env::var("CCK_TEST_ATTACH_SOCK").ok().map(|sock| {
+            let mut s = UnixStream::connect(sock).unwrap();
+            s.write_all(&json_line(&json!({ "op": "attach", "protocol": KEEPER_PROTOCOL }))).unwrap();
+            let mut answer = String::new();
+            BufReader::new(s.try_clone().unwrap()).read_line(&mut answer).unwrap();
+            s
+        });
+        println!("READY");
+        let mut go = String::new();
+        std::io::stdin().read_line(&mut go).unwrap();
+        let mut j = UnixStream::connect(judge).unwrap();
+        let _ = std::io::Read::read(&mut j, &mut [0u8; 1]);
+        return;
+    }
+    let data = PathBuf::from(format!("/tmp/cck-replaced-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let window = data.join("centralu");
+    fs::copy(std::env::current_exe().unwrap(), &window).unwrap();
+    k.state.lock().unwrap().desired.bundle_path = Some(window.to_string_lossy().to_string());
+    let judge_sock = data.join("judge.sock");
+    let judging = UnixListener::bind(&judge_sock).unwrap();
+    let start = |attach: bool| {
+        let mut c = Command::new(&window);
+        c.args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+            .env("CCK_TEST_JUDGE_SOCK", &judge_sock)
+            .env_remove("CC_KEEPER_TEST_WINDOW_EXE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        if attach {
+            c.env("CCK_TEST_ATTACH_SOCK", &k.sock);
+        }
+        let mut child = c.spawn().unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while !line.contains("READY") {
+            line.clear();
+            assert!(out.read_line(&mut line).unwrap() > 0, "the copy ended before it was ready");
+        }
+        // Its output stays open until it ends, so the copy's harness never writes to a closed pipe
+        (child, out)
+    };
+    let (mut window_proc, _window_out) = start(true);
+    let (mut stranger, _stranger_out) = start(false);
+    assert_eq!(k.attached_windows().len(), 1, "the copy at the accepted path attached as a window");
+    // The update: the file at the window's path is replaced, as the install's rename does
+    fs::remove_file(&window).unwrap();
+    fs::copy(std::env::current_exe().unwrap(), &window).unwrap();
+    let like_macos = |pid: u32| match crate::os::exe_of_pid(pid) {
+        Ok(p) if p.to_string_lossy().ends_with(" (deleted)") => Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+        other => other,
+    };
+    let judged = |child: &mut std::process::Child| {
+        writeln!(child.stdin.as_mut().unwrap()).unwrap();
+        let (s, _) = judging.accept().unwrap();
+        let pid = crate::os::peer_pid(&s).unwrap();
+        assert_eq!(pid, child.id());
+        let seam = window_peer::judge_pid_for_update(pid, &k.window_exes(), &k.attached_windows(), like_macos, crate::os::process_started);
+        let real = crate::os::exe_of_pid(pid).is_err().then(|| k.judge_window_for_update(&s));
+        (seam, real)
+    };
+    let (seam, real) = judged(&mut window_proc);
+    assert_eq!(seam, Ok(()), "the attached window after its executable was replaced");
+    if let Some(real) = real {
+        assert_eq!(real, Ok(()), "the keeper's own judgement, where the kernel names no path");
+    }
+    let (seam, real) = judged(&mut stranger);
+    assert!(seam.as_ref().is_err_and(|e| e.contains("no window attached")), "{seam:?}");
+    if let Some(real) = real {
+        assert!(real.is_err(), "the keeper's own judgement of a process that never attached");
+    }
+    for mut c in [window_proc, stranger] {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+    let _ = fs::remove_dir_all(&data);
+}
+
 /// #1895 step 3: "Apply now" stops only a host that said it takes the keeper's stop lines (an earlier build's would be
 /// stopped as a quit), and never a keeper already on its way out or mid-switch, or for a process that is not a window. Each
 /// refusal says its own reason, which the window shows after "Not relaunched:"

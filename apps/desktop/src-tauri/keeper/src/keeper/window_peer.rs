@@ -35,6 +35,16 @@
 //! **How it fails.** A peer whose pid or executable the kernel does not name is not a window: the
 //! token is not handed out on a guess. Every refusal is logged with the executable and why, and a
 //! window that was given the limited credential says so in its own log (`sidecar/link.rs`).
+//!
+//! **A window whose executable an update replaced** (#2117). Installing an update replaces the bundle's
+//! files under a running window; macOS then names no path for its pid at all (`proc_pidpath` fails with
+//! ENOENT), where Linux adds ` (deleted)`. A stop for an update comes from exactly such a window, so that
+//! one op also takes a window it judged when it attached (`Attached`: its pid and when that process
+//! started, so a pid used again is not it) and that is still attached, but only when no executable can
+//! be read for the pid: one that reads and is not accepted is refused as before, so a replaced file
+//! widens nothing an unknown pid gets. `status`, `attach`, `switch` and `upgrade` keep the path alone:
+//! the last two start code of the caller's naming with the token, which a window about to relaunch
+//! has no need of.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -98,6 +108,44 @@ pub fn judge(stream: &UnixStream, accepted: &[PathBuf]) -> Result<(), String> {
     let pid = crate::os::peer_pid(stream).map_err(|e| format!("the kernel named no peer process ({e})"))?;
     let exe = crate::os::exe_of_pid(pid).map_err(|e| format!("the executable of pid {pid} could not be read ({e})"))?;
     judge_exe(&exe, accepted, own_team().as_deref(), team_of)
+}
+
+/// A window as it was judged when it attached (#2117): its pid and when that process started (`os::process_started`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attached {
+    pub pid: u32,
+    pub started: u64,
+}
+
+/// The `Attached` of the peer of `stream`, read as it attaches; None when the kernel names no pid or start for it.
+pub fn attached(stream: &UnixStream) -> Option<Attached> {
+    let pid = crate::os::peer_pid(stream).ok()?;
+    let started = crate::os::process_started(pid).ok()?;
+    Some(Attached { pid, started })
+}
+
+/// `judge`, for a stop for an update: the same, and a peer whose executable cannot be read at all is still a window when it
+/// is one of the windows attached now (`windows`), by pid and start (#2117).
+pub fn judge_for_update(stream: &UnixStream, accepted: &[PathBuf], windows: &[Attached]) -> Result<(), String> {
+    let pid = crate::os::peer_pid(stream).map_err(|e| format!("the kernel named no peer process ({e})"))?;
+    judge_pid_for_update(pid, accepted, windows, crate::os::exe_of_pid, crate::os::process_started)
+}
+
+/// The rule of `judge_for_update` for one pid, with the readers of its executable and its start passed in for the tests.
+pub fn judge_pid_for_update(
+    pid: u32,
+    accepted: &[PathBuf],
+    windows: &[Attached],
+    exe_of: impl Fn(u32) -> std::io::Result<PathBuf>,
+    started_of: impl Fn(u32) -> std::io::Result<u64>,
+) -> Result<(), String> {
+    match exe_of(pid) {
+        Ok(exe) => judge_exe(&exe, accepted, own_team().as_deref(), team_of),
+        Err(e) => match started_of(pid) {
+            Ok(started) if windows.contains(&Attached { pid, started }) => Ok(()),
+            _ => Err(format!("the executable of pid {pid} could not be read ({e}), and it is no window attached to this keeper")),
+        },
+    }
 }
 
 /// The rule for one executable: `accepted` are the window executables, `ours` is this keeper's team
@@ -185,6 +233,30 @@ pub fn test_window_exe() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2117: an update replaced the window's executable, which macOS then names no path for. A stop for an update from the
+    /// window that attached is still a window's; any other pid with no executable to read is not, nor the same pid in a
+    /// process that started later, nor a pid whose executable reads as another file
+    #[test]
+    fn a_stop_for_an_update_takes_the_attached_window_whose_executable_was_replaced() {
+        let window = PathBuf::from("/Applications/Centralu.app/Contents/MacOS/centralu");
+        let accepted = vec![window.clone()];
+        let attached = [Attached { pid: 40, started: 1_000 }];
+        let unlinked = |_: u32| -> std::io::Result<PathBuf> { Err(std::io::Error::from(std::io::ErrorKind::NotFound)) };
+        let started = |pid: u32| -> std::io::Result<u64> { Ok(if pid == 40 { 1_000 } else { 2_000 }) };
+        assert_eq!(judge_pid_for_update(40, &accepted, &attached, unlinked, started), Ok(()));
+        let unknown = judge_pid_for_update(41, &accepted, &attached, unlinked, started).unwrap_err();
+        assert!(unknown.contains("could not be read") && unknown.contains("no window attached"), "{unknown}");
+        let reused = |_: u32| -> std::io::Result<u64> { Ok(1_001) };
+        assert!(judge_pid_for_update(40, &accepted, &attached, unlinked, reused).is_err(), "a pid used again by a later process");
+        let no_start = |_: u32| -> std::io::Result<u64> { Err(std::io::Error::from(std::io::ErrorKind::NotFound)) };
+        assert!(judge_pid_for_update(40, &accepted, &attached, unlinked, no_start).is_err(), "a start that cannot be read");
+        assert!(judge_pid_for_update(40, &accepted, &[], unlinked, started).is_err(), "no window attached");
+        let elsewhere = |_: u32| -> std::io::Result<PathBuf> { Ok(PathBuf::from("/tmp/centralu")) };
+        assert!(judge_pid_for_update(40, &accepted, &attached, elsewhere, started).is_err(), "a readable executable that is not accepted");
+        let readable = |_: u32| -> std::io::Result<PathBuf> { Ok(window.clone()) };
+        assert_eq!(judge_pid_for_update(41, &accepted, &[], readable, started), Ok(()), "the window's path alone, as before");
+    }
 
     fn paths(ps: &[&str]) -> Vec<PathBuf> {
         ps.iter().map(PathBuf::from).collect()

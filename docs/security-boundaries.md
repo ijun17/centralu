@@ -1808,6 +1808,15 @@ door's port and a credential, stop the host, and make the keeper run a host from
   that is not a window and fails if any line it gets back holds the token
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
   checks the list against the dispatcher.
+- **A window an update replaced** (#2117). Installing an update replaces the bundle's files under the running window,
+  and macOS then names no executable for its pid at all (`proc_pidpath` fails), where Linux names the old path with
+  ` (deleted)`. The stop for an update ("Apply now") comes from exactly that window, so it alone also takes a peer
+  whose executable cannot be read when that peer is a window attached now, recorded as it attached by its pid and
+  when that process started (`window_peer::Attached`; a pid used again belongs to a process that started later). A
+  peer whose executable reads and is not accepted is refused as before, and so is any pid with nothing to read that is
+  not such a window, so a replaced file widens nothing an unknown process gets. `status`, `attach`, `switch` and
+  `upgrade` keep the path alone (`switch` and `upgrade` start code with the token, which a window about to relaunch does
+  not need). Test: `a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update`.
 - **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees, or
   replace the file at an accepted path (an app bundle is the user's to change). A peer can connect and then `exec` the
   window's executable, keeping its pid: the window it starts flashes on screen. `codesign --display` reads the file
