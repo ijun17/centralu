@@ -202,7 +202,9 @@ async function main(): Promise<number> {
         if (scenario.otherSession && other && otherProject) await open(scenario.otherSession, { projectId: otherProject.id, cwd: other })
         const main = await open(said(scenario.turns[0]!))
         for (const text of scenario.turns.slice(1)) await turn(main, said(text))
-        for (const next of scenario.then ?? []) await window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)
+        // All armed together: the events come close behind each other (a compaction, then the end of its turn), and a wait only sees what comes after it starts
+        await Promise.all((scenario.then ?? []).map((next) => window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)))
+        if (scenario.after) await turn(main, scenario.after)
         // The recording of the session the scenario keeps: the one whose process made the tool calls
         if (window.unexpected.length) throw new Error(`the host raised cards the scenario does not expect (refused): ${window.unexpected.join(', ')}`)
         const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
