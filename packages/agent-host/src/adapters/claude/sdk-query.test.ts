@@ -54,7 +54,7 @@ describe('the options of a session\'s query', () => {
 })
 
 describe("the CLI's process", () => {
-  it('started here, ends with this host however the host ends (#1654 Q3)', () => {
+  it('hands the SDK spec to the start as it is, which adds the host watch (#1654 Q3)', () => {
     const specs: unknown[] = []
     const o = claudeQueryOptions({
       sessionId: 's1',
@@ -70,7 +70,7 @@ describe("the CLI's process", () => {
       canUseTool: () => Promise.resolve({ behavior: 'deny' as const, message: '' }),
     })
     expect(() => o.spawnClaudeCodeProcess({ command: 'claude', args: ['-p'], env: {} })).toThrow('not started')
-    expect(specs).toEqual([{ command: 'claude', args: ['-p'], env: {}, endsWithHost: true }])
+    expect(specs).toEqual([{ command: 'claude', args: ['-p'], env: {} }])
   })
 })
 
