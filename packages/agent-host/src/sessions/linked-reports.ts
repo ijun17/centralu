@@ -42,7 +42,7 @@ export type LinkedReportsHost = {
     work?: ReportWork,
     answerSeq?: number,
     part?: { wrote?: true; added?: true; cut?: true },
-  ): Promise<void>
+  ): Promise<unknown>
   /**
    * Whether a report about this session may go now (#1038 review): a child start_agent started on a linked machine
    * answers by whose its turn is (`RemoteAgents.reportGate`): its caller's goes, another's (the person's on that

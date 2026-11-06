@@ -73,7 +73,7 @@ export type DelegationHost = {
   queuedOf: (callerId: string, sessionId: string) => ChildRunResult | undefined
   readonly readGrants: Map<string, Set<string>>
   rename: (sessionId: string, name: string) => void
-  reportBackIfAwaited: (sessionId: string, ending: NormalizedEvent, answer?: string, settled?: readonly BackgroundTask[]) => Promise<void>
+  reportBackIfAwaited: (sessionId: string, ending: NormalizedEvent, answer?: string, settled?: readonly BackgroundTask[]) => Promise<string | undefined>
   routedCards: (sessionId: string, callerId: string) => RoutedCard[]
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   sleepSession: (sessionId: string) => Promise<boolean>

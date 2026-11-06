@@ -32,7 +32,8 @@ type Internals = {
   meta: Map<string, { interruption?: unknown; state: string }>
   restartPolicy: { continuingTurns: Set<string> }
   turnLostInSwap(m: unknown): void
-  quitRequesters: Map<string, string>
+  quitRequesters: Map<string, { requester: string; told?: boolean }>
+  quitTellEnded(sessionId: string, told: string | undefined): void
   selfCompaction: { compactTurn(id: string): boolean }
 }
 const inside = () => w.mgr as unknown as Internals
@@ -228,6 +229,22 @@ describe('who is not told, or told another way', () => {
     expect(stopNotices(asker)).toEqual([])
   })
 
+  it('the session the older report would tell is told by the stop notice when that report does not go out: told is what was sent, not who might be', async () => {
+    const asker = await w.callerSession()
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const started = await w.mgr.startAgent(asker, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    working(child)
+    const q = ask(asker, child, 'which branch?')
+    // The starter takes its task back: the report the older path owes it is settled already, so that path writes none
+    const task = read.tasks(addr(asker), child)[0]!
+    m.service.done(addr(asker), task.id)
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(read.reportsOn(task.id)).toEqual([])
+    expect(stopNotices(asker)[0]!.message.facts.unanswered).toEqual([{ id: q.id, recipient: addr(child), why: 'limit' }])
+  })
+
   it('the session that started the child is told of a stop the older paths tell it nothing of, once its report has gone out', async () => {
     const asker = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
@@ -277,8 +294,8 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     const other = await w.callerSession()
     const second = ask(other, child, 'and the tag?')
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
-    // The start found `asker` to be told by `tellAskerOfInterruption`
-    inside().quitRequesters.set(child, asker)
+    // The start found `asker` to be told by `tellAskerOfInterruption`, and that path told it before the mailbox was ready
+    inside().quitRequesters.set(child, { requester: asker, told: true })
 
     m.afterReady()
     expect(stopNotices(asker)).toEqual([])
@@ -293,9 +310,28 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     const { asker, child } = await asked()
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
     inside().meta.get(asker)!.interruption = { reason: 'quit', at: Date.now() }
-    inside().quitRequesters.set(child, asker)
+    inside().quitRequesters.set(child, { requester: asker, told: false })
     m.afterReady()
     expect(stopNotices(asker)).toHaveLength(1)
+    m.delivery.stop()
+  })
+
+  it('a requester the older path tells later (one the keeper kept) waits for it: told then, it gets no stop notice; not told, it gets one', async () => {
+    const one = await asked()
+    const two = await asked()
+    for (const { child, asker } of [one, two]) {
+      inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
+      inside().quitRequesters.set(child, { requester: asker })
+    }
+    m.afterReady()
+    expect(stopNotices(one.asker)).toEqual([])
+    expect(stopNotices(two.asker)).toEqual([])
+    inside().quitTellEnded(one.child, one.asker)
+    inside().quitTellEnded(two.child, undefined)
+    expect(stopNotices(one.asker)).toEqual([])
+    expect(read.row(one.question.id, addr(one.child))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
+    expect(stopNotices(two.asker)).toHaveLength(1)
+    expect(stopNotices(two.asker)[0]!.message.facts).toMatchObject({ quiet: true })
     m.delivery.stop()
   })
 

@@ -160,6 +160,11 @@ export class MessageService {
   private readonly listeners = createListeners<MailChange>((e) => console.error(`[mail] a listener failed: ${errorMessage(e)}`))
   private queued: MailChange[] = []
   private running = false
+  /**
+   * Stops whose notice to a sender waits for an older report path to end (`sessionStopped`'s `held`), by stopped session and sender, with whether it
+   * would wake. In memory: a restart in between leaves the rows released and untold, and the sender's next notice lists them
+   */
+  private readonly oldPathsOpen = new Map<string, { quiet: boolean }>()
 
   constructor(
     private readonly records: MailboxRecords,
@@ -834,11 +839,13 @@ export class MessageService {
    *
    * Who is woken (Q1): a sender that is at rest and waits on the stopped session, by a task it gave it that is still open or by a wait (`waitsOn`).
    * Every other sender reads the notice with its next mail. `quiet`: no one is woken (a quit: a restart must not wake every sender that waits).
-   * The person's notice goes to the Inbox and wakes nothing. `told`: senders the older report paths tell of this same stop (the owner of a report,
-   * the session that started it); their rows are released and marked told, with no second notice. Returns how many rows were released
+   * The person's notice goes to the Inbox and wakes nothing. An older report path may tell some senders of this same stop (the owner of a report, the
+   * session that started it): `told`, those it already told, whose rows are released and marked told; `held`, those it may still tell, whose rows are
+   * released and whose notice waits for that path to end (`oldPathEnded`), so a sender it told is not told twice and one it did not tell is told all
+   * the same. Returns how many rows were released
    */
-  sessionStopped(address: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[]; turnSeq?: number | null } = {}): number {
-    return this.sessionsStopped([{ address, why, turnSeq: opts.turnSeq ?? null, ...(opts.told ? { told: opts.told } : {}) }], opts.quiet === true)
+  sessionStopped(address: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[]; held?: readonly string[]; turnSeq?: number | null } = {}): number {
+    return this.sessionsStopped([{ address, why, turnSeq: opts.turnSeq ?? null, ...(opts.told ? { told: opts.told } : {}), ...(opts.held ? { held: opts.held } : {}) }], opts.quiet === true)
   }
 
   /** Several sessions stopped at once (a quit found at the start): in one write, so a sender of questions to many of them is told once, in one notice */
@@ -848,7 +855,7 @@ export class MessageService {
     const waiting = new Set<string>()
     this.releaseAndTell(
       (now, senders) => {
-        for (const { address, why, turnSeq, told } of stops) {
+        for (const { address, why, turnSeq, told, held } of stops) {
           if (turnSeq === null) continue
           const rows = this.records.watchedTo(address)
           const gave = new Set(rows.filter((r) => this.records.message(r.messageId)?.kind === 'task').flatMap((r) => this.records.message(r.messageId)?.sender ?? []))
@@ -859,15 +866,32 @@ export class MessageService {
             if (!m || m.kind === 'task' || !m.needsReply || m.sender === address || this.isRequest(m, address)) continue
             if (!this.records.markReleased(row.messageId, address, now, why)) continue
             released++
-            if (told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
-            else senders.add(m.sender)
             if (gave.has(m.sender) || this.opts.waitsOn?.(m.sender, address)) waiting.add(m.sender)
+            if (told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
+            else if (held?.includes(m.sender)) this.oldPathsOpen.set(oldPathKey(address, m.sender), { quiet: quiet || !waiting.has(m.sender) })
+            else senders.add(m.sender)
           }
         }
       },
       (sender) => quiet || (parseAddress(sender)?.kind === 'session' && (this.opts.atRest?.(sender) === false || !waiting.has(sender))),
     )
     return released
+  }
+
+  /**
+   * An older report path ended for `stopped`'s stop (`sessionStopped`'s `held`): `told`, it really sent `sender` the stop, whose rows are then marked
+   * told; else `sender` gets the stop notice now. Nothing when no row of `sender` waited for it
+   */
+  oldPathEnded(stopped: string, sender: string, told: boolean): void {
+    const key = oldPathKey(stopped, sender)
+    const open = this.oldPathsOpen.get(key)
+    if (!open) return
+    this.oldPathsOpen.delete(key)
+    this.run(() => {
+      const now = this.now()
+      if (told) this.records.markTold(this.records.releasedUntold(sender).filter((r) => r.recipient === stopped), now)
+      else this.tellUnanswered(sender, open.quiet || (parseAddress(sender)?.kind === 'session' && this.opts.atRest?.(sender) === false), now)
+    })
   }
 
   /**
@@ -1073,7 +1097,10 @@ export class MessageService {
   private tellUnanswered(sender: string, quiet: boolean, since: number): void {
     const kind = parseAddress(sender)?.kind
     // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
-    const rows = this.records.releasedUntold(sender).filter((r) => kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone'))
+    // Nor what an older report path may still tell (`oldPathEnded`)
+    const rows = this.records
+      .releasedUntold(sender)
+      .filter((r) => !this.oldPathsOpen.has(oldPathKey(r.recipient, sender)) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
     this.centralu(sender, {
@@ -1224,8 +1251,11 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   uncontinued: 'Centralu could not continue that session',
 }
 
-/** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders the older report paths tell of this stop */
-export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[] }
+/** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders an older report path told of this stop or may still tell */
+export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; held?: readonly string[] }
+
+/** A stopped session and a sender of questions to it, as one key */
+const oldPathKey = (stopped: string, sender: string): string => `${stopped}|${sender}`
 
 /** Why a session stopped, the words of `sessionStopped` */
 export type StopWhy = 'stopped' | 'error' | 'limit' | 'network' | 'interrupted' | 'quit' | 'shutdown' | 'uncontinued'

@@ -36,8 +36,8 @@ export type HostMailSessions = {
   mailSessions(): MailSessions
   /** The sessions whose running work `id` waits on (`SessionManager.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
   waitsOn?(id: string): string[]
-  /** The sessions the older report paths tell of the quit that cut `id`'s turn, which the start found (`SessionManager.quitTold`) */
-  quitTold?(id: string): string[]
+  /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`SessionManager.quitTold`) */
+  quitTold?(id: string): { told: string[]; held: string[] }
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
@@ -189,7 +189,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
-    stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}) }),
+    stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}) }),
+    oldPathEnded: (id, sender, told) => service.oldPathEnded(addressOf(id), addressOf(sender), told),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -236,9 +237,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         // so a restart wakes none of them. Released once; a start that finds the same mark again finds nothing to release
         // One write for all of them: the person, and a session that asked several, read one notice. The cut turn is the one this host never saw end
         const open = new Map(store.mailbox.openTurns().map((t) => [t.sessionId, t.turnSeq]))
+        const quitTold = (id: string) => {
+          const q = sessions.quitTold?.(id) ?? { told: [], held: [] }
+          return { told: q.told.map(addressOf), held: q.held.map(addressOf) }
+        }
         const stops = sessions.listSessions().flatMap((s) => {
           const why = s.interruption?.reason
-          return why === 'quit' || why === 'shutdown' ? [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, told: (sessions.quitTold?.(s.id) ?? []).map(addressOf) }] : []
+          return why === 'quit' || why === 'shutdown' ? [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, ...quitTold(s.id) }] : []
         })
         service.sessionsStopped(stops, true)
       } catch (e) {

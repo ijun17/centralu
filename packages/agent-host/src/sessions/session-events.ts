@@ -66,8 +66,13 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailPoke: (sessionId: string) => void
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
-    /** A turn ended without finishing, and why: the senders of the questions it left unanswered are told once (`MessageService.sessionStopped`), except `told`, whom the older report paths tell of it. Never throws */
-    mailStopped: (sessionId: string, why: StopWhy, told: string[]) => void
+    /**
+     * A turn ended without finishing, and why: the senders of the questions it left unanswered are told once (`MessageService.sessionStopped`), except
+     * `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
+     */
+    mailStopped: (sessionId: string, why: StopWhy, opts: { told: string[]; held: string[] }) => void
+    /** The older report paths of that stop, each resolving to the session it told: once ended, a `held` session they did not tell gets the stop notice */
+    mailStopTold: (sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
@@ -353,19 +358,23 @@ export class SessionEvents {
      * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
      */
     const stopWhy = endedTurn && e.sessionId && !this.host.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
-    if (stopWhy && e.sessionId) this.host.mailStopped(e.sessionId, stopWhy, this.reportedTo(e.sessionId, { turnBy, mailOwner: mailTurn?.ownerId, tracksInputs: !!run?.tracksInputs, owed, waited, caller: delegation?.callerId, stop: nowInterrupted }))
+    const stopTold = stopWhy && e.sessionId ? this.stopTold(e.sessionId, { mailOwner: mailTurn?.ownerId, waited, caller: delegation?.callerId }) : undefined
+    if (stopWhy && e.sessionId && stopTold) this.host.mailStopped(e.sessionId, stopWhy, stopTold)
+    /** The older report paths that may tell of this turn's end, each resolving to the session it told */
+    const sends: Promise<string | undefined>[] = []
     if (mailTurn && e.sessionId) {
       // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
-      void this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+      sends.push(this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy))
       // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
       if (this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
     } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
       // A wait settled in an earlier turn holds that turn's answer, not this one's
-      void this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy)
+      sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy))
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
     if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) void this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
-    if (endedTurn && e.sessionId && !owed) void this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy)
+    if (endedTurn && e.sessionId && !owed) sends.push(this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy))
+    if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)
@@ -407,18 +416,17 @@ export class SessionEvents {
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
   /**
-   * The sessions the older report paths tell of this same stop, read before they run (they clear their marks): the owner of the report, or of the
-   * thread's turn; a call still waiting, which reads it itself; and, when no report is owed, the session that gave the turn or started it, for a stop
-   * the tool left a mark of (the network, its interrupt). An error, a limit or a Stop leaves none, so they tell the asker nothing. Never the person's own turn (#1377)
+   * Who already knows of this stop, and who may yet be told by an older report path, read before they run (they clear their marks). `told`: a call
+   * still waiting, which read the end itself. `held`: every session those paths could tell (the owner of the report or of the thread's turn, the
+   * session that gave the turn or started it), whose stop notice waits until they ended and is sent only if they did not tell it
    */
-  private reportedTo(id: string, d: { turnBy: { by: string } | undefined; mailOwner: string | undefined; tracksInputs: boolean; owed: boolean; waited: boolean; caller: string | undefined; stop: Interruption | null }): string[] {
-    if (d.turnBy?.by === 'person') return []
+  private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[] } {
     const meta = this.host.meta
     const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
-    const told: (string | undefined)[] = [d.mailOwner ?? (d.tracksInputs ? undefined : this.host.children.awaitingReport.get(id))]
-    if (d.waited) told.push(asker)
-    if (!d.owed && d.stop && d.stop.reason !== 'reconnecting' && asker && meta.has(asker) && !wentWithItsProcess(meta.get(asker)?.interruption)) told.push(asker)
-    return told.flatMap((who) => (who && who !== id && meta.has(who) ? [who] : []))
+    const known = (who: string | undefined): who is string => !!who && who !== id && meta.has(who)
+    const told = d.waited && known(asker) ? [asker] : []
+    const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id), asker])].filter(known).filter((who) => !told.includes(who))
+    return { told, held }
   }
 
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
