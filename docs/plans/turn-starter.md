@@ -14,7 +14,7 @@ A command the tool answered without a turn had the same effect when a work turn 
 What reads `by`:
 
 - the mailbox's turn row (`onTurnStarted` → `turnRecorder` → `MailTurns.beginOther`, `mail_turns.started_by`), which
-  the pair loop guard and `lastPersonTurn` count, and from which what the turn sends gets its cause;
+  the pair's warning count (#2014) and `lastPersonTurn` read, and from which what the turn sends gets its cause;
 - `continuesPause` and `personInTurn`, each time a call arrives during the turn;
 - `turnEnded`, at the turn's end: the report goes out or not.
 

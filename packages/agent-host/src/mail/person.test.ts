@@ -357,15 +357,6 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     expect(refusedFor(() => r.person.held('release', B, [mid(26), mid(27)]))).toBe('untrusted_project')
     expect(w.row(mid(26), B)?.held).toBe('budget')
   })
-
-  it('Resume on a chain counts each of its pairs anew', () => {
-    const w = hostWorld()
-    oldThread(w.store, { id: tid(25), owner: A, at: w.clock.t - 1_000 }, [{ id: mid(28), sender: A, kind: 'note', body: 'loop', receipts: [{ recipient: B, held: 'loop' }] }])
-    const r = ready(w)
-    const pair = vi.spyOn(r.turns, 'resumePair')
-    r.person.resume({ threadId: mid(28) })
-    expect(pair).toHaveBeenCalledWith(B, A)
-  })
 })
 
 describe('closing a chain a session works on, and its state, as on main (owner decisions on #1914)', () => {

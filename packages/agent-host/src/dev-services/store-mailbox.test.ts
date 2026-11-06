@@ -332,15 +332,10 @@ describe('guards and counts', () => {
     expect(box.recipient(other, C)?.turnSeq).toBeNull()
   })
 
-  it('newSince counts messages that answer nothing; sameBody finds the same text to the same recipient', () => {
+  it('sameBody finds the same text to the same recipient', () => {
     const { box, send } = world()
-    const first = send({ sender: A, body: 'hello' }, B)
-    send({ sender: A, body: 'again', replyTo: first }, B)
+    send({ sender: A, body: 'hello' }, B)
     send({ sender: A, body: 'old', createdAt: NOW - DAY }, B)
-    expect(box.newSince(A, B, NOW - 1000)).toBe(1)
-    // A task is no new conversation: it has its own bounds
-    send({ sender: A, kind: 'task' }, B)
-    expect(box.newSince(A, B, NOW - 1000)).toBe(1)
     expect(box.sameBody(A, B, 'hello', NOW - 1000)).toBe(true)
     expect(box.sameBody(A, C, 'hello', NOW - 1000)).toBe(false)
     expect(box.sameBody(A, B, 'old', NOW - 1000)).toBe(false)
