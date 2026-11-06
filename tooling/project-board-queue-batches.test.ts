@@ -324,6 +324,29 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       ...patch,
     })
 
+  // #2098 (2026-11-07): open_pr turned the queued #2094 into a draft while batch-487 tested it; the batch was dropped ("changed while it
+  // ran"), a person marked it ready again on the same head, and the queue raised "full-tier" attention instead of batching it again
+  it('batches a pull request again, with no push, when its batch was dropped because it was a draft for a while (#2098)', async () => {
+    const second = ghRun('success', 1, ONE, { id: 951, head_branch: 'queue/batch-2', event: 'workflow_dispatch', check_suite_id: 6001 })
+    const going = [suiteCheck('full tier', null, 60000, 6000), suiteCheck('verify', null, 60001, 6000)]
+    runtime(tieredState({ on: { 'dispatch:queue/batch-1': { runs: { [ONE]: [oneRun(null)] }, checks: { [ONE]: going } } } }), TIERS)
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'ci', 'the batch running')
+    patchGh((st) => (st.prs['77'] = ghPr(77, { isDraft: true, mergeStateStatus: 'DRAFT' })))
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch dropped')
+    // Marked ready again: the same head, nothing pushed
+    patchGh((st) => {
+      st.prs['77'] = ghPr(77)
+      st.on['dispatch:queue/batch-2'] = { runs: { [ONE]: [second] }, checks: { [ONE]: fullChecks(6001) } }
+    })
+    await until((x) => stateOf(x) === 'merged' && batchesOnDisk()[1]?.state === 'done', 'the merge')
+    expect(batchesOnDisk().map((b) => [b.members.map((m: any) => m.pr), b.state])).toEqual([
+      [[77], 'dropped'],
+      [[77], 'done'],
+    ])
+    expect(notices().filter((e) => e.kind === 'attention' && String(e.text).includes('batch of one'))).toEqual([])
+  })
+
   it('lands a pull request whose own run was the quick tier through a batch of one, never from that run', async () => {
     runtime(tieredState(), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })

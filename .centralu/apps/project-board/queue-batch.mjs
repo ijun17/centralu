@@ -330,6 +330,9 @@ async function runCi(b, ctx) {
   const { defaultBranch } = await permissionsOf(repo, now)
   // A member that moved on (pushed, closed, a draft, taken out, queued again): what the batch tests is not what would land
   const left = []
+  // Left only by being a draft for a while, on the head the batch tested (open_pr turns the lower of a new stack into a draft, #2098): it
+  // is not a change to what would land, so it is batched again once it is ready, rather than sent to its session
+  const drafted = []
   for (const s of b.steps) {
     const it = findItem(q, repo, s.pr)
     if (!it || it.batch !== b.id) {
@@ -337,7 +340,10 @@ async function runCi(b, ctx) {
       continue
     }
     const pr = await readPr(repo, s.pr, QUEUE_PR_FIELDS)
-    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) left.push(s.pr)
+    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) {
+      left.push(s.pr)
+      if (pr.state === 'OPEN' && pr.isDraft && pr.headRefOid === s.head) drafted.push(s.pr)
+    }
   }
   if (left.length) {
     await cancelBatchRuns(b, renew)
@@ -345,6 +351,10 @@ async function runCi(b, ctx) {
     return drop(b, ctx, `${list(b, left, ref)} changed while it ran; ${rest.length >= KEEP_MIN ? `${list(b, rest, ref)} are tested again without ${left.length === 1 ? 'it' : 'them'}` : 'the rest go back to their own CI'}.`, {
       then: (fq, fb) => {
         // endBatch sent them all back as batchless; the rest, tested again together, are not
+        for (const p of drafted) {
+          const i = findItem(fq, fb.repo, p)
+          if (i && !i.batch) (delete i.batchless, delete i.alone)
+        }
         const again = rest.map((p) => findItem(fq, fb.repo, p)).filter((i) => i && !i.batch && ACTIVE.has(i.state))
         if (again.length >= KEEP_MIN) {
           for (const i of again) delete i.batchless
