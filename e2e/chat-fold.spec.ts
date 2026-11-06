@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { emitEvent, newSession, QUESTIONS, setup } from './fixtures/control.js'
 
 /**
@@ -11,6 +11,30 @@ const user = (seq: number, text = 'question'): Row => ({ kind: 'user', seq, stor
 const said = (seq: number, text = 'An answer.'): Row => ({ kind: 'assistant', seq, storedSeq: seq, text })
 const thought = (seq: number, text = 'Thinking it through'): Row => ({ kind: 'reasoning', seq, storedSeq: seq, text })
 const tool = (seq: number, over: Row = {}): Row => ({ kind: 'tool', seq, storedSeq: seq, tool: 'Bash', title: `step ${seq}`, callId: `c${seq}`, result: 'ok', ok: true, ...over })
+
+/**
+ * Waits until the list has come to rest: its position, its height and the rows it has measured unchanged for ten frames
+ * in a row. Counted in frames, since a list that is still measuring moves once per frame and a busy machine can let a
+ * fixed wait pass without one. Rows are measured a frame after they mount, and the list holds the view still as they are,
+ * so a position read before that is not the one the rows settle on.
+ */
+const rest = (stream: Locator) =>
+  stream.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        const state = () => `${el.scrollTop}/${el.scrollHeight}/${el.querySelector('[data-sized-rows]')?.getAttribute('data-sized-rows')}`
+        let last = state()
+        let still = 0
+        const frame = () => {
+          const now = state()
+          still = now === last ? still + 1 : 0
+          last = now
+          if (still >= 10) resolve()
+          else requestAnimationFrame(frame)
+        }
+        requestAnimationFrame(frame)
+      }),
+  )
 
 async function seed(page: Page, sid: string, items: Row[]) {
   await page.evaluate(
@@ -140,6 +164,8 @@ test('an opened run stays open when the list detaches it on a scroll away and ba
   for (let i = 0; i < 40; i++) rows.push(said(10 + i * 2, `line ${i} `.repeat(60)), tool(11 + i * 2))
   await seed(page, sid, rows)
   const stream = page.getByTestId('chat-stream')
+  // The list lands at the end of the conversation first; a move to the top before that is undone by the landing
+  await rest(stream)
   await stream.evaluate((el) => (el.scrollTop = 0))
   // The run's first row is the third of the conversation (the list's own index)
   const first = page.locator('[data-testid=fold-line][data-fold-at="2"]')
@@ -170,12 +196,18 @@ test('opening a run keeps the line where it was under the pointer', async ({ pag
   for (let i = 0; i < 12; i++) rows.push(said(10 + i * 4, `line ${i} `.repeat(30)), thought(11 + i * 4), tool(12 + i * 4), tool(13 + i * 4))
   await seed(page, sid, rows)
   const stream = page.getByTestId('chat-stream')
+  await rest(stream)
   await stream.evaluate((el) => (el.scrollTop = el.scrollHeight / 2))
+  await rest(stream)
   // A line the list has on the page near the middle; it is found again by its row, since the list moves its rows
   await expect(page.getByTestId('fold-line').first()).toBeVisible()
   const at = await page.getByTestId('fold-line').first().getAttribute('data-fold-at')
   const line = page.locator('[data-testid=fold-line][data-fold-at="' + at + '"]')
-  await line.scrollIntoViewIfNeeded()
+  // In the middle of the pane, clear of its edges: the first line on the page can stand under the pinned copy of the
+  // question at the top, which takes the pointer, and Playwright then scrolls the line clear before it presses (the
+  // log said "sticky-user intercepts pointer events"), so the place measured here would no longer be where it is pressed
+  await line.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await rest(stream)
   const before = (await line.boundingBox())!.y
   await line.click()
   await expect(line).toHaveAttribute('aria-expanded', 'true')
