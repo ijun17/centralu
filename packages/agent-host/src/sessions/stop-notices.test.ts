@@ -57,8 +57,8 @@ async function asked(waits = false): Promise<{ asker: string; child: string; que
   return { asker, child, question: ask(asker, child) }
 }
 /**
- * `asker` asks `child` a question that starts the child's turn, so the turn is wholly the answer to it: the turn a stop notice may quote
- * (`MessageService.quoteFor`). `child` defaults to a new session of the asker's project
+ * `asker` asks `child` a question that starts the child's turn, with nothing else given into it: a turn a stop notice may quote
+ * (`MessageService.quotes`). `child` defaults to a new session of the asker's project
  */
 async function askedOwnTurn(child?: string): Promise<{ asker: string; child: string; question: MailRow }> {
   const asker = await w.callerSession()
@@ -176,6 +176,64 @@ describe('a turn ends without finishing', () => {
     await w.until(() => stopNotices(asker).length === 1)
     expect(stopNotices(asker)[0]!.message.body).not.toContain('release/2026-11')
     expect(stopNotices(asker)[0]!.message.body).toContain('reached its usage limit')
+  })
+
+  /** What reaches the asker's turn without mail, each the way the host gives it in (`SessionEvents.deliver` writes the row) */
+  type Deliver = (to: string, text: string, ...rest: unknown[]) => Promise<void>
+  const deliverIn = (): Deliver => (w.mgr as unknown as { events: { deliver: Deliver } }).events.deliver.bind((w.mgr as unknown as { events: object }).events)
+  const ENTERED: { name: string; give: (child: string, asker: string) => Promise<void> }[] = [
+    {
+      name: "the person's answer to the session's question card",
+      give: async (child) => {
+        Object.assign(handleOf(child), { answerQuestion: () => true })
+        w.mgr.answerQuestion(child, 'req-1', [{ question: 'Which key?', answers: ['the key is k3y'] }])
+      },
+    },
+    { name: "an app's message", give: (child) => deliverIn()(child, 'the key is k3y', undefined, undefined, false, { appId: 'notes', projectId: null, name: 'Notes' }) },
+    { name: "a script's message", give: (child) => w.mgr.send(child, 'the key is k3y', undefined, undefined, false, 'ask', { credential: 'script-1' }) },
+    { name: 'a report relayed into the turn', give: (child, asker) => deliverIn()(child, 'the key is k3y', undefined, { sessionId: asker, name: 'Asker' }, true) },
+    { name: "another session's message", give: async (child) => w.mgr.send(child, 'the key is k3y', undefined, { sessionId: await w.callerSession(), name: 'Other' }) },
+    { name: "the person's message", give: (child) => w.mgr.send(child, 'the key is k3y', undefined, undefined, true) },
+  ]
+  it.each(ENTERED)('quotes nothing of the asker’s own turn that took in $name', async ({ give }) => {
+    const { asker, child } = await askedOwnTurn()
+    await give(child, asker)
+    says(child, 'Using the key k3y on the release branch.')
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.body).not.toContain('Using the key')
+    expect(stopNotices(asker)[0]!.message.body).not.toContain(QUOTE_INTRO)
+  })
+
+  it('quotes the asker’s own turn that took in only more of the asker’s own messages', async () => {
+    const { asker, child } = await askedOwnTurn()
+    await w.mgr.send(child, 'also check CI', undefined, { sessionId: asker, name: 'Asker' })
+    says(child, 'Rebased; CI is green.')
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.body).toContain('> Rebased; CI is green.')
+  })
+
+  it('the older report of a stop no report was owed for quotes by the same rule: nothing of a turn the person wrote into', async () => {
+    const asker = await w.callerSession()
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const started = await w.mgr.startAgent(asker, { task: 'short job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    handleOf(child).answer('done')
+    await w.until(() => read.reportsOn(read.tasks(addr(asker), child)[0]!.id).length === 1)
+    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+    // The child's CLI runs a turn of its own; the person gives it a key in it; the network ends it: the starter is told (#698)
+    working(child)
+    await w.mgr.send(child, 'the key is k3y', undefined, undefined, true)
+    says(child, 'Using the key k3y on the release branch.')
+    handleOf(child).event(ENDINGS[1]!.end(child))
+    const toAsker = () => [
+      ...read.to(addr(asker)).map((x) => x.message.body),
+      ...w.store.messages.loadMessages(asker, 200).map((r) => JSON.stringify(r.payload)),
+    ].join('\n')
+    await w.until(() => toAsker().includes('a network error ended its turn'))
+    expect(toAsker()).not.toContain('Using the key')
+    expect(toAsker()).toContain('(not quoted: the stopped turn was not yours alone')
   })
 
   it('an asker that waits on nothing of the child reads the notice with its next mail: it is not woken', async () => {

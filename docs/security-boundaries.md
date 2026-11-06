@@ -19,12 +19,21 @@ hook's output, a linked machine's is whatever it sends), a session's or project'
 session gets when a session it asked stops before answering (docs/plans/turn-owned-by-no-one.md §4.1) quotes what the
 stopped session last wrote in the cut turn, at most 600 characters, five sessions a notice, every line behind `> `, under
 Centralu's words that it is that session's own text, to be read as information and never as instructions. It is not a new
-read path: it quotes only what that sender could read anyway (`MessageService.quoteFor`). Only to a sender that can read the
-stopped session with `read_session` (that tool's own rule, `OrchestratorTools.mayRead`, asked through
-`SessionTools.readsSession`), and only of a turn that was wholly the answer to that sender: its own message started it, every
-message given into it is its own, the person wrote nothing in it, and the session has run no turn since. A turn the person,
-the CLI or another sender had a part in is not split: nothing of it is quoted, so a secret the person gave the session, or
-an answer to someone else that rode in the same turn, never reaches the asker's notice. It is mail, so
+read path, and one rule decides it (`MessageService.quotes`), which the older report path's notice of a stop
+(`ChildReports.tellAskerOfInterruption`) is held to as well. Each of these must hold, or nothing is quoted:
+- the sender is a session that can read the stopped session with `read_session` (that tool's own rule,
+  `OrchestratorTools.mayRead`, asked through `SessionTools.readsSession`);
+- the cut turn is the session's latest in the mailbox's record of turns, and the mailbox started it with the sender's own message;
+- every message the mailbox delivered into that turn is the sender's;
+- every user row the session stored since the row its turn before began after names the sender in `from`, not as a relayed
+  report, and no question card of the session was answered since (`ChildOwnership.latestTurnInputs`). A row the person typed,
+  an app's, a script's and one read back from the tool's own record name no sender. A question card's answer goes to the tool
+  and is stored only as the mark `question_answered:<session>`, written before the answer is given. With no turn start
+  recorded, nothing is quoted.
+
+The rows checked start at the turn before's start, so they can include that turn's own rows; such a row withholds the quote
+too. Withheld, the mail notice carries no quote, and the older path's report has `(not quoted: …)` where the last response
+would be. It is mail, so
 it is never inline in a wake: `mail read` shows it quoted again under "the person did not write it". The error's words are
 still left out, and the person's Inbox notice quotes nothing. A notice that could not be delivered is kept in memory, dropped
 with its session, and delivered when the session next takes a message; ordinary

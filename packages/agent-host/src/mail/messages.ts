@@ -181,6 +181,11 @@ export class MessageService {
       stoppedWords?: (sessionAddress: string) => string | null
       /** Whether `reader` can read the session `sessionAddress` with read_session (`SessionTools.readsSession`): a stop notice quotes only to such a reader; none when absent */
       mayRead?: (reader: string, sessionAddress: string) => boolean
+      /**
+       * Who gave each thing that may have entered the session's latest turn other than mail (`ChildOwnership.latestTurnInputs`): a session id, or
+       * null for anything no session provably sent (the person's text or answer to a question card, an app, a script, a relayed report). None quoted when absent
+       */
+      turnInputs?: (sessionId: string) => readonly (string | null)[]
     },
   ) {
     this.now = opts.now ?? Date.now
@@ -901,23 +906,31 @@ export class MessageService {
     return true
   }
 
-  /**
-   * What `stopped`'s stop notice to `sender` quotes of its cut turn `turnSeq` (owner, #1948; security-boundaries.md), or null. Never text `sender`
-   * could not read anyway: only to a sender that can read the stopped session with read_session (`mayRead`), and only of a turn that was wholly
-   * the answer to that sender: its own message started it (the turn's starter), every message given into it is its own, the person wrote nothing
-   * in it, and the session has run no turn since, so the words are that turn's. A turn the person, the CLI or another sender had a part in is
-   * not split: nothing of it is quoted
-   */
+  /** What `stopped`'s stop notice to `sender` quotes of its cut turn `turnSeq` (owner, #1948): its words when `quotes` allows it, else null */
   private quoteFor(stopped: string, sender: string, turnSeq: number | null): string | null {
-    const party = parseAddress(stopped)
-    if (turnSeq === null || party?.kind !== 'session' || parseAddress(sender)?.kind !== 'session' || this.opts.mayRead?.(sender, stopped) !== true) return null
-    const turn = this.records.turn(party.sessionId, turnSeq)
-    if (!turn || turn.startedBy !== 'mail' || turn.starterId === null || this.records.message(turn.starterId)?.sender !== sender) return null
-    if (this.records.nextTurnSeq(party.sessionId) !== turnSeq + 1) return null
-    if (this.records.inTurn(stopped, turnSeq).some((r) => r.message.sender !== sender)) return null
-    const typed = this.opts.personSaid?.(party.sessionId)
-    if (typed && typed.ts >= turn.startedAt) return null
-    return this.opts.stoppedWords?.(stopped) ?? null
+    return turnSeq !== null && this.quotes(stopped, sender, turnSeq) ? (this.opts.stoppedWords?.(stopped) ?? null) : null
+  }
+
+  /**
+   * Whether a stop notice to `sender` may quote the words of `stopped`'s turn `turnSeq` (its latest when absent): the one rule every stop notice
+   * to a session quotes by (security-boundaries.md), the mailbox's and the older report path's (`MailHooks.quotes`). All of it must hold:
+   * - `sender` is a session that can read `stopped` with read_session (`mayRead`, that tool's own rule);
+   * - the turn is the session's latest (no turn since), and the mailbox started it with `sender`'s own message (the turn's starter);
+   * - every message the mailbox gave into it is from `sender`;
+   * - everything else that may have entered it (`turnInputs`: each user row stored since the turn before began, and a question card answered
+   *   since) was sent by `sender`: none from the person, an app, a script, a relayed report or another session.
+   * A turn anyone else had a part in, or one these records cannot tell, is not split: nothing of it is quoted to anyone
+   */
+  quotes(stopped: string, sender: string, turnSeq?: number): boolean {
+    const [party, from] = [parseAddress(stopped), parseAddress(sender)]
+    if (party?.kind !== 'session' || from?.kind !== 'session' || this.opts.mayRead?.(sender, stopped) !== true) return false
+    const seq = turnSeq ?? this.records.nextTurnSeq(party.sessionId) - 1
+    if (this.records.nextTurnSeq(party.sessionId) !== seq + 1) return false
+    const turn = this.records.turn(party.sessionId, seq)
+    if (!turn || turn.startedBy !== 'mail' || turn.starterId === null || this.records.message(turn.starterId)?.sender !== sender) return false
+    if (this.records.inTurn(stopped, seq).some((r) => r.message.sender !== sender)) return false
+    const given = this.opts.turnInputs?.(party.sessionId)
+    return given !== undefined && given.every((id) => id === from.sessionId)
   }
 
   /**
@@ -1122,7 +1135,7 @@ export class MessageService {
       .filter((r) => !waiting.has(`${r.messageId}/${r.recipient}`) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
-    // A session reads what the stopped session last said in a turn that was its own (`quoteFor`), as that session's words; the person reads it in the conversation itself
+    // A session reads what the stopped session last said in the cut turn when `quotes` allows it, as that session's words; the person reads it in the conversation itself
     const stopped = kind === 'session' ? [...new Set(unanswered.filter((u) => isStop(u.why)).map((u) => u.recipient))].slice(0, QUOTED_STOPS) : []
     const cutTurn = (r: string): number | null => {
       const seqs = new Set(rows.filter((x) => x.recipient === r && isStop(x.releasedWhy)).map((x) => x.turnSeq))

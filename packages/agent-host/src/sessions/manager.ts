@@ -105,6 +105,11 @@ export type AgentProcessHost = {
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
+  /**
+   * Whether a notice to `readerId` of `stoppedId`'s stop may quote the words of its latest turn (`MessageService.quotes`, security-boundaries.md):
+   * the one rule every stop notice to a session quotes by. Nothing is quoted without it
+   */
+  quotes?(stoppedId: string, readerId: string): boolean
   /** A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): the senders of the questions it left unanswered are told once. Quiet: wakes no one */
   stopped?(sessionId: string, why: StopWhy, opts?: { quiet?: boolean; told?: readonly string[]; held?: readonly string[] }): void
   /** An older report path held by `stopped` (its `held`) ended: `told`, it really told `senderId` of the stop; else the stop notice tells it now */
@@ -1084,6 +1089,7 @@ export class SessionManager {
     this.children.onPersonWork(hooks.personWork)
     this.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
     this.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
+    this.reports.useQuotes(hooks.quotes ? (stoppedId, readerId) => hooks.quotes?.(stoppedId, readerId) === true : undefined)
     this.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
@@ -1855,6 +1861,8 @@ export class SessionManager {
    */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): void {
     const handle = this.requireHandle(sessionId)
+    // Marked first: an answer the tool took and the mark lost would let a stop notice quote a turn that holds the person's answer (#1948)
+    this.children.noteQuestionAnswered(sessionId)
     const landed = handle.answerQuestion?.(requestId, answers) ?? false
     if (!landed) {
       this.emit({ type: 'question_resolved', sessionId, requestId })
@@ -2604,6 +2612,11 @@ export class SessionManager {
   /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
   orchestratorId(): string | null {
     return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
+  }
+
+  /** `ChildOwnership.latestTurnInputs`: who gave what may have entered the session's latest turn, which a stop notice quotes only to its one asker */
+  turnInputs(sessionId: string): (string | null)[] {
+    return this.children.latestTurnInputs(sessionId)
   }
 
   /** `SessionTools.readsSession`: what a stop notice may quote of a session to another */

@@ -1,7 +1,7 @@
 /**
  * A stop notice that waits for an older report path (docs/plans/turn-owned-by-no-one.md §4.1, `MessageService.sessionStopped`'s `held`), and what a
- * stop notice quotes of the stopped session's cut turn (`quoteFor`, security-boundaries.md): one stop of a pair held at a time, a hold that never
- * ends rescued after the wait, the words taken when the turn was cut, and nothing quoted of a turn that was not wholly the sender's answer.
+ * stop notice quotes of the stopped session's cut turn (`MessageService.quotes`, security-boundaries.md): one stop of a pair held at a time, a hold
+ * that never ends rescued after the wait, the words taken when the turn was cut, and nothing quoted unless each part of that rule holds.
  */
 import { describe, expect, it } from 'vitest'
 import { parseAddress } from './address.js'
@@ -13,13 +13,14 @@ function stops() {
   const w = world()
   const words = { now: 'Rebased onto main; running the tests.' as string | null }
   const reads = { ok: true }
-  const typed = new Map<string, number>()
+  /** What else entered each session's latest turn (`turnInputs`): the asker's own rows unless a test adds another's */
+  const entered = new Map<string, (string | null)[]>()
   const mail = new MessageService(w.store.mailbox, w.reach, {
     hostId: HOST,
     now: () => w.clock.t,
     stoppedWords: () => words.now,
     mayRead: () => reads.ok,
-    personSaid: (id) => (typed.has(id) ? { seq: 1, ts: typed.get(id)! } : null),
+    turnInputs: (id) => entered.get(id) ?? [],
   })
   /** `sender` asks `to` a question that starts `to`'s next turn (`own`), or is given into a turn the CLI started */
   const askInTurn = (sender: string, to: string, own = true) => {
@@ -34,7 +35,7 @@ function stops() {
       .pendingFor(to, w.clock.t + 60_000)
       .filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
       .map((p) => ({ ids: (p.message.facts.unanswered as { id: string }[]).map((u) => u.id), body: p.message.body }))
-  return { w, mail, words, reads, typed, askInTurn, notices }
+  return { w, mail, words, reads, entered, askInTurn, notices }
 }
 
 const idOf = (address: string) => {
@@ -99,7 +100,8 @@ describe('what a stop notice quotes of the cut turn', () => {
       const q = s.mail.send(C, { to: [B], text: 'and mine?', needsReply: true }).message
       s.w.store.mailbox.markDelivered(B, [q.id], s.w.clock.t, seq)
     }],
-    ['the person writing into the turn', (s: ReturnType<typeof stops>) => void s.typed.set(idOf(B), s.w.clock.t)],
+    ['the person writing into the turn, or answering its question card', (s: ReturnType<typeof stops>) => void s.entered.set(idOf(B), [null])],
+    ['another session’s message given into the turn outside the mailbox', (s: ReturnType<typeof stops>) => void s.entered.set(idOf(B), [idOf(A), idOf(C)])],
     ['a turn the session ran after the cut one', (s: ReturnType<typeof stops>) => void s.w.startTurn(B, null)],
   ] as const)('%s: nothing quoted, the stop still told', (_, change) => {
     const s = stops()

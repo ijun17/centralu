@@ -42,11 +42,13 @@ export type HostMailSessions = {
   stoppedWords?(id: string): string | null
   /** Whether `readerId` can read `targetId` with read_session (`SessionManager.readsSession`): only then is a stopped session's text quoted to it */
   readsSession?(readerId: string, targetId: string): boolean
+  /** Who gave what may have entered the session's latest turn (`SessionManager.turnInputs`): only a turn its asker alone gave anything is quoted to it */
+  turnInputs?(id: string): readonly (string | null)[]
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords' | 'readsSession'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'mailSeats' | 'orchestratorId' | 'orchestratorAsks' | 'keptInTurn' | 'oldOwes' | 'mailSessions' | 'waitsOn' | 'quitTold' | 'stoppedWords' | 'readsSession' | 'turnInputs'>,
   orchestratorHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mailSeats(orchestratorHasMailCommand)
@@ -64,6 +66,7 @@ export function mailSessionsOf(
     quitTold: (id) => mgr.quitTold(id),
     stoppedWords: (id) => mgr.stoppedWords(id),
     readsSession: (readerId, targetId) => mgr.readsSession(readerId, targetId),
+    turnInputs: (id) => mgr.turnInputs(id),
   }
 }
 
@@ -142,6 +145,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const [from, to] = [parseAddress(reader), parseAddress(target)]
       return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
     },
+    ...(sessions.turnInputs ? { turnInputs: (id: string) => sessions.turnInputs?.(id) ?? [null] } : {}),
     waitsOn: (sender, stopped) => {
       const [from, to] = [parseAddress(sender), parseAddress(stopped)]
       return from?.kind === 'session' && to?.kind === 'session' && (sessions.waitsOn?.(from.sessionId) ?? []).includes(to.sessionId)
@@ -205,6 +209,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}) }),
     oldPathEnded: (id, sender, told) => service.oldPathEnded(addressOf(id), addressOf(sender), told),
+    quotes: (id, reader) => service.quotes(addressOf(id), addressOf(reader)),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),

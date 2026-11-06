@@ -42,6 +42,8 @@ const FOR_MODEL: Naming = {
 
 /** In a report's place of the last response when it is not read: Centralu's words, not the session's */
 const NOT_READ = "(not read: the session's last turn was the person's; read_session shows it)"
+/** A stopped turn's words a stop notice does not quote (#1948): the turn was not the asker's alone, or the asker cannot read the session */
+const NOT_QUOTED = '(not quoted: the stopped turn was not yours alone, or you cannot read that session)'
 
 /** The one word of Centralu's that says how a turn ended, for the mailbox's wake (the same cases `deliverReport` words in full) */
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
@@ -184,6 +186,12 @@ export class ChildReports {
   private mailReport: ((ownerId: string, childId: string, draft: ReportDraft) => ReportedAs) | undefined
   useMail(hook: ChildReports['mailReport']): void {
     this.mailReport = hook
+  }
+
+  /** The rule a stop notice quotes the stopped turn by (`MailHooks.quotes`), set by the host when it has a mailbox; with none, nothing is quoted */
+  private quotes: ((stoppedId: string, readerId: string) => boolean) | undefined
+  useQuotes(rule: ChildReports['quotes']): void {
+    this.quotes = rule
   }
 
   /** The draft of a report for the mailbox, and what it answered; `none` when there is no mailbox, or it failed */
@@ -403,7 +411,9 @@ export class ChildReports {
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const { name, project } = this.reportedAs(m)
     const { preview, seq } = this.stoppedTurnAnswer(sessionId)
-    return (await this.deliverReport(asker, sessionId, name, project, preview, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)) ? asker : undefined
+    // Its words only by the rule every stop notice quotes by (#1948): `MailHooks.quotes`, `MessageService.quotes`
+    const quoted = preview === '' || this.quotes?.(sessionId, asker) === true ? preview : NOT_QUOTED
+    return (await this.deliverReport(asker, sessionId, name, project, quoted, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)) ? asker : undefined
   }
 
   /**
@@ -527,7 +537,7 @@ export class ChildReports {
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
     // Centralu's placeholders for words that were not read are not the session's answer, and are not kept as one
-    const answered = preview !== '' && preview !== NOT_READ && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
+    const answered = preview !== '' && preview !== NOT_READ && preview !== NOT_QUOTED && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
     // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
     const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
     const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''
