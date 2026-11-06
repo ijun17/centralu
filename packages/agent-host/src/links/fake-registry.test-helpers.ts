@@ -4,7 +4,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { createServer, type Server } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /**
  * A local stand-in for registry.npmjs.org and nodejs.org/dist (links/install tests): signed version
@@ -257,4 +258,17 @@ export function hungListening(dataDir: string): Promise<boolean> {
     socket.once('connect', () => (socket.destroy(), resolve(true)))
     socket.once('error', () => resolve(false))
   })
+}
+
+const SERVE_FILES = pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve-files.mjs')).href
+
+/**
+ * Whether the process a `FAKE_HANGS` version left behind is still the one its lock names: the launcher's own reading of
+ * `host.lock` (`lockHolderIsAlive`: the pid and the time it started, or created before the lock was written), so a freed pid
+ * that another process took reads as gone. What a test's cleanup asks before it kills that pid, port or no port: a fake that
+ * failed before it listened still leaves its process behind.
+ */
+export async function hungHolderAlive(dataDir: string): Promise<boolean> {
+  const { lockHolderIsAlive } = (await import(SERVE_FILES)) as { lockHolderIsAlive: (dir: string) => boolean }
+  return lockHolderIsAlive(dataDir)
 }
