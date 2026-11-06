@@ -151,8 +151,8 @@ describe('a CLI that must end with its host', () => {
   it.skipIf(!unix)('ends Claude Code when its host is SIGKILLed', async () => {
     await endsWithItsHost((cli) => [
       `import { claudeQueryOptions } from ${moduleUrl('claude/sdk-query.ts')}`,
-      `import { spawnLocalAgent } from ${moduleUrl('local-process.ts')}`,
-      "const o = claudeQueryOptions({ sessionId: 's1', opts: { sessionId: 's1', cwd: process.cwd(), permissionPreset: 'normal' }, executablePath: undefined, servers: {}, permissionOptions: { permissionMode: 'default' }, codeIntelligence: {}, spawn: spawnLocalAgent, canUseTool: async () => ({ behavior: 'deny', message: '' }) })",
+      `import { startToolProcess } from ${moduleUrl('core/tool-process.ts')}`,
+      "const o = claudeQueryOptions({ sessionId: 's1', opts: { sessionId: 's1', cwd: process.cwd(), permissionPreset: 'normal' }, executablePath: undefined, servers: {}, permissionOptions: { permissionMode: 'default' }, codeIntelligence: {}, spawn: (s) => startToolProcess(s), canUseTool: async () => ({ behavior: 'deny', message: '' }) })",
       `o.spawnClaudeCodeProcess({ command: ${JSON.stringify(cli.command)}, args: ${JSON.stringify(cli.args)}, env: process.env })`,
     ])
   })
