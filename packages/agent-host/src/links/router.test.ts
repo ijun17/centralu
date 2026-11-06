@@ -965,32 +965,38 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     // The two writes that go to every machine at once take the same rule as a call to one machine (`forward`): the window's own is never an attempt to connect
     describe('the writes the router splits across machines', () => {
       const window = { client: 1, rights: 'full', window: true } as const
-      const down = () => {
+      /** m1 is down; `waits`: nothing will connect it (the person disconnected it), else the hub keeps trying and a call may start an attempt */
+      const down = (waits: boolean) => {
         const r = rig()
         let tried = 0
         r.localAnswers['projects.reorder'] = []
         r.m1.reachable = false
-        r.m1.waitsForPerson = true
+        r.m1.waitsForPerson = waits
         Object.assign(r.m1, { reachForCall: async () => void tried++ })
         return { ...r, tried: () => tried }
       }
       const rule = { id: encodeNumber(1, 7) }
 
-      it('does not try to connect a machine for a rule deleted from the window, and says where to connect it', async () => {
-        const { router, tried } = down()
-        const refused = await router.handle('approvals.deleteRule', rule, window).catch((e: Error) => e.message)
-        expect(refused).toBe('Machine m1 is not connected. Connect it in Settings → Machines, then try again.')
+      it('does not try to connect a machine that is down for a rule deleted from the window', async () => {
+        const { router, tried } = down(false)
+        await router.handle('approvals.deleteRule', rule, window).catch(() => undefined)
         expect(tried()).toBe(0)
       })
 
-      it('does not try to connect a machine for a project order sent from the window', async () => {
-        const { router, tried } = down()
+      it('does not try to connect a machine that is down for a project order sent from the window', async () => {
+        const { router, tried } = down(false)
         await router.handle('projects.reorder', { orderedIds: ['m1.p1'] }, window)
         expect(tried()).toBe(0)
       })
 
+      it('tells the window where to connect a machine the person disconnected, not to ask the person', async () => {
+        const { router } = down(true)
+        const refused = await router.handle('approvals.deleteRule', rule, window).catch((e: Error) => e.message)
+        expect(refused).toBe('Machine m1 is not connected. Connect it in Settings → Machines, then try again.')
+      })
+
       it('still tries for an agent’s own (no socket behind it)', async () => {
-        const { router, tried } = down()
+        const { router, tried } = down(false)
         await router.handle('approvals.deleteRule', rule).catch(() => undefined)
         await router.handle('projects.reorder', { orderedIds: ['m1.p1'] })
         expect(tried()).toBe(2)
