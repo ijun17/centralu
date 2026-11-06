@@ -6,7 +6,9 @@ import { gitWrapper } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { SLOW } from './test-timing.js'
 import { g, GIT_ENV, githubStandIn } from './git-fixture.test-helpers.js'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { attributeByPaths, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, passedAfterBlame, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+import { attributeByPaths, BLAME_KEEP_MS, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, passedAfterBlame, rememberBlame, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { blameRestedOnMore } from '../.centralu/apps/project-board/main-revert.mjs'
 import { REPO_ROOT, R, SHA, ghCheck, ghRun, ghPr, type Gh, ghState, appRef, root, rt, fake, IDLE_SERVER, NO_TIERS, FAST_LAND, runtime, call, gh, patchGh, writes, ghCalls, filesNamed, queueFile, queueOnDisk, notices, until, polls, stateOf, short2, watch, seedQueue, landed, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('agents find the board tool for the gh command they would type', { timeout: 60_000 * SLOW }, () => {
@@ -1135,9 +1137,11 @@ describe("the main guard takes back its revert and issue when the run it blamed 
   const stateOfIssue = (n: number) => (gh().issueStates ?? {})[n]
   const closes = () => writes().filter((w) => w[0] === 'close')
   const mainGreenNotices = () => notices().filter((e) => e.kind === 'main-green')
+  const onIssue = () => (gh().comments ?? []).filter((c: { issue: number }) => c.issue === 501)
+  const retracted = () => !!guardOnDisk().hunt?.retracted?.done || guardOnDisk().hunt === null
 
   /** A guard that blamed #82, the only commit since the last green one (its rerun failed too), reverted it in #600 and filed #501; the guard is then waiting for the next run */
-  async function blamed() {
+  async function blamed({ oneFailure = false } = {}) {
     const repo = mainRepo([{ subject: 'feat(ui): change 82 (#82)', files: ['packages/ui/src/b.ts'] }])
     const c2 = repo.shas[0]!
     seedQueue([{ repo: R, pr: 82, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: c2, title: 'feat(ui): change 82', updatedAt: new Date().toISOString(), reruns: {} }])
@@ -1148,21 +1152,28 @@ describe("the main guard takes back its revert and issue when the run it blamed 
     })
     await call('merge_queue')
     await until(() => guardOnDisk().hunt?.outcome === 'reverting' && mainRedNotices().length > 0, 'the revert')
+    if (oneFailure) {
+      // As a run an older driver, or a person, blamed on after one failed attempt
+      const file = queueFile()
+      const q = JSON.parse(readFileSync(file, 'utf8'))
+      q.guard.hunt.attempt = 1
+      writeFileSync(file, JSON.stringify(q))
+    }
     return { repo, c2 }
   }
 
-  it('closes the revert (out of the queue first) and the issue, each with the reason, and tells the session that queued the commit', async () => {
-    const { repo, c2 } = await blamed()
-    expect(guardOnDisk().hunt).toMatchObject({ run: 990, attempt: 2, issue: 501, revert: { pr: 600 } })
+  it('closes the revert (out of the queue after the close) and the issue, each with the reason, when the blame rested on one failure, and tells the session that queued the commit', async () => {
+    const { repo, c2 } = await blamed({ oneFailure: true })
+    expect(guardOnDisk().hunt).toMatchObject({ run: 990, issue: 501, revert: { pr: 600 } })
     // A person reruns the run; the same job passes
     patchGh((s) => (s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }))
-    await until(() => !!guardOnDisk().hunt?.retracted?.done || guardOnDisk().hunt === null, 'the retraction')
+    await until(retracted, 'the retraction')
     await polls(8)
     // Closed once each, with the reason; the revert is gone from the queue and was never announced as closed without merging
     expect(closes()).toEqual([['close', '600', expect.stringContaining('passed when its jobs were run again (attempt 3)')]])
     expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'not_planned' })
-    expect(gh().comments.filter((c: { issue: number }) => c.issue === 501)).toHaveLength(1)
-    expect(gh().comments.find((c: { issue: number }) => c.issue === 501).body).toContain('the failure was intermittent')
+    expect(onIssue()).toHaveLength(1)
+    expect(onIssue()[0].body).toContain('the failure was intermittent')
     expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)
     expect(notices().filter((e) => e.kind === 'closed')).toEqual([])
     // The session that queued it hears that main is green: once
@@ -1170,21 +1181,106 @@ describe("the main guard takes back its revert and issue when the run it blamed 
     expect(mainGreenNotices()[0]).toMatchObject({ owner: 'tester', text: expect.stringContaining(`main is green again at ${c2.slice(0, 7)}`) })
     expect(guardOnDisk().hunt ?? null).toBe(null)
     expect(guardOnDisk().green).toBe(c2)
+    // The note on the known failures issue does not say that nothing was blamed or reverted: something was, and is taken back
+    const known = (gh().comments ?? []).filter((c: { issue: number }) => c.issue === 368)
+    expect(known).toHaveLength(1)
+    expect(known[0].body).toContain('a commit was blamed earlier (the revert #600 and the issue #501)')
+    expect(known[0].body).not.toContain('nothing was reverted')
+  })
+
+  it('withdraws the revert but leaves the issue open, labelled flaky-suspect, when the blame rested on more than one failed attempt', async () => {
+    const { repo, c2 } = await blamed()
+    expect(guardOnDisk().hunt).toMatchObject({ run: 990, attempt: 2, issue: 501, revert: { pr: 600 } })
+    patchGh((s) => (s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }))
+    await until(retracted, 'the retraction')
+    await polls(8)
+    // Main stays as it was: the unmerged revert is closed and out of the queue; the commit is not put back, and a person decides about the issue
+    expect(closes()).toEqual([['close', '600', expect.stringContaining('The commit stays on main as it was; a person decides.')]])
+    expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)
+    expect(stateOfIssue(501)).toBeUndefined()
+    expect(onIssue()).toHaveLength(1)
+    expect(onIssue()[0].body).toContain('this stays open for a person to judge')
+    expect(onIssue()[0].body).toContain('1 failed attempt of the run')
+    expect(writes().filter((w) => w[0] === 'labels')).toEqual([['labels', '501', ['flaky-suspect']]])
+    expect(mainGreenNotices()).toHaveLength(1)
+    expect(mainGreenNotices()[0]!.text).toContain('stays open: the blame rested on more than one failure')
   })
 
   it('leaves a revert that already landed alone, and only comments on the issue, which stays open', async () => {
-    const { repo, c2 } = await blamed()
+    const { repo, c2 } = await blamed({ oneFailure: true })
     patchGh((s) => {
       s.prs['600'].state = 'MERGED'
       s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
     })
-    const onIssue = () => (gh().comments ?? []).filter((c: { issue: number }) => c.issue === 501)
     await until(() => onIssue().length > 0, 'the comment')
     await polls(8)
     expect(closes()).toEqual([])
     expect(stateOfIssue(501)).toBeUndefined()
     expect(onIssue()).toHaveLength(1)
     expect(onIssue()[0].body).toContain('had already landed')
+  })
+
+  it('still takes the blame back when main went green over it first: the revert landed, its run passed, and only then the blamed run passed', async () => {
+    const { repo, c2 } = await blamed({ oneFailure: true })
+    // The revert merged, and main's newest run is green: the hunt is over and its record is gone from the guard's state
+    patchGh((s) => {
+      s.prs['600'].state = 'MERGED'
+      s.branchRuns = { main: [mainRun(995, 'a'.repeat(40), 'success'), mainRun(990, c2, 'failure'), mainRun(980, repo.green, 'success')] }
+    })
+    await until(() => guardOnDisk().hunt === null, 'main green')
+    expect(guardOnDisk().blamed).toMatchObject([{ run: 990, issue: 501, revert: { pr: 600 } }])
+    // Then a person's rerun of the blamed run passes
+    patchGh((s) => (s.branchRuns = { main: [mainRun(995, 'a'.repeat(40), 'success'), rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }))
+    await until(() => onIssue().length > 0 && mainGreenNotices().length > 0, 'the retraction')
+    await polls(6)
+    expect(closes()).toEqual([])
+    expect(onIssue()).toHaveLength(1)
+    expect(onIssue()[0].body).toContain('had already landed')
+    expect(mainGreenNotices()).toHaveLength(1)
+    expect(guardOnDisk().blamed ?? []).toEqual([])
+  })
+
+  it('posts nothing twice across a restart, and leaves an issue a person closed alone', async () => {
+    const { repo, c2 } = await blamed({ oneFailure: true })
+    // A try that stopped after its comment: the comment is on the issue (with its mark), the progress was not written
+    patchGh((s) => {
+      s.comments = [...(s.comments ?? []), { issue: 501, body: '<!-- main-guard-retract run=990 -->\nMain failed and passed.' }]
+      s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
+    })
+    await until(retracted, 'the retraction')
+    await polls(6)
+    expect(onIssue()).toHaveLength(1)
+    expect(mainGreenNotices()).toHaveLength(1)
+  })
+
+  it('leaves an issue a person closed already without a comment', async () => {
+    const { repo, c2 } = await blamed({ oneFailure: true })
+    patchGh((s) => {
+      s.issueStates = { ...(s.issueStates ?? {}), 501: { state: 'closed', state_reason: 'completed' } }
+      s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
+    })
+    await until(retracted, 'the retraction')
+    await polls(6)
+    expect(onIssue()).toEqual([])
+    expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'completed' })
+    expect(closes()).toHaveLength(1)
+  })
+
+  it('keeps the revert in the queue while the close is refused (merged between the read and the close), and closes it when it can', async () => {
+    const { repo, c2 } = await blamed({ oneFailure: true })
+    patchGh((s) => {
+      s.closeFails = true
+      s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
+    })
+    await polls(10)
+    // Refused: nothing is taken out of the queue, announced or written down as done
+    expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(true)
+    expect(guardOnDisk().hunt?.retracted?.done).toBeUndefined()
+    expect(closes()).toEqual([])
+    patchGh((s) => (s.closeFails = false))
+    await until(retracted, 'the retraction')
+    expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)
+    expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'not_planned' })
   })
 
   it('closes nothing while the run is still failing, when only a newer run passed, or when the red run is another one', async () => {
@@ -1208,14 +1304,35 @@ describe("the main guard takes back its revert and issue when the run it blamed 
     expect(passedAfterBlame({ hunt, runs: [run({})] })).toMatchObject({ id: 990 })
   })
 
+  it('keeps a finished hunt as long as it can be taken back, and no longer', () => {
+    const NOW = Date.parse('2026-11-07T12:00:00Z')
+    const ended = (over: object = {}) => ({ run: 990, endedAt: new Date(NOW - 3600_000).toISOString(), issue: 501, revert: { pr: 600 }, probe: { branch: 'x' }, ...over })
+    expect(rememberBlame([], ended(), NOW)).toEqual([{ run: 990, endedAt: expect.any(String), issue: 501, revert: { pr: 600 } }])
+    // Nothing filed, still under way, or taken back already: nothing to keep
+    expect(rememberBlame([], ended({ issue: undefined, revert: undefined }), NOW)).toBeNull()
+    expect(rememberBlame([], ended({ endedAt: undefined }), NOW)).toBeNull()
+    expect(rememberBlame([], ended({ retracted: { done: 'x' } }), NOW)).toBeNull()
+    // The list drops what is done or older than the bound, and the same run once
+    const old = { run: 1, endedAt: new Date(NOW - BLAME_KEEP_MS - 1).toISOString() }
+    const done = { run: 2, endedAt: new Date(NOW).toISOString(), retracted: { done: 'x' } }
+    const kept = { run: 3, endedAt: new Date(NOW - 1000).toISOString() }
+    expect(rememberBlame([old, done, kept, { run: 990, endedAt: new Date(NOW).toISOString() }], ended(), NOW)!.map((b: { run: number }) => b.run)).toEqual([3, 990])
+    // The evidence the blame rested on
+    expect(blameRestedOnMore({ attempt: 1 })).toBe(false)
+    expect(blameRestedOnMore({})).toBe(false)
+    expect(blameRestedOnMore({ attempt: 2 })).toBe(true)
+    expect(blameRestedOnMore({ attempt: 1, culprit: { how: 'bisected: the full tier passed on the commit before it and failed on it' } })).toBe(true)
+    expect(blameRestedOnMore({ attempt: 1, culprit: { how: 'the only commit since the last green one' } })).toBe(false)
+  })
+
   it('does not take a revert it could not read for gone: GitHub failing on the read is tried again, so the revert is still closed', async () => {
-    const { repo, c2 } = await blamed()
+    const { repo, c2 } = await blamed({ oneFailure: true })
     // The next two reads of any pull request are dropped connections, not GitHub saying the revert does not exist
     patchGh((s) => {
       s.viewLost = { n: 2 }
       s.branchRuns = { main: [rerunPassed(990, c2, 3), mainRun(980, repo.green, 'success')] }
     })
-    await until(() => !!guardOnDisk().hunt?.retracted?.done || guardOnDisk().hunt === null, 'the retraction')
+    await until(retracted, 'the retraction')
     expect(closes()).toEqual([['close', '600', expect.stringContaining('passed when its jobs were run again')]])
     expect(stateOfIssue(501)).toEqual({ state: 'closed', state_reason: 'not_planned' })
     expect(itemsOnDisk().some((i: { pr: number }) => i.pr === 600)).toBe(false)

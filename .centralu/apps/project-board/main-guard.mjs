@@ -222,7 +222,11 @@ async function noteFlakes({ repo, runs, g, update }) {
       if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].flaked = true
     })
     if (!CI.knownFailures) continue
-    const body = `${GUARD_NOTE}\nIntermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so no commit was blamed and nothing was reverted.${r.line ? ` The first failing line: "${r.line}"` : ''}`
+    // A run the guard blamed a commit for did lead to a revert or an issue (#2082): the note says so, and that they are taken back
+    const blame = [g.hunt, ...(g.blamed ?? [])].find((h) => h && String(h.run) === id && (h.issue != null || h.revert?.pr))
+    const filed = blame ? [blame.revert?.pr ? `the revert #${blame.revert.pr}` : null, blame.issue != null ? `the issue #${blame.issue}` : null].filter(Boolean).join(' and ') : ''
+    const outcome = blame ? `a commit was blamed earlier (${filed}), which the main guard takes back` : 'no commit was blamed and nothing was reverted'
+    const body = `${GUARD_NOTE}\nIntermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so ${outcome}.${r.line ? ` The first failing line: "${r.line}"` : ''}`
     await postComment(repo, CI.knownFailures, body).catch((e) => {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     })
@@ -238,6 +242,22 @@ export function passedAfterBlame({ hunt, runs }) {
   if (!hunt?.endedAt || hunt.retracted?.done || hunt.repeats || (hunt.issue == null && !hunt.revert?.pr)) return null
   const run = runs.find((r) => String(r.id) === String(hunt.run))
   return run && run.status === 'completed' && run.conclusion === 'success' && (run.attempt ?? 1) > (hunt.attempt ?? 1) ? run : null
+}
+
+/** How long a finished hunt's revert and issue can still be taken back after main went green or another hunt began (#2082) */
+export const BLAME_KEEP_MS = Number(process.env.PROJECT_BOARD_QUEUE_BLAME_KEEP_MS) || 3 * 24 * 3600_000
+const BLAMED_KEPT = 10
+
+/**
+ * `guard.blamed` with a finished hunt added: what `passedAfterBlame` needs of it once main is green again (the revert that lands
+ * has its own green run, and only then does a person rerun the run that was blamed), so the retraction is not lost with the hunt.
+ * Kept until retracted, or `BLAME_KEEP_MS`. Null when there is nothing to add.
+ */
+export function rememberBlame(blamed, hunt, now) {
+  if (!hunt?.endedAt || hunt.retracted?.done || (hunt.issue == null && !hunt.revert?.pr)) return null
+  const fresh = (blamed ?? []).filter((b) => !b.retracted?.done && now - Date.parse(b.endedAt) < BLAME_KEEP_MS && String(b.run) !== String(hunt.run))
+  const { probe: _probe, ...record } = hunt
+  return [...fresh, record].slice(-BLAMED_KEPT)
 }
 
 /** The text of the step that failed first in a failed job's log; empty when the log cannot be read */
@@ -292,11 +312,18 @@ export async function guardTick({ q, update, now = clock(), renew, act, retract,
   const { green, red, unfinished } = mainVerdict(runs)
   await noteFlakes({ repo, runs, g, update })
   // The run a revert and an issue were filed for passed when rerun: the guard takes them back (#2082)
-  const passed = retract ? passedAfterBlame({ hunt: g.hunt, runs }) : null
-  if (passed && !(await retract(g.hunt, passed))) return { did: 'yielded' }
+  // The hunt under way or ended, and the ended ones main went green over (`guard.blamed`)
+  const passed = retract ? [g.hunt, ...(g.blamed ?? [])].map((h) => ({ h, run: passedAfterBlame({ hunt: h, runs }) })).find((x) => x.run) : null
+  if (passed && !(await retract(passed.h, passed.run))) return { did: 'yielded' }
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
-  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
+  const save = (patch) =>
+    update((fresh) => {
+      const guard = fresh.guard ?? {}
+      // A finished hunt that main's green or another hunt replaces is kept, with what it filed, to be taken back later
+      const blamed = 'hunt' in patch && guard.hunt && String(patch.hunt?.run) !== String(guard.hunt.run) ? rememberBlame(guard.blamed, guard.hunt, now) : null
+      fresh.guard = { ...guard, pending, unfinished, ...patch, ...(blamed ? { blamed } : {}), nextAt: new Date(now + GUARD_MS).toISOString() }
+    })
   const hunt = g.hunt ?? null
   const hunted = g.hunted ?? []
   const known = g.known ?? []

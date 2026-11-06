@@ -818,13 +818,22 @@ looked into).
 - **A blame is taken back when the run passes (#2082, 2026-11-06)**: the guard blamed #2076 for one failure of a Windows job, filed
   a revert and an issue, and a person's rerun of the run (attempt 2) then passed; both were closed by hand. A hunt that ended with
   a revert or an issue (`guard.hunt`, which keeps the run's id and the attempt it saw fail, `attempt`) is retracted when that same run
-  completes `success` on a later attempt (`passedAfterBlame`, `retractRed` in main-revert.mjs): the revert pull request leaves the
-  merge queue (so it is not announced as closed without merging) and is closed with a comment, the issue is commented on and closed
-  as not planned, and the session that queued the commit gets a `main-green` message. A revert that has already landed is left
-  alone and the issue stays open with a comment, since putting a commit back is a person's call. A newer run that passes retracts
-  nothing: the commit may be what it fixed. Each step is written down as it is done (`hunt.retracted`), so a try that stopped
-  half way posts nothing twice. The first failure of a test is still rerun before any commit is blamed (above); this only covers a blame
-  that was filed anyway (a rerun by a person, a driver on an older build).
+  completes `success` on a later attempt (`passedAfterBlame`, `retractRed` in main-revert.mjs). Main going green first does not
+  lose it: a finished hunt that main's green or another hunt replaces is kept in `guard.blamed` (`rememberBlame`, up to 10, for
+  `BLAME_KEEP_MS` = 3 days or until retracted), since the revert lands, its run passes, and only then does a person rerun the run
+  that was blamed. What is done depends on what the blame rested on (`blameRestedOnMore`): after **one failure** (a run an older
+  driver or a person blamed on) the revert pull request leaves the merge queue (after it is closed, not before, so a close
+  refused because it merged meanwhile leaves it queued for the queue to record) and is closed with a comment, the issue is closed
+  as not planned, and the session that queued the commit gets a `main-green` message. After **more than one failed attempt** (the rerun failed too, or a bisect probe failed
+  on the commit: a race the commit brought in fails some of the time), the revert is withdrawn the same way, but the issue stays
+  open with a comment saying a later attempt passed and a `flaky-suspect` label, and a person decides; main is left as it was. A revert that has
+  already landed is left alone and the issue only gets a comment, since putting a commit back is a person's call; an issue a person
+  closed already gets nothing. A newer run that passes retracts nothing: the commit may be what it fixed; nor does a blame
+  that rested on the failure coming again and again (`repeats`). Each step is written down as it is done (`retracted`), and each
+  issue comment carries a mark (`<!-- main-guard-retract run=N -->`) that is looked for before posting, so a try that stopped half
+  way, or a restart, posts nothing twice. The note on the known failures issue says a commit was blamed earlier, and that the guard
+  takes it back, for a run it filed something for. The first failure of a test is still rerun before any commit is blamed (above);
+  this only covers a blame that was filed anyway (a rerun by a person, a driver on an older build).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or

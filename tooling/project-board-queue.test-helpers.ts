@@ -57,7 +57,10 @@ const path = args[0] === 'api' ? args.filter((a) => a.startsWith('repos/'))[0] :
 const write = (w) => { st.writes = [...(st.writes ?? []), w]; const patch = st.on && st.on[w[0] + ':' + w[1]]; if (patch) for (const [k, v] of Object.entries(patch)) st[k] = { ...st[k], ...v }; save() }
 if (st.viewLost && st.viewLost.n > 0 && args[0] === 'pr' && args[1] === 'view') { st.viewLost.n--; save(); fail('Post "https://api.github.com/graphql": EOF') }
 if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
-if (args[0] === 'pr' && args[1] === 'view') {
+if (args[0] === 'issue' && args[1] === 'view') {
+  const n = Number(args[2])
+  out({ body: '', state: (st.issueStates ?? {})[n]?.state === 'closed' ? 'CLOSED' : 'OPEN', comments: (st.comments ?? []).filter((c) => c.issue === n).map((c) => ({ body: c.body })) })
+} else if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
   if (!pr) fail('Could not resolve to a PullRequest with the number of ' + args[2] + '.')
   out(pr)
@@ -84,6 +87,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
   // The connection dropped after GitHub did it: gh fails, the merge happened
   if (st.mergeLost) fail(st.mergeLost)
 } else if (args[0] === 'pr' && args[1] === 'close') {
+  if (st.closeFails) fail('GraphQL: Pull request is already merged')
   write(['close', args[2], args[args.indexOf('--comment') + 1]])
   st.prs[args[2]].state = 'CLOSED'
   save()
