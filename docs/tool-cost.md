@@ -43,6 +43,7 @@ requests and 3 sonnet ones, mostly cache reads) and a few minutes of Codex usage
 
 The baselines are kept next to the script, meta and summary only, so a later run compares against them:
 `packages/agent-host/scripts/measure-tools/baselines/2026-10-12-{dry,live}.json`.
+Later probes keep their summary there too, one file each (the latest: `2026-11-06-codex-subagent-name-564-live.json`, §11).
 
 ## 2. How it measures
 
@@ -685,7 +686,7 @@ sessions, which had Centralu's tools and no instructions (#320), now get one sen
   person will follow." The last entry came
   after #561's tools (§10) joined the seat; it was measured on its own (below), the rest of this section without it.
   Each CLI is given the name of its own subagent tool in place of "Agent" (#1587): Codex's reads "not your spawn_agent tool"
-  (6 characters longer), in the orchestrator's light-work line (#853) as well, which uses the same phrase. That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
+  (6 characters longer), in the orchestrator's light-work line (#853) as well, which uses the same phrase. That wording was measured on Codex afterwards (below, "The `start_agent` line on Codex").
 - The orchestrator (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
   person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or
   using another tool."
@@ -822,7 +823,36 @@ not your Agent tool, for long work, another CLI or a worktree, or work the perso
 
 The short ambiguous hand-off splits on haiku and goes to `start_agent` on Sonnet; the long one and the named CLI reach it
 on both, and the helper search stays with the built-in subagent on both. `Agent` is Claude Code's name; on Codex, whose
-own sub-agents §10 also saw, the line was not measured.
+own sub-agents §10 also saw, the line was measured later (next).
+
+**The `start_agent` line on Codex (2026-11-06, #2016).** #2016 gave each CLI the name of its own subagent tool, so
+Codex reads "not your spawn_agent tool". The same `prompts-564-agent.json` on codex-cli 0.160.0 and its default model,
+2 repetitions, `safe`, consent cards declined, ordinary session, base 0b479ac1d:
+`pnpm measure:tools --live --cli codex --reps 2 --phases selection --kinds reader --prompts packages/agent-host/scripts/measure-tools/prompts-564-agent.json`.
+Summary: `baselines/2026-11-06-codex-subagent-name-564-live.json`.
+
+| Prompt | Expect | Codex |
+|---|---|---|
+| "Have Codex write a one-line shell command …" | `start_agent` | 0/2: no tool call, one request; it wrote the command itself |
+| "Hand this to another agent …" (short; ambiguous under B) | either | `start_agent` 2/2 |
+| "Hand off building a CSV-to-JSON converter …" (long) | `start_agent` | 2/2 |
+| "Use a helper to search the code here for TODO comments …" | the built-in sub-agent, no Centralu call | `start_agent` 1/2 (the other run used its own sub-agent: `subAgentActivity`, then `wait`) |
+| The three no-tool prompts | no Centralu call | 6/6 |
+
+Every `start_agent` call was reached through Codex's `exec` step that looks the tool up first (`Bash > start_agent` in the
+calls column), and the consent card was declined each time. Readings:
+
+- **It picks `start_agent` where the work is long or the person says to hand it off** (4 of 4), as haiku and Sonnet did
+  (§11 option B), and makes no Centralu call on the no-tool prompts (6 of 6; those turns took 1 to 2 requests and
+  19,000 to 38,000 input tokens each).
+- **It over-uses on the helper prompt once in two** (`start_agent` first, where haiku and Sonnet stayed with `Agent` 3 of 3
+  each). Two repetitions cannot say whether that is a rate or a chance; the cost of the wrong pick is a consent card for a
+  child that runs in another session, not a lost result.
+- **"Have Codex write …" is a prompt Codex answers itself**: asked inside Codex to have Codex do a thing, it does it
+  without starting a second Codex. That is a reasonable reading of the sentence, not a miss of the instruction, but it
+  means this prompt cannot show `start_agent` on Codex; a prompt naming Claude would, and the set has none.
+- Not measured: the card allowed (whether the child then does the job), the orchestrator's light-work line on Codex,
+  Korean, and a bigger sample for the helper prompt.
 
 **The orchestrator's preamble** was measured in §9 round 2 (no regression, no gain that held); its new wording was not
 measured on the orchestrator's prompts here, only its cost above.
@@ -835,8 +865,8 @@ and about 140 Codex turns on the account's plan.
 (a Claude session picks the instructions up when its process next starts, at a one-time cost to its cache; a Codex
 thread keeps what it was started with, agent-host.md §1.1); prompts deep in a long conversation, where the instructions
 are far from the question; the consent cards allowed, so what `ask_project` or `attach_app` would then have answered;
-the orchestrator's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
-card allowed (whether the child then does the long job); Windows and the packaged app.
+the orchestrator's new preamble on its own prompts; the `start_agent` line in Korean, and with the consent
+card allowed (whether the child then does the long job; on Codex it was measured later, above, with two repetitions); Windows and the packaged app.
 
 **#957: repository work through an app's guide (2026-10-17).** Owner decision: no task-to-tool table in these
 instructions, which sit in the prompt's cached prefix and would change whenever an app does; an app such as the
