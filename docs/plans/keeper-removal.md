@@ -3,7 +3,7 @@
 > **Status: design, not built.** The owner decided option C of #1895 (2026-11-03, confirmed 2026-11-06): agents are no
 > longer held across an update on any machine, every update is stop-and-continue, and the supervisor role, credential
 > issuance (#1405) and background mode stay, re-homed. This document is step 4. Step 3 (the macOS release app's host
-> stops handing its children to the keeper, behind one switch, with a one-time handover from a holding keeper) ships
+> stops handing its children to the keeper, behind one switch, with a handover from a holding keeper, §6) ships
 > first in a beta. No deletion lands before step 3 is in a beta and the `keeper-holding-last` tag exists.
 > [remote-keeper.md](remote-keeper.md) §3 to §5.1 stay as measured background; its steps 3 to 8 are cancelled.
 
@@ -199,17 +199,17 @@ security-boundaries.md, runtime-lessons.md and the Korean mirrors. Line counts a
 | PR | Deletes | Moves or changes | Must pass | Real-environment check | ≈ lines out |
 |---|---|---|---|---|---|
 | 1. Host: no held children | `agent-host/src/keeper/*`, `adoptKept`, `keptSessions`, detach mode, the adapters' `detach()`, `strays.ts` rule 3, keeper-only tests. Carries this doc | Every ending is a stop or a stop for an update | `pnpm verify`, `CI=1 pnpm e2e`, the Windows and macOS CI jobs | macOS packaged: kill the host mid-turn with a terminal open. The keeper restarts it, the turn shows stopped with Continue, and no agent CLI is left running (process table). Remote serve: an update from a hub still continues a turn | 3,900 |
-| 2. Keeper: no children service | `keeper/children/*`, `os/unix/children.rs`, the exit-watch backends, the children lines of `server/host.rs`, `keeper-children-integration.mjs`, step 3's switch (§5) | `children` answers an empty list | `cargo test` of the crate on macOS and Linux, the `keeper e2e` job | macOS packaged: start, open a terminal, run a Run command, quit with background mode on and off | 4,100 |
+| 2. Keeper: no children service | `keeper/children/*`, `os/unix/children.rs`, the exit-watch backends, the children lines of `server/host.rs`, `keeper-children-integration.mjs`, step 3's switch (§6) | `children` answers an empty list. An incoming handoff whose snapshot carries a child table is refused (§6): the sending keeper rolls back and carries on | `cargo test` of the crate on macOS and Linux, the `keeper e2e` job | macOS packaged: start, open a terminal, run a Run command, quit with background mode on and off | 4,100 |
 | 3. Window: an update and another build are a stop | the window's `switch`/`upgrade` calls, `switch_host_build`, the swap half of `switch-plan.ts`, `relaunch-swap.ts`, the build bar's progress, the start-up swap wait (#580), the relaunch grace | "Apply now" and the build bar call `stop {forUpdate}` and start their own keeper. `autoApplyDecision`. The owner's texts. `relaunch.spec.ts` rewritten | `pnpm verify`, `CI=1 E2E_BROWSER=webkit pnpm e2e`, the keeper relaunch script | macOS packaged: "Apply now" with a running turn, a terminal, a Run command and a pending card. An older build's window opened against a newer keeper, and the reverse | 1,400 |
 | 4. Keeper: no swap | `keeper/swap.rs`, `server/switch.rs`, the swap tests, `keeper-integration-swap.mjs`, the swap's claims in `source.rs`, swap phases in `server/push.rs` | `switch` and `upgrade` answer `gone` | `cargo test`, `keeper e2e` | macOS packaged: a window of the previous release attaches to this keeper and presses "Switch": it shows the refusal and offers "Restart completely" | 1,800 |
 | 5. Host: no swap | `standby`, `activate`, `drain` lines, `--standby`, `Store.inspect`, the swap open and deferral, the swap-only session tests, `store-swap.test.ts` | `view-handover` re-homed to the stop for an update (if question 2 says keep) | `pnpm verify`, a store fixture with `deferred_migrations` owed is opened and run | macOS packaged: an update with an open app view in a conversation. Remote serve: a hub's update and rollback on a Linux and a Windows machine | 1,900 |
 | 6. Keeper: no handoff | `keeper/handoff/*`, `os/unix/handles.rs`, `host_proc/handover.rs`, `no_handover.rs`, `HostProc::Foreign`, the content route, `keeper-handoff-integration.mjs`, `keeper-content-integration.mts` | `--take-over-fd` ignored with a log line. Lands no earlier than four releases after step 3's beta (as #461 did) | `cargo test`, `keeper e2e`, `shell-integration.mts` | macOS packaged: an update from the `keeper-holding-last` build straight to this one, with a turn running (§5, risk 1) | 3,800 |
 | 7. Linux: direct only | `carried.rs`, `appimage.rs`, the Linux keeper rows of `start_plan`, the keeper in `@centralu/host-linux-*` and its checks, the `keeper e2e (linux)` scripts | `CC_USE_KEEPER` ignored on Linux release, with a log line | `cargo test` on Linux, `host-package.test.ts` | Linux AppImage started with `CC_USE_KEEPER=1`. A hub installing a host package on a linked Linux or WSL machine | 900 |
-| 8. The one-time handover | step 3's handover from a holding keeper | none | `cargo test`, `keeper e2e` | macOS packaged: an update from the previous release | small |
+| 8. The one-time handover | nothing of its own: step 3 built no separate module (§6). Its rule, `handoff::held_children_on_handoff`, goes with PR 2's refusal and PR 6 | none | — | — | 0 |
 
 Total ≈17,800. The order keeps each PR revertable alone: 1 before 2 (a host that never asks makes the service dead
 code), 3 before 4 (no window asks for a swap), 4 before 5 (no keeper sends standby or drain), 4 before 6 (the swap was
-the handoff's last caller). PR 7 can land anywhere after 2. PR 8 is gated on time, not on code.
+the handoff's last caller). PR 7 can land anywhere after 2. PR 8 has no work left (§6).
 
 ## 5. Risks
 
@@ -235,9 +235,25 @@ So that the removal deletes the switch instead of leaving two paths:
   and `server/host.rs` tells the host about it. Nothing in the host and nothing in `start_plan`: a host whose keeper
   offers no children service already spawns its own and stops them at every ending (agent-host.md §4.3), and the
   topology (shell, keeper, host) does not change. PR 2 deletes the fact with the service.
-- **The handover from a holding keeper lives in one module of the keeper crate**, entered only from the receiving
-  side of a keeper handoff with a non-empty child table: it asks the host to stop for an update, ends each held child,
-  and goes on. PR 8 deletes that module. PR 6 cannot land before PR 8's module has no work left (four releases).
+- **The handover from a holding keeper, as step 3 built it (#2055).** A host of 0.1.0-beta.48 or earlier cannot be told to
+  stop for an update by its keeper (it takes the stdin stop line only from a window, and its drain hands the children over),
+  so a holding keeper cannot end its turns as an update's. Step 3 therefore kept the existing handoff: an earlier build's
+  window applying the update tells its keeper `relaunching`, the relaunched window switches it, and the keeper of step 3
+  takes the child table over, its swapped host taking the children. That keeper keeps serving them until its next update,
+  switch or quit. One rule, on the sending side of `handoff::give` (`held_children_on_handoff`), keeps holding from passing
+  on: a keeper that holds children and whose host says `stopsForUpdate` never hands them on; asked to switch, it stops for
+  an update and exits, and the window starts a keeper of its own build. It hands a child table on only while its host
+  cannot stop for an update (an earlier build's host after a failed swap, or a host not up), and logs that.
+- **Step 4 and a handed child table: refused, not received.** Choice between keeping a path that receives a child table
+  and stops it for N releases, or refusing such a handoff. Refused, from PR 2 on, because:
+  1. After PR 3 no window sends `switch`, and a window names only its own build's keeper, so no keeper of PR 3 or later is
+     ever the target of a handoff; between PR 2 and PR 3 the only sender with a child table is a step 3 keeper whose host
+     cannot stop for an update, which is rare (a swap that failed after the transition).
+  2. A received table could only be ended as a quit is: its host cannot list the turns for an update, so receiving
+     would buy nothing over the refusal, and would keep the child-table code alive for N releases.
+  3. The refusal is the handoff's existing failure path: the sender rolls back and carries on with what it holds, the
+     window shows the refusal and offers "Restart completely", and from PR 3 the window's `stop {forUpdate}`, or a plain
+     `stop` behind the loss confirmation for a keeper that cannot (§5, risk 1), ends it. Nothing is orphaned.
 - **The stop for an update is one keeper op** (`stop {forUpdate:true}`), shared by step 3 and by PR 3 onward.
 
 If step 3 places the switch elsewhere, this section and the PRs that name it change before PR 1, not after.
