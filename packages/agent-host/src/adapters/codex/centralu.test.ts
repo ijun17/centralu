@@ -44,16 +44,22 @@ async function host(d: Driver, spec: CentraluScenario, hostSent: (method: string
     }
     await d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
   }
-  if (spec.then?.some((t) => t.type === 'turn_complete')) {
+  const compacts = spec.then?.some((t) => t.type === 'compaction')
+  if (!compacts && spec.then?.some((t) => t.type === 'turn_complete')) {
     // The answer arrives by mail and the host starts a turn from it, as the mailbox's channel input
     const [wake] = hostSent('turn/start').slice(spec.turns.length)
     d.session().send(wake!, { origin: { kind: 'channel', server: 'centralu' }, ...named() })
     await d.waitFor('the end of the turn the mail starts', ended)
   }
-  if (spec.then?.some((t) => t.type === 'compaction')) {
+  if (compacts) {
     // Centralu's own compact, as `SessionEvents.sendCompact` sends it
     d.session().send('/compact', { compact: true })
     await d.waitFor('the compaction', (e) => e.type === 'compaction')
+    await d.waitFor('the end of the compaction turn', (e) => e.type === 'turn_complete')
+  }
+  if (spec.after) {
+    d.session().send(spec.after, named())
+    await d.waitFor('the end of the turn after', (e) => ended(e) && e.type === 'turn_complete')
   }
 }
 
@@ -148,9 +154,34 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(of(events, 'activity').map((a) => a.activity)).toEqual(['compacting', null])
     const used = of(events, 'context_update').map((c) => c.used)
     expect(Math.max(...used)).toBeGreaterThan(120_000)
-    expect(used.at(-1)).toBeLessThan(10_000)
-    // The compaction turn's own end is not in the recording (it was cut when the compaction item completed): the two turns before it ended as the session's
-    expect(of(events, 'turn_complete')).toHaveLength(2)
+    // The reading the compaction turn itself reports, between its start and its marker, is the summary's size
+    const started = events.findIndex((e) => e.type === 'activity' && e.activity === 'compacting')
+    const marker = events.findIndex((e) => e.type === 'compaction')
+    expect(of(events.slice(started, marker), 'context_update').map((c) => c.used)).toEqual([expect.any(Number)])
+    expect(of(events.slice(started, marker), 'context_update')[0]!.used).toBeLessThan(10_000)
+    expect(of(events, 'turn_complete')).toHaveLength(4)
+  })
+
+  it('centralu-compact-real: guards the state after a compaction — the compaction turn ends as a turn of its own, and the next turn builds on the summary, not on the old context', async () => {
+    const { events } = await replay('centralu-compact-real')
+    const at = events.findIndex((e) => e.type === 'compaction')
+    const started = events.findIndex((e) => e.type === 'activity' && e.activity === 'compacting')
+    const compactionEnd = events.findIndex((e, i) => i > at && e.type === 'turn_complete')
+    expect(compactionEnd).toBeGreaterThan(at)
+    // No text of the model's comes between the compaction and the end of its turn; the turn after it is the one that answers
+    expect(events.slice(at, compactionEnd).some((e) => e.type === 'message_delta')).toBe(false)
+    const after = events.slice(compactionEnd + 1)
+    expect(after.filter((e) => e.type === 'message_delta').map((e) => (e as { text: string }).text).join('')).toContain('after')
+    expect(after.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
+    // The context starts again from the summary: the turn after it is some thousands of tokens, where the one before the compaction was over 120k
+    const used = of(after, 'context_update').map((c) => c.used)
+    expect(used.length).toBeGreaterThan(0)
+    expect(Math.max(...used)).toBeLessThan(30_000)
+    expect(of(events.slice(0, started), 'context_update').at(-1)!.used).toBeGreaterThan(120_000)
+    expect(of(after, 'compaction')).toEqual([])
+    expect(of(events, 'error')).toEqual([])
+    // The session was not left working: the last event of the recording is the end of the turn after the compaction
+    expect(events.at(-1)).toMatchObject({ type: 'turn_complete' })
   })
 
   it('centralu-compact-real: guards the tool-call cards — compact_self is drawn as Centralu’s and succeeds, once per call, however many times the model asked', async () => {
@@ -184,6 +215,24 @@ describe(`Codex calling Centralu's tools (${recordedVersion()})`, () => {
     expect(results.every((r) => r.ok)).toBe(true)
     expect(results.at(-1)!.summary).toContain('one')
     expect(results.at(-1)!.summary).toContain('two')
+  })
+
+  it('centralu-agent-stop: guards the cards that end a child — a running child is stopped and then put in the archive, each drawn by what it did and answered ok', async () => {
+    const { events } = await replay('centralu-agent-stop')
+    expect(calls(events).map((c) => c.centralu?.label)).toEqual(['Started an agent', 'Stopped an agent', 'Deleted an agent'])
+    const [start, stop, del] = calls(events)
+    expect(start!.tool).toBe('start_agent')
+    expect([stop!.tool, del!.tool]).toEqual(['agent_session', 'agent_session'])
+    // The two calls on the child name the same session
+    expect(stop!.centralu?.sessionId).toBeDefined()
+    expect(del!.centralu?.sessionId).toBe(stop!.centralu?.sessionId)
+    const results = of(events, 'tool_result')
+    expect(results.every((r) => r.ok)).toBe(true)
+    expect(results[1]!.summary).toContain('Stopped the codex session')
+    expect(results[2]!.summary).toContain('to the session archive')
+    // The child was working when it was stopped: it was not waited for
+    expect(results[0]!.summary).toContain('is working on it')
+    expect(of(events, 'turn_complete')).toHaveLength(1)
   })
 
   it('centralu-ask-project: guards ask_project’s card and its answer — the other project’s session answers and the answer is the result', async () => {
