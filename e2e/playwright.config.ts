@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
-import { e2eEngine } from './engine.js'
+import { e2eEngine, e2eReplayPart } from './engine.js'
 
 /**
  * Only the startup-screen test runs on its **own** server.
@@ -41,10 +41,11 @@ const LINKED_SPEC = /(^|[\\/])linked-hosts(-webkit)?\.spec\.ts$/
 /**
  * The replay suite (#1498) plays recorded sessions on a host of the same kind as the linked suite's (the real web platform
  * against a real host, the page reaching it through a relay on 5182, e2e/fixtures/replay-host.ts), with its own server
- * and one worker for the same reasons. Its own project and the first in the list, not a spec of the linked project: a
- * shard is a run of tests in the order of the projects (`--shard` cuts that list into equal runs), so the replay's
- * 50 or more tests of a few seconds each fell in the last shard with the linked project's, which then ran out of time (#2049).
- * Listed first, they are in the first shard instead.
+ * and one worker for the same reasons. Its own project, not a spec of the linked project: a shard is a run of tests in the
+ * order of the projects (`--shard` cuts that list into equal runs), so the replay's 60 tests of 5 to 10 seconds each fell all
+ * in one shard (first the last, with the linked project's, #2049; then the first, listed first), and their single worker made
+ * them a floor of about 8 minutes under that shard's time on a slow runner. CI plays the replay on its own, cut by `--shard`
+ * across all the shards, and then the other projects (`E2E_REPLAY`, engine.ts), so each shard holds its share of both.
  */
 const REPLAY_PORT = 5181
 const REPLAY_URL = `http://127.0.0.1:${REPLAY_PORT}`
@@ -77,6 +78,7 @@ const SERVE = (url: string) => `node ../scripts/e2e-web-server.mjs --url ${url} 
 // load this file too, and inherit the runner's value
 process.env.E2E_WEB_SERVER_EVENTS ??= join(tmpdir(), `centralu-e2e-web-server-${process.pid}-${Date.now()}.jsonl`)
 
+const replayPart = e2eReplayPart()
 const leftOut = ENGINE === 'webkit' ? [WEBKIT_TWIN] : ENGINE === 'chromium' ? [WEBKIT_TWIN, WEBKIT_ONLY] : []
 
 export default defineConfig({
@@ -103,7 +105,6 @@ export default defineConfig({
   globalTeardown: './web-server-report.ts',
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
-    // Before the app project, which holds most of the tests: see REPLAY_SPEC
     { name: 'replay', testMatch: REPLAY_SPEC, testIgnore: leftOut, use: { baseURL: REPLAY_URL }, workers: 1 },
     { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, REPLAY_SPEC, ...leftOut] },
     { name: 'startup', testMatch: STARTUP_SPEC, use: { baseURL: STARTUP_URL } },
@@ -111,7 +112,7 @@ export default defineConfig({
     // tests at once would collide on it (`--repeat-each 5` failed 4 of 5 with EADDRINUSE).
     { name: 'recovery', testMatch: RECOVERY_SPEC, use: { baseURL: RECOVERY_URL }, workers: 1 },
     { name: 'linked', testMatch: LINKED_SPEC, testIgnore: leftOut, use: { baseURL: LINKED_URL }, workers: 1 },
-  ],
+  ].filter((p) => (replayPart === 'only' ? p.name === 'replay' : replayPart === 'skip' ? p.name !== 'replay' : true)),
   webServer: [
     {
       command: `${SERVE('http://127.0.0.1:5174')} pnpm --filter @cc/web exec vite --port 5174 --strictPort`,

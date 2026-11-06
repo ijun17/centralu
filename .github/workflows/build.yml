@@ -713,8 +713,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -793,12 +793,9 @@ jobs:
         timeout-minutes: 12
         env:
           E2E_BROWSER: webkit
-          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
-          # One name per shard, so the merge below does not overwrite one shard's report with another's
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
         # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
         # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
+        run: bash .github/scripts/e2e-shard.sh ${{ matrix.shard }} ${{ matrix.shards }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -825,8 +822,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -896,11 +893,9 @@ jobs:
         timeout-minutes: 12
         env:
           E2E_BROWSER: chromium
-          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
         # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
         # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
+        run: bash .github/scripts/e2e-shard.sh ${{ matrix.shard }} ${{ matrix.shards }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -918,8 +913,8 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - run: echo "Only documents changed (.github/scripts/ci-changes.mjs)"
 
@@ -949,14 +944,15 @@ jobs:
           pattern: e2e-blob-*
           path: blobs
 
-      # download-artifact puts each artifact in a folder of its own name: e2e-blob-<engine>-<shard>
+      # download-artifact puts each artifact in a folder of its own name: e2e-blob-<engine>-<shard>; in it a shard keeps the
+      # replay run's report in a folder of its own (.github/scripts/e2e-shard.sh)
       - name: Merge the shard reports, per engine
         run: |
           set -euo pipefail
           for engine in webkit chromium; do
             mkdir -p "merge/$engine"
             for dir in blobs/e2e-blob-"$engine"-*; do
-              if [ -d "$dir" ]; then cp "$dir"/*.zip "merge/$engine/"; fi
+              if [ -d "$dir" ]; then find "$dir" -name '*.zip' -exec cp {} "merge/$engine/" \; ; fi
             done
             if ls "merge/$engine"/*.zip >/dev/null 2>&1; then
               # The flaky tests' table goes to this job's summary under the engine's name; their annotations came from the shards
