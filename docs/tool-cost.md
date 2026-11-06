@@ -963,15 +963,28 @@ A live run of the first version of this change (`tools` and `maxChars` only) mea
 Not measured live: tokens through `pnpm measure:tools --live` for the final definitions, and whether a reader with these arguments and
 no description picks `maxChars` by itself when a note says a read stopped early.
 
-## 15. compact_self (#1451)
+## 15. compact_self (#1451, `then` #2024)
 
-`compact_self({ focus? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host.md "Compacting at a break"). An
+`compact_self({ focus?, then? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host.md "Compacting at a break"). An
 ordinary session's and the orchestrator's; a coordinator and a builder do not have it. It is **loaded** on Claude, not deferred: its description is the
 instruction on when to use it (work finished and reported; before waiting over a few minutes on a child, CI or the person; switching to an
 unrelated task), and a deferred tool is not read until something searches for it. Counted from the definition: 453 characters
 (`COMPACT_BUDGET_CHARS` 460), which raises the reader seat's Claude resident ceiling 2,850 → 3,310, its Codex ceiling by the same, and the
 orchestrator's 9,710 → 10,170 (its tool list is resident in the commands tier too). The saving it is for is measured in #1451 (cache reads of
 contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request.
+
+**`then` (#2024, owner decision 2026-11-06).** A new optional argument, the agent's own next step, sent as its next turn once the compaction is
+done (docs/agent-host.md "Going on after the compaction"). Counted from the definition the way the rest of this section is (`sentChars`, the name,
+description and the schema as the tool sends them): **453 → 606 characters, +153** (`COMPACT_BUDGET_CHARS` 460 → 610). The argument is 153
+characters because its words are the instruction: the call carries the next step, the turn must end after it, and a refusal still brings the step with
+the reason ("or with the reason if not", 27 of them, added by the review of the first version, where a refused request left the session stalled). The
+description of the tool itself did not change. The ceilings move by the same 150, which they take from `COMPACT_BUDGET_CHARS`: the reader seat's Claude
+resident ceiling 3,310 → 3,460, its Codex ceiling the same, and the orchestrator's 10,170 → 10,790 (the first version measured 3,428 and 6,381 on Claude and
+Codex for the reader and 10,693 and 10,751 for the orchestrator at +126; these move by +27, computed, not measured again). At the section's
+estimate of about 4 characters a token that is **about 38 more tokens in every request of an ordinary session and of the orchestrator** (computed from
+the characters, not measured live). The context notice (`context-nudges.ts`) gained about 60 characters, sent once per share per compaction cycle,
+not per request. Not measured live: tokens through `pnpm measure:tools --live`, and how often a model sets `then` and ends its turn after the notice; the
+one live run of the whole path is in the pull request.
 
 **Whether an agent calls it on its own (#1492, one run, 2026-10-24).** An agent cannot see its context size, so Centralu tells it quietly when it
 passes shares (docs/agent-host.md "Telling a growing session"). Claude on its cheapest model (`haiku`, window 1,000,000 as the CLI reported it), an

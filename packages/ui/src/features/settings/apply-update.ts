@@ -38,17 +38,59 @@ export type AutoApplyInput = {
  *   command running (the host's one idle rule, `hostBusy`, reported through the keeper). Unknown
  *   counts as busy, as it does for the switch's question.
  * - Never while someone is typing.
- * - Never from a window whose relaunch stops the host (no keeper, #1895): nothing reports whether the host is busy there, and
- *   waiting for a report that never comes would only say "something is running" for good. The person presses the button.
+ * - Never from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing
+ *   reports whether the host is busy there, and waiting for a report that never comes would only say "something is
+ *   running" for good. The person presses the button. With a keeper the report is there, so it waits for idle as before.
  */
 export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingFor?: string } {
   const u = i.update
   if (!u?.autoApply || u.phase !== 'restart_required' || i.tried) return { apply: false }
   if (applyOffer(u, i.windowVersion, i.relaunch).kind !== 'apply') return { apply: false }
-  if (i.relaunch?.restartsHost) return { apply: false }
+  if (i.relaunch?.restartsHost && !i.relaunch.idleReported) return { apply: false }
   if (i.busy !== false) return { apply: false, waitingFor: 'something is running' }
   if (i.typing) return { apply: false, waitingFor: 'you are typing' }
   return { apply: true }
+}
+
+/**
+ * What Settings says applying an update does, from the relaunch check (#1895 step 3). Four cases:
+ *
+ * - an older keeper's host hands its agents to it (`keepsAgents`, said only then): agents, terminals and commands keep going;
+ * - the update stops the host and the next one continues (`restartsHost`), with a keeper that reports when nothing is
+ *   busy (`idleReported`): automatic updates still wait for that and apply by themselves;
+ * - the same without that report (no keeper): nothing applies by itself, the person presses Update;
+ * - a window that cannot relaunch into the update, or cannot tell yet (Windows, Linux, a browser, before the first check):
+ *   it says only what it knows, that a restart of Centralu applies it.
+ */
+export function applyWords(relaunch: RelaunchCheck | null | undefined): { applying: string; hint: string; more: string } {
+  const waits = 'applied once no session is working or waiting for you, no terminal or command is running, and you are not typing.'
+  if (relaunch?.keepsAgents) {
+    return {
+      applying: 'Applying it relaunches the window, and running agents, terminals and commands keep going.',
+      hint: 'Checks, installs and applies a newer version once nothing is busy.',
+      more: `A newer version is installed as soon as it is found, and ${waits} Applying relaunches the window; agents keep running through it.`,
+    }
+  }
+  if (!relaunch?.restartsHost) {
+    return {
+      applying: 'Restarting Centralu applies it.',
+      hint: 'Checks for and installs a newer version; restarting Centralu applies it.',
+      more: 'A newer version is installed as soon as it is found, and is used once Centralu restarts.',
+    }
+  }
+  const applying = 'Applying it relaunches the window; running turns go on once the agent host is back, and open terminals and commands start again.'
+  if (relaunch.idleReported) {
+    return {
+      applying,
+      hint: 'Checks, installs and applies a newer version once nothing is busy.',
+      more: `A newer version is installed as soon as it is found, and ${waits} Applying relaunches the window and restarts the agent host; conversations pick up where they were.`,
+    }
+  }
+  return {
+    applying,
+    hint: 'Checks for and installs a newer version; you apply it with the Update button.',
+    more: 'A newer version is installed as soon as it is found. This window cannot tell when nothing is running, so it is applied when you press Update.',
+  }
 }
 
 /**

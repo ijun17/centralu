@@ -1,17 +1,17 @@
 #!/usr/bin/env -S npx tsx
 /**
- * Records what Codex really sends and receives for Centralu's own tools (`mail`, `start_agent`, `read_session`, `compact_self`),
- * which only a real host can serve (#1498):
+ * Records what Codex or Claude Code really sends and receives for Centralu's own tools (`mail`, `start_agent`, `agent_session`,
+ * `ask_project`, `read_session`, `compact_self`), which only a real host can serve (#1498):
  *
- *   pnpm exec tsx scripts/frames-record-host.mts [scenario ...] [--raw <folder>]
+ *   pnpm exec tsx scripts/frames-record-host.mts [codex | claude] [scenario ...] [--raw <folder>]
  *
  * It starts the agent host from source (`packages/agent-host/src/main.ts`) in a temporary data folder, with the frame recorder
- * on (`CC_RECORD_FRAMES`) and a Codex settings folder of its own (`frames-record-kit.mts`), and drives it over its WebSocket as a
- * window does: adds a project, creates sessions, sends the scenario's prompts. The Codex session's app-server is started by the
- * host with Centralu's real bridge, so the tool calls go the whole way, bridge and host included; the recording holds the lines
- * between the host and that app-server, scrubbed into `adapters/codex/recordings/codex-<version>/<scenario>.jsonl`, which
- * `codex/centralu.test.ts` replays through the adapter. It spends model calls (Codex's smallest model; the sessions the
- * scenario starts use it too) and never touches the person's data folder: `CC_DATA_DIR` and `--db` are temporary.
+ * on (`CC_RECORD_FRAMES`) and a settings folder of the tool's own (`frames-record-kit.mts`), and drives it over its WebSocket as a
+ * window does: adds a project, creates sessions, sends the scenario's prompts. The session's process is started by the
+ * host with Centralu's real tools (Codex: the bridge; Claude Code: served in the host's own process), so the tool calls go the whole
+ * way, host included; the recording holds the lines between the host and that process, scrubbed into
+ * `adapters/<codex | claude>/recordings/<tool>-<version>/<scenario>.jsonl`, which `<tool>/centralu.test.ts` replays through the
+ * adapter. It spends model calls (the tool's smallest model; the sessions the scenario starts use it too) and never touches the person's data folder: `CC_DATA_DIR` and `--db` are temporary.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -19,13 +19,20 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { removeDir, temporaryCodexHome } from './frames-record-kit.mts'
+import { removeDir, temporaryClaudeConfig, temporaryCodexHome } from './frames-record-kit.mts'
 import { scrub } from './frames-scrub.mts'
 import { CENTRALU_SCENARIOS } from '../packages/agent-host/src/adapters/codex/centralu-scenarios.test-helpers.js'
+import { CLAUDE_CENTRALU_SCENARIOS } from '../packages/agent-host/src/adapters/claude/centralu-scenarios.test-helpers.js'
+import type { HostScenario } from '../packages/agent-host/src/adapters/frames/host-scenario.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const CODEX_FOLDER = join(ROOT, 'packages/agent-host/src/adapters/codex/recordings')
-const MODEL = 'gpt-5.6-luna'
+const ADAPTERS = join(ROOT, 'packages/agent-host/src/adapters')
+
+/** What a recording differs in by tool: the cheapest model, the effort, the scenarios, and the recordings' folder prefix */
+const TOOLS = {
+  codex: { prefix: 'codex', model: 'gpt-5.6-luna', effort: 'low' as string | undefined, scenarios: CENTRALU_SCENARIOS as readonly HostScenario[] },
+  claude: { prefix: 'claude-code', model: 'haiku', effort: undefined as string | undefined, scenarios: CLAUDE_CENTRALU_SCENARIOS },
+}
 
 type Event = { type: string; sessionId?: string; [k: string]: unknown }
 
@@ -137,22 +144,25 @@ async function main(): Promise<number> {
   const args = process.argv.slice(2)
   const rawAt = args.indexOf('--raw')
   const keepRaw = rawAt >= 0 ? args.splice(rawAt, 2)[1] : undefined
-  const chosen = CENTRALU_SCENARIOS.filter((s) => args.length === 0 || args.includes(s.name))
+  const toolName = args[0] === 'claude' || args[0] === 'codex' ? (args.shift() as 'claude' | 'codex') : 'codex'
+  const tool = TOOLS[toolName]
+  const chosen = tool.scenarios.filter((s) => args.length === 0 || args.includes(s.name))
   let failed = 0
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
-  const codexHome = temporaryCodexHome(data)
+  let config: { finish(): void } = { finish() {} }
   let host: ChildProcess | null = null
   // What the run in progress has made, for an interrupted run to take away (the copy of the sign-in is in `data`)
   const open_: string[] = []
   const stop = () => {
     host?.kill('SIGKILL')
-    codexHome.finish()
+    config.finish()
     for (const dir of [...open_, data]) rmSync(dir, { recursive: true, force: true })
     process.exit(130)
   }
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   try {
+    config = toolName === 'claude' ? temporaryClaudeConfig(data) : temporaryCodexHome(data)
     for (const scenario of chosen) {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
@@ -176,7 +186,7 @@ async function main(): Promise<number> {
           otherProject = await window.rpc<{ id: string }>('projects.add', { path: other })
         }
         const open = async (prompt: string, where?: { projectId: string; cwd: string }): Promise<string> => {
-          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: where?.projectId ?? project.id, cwd: where?.cwd ?? folder, tool: 'codex', model: MODEL, effort: 'low', permissionPreset: 'auto' })
+          const made = await window.rpc<{ id?: string; sessionId?: string }>('agents.createSession', { projectId: where?.projectId ?? project.id, cwd: where?.cwd ?? folder, tool: toolName, model: tool.model, ...(tool.effort ? { effort: tool.effort } : {}), permissionPreset: 'auto' })
           const id = made.id ?? made.sessionId!
           await turn(id, prompt)
           return id
@@ -193,19 +203,20 @@ async function main(): Promise<number> {
         const main = await open(said(scenario.turns[0]!))
         for (const text of scenario.turns.slice(1)) await turn(main, said(text))
         for (const next of scenario.then ?? []) await window.waitFor(next.label, (e) => e.sessionId === main && e.type === next.type, 240_000)
-        // The recording of the session the scenario keeps: the one whose Codex process made the tool calls
+        // The recording of the session the scenario keeps: the one whose process made the tool calls
         if (window.unexpected.length) throw new Error(`the host raised cards the scenario does not expect (refused): ${window.unexpected.join(', ')}`)
         const files = readdirSync(raw).filter((n) => n.startsWith(`${main}.`)).sort((a, b) => Number(a.split('.').at(-2)) - Number(b.split('.').at(-2)))
         const frames = files.flatMap((f) => readFileSync(join(raw, f), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
-        const codexVersion = (await import('../packages/agent-host/src/adapters/codex/index.js').then((m) => new m.CodexAdapter().installedVersion())) ?? 'unknown'
-        const dir = join(CODEX_FOLDER, `codex-${codexVersion.replace(/^codex-cli /, '').split(/[-\s]/)[0]}`)
+        const adapter = await import(`../packages/agent-host/src/adapters/${toolName}/index.js`).then((m) => (toolName === 'claude' ? new m.ClaudeAdapter() : new m.CodexAdapter()) as { installedVersion?(): Promise<string | undefined> })
+        const version = (await adapter.installedVersion?.()) ?? 'unknown'
+        const dir = join(ADAPTERS, toolName, 'recordings', `${tool.prefix}-${version.replace(/^codex-cli /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
-        const header = { header: { tool: 'codex', version: codexVersion, scenario: scenario.name, preset: 'auto', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10), host: true } }
+        const header = { header: { tool: toolName, version, scenario: scenario.name, preset: 'auto', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10), host: true } }
         writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...scrub(frames, folder, undefined, { cutText: scenario.cutText })].map((l) => JSON.stringify(l)).join('\n') + '\n')
-        console.log(`[record] codex ${scenario.name} (through a host): ${frames.length} frames -> ${dir}`)
+        console.log(`[record] ${toolName} ${scenario.name} (through a host): ${frames.length} frames -> ${dir}`)
       } catch (e) {
         failed++
-        console.error(`[record] codex ${scenario.name}: ${(e as Error).message}`)
+        console.error(`[record] ${toolName} ${scenario.name}: ${(e as Error).message}`)
       } finally {
         window.close()
         host?.kill('SIGTERM')
@@ -218,7 +229,7 @@ async function main(): Promise<number> {
       }
     }
   } finally {
-    codexHome.finish()
+    config.finish()
     await removeDir(data)
   }
   return failed ? 1 : 0

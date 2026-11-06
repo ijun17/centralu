@@ -169,6 +169,34 @@ describe('a tool that takes input mid-turn: the queue', () => {
     expect(said.slice(-2)).toEqual(['write:a+/compact', 'turn_complete'])
   })
 
+  it('says how many inputs wait to start a turn: behind a blocking turn, and written and not yet answered (`waiting`, read when a turn ends)', async () => {
+    const { wire, ledger, events } = await ready()
+    expect(ledger.waiting).toBe(0)
+    ledger.send('/compact')
+    await tick()
+    ledger.turnStarted('compact-1')
+    expect(ledger.waiting).toBe(1)
+    wire.writes[0]?.reply.resolve(null)
+    await tick()
+    expect(ledger.waiting).toBe(0)
+    // The person’s message waits behind the compact turn
+    ledger.send('a')
+    await tick()
+    expect(ledger.waiting).toBe(1)
+    // At the end of the turn it is written, before the end is said: written and not answered still waits
+    let seen = -1
+    const sink = events.push.bind(events)
+    events.push = (...e) => {
+      if (e.some((x) => x.type === 'turn_complete')) seen = ledger.waiting
+      return sink(...e)
+    }
+    ledger.turnEnded('compact-1', { how: 'complete' })
+    expect(seen).toBe(1)
+    wire.writes[1]?.reply.resolve(null)
+    await tick()
+    expect(ledger.waiting).toBe(0)
+  })
+
   it('drops what waited behind a blocking turn on the person’s Stop: said not delivered, and never written after it (#1640)', async () => {
     const { wire, ledger, events } = await ready()
     ledger.send('/compact')

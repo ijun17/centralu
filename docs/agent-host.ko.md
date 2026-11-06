@@ -1071,9 +1071,9 @@ interface AdapterCapabilities {
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → under the keeper: agents, terminals and commands keep running there; the new
-                  host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
-                → without a keeper: session processes die → a new streamEpoch → UIs resync
+host restarts   → under a keeper that holds children (before #1895 step 3, §4.3): agents, terminals and commands
+                  keep running there; the new host re-attaches to them mid-turn → a new streamEpoch → UIs resync
+                → otherwise (since step 3 under the keeper too): session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
@@ -1107,7 +1107,7 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 
 | 어디서 | 변수 | 방식 | 무엇이 도는가 | 이유 |
 |---|---|---|---|---|
-| macOS 릴리스 | 없음 | `ThroughShell` | 창이 LaunchServices로 `<data>/shell/Centralu.app`을 열고, 셸이 `<data>/content/<version>/`에서 `centralu-keeper`를, 그 검증된 사본에서 호스트를 띄운다(§4.1) | 셸이 업데이트를 건너 macOS 권한을 쥔다([plans/thin-shell.md](plans/thin-shell.md)) |
+| macOS 릴리스 | 없음 | `ThroughShell` | 창이 LaunchServices로 `<data>/shell/Centralu.app`을 열고, 셸이 `<data>/content/<version>/`에서 `centralu-keeper`를, 그 검증된 사본에서 호스트를 띄운다(§4.1). #1895 3단계부터 키퍼는 자식 소켓을 열지 않아 호스트가 같은 트리 안에서 자식을 직접 띄우고, 업데이트는 멈추고 이어 간다(§4.5 "키퍼는 자식을 쥐지 않는다") | 셸이 업데이트를 건너 macOS 권한을 쥔다([plans/thin-shell.md](plans/thin-shell.md)) |
 | macOS 릴리스 | `CC_SHELL_UNPINNED=1` | `ThroughShell` | 같고, 창이 고정되지 않은 셸을 싣고 있어도 연다 | 임시 `CC_DATA_DIR`로 손수 경로를 확인할 때 |
 | macOS 릴리스, 셸이 물러남(거절, 안 실림, 고정 안 됨, 설치 실패, 열리지 않음, 보고 없음) | 없음 | `KeeperBeside` | 창이 자기 실행 파일 옆의 `centralu-keeper`를 띄우고, 호스트는 `<data>/hosts/<key>/`에서 돈다 | 에이전트는 계속 돌아야 한다. 창이 사는 동안 계속 이렇게 한다 |
 | macOS 릴리스 | `CC_KEEPER_HOST_SOURCE`(값 무관) | `KeeperBeside` | 창 옆의 키퍼가 그 폴더를 돌린다(빈 값이면 번들된 호스트) | 키퍼 스크립트가 호스트를 지정하는 방법이고, 셸은 그 호스트를 돌리지 않는다 |
@@ -1494,6 +1494,37 @@ exe, 매핑된 호스트의 `better-sqlite3`·`node-pty` 모듈)으로 측정했
 종료처럼 끝난다. 업데이트 줄이 이를 말한다(`RelaunchCheck.restartsHost`). `relaunch_info`가 ready일 때만이고, 키퍼가 있을 때와 같다: 업데이트가 바꾼 앱 번들에서(macOS).
 Linux 패키지와 Windows 설치는 번들이 아니므로 "Restart Centralu to finish updating"이 그대로이고, 바쁨 보고는 키퍼의 것이라 키퍼 없이는 스스로 적용되지 않는다.
 에이전트를 쥐지 않는 호스트(자식 서비스 없는 키퍼)의 교체도 같은 멈춤이다: drain이 에이전트를 놓기 전에 시작하고, 이어받는 호스트가 끝난 것을 이어 간다.
+
+**키퍼는 자식을 쥐지 않는다** (#1895 3단계, 사장님 결정 2026-11-03, 옵션 C). macOS 릴리스는 셸 → 키퍼 → 호스트 모양을 그대로 둔다. 릴리스는 ad-hoc
+서명이라 셸이 시작한 트리만 업데이트를 건너 macOS 권한을 지키기 때문이다([plans/thin-shell.md](plans/thin-shell.md) §1, §2). 호스트가 직접 띄운 에이전트도
+그 트리 안에 있다. 바뀌는 것은 새로 시작한 키퍼가 자식 소켓을 열지 않는다는 것 하나다(`server/start.rs`의 `holds_children`, 스위치가 있는 유일한 곳.
+`CC_KEEPER_HOLDS_CHILDREN=1`은 아직 쥐기를 시험하는 키퍼 스크립트용). 그래서 호스트는 다른 기기처럼 자식을 직접 띄우고, 모든 끝남이 그것을 멈춘다.
+
+- "Apply now": 창이 `keeper.sock`에 `{"op":"stop","forUpdate":true}`를 보낸다. 키퍼는 호스트에 업데이트용 멈춤 줄을 쓰고 최대 15초 기다린 뒤
+  답하고 끝난다. 창은 다시 뜨면서 셸을 열고, 셸이 새 빌드의 키퍼를 띄운다. 다음 호스트가 목록의 턴을 Centralu의 안내와 함께 이어 가고 터미널과 Run 명령을
+  다시 연다. 다른 빌드의 호스트를 돌리는 키퍼는 없다. 창은 키퍼의 view(`stopsForUpdate`)로 이를 알고, 그것이 없는 예전 키퍼에는 예전처럼 `relaunching`을 보낸다.
+  창만 청할 수 있다(다른 프로세스는 `window_only`로 거절된다. 그러지 않으면 에이전트의 Bash가 모든 턴을 끊고 업데이트처럼 이어 가게 만들 수 있다). 거절(키퍼가
+  멈추는 중, 전환 중, 호스트가 아직 뜨지 않음)은 아무것도 멈추지 않고 저마다의 이유로 보인다. 멈추는 동안 누른 "Quit completely"는 거절되고("Centralu is stopping for an update; quit
+  again once it has relaunched") 아무것도 보내지 않는다. 그 멈춤은 끊은 턴을 목록에 남기고 연결된 허브가 볼 종료 표시를 남기지 않기 때문이다(#1143).
+  다시 띄우기는 그대로 진행되고, 사람은 다시 뜬 창에서 종료한다. 전환하던 키퍼가 넘기는 대신 업데이트용으로 멈추는 동안(소켓은 없고 프로세스는 살아 있음)
+  누른 종료도 같은 말로 거절된다. `RelaunchCheck.keepsAgents`는 에이전트를 넘겨받는 예전 키퍼의 호스트일 때만 붙는다. 설정은 그때만 에이전트가 계속 돈다고 말하고,
+  알 수 없는 창(Windows, Linux, 브라우저, 아직 키퍼에 붙지 않은 창)은 Centralu를 다시 시작하면 적용된다고만 말한다.
+- 손으로 연 다른 빌드의 창: 예전처럼 "Switch to this build"(handoff와 교체). 자식을 아직 쥔 키퍼(아래)의 호스트가 업데이트용으로 멈출 수 있으면, 넘기지 않고
+  업데이트용으로 멈춘 뒤 끝나고, 창이 자기 빌드의 키퍼를 띄운다. 멈출 수 있는지는 호스트가 시작할 때 한 말(`{"swap":{...,"stopsForUpdate":true}}`)로
+  알고, handoff는 이를 넘기지 않는다. 그래서 자식과 함께 호스트를 넘겨받은 키퍼는 새 호스트가 뜰 때까지(전환의 교체가 하나 띄운다) "멈출 수 없음"으로
+  읽고, 교체 없는 handoff였다면 그 키퍼의 다음 전환에서 자식을 다시 넘긴다.
+- 자동 모드: 그대로 키퍼가 한가하다고 보고할 때 적용한다(`RelaunchCheck.idleReported`).
+- 호스트 충돌: 키퍼가 같은 규칙으로 다시 띄우지만 에이전트·터미널·명령은 함께 끝나고, 돌던 턴은 Windows·Linux처럼 멈춤과 Continue로 남는다.
+- "Quit completely", 백그라운드 모드 꺼짐, 유휴 종료: 호스트 stdin의 평범한 `{"op":"stop"}`(`STOP_LINE`)이 같은 멈춤과 같은 종료 표시(#1143)를 남긴다.
+- 백그라운드 모드, 자격 증명 발급(#1405), 정문, 감독, 빌드별 사본: 그대로 키퍼의 것.
+
+*자식을 쥔 키퍼에서 넘어오기.* 이전 빌드의 창에서 "Apply now"를 누르면 그 키퍼가 `relaunching`을 받고, 새 창이 그 키퍼에 붙어 예전처럼 전환한다. 예전 키퍼는
+쥔 것을 모두 새 빌드의 키퍼에 넘기고(§4.4), 교체된 호스트가 자식을 이어받는다. 이렇게 자식을 받은 키퍼는 남은 생애 동안 그것을 계속 내준다: 그 호스트는
+그 서비스로 계속 띄우고, 넘어오는 일 자체로 끊기는 것은 없다. 다음 업데이트·전환·종료가 그것을 멈추고, 셸이 다음에 띄우는 키퍼는 아무것도 쥐지 않는다.
+handoff는 키퍼의 호스트가 업데이트용으로 멈출 수 없을 때(이전 빌드의 호스트, 또는 아직 뜨지 않은 호스트)만 자식 표를 넘기고 keeper.log에 그렇게 적는다.
+그 밖에는 키퍼가 업데이트용으로 멈추고 끝난다(`handoff::held_children_on_handoff`). 그래서 호스트가 끝낼 수 있었는데도 쥐기가 키퍼에서 키퍼로 이어지는 일은 없다. 받자마자
+멈추지 않은 이유: 0.1.0-beta.48까지의 호스트는 멈춤 줄을 창(`CC_STARTED_BY=app`)에게서만 받고 drain에서는 자식을 넘기므로, 그 턴을 목록에 올릴 방법이 없어
+종료처럼 끝났을 것이다. `scripts/keeper-children-integration.mjs`가 끝까지 확인한다.
 
 **규칙** (`idle.ts`). `hostBusy(snapshot)`이 "지금 멈추면 누가 무엇을 잃는가"에 대한 유일한 답이다: 일하거나 승인 또는
 질문을 기다리거나 활동으로 치는 백그라운드 작업(#290)을 돌리는 살아 있는 세션, 열린 터미널, 돌고 있는 프로젝트 명령.

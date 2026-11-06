@@ -3,7 +3,7 @@ import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
 import type { AgentSpawnSpec } from '../contract.js'
 import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
-import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
+import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
 
 /**
  * The Claude adapter against recordings of the real CLI (#1498): the CLI's stream-json, recorded at its process by
@@ -315,5 +315,53 @@ describe(`what the adapter makes of the CLI's real turns, the tools Centralu's s
     expect(calls(events)).toMatchObject([{ summary: { tool: 'PowerShell', title: 'Write-Output "ps-ok"' } }])
     expect(of(events, 'approval_request')).toEqual([])
     expect(results(events)).toMatchObject([{ ok: true, summary: 'ps-ok' }])
+  })
+
+  it('todo: each TaskCreate adds a step to the plan from the id its result names, and a TaskUpdate marks one completed; the plan is a whole snapshot each time', async () => {
+    const { events } = await run('todo')
+    expect(calls(events).map((c) => c.summary.tool).filter((t) => t.startsWith('Task'))).toEqual(['TaskCreate', 'TaskCreate', 'TaskUpdate'])
+    expect(of(events, 'plan_update').map((p) => p.steps)).toEqual([
+      [{ text: 'write the intro', status: 'pending' }],
+      [{ text: 'write the intro', status: 'pending' }, { text: 'write the outro', status: 'pending' }],
+      [{ text: 'write the intro', status: 'completed' }, { text: 'write the outro', status: 'pending' }],
+    ])
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(ended(events)).toBe(1)
+  })
+
+  it('thinking: the thinking the CLI shows arrives as reasoning text before the answer, not as an empty block, and the turn ends once', async () => {
+    const { events } = await run('thinking')
+    const reasoning = of(events, 'reasoning_delta').map((e) => e.text ?? '').join('')
+    // Exactly the words the CLI streamed: the finished message repeats them, and the adapter does not say them twice (`reasoningStreamed`)
+    const streamed = recordedMessages('thinking')
+      .flatMap((m) => ((m as { event?: { delta?: { type?: string; thinking?: string } } }).event?.delta?.type === 'thinking_delta' ? [(m as { event: { delta: { thinking: string } } }).event.delta.thinking] : []))
+      .join('')
+    expect(streamed).toMatch(/17/)
+    expect(reasoning).toBe(streamed)
+    // ...as deltas, one per streamed piece: the same words once from the finished message would also join to `streamed`
+    const pieces = recordedMessages('thinking').filter((m) => (m as { event?: { delta?: { type?: string; thinking?: string } } }).event?.delta?.type === 'thinking_delta' && !!(m as { event: { delta: { thinking: string } } }).event.delta.thinking)
+    expect(of(events, 'reasoning_delta').filter((e) => !!e.text)).toHaveLength(pieces.length)
+    expect(events.findIndex((e) => e.type === 'reasoning_delta' && !!e.text)).toBeLessThan(events.findIndex((e) => e.type === 'message_delta'))
+    expect(said(events)).toContain('391')
+    expect(ended(events)).toBe(1)
+  })
+
+  it('web: a page fetched and a search made are calls of their tools, run under auto without a card, each with its words as the result', async () => {
+    const { events } = await run('web')
+    expect(calls(events).map((c) => c.summary.tool).filter((t) => t.startsWith('Web'))).toEqual(['WebFetch', 'WebSearch'])
+    expect(calls(events).find((c) => c.summary.tool === 'WebFetch')!.input).toMatchObject({ url: 'https://example.com' })
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(results(events).slice(-2)).toMatchObject([{ ok: true, summary: expect.stringContaining('Example Domain') }, { ok: true, summary: expect.stringContaining('Web search results') }])
+    expect(ended(events)).toBe(1)
+  })
+
+  it("mcp-call: a tool of an MCP server of the person's own is named by its server and tool, asks nothing under auto, and returns the server's text", async () => {
+    const { events } = await run('mcp-call')
+    // The model first looks the tool up (ToolSearch), as the tools of an MCP server are deferred
+    const ping = calls(events).find((c) => c.summary.tool === 'mcp__probe__ping')
+    expect(ping).toBeDefined()
+    expect(of(events, 'approval_request')).toEqual([])
+    expect(results(events).find((r) => r.callId === ping!.callId)).toMatchObject({ ok: true, summary: 'pong' })
+    expect(ended(events)).toBe(1)
   })
 })

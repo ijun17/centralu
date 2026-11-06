@@ -5,7 +5,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
  * Telling a session its context is growing (#1492). An agent cannot see how full its context is: Claude Code does not tell the
  * model, and `compact_self` (#1478) only works when the agent thinks of it. So when a session's context passes a first share
  * (30% of the model's window by default) Centralu tells it, once, its size and "when this step of the work is done, call
- * `compact_self`", and tells it once more at a second share that sits below the share the tool compacts at by itself
+ * `compact_self` with `then` set to what you do next, and end your turn" (#2024), and tells it once more at a second share that sits below the share the tool compacts at by itself
  * (`nudgeShares`: 10 points below it by default, never at or above it), where that compaction would come in the middle of work.
  *
  *  - **Quiet.** The note rides in with the session's next input or tool result (`SessionHandle.nudge`: Claude's quiet input, Codex's
@@ -111,8 +111,8 @@ export class ContextNudges {
     const used = `${Math.round(c.size / 1000)}k of ${Math.round(window / 1000)}k tokens`
     const text =
       which === 'second' && c.point !== null
-        ? `[Centralu] Your context is now about ${percent}% full (${used}), and the tool compacts it by itself in the middle of work at ${Math.round(c.point * 100)}%. Call compact_self when the current step is done, at the latest; do not stop what you are doing for it.`
-        : `[Centralu] Your context is now about ${percent}% full (${used}). When this step of the work is done, call compact_self so the next step starts from a summary; do not stop what you are doing for it.`
+        ? `[Centralu] Your context is now about ${percent}% full (${used}), and the tool compacts it by itself in the middle of work at ${Math.round(c.point * 100)}%. When the current step is done, at the latest, call compact_self with "then" set to what you do next, and end your turn; do not stop what you are doing for it.`
+        : `[Centralu] Your context is now about ${percent}% full (${used}). When this step of the work is done, call compact_self with "then" set to what you do next, and end your turn, so the next step starts from a summary; do not stop what you are doing for it.`
     const failed = (err: unknown) => {
       // Not told: the share stays told, so a failing send is not repeated with every request
       c.waiting = null
@@ -122,7 +122,7 @@ export class ContextNudges {
       // Not taken (a turn that has ended, or none that can be steered): it waits for a later request of a running turn
       if (!took) return
       c.waiting = null
-      this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self when this step is done`)
+      this.host.notice(id, `Centralu told it its context is ${percent}% full: call compact_self with then set to its next step`)
     }
     let took: boolean | Promise<boolean>
     try {

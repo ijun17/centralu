@@ -193,6 +193,32 @@ fn thaw(k: &Keeper, f: &Frozen) {
     }
 }
 
+/// What a handoff does with the children this keeper holds (#1895 step 3)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HeldOnHandoff {
+    /// It holds none: nothing to decide
+    NoneHeld,
+    /// Its host can stop for an update: it does, and this keeper ends instead of handing over, so holding never passes to
+    /// a keeper whose host could have ended it
+    StopInstead,
+    /// Its host cannot (an earlier build's, or a host not up): the children go on to the next keeper with the handoff, as
+    /// before, so nothing running is cut. That keeper's next update or switch ends them
+    HandOn,
+}
+
+/// What the windows are told while a keeper that holds children stops for an update instead of handing over
+pub(in crate::keeper) const STOPS_INSTEAD: &str =
+    "this keeper stops for the update instead of handing over the processes it holds; the window then starts a keeper of its own build, whose host continues what was stopped";
+
+/// `HeldOnHandoff` from whether this keeper serves the child socket and whether its host said it stops for an update
+pub(super) fn held_children_on_handoff(holds: bool, host_stops_for_update: bool) -> HeldOnHandoff {
+    match (holds, host_stops_for_update) {
+        (false, _) => HeldOnHandoff::NoneHeld,
+        (true, true) => HeldOnHandoff::StopInstead,
+        (true, false) => HeldOnHandoff::HandOn,
+    }
+}
+
 /**
  * Hands this keeper over to the keeper at `exe`, of build `target`. Returns only on failure, after
  * rolling everything back; on success the process exits.
@@ -210,10 +236,32 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
     if !exe.is_file() {
         return Err(format!("the new build's executable is not at {}", exe.display()));
     }
-    {
-        let st = k.state.lock().map_err(|_| "keeper state poisoned")?;
+    let held = {
+        let mut st = k.state.lock().map_err(|_| "keeper state poisoned")?;
         if st.stopping {
             return Err("the keeper is stopping".into());
+        }
+        let held = held_children_on_handoff(k.children.enabled(), st.host_stops_for_update);
+        if held == HeldOnHandoff::StopInstead {
+            st.stopping = true;
+            // The windows wait on "handing over" for up to the stop's bound; they are told why, and that they start a keeper next
+            if let Some(sw) = st.swap.as_mut() {
+                sw.message = Some(STOPS_INSTEAD.into());
+            }
+            k.broadcast(&mut st);
+        }
+        held
+    };
+    match held {
+        HeldOnHandoff::NoneHeld => {}
+        HeldOnHandoff::StopInstead => {
+            log("not handing over the children this keeper holds: its host stops for an update instead, and this keeper ends; the window starts a keeper of its own build, whose host continues what this one ended (#1895 step 3)");
+            k.end_for_update(crate::host_proc::STOP_FOR_UPDATE_WAIT);
+            log(&format!("stopped for an update instead of handing over (pid {})", k.info.pid));
+            super::server::exit_after_stop();
+        }
+        HeldOnHandoff::HandOn => {
+            log("handing the children this keeper holds on to the next keeper: its host cannot stop for an update (an earlier build's, or not up)");
         }
     }
     let (mut child, mut ch) = spawn_successor(k, exe, target).map_err(|e| format!("could not start the new keeper: {e}"))?;
@@ -704,6 +752,10 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             swapping: snap.then_switch.is_some(),
             drained: None,
             keeps_agents: snap.keeps_agents,
+            // Not passed on (#1895 step 3): until the host says it again at its next start, "Apply now" asks this keeper to hold
+            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it. And a keeper that took
+            // children over here hands them on again at its next switch (`held_children_on_handoff`), unless a new host started
+            host_stops_for_update: false,
             // Not passed on: a handoff starts from an attached window's switch, which already
             // spent any relaunch grace (#352)
             relaunch_until: None,

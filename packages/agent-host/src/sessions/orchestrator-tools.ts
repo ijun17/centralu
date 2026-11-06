@@ -114,8 +114,8 @@ function runParsed<N extends keyof OrchestratorToolArgs>(name: N, args: Orchestr
 }
 
 const HANDLERS: ToolHandlers = {
-  compact_self({ focus }, { tools }) {
-    return tools.compactSelf ? tools.compactSelf(focus) : { text: 'Compacting is not available in this session.', isError: true }
+  compact_self({ focus, then }, { tools }) {
+    return tools.compactSelf ? tools.compactSelf(focus, then) : { text: 'Compacting is not available in this session.', isError: true }
   },
   mail(args, { tools }) {
     return tools.mail ? tools.mail(args) : { text: 'The mailbox is not available in this session.', isError: true }

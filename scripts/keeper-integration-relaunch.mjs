@@ -90,7 +90,10 @@ async function scenarioRelaunch() {
   const GRACE = 6
   const data = newData()
   const sock = join(data, 'keeper.sock')
-  const k = startKeeper(data, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE) } })
+  // Held here as a keeper of an earlier build holds them (`CC_KEEPER_HOLDS_CHILDREN=1`), which is what this scenario is about: the
+  // window still tells `relaunching` to a keeper whose host cannot stop for an update. Any other keeper of this build is asked
+  // to stop for an update instead, holding or not (keeper-children-integration.mjs). Step 4 rewrites this scenario
+  const k = startKeeper(data, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE), CC_KEEPER_HOLDS_CHILDREN: '1' } })
   const view = await waitFor(async () => {
     const v = await status(sock)
     return ready(v) && v

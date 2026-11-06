@@ -518,6 +518,14 @@ export class MessageService {
     return { items: found.slice(0, opts.limit).map((m) => this.item(m, address, null)), older: found.length > opts.limit }
   }
 
+  /**
+   * Whether mail that wakes `recipient` waits for it, due or not yet (the debounce makes a message wait a moment before it is due): a turn of its own is
+   * coming, which a note of the host's should follow. Reads only; mail that is held out or settled is not waiting
+   */
+  wakingFor(recipient: string): boolean {
+    return this.records.pendingFor(recipient, Number.MAX_SAFE_INTEGER).some((p) => wakesMessage(p.message))
+  }
+
   watchedTo(recipient: string): RecipientRow[] {
     return this.records.watchedTo(recipient)
   }

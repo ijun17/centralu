@@ -24,6 +24,8 @@ export class FakeHandle implements SessionHandle {
   /** Whether the tool takes a note now (Codex between turns does not) */
   takesNudges = true
   disposed = false
+  /** How many inputs the tool holds that no turn has started for (`SessionHandle.queuedInputs`); absent: this tool cannot say, as an ACP agent cannot */
+  queuedInputs?: () => number
   constructor(readonly sessionId: string, private emit: EventSink) {}
   send(text: string, opts?: { origin?: InputOrigin; compact?: boolean }) {
     this.sent.push(text)

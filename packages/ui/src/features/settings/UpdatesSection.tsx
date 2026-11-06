@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { APP_VERSION } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
-import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
+import { applyWords, installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
 import { SettingToggle } from './SettingToggle.jsx'
 import { Button } from '../../components/Button.jsx'
 import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
@@ -37,6 +37,7 @@ export function UpdatesSection() {
   const relaunch = useRelaunchCheck()
   const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   const offer = update?.phase === 'restart_required' ? applyOffer(update, APP_VERSION, relaunch) : null
+  const words = applyWords(relaunch)
   /*
    * One switch for the host's two (owner, 2026-10-20): automatic checking (`auto`) and applying when idle (`autoApply`).
    * It reads as on only when both are, so a host still holding the old default (checking on, applying off) shows it
@@ -67,7 +68,7 @@ export function UpdatesSection() {
           Centralu updates through npm, the same way it was installed.
           <More>
             Checking only asks the registry which version is newest. With automatic updates off, installing happens when
-            you ask for it. Applying it relaunches the window, and running agents, terminals and commands keep going.
+            you ask for it. {words.applying}
           </More>
         </>
       }
@@ -96,22 +97,20 @@ export function UpdatesSection() {
 
       {/*
         Someone turning it off needs to know what they are turning off, and someone leaving it on needs to know what
-        goes out — there is no request that goes out silently. Applying needs a window that can relaunch without cutting
-        anything (#352: the desktop app with the keeper); elsewhere a newer version is installed and the window says so.
+        goes out — there is no request that goes out silently. Applying needs a window that can relaunch (#352); what it
+        costs, and whether it can wait for idle by itself, is `applyWords` (#1895 step 3).
       */}
       <SettingToggle
         checked={automatic}
         disabled={update === null}
         onChange={setAutomatic}
         label="Automatic updates"
-        hint="Checks, installs and applies a newer version once nothing is busy."
+        hint={words.hint}
         more={
           <>
             It asks the public npm registry for one version number and nothing else: at startup, every six hours, and on
-            focus if the last check is over an hour old. A newer version is installed as soon as it is found, and applied
-            once no session is working or waiting for you, no terminal or command is running, and you are not typing.
-            Applying relaunches the window; agents keep running through it. If it cannot reach the registry, nothing
-            happens and nothing interrupts you.
+            focus if the last check is over an hour old. {words.more} If it cannot reach the registry, nothing happens and
+            nothing interrupts you.
           </>
         }
         testId="update-auto"

@@ -2,6 +2,26 @@
 
 use super::*;
 
+/// `CC_KEEPER_HOLDS_CHILDREN=1`: a keeper started fresh serves its child socket again (`holds_children`)
+pub const HOLDS_CHILDREN_ENV: &str = "CC_KEEPER_HOLDS_CHILDREN";
+
+/**
+ * Whether a keeper started fresh serves the child socket, so its hosts spawn agents, terminals and commands through it
+ * and a host restart or a swap leaves them running (#280 step 2). Off since #1895 step 3 (owner decision 2026-11-03,
+ * option C): the host spawns its own, still inside the tree the shell started, and an update stops them and continues
+ * their turns (`stop` with `forUpdate`). The one fact of the switch, read here only (docs/plans/keeper-removal.md §6).
+ *
+ * A keeper that takes over from a keeper of an earlier build that held children keeps serving them for the rest of its
+ * life (`handoff::take`): its host takes them over and nothing running is cut. Its next update, switch or quit stops
+ * them, and the keeper the shell starts next serves none. It hands them on only while its host cannot stop for an
+ * update (`handoff::held_children_on_handoff`), and says so in keeper.log.
+ *
+ * The variable is for the keeper scripts that still test holding; step 4 deletes it with the child service.
+ */
+fn holds_children() -> bool {
+    std::env::var(HOLDS_CHILDREN_ENV).as_deref() == Ok("1")
+}
+
 /// Command-line options. The app passes all of them; a person starting a keeper by hand can
 /// leave them out (it then runs the host from source, as a debug build would).
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -141,11 +161,18 @@ pub fn run(args: &[String]) -> i32 {
     let _ = fs::set_permissions(&sock, fs::Permissions::from_mode(0o600));
 
     // Bound here, while the keeper is still single-threaded (the socket is born under umask 077).
-    // Without it the host spawns its own children, exactly as before step 2.
-    let children = Children::start(&data).unwrap_or_else(|e| {
-        log(&format!("child service unavailable ({e}); the host keeps its own children"));
+    // Without it the host spawns its own children, exactly as before step 2: since #1895 step 3, always (`holds_children`).
+    let children = if holds_children() {
+        Children::start(&data).unwrap_or_else(|e| {
+            log(&format!("child service unavailable ({e}); the host keeps its own children"));
+            Children::disabled()
+        })
+    } else {
+        // A socket a holding keeper left when it died: no host may take it for a live service
+        let _ = fs::remove_file(children::socket_path(&data));
+        log("no child service: the host spawns its own children, and an update stops them and continues their turns (#1895)");
         Children::disabled()
-    });
+    };
 
     let desired = own_build(&opts);
     let settings = source::load_settings(&data);

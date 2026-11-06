@@ -344,3 +344,16 @@ fn the_host_handed_over_is_answered_from_the_first_accept() {
     b.stop_all(Duration::from_millis(200));
 }
 
+
+/**
+ * Review of #1895 step 3: a keeper holding children handed them on in every handoff, so holding could pass from keeper to
+ * keeper for good. Now it hands them on only when its host cannot stop for an update; when it can, it stops for one and
+ * ends instead, and the window starts a keeper of its own build.
+ */
+#[test]
+fn held_children_go_on_only_when_the_host_cannot_stop_for_an_update() {
+    assert_eq!(held_children_on_handoff(true, true), HeldOnHandoff::StopInstead);
+    assert_eq!(held_children_on_handoff(true, false), HeldOnHandoff::HandOn);
+    assert_eq!(held_children_on_handoff(false, true), HeldOnHandoff::NoneHeld);
+    assert_eq!(held_children_on_handoff(false, false), HeldOnHandoff::NoneHeld);
+}

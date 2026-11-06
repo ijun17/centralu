@@ -214,6 +214,10 @@ pub struct KeeperView {
      */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rights: Option<String>,
+    /// `stop` with `forUpdate` stops the host for an update and ends the keeper (#1895 step 3): what "Apply now" asks of
+    /// it. A keeper without it is asked to hold on through the relaunch (`relaunching`) and switched after.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stops_for_update: bool,
 }
 
 /// Seconds since the epoch, as every record the keeper keeps writes its times.
