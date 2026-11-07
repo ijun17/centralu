@@ -2052,7 +2052,8 @@ Implementation rules:
   summary, so every session starts the CLI with `--thinking-display summarized` (`extraArgs` in `sdk-query.ts`; not the SDK's
   `thinking` option, which would also pass `--thinking adaptive` and decide whether the model thinks). It changes what is
   shown, not what is thought or billed: measured on CLI 2.1.316, the output tokens of a turn stay the same. The CLI takes
-  the flag since 2.1.100 at least; an older one refuses the unknown option and the session does not start.
+  the flag since 2.1.100 at least; an older one refuses the unknown option and the session does not start. A CLI an older
+  host started and this one adopts keeps the arguments it started with, so its thinking stays empty until it restarts.
 - **A native subagent's steps go out wrapped, tagged with the launching call** (#222). Never as the parent's own events
   (#98): a `subagent_event` whose `step` is a text, reasoning, tool call or tool result, and whose `parentCallId` is the
   call that started the subagent. Claude: the subagent's messages carry `parent_tool_use_id`, and `forwardSubagentText`
