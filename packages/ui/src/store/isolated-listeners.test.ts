@@ -7,6 +7,8 @@ afterEach(() => vi.restoreAllMocks())
 describe('a store listener that throws (#2070)', () => {
   it('does not stop the listeners after it, or the code that set the state', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const later: (() => void)[] = []
+    vi.spyOn(globalThis, 'queueMicrotask').mockImplementation((f) => void later.push(f))
     const store = create<{ n: number }>()(isolatedListeners(() => ({ n: 0 })))
     const seen: number[] = []
     store.subscribe(() => {
@@ -20,6 +22,9 @@ describe('a store listener that throws (#2070)', () => {
     expect(after).toBe(true)
     expect(store.getState().n).toBe(1)
     expect(logged).toHaveBeenCalledWith('A store listener threw', expect.any(Error))
+    // And thrown again on its own, after the others, so it is still an uncaught error (e2e's page error)
+    expect(later).toHaveLength(1)
+    expect(() => later[0]!()).toThrow('a view failed')
   })
 
   it('still lets a listener unsubscribe', () => {
