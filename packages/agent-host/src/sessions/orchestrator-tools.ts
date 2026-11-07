@@ -134,10 +134,14 @@ const HANDLERS: ToolHandlers = {
     if (!r.ok) return { text: `Centralu update did not start: ${r.error ?? 'unavailable'}`, isError: true }
     const s = r.status
     if (!s) return { text: 'Centralu update is unavailable.', isError: true }
-    if (action === 'check') return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
     // The install answers once its target is settled (#645): up to date is a result here, not a failure
     const apply = callForm(caller.profile, 'update_centralu', { action: 'apply' })
     const applies = `The person applies the installed build from Centralu${apply ? `, or ${apply} does` : ''}; their automatic-update setting was not changed.`
+    if (action === 'check') {
+      // A release installed and waiting for a restart is not one to install again (#2130)
+      if (s.phase === 'restart_required') return { text: `Centralu ${s.latest ?? ''} is installed and waits for a restart. ${applies}` }
+      return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
+    }
     if (s.phase === 'failed') return { text: `Centralu update failed: ${s.error}` }
     if (s.phase === 'restart_required') return { text: `Centralu ${s.latest ?? ''} is installed. ${applies}` }
     if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }
