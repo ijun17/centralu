@@ -93,6 +93,8 @@ fn a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled() {
     read_until(&mut out, &mut got, "line40\n");
 
     let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
+    // A whole keeper of this build would refuse this table: its child is running (#1895 step 4)
+    assert!(refuse_live_children(&state).is_err(), "{state}");
     // While frozen the child keeps writing into its pipe and nobody reads it
     std::thread::sleep(Duration::from_millis(150));
     let mut u = Unpack::new(pack.fds, pack.blobs);
@@ -356,4 +358,15 @@ fn held_children_go_on_only_when_the_host_cannot_stop_for_an_update() {
     assert_eq!(held_children_on_handoff(true, false), HeldOnHandoff::HandOn);
     assert_eq!(held_children_on_handoff(false, true), HeldOnHandoff::NoneHeld);
     assert_eq!(held_children_on_handoff(false, false), HeldOnHandoff::NoneHeld);
+}
+
+/// #1895 step 4: a handed child table with a running child is refused (no host of this build would read it); one whose
+/// children all exited, or that has none, is taken
+#[test]
+fn a_handed_child_table_with_a_running_child_is_refused() {
+    let running = json!({ "children": [{ "pid": 10, "exit": null }, { "pid": 11, "exit": { "code": 0, "signal": null } }] });
+    let why = refuse_live_children(&running).unwrap_err();
+    assert!(why.contains("1 running") && why.contains("quit Centralu completely"), "{why}");
+    assert!(refuse_live_children(&json!({ "children": [{ "pid": 11, "exit": { "code": 0, "signal": null } }] })).is_ok());
+    assert!(refuse_live_children(&json!({ "children": [] })).is_ok());
 }

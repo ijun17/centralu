@@ -219,6 +219,20 @@ pub(super) fn held_children_on_handoff(holds: bool, host_stops_for_update: bool)
     }
 }
 
+/// The refusal of a handed child table that still has a running child (#1895 step 4, `docs/plans/keeper-removal.md` §6):
+/// this build's host takes over nothing a keeper holds, so those processes would run on with no host to read them. The
+/// outgoing keeper rolls back and carries on with them, and its window offers "Restart completely". A table whose
+/// children have all exited (or that has none) is taken as before
+pub(super) fn refuse_live_children(table: &Value) -> Result<(), String> {
+    let live = table.get("children").and_then(Value::as_array).map_or(0, |c| c.iter().filter(|c| c.get("exit").is_none_or(Value::is_null)).count());
+    if live == 0 {
+        return Ok(());
+    }
+    Err(format!(
+        "this build no longer takes over the agents, terminals and commands a keeper holds ({live} running); quit Centralu completely and open it again to update"
+    ))
+}
+
 /**
  * Hands this keeper over to the keeper at `exe`, of build `target`. Returns only on failure, after
  * rolling everything back; on success the process exits.
@@ -539,6 +553,9 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     let snap: KeeperSnap = serde_json::from_value(snap_v).map_err(|e| format!("snapshot: {e}"))?;
     if snap.protocol > HANDOFF_PROTOCOL {
         return Err(format!("handoff format {} is newer than this keeper reads ({HANDOFF_PROTOCOL})", snap.protocol));
+    }
+    if let Some(c) = &snap.children {
+        refuse_live_children(&c.state)?;
     }
     let mut u = Unpack::new(msg.fds, msg.blobs);
     let lock = std::fs::File::from(u.fd(snap.lock)?);
