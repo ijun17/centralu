@@ -9,7 +9,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * What the routed cards reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type RoutedCardsHost = Pick<DelegationHost, 'autoBoundaryOpen' | 'children' | 'deliver' | 'handingOver' | 'meta' | 'nameOf'> &
+export type RoutedCardsHost = Pick<DelegationHost, 'autoBoundaryOpen' | 'children' | 'deliver' | 'meta' | 'nameOf'> &
   Pick<SessionTrashHost, 'hostCards'> & {
     /** The tool bundle a session receives (tool-profiles.ts), null for none */
     toolProfileOf: (sessionId: string) => ToolProfile | null
@@ -74,7 +74,7 @@ export class RoutedCards {
    */
   routeCard(sessionId: string, requestId: string, kind: 'question' | 'approval'): void {
     const owner = this.host.children.turnOwners.get(sessionId)
-    if (!owner || this.host.handingOver || !this.host.meta.has(owner.callerId)) return
+    if (!owner || !this.host.meta.has(owner.callerId)) return
     // Told once per card, by its handle: a request id an adapter numbers again after a restart is another card
     const handle = this.routedCards(sessionId, owner.callerId).find((c) => c.requestId === requestId)?.card
     if (!handle || owner.told.has(handle)) return

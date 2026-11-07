@@ -1,24 +1,7 @@
-import { EventEmitter } from 'node:events'
-import { PassThrough } from 'node:stream'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
-import type { AgentProcessHost } from './manager.js'
 
-/** The fakes of a host that lets sessions go to the keeper and adopts them again: a process, a session handle, a claude adapter */
-
-export class FakeProcess extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  exitCode = null
-  /** Set by a test that makes the process exit late */
-  exited = false
-  killed = false
-  kills: string[] = []
-  kill(signal: NodeJS.Signals = 'SIGTERM') {
-    this.kills.push(signal)
-    return true
-  }
-}
+/** The fakes of a claude session on the direct path: a session handle whose turns a test drives, and an adapter that makes them */
 
 export class Handle implements SessionHandle {
   externalId: string | null
@@ -48,11 +31,6 @@ export class Handle implements SessionHandle {
   }
   interrupt() {}
   async dispose() {}
-  /** Set by a test: the turn ends while the leaving host lets the process go */
-  endOnDetach?: string
-  async detach() {
-    if (this.endOnDetach) this.answer(this.endOnDetach)
-  }
 }
 
 export class Adapter implements AgentAdapter {
@@ -74,5 +52,3 @@ export class Adapter implements AgentAdapter {
     return h
   }
 }
-
-export const processes: AgentProcessHost = { spawn: () => new FakeProcess() }

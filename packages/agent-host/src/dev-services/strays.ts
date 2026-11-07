@@ -7,7 +7,6 @@ import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { KILL_GRACE_MS } from './kill-tree.js'
 import { ancestors, descendants } from './proc-table.js'
-import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
 
@@ -44,8 +43,7 @@ const exec = promisify(execFile)
  *     **WSL's `/init` counts as init** (#1882). There an orphan is adopted by a per-session `/init` helper, not by pid 1,
  *     so a leftover's parent is alive and the chain above would read it as an owner. `orphanAdopter` asks the machine where
  *     an orphan of ours lands (a short-lived one is made and its parent read); that process counts as init only when its
- *     command is exactly `/init`. Every other living parent is still an owner: the keeper or an agent holding its own
- *     children, and `systemd --user`, which also adopts an editor that detached itself (`code .` from a terminal in the
+ *     command is exactly `/init`. Every other living parent is still an owner: an agent holding its own children, and `systemd --user`, which also adopts an editor that detached itself (`code .` from a terminal in the
  *     project: cwd in the project, no terminal, parent `systemd --user`), and would be offered as a leftover. A systemd
  *     desktop's own leftovers are therefore still missed, by choice. What started the host (the keeper, a launcher) is
  *     never a candidate.
@@ -116,20 +114,13 @@ export function pickStrays(
   cwdOf: ReadonlyMap<number, string>,
   roots: readonly string[],
   selfPid: number,
-  /**
-   * The children the keeper holds for this host (#280 step 2): agents, terminals, commands. They
-   * are ours exactly as our own children were — the keeper and the host stop them — but they are
-   * not our descendants any more, and a keeper that took them over from another keeper (step 4) is
-   * not even their parent, so the parent chain alone would call them ownerless.
-   */
-  held: readonly number[] = [],
   /** WSL's `/init` helper, where it adopts an orphan of ours (`orphanAdopter`), taken for init in rule 4 */
   adopter: number | null = null,
 ): StrayProcess[] {
   // The set of our own descendants — the side the host cleans up as a whole tree when it shuts down
-  const ours = descendants(rows, [selfPid, ...held])
+  const ours = descendants(rows, [selfPid])
   // Who started us (the keeper, a launcher) is not a leftover, whatever adopted it: it is no leftover of anyone's
-  const launchers = ancestors(rows, [selfPid, ...held])
+  const launchers = ancestors(rows, [selfPid])
 
   // What passed rules 1 through 3. Rule 4 (no owner) can only be judged once this set is known
   const candidates = new Map<number, string>()
@@ -250,11 +241,10 @@ export async function orphanAdopter(run: Run = exec, end: (pid: number) => void 
 export async function findStrays(
   roots: readonly string[],
   selfPid = process.pid,
-  held: readonly number[] = [],
 ): Promise<StrayProcess[]> {
   if (!hasPs() || roots.length === 0) return []
   const [{ rows, cwdOf }, adopter] = await Promise.all([scanProcesses(), orphanAdopter()])
-  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, held, adopter)
+  return pickStrays(rows, cwdOf, resolveRoots(roots), selfPid, adopter)
 }
 
 /**
@@ -299,22 +289,17 @@ const REAL_STRAY_STOP: StrayStopDeps = { find: findStrays, kill: (pid, signal) =
  * running the same command: the same two shots as every other stop (`stopGroup`). A dev server that traps TERM used to
  * be left running after Stop.
  *
- * **`held` unknown (null) stops nothing.** The keeper's children are told apart from leftovers only by its list (rule
- * 3): after a keeper handoff, kept agents are init's children, and with the list missing they would be stopped as
- * leftovers. Even a TERM ends an agent, so this refuses rather than guess.
+ * No host's children are held anywhere else any more (#1895 step 4): a process a holding keeper left behind when it
+ * died is an orphan in our folder like any other, and is offered and stopped as one.
  */
 export async function stopStrays(
   pids: readonly number[],
   roots: readonly string[],
   selfPid = process.pid,
-  held: readonly number[] | null = [],
   deps: StrayStopDeps = REAL_STRAY_STOP,
 ): Promise<{ stopped: number }> {
-  if (held === null) {
-    throw rpcError('The keeper could not say which processes it holds for this host, so nothing was stopped; try again')
-  }
   const shoot = async (targets: readonly StrayProcess[], signal: NodeJS.Signals): Promise<StrayProcess[]> => {
-    const live = new Map((await deps.find(roots, selfPid, held)).map((s) => [s.pid, s]))
+    const live = new Map((await deps.find(roots, selfPid)).map((s) => [s.pid, s]))
     const hit: StrayProcess[] = []
     for (const target of targets) {
       const now = live.get(target.pid)

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
+import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
 import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
@@ -12,8 +12,7 @@ import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { pausedReportKey } from './child-ownership.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
+import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -114,7 +113,6 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
 const ECONNREFUSED = 'API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)'
 
 let store: Store
@@ -139,8 +137,6 @@ function host(o: { updateResume?: UpdateResumeFolder } = {}) {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
   const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), {
-    processes,
-    keptSessions: new Set(),
     ...(o.updateResume ? { updateResume: o.updateResume } : {}),
   })
   mgr.prLookup = async () => null
@@ -1158,12 +1154,12 @@ describe('a tool reconnecting for too long (#698)', () => {
     expect(clocks().has(id)).toBe(false)
   })
 
-  it('a host handing its sessions over leaves no reconnect clock running behind it', async () => {
+  it('a host that lets its sessions go leaves no reconnect clock running behind it', async () => {
     const a = host()
     const { id, h } = await working(a)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
-    await a.mgr.tenure.detachAll()
+    await a.mgr.tenure.disposeAll()
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     // The next host watches the session from its own first event; this one says nothing after leaving
     expect(interruptions(id)).toEqual([])
@@ -1176,7 +1172,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     // The process still speaks while it is let go: its tool begins retrying then
     h.dispose = async () => h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
-    await a.mgr.tenure.detachAll()
+    await a.mgr.tenure.disposeAll()
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     expect(interruptions(id)).toEqual([])
   })

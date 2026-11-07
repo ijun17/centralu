@@ -165,7 +165,7 @@ function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STOR
  * What a child's reports reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'handingOver' | 'meta' | 'store' | 'trashing'> &
+export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'disposing' | 'meta' | 'store' | 'trashing'> &
   Pick<RoutedCardsHost, 'toolProfileOf'> & {
     /** Whether the session's seat has the mail tool: the mailbox can wake it (the receive rule) */
     canReadMail(sessionId: string): boolean
@@ -225,7 +225,7 @@ export class ChildReports {
    * turns that are the work's: the person's own are theirs (#1377), and once the thread is reported the turns after it are not reported
    */
   async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter): Promise<void> {
-    if (this.host.handingOver || this.host.disposing || turn?.by === 'person') return
+    if (this.host.disposing || turn?.by === 'person') return
     if (!this.host.children.personOwes(sessionId)) return
     const stop = this.host.meta.get(sessionId)?.interruption
     // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
@@ -274,7 +274,7 @@ export class ChildReports {
    */
   settlePausedReport(sessionId: string): void {
     this.host.children.stopSettling(sessionId)
-    if (this.host.disposing || this.host.handingOver) return
+    if (this.host.disposing) return
     const quiet = () => {
       const m = this.host.meta.get(sessionId)
       return this.host.children.pausedReports.has(sessionId) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
@@ -283,7 +283,7 @@ export class ChildReports {
     if (!quiet()) return
     const timer = setTimeout(() => {
       this.host.children.stopSettling(sessionId)
-      if (!quiet() || this.host.handingOver || this.host.disposing) return
+      if (!quiet() || this.host.disposing) return
       console.error(`[sessions] ${sessionId.slice(0, 8)}: its background work ended and no turn followed; reporting the work as ended`)
       void this.reportBackIfAwaited(sessionId, { type: 'turn_complete', sessionId }, undefined, this.pausedTasksNow(sessionId))
     }, PAUSED_REPORT_SETTLE_MS)
@@ -316,7 +316,7 @@ export class ChildReports {
     turn?: TurnStarter,
   ): Promise<string | undefined> {
     const orchestratorId = this.host.children.awaitingReport.get(sessionId)
-    if (!orchestratorId || this.host.handingOver) return undefined
+    if (!orchestratorId) return undefined
     if (turn?.by === 'person' && !settled) {
       // Their turn changes nothing of the report. The paused work may have ended meanwhile, with no turn to follow: its wait starts again
       if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
@@ -356,7 +356,7 @@ export class ChildReports {
    * end of its work, with no pause, and the other owner's mark, its pause and its tasks are left as they are. The person's own turn is reported to nobody
    */
   async reportMailTurn(sessionId: string, ownerId: string, ending: NormalizedEvent, answer: string | undefined, turn: TurnStarter | undefined): Promise<string | undefined> {
-    if (this.host.handingOver || turn?.by === 'person') return undefined
+    if (turn?.by === 'person') return undefined
     const target = this.host.meta.get(sessionId)
     if (!target || !this.host.meta.has(ownerId)) return undefined
     const waiting = ending.type === 'turn_complete' ? this.host.children.waitingOn(ownerId, sessionId) : 0
@@ -400,7 +400,7 @@ export class ChildReports {
     const stop = m?.interruption
     // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
     const asker = requester ?? m?.askedBy ?? undefined
-    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.host.handingOver) return undefined
+    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting') return undefined
     /*
      * **Not a requester a quit stopped** (#698). It waits for the person's Continue under its own "stopped" line; a
      * notice would resume it and start a model turn with nobody there (at launch, when the same quit cut it), and that
@@ -425,18 +425,6 @@ export class ChildReports {
     if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }
     const rows = this.host.store.messages.loadMessages(sessionId, 200)
     return { preview: clipPreview(lastResponse(rows, span), 600), seq: lastResponseSeq(rows, span) ?? undefined }
-  }
-
-  /**
-   * A report a host swap held back (#646, #1186): its session ended a turn while the old host let go, and the mark the
-   * store kept is dropped at start (`restoreReports`), so a later turn is never reported as the work. The caller is
-   * told once, here, that a turn ended and where to read it; it used to hear nothing.
-   */
-  async tellTurnEndedInSwap(sessionId: string, callerId: string): Promise<void> {
-    const m = this.host.meta.get(sessionId)
-    if (!m || !this.host.meta.has(callerId) || this.host.handingOver) return
-    const { name, project } = this.reportedAs(m)
-    await this.deliverReport(callerId, sessionId, name, project, previewOf(this.host.store.messages, sessionId, 600), { type: 'turn_complete' }, { swapped: true }, this.answerSeq(sessionId))
   }
 
   /**
@@ -660,7 +648,7 @@ export class ChildReports {
      */
     opts: { keep?: boolean; onDelivered?: () => void } = {},
   ): Promise<boolean> {
-    if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return false
+    if (this.host.disposing || !this.host.meta.has(sessionId)) return false
     const modelText = `${forModel}\nsourceSessionId: ${from.sessionId}`
     try {
       await this.host.deliver(sessionId, text, undefined, from, relayed, undefined, 'inline', undefined, undefined, relayed ? modelText : undefined)
@@ -668,7 +656,7 @@ export class ChildReports {
       return true
     } catch (e) {
       // The session may be asleep or deleted — a notice must not destabilize the host
-      if (this.host.handingOver || this.host.disposing || !this.host.meta.has(sessionId)) return false
+      if (this.host.disposing || !this.host.meta.has(sessionId)) return false
       if (opts.keep === false) return false
       const list = this.held.get(sessionId) ?? []
       if (list.length >= HELD_NOTICES_MAX) list.shift()

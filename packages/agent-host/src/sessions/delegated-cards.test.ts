@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentAdapter } from '../adapters/contract.js'
 import type { ApprovalDetail, PermissionPreset, Question, QuestionAnswer, ToolName } from '@cc/protocol'
+import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { CrossAdapter, crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { answersFrom, decisionFrom } from './delegated-cards.js'
 import { SessionManager } from './manager.js'
@@ -11,7 +13,7 @@ import { runOrchestratorTool } from './orchestrator-tools.js'
  * agent_session send, ask_project, send_to_session), the cards it raises in that turn go to the session that asked
  * as well as to the person. A question it may answer, first answer wins; an approval it is only told of, unless its
  * own preset is auto when it answers. It is told with a notice that never carries the card's text, and reads the
- * card through a tool. The link ends with the turn and survives a host swap.
+ * card through a tool. The link ends with the turn and survives an update that cuts the turn and continues it.
  */
 
 const QUESTION: Question = {
@@ -431,7 +433,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
   })
 })
 
-describe('a delegated turn\'s link across a host swap (#676)', () => {
+describe('a delegated turn\'s link across a host restart (#676)', () => {
   let w: CrossWorld
   const hosts: SessionManager[] = []
   beforeEach(async () => {
@@ -442,51 +444,59 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     await w.dispose()
   })
 
-  it('keeps routing the kept child\'s card to its parent under the next host, without telling it twice', async () => {
+  /** A host on the world's store; `updateResume` is the data folder's lists of the turns an update cut (#1618) */
+  const host = (updateResume?: UpdateResumeFolder) => {
+    const claude = new CrossAdapter('claude')
+    const mgr = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, updateResume ? { updateResume } : {})
+    hosts.push(mgr)
+    return { mgr, claude }
+  }
+
+  it('keeps routing the child\'s cards to its parent under the next host that continues the turn an update cut', async () => {
+    const f = memoryUpdateFolder()
+    const first = host(f)
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
-    const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
+    const parent = (await first.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
+    const r = await first.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
     const child = r.sessionId
-    // The parent has a conversation to resume under the next host, so a second notice would reach it
-    w.adapters.get('claude')!.handles.get(parent)!.externalId = 'ext-parent'
-    answering(w.adapters.get('claude')!.handles.get(child)!).ask('q-1')
+    // Conversations the next host can resume: the child's turn is continued, and the parent is told through its own
+    first.claude.handles.get(parent)!.externalId = 'ext-parent'
+    first.claude.handles.get(child)!.externalId = 'ext-child'
+    answering(first.claude.handles.get(child)!).ask('q-1')
     const told = () => w.store.messages.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
     await w.until(() => told().length === 1)
-    await w.mgr.tenure.detachAll()
+    // A linked hub's update stops the host while the delegated turn runs
+    first.mgr.tenure.stopForUpdate()
+    await first.mgr.tenure.disposeAll()
+    expect(f.turns()?.map((t) => t.id)).toContain(child)
     expect(w.store.children.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
 
-    const claude = new CrossAdapter('claude')
-    const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, { keptSessions: new Set([child]) })
-    hosts.push(next)
-    await next.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: {} as never }])
-    // The kept CLI sends its standing card again to the new host
-    const cards = answering(claude.handles.get(child)!)
-    cards.ask('q-1')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(told()).toHaveLength(1)
-    // A new card in the same turn is told, through the parent's resumed conversation
+    const next = host(f)
+    await w.until(() => (next.claude.handles.get(child)?.sent.length ?? 0) === 1)
+    expect(w.store.children.listDelegatedTurns()).toMatchObject([{ sessionId: child, callerSessionId: parent }])
+    // A card in the continued turn is told, through the parent's resumed conversation
+    const cards = answering(next.claude.handles.get(child)!)
     cards.ask('q-2')
     await w.until(() => told().length === 2)
-    cards.answered.length = 0
-    const standing = await next.agentSession(parent, { sessionId: child, action: 'status' })
-    expect(standing).toMatchObject({ state: 'asking', cards: [{ requestId: 'q-1' }, { requestId: 'q-2' }] })
-    expect(await next.agentSession(parent, { sessionId: child, action: 'answer', card: standing.ok && standing.state === 'asking' ? standing.cards[0]!.card : '', text: 'Postgres' })).toMatchObject({ ok: true, state: 'answered' })
+    const standing = await next.mgr.agentSession(parent, { sessionId: child, action: 'status' })
+    expect(standing).toMatchObject({ state: 'asking', cards: [{ requestId: 'q-2' }] })
+    expect(await next.mgr.agentSession(parent, { sessionId: child, action: 'answer', card: standing.ok && standing.state === 'asking' ? standing.cards[0]!.card : '', text: 'Postgres' })).toMatchObject({ ok: true, state: 'answered' })
     expect(cards.answered).toHaveLength(1)
     // The turn ends under the new host, and the link with it
-    claude.handles.get(child)!.answer('done')
-    await new Promise((r) => setTimeout(r, 20))
-    expect(w.store.children.listDelegatedTurns()).toEqual([])
+    next.claude.handles.get(child)!.answer('done')
+    await w.until(() => w.store.children.listDelegatedTurns().length === 0)
   })
 
-  it('is dropped by a host that finds no process for the session', async () => {
+  it('is dropped by a host that does not continue the turn (a quit cut it)', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
-    await w.mgr.tenure.detachAll()
-    const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude')]]), () => {}, undefined, undefined, {})
-    hosts.push(next)
+    await w.mgr.tenure.disposeAll()
+    // The quit leaves the row for the next start to judge
+    expect(w.store.children.listDelegatedTurns()).toMatchObject([{ sessionId: r.sessionId, callerSessionId: parent }])
+    host()
     expect(w.store.children.listDelegatedTurns()).toEqual([])
   })
 })

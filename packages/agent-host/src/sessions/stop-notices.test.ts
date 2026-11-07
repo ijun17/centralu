@@ -359,13 +359,12 @@ describe('a turn ends without finishing', () => {
 })
 
 describe('who is not told, or told another way', () => {
-  it.each(['handingOver', 'disposing'] as const)('a host that is leaving (%s) writes nothing: the turns it cuts are continued or marked by the next one', async (leaving) => {
+  it('a host that is leaving writes nothing: the turns it cuts are continued or marked by the next one', async () => {
     const { asker, child } = await asked()
-    const host = w.mgr.tenure as unknown as Record<typeof leaving, boolean>
-    host[leaving] = true
+    w.mgr.tenure.disposing = true
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'x', retryable: false } })
     await new Promise((r) => setTimeout(r, 20))
-    host[leaving] = false
+    w.mgr.tenure.disposing = false
     expect(stopNotices(asker)).toEqual([])
     expect(read.row(read.between(addr(asker), addr(child))[0]!.id, addr(child))).toMatchObject({ releasedAt: null })
     // Nothing was released, so the next host's stop of a question is told

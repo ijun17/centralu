@@ -10,7 +10,9 @@ import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
 import { DEBOUNCE_MS } from '../mail/rules.js'
 import { SessionManager } from './manager.js'
-import { Adapter, FakeProcess, processes } from './kept-host.test-helpers.js'
+import { Adapter } from './fake-claude.test-helpers.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
+import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
@@ -42,10 +44,10 @@ afterEach(async () => {
 })
 
 /** A host with its mailbox, wired as `main.ts` wires it; the delivery's timer never fires, so a test drains a mailbox itself */
-function host(kept: ReadonlySet<string> = new Set()) {
+function host(updateResume?: UpdateResumeFolder) {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), updateResume ? { updateResume } : {})
   mgr.prLookup = async () => null
   hosts.push(mgr)
   const m = wireHostMail(mgr, store)
@@ -278,16 +280,19 @@ describe("a handoff moves the original's mail to the session that took over (#15
 })
 
 describe('the handoff mail move in the situations around it (#1574)', () => {
-  it("survives a host swap between the handoff and the child's question: the next host delivers it to the successor", async () => {
-    const h = host()
+  it("survives a host restart between the handoff and the child's question: the next host delivers it to the successor", async () => {
+    const f = memoryUpdateFolder()
+    const h = host(f)
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     const fromChild = ask(h, child, [parent], 'Which branch?')
     const heir = await handOff(h, project, parent, false)
-    await h.mgr.tenure.detachAll()
+    // An update stops the host while the child works: the next host continues its turn
+    h.mgr.tenure.stopForUpdate()
+    await h.mgr.tenure.disposeAll()
 
-    const next = host(new Set([child]))
-    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    const next = host(f)
+    await eventually(() => !!next.claude.handles.get(child)?.sent.length)
     expect(read.row(fromChild.id, at(heir))).toMatchObject({ settled: null })
     expect(pendingFor(heir, fromChild.id)).toBe(true)
     expect(pendingFor(parent, fromChild.id)).toBe(false)

@@ -8,11 +8,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, Question, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { hostBusy } from '../idle.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
+import { SessionManager } from './manager.js'
 import { ASK_WINDOW_MS, CARD_RESTS_KEY } from './card-rest.js'
 import { runOrchestratorTool } from './orchestrator-tools.js'
 
@@ -51,7 +50,6 @@ class Handle implements SessionHandle {
     return true
   }
   interrupt() {}
-  async detach() {}
   async dispose() {
     if (this.backgroundCall) this.ev({ type: 'tool_result', callId: this.backgroundCall, ok: false, summary: 'The session closed before this agent reported back' })
   }
@@ -74,8 +72,6 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
-
 let store: Store
 let root: string
 let events: NormalizedEvent[]
@@ -93,9 +89,9 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function host(kept: ReadonlySet<string> = new Set()) {
+function host() {
   const claude = new Adapter()
-  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude]]), (e) => events.push(e), undefined, join(root, 'worktrees'))
   mgr.prLookup = async () => null
   hosts.push(mgr)
   return { mgr, claude }
@@ -208,24 +204,7 @@ describe('a session at rest stays at rest (#428)', () => {
     expect(info().state).toBe('idle')
   })
 
-  it('a card standing over a host swap still closes back into its rest under the next host', async () => {
-    const a = await session()
-    a.h.turn()
-    a.h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    await a.mgr.tenure.detachAll()
-
-    // The keeper kept the process: the next host adopts it, still waiting_approval, and the tool raises the card again
-    const b = host(new Set([a.s.id]))
-    await b.mgr.tenure.adoptKept([{ sessionId: a.s.id, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    const adopted = b.claude.handles.get(a.s.id)!
-    adopted.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    b.mgr.inputs.respondApproval(a.s.id, 'r1', 'allow')
-    expect(b.mgr.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
-    expect(b.mgr.processes.sessionIdle(a.s.id)).toEqual({ idle: true })
-    expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
-  })
-
-  it('a rest left for a process nobody adopted is dropped, and so is a deleted session\'s', async () => {
+  it('a rest left by the host before is dropped at the next start, and so is a deleted session\'s', async () => {
     const a = await session()
     a.h.turn()
     a.h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
@@ -236,8 +215,8 @@ describe('a session at rest stays at rest (#428)', () => {
     const c = await session()
     c.h.turn()
     c.h.ev({ type: 'approval_request', requestId: 'r2', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    await c.mgr.tenure.detachAll()
-    // Not kept: the process is gone with its card, and the next start forgets the rest
+    await c.mgr.tenure.disposeAll()
+    // The process is gone with its card, and the next start forgets the rest
     host()
     expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()
   })

@@ -9,8 +9,8 @@ import { SessionManager } from './manager.js'
 
 /**
  * Moving a session to a newly installed agent CLI on the direct path (#297): no keeper, the host spawns each agent
- * itself. This is how the host runs on Windows, `pnpm dev`, e2e and a debug app, so it runs on every platform
- * (sessions/agent-versions-restart.test.ts covers the keeper and is macOS and Linux only).
+ * itself. That is how every host runs since #1895 step 4, under a keeper too, so it runs on every platform
+ * (sessions/agent-versions-restart.test.ts covers waiting for a session's background work).
  *
  * The adapter is a stand-in that, like a real one, reports the CLI version a new process runs and is disposed on a
  * restart. Each handle stands for one process.

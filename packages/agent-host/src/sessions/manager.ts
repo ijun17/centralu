@@ -72,17 +72,8 @@ import {
   oneLineText,
   PermissionPreset as PresetSchema,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
-
-/**
- * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
- * session's tool there; the manager hands it to the adapter as a `ProcessSource`.
- */
-export type AgentProcessHost = {
-  /** `version`: the CLI version the process is started from, written on its keeper tag so the next host knows it (#297) */
-  spawn(sessionId: string, tool: ToolName, spec: AgentSpawnSpec, version?: string): AgentProcess
-}
 
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
@@ -273,12 +264,6 @@ export class SessionManager {
      */
     private worktreeRoot = join(homedir(), DATA_DIR, 'worktrees'),
     private keeperOpts: {
-      /** Spawns agents outside this host (the keeper). Absent: adapters spawn their tools as our children */
-      processes?: AgentProcessHost
-      /** Sessions whose tool process a previous host left running — their live state is not reset (see below) */
-      keptSessions?: ReadonlySet<string>
-      /** How long a kept process that could not be re-attached is waited for after SIGTERM before it is killed and its session resumed; default 5 s */
-      exitWaitMs?: number
       /**
        * The data folder's list of the turns an update cut (#1618, lifecycle/update-resume.ts): the host before this one wrote
        * it as it stopped, and each listed session this start finds mid-turn with no process is continued once
@@ -394,7 +379,7 @@ export class SessionManager {
     this.processes = new SessionProcesses(this.parts())
     this.overloadRetry = new OverloadRetry({
       meta: this.meta,
-      leaving: () => this.tenure.handingOver || this.tenure.disposing,
+      leaving: () => this.tenure.disposing,
       compactTurn: (id) => this.selfCompaction.compactTurn(id),
       running: (id) => this.handles.has(id),
       note: (e) => this.events.onEvent(e),
@@ -402,7 +387,7 @@ export class SessionManager {
       send: (id, text, gate) =>
         this.events
           .deliverMail(id, { text, quiet: false, line: '', label: 'retry', skipLine: () => true }, {
-            leaving: () => this.tenure.handingOver || this.tenure.disposing,
+            leaving: () => this.tenure.disposing,
             // The last check before the tool is given the note (deliverMail asks it once, right before): passed, the turn is the tool's
             atRest: () => {
               const stands = gate.live() && inTurn(this.meta.get(id)?.state ?? 'idle')
@@ -433,7 +418,7 @@ export class SessionManager {
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
       sendThen: (id, text, line) =>
-        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.tenure.handingOver || this.tenure.disposing, atRest: () => this.mail.mailReceiver(id).kind === 'ready' }),
+        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.tenure.disposing, atRest: () => this.mail.mailReceiver(id).kind === 'ready' }),
       // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
       queued: (id) => {
         const held = this.handles.get(id)?.queuedInputs?.()
@@ -689,8 +674,8 @@ export class SessionManager {
   /** Starts compacting the sessions at rest over the lower share (#1451); the shutdown plan stops it before the sessions are let go of */
   startSelfCompaction(): void {
     this.selfCompaction.start()
-    // What the last host left of a `compact_self` (#2024); a process the keeper kept is looked at once it is adopted (`adoptKept`)
-    this.selfCompaction.recover((id) => !this.keeperOpts.keptSessions?.has(id))
+    // What the last host left of a `compact_self` (#2024)
+    this.selfCompaction.recover()
   }
 
 
@@ -953,7 +938,7 @@ export class SessionManager {
         return self.tenure.lettingGo()
       },
       get closing() {
-        return self.tenure.disposing || self.tenure.handingOver
+        return self.tenure.disposing
       },
       createSession: (...a) => self.createSession(...a),
       cwdFor: (...a) => self.cwdFor(...a),
@@ -1045,9 +1030,6 @@ export class SessionManager {
         return self.selfCompaction
       },
       stopSelfCompaction: () => self.stopSelfCompaction(),
-      get handingOver() {
-        return self.tenure.handingOver
-      },
       get handles() {
         return self.handles
       },

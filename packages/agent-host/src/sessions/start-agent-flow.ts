@@ -291,7 +291,7 @@ export class AgentStartFlow {
     if (!consent.ok) {
       // The host is leaving (a swap or a quit), not the person answering: the request stays stored, and the next host
       // raises the card again (#673)
-      if (request && consent.why === 'withdrawn' && (this.host.handingOver || this.host.disposing)) return done(agentStartPending(request))
+      if (request && consent.why === 'withdrawn' && this.host.disposing) return done(agentStartPending(request))
       if (request) {
         // Withdrawn for a reason of its own (trust revoked, the caller withdrew it): that reason is the answer
         const ended = this.host.children.agentStarts.get(request.requestId)?.ended

@@ -8,9 +8,8 @@ import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
 
 /**
- * An agent CLI this host starts itself: the path without a keeper (Windows, `pnpm dev`, e2e, a debug
- * app, or a keeper whose child service did not answer). Under a keeper the CLI is the keeper's child
- * instead (`keeper/agent-process.ts`).
+ * An agent CLI this host starts itself, on every path, under a keeper too (#1895 step 4: no host uses the
+ * keeper's children service any more).
  *
  * The point is what stopping it ends. An agent CLI starts helpers of its own: Claude Code's LSP
  * tool runs `typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from

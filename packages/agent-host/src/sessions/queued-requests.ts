@@ -21,7 +21,7 @@ import type { AskProjectFlow } from './ask-project-flow.js'
  */
 export type QueuedRequestsHost = Pick<
   DelegationHost,
-  'adapters' | 'agentRuns' | 'children' | 'deliver' | 'disposing' | 'handingOver' | 'handles' | 'meta' | 'nameOf' | 'store' | 'tellSession' | 'trashing'
+  'adapters' | 'agentRuns' | 'children' | 'deliver' | 'disposing' | 'handles' | 'meta' | 'nameOf' | 'store' | 'tellSession' | 'trashing'
 > &
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
   Pick<RestartHost, 'inputsHeld'> & {
@@ -133,7 +133,7 @@ export class QueuedRequests {
    * one delivers it.
    */
   private async drainQueue(sessionId: string): Promise<void> {
-    if (this.host.disposing || this.host.handingOver || this.host.children.delivering.has(sessionId)) return
+    if (this.host.disposing || this.host.children.delivering.has(sessionId)) return
     const m = this.host.meta.get(sessionId)
     const list = this.host.children.queued.get(sessionId)
     if (!m || !list?.length) return
@@ -198,7 +198,7 @@ export class QueuedRequests {
       if (inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')) this.host.children.queuedTurnStarted(sessionId)
     } catch (e) {
       // Leaving: the row stays, marked, and the next host delivers it
-      if (this.host.handingOver || this.host.disposing) return
+      if (this.host.disposing) return
       // Said once, below, rather than as a report too
       if (this.host.children.awaitingReport.get(sessionId) === caller.id) this.host.children.clearReport(sessionId)
       if (d) {

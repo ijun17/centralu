@@ -62,8 +62,7 @@ export type DelegationHost = {
   ensureProjectAccess: (callerSessionId: string, toProjectId: string, access: ProjectConsentKind, what: { text: string; app?: { appId: string; name: string; }; session?: { id: string; name: string; }; }, signal?: AbortSignal) => Promise<{ ok: true; } | { ok: false; error: string; }>
   firstTool: (preferred?: ToolName | null) => ToolName | null
   gitTrust: (projectId: string | null) => { trusted: boolean; }
-  readonly handingOver: boolean
-  /** The host is quitting or handing its sessions over (`disposing || handingOver`) */
+  /** The host is quitting (`disposing`) */
   readonly closing: boolean
   readonly handles: Map<string, SessionHandle>
   readonly linkedReader: LinkedSessions | null

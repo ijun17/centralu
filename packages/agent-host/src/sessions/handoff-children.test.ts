@@ -4,21 +4,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess } from '../adapters/contract.js'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { Store } from '../dev-services/store.js'
 import { crossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { SessionManager } from './manager.js'
-import { Adapter, FakeProcess, Handle, processes } from './kept-host.test-helpers.js'
+import { Adapter, Handle } from './fake-claude.test-helpers.js'
+import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
+import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A handoff moves the original session's children to the session that took over (#693): their reports, the
  * agent_session handle, their delegated turns, the requests the original queued and its start_agent cards still
  * standing. A settled child moves too, whether the original stays or goes (#1475, #738). The move is one store transaction, so a crash leaves
- * every link with one owner, and a host that takes over after a swap reads that owner.
+ * every link with one owner, and the host that starts next reads that owner.
  */
 
 let store: Store
@@ -38,10 +40,11 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function host(kept: ReadonlySet<string> = new Set()) {
+/** `updateResume`: the data folder's lists of the turns an update cut (#1618), for a turn that goes on across a restart */
+function host(updateResume?: UpdateResumeFolder) {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), updateResume ? { updateResume } : {})
   mgr.prLookup = async () => null
   hosts.push(mgr)
   return { mgr, claude }
@@ -397,7 +400,8 @@ describe('a handoff moves the live children to the new session (#693)', () => {
   })
 
   it('leaves everything with the original when the store fails mid-move, and a restart reads that one owner', async () => {
-    const h = host()
+    const f = memoryUpdateFolder()
+    const h = host(f)
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     // A crash between the move's steps: the sessions, report and turn rows are written, the queue's is not
@@ -418,24 +422,29 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: false })
     expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
 
-    await h.mgr.tenure.detachAll()
-    const next = host(new Set([child]))
-    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    // An update stops the host while the child works: the next host continues its turn
+    h.mgr.tenure.stopForUpdate()
+    await h.mgr.tenure.disposeAll()
+    const next = host(f)
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(parent)
+    await eventually(() => !!next.claude.handles.get(child)?.sent.length)
     next.claude.handles.get(child)!.answer('finished under the next host')
     await eventually(() => reports(next.claude.handles.get(parent), child).length === 1)
     expect(reports(next.claude.handles.get(heir), child)).toEqual([])
   })
 
-  it('survives a host swap: the next host reports the kept child to the new session', async () => {
-    const h = host()
+  it('survives a host restart: the next host reports the working child to the new session', async () => {
+    const f = memoryUpdateFolder()
+    const h = host(f)
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     const heir = await handOff(h, project, parent)
-    await h.mgr.tenure.detachAll()
+    // An update stops the host while the child works: the next host continues its turn
+    h.mgr.tenure.stopForUpdate()
+    await h.mgr.tenure.disposeAll()
 
-    const next = host(new Set([child]))
-    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    const next = host(f)
+    await eventually(() => !!next.claude.handles.get(child)?.sent.length)
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
     expect(await next.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
     next.claude.handles.get(child)!.answer('finished under the next host')
@@ -587,12 +596,12 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(events).toContainEqual({ type: 'session_owner', sessionId: child, askedBy: heir, parentSessionId: heir })
   })
 
-  it('survives a host swap: the next host reads the new session as the settled child\'s owner', async () => {
+  it('survives a host restart: the next host reads the new session as the settled child\'s owner', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent)
-    await h.mgr.tenure.detachAll()
+    await h.mgr.tenure.disposeAll()
 
     const next = host()
     expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
@@ -605,7 +614,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = await settledChild(h, parent)
     const heir = await handOff(h, project, parent, false)
     const own = await startChild(h, heir, 'its own work')
-    await h.mgr.tenure.detachAll()
+    await h.mgr.tenure.disposeAll()
 
     // The record of what moved is memory only; the successor's marker and the child's owner are stored
     const next = host()
@@ -625,7 +634,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const child = await settledChild(h, second)
     const third = await handOff(h, project, second, false)
     expect(owner(child)).toBe(third)
-    await h.mgr.tenure.detachAll()
+    await h.mgr.tenure.disposeAll()
 
     const next = host()
     // second owned it when the handoff moved it, so second is told where it went; first never owned it
