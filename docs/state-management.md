@@ -44,6 +44,7 @@ interface AppStore {
 ```
 
 - **Why zustand**: events arrive outside the React render cycle (in a WS callback). zustand allows `store.setState` from outside React, and lets the subscription unit be sliced by selector to control re-renders. (See tech-stack.md)
+- **Each store listener runs on its own** (`store/isolated-listeners.ts`, #2070): zustand calls its listeners in one loop inside `setState`, so one that threw used to skip the rest and throw into the code that set the state, leaving a host event's handler half done. A throwing listener is logged and the others run.
 - Session state transitions must pass through the transition table (`protocol/session-state.ts`, re-exported by `core/session`; the host runs the same rules on its copy, [domain-model.md](domain-model.md) §3). An illegal transition (e.g. an `idle → waiting_approval` that a `state_change` claims) throws in dev mode and is logged and ignored in prod. But **`approval_request`/`question_request`, which are facts sent by the host, are the exception** — if an approval request genuinely exists and the table blocks it, it never appears in the inbox or the badge and the agent is blocked forever (measured). These two transition to `waiting_approval` from any state.
 
 ## 3. Derived state rules (half the bugs are stopped here)
