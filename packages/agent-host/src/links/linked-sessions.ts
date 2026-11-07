@@ -2,6 +2,7 @@ import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadS
 import { NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
+import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
 import { awaySentence, notReachable, TAIL, type Tail } from './machine-reach.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
@@ -395,8 +396,9 @@ export function linkedSessions(
 
     hubAuto(machineId) {
       return viaMachine(machineId, async (m) => {
-        const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
-        return { allowed: r?.allowed === true }
+        const state = await askHubAuto((method, params) => m.call(method, params))
+        if (state === 'older') throw new Error(`${m.name} runs a Centralu from before "Allow auto from a linked computer"`)
+        return { allowed: state === 'on' }
       })
     },
 
