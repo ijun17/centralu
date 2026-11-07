@@ -46,6 +46,9 @@ type AskCause = { matchedAskRule?: unknown; decisionReason?: string }
  * written). Naming a settings rule when a hook asked sent an agent looking for a rule that did not exist, and the hook's
  * reason, which says what tripped it, was lost.
  */
+/** How much of an ask's reason goes to the model: a hook may echo a whole command or file */
+const REASON_CHARS = 400
+
 export function autoRefusal(toolName: string, cause: AskCause | undefined): string {
   const head = `Permission to use ${toolName} was not granted: the auto preset does not ask`
   if (cause?.matchedAskRule) {
@@ -54,8 +57,10 @@ export function autoRefusal(toolName: string, cause: AskCause | undefined): stri
     const text = typeof rule.ruleContent === 'string' && rule.ruleContent ? `${name}(${rule.ruleContent})` : name
     return `${head}, and a settings "ask" rule matched (${text}${typeof rule.source === 'string' && rule.source ? ` in ${rule.source}` : ''})`
   }
-  const reason = cause?.decisionReason?.trim()
-  if (reason) return `${head}, and approval was asked for: ${reason}`
+  // Read with care: the SDK passes the CLI's field unchecked. A reason that is only the mode asking says nothing new
+  const said = typeof cause?.decisionReason === 'string' ? cause.decisionReason.replace(/\s+/g, ' ').trim() : ''
+  const reason = said.length > REASON_CHARS ? `${said.slice(0, REASON_CHARS)}…` : said
+  if (reason && !benignAskReason(reason)) return `${head}, and approval was asked for: ${reason}`
   return `${head}, and approval was asked for (a settings rule, a hook or a check of Claude Code's own)`
 }
 

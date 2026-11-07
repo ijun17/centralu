@@ -91,6 +91,10 @@ describe('the auto refusal names why the CLI asked (#2134)', () => {
     expect(hook).not.toContain('rule matched')
     const rule = await ask({ matchedAskRule: { source: 'userSettings', toolName: 'Bash', ruleContent: 'ssh:*' } })
     expect(rule).toContain('a settings "ask" rule matched (Bash(ssh:*) in userSettings)')
+    // The mode asking is no news, a reason that is not text is not read, and a long one is cut
+    expect(await ask({ decisionReason: 'The current permission mode requires approval for this tool' })).not.toContain('permission mode')
+    expect(await ask({ decisionReason: { why: 'x' } })).toContain('the auto preset does not ask')
+    expect((await ask({ decisionReason: 'y'.repeat(2_000) })).length).toBeLessThan(600)
     const none = await ask({})
     expect(none).toContain('the auto preset does not ask')
     expect(none).not.toContain('rule matched')
