@@ -2977,6 +2977,14 @@ whose child table still has a running child ([plans/keeper-removal.md](plans/kee
 rolls back and carries on with its children and its host, and the update is refused with "quit Centralu completely and
 open it again to update". Quitting stops those children, and the keeper the shell starts next holds none.
 
+Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`), and its
+host's drain would hand its children to it, where no host of this build looks. So until PR 2 the host keeps one small
+check (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
+standby under a keeper that holds a running child does not stand by, so that swap fails before the running host is
+touched and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it
+restores its sessions, so their turns show stopped and Continue starts the only CLI. A keeper of step 3 or later serves
+no `children.sock`, and nothing is asked. Checked with a real beta.48 keeper and host on Linux (#2122 review).
+
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
 update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
 lose: a Centralu tool call still running (a `start_agent` or `agent_session` wait, an `ask_project`, an app tool) is cut and has to be
