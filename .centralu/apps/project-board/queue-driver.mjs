@@ -793,37 +793,31 @@ async function runnerPressure(conf, now) {
 
 /**
  * Whether no new batch is formed now, and says so on the queue (`runnerHold`: since when and why, which `merge_queue` shows). Bounded:
- * after `maxMs` of one hold the batch is formed anyway, and that run is written down (`runnerHoldDone`) so it is not waited for again.
- * A run is forgotten there only when it has finished: not when the queue goes idle and fills again, nor when GitHub cannot be asked.
+ * a run is waited for until `maxMs` after it was first waited for, then batches are formed anyway. When it was first waited for is kept
+ * apart from the hold (`runnerHoldSince`), and forgotten only when that run has finished: not when the queue goes idle and fills again,
+ * nor when a batch runs, nor when GitHub cannot be asked.
  */
 async function holdBatches(dir, now) {
   const conf = QUEUE.runnerHold
   if (!conf || (!conf.workflows.length && !conf.mainRuns)) return false
   const q = readQueue(dir)
-  const held = q.runnerHold ?? null
   const read = await runnerPressure(conf, now)
-  if (!read) return false
-  const { found, live } = read
-  let done = Object.fromEntries(Object.entries(q.runnerHoldDone ?? {}).filter(([run]) => live.has(run)))
-  if (!found) {
-    updateQueue(dir, (fresh) => {
-      delete fresh.runnerHold
-      if (Object.keys(done).length) fresh.runnerHoldDone = done
-      else delete fresh.runnerHoldDone
-    })
+  // GitHub cannot be asked: nothing is held, so the hold is not shown; what is known of the runs stays
+  if (!read) {
+    if (q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
     return false
   }
-  // The same run keeps its hold and its bound; another run waiting is a new hold
-  const same = held && held.run === found.run
-  const since = same ? held.since : new Date(now).toISOString()
-  const expired = found.run in done || now - Date.parse(since) > conf.maxMs
-  if (expired) done = { ...done, [found.run]: done[found.run] ?? new Date(now).toISOString() }
+  const { found, live } = read
+  const seen = Object.fromEntries(Object.entries(q.runnerHoldSince ?? {}).filter(([run]) => live.has(run)))
+  if (found) seen[found.run] ??= new Date(now).toISOString()
+  const expired = found ? now - Date.parse(seen[found.run]) > conf.maxMs : false
   updateQueue(dir, (fresh) => {
-    fresh.runnerHold = { since, run: found.run, why: found.why, ...(expired ? { expired: true } : {}) }
-    if (Object.keys(done).length) fresh.runnerHoldDone = done
-    else delete fresh.runnerHoldDone
+    if (found) fresh.runnerHold = { since: seen[found.run], run: found.run, why: found.why, ...(expired ? { expired: true } : {}) }
+    else delete fresh.runnerHold
+    if (Object.keys(seen).length) fresh.runnerHoldSince = seen
+    else delete fresh.runnerHoldSince
   })
-  return !expired
+  return !!found && !expired
 }
 
 /**
@@ -851,7 +845,7 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   // The guard's revert is not held: main is red, and it is what a release or a run waits for
   const urgent = q.items.some((i) => ACTIVE.has(i.state) && i.guardRevert)
   const holding = work?.form && !urgent ? await holdBatches(dir, now) : false
-  // A hold is over when the run no longer waits (holdBatches), the queue is idle, or a batch runs (the runs it let go of are kept in runnerHoldDone)
+  // A hold is over when the run no longer waits (holdBatches), the queue is idle, or a batch runs (when each run was first waited for is kept in runnerHoldSince)
   if (work?.batch && q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
   if (work?.form && !holding) {
     updateQueue(dir, (fresh) => formDue(fresh, now, ref))
