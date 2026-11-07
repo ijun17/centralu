@@ -371,7 +371,7 @@ interface Os {
   tools: OsTools          // find (whichTool), program (programPath), resolve (resolveCommand)
   env: OsEnv              // get (any case on Windows), all, set, home, temp (read when asked), execPath, username, cwd()
   clock: OsClock          // now, setTimeout (unref'd), sleep (keeps the host alive while awaited)
-  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, the engine the test gives
+  sqlite: OsSqlite        // open(path | ':memory:'): better-sqlite3 on the real OS; in memory, ENOSYS
   traits: OsTraits        // foldsPathCase, hasProcessGroups, locksRunningPrograms, locksWatchedFolders,
                           // cpKeepsLinks, clonesFiles, measuresWithDu, hasPs, modesGuardFiles, hasWindowsFileNames
 }
@@ -518,8 +518,8 @@ show it are not run against a Mac (`linux: true`).
 Not modeled in memory: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares,
 `\\?\` paths, permissions beyond the owner's write bit (on Windows the read-only attribute; on POSIX the host is never root), PTYs, a watch on a single file (refused: stricter than both OSes), the null device (a child's
 `'ignore'` is the way to discard), a write through a link that leads nowhere (refused, where the OS makes the
-target), and SQLite: a test gives the engine (`memoryOs({ sqlite })`), and the database's files are not in the
-in-memory tree, so what renames, copies or removes them is tested on the real OS. NTFS's case table is the one measured
+target), an `'overlapped'` fd 3 (refused), and SQLite (`sqlite.open` is `ENOSYS`; no test gave an engine, so the
+option went, host-big-files.md §6): what opens, renames, copies or removes a database is tested on the real OS. NTFS's case table is the one measured
 on Windows 11; a volume formatted by an older Windows keeps an older table.
 
 ### 7.2 What each area needs, and whether the interface has it
@@ -531,7 +531,7 @@ Surveyed from each area's shipped files before the interface was frozen (the par
 | 3a store and files | sync reads and writes, `mkdir -p` with a mode, `rm` with retries, a private file (`0600`, `wx`, a hard link to claim a name), `lstat`/`chmod` for the data folder, an append log (`openSync('a')`, `writeSync`, `fchmodSync`), `realpathSync.native`, `fs.watch`, `ps` for a lock's owner and a signal to a stray by pid, SQLite (WAL, `BEGIN EXCLUSIVE` lock) | `files`, `processes.runSync`/`signal`, `sqlite.open` (the database's own files only on the real OS, §7.1), `traits.modesGuardFiles`, `env.home` |
 | 3b worktrees | git run to its end with input, a 0600 output file, a timeout, a buffer cap and an abort that end the tree (`run`); `cp -c` (`run` + `traits.clonesFiles`), `cpSync` with `verbatimSymlinks`, a folder walk that sees junctions (`readdirSync` with types), `symlink(…, 'junction')` and its `EPERM` fallback, `realpath`, bigint `dev`/`ino`; the setup command through the shell; the one recursive watch on Windows | `processes.run`/`runShell`, `files`, `traits.cpKeepsLinks`/`locksWatchedFolders`, `tools.program` |
 | 3c adapters | a contained child with three pipes (or the host's own, `'inherit'`), `exit` and `error`, `kill`, `unref`, a tree stop with a grace and the sweep of what is left; short runs with a timeout; config files read sync; the clock for graces | `processes.start`/`stop`/`run`, `child.unref`, `tools.find`/`resolve`, `files`, `clock`. **Not in it**: the POSIX host watch (an extra fd and an `sh` wrapper, `endsWithHost`) and the keeper-held processes: those stay with the adapters' process code in the layer's `grouped-child.ts`/`kill-tree.ts` until 3f |
-| 3e apps runtime | the app server with stdio `['pipe','pipe','pipe','overlapped']`, its exit and close, a stop with a grace; sync file work (fingerprints, private JSON, staging, `cpSync` with timestamps, `utimesSync`, `EXDEV` across volumes), `fs.watch`, `process.kill(pid, 0)` | `processes.start` (`'overlapped'`), `stop`, `alive`, `files`, `clock` |
+| 3e apps runtime | the app server with stdio `['pipe','pipe','pipe','overlapped']`, its exit and close, a stop with a grace; sync file work (fingerprints, private JSON, staging, `cpSync` with timestamps, `utimesSync`, `EXDEV` across volumes), `fs.watch`, `process.kill(pid, 0)` | `processes.start` (`'overlapped'`, on the real OS only: the in-memory one refuses it), `stop`, `alive`, `files`, `clock` |
 | 3d links and ssh, 3f keeper | parked (#1626, #1615) | — |
 
 Outside every area: terminals (node-pty) stay in the layer's `terminal.ts`; sockets and HTTP (`views/`, `transport/`)
