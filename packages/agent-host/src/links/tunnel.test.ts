@@ -530,7 +530,10 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
 
   it('runs the person’s own command in place of centralu, with no fallback', async () => {
     const cmd = 'CC_DATA_DIR=/tmp/x node /src/packaging/npm/centralu/bin/centralu.mjs'
-    await expect(tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open()).rejects.toThrow(/No such file or directory/)
+    const said = await tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open().then(() => '', (e: unknown) => (e instanceof Error ? e.message : ''))
+    expect(said).toMatch(/No such file or directory/)
+    // The person's own command is not the launcher: the hint about the launcher's Node is not for it
+    expect(said).not.toMatch(/interactive shell/)
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run)
     expect(runs).toEqual([expect.stringMatching(/^CC_DATA_DIR=\/tmp\/x node \/src\/packaging\/npm\/centralu\/bin\/centralu\.mjs serve --connection --pair hub:[A-Za-z0-9._-]+$/)])
     await expect(tunnel({ FAKE_SSH_HAS: cmd }, { shell: 'posix', command: cmd }).open()).resolves.toMatchObject({ token: 'tok' })

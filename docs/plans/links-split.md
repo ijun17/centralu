@@ -52,7 +52,7 @@ to the command part, with `RemoteSpec`, `shimNames` and `npmInstall`; the connec
 imports nothing of the line. The transport (`Tunnel`, `Endpoint`, `HostStart`, `RemoteRun`, `DirectTunnel`, `SshTunnel`)
 imports both and is imported by neither. `parseRevoke` and `parseDetachLine` stay with the line (they read what `serve`
 prints), `revokeCommand` and `detachCommand` with the commands. The text readers are pure but for one `reg.exe` call,
-which is behind `os.ts`. Order of the moves: text, commands, line, so no two new modules import each other.
+which would stay in `tunnel.ts` (row 9 stopped). Order of the moves: text, commands, line, so no two new modules import each other.
 
 ## 2. One job done twice
 
@@ -161,7 +161,7 @@ the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allow
 | 6 | **B7**: exit 127 is not "not installed" | #2102 | fix | 2 / 2 (+10 test) |
 | 7 | **B5**: the client's redials stop at hellos that drop at once (short-lived hellos counted apart) | #2104 | fix | 1 / 27 (+46 test) |
 | 8 | ~~B6~~: a dev remote judged as one before its hello | #2106, closed | dropped | see §2.4a |
-| 9 | ~~**`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts`~~ | **stopped under D1** (#2120, closed): built and measured at 158 lines out and 167 in (+9), and #2067 does not need it. The code page lookup behind `os.ts` alone is not a rule fix either: `tunnel.ts` is on `tooling/os-allowlist.txt` because it spawns ssh and opens sockets, so the lookup is allowed there and moving it would leave the file on the list | move | not made |
+| 9 | ~~**`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts`~~ | **stopped under D1 (§7)** (#2120, closed): built and measured at 158 lines out and 167 in (+9), and #2067 does not need it. The code page lookup behind `os.ts` alone is not a rule fix either: `tunnel.ts` is on `tooling/os-allowlist.txt` because it spawns ssh and opens sockets, so the lookup is allowed there and moving it would leave the file on the list | move | not made |
 | 10 | **Deletions**: the dead `hidden` set, `lastWords` and `read` through `viaSession` (D1), the update's `sleep` (D9), two doc comments back above their methods | #2110 | deletion | 75 / 69 (-6) |
 | 10a | What the deletions of §2.3 would still do, measured and found not to shrink: D2 and D3 as helpers (+4 lines, one source), D5 (a shared reader adds what it saves), D6, D7, D11 (a decision on one spelling each, across files) | not made | | 0 |
 | 11 | **`session-mirror.ts`** (the shown and hidden sessions) | after the deletions; #2067 needs it | move | ~90 |

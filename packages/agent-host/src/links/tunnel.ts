@@ -892,7 +892,7 @@ export class SshTunnel implements Tunnel {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
       const why = lastLine(r.stderr)
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}${r.code === 127 ? STALE_LAUNCHER : ''}`)
+      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}${r.code === 127 && !remote.command ? STALE_LAUNCHER : ''}`)
     }
     if (answer.ok) {
       this.linkBound = false
@@ -1057,7 +1057,7 @@ export class SshTunnel implements Tunnel {
       const why = lastLine(r.stderr)
       // Its serve.json may not be read there (#1405 review): the launcher's own advice, not a guess at an older Centralu
       if (r.code !== 0 && /cannot be read by this user \((EACCES|EPERM)\)/.test(why)) throw new Error(why.replace(/^centralu serve: /, ''))
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}${r.code === 127 ? STALE_LAUNCHER : ''}`)
+      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}${r.code === 127 && !remote.command ? STALE_LAUNCHER : ''}`)
     }
   }
 
