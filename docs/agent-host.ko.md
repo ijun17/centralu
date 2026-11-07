@@ -851,7 +851,8 @@ interface AdapterCapabilities {
   세션이 CLI를 `--thinking-display summarized`로 시작한다(`sdk-query.ts`의 `extraArgs`). SDK의 `thinking` 옵션은 쓰지
   않는다. 그 옵션은 `--thinking adaptive`도 함께 넘겨서, 모델이 생각할지까지 정해 버리기 때문이다. 이 플래그는 보이는
   것만 바꾸고, 생각하는 양이나 비용은 바꾸지 않는다. CLI 2.1.316에서 재 보니 한 턴의 출력 토큰이 같았다. CLI는 적어도
-  2.1.100부터 이 플래그를 받는다. 그보다 옛 CLI는 모르는 옵션이라며 거절하고, 세션이 시작되지 않는다.
+  2.1.100부터 이 플래그를 받는다. 그보다 옛 CLI는 모르는 옵션이라며 거절하고, 세션이 시작되지 않는다. 이전 호스트가
+  띄운 CLI를 이 호스트가 이어받으면 그 CLI는 처음 받은 인자를 그대로 쓰므로, 다시 시작하기 전까지는 생각이 빈 채로 온다.
 - **네이티브 서브에이전트의 걸음은 감싸서, 띄운 호출을 붙여 내보낸다** (#222). 부모 자신의 이벤트로는 결코 내보내지
   않는다(#98): `step`이 글, 추론, 도구 호출, 도구 결과 중 하나이고 `parentCallId`가 서브에이전트를 띄운 호출인
   `subagent_event`다. Claude: 서브에이전트의 메시지에는 `parent_tool_use_id`가 붙어 있고, `forwardSubagentText`를 켜면
