@@ -761,6 +761,9 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             relaunch_until: None,
             // Not passed on either: the handoff's own windows are attached
             reattach_until: None,
+            // Not passed on (#2119): the windows handed over are judged by their path again here, and one an install
+            // replaced is refused "Apply now" with the advice to quit and reopen, as after a keeper restart
+            known_windows: Vec::new(),
         }),
         idle: super::idle_limit(),
         started: ago(snap.since_start_ms),

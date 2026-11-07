@@ -139,11 +139,15 @@ pub(in crate::keeper) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
     thread::spawn(move || watch_window(k, id, BufReader::new(read_half)));
 }
 
-/// Whether the peer of an attaching or handed-over window is a Centralu window (#1405), logged with why when it is not:
-/// it then gets the limited credential, and its own log says so too.
+/// Whether the peer of an attaching or handed-over window is a Centralu window (#1405, #2119 `Keeper::judge_attaching`),
+/// logged with why when it is not: it then gets the limited credential, and its own log says so too.
 fn judged(k: &Keeper, stream: &UnixStream) -> bool {
-    match k.judge_window(stream) {
-        Ok(()) => true,
+    match k.judge_attaching(stream) {
+        Ok(window_peer::Taken::ByPath) => true,
+        Ok(window_peer::Taken::Known) => {
+            log("an attaching window whose executable no longer reads as the window's is one this keeper took before (an update replaced it)");
+            true
+        }
         Err(why) => {
             log(&format!("an attaching client gets the limited credential: {why}"));
             false

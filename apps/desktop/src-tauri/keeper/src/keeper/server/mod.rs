@@ -120,6 +120,9 @@ pub(super) struct State {
     /// attach again, as for a relaunch: with no window attached, nothing stops it meanwhile. Cleared
     /// by the next attach.
     pub(super) reattach_until: Option<Instant>,
+    /// Every window this keeper took by its path, by pid and start, for its life (#2119, `window_peer::judge_attaching`):
+    /// one that attaches again after an install, when its path reads as no window's, is still taken
+    pub(super) known_windows: Vec<window_peer::Attached>,
 }
 
 /// Has the child socket answer this keeper's current host (the supervisor's, its own or handed over)
@@ -153,6 +156,7 @@ impl State {
             host_stops_for_update: false,
             relaunch_until: None,
             reattach_until: None,
+            known_windows: Vec::new(),
         }
     }
 
@@ -386,6 +390,18 @@ impl Keeper {
         window_peer::judge(stream, &self.window_exes())
     }
 
+    /// Whether an attaching or handed-over peer is a window: by its path, or as a window this keeper took by its path
+    /// before (#2119, `window_peer::judge_attaching`); a window taken by its path is remembered. Never under the state
+    /// lock while the path is judged, which may run `codesign`.
+    pub(super) fn judge_attaching(&self, stream: &UnixStream) -> Result<window_peer::Taken, String> {
+        let by_path = self.judge_window(stream);
+        let peer = window_peer::attached(stream);
+        match self.state.lock() {
+            Ok(mut st) => window_peer::judge_attaching(by_path, peer, &mut st.known_windows),
+            Err(_) => by_path.map(|()| window_peer::Taken::ByPath),
+        }
+    }
+
     /// Whether the peer may stop the keeper for an update: a window attached now, by pid and start, whatever its executable
     /// reads after an install (#2117, `window_peer::judge_for_update`).
     pub(super) fn judge_window_for_update(&self, stream: &UnixStream) -> Result<(), String> {
@@ -556,7 +572,10 @@ impl Keeper {
 /// The refusal of a stop for an update by a keeper that has handed over
 pub(super) const HANDED_OVER: &str = "this keeper has just handed over to a newer one; try again in a moment";
 /// The refusal of a stop for an update to a process that is not a Centralu window
-pub(super) const NOT_A_WINDOW: &str = "window_only: only a Centralu window can stop the keeper for an update";
+/// (#2119): the person's own window gets it when this keeper does not know it (one started after the install, or a window
+/// whose attach the keeper could not take again); quitting and reopening runs the installed build, which is the update
+pub(super) const NOT_A_WINDOW: &str =
+    "window_only: the keeper does not recognise this window since the update was installed; quit Centralu and open it again to finish the update";
 
 /// Why this keeper cannot stop for an update now, or None (#1895 step 3), each in words the window shows after "Not
 /// relaunched:". Nothing is stopped when it cannot: the window says why and stays
