@@ -174,9 +174,7 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
   it('does not make merge_queue wait for a GitHub that accepts and does not answer for a while, and shows the answer once it comes', async () => {
     waiting()
     start(4, BOARD)
-    // GitHub holds its answer until the test lets it go: a time limit used to decide this under a loaded runner
-    const answer = join(root, 'compare-may-answer')
-    patchGh((st) => (st.compareHangs = answer))
+    patchGh((st) => (st.compareHangs = 6000))
     const calls = await Promise.all([call('merge_queue'), call('merge_queue'), call('merge_queue')])
     // The question to GitHub is still out (the fake records it when it answers): the calls did not wait for it
     expect(asked()).toBe(0)
@@ -185,7 +183,6 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
       expect(c.data.code).toBeUndefined()
     }
     // And once GitHub answers, the next call shows it
-    writeFileSync(answer, '')
     const told = await learned()
     expect(told.text).toContain('Board code: 4 commits behind main')
   })
