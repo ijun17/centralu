@@ -391,6 +391,9 @@ async function mergeQueue({ all = false, owner }) {
     : who
       ? [`${plural(waiting.length, 'message')} not acknowledged by ${who}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`, ...waiting.map((e) => `#${e.seq} ${e.text}`)]
       : [`${plural(waiting.length, 'message')} not acknowledged, for ${owners.map((o) => `${o} (${waiting.filter((e) => e.owner === o).length})`).join(', ')}; merge_queue({ owner }) lists them.`]
+  // No new batch while a release or main's run waits for a runner (#2115): said, so a queue that stands still is not a mystery
+  const hold = readQueue(dataDir()).runnerHold ?? null
+  const holdLines = hold ? [`New batches are held: ${hold.why}${hold.expired ? ' (held longer than the limit, so they are formed anyway)' : ''}, since ${hold.since.slice(11, 16)} UTC.`] : []
   // Whether this instance guards main, and why: an operator who finds a revert nobody here made asks which instance filed it (#2087)
   const guard = guardStatus(dataDir())
   // How old this instance's own code is, and a warning when it drives on old code (#2121)
@@ -399,8 +402,8 @@ async function mergeQueue({ all = false, owner }) {
   const driving = readQueue(dataDir()).items.some((i) => WORKING.has(i.state))
   const warning = staleWarning(age, { queue: driving, guard: guard?.state === 'driving' })
   const codeLines = age ? [age.text, ...(warning ? [warning] : [])] : []
-  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['code', '', codeLines]], {
-    ...(age ? { code: { head: age.head, behind: age.behind, appChanged: age.appChanged, warning } } : {}), counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}) })
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['code', '', codeLines], ['hold', '', holdLines]], {
+    ...(age ? { code: { head: age.head, behind: age.behind, appChanged: age.appChanged, warning } } : {}), counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {

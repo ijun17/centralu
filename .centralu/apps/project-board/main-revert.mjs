@@ -196,7 +196,8 @@ export async function actOnRed(dir, found, { now = clock(), ref, update, renew =
     if (revert) {
       const owner = item?.owner ?? null
       const out = enqueue(q, { repo, pr: revert.pr, lowers: [], owner, author: item?.author ?? owner, notice: item?.notice ?? null, deleteBranch: true, title: revertTitle(culprit.subject), at }, ref)
-      if (out.item) out.item.front = out.item.front ?? at
+      // Marked as the guard's own: the queue forms its batch even while a release or main's run waits for a runner (#2115)
+      if (out.item) Object.assign(out.item, { front: out.item.front ?? at, guardRevert: true })
     }
     const text = culprit
       ? `Merge queue: main went red after ${name} (${culprit.subject}) landed: ${failureLine(red)}. Found as ${how}. ${did} ${ref(repo, issue.number)} has the failure; fix it on a new branch and queue it again.`

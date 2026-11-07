@@ -163,6 +163,10 @@ if (args[0] === 'issue' && args[1] === 'view') {
   out({ check_runs: (st.checks ?? {})[path.split('/')[4]] ?? [] })
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
   out({ state: 'pending', statuses: [] })
+} else if (path && /\/actions\/workflows\/(release|shell-release)\.yml\/runs\?/.test(path)) {
+  if (st.releaseRunsError) fail(st.releaseRunsError)
+  const runs = (st.releaseRuns ?? {})[path.split('/workflows/')[1].split('/')[0]] ?? []
+  out(args.includes('--slurp') ? [{ workflow_runs: runs }] : { workflow_runs: runs })
 } else if (path && path.includes('/actions/workflows/build.yml/runs?')) {
   // By commit (a pull request's, a batch's), else by branch (main's push runs, a bisect probe's): the main guard (#1259)
   const query = new URLSearchParams(path.split('?')[1])

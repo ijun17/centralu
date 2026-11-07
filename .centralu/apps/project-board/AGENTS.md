@@ -601,6 +601,15 @@ default 4: the owner's, 2026-10-19, this repository's too).
   batch's tree after it (a driver stopped before writing it down), it counts as landed. The batch
   branch is deleted when the batch ends, whatever the end, but only once the queue has written down
   that it made it (`branchMade`), and only while it is still the driver.
+- **No new batch while a release or main's run waits for a runner** (#2115, 2026-11-07: a release rehearsal's last job
+  waited more than 30 minutes behind 40 running jobs). With `queue.runnerHold` in project.json (`workflows`: release workflow
+  files; `mainRuns`: main's full tier, the guard's runs, off in this repository's project.json because after every landing a main run has queued jobs, which would come close to serialising the queue; `maxMinutes`, 45), the tick forms no new batch while a run of one of
+  those, not finished, has a job whose status is `queued` (`holdBatches`, `runnerPressure`, queue-driver.mjs; asked at most once a
+  minute, and a GitHub that cannot be asked holds nothing). A batch's run of the quick tier is work nobody waits on, and GitHub
+  schedules queued jobs without priority. The items are polled as ever, a running batch goes on, landing is not held, and
+  `merge_queue` says "New batches are held: …, since HH:MM UTC" (`runnerHold` on the queue). A job waiting for an approval is not queued
+  for a runner, and nothing is held for a finished run. A run is waited for until `maxMinutes` after it was first waited for (`runnerHoldSince` on the queue, kept apart from the hold); then batches are formed anyway. It is forgotten only when the run has finished, not when the queue goes idle and fills again, a batch runs, or GitHub cannot be asked (another run waiting is a new hold; queueing a pull request meanwhile does not start it over), so jobs that never start cannot stop the queue. The guard's own revert (`guardRevert` on its item) is never held: main is red. `PROJECT_BOARD_QUEUE_RUNNER_HOLD` (the object as JSON,
+  or `off`) and `PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS` are for tests only.
 - A member sent back has its own run cancelled: the item's poll reruns it (a cancelled run once per
   head), which is what tells the session what is wrong with it, if anything.
 - The watch command does not say "Nothing left queued" while a batch with the owner's pull requests
