@@ -197,7 +197,9 @@ if (args[0] === 'issue' && args[1] === 'view') {
   // A batch branch's files, as the test gives them (batchFiles), for the queue's question whether it changes the screen
   const key = path.split('/compare/')[1]
   const files = (st.compareFiles ?? {})[key] ?? (key.includes('queue%2Fbatch-') ? st.batchFiles : undefined)
-  out({ status: (st.compare ?? {})[key] ?? 'ahead', ...(files ? { files: files.map((f) => (typeof f === 'string' ? { filename: f } : f)) } : {}) })
+  // How far the second is ahead of the first (compareAhead: ahead_by, #2121), as the test gives it
+  const ahead = (st.compareAhead ?? {})[key]
+  out({ status: (st.compare ?? {})[key] ?? 'ahead', ...(ahead !== undefined ? { ahead_by: ahead } : {}), ...(files ? { files: files.map((f) => (typeof f === 'string' ? { filename: f } : f)) } : {}) })
 } else if (path && args.includes('PATCH') && /\/pulls\/\d+$/.test(path)) {
   const body = JSON.parse(stdin)
   write(['base', path.split('/')[4], body.base])
@@ -350,6 +352,8 @@ export const NO_CHECKOUT = { PROJECT_BOARD_QUEUE_CHECKOUT: '' }
 export const NO_SCREEN = { PROJECT_BOARD_CI_SCREEN: 'off' }
 /** No main guard unless a test asks for it (#1259): it reads main's runs on its own clock */
 export const NO_GUARD = { PROJECT_BOARD_QUEUE_GUARD: 'off' }
+/** The board's own code is not compared with main unless a test asks for it (#2121): it would read the checkout the tests run from */
+export const NO_CODE_CHECK = { PROJECT_BOARD_CODE_DIR: '' }
 
 export function runtime(state?: Gh, env: Record<string, string> = {}, path: string[] = []) {
   if (state) fake.setState(state)
@@ -357,7 +361,7 @@ export function runtime(state?: Gh, env: Record<string, string> = {}, path: stri
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...NO_GUARD, ...NO_SCREEN, ...NO_GIT_MAINTENANCE, ...env }, path),
+    env: fake.env({ ...FAST, ...NO_TIERS, ...NO_CHECKOUT, ...NO_GUARD, ...NO_CODE_CHECK, ...NO_SCREEN, ...NO_GIT_MAINTENANCE, ...env }, path),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
   rt.refresh()

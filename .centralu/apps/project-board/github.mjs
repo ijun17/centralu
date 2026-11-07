@@ -631,6 +631,18 @@ export async function readCompareFiles(repo, base, head) {
   return c.files.flatMap((f) => [f.filename, f.previous_filename]).filter((f) => typeof f === 'string' && f)
 }
 
+/**
+ * How far `base` is ahead of `head` (GitHub's comparison, #2121): the commits of `base` that `head` lacks, and the files they
+ * change (null when GitHub did not list them). Null when the comparison is missing: a `head` GitHub does not know, a local
+ * commit nobody pushed.
+ */
+export async function readBehind(repo, head, base) {
+  checkRepo(repo)
+  const c = await restJson(`repos/${repo}/compare/${encodeURIComponent(head)}...${encodeURIComponent(base)}`, { missing: [404, 422] })
+  if (!c || !Number.isFinite(c.ahead_by)) return null
+  return { behind: c.ahead_by, files: Array.isArray(c.files) ? c.files.flatMap((f) => [f.filename, f.previous_filename]).filter((f) => typeof f === 'string' && f) : null }
+}
+
 /** The open pull requests whose base is `branch` (deleting it would close them). */
 export async function openPrsOnBase(repo, branch) {
   checkRepo(repo)
