@@ -816,6 +816,7 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   const active = q.items.filter((i) => ACTIVE.has(i.state))
   // A batch whose last member landed still has its end to do (its branch, the tree check)
   if (!active.length && !activeBatch(q)) {
+    if (q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
     releaseLease(dir, holder)
     return { did: 'idle' }
   }
@@ -828,7 +829,8 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   const work = batchWork(q, now)
   // Not while a release or main's run waits for runners (#2115): the batch would only take the slots they wait for; the items are polled meanwhile
   const holding = work?.form ? await holdBatches(dir, now) : false
-  if (!work?.form && q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+  // A hold that expired is remembered while the run still waits, so the next batch is not held again; any other is over once no batch is due
+  if (!work?.form && q.runnerHold && !q.runnerHold.expired) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
   if (work?.form && !holding) {
     updateQueue(dir, (fresh) => formDue(fresh, now, ref))
     return { did: 'batched' }

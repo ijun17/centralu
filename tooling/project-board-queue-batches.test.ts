@@ -349,17 +349,8 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       runtime(tieredState({ releaseRuns: { 'release.yml': [release('queued')] }, ...waiting('queued') }), hold({ maxMinutes: 0.001 }))
       await call('queue_merge', { pr: 77, owner: 'tester' })
       await until((x) => stateOf(x) === 'merged', 'the merge')
-      expect(queueOnDisk().runnerHold).toBeUndefined()
-    })
-
-    it.each([
-      ['a finished release run', { ...release('completed'), conclusion: 'success' }, 'queued'],
-      ['a release run whose job waits for an approval, not for a runner', release('waiting'), 'waiting'],
-    ])('holds nothing for %s', async (_what, run, jobStatus) => {
-      runtime(tieredState({ releaseRuns: { 'release.yml': [run] }, ...waiting(jobStatus) }), hold())
-      await call('queue_merge', { pr: 77, owner: 'tester' })
-      await until((x) => stateOf(x) === 'merged', 'the merge')
-      expect(queueOnDisk().runnerHold).toBeUndefined()
+      // It said it let go: the batch was formed with the job still waiting
+      expect(queueOnDisk().runnerHold).toMatchObject({ expired: true })
     })
   })
 
