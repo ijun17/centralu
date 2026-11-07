@@ -2980,10 +2980,13 @@ open it again to update". Quitting stops those children, and the keeper the shel
 Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`), and its
 host's drain would hand its children to it, where no host of this build looks. So until PR 2 the host keeps one small
 check (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
-standby under a keeper that holds a running child does not stand by, so that swap fails before the running host is
-touched and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it
-restores its sessions, so their turns show stopped and Continue starts the only CLI. A keeper of step 3 or later serves
-no `children.sock`, and nothing is asked. Checked with a real beta.48 keeper and host on Linux (#2122 review).
+standby under a keeper whose `children.sock` answers stands by only when that keeper lists its children and none runs
+(an `ok: false`, no answer or an unreadable list refuses it too), so that swap fails before the running host is touched
+and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it restores
+its sessions, so their turns show stopped and Continue starts the only CLI. It signals each child's process group
+through the service and, for a terminal, every group in the shell's session (found by its controlling terminal), as
+that keeper's own stop does, so a job the shell put in a group of its own (`sleep &`) ends too. A keeper of step 3 or
+later serves no `children.sock` (it removes one a holding keeper left), and nothing is asked. Checked with a real beta.48 keeper and host on Linux (#2122 review).
 
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
 update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
