@@ -4415,7 +4415,8 @@ Counts, percentages and names only: no content.
   Output comes from the request's own usage where the tool reports it per request (`RequestInput.outputTokens`: Codex's `last.outputTokens`).
   **Claude's comes from the stream's `message_delta`** (#2135): an assistant message carries only the count the stream started with (a few tokens), so the
   normalizer holds a streamed response's request until its `message_delta` brings the final count (`heldRequest`), and lets it go without output when the
-  next response starts or the turn ends first (a stopped stream). A subagent's responses are not streamed, so its requests still have no output, and a
+  next response starts, the turn ends (a stopped stream) or the process ends first. The request's time is then the end of its stream, not its first
+  message, so the idle gap the ledger measures (§6.1) shifts by the difference of two responses' lengths, as it already did by their thinking. A subagent's responses are not streamed, so its requests still have no output, and a
   response that arrives whole (no `message_start`) is carried at once without one. Buckets before the fix have `output` 0 for Claude; `usage_history`
   prints `out n/a` for a row with no output rather than `out 0`, which an agent would take as fact.
 

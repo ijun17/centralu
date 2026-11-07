@@ -1009,6 +1009,21 @@ describe('a model request, for prompt cache accounting', () => {
     expect(requests(stream.push(sdk({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 50 } } })))).toEqual([])
   })
 
+  it('lets a held request go when the process ends mid-stream, and a message_delta of another stream does not take it (#2135)', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const start = (id: string) => sdk({ type: 'stream_event', event: { type: 'message_start', message: { id, usage: { output_tokens: 1 } } } })
+    stream.push(start('msg_a'))
+    stream.push(sdk(block('msg_a', [{ type: 'text', text: 'Part' }])))
+    // A new stream's delta is not msg_a's: msg_a goes without output at that stream's start, and the delta finds nothing held
+    expect(requests(stream.push(start('msg_b')))).toHaveLength(1)
+    expect(requests(stream.push(sdk({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 70 } } })))).toEqual([])
+    // msg_c is held when the process dies (no delta, no result): the release still counts it
+    stream.push(start('msg_c'))
+    stream.push(sdk(block('msg_c', [{ type: 'text', text: 'Cut' }])))
+    expect(requests(stream.release('process lost'))).toEqual([{ inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 }])
+    expect(requests(stream.release('again'))).toEqual([])
+  })
+
   it("is not carried by the turn's result, which is a running total", () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const out = stream.push(sdk({
