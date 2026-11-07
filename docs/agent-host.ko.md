@@ -847,6 +847,11 @@ interface AdapterCapabilities {
   `tool_call.input`은 도구가 받은 입력을 받은 그대로, `tool_result.output`은 도구가 답한 글 전체를 자르지 않고 싣는다.
   이미지는 뺀다(`message_image`로 따로 나간다, #40). host가 기록을 저장소에 남기고 내보내는 모든 것에서 걷으므로
   ([protocol.md](protocol.md) §2), 어댑터는 작은 카드와 온전한 기록 사이에서 고를 필요가 없다.
+- **Claude의 생각은 글로 온다**(#2062). 요즘 모델은 요약을 요청하지 않으면 글이 빈 생각 블록을 보낸다. 그래서 모든
+  세션이 CLI를 `--thinking-display summarized`로 시작한다(`sdk-query.ts`의 `extraArgs`). SDK의 `thinking` 옵션은 쓰지
+  않는다. 그 옵션은 `--thinking adaptive`도 함께 넘겨서, 모델이 생각할지까지 정해 버리기 때문이다. 이 플래그는 보이는
+  것만 바꾸고, 생각하는 양이나 비용은 바꾸지 않는다. CLI 2.1.316에서 재 보니 한 턴의 출력 토큰이 같았다. CLI는 적어도
+  2.1.100부터 이 플래그를 받는다. 그보다 옛 CLI는 모르는 옵션이라며 거절하고, 세션이 시작되지 않는다.
 - **네이티브 서브에이전트의 걸음은 감싸서, 띄운 호출을 붙여 내보낸다** (#222). 부모 자신의 이벤트로는 결코 내보내지
   않는다(#98): `step`이 글, 추론, 도구 호출, 도구 결과 중 하나이고 `parentCallId`가 서브에이전트를 띄운 호출인
   `subagent_event`다. Claude: 서브에이전트의 메시지에는 `parent_tool_use_id`가 붙어 있고, `forwardSubagentText`를 켜면
