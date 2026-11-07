@@ -22,14 +22,17 @@
  *   - a switch to content 0.2.2 changed after signing is refused with the reason `content`: keeper A
  *     and its host serve on, nothing is left in `<data>/content/`, the terminal keeps counting;
  *   - a switch to 0.1.9, older than what ran here, is refused with `downgrade`;
+ *   - no keeper here serves a child socket: the host spawns its own terminal (#1895), so a handoff
+ *     carries no child table;
  *   - an upgrade to 0.2.1 hands keeper A over to keeper B running from `<data>/content/0.2.1/` (the
  *     bundle's own keeper and its window host, which the request names, are never started): the
- *     same host process, the same terminal, its counter continuous, the window never
- *     dropped, the front door unchanged, A gone, the floor at 0.2.1, and `content/0.2.0` kept for
- *     as long as the host runs from it;
- *   - the switch from the 0.2.1 window then moves only the host, to `content/0.2.1/host`, and once
- *     nothing runs from `content/0.2.0` it is removed;
- *   - stop ends the keeper, the host and the terminal.
+ *     same host process, so the host's terminal is the same shell, its counter continuous, the
+ *     window never dropped, the front door unchanged, A gone, the floor at 0.2.1, and
+ *     `content/0.2.0` kept for as long as the host runs from it;
+ *   - the switch from the 0.2.1 window then moves only the host, to `content/0.2.1/host`, the old
+ *     host's terminal ending with it (the host owns it), and once nothing runs from `content/0.2.0`
+ *     it is removed;
+ *   - stop ends the keeper, the host and every process it started.
  *
  * CI runs it in the `keeper e2e` job (.github/workflows/build.yml) with `--no-build` after the
  * job's own `pnpm bundle:host` and `cargo build`. Every process it starts, and everything those
@@ -42,16 +45,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { rawPublicKey, throwawayKey, writeContentManifest, type SigningKey } from './content-manifest.mjs'
-import { alive, cleanupOnExit, copyEarlierHost, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, familyOf, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildShellExe, TAURI_DIR } from './shell-bundle.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
-// Keepers that hold their hosts' children, so a handoff through content carries a terminal, as before #1895 step 3. Step 4
-// deletes this script with the handoff
-process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const flag = (name: string) => {
@@ -114,6 +114,11 @@ function attachClient(sock: string, out: string): number {
 }
 
 /** Numbers printed as `<tag> <n>` on their own lines, in order */
+/**
+ * The pid a terminal's shell printed as `P <pid>`. Not anchored at the line's start: a shell may write a mode change and a
+ * carriage return before the output, and the typed command line itself has `P $$`, no digits
+ */
+const shellPid = (screen: string) => Number(screen.match(/P (\d+)\r?$/m)?.[1]) || undefined
 const numbers = (text: string, tag: string) => [...text.matchAll(new RegExp(`^${tag} (\\d+)\\r?$`, 'gm'))].map((m) => Number(m[1]))
 function continuous(ns: number[]): { ok: boolean; why: string } {
   if (ns.length < 2) return { ok: false, why: `only ${ns.length} numbers` }
@@ -160,8 +165,7 @@ function makeBundle(root: string, name: string, version: string, keeper: string,
   mkdirSync(content, { recursive: true })
   copyFileSync(keeper, join(content, 'centralu-keeper'))
   chmodSync(join(content, 'centralu-keeper'), 0o755)
-  // Of a build before #1895 step 3, so a handoff through content carries what the keeper holds (`copyEarlierHost`)
-  copyEarlierHost(HOST_SRC, join(content, 'host'))
+  cpSync(HOST_SRC, join(content, 'host'), { recursive: true })
   const infoPath = join(content, 'host/bundle-info.json')
   const commit = `content-${name}`
   writeFileSync(infoPath, JSON.stringify({ ...JSON.parse(readFileSync(infoPath, 'utf8')), commit, builtAt: new Date().toISOString() }))
@@ -230,14 +234,15 @@ async function scenario(testKeeper: string, testShell: string, key: SigningKey):
   const p = await host.call('projects.add', { path: project })
   const term = await host.call('terminal.create', { projectId: p.id, cols: 80, rows: 24 })
   await sleep(1500)
-  await host.call('terminal.input', { terminalId: term.terminalId, data: 'i=0; while true; do echo "C $i"; i=$((i+1)); sleep 0.05; done\n' })
+  await host.call('terminal.input', { terminalId: term.terminalId, data: 'echo "P $$"; i=0; while true; do echo "C $i"; i=$((i+1)); sleep 0.05; done\n' })
   check(await waitFor(() => numbers(host.screen(term.terminalId), 'C').length > 10, 15_000), 'the terminal counts', host.screen(term.terminalId).slice(-300))
   const hostPid = view!.hostPid as number
   started.add(hostPid)
-  const before = await heldChildren(data)
-  for (const c of before) started.add(c.pid)
-  const termPid = before.find((c) => c.tag?.kind === 'terminal')?.pid as number | undefined
-  check(termPid && alive(termPid), 'the keeper holds the terminal', JSON.stringify(before))
+  // The host's own shell, which no keeper lists
+  const termPid = shellPid(host.screen(term.terminalId))
+  if (termPid) started.add(termPid)
+  check(termPid && alive(termPid) && familyOf([hostPid]).includes(termPid), "the terminal's shell is the host's own process", String(termPid))
+  check(!existsSync(join(data, 'children.sock')), 'keeper A serves no child socket')
 
   const refusedWith = async (b: Bundle, reason: string) => {
     const sw = await request(sock, switchFrom(b))
@@ -277,8 +282,8 @@ async function scenario(testKeeper: string, testShell: string, key: SigningKey):
   check(await waitFor(() => !alive(keeperA), 10_000), 'keeper A has exited')
   check(view!.hostPid === hostPid && alive(hostPid), 'the host is the same process')
   check(view!.status.port === door.port && view!.status.token === door.token, 'the front door has the same port and token')
-  const after = await heldChildren(data)
-  check(after.some((c) => c.pid === termPid && c.alive), 'the terminal is the same process, held by keeper B', JSON.stringify(after))
+  check(alive(termPid), "the host's terminal is the same shell, still running", String(termPid))
+  check(!existsSync(join(data, 'children.sock')), 'keeper B serves no child socket either')
   check(!readFileSync(windowOut, 'utf8').includes('"closed"'), 'the window was never dropped')
   await sleep(1500)
   const counted = continuous(numbers(host.screen(term.terminalId), 'C'))
@@ -287,6 +292,8 @@ async function scenario(testKeeper: string, testShell: string, key: SigningKey):
   check(existsSync(join(contentA, 'host/main.mjs')), 'content/0.2.0 stays while the host runs from it')
 
   log('\nthe 0.2.1 window switches: only the host moves, and content/0.2.0 goes once unused')
+  const oldFamily = familyOf([hostPid])
+  for (const pid of oldFamily) started.add(pid)
   const sw = await request(sock, switchFrom(B))
   check(sw.ok, 'the switch is accepted', JSON.stringify(sw))
   view = await waitFor(async () => {
@@ -297,7 +304,8 @@ async function scenario(testKeeper: string, testShell: string, key: SigningKey):
   started.add(view!.hostPid)
   check(view!.keeper.pid === keeperB, 'keeper B stays (it already runs this content)')
   check(real(view!.source?.copyDir ?? '') === real(join(contentB, 'host')), "the new host runs from content/0.2.1's host/", JSON.stringify(view!.source))
-  check(alive(termPid), 'the terminal is still the same process')
+  // The host owns its terminal: the old one's shell ends with it, nothing is left unowned
+  check(await waitFor(() => oldFamily.every((pid) => !alive(pid)), 15_000, 250), `the old host and the ${oldFamily.length - 1} processes it had started have ended`, oldFamily.filter(alive).join(', '))
   check(await waitFor(() => !existsSync(contentA), 15_000), 'content/0.2.0 was removed once nothing ran from it', contentEntries(data).join(', '))
   check(
     JSON.stringify(contentEntries(data)) === JSON.stringify(['0.2.1', 'highest-started']),
@@ -306,10 +314,10 @@ async function scenario(testKeeper: string, testShell: string, key: SigningKey):
   )
 
   log('\nquit completely')
-  const pids = [keeperB, view!.hostPid as number, termPid as number].filter(alive)
+  const pids = [keeperB, ...familyOf([view!.hostPid as number])].filter(alive)
   host.close()
   check((await request(sock, { op: 'stop' })).ok, 'stop is accepted')
-  check(await waitFor(() => pids.every((pid) => !alive(pid)), 20_000, 250), 'the keeper, the host and the terminal are gone', pids.filter(alive).join(', '))
+  check(await waitFor(() => pids.every((pid) => !alive(pid)), 20_000, 250), 'the keeper, the host and what it started are gone', pids.filter(alive).join(', '))
   // The stand-in window exits by itself once the keeper closes its connection; the cleanup ends it otherwise
 }
 
