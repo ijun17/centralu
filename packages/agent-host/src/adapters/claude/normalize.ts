@@ -1,6 +1,6 @@
 import type { NormalizedEvent, RequestInput, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
-import { addTokens, NO_TOKENS } from '../token-usage.js'
+import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
@@ -243,6 +243,13 @@ export class ClaudeStreamNormalizer {
   /** The last turn result's reading, the process's total then, and the parent's requests since (see `withRequest`) */
   private resultTokens: TokenUsage | null = null
   private sinceResult: TokenUsage = NO_TOKENS
+  /**
+   * The parent's streamed request, held until its `message_delta` brings the request's output count (#2135). The
+   * assistant messages of a streamed response carry the count the stream started with (a few tokens); the final one
+   * comes only in `message_delta`, after them. Let go without output when the next response starts or the turn ends
+   * first (a stopped stream), so a request is never lost to a missing delta.
+   */
+  private heldRequest: { id: string; request: RequestInput } | null = null
   /** Claude Code's task list, kept as the plan (see `followTasks`) */
   private readonly taskPlan: ClaudeTaskPlan
   /** Edits whose result has not come yet (see `touch`) */
@@ -355,13 +362,27 @@ export class ClaudeStreamNormalizer {
       ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
       ...ttlOf(usage.cache_creation),
       ...(str(m.message?.model) ? { model: str(m.message?.model) } : {}),
-      // No output count: an assistant message carries the placeholder the stream started with (a few tokens), and the
-      // final count only comes in the stream's message_delta, which this path does not follow (usage history, §6.2)
+      // No output count here: an assistant message carries the placeholder the stream started with (a few tokens). A
+      // streamed response's final count comes in its message_delta (`heldRequest`); a subagent's is not streamed
     }
     if (subagent) {
       return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events
     }
+    if (id === this.streamMessageId) {
+      const earlier = this.releaseRequest()
+      this.heldRequest = { id, request }
+      return [...earlier, ...events]
+    }
     return events.map((e) => (e.type === 'usage_update' ? { ...e, request } : e))
+  }
+
+  /** The held request (see `heldRequest`), with the output count when its message_delta brought one */
+  private releaseRequest(outputTokens?: number): NormalizedEvent[] {
+    const held = this.heldRequest
+    this.heldRequest = null
+    if (!held || !this.lastTokens) return []
+    const request = outputTokens ? { ...held.request, outputTokens } : held.request
+    return [{ type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }]
   }
 
   /**
@@ -486,8 +507,14 @@ export class ClaudeStreamNormalizer {
      */
     if (msg.type === 'stream_event') {
       const e = msg.event
-      if (e?.type === 'message_start') this.streamMessageId = str(e.message?.id) || undefined
+      if (e?.type === 'message_start') {
+        events = [...this.releaseRequest(), ...events]
+        this.streamMessageId = str(e.message?.id) || undefined
+      } else if (e?.type === 'message_delta' && this.heldRequest?.id === this.streamMessageId) {
+        events = [...events, ...this.releaseRequest(tokenCount(e.usage?.output_tokens))]
+      }
     }
+    if (type === 'result') events = [...this.releaseRequest(), ...events]
     const wholeId = msg.type === 'assistant' ? str(msg.message?.id) || undefined : undefined
     const messageId = type === 'stream_event' ? this.streamMessageId : wholeId
     if (messageId) events = events.map((e) => (e.type === 'message_delta' && !e.messageId ? { ...e, messageId } : e))

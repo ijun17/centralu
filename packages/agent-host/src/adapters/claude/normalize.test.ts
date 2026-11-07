@@ -8,7 +8,7 @@ import { DIFF_PREVIEW_CHARS } from '../file-changes.js'
 import { IMAGE_MAX_BYTES } from '../images.js'
 import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
-import { recordedApprovals, recordedWhere } from './recorded.test-helpers.js'
+import { recordedApprovals, recordedMessages, recordedWhere } from './recorded.test-helpers.js'
 import { sdk } from './sdk-message.test-helpers.js'
 
 const SID = 's1'
@@ -977,6 +977,36 @@ describe('a model request, for prompt cache accounting', () => {
     expect(out.find((e) => e.type === 'usage_update')).toMatchObject({
       tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 5, cacheCreationTokens: 0 },
     })
+  })
+
+  it("carries a streamed response's output count, which only its message_delta brings (#2135, recorded)", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const recorded = recordedMessages('files')
+    const out = recorded.flatMap((m) => stream.push(m))
+    // Recorded: two responses whose assistant messages carry 8 and 5 output tokens (the stream's start), and whose
+    // message_delta says 395 and 430; the turn's result says 825
+    const outputs = requests(out).map((r) => r.outputTokens)
+    expect(outputs).toEqual([395, 430])
+    const result = recorded.find((m) => m.type === 'result') as { usage?: { output_tokens?: number } } | undefined
+    expect(outputs.reduce((a, b) => a! + b!, 0)).toBe(result?.usage?.output_tokens)
+    // Still one request per response, with its input as the assistant messages carried it
+    expect(requests(out).every((r) => r.inputTokens > 0 || r.cacheReadTokens > 0)).toBe(true)
+  })
+
+  it('lets a held request go without output when its stream stops before message_delta (#2135)', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const start = (id: string) => sdk({ type: 'stream_event', event: { type: 'message_start', message: { id, usage: { output_tokens: 1 } } } })
+    stream.push(start('msg_a'))
+    // Held, not carried yet: its output count has not come
+    expect(requests(stream.push(sdk(block('msg_a', [{ type: 'text', text: 'Part' }]))))).toEqual([])
+    // The next response starts with no message_delta for the first: the first goes, without output
+    expect(requests(stream.push(start('msg_b')))).toEqual([{ inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 }])
+    stream.push(sdk(block('msg_b', [{ type: 'text', text: 'More' }])))
+    // The turn ends (stopped) with msg_b still held: it goes before the result's own reading
+    const ended = stream.push(sdk({ type: 'result', subtype: 'error_during_execution', modelUsage: {} }))
+    expect(requests(ended)).toEqual([{ inputTokens: 9, cacheReadTokens: 80_412, cacheCreationTokens: 4_213 }])
+    // A message_delta that comes after it was let go adds nothing
+    expect(requests(stream.push(sdk({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 50 } } })))).toEqual([])
   })
 
   it("is not carried by the turn's result, which is a running total", () => {
