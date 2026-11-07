@@ -59,6 +59,8 @@ import { clearStoppedMark, markQuit, takeSystemEnd, updateResumeFolder, writeSys
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
 import { bridgeAddress, ControlChannel, onDrain, standby, viewPort } from './swap-control.js'
+import { endHeld, refuseStandby } from './lifecycle/keeper-held.js'
+import { keeperHeldIo } from './keeper/children-client.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
@@ -224,6 +226,15 @@ const swapping = values.standby === true && control !== null
 if (values.standby && !control) {
   console.error('[agent-host] --standby is only meaningful under a keeper; starting normally')
 }
+if (swapping && dbPath !== ':memory:') {
+  // A keeper of beta.48 or older still holding the running host's children swaps to this build even after this build's
+  // keeper refused its handoff: not standing by ends that swap with the running host untouched (`keeper-held.ts`)
+  const why = await refuseStandby(keeperHeldIo(dirname(dbPath)))
+  if (why) {
+    console.error(`[agent-host] not standing by: ${why}`)
+    process.exit(1)
+  }
+}
 if (swapping) {
   await standby({
     control: control!,
@@ -254,6 +265,14 @@ try {
 if (!lock.ok) {
   refuse(lockConflictMessage(lock.holder ?? lock.heldByPid, lock.lockPath))
   process.exit(1)
+}
+/*
+ * Under a keeper of beta.48 or older, what an earlier build's host gave it to hold, now that no host is up to take it
+ * over: ended before the sessions are restored, so a turn it cut shows stopped and its Continue starts the only CLI
+ * (`keeper-held.ts`). A standby that got here took over from a host that held nothing (its check above).
+ */
+if (launch.underKeeper && !swapping && dbPath !== ':memory:') {
+  await endHeld(keeperHeldIo(dirname(dbPath)), (line) => console.error(line))
 }
 /*
  * The lock is released by one exit hook, which runs last whichever path led to the exit (HO5). A

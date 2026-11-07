@@ -201,6 +201,7 @@ packages/agent-host/src/fake-exe.test-helpers.ts
 packages/agent-host/src/fake-exe.test.ts
 packages/agent-host/src/fs-containment.test.ts
 packages/agent-host/src/inline-views.test.ts
+packages/agent-host/src/keeper/children-client.ts
 packages/agent-host/src/lifecycle/endings.test.ts
 packages/agent-host/src/lifecycle/endings.ts
 packages/agent-host/src/lifecycle/host-process.test.ts
