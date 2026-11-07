@@ -276,24 +276,33 @@ export async function retractRed(hunt, run, { now = clock(), ref, update, renew 
     if (!renew()) return null
     const seen = await readIssueText(repo, hunt.issue)
     const keepOpen = more || revert === 'landed'
-    if (seen.state === 'CLOSED') issue = 'closed-by-person'
-    else if (seen.text.includes(tag)) issue = keepOpen ? 'commented' : 'closed'
+    if (seen.text.includes(tag)) issue = keepOpen ? 'commented' : 'closed'
+    // Closed, and not by this try that stopped between the close and its comment (`closing`): a person's, left alone
+    else if (seen.state === 'CLOSED' && done.closing !== true) issue = 'closed-by-person'
     else if (revert === 'landed') {
-      await postComment(repo, hunt.issue, `${tag}\n${passed} The revert ${ref(repo, hunt.revert.pr)} had already landed, so it is left to a person: put the change back if it should be on main. ${closing}`)
+      await postComment(repo, hunt.issue, `${tag}
+${passed} The revert ${ref(repo, hunt.revert.pr)} had already landed, so it is left to a person: put the change back if it should be on main. ${closing}`)
       issue = 'commented'
     } else if (more) {
       const rested = failed > 1 ? `${failed - 1} failed attempt${failed > 2 ? 's' : ''} of the run` : 'a bisect probe that failed on the commit'
-      await postComment(
-        repo,
-        hunt.issue,
-        `${tag}\n${passed} The blame rested on ${rested}, so this stays open for a person to judge: a race ${name ?? 'the commit'} brought in would fail some of the time too. ${revert === 'closed' ? `The revert ${ref(repo, hunt.revert.pr)} is closed and main is as it was. ` : ''}${closing}`,
-      )
+      // The label first: it can be added twice, a comment cannot be told from one to post again
       await addLabels(repo, hunt.issue, ['flaky-suspect']).catch((e) => {
         if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
       })
+      await postComment(
+        repo,
+        hunt.issue,
+        `${tag}
+${passed} The blame rested on ${rested}, so this stays open for a person to judge: a race ${name ?? 'the commit'} brought in would fail some of the time too. ${revert === 'closed' ? `The revert ${ref(repo, hunt.revert.pr)} is closed and main is as it was. ` : ''}${closing}`,
+      )
       issue = 'commented'
     } else {
-      await closeIssue(repo, hunt.issue, `${tag}\n${passed}${revert === 'closed' ? ` The revert ${ref(repo, hunt.revert.pr)} is closed.` : ''} ${closing}`)
+      const body = `${tag}
+${passed}${revert === 'closed' ? ` The revert ${ref(repo, hunt.revert.pr)} is closed.` : ''} ${closing}`
+      // Written before the issue is closed: a try that stops after the close finds it closed, and owes the comment
+      await mark({ closing: true })
+      if (seen.state === 'CLOSED') await postComment(repo, hunt.issue, body)
+      else await closeIssue(repo, hunt.issue, body)
       issue = 'closed'
     }
     mark({ issue })

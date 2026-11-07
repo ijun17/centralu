@@ -11,7 +11,7 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, isOutage, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
 import { failingStepText, isTestFailure, testName } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
@@ -238,13 +238,17 @@ async function noteFlakes({ repo, runs, g, update }) {
  * (#2082: a person reran main's run after the guard blamed a commit, and the same job passed); null while it has not, or when
  * there is nothing filed, or the retraction is done, or the failure came again and again (`repeats`: a rerun that passes is what it always does). A newer run that passes says nothing: the commit may be what a later one fixed.
  */
-export function passedAfterBlame({ hunt, runs }) {
-  if (!hunt?.endedAt || hunt.retracted?.done || hunt.repeats || (hunt.issue == null && !hunt.revert?.pr)) return null
+export function passedAfterBlame({ hunt, runs, now = clock() }) {
+  if (!hunt?.endedAt || hunt.retracted?.done || hunt.retracted?.gaveUp || hunt.repeats || (hunt.issue == null && !hunt.revert?.pr)) return null
+  // Kept as long as `BLAME_KEEP_MS`, whichever list it is in
+  if (now - Date.parse(hunt.endedAt) > BLAME_KEEP_MS) return null
   const run = runs.find((r) => String(r.id) === String(hunt.run))
   return run && run.status === 'completed' && run.conclusion === 'success' && (run.attempt ?? 1) > (hunt.attempt ?? 1) ? run : null
 }
 
 /** How long a finished hunt's revert and issue can still be taken back after main went green or another hunt began (#2082) */
+/** How many steps a retraction that fails for its own reasons is tried before it is left to a person */
+export const RETRACT_TRIES = 10
 export const BLAME_KEEP_MS = Number(process.env.PROJECT_BOARD_QUEUE_BLAME_KEEP_MS) || 3 * 24 * 3600_000
 const BLAMED_KEPT = 10
 
@@ -313,8 +317,25 @@ export async function guardTick({ q, update, now = clock(), renew, act, retract,
   await noteFlakes({ repo, runs, g, update })
   // The run a revert and an issue were filed for passed when rerun: the guard takes them back (#2082)
   // The hunt under way or ended, and the ended ones main went green over (`guard.blamed`)
-  const passed = retract ? [g.hunt, ...(g.blamed ?? [])].map((h) => ({ h, run: passedAfterBlame({ hunt: h, runs }) })).find((x) => x.run) : null
-  if (passed && !(await retract(passed.h, passed.run))) return { did: 'yielded' }
+  const passed = retract ? [g.hunt, ...(g.blamed ?? [])].map((h) => ({ h, run: passedAfterBlame({ hunt: h, runs, now }) })).find((x) => x.run) : null
+  if (passed) {
+    try {
+      if (!(await retract(passed.h, passed.run))) return { did: 'yielded' }
+    } catch (e) {
+      // What GitHub's outage or the machine's state (no network, no login, a limit) stops is waited out; anything else (an issue gone or unreadable)
+      // is tried `RETRACT_TRIES` times and then left to a person, and never stops the guard from looking at main's red
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind) || isOutage(e)) throw e
+      console.error(`[project-board] main guard: could not take back the blame for run ${passed.h.run}: ${e.message}`)
+      await update((fresh) => {
+        for (const h of [fresh.guard?.hunt, ...(fresh.guard?.blamed ?? [])]) {
+          if (h && String(h.run) === String(passed.h.run)) {
+            const tries = (h.retracted?.tries ?? 0) + 1
+            h.retracted = { ...(h.retracted ?? {}), tries, ...(tries >= RETRACT_TRIES ? { gaveUp: new Date(now).toISOString() } : {}) }
+          }
+        }
+      })
+    }
+  }
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
   const save = (patch) =>

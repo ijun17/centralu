@@ -832,7 +832,7 @@ looked into).
   that rested on the failure coming again and again (`repeats`). Each step is written down as it is done (`retracted`), and each
   issue comment carries a mark (`<!-- main-guard-retract run=N -->`) that is looked for before posting, so a try that stopped half
   way, or a restart, posts nothing twice. The note on the known failures issue says a commit was blamed earlier, and that the guard
-  takes it back, for a run it filed something for. The first failure of a test is still rerun before any commit is blamed (above);
+  takes it back, for a run it filed something for. A retraction that fails for its own reasons (an issue it cannot read; not an outage, which is waited out) is tried `RETRACT_TRIES` (10) steps and then left to a person (`retracted.gaveUp`), and never stops the guard from reading main. The close of an issue is written down (`closing`) before it is made, so a try that stopped between the close and its comment still owes the comment and does not take the close for a person's; the label goes on before the comment. The first failure of a test is still rerun before any commit is blamed (above);
   this only covers a blame that was filed anyway (a rerun by a person, a driver on an older build).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into

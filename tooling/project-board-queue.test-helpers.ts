@@ -59,6 +59,7 @@ if (st.viewLost && st.viewLost.n > 0 && args[0] === 'pr' && args[1] === 'view') 
 if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
 if (args[0] === 'issue' && args[1] === 'view') {
   const n = Number(args[2])
+  if (st.issueViewFails) fail('GraphQL: Could not resolve to an Issue with the number of ' + n + '. (HTTP 404)')
   out({ body: '', state: (st.issueStates ?? {})[n]?.state === 'closed' ? 'CLOSED' : 'OPEN', comments: (st.comments ?? []).filter((c) => c.issue === n).map((c) => ({ body: c.body })) })
 } else if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
@@ -220,6 +221,7 @@ if (args[0] === 'issue' && args[1] === 'view') {
   write(['issue', body.title])
   out({ number: 500 + st.issues.length, html_url: 'https://github.com/ijun17/centralu/issues/' + (500 + st.issues.length) })
 } else if (path && /\/issues\/\d+\/comments$/.test(path) && args.includes('POST')) {
+  if (st.commentFails > 0) { st.commentFails--; save(); fail('HTTP 502: Bad Gateway') }
   const body = JSON.parse(stdin)
   st.comments = [...(st.comments ?? []), { issue: Number(path.split('/')[4]), body: body.body }]
   write(['comment', path.split('/')[4]])
