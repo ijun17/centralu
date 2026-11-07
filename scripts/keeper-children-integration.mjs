@@ -37,6 +37,7 @@
  * (`keeper-test-processes.mjs`); a failed run prints the end of the keeper's and the host's logs.
  */
 import { execFileSync } from 'node:child_process'
+import { createConnection } from 'node:net'
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, cleanupOnExit, copyEarlierHost, familyOf, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
@@ -254,7 +255,11 @@ async function transition({ data, sock, project, p, keeper, app, view, host, ter
   const keeperB = view.keeper.pid
   started.add(keeperB)
   host.close()
+  // From an attached window, as the shell asks: since #2117 the keeper takes a stop for an update only from a process with a
+  // window attached now (by pid and start), and `app2` is another process. So this one attaches first.
+  const here = await attachHere(sock)
   const stop = await request(sock, { op: 'stop', forUpdate: true }, 40_000)
+  here.destroy()
   check(stop.ok, 'stop for an update is answered once the host is gone', JSON.stringify(stop))
   check(await waitFor(() => !alive(keeperB) && pidsBefore.every((pid) => !alive(pid)), 10_000, 250), 'the keeper, the host and every child it held have ended', pidsBefore.filter(alive).join(', '))
   check(/asked to stop \(the keeper, for an update\)/.test(readFileSync(join(data, 'host.log'), 'utf8')), 'the host heard it on its stdin, for an update')
@@ -399,3 +404,24 @@ try {
 }
 log(failures === 0 ? '\nall keeper child checks passed' : `\n${failures} keeper child check(s) failed`)
 process.exit(failures === 0 ? 0 : 1)
+
+/** This process attached as a window (its executable is `CC_KEEPER_TEST_WINDOW_EXE`), once the keeper's first view arrived */
+function attachHere(sock) {
+  return new Promise((resolve, reject) => {
+    const c = createConnection(sock)
+    const timer = setTimeout(() => {
+      c.destroy()
+      reject(new Error('no view after attaching'))
+    }, 8000)
+    c.on('connect', () => c.write(`${JSON.stringify({ op: 'attach', protocol: 1 })}
+`))
+    c.once('data', () => {
+      clearTimeout(timer)
+      resolve(c)
+    })
+    c.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+  })
+}

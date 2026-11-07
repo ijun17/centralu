@@ -355,9 +355,11 @@ fn keeper_with_a_host(data: &Path) -> Arc<Keeper> {
 fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
     use std::io::BufRead;
     let mut s = UnixStream::connect(sock).unwrap();
-    s.write_all(&json_line(req)).unwrap();
+    // Before the request: the keeper may answer and close at once, and macOS refuses `SO_RCVTIMEO` (EINVAL) on a socket
+    // its peer has closed, so a timeout set after the write fails on a fast machine (the GitHub runner did)
     s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
     let mut r = BufReader::new(s.try_clone().unwrap());
+    s.write_all(&json_line(req)).unwrap();
     let mut lines = Vec::new();
     let end = Instant::now() + Duration::from_secs(10);
     let mut line = String::new();
@@ -523,10 +525,10 @@ fn only_the_accepted_window_executable_gets_the_token() {
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let reply = stdout
-            .lines()
-            .find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string()))
-            .unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
+        let reply = stdout.lines().find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string())).unwrap_or_else(|| {
+            panic!("the copy made no request ({}): {stdout}
+{}", out.status, String::from_utf8_lossy(&out.stderr))
+        });
         serde_json::from_str(&reply).unwrap()
     };
     let v = status_of(&window);
@@ -700,12 +702,13 @@ fn keeper_with_a_fake_host_and(data: &Path, script: &str, children: Children) ->
 fn stop_for_update_of(k: &Arc<Keeper>, host: u32, window: bool, wait: Duration) -> (bool, Value, bool, Duration) {
     use std::io::BufRead;
     let (mut keeper_end, window_end) = UnixStream::pair().unwrap();
+    // Before the keeper's end can answer and close: macOS refuses the timeout on a socket its peer closed (see `ask`)
+    window_end.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let started = Instant::now();
     let stopping = {
         let k = k.clone();
         thread::spawn(move || k.stop_for_update(&mut keeper_end, if window { Ok(()) } else { Err("a test's caller".into()) }, wait))
     };
-    window_end.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let mut line = String::new();
     BufReader::new(window_end).read_line(&mut line).unwrap();
     let (took, host_alive) = (started.elapsed(), crate::os::pid_alive(host));
