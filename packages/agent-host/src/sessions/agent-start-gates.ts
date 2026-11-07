@@ -26,23 +26,6 @@ export class AgentStartGates {
   private readonly agentStartReserved = new Map<string, number>()
 
   /**
-   * What a child's start rests on in its caller, read once the person allowed it and again once its session exists,
-   * right before its delegation is registered: the caller is still here, its project still registered and trusted
-   * (or the caller is `auto`), and it is still above the agent depth (#867), which `auto` does not open.
-   */
-  agentStartGateError(callerId: string, projectId: string): string | null {
-    const caller = this.host.meta.get(callerId)
-    if (!caller) return 'The session that asked is no longer here.'
-    // The orchestrator's place is no project (#853): nothing to be registered or trusted
-    if (projectId === ORCHESTRATOR_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(this.host, callerId, 'start agents')
-    const now = this.host.store.projects.listProjects().find((p) => p.id === projectId)
-    if (!now) return 'This session\'s project is no longer registered.'
-    const auto = caller.permissionPreset === 'auto'
-    if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
-    return agentDepthRefusal(this.host, callerId, 'start agents')
-  }
-
-  /**
    * A place under the per-project ceiling, checked and taken in one synchronous step (`agentStartReserved`), for a start
    * (`createAgentChild`) or a fork (`forkFor`) that waits on something before its delegation counts the child.
    * `release` once the delegation counts it, or when the start fails; a second call does nothing.
@@ -86,4 +69,24 @@ export class AgentStartGates {
     const wait = namedCall(this.host.toolProfileOf(callerId), 'agent_session', { sessionId: FILL, action: 'wait' })
     return `${running} agents ${whose} are already working, the most at once. Wait for one (${wait}) or stop one, then try again.`
   }
+}
+
+/**
+ * What a child's start rests on in its caller, read once the person allowed it and again once its session exists,
+ * right before its delegation is registered: the caller is still here, its project still registered and trusted
+ * (or the caller is `auto`), and it is still above the agent depth (#867), which `auto` does not open. A child on a
+ * linked machine rests on the same, after its card and before each send to it (`RemoteAgents`), where a caller with no
+ * project (`null`) has none registered. Nothing is logged: an `auto` caller's crossing into an untrusted project was
+ * logged once, at the start's first gate.
+ */
+export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' | 'children' | 'uiPreferences'>, callerId: string, projectId: string | null): string | null {
+  const caller = host.meta.get(callerId)
+  if (!caller) return 'The session that asked is no longer here.'
+  // The orchestrator's place is no project (#853): nothing to be registered or trusted
+  if (projectId === ORCHESTRATOR_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(host, callerId, 'start agents')
+  const now = host.store.projects.listProjects().find((p) => p.id === projectId)
+  if (!now) return 'This session\'s project is no longer registered.'
+  const auto = caller.permissionPreset === 'auto'
+  if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
+  return agentDepthRefusal(host, callerId, 'start agents')
 }
