@@ -4345,8 +4345,11 @@ Counts, percentages and names only: no content.
   for the next minute. The model comes from the request when the tool says which served it (Claude's `message.model`, so a subagent or a fallback on
   another model is counted under its own), else from the session's setting (Codex: `by: model` is then the session's configured model, a known limit).
   Output comes from the request's own usage where the tool reports it per request (`RequestInput.outputTokens`: Codex's `last.outputTokens`).
-  **Claude's is left at 0**: an assistant message carries only the count the stream started with (a few tokens), and the final count arrives in the stream's
-  `message_delta`, which the normalizer does not follow. Recording the placeholder would understate it by orders of magnitude, so no figure is better than that one; counting it from `message_delta` is a named follow-up. Meanwhile `usage_history` prints `out n/a` for a row with no output rather than `out 0`, which an agent would take as fact (it is about 1.6% of the tokens but about 9.5% of the cost at Haiku prices).
+  **Claude's comes from the stream's `message_delta`** (#2135): an assistant message carries only the count the stream started with (a few tokens), so the
+  normalizer holds a streamed response's request until its `message_delta` brings the final count (`heldRequest`), and lets it go without output when the
+  next response starts or the turn ends first (a stopped stream). A subagent's responses are not streamed, so its requests still have no output, and a
+  response that arrives whole (no `message_start`) is carried at once without one. Buckets before the fix have `output` 0 for Claude; `usage_history`
+  prints `out n/a` for a row with no output rather than `out 0`, which an agent would take as fact.
 
 | Decision | Reasoning |
 |---|---|
