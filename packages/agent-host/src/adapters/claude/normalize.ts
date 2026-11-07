@@ -247,7 +247,7 @@ export class ClaudeStreamNormalizer {
    * The parent's streamed request, held until its `message_delta` brings the request's output count (#2135). The
    * assistant messages of a streamed response carry the count the stream started with (a few tokens); the final one
    * comes only in `message_delta`, after them. Let go without output when the next response starts or the turn ends
-   * first (a stopped stream), so a request is never lost to a missing delta.
+   * first (a stopped stream), or the process ends (`release`), so a request is never lost to a missing delta.
    */
   private heldRequest: { id: string; request: RequestInput } | null = null
   /** Claude Code's task list, kept as the plan (see `followTasks`) */
@@ -562,7 +562,8 @@ export class ClaudeStreamNormalizer {
 
   release(why: string): NormalizedEvent[] {
     // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
-    const out: NormalizedEvent[] = this.deferred.splice(0)
+    // A request held for its output count still counts when the process ends mid-stream (#2135), as it did before
+    const out: NormalizedEvent[] = [...this.releaseRequest(), ...this.deferred.splice(0)]
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
     this.background.clear()
     // The reason above names an agent's card; a background shell went the same way, so its ending says what happened
