@@ -390,7 +390,10 @@ async function mergeQueue({ all = false, owner }) {
     : who
       ? [`${plural(waiting.length, 'message')} not acknowledged by ${who}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`, ...waiting.map((e) => `#${e.seq} ${e.text}`)]
       : [`${plural(waiting.length, 'message')} not acknowledged, for ${owners.map((o) => `${o} (${waiting.filter((e) => e.owner === o).length})`).join(', ')}; merge_queue({ owner }) lists them.`]
-  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq })
+  // No new batch while a release or main's run waits for a runner (#2115): said, so a queue that stands still is not a mystery
+  const hold = readQueue(dataDir()).runnerHold ?? null
+  const holdLines = hold ? [`New batches are held: ${hold.why}${hold.expired ? ' (held longer than the limit, so they are formed anyway)' : ''}, since ${hold.since.slice(11, 16)} UTC.`] : []
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['hold', '', holdLines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(hold ? { runnerHold: hold } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {

@@ -324,6 +324,45 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       ...patch,
     })
 
+  // #2115 (2026-11-07): a release's last job waited more than 30 minutes behind 40 running jobs, work nobody waits on among them
+  describe('a release run waiting for a runner (#2115)', () => {
+    const release = (status: string) => ({ id: 7001, status, conclusion: null, event: 'push', head_branch: 'v1.0.0', head_sha: 'f'.repeat(40) })
+    const waiting = (jobStatus: string) => ({ jobs: { 7001: [{ id: 1, name: 'centralu (shim)', status: jobStatus, conclusion: null, steps: [] }] } })
+    const hold = (extra: object = {}) => ({ ...TIERS, PROJECT_BOARD_QUEUE_RUNNER_HOLD: JSON.stringify({ workflows: ['release.yml'], ...extra }), PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS: '0' })
+
+    it('forms no batch while a job of the release run is queued, says so, and forms it once nothing waits', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await morePolls(10)
+      // No branch made, nothing dispatched; the queue says what it waits for
+      expect(writes()).toEqual([])
+      expect(batchesOnDisk()).toEqual([])
+      expect(queueOnDisk().runnerHold).toMatchObject({ why: 'release.yml run 7001 has 1 job waiting for a runner' })
+      expect((await call('merge_queue')).text).toContain('New batches are held: release.yml run 7001 has 1 job waiting for a runner')
+      // The release's job started: the batch is formed and the pull request lands
+      patchGh((st) => (st.jobs[7001][0].status = 'in_progress'))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(queueOnDisk().runnerHold).toBeUndefined()
+    })
+
+    it('holds for no longer than maxMinutes, so jobs that never start cannot stop the queue', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('queued')] }, ...waiting('queued') }), hold({ maxMinutes: 0.001 }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(queueOnDisk().runnerHold).toBeUndefined()
+    })
+
+    it.each([
+      ['a finished release run', { ...release('completed'), conclusion: 'success' }, 'queued'],
+      ['a release run whose job waits for an approval, not for a runner', release('waiting'), 'waiting'],
+    ])('holds nothing for %s', async (_what, run, jobStatus) => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [run] }, ...waiting(jobStatus) }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(queueOnDisk().runnerHold).toBeUndefined()
+    })
+  })
+
   it('lands a pull request whose own run was the quick tier through a batch of one, never from that run', async () => {
     runtime(tieredState(), TIERS)
     await call('queue_merge', { pr: 77, owner: 'tester' })

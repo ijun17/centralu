@@ -39,10 +39,12 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
+  runJobs,
   runJobSteps,
   jobNotes,
   sameRepo,
   setPrBase,
+  workflowRuns,
 } from './github.mjs'
 import {
   ACTIVE,
@@ -749,6 +751,61 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   return { state: d.state, patch, events, wait }
 }
 
+// --- Runners for the release and main's runs (#2115) ---------------------------------------------------
+
+let pressure = { at: -Infinity, value: null }
+
+/**
+ * What waits for a runner that a new batch would take the slots of: a run of a release workflow, or of main's full tier (the main
+ * guard's), with a job queued. Null when nothing does, and when GitHub cannot be asked (a hold must never be the reason the queue stops).
+ * Kept `checkMs`, so a tick does not ask on every poll.
+ */
+async function runnerPressure(conf, now) {
+  if (now - pressure.at < conf.checkMs) return pressure.value
+  let value = null
+  try {
+    const repo = config.repository
+    const lists = []
+    for (const wf of conf.workflows) lists.push([wf, await workflowRuns(repo, wf)])
+    if (conf.mainRuns && QUEUE.guard) {
+      const { defaultBranch } = await readRepo(repo)
+      lists.push(["main's full tier", await workflowRuns(repo, 'build.yml', { event: 'push', branch: defaultBranch })])
+    }
+    search: for (const [name, runs] of lists) {
+      for (const run of runs.filter((r) => r.status !== 'completed').slice(0, 3)) {
+        const queued = (await runJobs(repo, run.id)).filter((j) => j.status === 'queued')
+        if (queued.length) {
+          value = `${name} run ${run.id} has ${queued.length} job${queued.length === 1 ? '' : 's'} waiting for a runner`
+          break search
+        }
+      }
+    }
+  } catch (e) {
+    if (!(e instanceof GitHubError)) throw e
+  }
+  pressure = { at: now, value }
+  return value
+}
+
+/**
+ * Whether no new batch is formed now, and says so on the queue (`runnerHold`: since when and why, which `merge_queue` shows). Bounded:
+ * after `maxMs` of one hold the batch is formed anyway, and not held again until nothing waits any more.
+ */
+async function holdBatches(dir, now) {
+  const conf = QUEUE.runnerHold
+  if (!conf || (!conf.workflows.length && !conf.mainRuns)) return false
+  const held = readQueue(dir).runnerHold ?? null
+  const why = await runnerPressure(conf, now)
+  if (!why) {
+    if (held) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+    return false
+  }
+  const since = held?.since ?? new Date(now).toISOString()
+  const expired = held?.expired === true || now - Date.parse(since) > conf.maxMs
+  updateQueue(dir, (fresh) => (fresh.runnerHold = { since, why, ...(expired ? { expired: true } : {}) }))
+  return !expired
+}
+
 /**
  * One tick: when the queue has an item due and no other driver holds the lease, polls that one item
  * and writes back what changed. Answers what it did: `idle`, `paused`, `busy` (another driver),
@@ -769,7 +826,10 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   q = readQueue(dir)
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
   const work = batchWork(q, now)
-  if (work?.form) {
+  // Not while a release or main's run waits for runners (#2115): the batch would only take the slots they wait for; the items are polled meanwhile
+  const holding = work?.form ? await holdBatches(dir, now) : false
+  if (!work?.form && q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+  if (work?.form && !holding) {
     updateQueue(dir, (fresh) => formDue(fresh, now, ref))
     return { did: 'batched' }
   }
