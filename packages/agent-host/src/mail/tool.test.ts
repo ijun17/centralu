@@ -108,7 +108,7 @@ describe('"to" as a name (#2039)', () => {
     expect(w.run('a', { action: 'send', to: `session:${HOST}/nobody`, text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "nobody"')
     expect(w.run('a', { action: 'send', to: 'fix: the mail', text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "fix: the mail"')
     // An address on another computer is not looked up here: the service refuses it in its own words
-    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe('Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and mail does not reach other computers yet: agent_session send reaches a session you started there.')
+    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe('Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.')
   })
 
   it('a name two sessions share is refused with both addresses, and an address or an id still reaches exactly one', () => {
