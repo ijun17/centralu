@@ -30,7 +30,6 @@ agent-host/src/
 ├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
 ├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
 ├─ links/               # linked machines (#82): links, the remote client, install and update over ssh
-├─ keeper/              # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 ├─ dev-services/        # git/fs/store, terminals, commands (not dev-only — it is where messages live, §5)
 ├─ swap-control.ts      # the host's half of a swap (#280 step 3); drain.ts waits out the calls it serves
 ├─ keeper-link.ts       # what the host tells the keeper, and its own build
@@ -576,14 +575,12 @@ below retained for `safe` and `normal`:
    to read "intersession message available" and an id alone, for every such notice. A report or notice that cannot
    be delivered (the receiver cannot be woken: its tool fails to start) is logged and kept in memory, and goes in
    once that session takes a message again (`deliverHeld`); it used to be dropped without a word. A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
-   is written to `report_marks` (store v49, #646) as well as kept in memory, so a host swap (#280) does not lose
-   it: the leaving host's `detachAll` fails its waits without reporting (`handingOver`), the next host restores
-   the marks of the sessions the keeper kept that are still in their turn, which ends under it. It drops a
-   mark whose session has no process any more (that turn died with the old host) and one whose kept session
-   already finished its turn during the swap, so a later turn the person starts there is never reported as the
-   assigned work (#166); that answer stays readable through `agent_session`, and the caller is told once that a turn
-   ended during the swap, with the read that shows it, not that the work finished (`tellTurnEndedInSwap`, #1186: it
-   used to hear nothing). Paths the
+   is written to `report_marks` (store v49, #646) as well as kept in memory, so an update's stop (#1618) does not
+   lose it: the next host restores the marks of the sessions whose cut turn it continues, which ends under it. It
+   drops every other mark (that turn died with the old host), so a later turn the person starts there is never
+   reported as the assigned work (#166); that answer stays readable through `agent_session`. Before #1895 step 4
+   PR 1 a host swap kept the marks of the sessions the keeper kept, and told a caller whose child ended its turn
+   during the swap (`tellTurnEndedInSwap`, #1186); no process outlives its host now. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
    Each answer that promises the notice (`working` with the report armed, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that
@@ -614,7 +611,7 @@ below retained for `safe` and `normal`:
 | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
    | The person talking to a paused child: their turn ends by the same rules, so the caller hears the end once the work is over | The work the caller gave is still the child's; the person's turn does not end it |
    | New work from the same caller (`agent_session send`, a note) ends the pause: that run's own wait or report tells its end. Archiving either session takes the report down | A pause belongs to the work it was told for; held on, it would report the new work a second time |
-   | Across a host swap the pause stays with the mark when the keeper kept the child's process (the work runs on there); a host that finds no process drops both, and a kept process that cannot be re-attached reports the work as stopped | The work went with a process that is gone |
+   | Across a host restart, an update or a swap the child's process ends, and with it the work it paused on: the next host drops the pause with the mark (an update tells the agent of the background tasks it ended, §4.8) | The work went with a process that is gone |
    | A handoff moves a paused child with its report; the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
    | Only a turn the delegation's own wait saw end is judged: the delegation's outcome path reports only a wait that failed with no ending event, or one notes held (`tracksInputs`) | Judged again a microtask later, the pause could read as the end once the work had ended |
 
@@ -1122,11 +1119,12 @@ Breakaway stays off because Git for Windows' sh asks for it, and a hook's childr
 Terminals are the person's, not the host's work: what is started in one (`code .`, the browser `claude auth login`
 opens) must outlive a host that crashes. They are started by a broker the host starts **before** it joins
 (`dev-services/broker-pty.ts`, `pty-broker.mjs` beside the host): a Node process that owns node-pty and speaks one
-JSON line per message over its stdin and stdout, behind the same node-pty-shaped surface as the keeper's ptys. It ends
+JSON line per message over its stdin and stdout, behind a node-pty-shaped surface. It ends
 with the host and its pseudoconsoles with it, so the shell ends as before, but what the shell started outside its
 console stays. A quit still ends each terminal's tree as before. Run commands, agents, git and app servers stay in the
 job. A broker that cannot start, or ends, leaves new terminals to start in the host. Under a keeper the host joins no
-job, since the keeper holds what must outlive a host swap. The host opens nothing for the person: "Open in IDE" and
+job (`lifecycle/work-job.ts`), a rule from when the keeper held what had to outlive a host swap; #1895 step 4 PR 1
+leaves it as it is, and no keeper runs on Windows. The host opens nothing for the person: "Open in IDE" and
 `system.openUrl` are the window's. A host that cannot join (PowerShell refused, an outer job that forbids it) says so
 in its log and runs as before.
 
@@ -1187,9 +1185,9 @@ turn, and never clears a report mark someone is owed of it (#1233, `domain-model
 - **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
   the delegation's outcome (`startDelegation`), or with the turn for `send_to_session` and `create_session`. A card from a later turn the
   person starts there never goes to the caller. Written to `delegated_turns` (store v51) as well as kept in memory:
-  the leaving host's `detachAll` keeps the rows (`handingOver`), and the next host restores the links of sessions the
-  keeper kept that are still in their turn, ending each with that turn; any other row is dropped. The kept CLI sends
-  its standing card again to the new host (§4.3); `told_cards` stops a second notice.
+  the next host restores the links of the sessions whose cut turn it continues after an update, ending each with
+  that turn; any other row is dropped. The continued turn may ask its caller again; `told_cards` stops a second
+  notice for a card already told.
 - **Delivery** (`routeCard`). A wait of the caller on that turn (`agent_session` wait, `start_agent` waiting,
   `ask_project` waiting) returns `asking` with the cards. With no wait, one notice goes into the caller's
   conversation, marked as from the session, as a report is (`tellCardRaised`): host-written words naming the
@@ -1228,7 +1226,7 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 | `ifBusy` | What happens |
 |---|---|
 | `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
-| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of an archived session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A row being delivered is left out of `withdrawReaches` and `dropOpenedByAuto`, so its gate (`queuedGateError`, for every tool) is read once more after that wait and any wake, before the task is written (`stillAllowed`). A remembered pair consent revoked in that window does not stop it: being delivered counts as running, as a delegation already running is left to finish (`revokeProjectConsent`). A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
+| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): a leaving host delivers nothing (`disposing`), and the next host delivers a request when the session's turn ends there (a cut turn it continues), or soon after start for a session at rest, so its input never starts a second process. A request whose session or requester is gone is dropped, as are those of an archived session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A row being delivered is left out of `withdrawReaches` and `dropOpenedByAuto`, so its gate (`queuedGateError`, for every tool) is read once more after that wait and any wake, before the task is written (`stillAllowed`). A remembered pair consent revoked in that window does not stop it: being delivered counts as running, as a delegation already running is left to finish (`revokeProjectConsent`). A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
 | `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the session archive. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
 
 **Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a
@@ -1276,7 +1274,7 @@ the floor (2 GB, `MEMORY_FLOOR_BYTES`) the start is **queued, not refused**:
 The wait re-reads memory every 15 s (`MEMORY_RECHECK_MS`) and lets **one** queued start go per check, oldest first:
 a child takes its memory over the first seconds of its turn, so starts released together would all read the same free
 memory. It gives up after 30 minutes (`MEMORY_WAIT_MAX_MS`): the caller is told as a message and the person in a
-notice. A withdrawn request, a deleted caller, or a host leaving (`disposeAll`, `detachAll` close the gate; the stored
+notice. A withdrawn request, a deleted caller, or a host leaving (`disposeAll` closes the gate; the stored
 request goes to the next host) ends the wait without a start. Sessions the person starts are never gated.
 
 ### 1.2.5 What a handoff carries, and what it leaves (#693, #738, #1475, #1638)
@@ -1754,7 +1752,7 @@ the params with the method's schema and reads the answer with its result schema,
     **One compaction in flight per session.** A second `compact_self` while one is on its way (its command sent, queued behind a turn of the person's, or running) asks for no second
     command: it joins the first, replaces its `then` (a call with none drops the earlier one) and says so; its focus line is too late. Two `/compact` commands are never queued. A step
     held for the turn that went first is replaced by the next request the same way.
-    **A host swap or restart does not lose it.** A `then` is kept in the store from the request on (`sessions/then-keep.ts`, the app setting `compact_then:<session>`, a key an older build serving the same store ignores and the trash's purge takes with the session; no store step) with how far the request came and when it last moved: `asked` (the turn runs), `sent` (the compact command went), `compacted` (the tool reported the compaction), `refused` (it did not compact; `why`), `sending`. The change from `compacted` or `refused` to `sending` is one transaction (`updateAppSetting`, `claim`): of the old host and the new, only the one that makes it sends, so the step goes **at most once**. The leaving host stops its compactor first in the shutdown plan (`stopSelfCompaction`, before the handles are let go of), so it sends nothing in its last moments. **From the claim on the record never goes back** (real run D3: the old host claimed the step, its delivery was refused because the host was leaving, the record went back to `compacted` and the next host sent the step a second time): a step whose delivery is in the air when the host leaves stays `sending`, and the next host only tells the session. A host that starts looks at what is left (`SelfCompaction.recover`, from `startSelfCompaction` for sessions the keeper did not keep, and from `adoptKept` for each one it adopted, after the adoption, so a kept session's input never starts a second process): a `compacted` or `refused` record is **sent** (the compaction is known done) if the session can take a turn, through the mailbox's delivery (`deliverMail`: Centralu's channel, no user row, the session woken if it has no process), with the person-came-first line and the Codex focus line it was kept with, and is held for the sweep otherwise (a limit or a card stands); every other stage is a request whose outcome the new host cannot tell (the turn had not ended, the compact was sent and not yet reported done, or the send itself was in progress), so **the session is woken with a turn** that says Centralu changed hosts, that it cannot tell whether the conversation was compacted or the step sent, and to go on by itself, with the text of its `then` (real runs D1 and D2: a note kept in the store left the session idle until someone typed, while the line said it was told). A quiet note goes instead into a session that is in a turn, and is kept for its next input when the tool takes none; the window gets a line that says which of the three happened. Told once: the record is cleared as it is told. **A record is as old as its last move** (`at`) and one older than `THEN_KEEP_MS` (an hour: a compact is stale after 30 minutes and a swap or a restart with a wake takes minutes, so an hour covers a long outage and cuts what a rollback to an older build left for a newer one to find days later) is not sent; the session is told it was too old. The deletion of a session (the trash) clears its record and its notes, so one restored later is sent no old step. A note the tool cannot take yet (no process, or Codex between turns) is kept in the store too (`compact_notes:<session>`) and given at the session's next turn start or request of its running turn. A store that fails to write is logged and the request goes on in memory as before. **The one window left:** a host that dies between the claim and the tool taking the step leaves a `sending` record, which the next host reports to the session as "being sent" rather than sending it again; the agent may then run a step it already ran, which it can tell from its own history. A step that could not be given after a compaction that did happen says so ("The compaction you asked for is done, but the session could not take your `then`"), not that it did not compact.
+    **A host swap or restart does not lose it.** A `then` is kept in the store from the request on (`sessions/then-keep.ts`, the app setting `compact_then:<session>`, a key an older build serving the same store ignores and the trash's purge takes with the session; no store step) with how far the request came and when it last moved: `asked` (the turn runs), `sent` (the compact command went), `compacted` (the tool reported the compaction), `refused` (it did not compact; `why`), `sending`. The change from `compacted` or `refused` to `sending` is one transaction (`updateAppSetting`, `claim`): of the old host and the new, only the one that makes it sends, so the step goes **at most once**. The leaving host stops its compactor first in the shutdown plan (`stopSelfCompaction`, before the handles are let go of), so it sends nothing in its last moments. **From the claim on the record never goes back** (real run D3: the old host claimed the step, its delivery was refused because the host was leaving, the record went back to `compacted` and the next host sent the step a second time): a step whose delivery is in the air when the host leaves stays `sending`, and the next host only tells the session. A host that starts looks at what is left (`SelfCompaction.recover`, from `startSelfCompaction`): a `compacted` or `refused` record is **sent** (the compaction is known done) if the session can take a turn, through the mailbox's delivery (`deliverMail`: Centralu's channel, no user row, the session woken if it has no process), with the person-came-first line and the Codex focus line it was kept with, and is held for the sweep otherwise (a limit or a card stands); every other stage is a request whose outcome the new host cannot tell (the turn had not ended, the compact was sent and not yet reported done, or the send itself was in progress), so **the session is woken with a turn** that says Centralu changed hosts, that it cannot tell whether the conversation was compacted or the step sent, and to go on by itself, with the text of its `then` (real runs D1 and D2: a note kept in the store left the session idle until someone typed, while the line said it was told). A quiet note goes instead into a session that is in a turn, and is kept for its next input when the tool takes none; the window gets a line that says which of the three happened. Told once: the record is cleared as it is told. **A record is as old as its last move** (`at`) and one older than `THEN_KEEP_MS` (an hour: a compact is stale after 30 minutes and a swap or a restart with a wake takes minutes, so an hour covers a long outage and cuts what a rollback to an older build left for a newer one to find days later) is not sent; the session is told it was too old. The deletion of a session (the trash) clears its record and its notes, so one restored later is sent no old step. A note the tool cannot take yet (no process, or Codex between turns) is kept in the store too (`compact_notes:<session>`) and given at the session's next turn start or request of its running turn. A store that fails to write is logged and the request goes on in memory as before. **The one window left:** a host that dies between the claim and the tool taking the step leaves a `sending` record, which the next host reports to the session as "being sent" rather than sending it again; the agent may then run a step it already ran, which it can tell from its own history. A step that could not be given after a compaction that did happen says so ("The compaction you asked for is done, but the session could not take your `then`"), not that it did not compact.
     **A warning, not a stop.** Each time a `then` has gone (the tool took it), the cycle is counted in the store (`compact_cycles:<session>`, the hour up to now, so a swap does not start it again); past `WARN_COMPACT_CYCLES_PER_HOUR` (6) the person is warned by the mailbox's own warning (`MailHooks.compactCycles`, `docs/plans/mailbox.md` D32, S20, #2014): one Inbox notice naming the session and the count, once per session per clock hour. The session keeps working; nothing is refused or delayed.
     **The floor and its gap.** After a compaction the context is a summary, far under the 100,000-token floor, so a `then` turn that calls
     `compact_self` again at once is refused by the floor (and, since a refused request still sends its step, gets it back with the reason: see above). A step that reads enough to grow back over the floor did real work, and a
@@ -2155,21 +2153,18 @@ Implementation rules:
   turn. **A message of the person's** before that takes the retry away first, so theirs goes in and the note does not; if
   theirs is refused, the error the retry stood in for ends the turn. The note asks the agent to check what already happened before repeating a step, and is
   Centralu's own in the history read-back (`isCentraluNote`: the catch-up never stores it as the person's message). **The
-  host leaving** (a quit or a swap): the wait lives in that host only and nothing is stored. The turn's end was the error the
-  host swallowed, which a kept process does not replay, so the leaving host ends the turn with that error now ("Centralu was
+  host leaving** (a quit, an update or a swap): the wait lives in that host only and nothing is stored. The turn's end was the error the
+  host swallowed, which no later process replays, so the leaving host ends the turn with that error now ("Centralu was
   going to retry this turn, but it restarted first. Send a message to go on."); no later host sends anything. It says so before the host is marked as leaving, so the
   end is the provider's error and not a quit's stop; a note already handed to the tool leaves as any running turn does. A session with
   no process when the time comes ends the same way. **A hub's `ask_project` task** marks its depth for the input (`hub_ask_depth:`), and Codex fails the tracked input when the turn
   fails, before the host sees the error: the failure takes the mark down only when no retry stands once the error was seen
   (`OverloadRetry.stands`); the end the turn reaches later takes it, so the continued turn keeps the depth (#2015). Other observers of a
   tracked input's failure (`start_agent` or `ask_project` notes into a running turn) still read a held error as a refusal (#2029).
-  **A crash of the host** during the wait ends nothing, and the kept process has already ended its turn: the
-  next host adopts it (`adoptKept`) idle while the stored state is `working`. The Codex handle answers `adoptedIdle()` (the
-  app-server's `thread.status` at the resume was not `active`, measured with codex-cli 0.160.0: `systemError` after a turn failed for capacity, `idle` after a completed or interrupted one, `active` while a turn runs, and nothing was sent since), and the manager then ends the turn as one a swap
-  could not continue (`turnLostInSwap`: idle, the "stopped" line, the interruption, its requester told, and the hub task's depth mark taken down by the rule that takes it down at any end of a turn, which #2015 keeps while the wait stands). The retry is not resumed (it
-  lived in the dead host). The same holds for a turn whose end the dead host had already read; an end that fell in the gap reaches the next host as a frame the
-  keeper buffered and ends normally (and a retry that frame starts in the new host stands). A tool that cannot say (Claude's CLI, silent until its
-  next frame) is taken to go on (#2020). **Claude** is not covered: its CLI retries a 529 itself
+  **A crash of the host** during the wait ends the process with it: the next start finds the session `working` with no
+  process and marks the turn stopped, as any crash's (§4.6.2). The retry is not resumed (it lived in the dead host).
+  Before #1895 step 4 PR 1 a keeper kept the process, and the next host that took it over idle ended the turn as one a
+  swap could not continue (Codex's `adoptedIdle()`, #2020). **Claude** is not covered: its CLI retries a 529 itself
   ten times with a growing delay (`api_retry`, the `retrying` activity) before it ends the turn, so a retry here would stack
   on that.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
@@ -2180,8 +2175,7 @@ Implementation rules:
   A message the person sent that the CLI will never read is said with `undeliveredError` / `undeliveredText` ("N
   message(s) were still queued when the session closed and were not delivered — please resend"), never dropped: the
   screen already shows it as sent. Codex closed while a lazy resume was still waking used to drop the messages sent
-  meanwhile without a word (both places that spoke for them stood aside for each other); `dispose` and `detach` (a host
-  swap: the next host resumes the thread, not those messages) now say them, and a
+  meanwhile without a word (both places that spoke for them stood aside for each other); `dispose` now says them, and a
   resume that fails or outlives its cap names them inside the one error that retires the handle.
   Open cards are a `PendingCards`: every way a card goes (answered, withdrawn by the CLI, the turn stopped, the handle
   closed) goes through `take` or `release`, which removes it before it is closed, and the adapter says
@@ -2241,10 +2235,10 @@ resume IDs. `SendMessage` is deliberately left available for this query's own su
 The environment gate disables peer discovery, cross-session sends and inbox binding in the
 inspected CLI versions 2.1.263–2.1.299. It is undocumented, version-sensitive and undoable by the `env` of the person's user settings, so the
 documented refusal and discovery denies stay as additional controls. They do not alone block
-every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
-already-running process and cannot apply new startup controls. The `auto` launch fingerprint is version 3, so the host
-that adopts a retained `auto` process started before the controls restarts it once through the normal launch-settings
-handover path (#589): at once when it is idle, after its current turn otherwise. Nothing needs to be restarted by hand.
+every outbound send to a known peer if the gate changes. A process started before the controls does not have them.
+The `auto` launch fingerprint is version 3, so a host that finds such an `auto` process restarts it once through the
+normal launch-settings path (#589): at once when it is idle, after its current turn otherwise. Since #1895 step 4 PR 1
+no process outlives its host, so every process a host runs it started itself. Nothing needs to be restarted by hand.
 See [security-boundaries.md](security-boundaries.md).
 
 The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
@@ -2478,19 +2472,19 @@ it, is the surface check in the table above: a `dropped` limitation there is exa
 UI disconnects  → the host does nothing (sessions carry on, events accumulate in event-log)
 UI reconnects   → hello { afterSeq, streamEpoch } → replay the missed events (same lifetime, within budget)
                   or resync (another lifetime, out of the buffer, over budget) → restore the screen
-host restarts   → under a keeper that holds children (before #1895 step 3, §4.3): agents, terminals and commands
-                  keep running there; the new host re-attaches to them mid-turn → a new streamEpoch → UIs resync
-                → otherwise (since step 3 under the keeper too): session processes die → a new streamEpoch → UIs resync
+host restarts   → session processes, terminals and commands end with it, under a keeper too (§4.3)
+                  → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
-host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
+host swapped    → the old host drains and stops for an update, the new one takes over behind the same front
+                  door and continues what it ended (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
-keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host,
-                  agents, terminals and every connection carry on; nothing reconnects
+keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host, the
+                  agents, terminals and commands it runs, and every connection carry on; nothing reconnects
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
-app relaunches  → "Apply now" (#352): the app announces it first, so with either mode nothing
-  to update       happens to the host; the relaunched window re-attaches and switches (§4.5)
+app relaunches  → "Apply now" (#352): the host stops for an update and the relaunched window starts
+  to update       the new build, whose host continues the turns it ended (§4.5)
 ```
 
 Thanks to this design, half of FR-10 (restore on restart) is the same code path as an ordinary reconnect — it is the default behaviour, not a special case. The rules for the cursor, the replay budget and the transport bounds are in [protocol.md](protocol.md) §1.
@@ -2644,11 +2638,11 @@ starting ends too: the app that launched it died first.
 real bundled host against a temporary `CC_DATA_DIR`.
 
 **In CI.** The `keeper e2e` job in `.github/workflows/build.yml` (macOS) builds the binary and the host once and runs
-the parts of the three keeper scripts that need no model and no network: all of `keeper-integration.mjs`, and
-`keeper-children-integration.mjs` and `keeper-handoff-integration.mjs` with `--no-claude --no-codex`, then the
-shell's (`shell-integration.mts`) and the handoff from verified content (`keeper-content-integration.mts`, §4.4). It exists
+the parts of the two keeper scripts that need no model and no network: all of `keeper-integration.mjs` (its `update`
+scenario holds the checks of `keeper-children-integration.mjs`, removed in #1895 step 4 PR 1), and
+`keeper-handoff-integration.mjs` with `--no-claude --no-codex`, then the shell's (`shell-integration.mts`) and the handoff from verified content (`keeper-content-integration.mts`, §4.4). It exists
 because none of this shows in unit tests or e2e: #329's `await` before the server existed crashed every host
-restart that held a terminal (#348), and only a hand run of the children script noticed. The claude and codex
+restart that held a terminal (#348), and only a hand run of the keeper's children script (since removed) noticed. The claude and codex
 turns stay manual. Each script ends every process it started and everything those started, pass or fail, found
 from one process table rather than by name (`scripts/keeper-test-processes.mjs`), and prints the end of
 `keeper.log` and `host.log` when a check fails. The `keeper e2e (linux)` job runs the same scripts and the keeper
@@ -2671,7 +2665,7 @@ stdin; a host told to expect it that gets no such line within 10 s ends its star
 0.1.0-beta.45 on reads it there (#1143). A host not told to read it there still reads `CC_HOST_TOKEN`, as one started
 by hand from a shell does (CONTRIBUTING.md).
 
-The child socket checks its peer by pid whatever the host's build. A keeper handoff passes the token
+A keeper handoff passes the token
 on its own channel and the host's stdin unchanged, so nothing is read again. The Codex bridge is started with the
 front door's address (`swap-control.ts`, `bridgeAddress`): a running codex keeps its bridge, and only an address
 that outlives this host survives a swap. Without a keeper the bridge gets the host's own port, as before.
@@ -2694,7 +2688,7 @@ answers on stdout next to its ready line. Neither side parses anything else the 
 | (started with `--standby`) | `{"standby":{pid,schema}}` once its own checks pass |
 | `{"op":"activate"}` | the ordinary ready line once it serves |
 | `{"op":"drain","timeoutMs":N}` | `{"drained":{waitedFor,cut,ms,keptAgents}}`, then it exits |
-| — | `{"swap":{"keepsAgents":bool}}` once per start |
+| — | `{"swap":{"keepsAgents":false,"stopsForUpdate":true}}` once per start |
 
 **Standby.** Before the ownership lock: the host has loaded its bundle and found its tools; it reads the store
 read-only (`Store.inspect`) and, if `min_reader_version` is past it, says the "written by a newer Centralu" sentence
@@ -2706,11 +2700,11 @@ front door hides the port, and the server needs the session manager, which needs
 app-tool proxy) runs through one tracker. On `drain`, new calls are refused and running ones get the bound; past
 it each is answered with an error saying the host switched builds and stopped waiting, that the call may or may
 not have finished, and to check and call again. RPC errors from a refusal or a cut carry `retryable: true`. Then,
-in order: a moment for a cut call's error to reach its agent, the **detach hook** `stopServices('detach')`, the
-lock released, `drained` written, exit. The detach hook releases the keeper-held agents, terminals and commands
-(§4.3) and stops only what lives in the host (app processes, in-process servers); `drained.keptAgents` and the
-start-up `keepsAgents` report are true only when the host has the keeper's child service. A host without one
-stops its children here, as a stop does.
+in order: a moment for a cut call's error to reach its agent, the **stop hook** (`stopServices(true)`), the lock
+released, `drained` written, exit. The stop hook is a stop for an update: it writes the open app views down (below),
+lists the turns, terminals and runs it ends, and stops everything the host started, agents included, as every ending
+does (§4.3); the host that takes over continues what it ended (§4.5). `drained.keptAgents` and the start-up
+`keepsAgents` are still sent, and always `false`: no host keeps agents in the keeper any more (#1895 step 4 PR 1).
 
 **Taking over.** After `activate` the host takes the lock and opens the store with `swap: true`: expand steps run
 now, heavy and breaking steps run after its ready line (§5.1).
@@ -2718,8 +2712,7 @@ now, heavy and breaking steps run after its ready line (§5.1).
 **Open app views** (#280 step 4). A view's frame address names the front door's port (`swap-control.ts`, `viewPort`)
 and a secret derived from the keeper's token (`transport/http.ts`, `deriveHttpSecret`), so every host the keeper
 runs gives out the same address for the same instance; without a keeper both stay as before (the host's port, a
-random secret). The instances themselves live in memory, so a planned ending — the drain above, or a signal while
-the host has the keeper's child service — writes each open one's id, app and `ui://` address to `app_settings`
+random secret). The instances themselves live in memory, so a swap's drain (above) writes each open one's id, app and `ui://` address to `app_settings`
 (`views.handover`, `view-handover.ts`), first thing in `stopServices`. The next host started under the keeper reads
 the record before it listens, deletes it, and if it is at most ten minutes old reopens them under the same ids:
 each holds its app again as `open()` does, an app that no longer exists is skipped, and a view in a conversation
@@ -2730,158 +2723,80 @@ host the first time `apps.viewFrame` or the proxy page needs them. On the UI sid
 its address again after a resync (`hostResyncs` in the store): the same address leaves the view and its state
 alone, another one is loaded, a failure takes the first load's failure path.
 
-### 4.3 The children the keeper holds, seen from the host (#280, option C step 2)
+### 4.3 The children the host starts, under a keeper too (#280, #1895)
 
-The design is in [architecture.md](architecture.md) §4.3. Since #1895 step 3 a keeper started fresh serves no child socket
-(`holds_children` in `server/start.rs`, the one place of the switch; `CC_KEEPER_HOLDS_CHILDREN=1` turns it back on for the keeper
-scripts that still test it), so this section describes a keeper of an earlier build, and one that took over from it (§4.5). Under the
-keeper (`CC_KEEPER=1`) the host connects to `<data>/children.sock` at startup (`keeper/held-children.ts`). If nothing answers there (an older keeper, a socket
-that would not bind), the host spawns its own children and every ending stops them, exactly as without a keeper.
-`pnpm dev`, e2e, a debug app and Windows never take this path.
+The host spawns its agents, terminals and Run commands itself on every machine, under a keeper too, and every ending
+stops them, or stops them for an update (§4.5). Since #1895 step 4 PR 1 it never connects to the keeper's
+`<data>/children.sock`, lists no keeper children at start and takes none over ([plans/keeper-removal.md](plans/keeper-removal.md)
+§4). Before, a host under a keeper that offered the children service asked it to spawn and hold them, so they
+outlived the host; a keeper started fresh has not offered it since step 3 (`holds_children` in `server/start.rs`),
+and the host already took this path then. **The keeper's children service still exists in the keeper until the
+next PR (PR 2), but no host uses it.** The design is in [architecture.md](architecture.md) §4.3.
 
-**The child socket** (`keeper/children/` in the desktop keeper crate, `keeper/children-client.ts` here). The first line
-of a connection says what it is. A *control* connection (`{"op":"hello","protocol":1}`), one per host, carries
-requests `{"rid":n,"op":…}` answered `{"rid":n,"ok":…}` and two pushed events: `{"event":"exit","id","code","signal"}`
-and `{"event":"stop"}` (the keeper is stopping for good; stop your children). An *attach* connection
-(`{"op":"attach","protocol":1,"id","stream":"out"|"err"}`) answers one line and then carries raw bytes: the
-child's output to the host, the host's bytes to the child's stdin or pty.
-
-| request | does |
-|---|---|
-| `spawn` `{kind:"pipes"\|"pty", cmd, args, cwd, env, cols?, rows?, tag}` | starts the child in its own session; `cmd` is looked up on the `PATH` in `env` |
-| `list` | every child: id, kind, pid, cmd, cwd, start, alive, exit status, tag, size, bytes not yet sent |
-| `signal` `{id, signal, group?}` | a signal to the child, or its whole group; refused for a name outside TERM/KILL/INT/HUP/QUIT/USR1/USR2/WINCH, and a no-op once it has exited (its pid may belong to someone else) |
-| `close_stdin` `{id}` | EOF after what was written (codex removes its thread lock on EOF, #57) |
-| `resize` `{id, cols, rows}` | `TIOCSWINSZ` on a pty |
-| `set_tag` `{id, tag}` / `release` `{id}` | replace the tag; forget an exited child (a running one is refused) |
-
-A new attach replaces the previous reader of that stream. A host that half-closes its attach connection is
-detaching: it is sent the rest of the line it is in, then the stream ends and the keeper buffers for the next one.
-
-**Buffers** (`keeper/children/buffer.rs`). An agent's stdout: lossless up to 64 MiB, then the keeper stops reading
-and the child blocks on its pipe; only whole lines go to a reader, and a line a lost reader got part of is sent
-whole to the next. A pty: drained always, the last 256 KiB kept and replayed to each new reader. An agent's stderr:
-a 256 KiB tail, never blocking. Bytes from a host go to an agent's stdin in whole lines only, so a host that dies
-mid-write never leaves a torn request; up to 8 MiB are queued before the keeper stops reading the host. A control
-connection whose host stops reading is dropped once 8 MiB of replies and exit events wait for it, with a line in the
-keeper's log: that host then sees every child it holds exit with SIGHUP and cannot spawn until it restarts. Once a
-burst has been sent, each of these buffers hands back the capacity it left behind, keeping 1 MiB.
-
-**What the host spawns there.** Every child carries a tag only hosts read (`keeper/tags.ts`): `{kind:"agent",
-tool, sessionId, version?}` (the CLI version it was started from, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
-must keep reading an older host's tags: the children outlive the build that spawned them.
-
-- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract/process.ts`): `spawn` in the keeper,
-  or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
-  of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request for
-  the CLI's whole process group (below) that is never sent once the process is detached or the host is exiting
-  (the SDK kills its processes on owner exit), and `stdin.end()` is `close_stdin`. Codex request ids carry a per-client prefix, so an answer to the previous
-  host's request cannot resolve one of ours.
-- **Terminals and commands.** `TerminalService` and `CommandRunner` take the keeper's pty module (`KeeperPty`,
-  node-pty's surface) instead of node-pty; stopping or closing them walks the process tree (`kill-tree.ts`), which
-  works from anywhere. Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
-  from it is in a group of its own (job control), and one that ignored the hang-up used to be left running.
-  Both hold each pty in a `PtySlot` (`dev-services/pty-slot.ts`, #428): its output (256 KiB), its exit, its tree
-  stopped, and a failed start, node-pty not loading included, said on screen and followed by an exit.
-- **Both** stand on `keeper/held-child.ts` (#428): the spawn's answer, the attach of their streams, the exit reported
-  once the output has ended (at most 1 s after it, `exit-after-drain.ts`), the release of the keeper's record, and a
-  detach that waits at most 2 s each for the attach and for the keeper to end the stream. A child whose streams cannot
-  be attached is ended (KILL to its group) and released once it has exited: the keeper refuses to release a running
-  child, so releasing it at once left it running with nobody to read or stop it. A child adopted from a previous host
-  gets one more attach first, with a 15 s bound (a loaded machine or a keeper handoff can hold the first one past its
-  5 s). If that fails too, an agent is ended, since its session starts a new CLI on the same conversation and two
-  CLIs on one thread conflict (so is an agent whose session start refused it for any reason, `adoptKept`: no adapter, no
-  resume, a project gone, a failed re-attach; except while the host itself is leaving: then it is not stopped here, #1720); a terminal or a command run is left running in the keeper for the next host.
-
-**What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
-`typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.
-They share the CLI's process group, which `setsid` made the CLI's own, so the group is the CLI, what it started, and
-nothing else. A stop signals that group: the host's TERM, and the KILL that follows when the CLI is still there after
-its grace (the SDK's 5 s; codex's 2 s after EOF), reach the helpers too. And whenever an agent exits, however it ended
-(a stop, a crash, a CLI that does not clean up), the keeper sweeps its group: TERM at once, KILL 2 s later to whatever
-is still in it (`Sweep`, `keeper/children/stop.rs`). Before, only the CLI's pid was signalled, and what it left was
-reparented to launchd/init and kept running with its memory. A group number is not reused while anyone is in it, and
-no sweep is sent while any process holds the CLI's pid (its zombie not yet reaped, or the number given to someone
-else), so a sweep never reaches another group; the keeper's own group is never a target (#350). A sweep still
-waiting is handed to the next keeper with the table (§4.4), and a keeper stopping for good waits for its sweeps and
-KILLs what is left at the end. Ptys are not swept: the kernel hangs up a terminal's foreground group as its shell
-exits, and the host ends a terminal's or a command's tree when it stops one. A detach (a restart, a swap) sends
-nothing, so agents and their helpers survive it.
-
-Without a keeper (Windows, `pnpm dev`, e2e, a debug app, a keeper whose child service did not answer) the host
-spawns the CLI itself, Claude's through `spawnClaudeCodeProcess` too (`adapters/local-process.ts`). On macOS and
-Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to every group in its tree and KILL to
-the survivors after 3 s, and once it has exited its group is swept the same way (`stopGroup`). On Windows a stop is
-`taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and creation
-times and ended (`collectOrphansWindows`), against a start time taken before the spawn. The start and the sweep are
-the ones app processes use (`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). Being in a group of its own, the CLI is no longer in the host's, so
+**Agents.** The host starts the CLI itself, Claude's through `spawnClaudeCodeProcess` too (`adapters/local-process.ts`).
+On macOS and Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to every group in its tree and
+KILL to the survivors after 3 s, and once it has exited its group is swept the same way (`stopGroup`). On Windows a
+stop is `taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and
+creation times and ended (`collectOrphansWindows`), against a start time taken before the spawn. The start and the
+sweep are the ones app processes use (`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). An agent CLI
+starts helpers of its own: Claude Code's LSP tool runs `typescript-language-server`, which runs `tsserver` (one
+reached 3.4 GB); MCP servers from the user's config; shells. They share the CLI's group, so a stop and the sweep after
+an exit reach them too. Being in a group of its own, the CLI is no longer in the host's, so
 every CLI the host starts, Claude Code, Codex's app-server and the ACP tools alike, starts behind the host watch
 (`endsWithHost`, `HOST_WATCH`): a pipe only the host holds, whose close ends the CLI's group however the host went,
 SIGKILL included, and whatever the CLI does with stdin's end (#1654; one start for every tool,
 `adapters/core/tool-process.ts`). The shell behind the watch also looks the CLI up itself before it starts it (on PATH as libuv does, relative and empty entries included, not with `command -v`, which differs by shell: Ubuntu 22.04's dash 0.5.11 names the first file of a name even when it cannot be run) and says on fd 4 when it is not there or cannot be run, so the host raises the same ENOENT or EACCES 'error' Node's spawn gives without the watch, not an "exited (code 127)". Windows has no such watch: there a host's children end with it through its kill-on-close job. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so both
-adapters add it the same way (`withStderrTail`, `stream-text.ts`): the host's own child and the keeper's each keep the
+adapters add it the same way (`withStderrTail`, `stream-text.ts`): the host's own child keeps the
 last 8 KiB of stderr (`AgentProcess.stderrTail`), decoded as one stream so a character split between two chunks stays
-whole, and Claude's `adapter_crashed` and Codex's "codex app-server exited" carry it, under the keeper too.
-A Codex app-server that exits **while its session has no turn in flight** (nothing running, no message whose `turn/start` is still unanswered, none queued, no input waiting for its turn, no blocking command, and the process had finished starting: a message sent just before the exit is lost with the process, so it is a crash with the stderr tail, not sleep) is not a crash (#1397): a Codex session keeps its app-server while idle (#568), so a system shutdown, a logout or a kill lands on such sessions. The adapter says `session_live` (`live: false`, `reason: 'asleep'`) instead of an `adapter_crashed` error, whatever the exit code; the manager retires the handle (as for a crash, only from the handle registered now) and the next message resumes the thread. No error, no mark. A session the host still reads as in a turn then (its end was lost, #1829) is set to `waiting_input`: no process is left to end it. A Stop with no turn running and none that can start says the session stopped at once, as Claude's does, since no `turn/completed` will come. An exit during a turn is still `adapter_crashed`; one the computer's shutdown caused is found by the next start and set to stopped with the `shutdown` interruption (§4.6.2, #1397). A Claude Code process that exits on its own follows the same rule (owner decision Q1 on #1654; the same `MidTurnLedger.exited`, with Claude's `inFlight`), whether the SDK's stream ends or throws: asleep with no turn open, no tracked input or card waiting, no message the CLI has not read or answered (a quiet input included, or one held behind `/goal` or the sign-in race), no background agent or shell still running (it goes with the process), and once the CLI has said anything on its stream; otherwise `adapter_crashed` with the stderr tail. An adopted process says nothing until its next turn, so until then its exit is still a crash. The shutdown is told from a crash at the next start, not by a power-off signal per OS: a host the system kills may never see one, while its last heartbeat and the boot time are always there.
+whole, and Claude's `adapter_crashed` and Codex's "codex app-server exited" carry it.
+A Codex app-server that exits **while its session has no turn in flight** (nothing running, no message whose `turn/start` is still unanswered, none queued, no input waiting for its turn, no blocking command, and the process had finished starting: a message sent just before the exit is lost with the process, so it is a crash with the stderr tail, not sleep) is not a crash (#1397): a Codex session keeps its app-server while idle (#568), so a system shutdown, a logout or a kill lands on such sessions. The adapter says `session_live` (`live: false`, `reason: 'asleep'`) instead of an `adapter_crashed` error, whatever the exit code; the manager retires the handle (as for a crash, only from the handle registered now) and the next message resumes the thread. No error, no mark. A session the host still reads as in a turn then (its end was lost, #1829) is set to `waiting_input`: no process is left to end it. A Stop with no turn running and none that can start says the session stopped at once, as Claude's does, since no `turn/completed` will come. An exit during a turn is still `adapter_crashed`; one the computer's shutdown caused is found by the next start and set to stopped with the `shutdown` interruption (§4.6.2, #1397). A Claude Code process that exits on its own follows the same rule (owner decision Q1 on #1654; the same `MidTurnLedger.exited`, with Claude's `inFlight`), whether the SDK's stream ends or throws: asleep with no turn open, no tracked input or card waiting, no message the CLI has not read or answered (a quiet input included, or one held behind `/goal` or the sign-in race), no background agent or shell still running (it goes with the process), and once the CLI has said anything on its stream; otherwise `adapter_crashed` with the stderr tail. The shutdown is told from a crash at the next start, not by a power-off signal per OS: a host the system kills may never see one, while its last heartbeat and the boot time are always there.
 
-**Leaving** (`lifecycle/shutdown.ts`, `stopPlan(mode)`). *Detach* — SIGTERM, SIGINT, SIGHUP, the keeper's pipe closing, an
-uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing
-is sent to the tool, a waiting approval stays waiting, and output still in flight is recorded before the store
-closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
-event, or any ending without the child service — is the old path: sessions disposed, terminals and runs killed.
-After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL), and
-what exited agents left in their groups. For a terminal each step reaches every process group in its session, so a
-job its shell put in a group of its own (a dev server sent to the background, one that ignores the hang-up) ends
-too (#840 item 2); before, only the shell's own group was signalled and such a job kept its port.
+**Terminals and commands.** `TerminalService` and `CommandRunner` run node-pty; stopping or closing them walks the
+process tree (`kill-tree.ts`). Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
+from it is in a group of its own (job control), and one that ignored the hang-up used to be left running. Both hold
+each pty in a `PtySlot` (`dev-services/pty-slot.ts`, #428): its output (256 KiB), its exit, reported once the output
+has ended (at most 1 s after it, `exit-after-drain.ts`), its tree stopped, and a failed start, node-pty not loading
+included, said on screen and followed by an exit.
 
-**Re-attach.** At startup the host lists the keeper's children. Live agents re-attach after `listen`, through
-`resumeSession`, so a screen waking the same session joins the re-attach instead of starting a second process.
-Their sessions keep `working` / `waiting_approval` through the startup reset (`keptSessions`); the state is then
-corrected by what the tool says. The transcript catch-up is skipped (the keeper's buffer delivers what was said
-meanwhile). A kept agent whose session is gone is stopped. Terminals and command runs come back under their ids
-with the replayed output as scrollback; a run that ended while no host was attached keeps its exit code. An exited
-agent or terminal is released. Measured before relying on it (2026-10-04, CLI 2.1.282 + SDK 0.3.263 with haiku;
-codex-cli 0.160.0 with `gpt-5.6-luna`, low effort):
+**Leaving** (`lifecycle/shutdown.ts`, `stopPlan(handOver, parts)`). Every ending is a stop: SIGTERM, SIGINT, SIGHUP,
+the parent's pipe closing, an uncaught exception, `host.stop`, the keeper's stop line and a swap's drain. Terminals and
+runs are ended first, synchronously, then sessions are disposed and app processes and the in-process servers stop.
+A stop for an update (the keeper's or the window's stop line with `forUpdate`, a hub's `host.stop { forUpdate }`, a
+swap's drain) is the same stop, and first lists the turns, terminals and runs it ends for the next host, which
+continues and reopens them (§4.5). `handOver` only adds writing the open app views down first, for a swap's drain
+(§4.2). The adapters have no detach any more, and there is no leave mode that lets agents run on.
 
-| tool | measured |
-|---|---|
-| claude | A new `query()` over the kept process: its `initialize` re-delivered the pending approval to the new `canUseTool` at once; answering it ran the command and finished the turn. Mid-turn, the remaining three Bash calls and the result arrived through the new host. |
-| codex | `initialize` again: `-32600 "Already initialized"`, nothing else changes. `thread/resume`: `thread.status` `active`/`waitingOnApproval`, the running turn in `thread.turns` (the id Stop needs), and the approval re-sent with the same request id (`0`); accepting it finished the turn. Since #342 the resume asks for no turns (`excludeTurns: true`), and the running turn comes from `thread/turns/list` (`limit: 1`, newest first, `itemsView: 'notLoaded'`), asked only when the thread is `active`; measured again on 0.160.0 (2026-10-05): the turn came back `inProgress`, and a pending approval was still re-sent under its id. A Codex that predates the flag answers with the turns, and those are read as before. It does not restart the thread's MCP servers (a probe server configured on resume never started), which is why the bridge has the front door's address and a credential every host the keeper runs accepts (§4.2). |
+**A host that crashes.** The keeper restarts it by its usual rules (§4.1). The agents end with the old host through
+the host watch, its terminals and runs with it; a turn in flight shows stopped with Continue (§4.6.2), as on Windows
+and Linux. Only a stop for an update lists turns to continue.
 
-**A lost in-process call.** A call to the host's own in-process tools (orchestrator `mcp__centralu__*`, app
-proxies `mcp__app-*`) in flight when the host died is never answered: measured, the adopted claude waited silently
-until the new owner called `interrupt()`, which ended the turn (`error_during_execution`); the next turn, including
-a call to the same tool now served by the new host, ran normally. So the manager hands the adapter the tool calls
-the store holds without a result, and Claude, finding one of its in-process tools among them, reports an error
-naming it and interrupts the turn. A planned swap drains such calls first (§4.2); this is for a crash. Codex needs
-nothing: its bridge fails a call whose socket closed.
+**Strays.** `strays.ts` rule 3 counts only the host's own descendants as ours. Processes a holding keeper of an earlier
+build left behind when it died hard (`kill -9`, a crash) are in sessions of their own under init; they are offered as
+leftovers like any orphan in the project's folders ([plans/keeper-removal.md](plans/keeper-removal.md) §5, risk 2).
+Stopping the ones a person chose (`stopStrays`) is the two shots every stop uses: SIGTERM to those still leftovers,
+then, after 3 s, SIGKILL to those that still are and still run the same command, measured again each time (#428).
+Both walk the table with `dev-services/proc-table.ts`, as `kill-tree.ts` does.
 
-**Strays.** `strays.ts` rule 3 counts the keeper's live children and their descendants as ours. After a keeper
-handover (§4.4) their parent is init, and the parent chain alone would offer them as leftovers. Stopping the ones a
-person chose (`stopStrays`) is the two shots every stop uses: SIGTERM to those still leftovers, then, after 3 s,
-SIGKILL to those that still are and still run the same command, measured again each time (#428). When the keeper
-cannot answer which children it holds, nothing is stopped: after a keeper handoff its agents are init's children, and
-without its list they would read as leftovers. Both walk the table with `dev-services/proc-table.ts`,
-as `kill-tree.ts` does.
+**Activity.** The activity report counts the host's own terminals, runs and live sessions. While no host is up the
+keeper counts nothing; its idle limit is 30 minutes and a crashed host is back in seconds.
 
-**Activity.** Kept terminals, runs and live sessions are the host's own entries again once taken over, so the
-activity report counts them as before. While no host is up the keeper counts nothing; its idle limit is 30
-minutes and a crashed host is back in seconds.
-
-`scripts/keeper-children-integration.mjs` drives this with the real binary, host, claude (haiku) and codex
-(`gpt-5.6-luna`): a claude turn across a SIGKILLed host, a terminal and a dev server across the same crash (resized
-afterwards), a codex turn across a swap, and stop ending every child. CI runs it with `--no-claude --no-codex` (§4.1).
+The `update` scenario of `scripts/keeper-integration.mjs` (in `keeper-integration-relaunch.mjs`) drives this with the
+real binary and host: the keeper serves no child socket, the host runs a terminal and a dev server itself, a stop for
+an update ends them and the next host opens them again, a SIGKILLed host's processes end with it and its terminals are
+not reopened, and a stop ends the keeper, the host and its children. `--claude` adds a claude (haiku) turn that the
+update cuts and the next host continues, and one the crash cuts. CI runs it without `--claude` (§4.1).
 
 ### 4.4 The keeper's handoff, seen from the host (#280, option C step 4)
 
 The design is in [architecture.md](architecture.md) §4.4. The host does nothing for it and notices nothing: its
-stdin and stdout are the same pipes, its control and attach connections on `children.sock` are the same sockets, its
+stdin and stdout are the same pipes, its
 token and the front door's address do not change, and its parent becomes init when the old keeper exits. What it
 writes on stdout during the freeze (an activity report, say) waits in the pipe and is read by the new keeper; what the
 old keeper had already read from it but not acted on is handed over with the rest. Its own control lines on stdin,
-used by a swap, keep working from the new keeper, which can drain it as the start of a switch. Its children are as
-they were: the outgoing keeper parks the child table between two passes and the new one carries on from the same
-buffers, so a turn in progress loses and repeats nothing.
+used by a swap, keep working from the new keeper, which can drain it as the start of a switch. Its children are its
+own processes and stay with it: nothing of them passes through the keeper, so a turn in progress loses and repeats
+nothing. (A keeper of an earlier build that still holds children passes its child table on as before; a host of this
+build never connects to the child socket, so it takes none of them over, §4.5.)
 
 `scripts/keeper-handoff-integration.mjs` drives this with real binaries of three builds, the real host, claude (haiku)
 and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
@@ -3023,13 +2938,14 @@ and opens the terminals and Run commands again. A host that does not end in time
 quit's. The update line says so (`RelaunchCheck.restartsHost`). Only where `relaunch_info` is ready, as with a keeper: from an app
 bundle the update replaced (macOS). No Linux package or Windows install is a bundle, so those keep "Restart Centralu to finish
 updating", and the busy report is the keeper's, so nothing applies by itself without one. A swap whose host holds no agents (a
-keeper without its child service) is the same stop: the drain begins it before it lets them go, and the host that takes over continues what it ended.
+host of #1895 step 4 PR 1 or later) is the same stop: the drain begins it before it stops them, and the host that takes over continues what it ended.
 
 **The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
-the removal design of #1895 step 4 (`docs/plans/keeper-removal.md`, on its own branch)). The macOS release keeps its shape, shell then keeper then host, because the
+the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 is built). The macOS release keeps its shape, shell then keeper then host, because the
 release is ad-hoc signed and only a tree the shell starts keeps its macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)
 §1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket
-(`holds_children`), so the host finds none, spawns its own children as on every other machine, and every ending stops them:
+(`holds_children`), so the host spawns its own children as on every other machine, and every ending stops them. Since
+step 4 PR 1 the host does not look for the socket at all (§4.3):
 
 | | Before (the keeper holds the children) | Since step 3 |
 |---|---|---|
@@ -3055,7 +2971,11 @@ starts next serves none. A handoff passes a child table on only while the keeper
 build's host, or one not up), and keeper.log says so; otherwise the keeper stops for an update and exits instead
 (`handoff::held_children_on_handoff`), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
 (`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
-turns, and they would have ended as a quit's. Checked end to end by `scripts/keeper-children-integration.mjs`.
+turns, and they would have ended as a quit's. This was checked end to end by `keeper-children-integration.mjs`, removed
+in #1895 step 4 PR 1. A host of that PR or later never takes children over, and a keeper of that build refuses a handoff
+whose child table still has a running child ([plans/keeper-removal.md](plans/keeper-removal.md) §6): the sending keeper
+rolls back and carries on with its children and its host, and the update is refused with "quit Centralu completely and
+open it again to update". Quitting stops those children, and the keeper the shell starts next holds none.
 
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
 update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
@@ -3090,9 +3010,11 @@ terminal counts even at a prompt: the host cannot tell an idle shell from one ru
 waits for terminals to close. Moving one session to a newly installed agent CLI (#297) uses the same file's narrower
 rule, `sessionIdle` (§4.6).
 
-**What the host sees.** Nothing new: the relaunched window reconnects through the same front door, then the switch
-drains this host and starts the new build's (§4.2), after the keeper has handed itself over (§4.4). The new host's
-update status starts fresh at its own version.
+**What the host sees.** A stop for an update: by the keeper's stop line since step 3, or, when the relaunched window
+switches a keeper of an earlier build, by the swap's drain (§4.2), after the keeper has handed itself over (§4.4). The
+drain stops this host's agents, terminals and commands as an update's stop does, since no host holds them in the keeper
+any more (#1895 step 4), and the next host continues the listed turns and opens the terminals and Run commands again.
+The new host's update status starts fresh at its own version.
 
 The desktop waits for its automatic relaunch swap before mounting the app (#580). If that attempt
 fails or times out, it opens on the attached host and remembers the attempt so `DesktopRoot` does
@@ -3111,8 +3033,8 @@ boundary.
 ### 4.6 Moving sessions to a newly installed agent CLI (#297)
 
 Every session runs its own agent process, started from the CLI installed at the time, and an update to `claude` or
-`codex` reaches a session only when its process starts again. Under the keeper (§4.3) a process outlives every app
-restart, so a person who uses Centralu daily could run an old CLI indefinitely. `agent-versions.ts` knows both sides and
+`codex` reaches a session only when its process starts again. A process lives as long as its host, which in background
+mode outlives every window (§4.1), so a person who uses Centralu daily could run an old CLI for a long time. `agent-versions.ts` knows both sides and
 restarts a session on the installed CLI when nothing in it would be lost.
 
 **The installed version** (`AgentAdapter.installedVersion`, `cli-version.ts`), read at host start, every ten minutes,
@@ -3128,12 +3050,9 @@ and when a window gains focus (`agents.versions { force: false }`, answered from
 3. `<cli> --version`, off Windows only (a Homebrew cask, a manual install).
 
 **The running version** is `SessionInfo.agentVersion`: what the process reported (`agent_version`, §2), and until it
-does, the installed version when it was started. Each keeper spawn writes that version on the child's tag
-(`{ kind: 'agent', tool, sessionId, version }`), and `adoptKept` gives it back to the session, because an adopted
-process does not report again. A tag from a host before #297 has no version: that session's version stays unknown and
-it is never moved by itself (unknown is never "older", `runsOlderCli`), until its next restart. If an update lands
-between the last reading and a spawn, the tag names the older version; the next host then moves that session once
-more, which costs a resume and nothing else.
+does, the installed version when it was started. No process outlives its host any more, so nothing hands a version
+from one host to the next (before #1895 step 4 PR 1 the keeper's child tag did). A session whose version is unknown is
+never moved by itself (unknown is never "older", `runsOlderCli`), until its next restart.
 
 **When a session is moved** (`restartDecision`): it is live, it runs an older version than the installed one, it is
 idle by `sessionIdle` (no turn, no approval or question, no live background task, and a tool that cannot report
@@ -3147,7 +3066,7 @@ its background work.
 |---|---|
 | Moving by itself is on by default ("Move idle sessions to a newly installed agent CLI", `agents.setAutoApplyVersions`, saved as `agents.autoApplyVersions`) | The owner's decision (2026-10-05). The restart waits until nothing would be lost, and the conversation continues through resume |
 | The header's action (`agents.applyVersions`) restarts every idle outdated session at once, without the quiet period | The update is app-wide; a person who just updated wants every session on it. A busy one is listed and keeps the line |
-| The restart is the manager's `restartSession` | The same path as "Restart agent": the handle is disposed (under the keeper: stdin closed, then a signal, through the keeper), and the session resumes in a newly spawned process. Nothing is re-attached, so the new process is the new CLI (`sessions/agent-versions-restart.test.ts`) |
+| The restart is the manager's `restartSession` | The same path as "Restart agent": the handle is disposed (stdin closed, then a signal), and the session resumes in a newly spawned process. Nothing is re-attached, so the new process is the new CLI (`sessions/agent-versions-restart.test.ts`) |
 | The conversation gets one line from Centralu, "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | A process restarted by itself is never silent |
 | The installed versions last seen are kept (`agents.versionsSeen`) | An update made while the app was closed still counts as a change |
 
@@ -3171,10 +3090,11 @@ conversation continues while the next process sees the new tools.
 
 **Launch settings after a host switch (#589).**
 
-The same keeper handoff can retain a process that was started with an older adapter policy: Codex sandbox roots and
-network settings, or Claude launch options and environment controls. Each adapter may report a versioned
+A live process keeps the adapter policy it was started with: Codex sandbox roots and network settings, or Claude
+launch options and environment controls. Each adapter may report a versioned
 `launchSettingsFingerprint(settings)` for the stable, session-specific launch inputs. The manager keeps that value in
-an app setting per session and compares it after adopting keeper children. A mismatch restarts an idle process through
+an app setting per session and compares it when the tool definitions are refreshed and when a project's trust changes
+(`refreshLaunchSettings`). Before #1895 step 4 PR 1 it also compared it after taking over a keeper's children. A mismatch restarts an idle process through
 the ordinary resume path, waits for a working or approval-waiting process to finish its turn, and is simply recorded
 for an asleep session with no process. The host never names a CLI or interprets the fingerprint; changing an adapter's
 derived launch policy means changing its own fingerprint.
@@ -3185,7 +3105,7 @@ through `launch_settings` so they pick up the changed sandbox.
 
 A missing stored fingerprint is also a mismatch: builds before this check kept processes with unknown
 launch settings. The update that introduces it therefore restarts each retained process once, at the
-same safe boundary, and records the new fingerprint. Later handoffs keep an unchanged process.
+same safe boundary, and records the new fingerprint.
 Both changed and previously unrecorded launch settings use the `launch_settings` cache rebuild cause
 ("launch settings changed"); the restart log says "launch settings changed or previously unrecorded".
 This is separate from `instructions` ("tools changed").
@@ -3214,7 +3134,7 @@ of a tool's:
 | Sleeping is `SessionProcesses.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
 | Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |
 | `session_live {live: false}` also goes out when a process is dropped and no new one takes its place (#648): `reason: 'restart_failed'` when a restart the host started (a refresh, a CLI move, "Restart agent") did not bring a process up, `'crashed'` when the process died | Before this the windows kept showing the session live, the screen's wake stepped back, and the person learnt only when a send failed. Now it shows asleep, and the next message wakes it |
-| Under the keeper the dispose stops the kept child (stdin closed, signalled). A host that takes over finds nothing to adopt for it, lists it asleep, and wakes it in a new child (`sleep-keeper.test.ts`). The sweep stops before a detach (`stopPlan`) | A sleep in the middle of a swap would end a process the next host is meant to adopt |
+| The dispose stops the process the host started (stdin closed, signalled). The sweep stops before the sessions are let go of in the shutdown (`stopPlan`) | A sleep then would race the sessions' own stop |
 | The screen wakes a session when its composer takes the keyboard or gets its first key, and on send; never on selecting or viewing it, and the grid's panels are not woken at startup | A session looked at is not a session typed to. The resume runs while the person types, so its 0.7 s is mostly hidden. Before #568 selecting woke a session and the grid woke every panel at startup, to hide a slow Codex resume |
 | Asleep shows quietly: the sidebar's tool mark is drawn exactly as the same session awake in the same state (a fade would read as a stalled session, #670) and only its tooltip says "asleep"; the conversation's line says "Asleep — it wakes when you type to it", then "Waking session…" while it starts | Not a state to act on, so no colour and no badge; but a person who wonders why the first answer is slower can find out |
 
@@ -3255,7 +3175,7 @@ tool-neutral (`sessions/interruptions.ts`):
 | Reason | Set when | Cleared when |
 |---|---|---|
 | `network` | a running turn ends in an error the network caused (`interruptionAfter` with `endedTurn`; a crash, `adapter_crashed`, and an error at rest are not): the error codes (`ECONNREFUSED`, `ENOTFOUND`, ...), Claude's "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error, dropped / Request timed out / No internet route / Unable to connect to API / fetch failed" (the wordings read in the CLI's own connection-failure function; "Unable to connect to API: SSL …" is a setting, not the network), the computer sleeping, Codex's "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network" (`isNetworkFailure`; the sentences measured in the real store and host.log). Only the tool's sentence counts, not the stderr tail a crash carries (`failureSentence`); generic words ("connection closed", "network error") count only inside those sentences, since an MCP server or a dev server can say them | the session works again (`working`, output), or a turn ends otherwise |
-| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached and its turn cannot be continued, or a turn an update or a swap cut could not be continued (§4.8, #1618, #1966; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
+| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash), or a turn an update or a swap cut could not be continued (§4.8, #1618, #1966; one that is continued is not marked). A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
 | `shutdown` | the last host was told the system was ending (a shutdown, restart or sign-out, #1397; `system-end.json`, below). Then a session that was `working` or `waiting_approval` with no process gets this reason instead of `quit` (unless it has rows from more than 2 minutes after that end, `SYSTEM_END_TAIL_MS`: a later host's, of a build that reads no notice), and so does a session in `error` whose newest error, past the `internal` one closing the handle writes for follow-ups still queued, is an `adapter_crashed` stamped from 30 s before the notice (`SYSTEM_END_LEAD_MS`: where the system ends every process at once, the agent may exit before the host asks) to 2 minutes after it. Both are reset to `idle` and get a warning line ("This turn stopped before it finished: the computer shut down, restarted or signed out while it was running …"; the words are `SHUTDOWN_WORDS` in the protocol, the same in the label, the note, the list and the report); a session at rest or one that crashed outside that span is left as it is. With no notice (a quit, any other stop, a host killed with no notice) nothing is guessed: a cut turn stays `quit` and a crash an error. Known: the caller of a delegated turn whose agent crashed in that span keeps the old host's "failed" report, sent before the host went, while the child then reads `shutdown`; it is reported once. `lifecycle/system-end.ts` | the same |
 | `interrupted` | a turn ends `waiting_input` with the reason `interrupted_by_tool` (`INTERRUPTED_BY_TOOL`): Codex's `turn/completed {status: "interrupted"}` for a turn no `turn/interrupt` of ours preceded | the same |
 | `reconnecting` | the tool has stayed `retrying` for `RECONNECTING_FLAG_MS` (5 minutes): Codex waits for the network without end. Live only, never stored | the activity moves off `retrying` or the turn ends |
@@ -3271,7 +3191,7 @@ tool-neutral (`sessions/interruptions.ts`):
 | A report owed for the turn names the reason first ("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") and how to go on | "The assigned work failed" made the asker redo or abandon work that only needed a "continue" |
 | When no report is owed (no report mark, no call waiting on the turn now), the session that gave the turn hears once of a `network`, `interrupted` or `quit` stop (`tellAskerOfInterruption`): a delegation's caller nobody waits for now (`ask_project` or `start_agent` past its bound), else the session that started it (`askedBy`). A call still waiting reads the stop from its own answer | The 2026-10-15 case, and an `ask_project` turn whose session has no `askedBy`. One report per stopped turn; another needs another turn, so two sessions cannot wake each other in a loop |
 | Every report and every word Centralu gives a session about its request (a start that did not start, a note or a queued request that did not go) goes through `tellSession` (#428): never while the host hands over or quits, never to a session that is gone | A quit used to report each running child as "failed: Centralu is shutting down" in its caller, which the next start then told again as a `quit` stop, and a report could wake a sleeping caller on the way out |
-| A `quit` is told at the next start, once per child, to the first that still exists of: the session owed its report, the one that gave the turn (`delegated_turns`), its `askedBy` (`quitNotices`, after the keeper's adoption for a kept one). A kept process that cannot be re-attached settles its report the same way. **No requester that is itself stopped by a quit** is told, at the start or later: it waits for the person's Continue | An asker that delegated without waiting was at rest, not cut, and its report mark used to be dropped: it never heard. Waking it once costs a turn; never hearing costs the work. An orchestrator the same quit cut would be resumed at launch with nobody there, and that turn would clear its own "stopped" mark before the person saw it; its children's rows say they stopped once it is continued |
+| A `quit` is told at the next start, once per child, to the first that still exists of: the session owed its report, the one that gave the turn (`delegated_turns`), its `askedBy` (`quitNotices`). **No requester that is itself stopped by a quit** is told, at the start or later: it waits for the person's Continue | An asker that delegated without waiting was at rest, not cut, and its report mark used to be dropped: it never heard. Waking it once costs a turn; never hearing costs the work. An orchestrator the same quit cut would be resumed at launch with nobody there, and that turn would clear its own "stopped" mark before the person saw it; its children's rows say they stopped once it is continued |
 | The orchestrator's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session list` (#690) names such a child `stopped` and leaves the reason to `status`: it is a list for cleaning up, where what matters is that the child's work is not over |
 | The screen shows it beside the state: the inbox row's word and **Continue**, the sidebar mark's ring (only while the stopped turn's answer is unread, #1549) and tooltip, a line above the composer (product-spec FR-15) | The state alone looks the same for a stopped turn and a finished one; Continue is the one message that goes on |
 | `CLAUDE_CODE_MAX_RETRIES` is left as the CLI sets it | Its three minutes outlast most drops; a longer budget would hold a turn hostage through a long outage |
@@ -3330,7 +3250,7 @@ trashed session's watched rows are settled `gone` and their senders told (`party
 The end of the first turn that is the work's (`reportToPersonIfOwed`, for a turn no one else is owed and the person did not start) is a report in the person's thread: Centralu's
 words (`personReportLine`: how the turn ended, a count of tasks, nothing of the session's words), the session's last response as its own relayed message beside them, the
 `failed` kind as a fact; the thread goes to `review`, so the turns after it are the person's own and are not reported. A turn that left the session's own background work
-running is a pause: the thread stays `running`, the same count of tasks is said once, and the turn that work's end starts is the report. A turn a quit cut (the next start found the session mid-turn with no process, or a kept process could not be re-attached) is reported as the `quit` it was, and the thread goes to `review`. Not done (#1463): a pause whose background work ends with no turn leaves the thread `running` (report marks have a 60 s settle for this; the person's thread has none), and a first send that throws after the session started leaves its thread `running`. Also not done: a session started on a linked machine has no thread.
+running is a pause: the thread stays `running`, the same count of tasks is said once, and the turn that work's end starts is the report. A turn a quit cut (the next start found the session mid-turn with no process) is reported as the `quit` it was, and the thread goes to `review`. Not done (#1463): a pause whose background work ends with no turn leaves the thread `running` (report marks have a 60 s settle for this; the person's thread has none), and a first send that throws after the session started leaves its thread `running`. Also not done: a session started on a linked machine has no thread.
 
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
@@ -3862,11 +3782,11 @@ the person's Continue would.
   update puts the old one back, a second update, a rollback) leaves the lists and writes its own with the turns it cuts,
   the continued ones included, so the host after it continues them; a Continue the tool takes while the host is leaving
   is left to that next host, which sends the note, writes the line and tells the requester: a host leaving for a second
-  update writes no line of its own for it, so the conversation shows one Continue. A person's quit or a swap lists nothing,
+  update writes no line of its own for it, so the conversation shows one Continue. A person's quit lists nothing,
   so there the line is written: it is the row that carries the conversation past the mark of the list still standing. Nothing expires: a list is the next start's, whenever it comes,
   on that machine's own clock. A list of another format continues nothing and is left to the host that wrote it.
 - **Continued.** A listed session the start finds mid-turn with no process stays `working` (no "stopped" mark, no quit
-  notice), its owed report and its delegated turn kept as a kept process's are, and once the start is done it is woken
+  notice), its owed report and its delegated turn kept, and once the start is done it is woken
   and given Centralu's note through Centralu's channel (`deliverMail`, no message of the person's): "Centralu on this
   machine was updated while your turn was running, which stopped the turn before it finished. Continue where you stopped.
   Check what already happened before repeating a step." Until the note is in, a wake from elsewhere (a window that sees
@@ -3928,14 +3848,11 @@ the person's Continue would.
   Stop, it was archived or deleted. A Stop still on its way when the host stops is not taken: that session is listed and
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that
   work with its process and is not continued as a turn, but its agent is told (above). One whose tool cannot take it up again
-  ends as a kept process that could not be re-attached does (`turnLostInSwap`): `quit`, and its report or its requester
-  told it stopped.
-- **A swap's cut is continued the same way** (#1966). A turn a host swap cut that its tool cannot take over (a kept process that could
-  not be re-attached; ACP, which reopens the conversation in a new process and so marks `takesOverTurn = false`) gets the same Continue
-  through the same door (`HostTenure.sendUpdateNote`, `continueLostTurn` from `adoptKept`), the state kept `working` while the new
-  process comes up (`continuingTurns`). Only when that send fails does it end as above. A turn cut by the person's own quit (`markQuit`,
-  no list, no swap) is not continued, as before (#1947). A kept process that could not be re-attached is stopped first and waited for (up to 5 s, then killed)
-  before its conversation is resumed, so two CLIs do not write one transcript.
+  ends as a crash's does (`turnLostInSwap`): `quit`, and its report or its requester told it stopped.
+- **A swap's cut is continued the same way** (#1966). Since #1895 step 4 PR 1 a swap's drain is a stop for an update
+  (§4.2), so the turns it cuts are listed and continued as above, through the same door (`HostTenure.sendUpdateNote`),
+  the state kept `working` while the new process comes up (`continuingTurns`). Only when that send fails does it end as
+  above. A turn cut by the person's own quit (`markQuit`, no list) is not continued, as before (#1947).
 - **Its caller hears nothing of the cut** (#1966). The update used to send one notice per cut child, each waking the parent's turn
   for no decision. Now the parent is told nothing until the continued turn ends; that report carries one line, "An update of
   Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set before the Continue goes in and dropped if it fails, `ChildOwnership.noteContinuedCut`; the machine's host
@@ -4358,7 +4275,7 @@ report from the API, and the screen's Rebuilds tooltip says so.
 | `compaction` compaction | A `compaction` event, or `conversation_reset` (Claude Code's /clear): the next request begins with a summary or nothing the cache has seen |
 | `thread_restart` thread restart | Codex's thread restarted so it takes an attached or detached app (`sessionAppsChanged`, at once or when the turn ends) |
 | `instructions` tools changed | Claude took an attached or detached app at once (its tool list is part of the prompt), or the orchestrator restarted for a skill or MCP change |
-| `launch_settings` launch settings changed | A keeper-retained process restarted because its adapter launch fingerprint changed or the previous build had not recorded one (#589); an idle process restarts now, a working process after its turn; a change of the project's trust does the same for the project's live sessions (#663) and says so in the conversation |
+| `launch_settings` launch settings changed | A live process restarted because its adapter launch fingerprint changed or the previous build had not recorded one (#589); an idle process restarts now, a working process after its turn; a change of the project's trust does the same for the project's live sessions (#663) and says so in the conversation |
 | `expired` cache expired | Idle longer than the lifetime the API reported for this lane's last write (Claude's `cache_creation` split: `ephemeral_1h_input_tokens` or `ephemeral_5m_input_tokens`) |
 | `probably_expired` probably expired | Idle more than 5 minutes when no lifetime was reported (Codex never reports one; a Claude lane that has not written yet) |
 | `unknown` | None of these, including idle shorter than the reported lifetime |
@@ -4408,7 +4325,7 @@ Counts, percentages and names only: no content.
 - **Tokens per hour** (`usage_buckets`): the requests `CacheLedger` already counts (§6.1), added up by `UsageRecorder`
   (`sessions/usage-recorder.ts`) into one bucket per hour, session, project, tool, model and machine (`''` for this host's own
   requests): requests, uncached input, cache read, cache write (and the part of it the API said stays cached 5 minutes or an hour,
-  `cacheTtl`, and since #1492 the API's own split of the writes into one hour and five minutes), output, the rebuilds by cause and what the rebuilds wrote (`rebuild_tokens`, v63). Buckets are written once a minute and at drain (`disposeAll`, `detachAll`), one
+  `cacheTtl`, and since #1492 the API's own split of the writes into one hour and five minutes), output, the rebuilds by cause and what the rebuilds wrote (`rebuild_tokens`, v63). Buckets are written once a minute and at drain (`disposeAll`), one
   upsert each that **adds** to the row, so a restart or a swap midway through an hour only adds. A write that fails keeps the buckets
   for the next minute. The model comes from the request when the tool says which served it (Claude's `message.model`, so a subagent or a fallback on
   another model is counted under its own), else from the session's setting (Codex: `by: model` is then the session's configured model, a known limit).

@@ -1,6 +1,6 @@
 # Removing the keeper's agent-holding and the live swap (#1895 step 4)
 
-> **Status: design, not built.** The owner decided option C of #1895 (2026-11-03, confirmed 2026-11-06): agents are no
+> **Status: PR 1 (host: no held children) built; PRs 2 to 8 design, not built.** The owner decided option C of #1895 (2026-11-03, confirmed 2026-11-06): agents are no
 > longer held across an update on any machine, every update is stop-and-continue, and the supervisor role, credential
 > issuance (#1405) and background mode stay, re-homed. This document is step 4. Step 3 (the macOS release app's host
 > stops handing its children to the keeper, behind one switch, with a handover from a holding keeper, §6) ships
@@ -112,7 +112,9 @@ becomes always true and then goes.
 first test. `control-updates.spec.ts` (220) loses the old-keeper refusal. `quit-dialog.spec.ts` and
 `background.spec.ts` stay.
 
-**Scripts and CI.** `keeper-children-integration.mjs` (219), `keeper-handoff-integration.mjs` (543),
+**Scripts and CI.** `keeper-children-integration.mjs` (219) went in PR 1, not PR 2: no host asks for children any
+more, and its remaining direct-path checks moved to the `update` scenario of `keeper-integration-relaunch.mjs`
+(registered in `keeper-integration.mjs`). `keeper-handoff-integration.mjs` (543),
 `keeper-content-integration.mts` (353) and `keeper-integration-swap.mjs` (296) go. `keeper-integration.mjs` with its
 harness, lifecycle and relaunch parts, `keeper-test-processes.mjs` and `shell-integration.mts` stay. The `keeper e2e`
 job runs what stays. The `keeper e2e (linux)` job keeps only the crate's unit tests, since `host_proc` supervises the
@@ -198,8 +200,8 @@ security-boundaries.md, runtime-lessons.md and the Korean mirrors. Line counts a
 
 | PR | Deletes | Moves or changes | Must pass | Real-environment check | ≈ lines out |
 |---|---|---|---|---|---|
-| 1. Host: no held children | `agent-host/src/keeper/*`, `adoptKept`, `keptSessions`, detach mode, the adapters' `detach()`, `strays.ts` rule 3, keeper-only tests. Carries this doc | Every ending is a stop or a stop for an update | `pnpm verify`, `CI=1 pnpm e2e`, the Windows and macOS CI jobs | macOS packaged: kill the host mid-turn with a terminal open. The keeper restarts it, the turn shows stopped with Continue, and no agent CLI is left running (process table). Remote serve: an update from a hub still continues a turn | 3,900 |
-| 2. Keeper: no children service | `keeper/children/*`, `os/unix/children.rs`, the exit-watch backends, the children lines of `server/host.rs`, `keeper-children-integration.mjs`, step 3's switch (§6) | `children` answers an empty list. An incoming handoff whose snapshot carries a child table is refused (§6): the sending keeper rolls back and carries on | `cargo test` of the crate on macOS and Linux, the `keeper e2e` job | macOS packaged: start, open a terminal, run a Run command, quit with background mode on and off | 4,100 |
+| 1. Host: no held children | `agent-host/src/keeper/*`, `adoptKept`, `keptSessions`, detach mode, the adapters' `detach()`, `strays.ts` rule 3, keeper-only tests, `keeper-children-integration.mjs` (its remaining checks moved to the `update` scenario of `keeper-integration-relaunch.mjs`). Carries this doc | Every ending is a stop or a stop for an update | `pnpm verify`, `CI=1 pnpm e2e`, the Windows and macOS CI jobs | macOS packaged: kill the host mid-turn with a terminal open. The keeper restarts it, the turn shows stopped with Continue, and no agent CLI is left running (process table). Remote serve: an update from a hub still continues a turn | 3,900 |
+| 2. Keeper: no children service | `keeper/children/*`, `os/unix/children.rs`, the exit-watch backends, the children lines of `server/host.rs`, step 3's switch (§6). `keeper-children-integration.mjs` already went in PR 1 | `children` answers an empty list. An incoming handoff whose snapshot carries a child table is refused (§6): the sending keeper rolls back and carries on | `cargo test` of the crate on macOS and Linux, the `keeper e2e` job | macOS packaged: start, open a terminal, run a Run command, quit with background mode on and off | 4,100 |
 | 3. Window: an update and another build are a stop | the window's `switch`/`upgrade` calls, `switch_host_build`, the swap half of `switch-plan.ts`, `relaunch-swap.ts`, the build bar's progress, the start-up swap wait (#580), the relaunch grace | "Apply now" and the build bar call `stop {forUpdate}` and start their own keeper. `autoApplyDecision`. The owner's texts. `relaunch.spec.ts` rewritten | `pnpm verify`, `CI=1 E2E_BROWSER=webkit pnpm e2e`, the keeper relaunch script | macOS packaged: "Apply now" with a running turn, a terminal, a Run command and a pending card. An older build's window opened against a newer keeper, and the reverse | 1,400 |
 | 4. Keeper: no swap | `keeper/swap.rs`, `server/switch.rs`, the swap tests, `keeper-integration-swap.mjs`, the swap's claims in `source.rs`, swap phases in `server/push.rs` | `switch` and `upgrade` answer `gone`. Closes #2083: the gap where the view says `done` before the host's `stopsForUpdate` line is read exists only after a swap | `cargo test`, `keeper e2e` | macOS packaged: a window of the previous release attaches to this keeper and presses "Switch": it shows the refusal and offers "Restart completely" | 1,800 |
 | 5. Host: no swap | `standby`, `activate`, `drain` lines, `--standby`, `Store.inspect`, the swap open and deferral, the swap-only session tests, `store-swap.test.ts` | `view-handover` re-homed to the stop for an update (if question 2 says keep) | `pnpm verify`, a store fixture with `deferred_migrations` owed is opened and run | macOS packaged: an update with an open app view in a conversation. Remote serve: a hub's update and rollback on a Linux and a Windows machine | 1,900 |
