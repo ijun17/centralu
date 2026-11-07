@@ -99,6 +99,12 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [machine({})]).hubAuto('m1')).toEqual({ ok: false, error: 'Box runs a Centralu from before "Allow auto from a linked computer"; update it there' })
   })
 
+  it('does not wait on a machine that never answers its "Allow auto from a linked computer": that is the reason it gives', async () => {
+    const stalled = { ...machine({}), call: () => new Promise<never>(() => {}) }
+    const reader = linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 })
+    expect(await reader.hubAuto('m1')).toEqual({ ok: false, error: 'did not answer within 30 ms' })
+  })
+
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
   it('creates a machine’s session under the preset the caller gives, normal when it gives none', async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })

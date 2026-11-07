@@ -396,7 +396,8 @@ export function linkedSessions(
 
     hubAuto(machineId) {
       return viaMachine(machineId, async (m) => {
-        const state = await askHubAuto((method, params) => m.call(method, params))
+        // Within the lookup bound like the reads here: a machine that never answers is a refusal in a sentence, not a call that waits for the client's own limit
+        const state = await askHubAuto((method, params) => boundedAsk(m, method, params))
         if (state === 'older') throw new Error(`${m.name} runs a Centralu from before "Allow auto from a linked computer"; update it there`)
         return { allowed: state === 'on' }
       })
