@@ -3,10 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handoffPrompt, SESSION_HANDOFF, type AdapterCapabilities, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
+import { SessionManager } from './manager.js'
 import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -46,7 +45,6 @@ class Handle implements SessionHandle {
   }
   interrupt() {}
   async dispose() {}
-  async detach() {}
 }
 
 class Adapter implements AgentAdapter {
@@ -67,8 +65,6 @@ class Adapter implements AgentAdapter {
     return h
   }
 }
-
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
 
 /*
  * The call bound counts from the call, card and all, so a short one also cut short calls meant to finish: on a loaded
@@ -101,7 +97,6 @@ beforeEach(() => {
   codex = new Adapter('codex')
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', codex]])
   mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {}, undefined, join(root, 'worktrees'), {
-    processes,
     handoffTimings: timings,
   })
   mgr.prLookup = async () => null

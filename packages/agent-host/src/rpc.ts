@@ -77,8 +77,6 @@ export type RpcServices = {
   views?: ViewHost
   /** An app view inside a conversation (M4 B-1) — the instance a session's app call opened. Closing it also updates this side's record */
   inlineViews?: InlineViews
-  /** Pids of the children the keeper holds for this host (#280 step 2) — never offered as strays */
-  heldPids?: () => Promise<number[]>
   /** The themes folder (#312, themes.ts) */
   themes?: ThemeFiles
   /** The installed agent CLIs, and moving sessions to them (#297, agent-versions.ts) */
@@ -158,15 +156,13 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
     return themes
   }
-  /** The pids the keeper holds for this host, or null when the keeper could not answer: a stop must not guess (`stopStrays`) */
-  const heldOrUnknown = async (): Promise<number[] | null> => (heldPids ? heldPids().catch(() => null) : [])
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw rpcError('Terminals are unavailable')
     return terminals
@@ -652,17 +648,8 @@ export function createRpcHandler(
     },
     'grid.get': async () => mgr.layout.grid(),
     'grid.set': async (p) => mgr.layout.setGridView(p.panels),
-    /*
-     * Not listed with no protection (#841 item 7): a keeper that could not answer made every agent it holds a stray,
-     * offered to be stopped on quit. The stop refuses that case already; the list says it too.
-     */
-    'processes.strays': async () => {
-      const held = await heldOrUnknown()
-      if (held === null) throw rpcError('The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again')
-      return findStrays(mgr.projectRegistry.folderRoots(), process.pid, held)
-    },
-    'processes.stop': async (p) =>
-      stopStrays(p.pids, mgr.projectRegistry.folderRoots(), process.pid, await heldOrUnknown()),
+    'processes.strays': async () => findStrays(mgr.projectRegistry.folderRoots(), process.pid),
+    'processes.stop': async (p) => stopStrays(p.pids, mgr.projectRegistry.folderRoots(), process.pid),
     'projects.list': async () => mgr.projectRegistry.listProjects(),
     'projects.origin': async (p) => ({ origin: await mgr.files.projectOrigin(p.projectId) }),
     'projects.reorder': async (p) =>

@@ -9,7 +9,6 @@ import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
-import { connectHeldChildren } from './keeper/held-children.js'
 import { chooseDataDir, dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
@@ -53,13 +52,15 @@ import { realOs } from './os/real.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
-import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
+import { Shutdown, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { SystemEndNotice, askSystemStopping } from './lifecycle/system-end.js'
 import { clearStoppedMark, markQuit, takeSystemEnd, updateResumeFolder, writeSystemEnd } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
-import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
+import { bridgeAddress, ControlChannel, onDrain, standby, viewPort } from './swap-control.js'
+import { endHeld, refuseStandby } from './lifecycle/keeper-held.js'
+import { keeperHeldIo } from './keeper/children-client.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
 import { linkedSessions } from './links/linked-sessions.js'
@@ -100,7 +101,7 @@ const launch = takeLaunchEnv()
  * PowerShell it takes runs while the store opens; awaited at `work job`, before anything else is started.
  */
 let ptyBroker: PtyBroker | null = null
-if (workJobWanted(launch)) {
+if (workJobWanted()) {
   try {
     ptyBroker = PtyBroker.start()
   } catch (err) {
@@ -108,7 +109,7 @@ if (workJobWanted(launch)) {
     console.error(`[agent-host] ${(err as Error).message}; terminals start in the host`)
   }
 }
-const workJob = joinWorkJob(launch)
+const workJob = joinWorkJob()
 /*
  * The token, when the launcher hands it over on stdin (#538) rather than in the environment. Read before the control
  * channel and the parent watch take stdin, which then see only what follows it. Without it no client could reach
@@ -225,6 +226,15 @@ const swapping = values.standby === true && control !== null
 if (values.standby && !control) {
   console.error('[agent-host] --standby is only meaningful under a keeper; starting normally')
 }
+if (swapping && dbPath !== ':memory:') {
+  // A keeper of beta.48 or older still holding the running host's children swaps to this build even after this build's
+  // keeper refused its handoff: not standing by ends that swap with the running host untouched (`keeper-held.ts`)
+  const why = await refuseStandby(keeperHeldIo(dirname(dbPath)))
+  if (why) {
+    console.error(`[agent-host] not standing by: ${why}`)
+    process.exit(1)
+  }
+}
 if (swapping) {
   await standby({
     control: control!,
@@ -255,6 +265,14 @@ try {
 if (!lock.ok) {
   refuse(lockConflictMessage(lock.holder ?? lock.heldByPid, lock.lockPath))
   process.exit(1)
+}
+/*
+ * Under a keeper of beta.48 or older, what an earlier build's host gave it to hold, now that no host is up to take it
+ * over: ended before the sessions are restored, so a turn it cut shows stopped and its Continue starts the only CLI
+ * (`keeper-held.ts`). A standby that got here took over from a host that held nothing (its check above).
+ */
+if (launch.underKeeper && !swapping && dbPath !== ':memory:') {
+  await endHeld(keeperHeldIo(dirname(dbPath)), (line) => console.error(line))
 }
 /*
  * The lock is released by one exit hook, which runs last whichever path led to the exit (HO5). A
@@ -326,17 +344,12 @@ try {
 const adapters = createAdapters(personOpener(ptyBroker))
 
 /*
- * Under the keeper, agents, terminals and project commands are spawned by the keeper, not by this
- * host, and a restart leaves them running (#280 step 2, keeper/held-children.ts). What a previous
- * host left there is taken over below. Without a keeper (`pnpm dev`, e2e, a debug app, Windows)
- * this is null and everything is spawned here.
+ * Agents, terminals and project commands are spawned by this host and end with it, under a keeper too: no host uses
+ * the keeper's children service any more (#1895 step 4)
  */
 start.at('work job')
 const workJobSaid = workJobLine(await workJob)
 if (workJobSaid) console.error(workJobSaid)
-
-start.at('keeper children')
-const held = launch.underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
 
 start.at('services')
 /*
@@ -370,7 +383,6 @@ const mgr = new SessionManager(
   // Worktrees are created next to the data folder — dev and the packaged app never touch each other's worktrees
   join(dirname(dbPath), 'worktrees'),
   {
-    ...(held ? { processes: held.processes, keptSessions: held.kept.sessionIds } : {}),
     ...(updateResume ? { updateResume } : {}),
     // The last host recorded that the system was ending (#1397)
     ...(systemEnd ? { systemEnd } : {}),
@@ -451,17 +463,10 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   tellsNow: (id) => mgr.mail.tellsMailNow(id),
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
 })
-/*
- * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
- * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
- */
-const terminals = new TerminalService(screens.push, held?.ptys ?? (ptyBroker ? brokerPtyModule(ptyBroker) : undefined))
+// Terminal and command output can arrive before the server exists: a restarted one writes as it starts (HO11, lifecycle/gate.ts)
+const terminals = new TerminalService(screens.push, ptyBroker ? brokerPtyModule(ptyBroker) : undefined)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
-const commandRuns = new CommandRunner(screens.push, held?.ptys)
-if (held) {
-  terminals.adopt(held.kept.terminals)
-  commandRuns.adopt(held.kept.runs)
-}
+const commandRuns = new CommandRunner(screens.push)
 // The terminals and Run commands a linked hub's update ended come back (#1902), before any screen asks for them
 restartEnded(mgr.tenure.takeUpdateEnded(), {
   projectFolders: new Set(store.projects.listProjects().map((p) => mgr.cwdOfProject(p.id))),
@@ -771,7 +776,6 @@ const router: Router = new Router({
     externalApps,
     views,
     inlineViews,
-    heldPids: held?.heldPids,
     machines: links,
     stopHost: launch.startedByServe && !launch.underKeeper ? (o) => stopFromRequest(o) : undefined,
     // `host.stop {ifIdle}`: the check and the refusal of new calls in one step (#1224, lifecycle/stop-gate.ts)
@@ -882,8 +886,8 @@ events.open((e) => server.broadcast(e))
  */
 let stopActivity: () => void = () => {}
 const shutdown = new Shutdown({
-  plan: (mode, handOver) =>
-    stopPlan(mode, handOver, {
+  plan: (handOver) =>
+    stopPlan(handOver, {
       recordEnded: () => {
         if (!updateResume || !stoppingForUpdate) return
         try {
@@ -918,7 +922,6 @@ const shutdown = new Shutdown({
       views,
       server,
       store,
-      children: held?.children ?? null,
     }),
   log: (line) => console.error(line),
   stopLog,
@@ -944,7 +947,8 @@ console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
  * What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts), and that this host
  * takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through the keeper
  */
-if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null, stopsForUpdate: true } }))
+// It holds no agents: no host uses the keeper's children service any more (#1895 step 4), so a swap ends them as an update's stop does
+if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: false, stopsForUpdate: true } }))
 /*
  * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready, where the steps a
  * swap left for later run: by then the host it replaced is gone, so a host failing before ready never leaves the
@@ -998,9 +1002,7 @@ sleeper.start()
 // A session at rest over the lower share is compacted before its next turn (#1451)
 mgr.startSelfCompaction()
 
-// The agents a previous host left running come back live, mid-turn if they were (#280 step 2)
-if (held) void mgr.tenure.adoptKept(held.kept.agents).then(() => mgr.launches.refreshToolDefinitions())
-else void mgr.launches.refreshToolDefinitions()
+void mgr.launches.refreshToolDefinitions()
 
 /*
  * The activity report the keeper's idle rule reads (#280, keeper-link.ts). Only under a keeper:
@@ -1016,47 +1018,37 @@ if (launch.underKeeper) {
 
 /*
  * Every way of ending, wired to the one shutdown (lifecycle/endings.ts): signals (and one held
- * while starting), a crash, the parent's pipe with `--watch-parent`, `host.stop`, the keeper's
- * `stop` on the child service, and its drain for a swap.
+ * while starting), a crash, the parent's pipe with `--watch-parent`, `host.stop`, the stop line on
+ * the control channel, and the keeper's drain for a swap.
  */
 start.at('endings')
 const endings = wireEndings({
   proc: process,
   signals,
-  heldChildren: held !== null,
-  leave: (mode, handOver) => void shutdown.leave(mode, handOver),
+  leave: (handOver) => void shutdown.leave(handOver),
   force: (why) => shutdown.force(why),
   record: crashRecorder(join(dirname(dbPath), 'host-errors.log'), (line) => console.error(line)),
   stdin: process.stdin,
   watchParent: values['watch-parent'] === true,
   log: (line) => console.error(line),
-  // The person quit Centralu here: a linked hub must not start a host in this folder by itself (#1143)
-  quit: () => {
-    if (dbPath !== ':memory:') markQuit(dirname(dbPath))
-  },
 })
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()
-// The keeper is stopping for good and asks this host to stop its children the way it always did
-held?.children.on('stop', endings.keeperStop)
 
 /*
  * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
- * detach, let go of the lock, say so, exit. The next host takes over from there.
+ * stop its agents, terminals and commands, let go of the lock, say so, exit. The next host takes over from there.
  */
 if (control && launch.underKeeper) {
   onDrain(control, {
     drain: hostDrain,
-    // A swap: the next host is already waiting, and it takes the open views over whether or not it
-    // takes the agents. With the keeper's child service a detach really hands agents, terminals and
-    // commands over (step 2); a signal arriving mid-drain runs no second, different ending.
+    // A swap: the next host is already waiting, and it takes the open views over. The agents end: that is an update's
+    // stop, so the next host continues what it ends (#1895). A signal arriving mid-drain runs no second, different ending.
     detach: () => {
-      const mode = signalMode(held !== null)
-      // A swap that holds no agents ends them: that is an update's stop, so the next host continues what it ends (#1895)
-      if (mode === 'stop') beginStopForUpdate()
-      return shutdown.stopServices(mode, true)
+      beginStopForUpdate()
+      return shutdown.stopServices(true)
     },
-    keepsAgents: KEEPS_AGENTS_ACROSS_SWAP && held !== null,
+    keepsAgents: false,
     // The data folder is the next host's from here: nothing this one learns later is written in it
     release: () => {
       systemEnding.close()

@@ -2,7 +2,6 @@ import { errorMessage } from '@cc/protocol'
 import { isObj } from '../json-value.js'
 import { ensureToolPath } from '../env-path.js'
 import { usesShippedConpty } from '../os.js'
-import type { CommandTag, TerminalTag } from '../keeper/tags.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
 /**
@@ -22,13 +21,7 @@ export type Pty = {
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
-  /** Lets go of the pty and leaves the shell running — only a pty the keeper owns can (#280 step 2) */
-  detach?(): Promise<void>
 }
-/**
- * node-pty, or the keeper's pty service with the same surface (#280 step 2, `keeper/keeper-pty.ts`).
- * The spawn options also carry a `tag`, which node-pty ignores and the keeper stores for the next host.
- */
 /** Whether a loaded module has what `PtyModule` asks of node-pty: a `spawn` */
 export function isPtyModule(m: unknown): m is PtyModule {
   return isObj(m) && typeof m.spawn === 'function'
@@ -53,8 +46,6 @@ export type PtyStart = {
   cols: number
   rows: number
   cwd: string
-  /** What the next host needs to take this pty over from the keeper (ignored by node-pty) */
-  tag: TerminalTag | CommandTag
 }
 
 export class PtySlot {
@@ -105,7 +96,6 @@ export class PtySlot {
         rows: opts.rows,
         cwd: opts.cwd,
         env: { ...process.env, TERM: 'xterm-256color' },
-        tag: opts.tag,
       })
       this.wire(handle)
     } catch (err) {
@@ -113,7 +103,7 @@ export class PtySlot {
     }
   }
 
-  /** Follows `handle`: a new one, or one the keeper kept for this host */
+  /** Follows `handle`, a pty just started */
   wire(handle: Pty): void {
     this.pty = handle
     handle.onData((data) => {
@@ -175,11 +165,6 @@ export class PtySlot {
   kill(): void {
     if (this.pty) killTree(this.pty, 'SIGKILL')
   }
-
-  /** Lets go of the pty and leaves it running — only a pty the keeper owns can (#280 step 2) */
-  detach(): Promise<void> | undefined {
-    return this.pty?.detach?.()
-  }
 }
 
 /**
@@ -231,7 +216,7 @@ let warnedInternals = false
  * here brings that back to the baseline.
  *
  * These are node-pty's private fields, so each is checked before it is touched. A pty that has none (macOS and Linux,
- * the keeper's, a test's) is left alone; one that looks like node-pty's Windows pty but lacks them says so once on
+ * a test's) is left alone; one that looks like node-pty's Windows pty but lacks them says so once on
  * stderr, and is left as node-pty leaves it: never a throw on the way out of a terminal.
  */
 export function releaseEnded(handle: Pty): void {

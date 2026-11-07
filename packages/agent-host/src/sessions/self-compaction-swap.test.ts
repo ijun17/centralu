@@ -5,17 +5,15 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { tempRoot } from '../temp-dir.test-helpers.js'
 import { FakeAdapter, FakeHandle, projectDirs } from './manager.test-helpers.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
+import { SessionManager } from './manager.js'
 import { THEN_SETTLE_MS } from './self-compaction.js'
 
 /**
- * A `compact_self` with a `then` across a host swap and a restart (#2024). Two session managers over one store, as the swap tests do
- * (background-tasks-swap.test.ts): the leaving host lets go of its processes (`detachAll`), the next one adopts the kept process or comes up
- * with none. The step goes exactly once, and when the new host cannot tell whether the compaction happened the session is told.
+ * A `compact_self` with a `then` across a restart (#2024). Two session managers over one store: the leaving host ends its processes
+ * (`disposeAll`), the next one comes up with none. The step goes exactly once, and when the new host cannot tell whether the compaction
+ * happened the session is told.
  */
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
 const STEP = 'Continue with step 3 of the plan in docs/x.md'
 
 let store: Store
@@ -36,12 +34,12 @@ afterEach(async () => {
   store.close()
 })
 
-function host(kept: ReadonlySet<string> = new Set()) {
+function host() {
   const claude = new FakeAdapter()
   claude.compactCommand = (focus) => (focus ? `/compact ${focus}` : '/compact')
   ;(claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tempRoot('compact-then-home-'), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tempRoot('compact-then-home-'))
   hosts.push(mgr)
   return { mgr, claude, rpc: createRpcHandler(mgr, adapters) }
 }
@@ -61,7 +59,7 @@ async function asking(a: ReturnType<typeof host>, until: 'asked' | 'sent' | 'com
     expect(h.sent).toEqual(['hello', '/compact'])
   }
   if (until === 'compacted') {
-    // The compact turn: the tool starts it and reports the compaction; it is still running when the host swaps
+    // The compact turn: the tool starts it and reports the compaction; it is still running when the host leaves
     h.emitEvent({ type: 'state_change', sessionId: s.id, state: 'working' })
     h.emitEvent({ type: 'compaction', sessionId: s.id, failed: false })
   }
@@ -75,57 +73,16 @@ const lastHandle = (h: ReturnType<typeof host>): FakeHandle => {
 }
 const stepsSentTo = (h: FakeHandle) => h.sent.filter((t) => t.includes(STEP))
 
-describe('compact_self then across a host swap (#2024)', () => {
-  it('sends the step once from the new host when the compaction was reported before the swap, and the leaving host sends nothing', async () => {
+describe('compact_self then across a restart (#2024)', () => {
+  it('wakes a session with no process for the step after a restart, when the compaction was reported, and the leaving host sends nothing', async () => {
     const a = host()
     const { id, h } = await asking(a, 'compacted')
-    await a.mgr.tenure.detachAll()
-    // The kept compact turn ends after the old host let go: it must not act on it
+    await a.mgr.tenure.disposeAll()
+    // The compact turn ends after the old host let go: it must not act on it
     h.finishTurn()
     await settle()
     expect(stepsSentTo(h)).toEqual([])
-
-    const b = host(new Set([id]))
-    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
-    const next = lastHandle(b)
-    // The adopted process is still in the compact turn: the step is not put into it, and follows its end
-    await settle()
-    expect(stepsSentTo(next)).toEqual([])
-    next.finishTurn()
-    await settle()
-    await expect.poll(() => stepsSentTo(next)).toHaveLength(1)
-    expect(next.origins[next.sent.findIndex((t) => t.includes(STEP))]).toEqual({ kind: 'channel', server: 'centralu' })
-    expect(next.sent.find((t) => t.includes(STEP))).toMatch(/The compaction you asked for with compact_self is done/)
-    expect(events.filter((e) => e.type === 'notice' && e.sessionId === id && e.text === 'Centralu sent the agent its next step after the compaction')).toHaveLength(1)
-    // Nothing is left to send twice: a host that starts again finds no step
-    expect(store.settings.appSetting(`compact_then:${id}`)).toBeNull()
-    const c = host(new Set([id]))
-    await c.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
-    expect(stepsSentTo(lastHandle(c))).toEqual([])
-    expect(stepsSentTo(next)).toHaveLength(1)
-  })
-
-  it('tells a kept process that is in a turn, quietly and with the text of its step, when the swap came before the compaction was known done', async () => {
-    for (const until of ['asked', 'sent'] as const) {
-      const a = host()
-      const { id } = await asking(a, until)
-      await a.mgr.tenure.detachAll()
-      const b = host(new Set([id]))
-      await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
-      const next = lastHandle(b)
-      expect(stepsSentTo(next), until).toEqual([])
-      expect(next.nudges, until).toEqual([expect.stringContaining(STEP)])
-      expect(next.nudges[0], until).toMatch(/changed hosts/)
-      expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /changed hosts/.test(e.text)), until).toBe(true)
-      expect(store.settings.appSetting(`compact_then:${id}`), until).toBeNull()
-    }
-  })
-
-  it('wakes a session with no process for the step after a restart that has no keeper, when the compaction was reported', async () => {
-    const a = host()
-    const { id } = await asking(a, 'compacted')
-    await a.mgr.tenure.detachAll()
-    // No kept process: the host after it starts the session's tool anew
+    // The host after it starts the session's tool anew
     const b = host()
     b.mgr.startSelfCompaction()
     await expect.poll(() => (b.claude.last ? stepsSentTo(b.claude.last).length : 0)).toBe(1)
@@ -150,7 +107,7 @@ describe('compact_self then across a host swap (#2024)', () => {
     for (const until of ['asked', 'sent'] as const) {
       const a = host()
       const { id } = await asking(a, until)
-      await a.mgr.tenure.detachAll()
+      await a.mgr.tenure.disposeAll()
       // The restarted host has no process for it: the note is a turn that wakes it, not a note that waits in the store for someone to type
       const b = host()
       b.mgr.startSelfCompaction()

@@ -2,7 +2,7 @@
 /**
  * The keeper end to end (#280, option C steps 1 and 3), with the real binary and the real host.
  *
- *   node scripts/keeper-integration.mjs [--no-build] [--only <scenario>[,<scenario>]]
+ *   node scripts/keeper-integration.mjs [--no-build] [--only <scenario>[,<scenario>]] [--claude]
  *
  * Builds the desktop binary with `cargo build` into a target folder under /tmp (never
  * `tauri build`, never anything under `target/release/bundle`), bundles the repository's host with
@@ -21,8 +21,16 @@
  *     ends itself after the idle limit with nothing attached — but not while a terminal is open;
  *   - an announced relaunch ("Apply now", #352) with background off: the window closing stops
  *     nothing, the window that attaches within the grace is told it is the relaunched one and finds
- *     the same host and the same keeper-held terminal; without an announcement, or once the grace
- *     has run out with no window back, the keeper stops as before;
+ *     the same host and the same terminal, which the host owns; without an announcement, or once the
+ *     grace has run out with no window back, the keeper stops as before;
+ *   - an update is a stop and continue (#1895): the keeper serves no child socket; `stop` with
+ *     `forUpdate` ends the host, every process it started and the keeper, and the host hears it on
+ *     its stdin and leaves no quit mark; the keeper started next opens the terminal again and starts
+ *     the dev server again; a host crash under it ends the processes the host started and reopens no
+ *     terminal; with background mode on and no window attached the host keeps its own children
+ *     running; stop ends the keeper, the host and its children and notes that the person quit.
+ *     `--claude` adds a claude (`haiku`, a few cents) turn that the update cuts and the next host
+ *     continues with Centralu's note, and one that the crash cuts, shown stopped and not continued;
  *   - stop ends everything;
  *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over;
  *   - a keeper started from `<data>/content/<version>/` closes the descriptors it inherited and
@@ -42,8 +50,8 @@
  *   - the drain answers a slow call the host serves itself with a retryable error once the bound
  *     (shortened to 1.5 s here) has passed, and the swap reports what it cut.
  *
- * It needs no model and no network, and CI runs all of it (the `keeper` job in
- * `.github/workflows/build.yml`).
+ * Without `--claude` it needs no model and no network, and CI runs all of it that way (the `keeper`
+ * jobs in `.github/workflows/build.yml`).
  *
  * Every process it starts, and everything those start, is killed before it exits, pass or fail
  * (`keeper-test-processes.mjs`); a failed scenario prints the end of its keeper's and host's logs.
@@ -57,7 +65,7 @@ import { join } from 'node:path'
 import { cleanupOnExit } from './keeper-test-processes.mjs'
 import { BIN, buildKeeper, cleanup, countFailure, failures, HOST_SRC, log } from './keeper-integration-harness.mjs'
 import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, scenarioKeeperDies, scenarioStop } from './keeper-integration-lifecycle.mjs'
-import { scenarioFromACopy, scenarioRelaunch } from './keeper-integration-relaunch.mjs'
+import { scenarioFromACopy, scenarioRelaunch, scenarioUpdate } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
@@ -76,6 +84,7 @@ async function main() {
     'background-on': scenarioBackgroundOn,
     stop: scenarioStop,
     relaunch: scenarioRelaunch,
+    update: scenarioUpdate,
     'busy-holds-idle': scenarioBusyHoldsIdle,
     'keeper-dies': scenarioKeeperDies,
     swap: scenarioSwap,

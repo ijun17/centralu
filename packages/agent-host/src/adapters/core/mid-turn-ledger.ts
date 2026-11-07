@@ -401,10 +401,4 @@ export class MidTurnLedger {
     await this.wire.close?.()
   }
 
-  /** A host swap: the next host resumes the conversation, but not what this one held while it opened (#428) */
-  async detach(): Promise<void> {
-    if (this.phase === 'opening') this.dropQueue('were sent while it was opening, as Centralu restarted,')
-    await this.wire.detach?.()
-    this.phase = 'closed'
-  }
 }

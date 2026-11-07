@@ -3,8 +3,9 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, ProcessSource, Sess
 
 /**
  * The scenarios of a conversation that changes hands while its app-server lives on: a host swap under the keeper, where the
- * new host takes over the process the old one started (`ProcessSource.adopt`, #280). Recorded by `scripts/frames-record.mts`,
- * replayed by `codex/adopt.test.ts`.
+ * new host takes over the process the old one started (`ProcessSource.adopt`, #280). Recorded by `scripts/frames-record.mts`
+ * while a host could let go of a running app-server (no host can since #1895 step 4, so no new recording can be made), replayed
+ * by `codex/adopt.test.ts` for as long as the adapter keeps its adopt path.
  *
  * A scenario has two halves. `before` runs on the session that starts the process and is not recorded (the recording begins
  * at the swap, as a new host's own tap does: it records from the adoption on). `after` runs on the session that adopts, and is
@@ -126,42 +127,4 @@ export async function driveAdopted(
     await handle.dispose()
   }
   return second.side.events
-}
-
-/**
- * Both halves against the real tool: `before` on a session that starts the app-server (`opts.processSource` spawns it, and
- * `process()` names it), then the swap (the first session lets go of the process without closing it), `startRecording`, and
- * `after` on a session that adopts it
- */
-export async function driveSwap(
-  adapter: AgentAdapter,
-  scenario: SwapScenario,
-  firstOpts: CreateSessionOpts,
-  secondId: string,
-  process: () => AgentProcess | null,
-  startRecording: () => void,
-  bound: number,
-): Promise<NormalizedEvent[]> {
-  let first: SessionHandle | null = null
-  const before = side(() => first!, bound, `${scenario.name} (before the swap)`)
-  first = await adapter.createSession(firstOpts, before.emit)
-  let live: AgentProcess | null = null
-  try {
-    await scenario.before(before.side)
-    live = process()
-    if (!live || !first.externalId || !first.detach) throw new Error(`${scenario.name}: nothing to hand over (process ${live ? 'found' : 'missing'}, thread ${first.externalId ?? 'unnamed'})`)
-    await first.detach()
-    startRecording()
-  } catch (e) {
-    // The app-server was never handed over: it ends here, not when the recorder does
-    await first.dispose().catch(() => {})
-    live?.kill('SIGKILL')
-    throw e
-  }
-  try {
-    return await driveAdopted(adapter, scenario, { ...firstOpts, sessionId: secondId }, live, first.externalId, bound)
-  } catch (e) {
-    live.kill('SIGKILL')
-    throw e
-  }
 }

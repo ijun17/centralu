@@ -5,8 +5,7 @@ import { SERVER_OVERLOADED } from '../adapters/overloaded.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { tempRoot } from '../temp-dir.test-helpers.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
+import { SessionManager } from './manager.js'
 import { isCentraluNote, RETRY_NOTE } from '../adapters/input-receipts.js'
 import { DELAYS_MS } from './overload-retry.js'
 
@@ -69,7 +68,6 @@ class Handle implements SessionHandle {
     this.pending = null
   }
   async dispose() {}
-  async detach() {}
 }
 
 class Adapter implements AgentAdapter {
@@ -101,8 +99,6 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() }
-
 const dir = tempRoot('overload-retry-')
 let store: Store
 let events: NormalizedEvent[]
@@ -117,10 +113,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** Whether the host was already marked as leaving when each error was said (a quit or a swap names a turn's end by that) */
+/** Whether the host was already marked as leaving when each error was said (a quit names a turn's end by that) */
 let leavingAtError: boolean[]
 
-function host(kept: ReadonlySet<string> = new Set()) {
+function host() {
   const adapter = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   const mgr: SessionManager = new SessionManager(
@@ -128,11 +124,10 @@ function host(kept: ReadonlySet<string> = new Set()) {
     adapters,
     (e) => {
       events.push(e)
-      if (e.type === 'error') leavingAtError.push(Boolean((mgr.tenure as unknown as { handingOver: boolean; disposing: boolean }).handingOver || (mgr.tenure as unknown as { disposing: boolean }).disposing))
+      if (e.type === 'error') leavingAtError.push(mgr.tenure.disposing)
     },
     undefined,
     dir,
-    { processes, keptSessions: kept },
   )
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }
@@ -249,20 +244,6 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
     expect(b.adapter.created).toHaveLength(0)
   })
 
-  it('a host swap during the wait ends it the same way, so a kept process is not left in a turn nobody continues', async () => {
-    const { a, id } = await working()
-    a.adapter.last.emit(overloaded(id))
-    await a.mgr.tenure.detachAll()
-    expect(errors(id)).toHaveLength(1)
-    expect(errors(id)[0]!.error.message).toMatch(/going to retry this turn, but it restarted first/)
-    const b = host(new Set([id]))
-    await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: new FakeProcess() }])
-    expect(b.session(id).state).toBe('error')
-    await vi.advanceTimersByTimeAsync(DELAYS_MS[0] * 2)
-    expect(a.adapter.last.sent).toHaveLength(0)
-    expect(b.adapter.last.sent).toHaveLength(0)
-  })
-
   it('the note is sent only while the retry stands, even when a restart is waited out between the time and the tool', async () => {
     // A restart under way holds every input (`deferredRestarts`): the note is on its way, not yet handed to the tool
     const hold = async (id: string, a: Awaited<ReturnType<typeof working>>['a']) => {
@@ -346,21 +327,18 @@ describe('a turn the provider ended for want of capacity (#1693)', () => {
 
     it('a host that leaves ends nothing for it: the tool’s turn leaves as any turn does', async () => {
       const { a, id } = await handed()
-      await a.mgr.tenure.detachAll()
+      await a.mgr.tenure.disposeAll()
       expect(errors(id)).toHaveLength(0)
       expect(a.session(id).state).toBe('working')
     })
   })
 
   it('a host that leaves says the turn’s end before it is marked as leaving: the end is the provider’s error, not a stop of the quit’s', async () => {
-    for (const leave of ['disposeAll', 'detachAll'] as const) {
-      leavingAtError = []
-      const { a, id } = await working()
-      a.adapter.last.emit(overloaded(id))
-      await a.mgr.tenure[leave]()
-      expect(errors(id)).toHaveLength(1)
-      expect(leavingAtError).toEqual([false])
-    }
+    const { a, id } = await working()
+    a.adapter.last.emit(overloaded(id))
+    await a.mgr.tenure.disposeAll()
+    expect(errors(id)).toHaveLength(1)
+    expect(leavingAtError).toEqual([false])
   })
 
   it('a message of the person’s that is refused leaves no turn waiting for nothing: the error ends it', async () => {

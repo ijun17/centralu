@@ -1,7 +1,6 @@
 /**
  * A child's exit, reported once its output has all arrived (#428): an agent CLI started here
- * (`adapters/local-process.ts`) or in the keeper (`keeper/agent-process.ts`), a pty the keeper holds
- * (`keeper/keeper-pty.ts`), and an app process (`apps/external/app-process.ts`).
+ * (`adapters/local-process.ts`) and an app process (`apps/external/app-process.ts`).
  *
  * 'exit' can arrive before the last of the output, and that last line is the one a reader needs: a
  * turn's result, a crash's reason. So the report waits for the output's end. A grandchild that

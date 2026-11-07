@@ -32,8 +32,7 @@ describe('the start order', () => {
     expect(START_ORDER.at(-1)).toBe('endings')
   })
 
-  it('joins the work job before anything is started: the keeper children, then the services (#1067)', () => {
-    expect(at('work job')).toBeLessThan(at('keeper children'))
+  it('joins the work job before anything is started: the services (#1067)', () => {
     expect(at('work job')).toBeLessThan(at('services'))
   })
 

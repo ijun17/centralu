@@ -7,7 +7,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * What the interruption watch reaches of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 'handingOver' | 'meta'> & Pick<SessionTrashHost, 'record'>
+export type InterruptionWatchHost = Pick<DelegationHost, 'disposing' | 'emit' | 'meta'> & Pick<SessionTrashHost, 'record'>
 
 /** The line the conversation gets where a turn was lost with its process (#698): Centralu quit, or the system ended under the host (#1397) */
 const LOST_TURN_LINE = {
@@ -54,8 +54,8 @@ export class InterruptionWatch {
   }
 
   private watchReconnecting(sessionId: string): void {
-    // A leaving host starts no clock: its processes still speak while they are let go, and the next host watches them (#698)
-    if (this.host.handingOver || this.host.disposing) return
+    // A quitting host starts no clock: the next host starts its own from the session's next event (#698)
+    if (this.host.disposing) return
     const since = Date.now()
     // The entry stays after it fires, so a later event of the same episode does not start the clock again
     const timer = setTimeout(() => {

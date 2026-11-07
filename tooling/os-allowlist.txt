@@ -201,13 +201,7 @@ packages/agent-host/src/fake-exe.test-helpers.ts
 packages/agent-host/src/fake-exe.test.ts
 packages/agent-host/src/fs-containment.test.ts
 packages/agent-host/src/inline-views.test.ts
-packages/agent-host/src/keeper/agent-process.test.ts
-packages/agent-host/src/keeper/agent-process.ts
 packages/agent-host/src/keeper/children-client.ts
-packages/agent-host/src/keeper/fake-keeper.test-helpers.ts
-packages/agent-host/src/keeper/held-child.ts
-packages/agent-host/src/keeper/held-children.ts
-packages/agent-host/src/keeper/keeper-pty.ts
 packages/agent-host/src/lifecycle/endings.test.ts
 packages/agent-host/src/lifecycle/endings.ts
 packages/agent-host/src/lifecycle/host-process.test.ts
@@ -295,7 +289,6 @@ packages/agent-host/src/sessions/host-leaving.test.ts
 packages/agent-host/src/sessions/housekeeping-commands.test.ts
 packages/agent-host/src/sessions/human-origin.test.ts
 packages/agent-host/src/sessions/interruptions.test.ts
-packages/agent-host/src/sessions/keeper-reattach.test.ts
 packages/agent-host/src/sessions/launch-refusal.test.ts
 packages/agent-host/src/sessions/linked-ask-paused.test.ts
 packages/agent-host/src/sessions/linked-start-params.test.ts
@@ -340,7 +333,6 @@ packages/agent-host/src/sessions/session-record.ts
 packages/agent-host/src/sessions/session-trash.test.ts
 packages/agent-host/src/sessions/session-trash.ts
 packages/agent-host/src/sessions/setting-files.test.ts
-packages/agent-host/src/sessions/sleep-keeper.test.ts
 packages/agent-host/src/sessions/sleep.test.ts
 packages/agent-host/src/sessions/start-agent-flow.ts
 packages/agent-host/src/sessions/start-agent.test.ts

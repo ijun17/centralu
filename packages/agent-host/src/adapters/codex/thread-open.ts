@@ -22,8 +22,7 @@ export async function initializeAppServer(client: CodexClient, sessionId: string
     /*
      * The app-server's version, for moving the session to a newer install (#297). Codex reports it only here, in
      * `userAgent`: `<our client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0, 2026-10-05:
-     * "centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)"). An adopted app-server is not
-     * initialized again; its version comes from the keeper's tag instead (`HostTenure.adoptKept`).
+     * "centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)").
      */
     const ua = typeof init?.userAgent === 'string' ? init.userAgent : ''
     const version = parseCliVersion(ua.slice(ua.indexOf('/') + 1))

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,27 +15,29 @@ import { SLOW } from '../../../../tooling/test-timing.js'
  */
 describe('joining the work job', () => {
   const os = (answer: (script: string) => Promise<string>, needed = true) => ({ needed, powershell: answer })
-  const free = { underKeeper: false }
+  afterEach(() => vi.unstubAllEnvs())
 
   it('is not asked for where process groups end a tree', async () => {
     let asked = false
-    const job = await joinWorkJob(free, 1234, os(async () => ((asked = true), 'ok 1'), false))
+    const job = await joinWorkJob(1234, os(async () => ((asked = true), 'ok 1'), false))
     expect(job).toEqual({ state: 'not needed' })
     expect(asked).toBe(false)
     expect(workJobLine(job)).toBeNull()
   })
 
-  it('is not joined under a keeper, which holds the children a job of the host would end with it', async () => {
+  it('is joined under a keeper too: the keeper holds none of the host children, so nothing needs to outlive the host', async () => {
+    vi.stubEnv('CC_KEEPER', '1')
     let asked = false
-    expect(await joinWorkJob({ underKeeper: true }, 1234, os(async () => ((asked = true), 'ok 1')))).toEqual({ state: 'not needed' })
-    expect(asked).toBe(false)
-    expect(workJobWanted({ underKeeper: true }, { needed: true })).toBe(false)
-    expect(workJobWanted(free, { needed: true })).toBe(true)
+    const job = await joinWorkJob(1234, os(async () => ((asked = true), 'ok 9')))
+    expect(job).toEqual({ state: 'joined', handle: 9 })
+    expect(asked).toBe(true)
+    expect(workJobWanted({ needed: true })).toBe(true)
+    expect(workJobWanted({ needed: false })).toBe(false)
   })
 
   it('asks for a job that ends its processes when closed, with no breakaway, for the pid given', async () => {
     let script = ''
-    const job = await joinWorkJob(free, 4321, os(async (s) => ((script = s), 'ok 720\r\n')))
+    const job = await joinWorkJob(4321, os(async (s) => ((script = s), 'ok 720\r\n')))
     expect(job).toEqual({ state: 'joined', handle: 720 })
     // KILL_ON_JOB_CLOSE; not BREAKAWAY_OK (0x800), which let what Git Bash started leave the job
     expect(WORK_JOB_LIMITS).toBe(0x2000)
@@ -46,8 +48,8 @@ describe('joining the work job', () => {
   })
 
   it('says why when Windows refused, or PowerShell could not run, and never throws', async () => {
-    expect(await joinWorkJob(free, 1, os(async () => 'assign 5'))).toEqual({ state: 'failed', reason: 'assign 5' })
-    const refused = await joinWorkJob(free, 1, os(async () => Promise.reject(Object.assign(new Error('Command failed'), { stderr: 'Add-Type : Cannot add type.\r\nmore' }))))
+    expect(await joinWorkJob(1, os(async () => 'assign 5'))).toEqual({ state: 'failed', reason: 'assign 5' })
+    const refused = await joinWorkJob(1, os(async () => Promise.reject(Object.assign(new Error('Command failed'), { stderr: 'Add-Type : Cannot add type.\r\nmore' }))))
     expect(refused).toEqual({ state: 'failed', reason: 'Add-Type : Cannot add type.\r' })
     expect(workJobLine(refused)).toContain('may outlive it')
   })

@@ -1927,6 +1927,10 @@ host. It changes where a client connects, not what it must prove:
 
 ### The keeper's child socket
 
+No host connects to this socket any more (#1895 step 4 PR 1): every host spawns and stops its own agents, terminals
+and commands, and a keeper started fresh has not served it since step 3. It stays in the keeper until the next PR
+removes it, and what follows describes it as it still is.
+
 The keeper also holds the host's agents, terminals and commands (#280 step 2) and serves them on a second socket,
 `<data>/children.sock`. Through it a process can start a program with the arguments, folder and environment of its
 choosing, read and write an agent's stdin and stdout (its whole conversation, approvals included) or a terminal, and

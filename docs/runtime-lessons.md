@@ -491,7 +491,8 @@ Happened: an adopted pty replays its output as soon as it is attached; an await 
 (#329) made every host restart that held a terminal crash, five times, until the keeper gave up (#348, ea5a9611).
 Only a hand run noticed.
 Rule: early frames are dropped (services keep their own scrollback); broadcasts before listen are swallowed.
-Guard: `scripts/keeper-children-integration.mjs` check "the keeper restarts a crashed host";
+Guard: `scripts/keeper-integration.mjs` scenario `update` (`keeper-integration-relaunch.mjs`) check "the keeper
+restarts the crashed host";
 `host/lifecycle/start.test.ts` "are dropped, not thrown, and the ones after it opens are sent" (`lifecycle/gate.ts`:
 every service is handed a gate's `push`, never the server). *Changed by step 3.*
 Platforms: macOS, Linux.
@@ -910,8 +911,7 @@ never fire (#392, #395, aab29764); exit records were never forgotten.
 Rule: buffers shrink once mostly empty (1 MiB floor); the 8 MiB control-queue cap is checked whatever the flush did;
 released children's exit records are dropped.
 Guard: `keeper/keeper/children/buffer.rs` `a_burst_gives_its_memory_back_once_it_is_sent`;
-`keeper/keeper/children/tests.rs` `a_control_queue_past_the_cap_is_dropped_while_the_socket_is_full`;
-`host/keeper/agent-process.test.ts` "forgets an exit once the child is released (#392)".
+`keeper/keeper/children/tests.rs` `a_control_queue_past_the_cap_is_dropped_while_the_socket_is_full` (the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more).
 Platforms: macOS, Linux.
 
 **CH7. No connection closing ever signals a child.**
@@ -919,10 +919,8 @@ Happened: the Agent SDK kills its process when its owner exits; a host leaving f
 untouched (#280).
 Rule: only an explicit request signals a child, closes its stdin or its pty; a detached handle ignores `kill()` and
 `stdin.end()`; the SDK's exit hook is neutralised by a `process.once('exit')` registered at module load.
-Guard: `keeper/keeper/children/tests.rs` `a_departing_host_does_not_end_the_child_and_the_next_host_gets_what_it_missed`;
-`host/keeper/agent-process.test.ts` "sends no signal and no EOF once detached, and the process keeps running";
-`host/adapters/codex/keeper.test.ts` "detaching sends no EOF and no signal, and denies nothing". The module-load exit
-hook (`hostLeaving`) is **UNGUARDED**.
+Guard: `keeper/keeper/children/tests.rs` `a_departing_host_does_not_end_the_child_and_the_next_host_gets_what_it_missed`
+(the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, with `agent-process.test.ts` and `adapters/codex/keeper.test.ts`).
 Platforms: macOS, Linux.
 
 **CH8. The keeper's stop escalates in a fixed order.**
@@ -932,7 +930,8 @@ its shell's jobs included (#840 item 2).
 Guard: `keeper/keeper/children/tests.rs` `stop_all_ends_pipes_and_ptys_the_host_left_running`;
 `keeper/keeper/children/tests.rs` `stop_all_ends_every_group_in_a_terminals_session`;
 `keeper/keeper/children/tests.rs` `asking_the_host_to_stop_waits_for_it_to_hang_up`;
-`scripts/keeper-children-integration.mjs` check "the host stopped its children itself first".
+`scripts/keeper-integration.mjs` scenario `update` check "stop ends the keeper, the host and its N children" (the
+host's own children since #1895 step 4 PR 1; `keeper-children-integration.mjs` went in that PR).
 Platforms: macOS, Linux.
 
 **CH9. The keeper's agent sweep never hits a reused number.**
@@ -960,8 +959,7 @@ Platforms: macOS, Linux.
 
 **CH11. A graceful stdin close is a request, not a socket end.**
 Rule: `stdin.end()` on a kept agent becomes the keeper's `close_stdin`, so codex can remove its lock (KL14).
-Guard: `host/keeper/agent-process.test.ts` "ends stdin with a keeper close_stdin request, and reports the exit after
-the output".
+Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, and with it `agent-process.test.ts`.
 Platforms: macOS, Linux.
 
 **CH12. Re-attaching across hosts and builds.**
@@ -972,18 +970,14 @@ answered (#280, #342).
 Rule: tags are opaque to the keeper and parsed by the host, unknown kinds left alone, tags without a version still read;
 new ids never collide with kept ones; codex request ids carry a per-client prefix; the second `initialize` is ignored
 only for an adopted process; a lost in-process call is failed out loud and the turn interrupted.
-Guard: `host/keeper/held-children.test.ts` "leaves a child with a tag it does not read alone — a newer build may have
-spawned it"; `host/dev-services/kept-ptys.test.ts` "keep their ids and replayed screen, and new ones never reuse a kept
-id"; `host/adapters/codex/keeper.test.ts` "request ids carry a per-client prefix, so an answer meant for the old host
-cannot resolve a new request"; `host/adapters/codex/keeper.test.ts` "adopts a running app-server: the second initialize
-is shrugged off and the pending approval comes back"; `host/adapters/claude/keeper.test.ts` "a call to an in-process
-tool lost with the old host is failed out loud and the turn released".
+Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, and with it its guards (`held-children.test.ts`, `kept-ptys.test.ts`, `adapters/codex/keeper.test.ts`,
+`adapters/claude/keeper.test.ts`). The adapters' adopt path is still replayed by `host/adapters/codex/adopt.test.ts`.
 Platforms: macOS, Linux.
 
 **CH13. Without a keeper the host owns its children.**
-Rule: if connecting to `children.sock` or listing fails, the host spawns and stops its children itself (Windows, debug,
-`centralu serve`).
-Guard: **UNGUARDED** (the keeper tests are skipped on Windows, and nothing tests the fallback itself).
+Rule: the host spawns and stops its children itself, on every path. Since #1895 step 4 PR 1 it never connects to
+`children.sock`, so there is no fallback left to guard; `scripts/keeper-integration.mjs` scenario `update` checks that
+the host runs its terminal and dev server itself under a keeper.
 Platforms: all.
 
 **CH14. A kept process pins the CLI it started with.**
@@ -992,16 +986,14 @@ started (#297).
 Rule: an idle, quiet (60 s) session on an older CLI is restarted on the installed one; unknown on either side is not
 older; versions are read without running npm's program.
 Guard: `host/agent-versions.test.ts` "restarts a live, idle, quiet session that runs an older CLI";
-`host/sessions/agent-versions-restart.test.ts` "stops the held child and spawns a new one from the installed CLI —
-nothing is re-attached".
+`host/sessions/agent-versions-direct.test.ts` (the held-child case of `agent-versions-restart.test.ts` went with #1895
+step 4 PR 1).
 Platforms: all.
 
 **CH15. A kept process reports its exit like node-pty, after its output.**
 Rule: wait for the stream to end (at most 1 s), flush the decoder, report a signalled pty as `exitCode: 0` plus the
 signal, report a lost keeper as SIGHUP, then release the child.
-Guard: `host/keeper/agent-process.test.ts` "delivers output and exit like node-pty, then releases the record";
-`host/keeper/agent-process.test.ts` "reports an exit when the keeper itself goes away, since the pipes went with it".
-The signal shape and `KeeperPty`'s lost keeper are **UNGUARDED**.
+Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more. The host's own processes report their exit after their output (KL19, `exit-after-drain.ts`).
 Platforms: macOS, Linux.
 
 ## 8. Front door, swap and the store across builds
@@ -1889,9 +1881,6 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 39 | KL9: the terminal's `disposeAll` kills every tree | `host/dev-services/terminal.ts` | macOS, Linux | 8 |
 | 40 | KL14: codex gets EOF before any signal | `host/adapters/codex/client.ts` | all | 8 |
 | 41 | KL19: exit reported after stdout's end for the host's own processes | `host/adapters/local-process.ts` | all | 8 |
-| 44 | CH7: the SDK's exit hook cannot reach the keeper (`hostLeaving`) | `host/keeper/agent-process.ts` | macOS, Linux | 8 |
-| 45 | CH13: without a keeper the host owns its children | `host/keeper/held-children.ts` | all | 8 |
-| 46 | CH15: a signalled pty's exit shape; a lost keeper for `KeeperPty` | `host/keeper/keeper-pty.ts` | macOS, Linux | 8 |
 | 47 | SW6: a connection that read the old target is turned away | `keeper/keeper/front_door.rs` | macOS, Linux | 5 |
 | 48 | SW12: a failed store open releases the file | `host/dev-services/store.ts` | Windows | 9 |
 | 49 | SW13: migrations log on stderr | `host/dev-services/store.ts` | all | — |

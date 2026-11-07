@@ -1,19 +1,16 @@
 import { tmpdir } from 'node:os'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, ExternalSessionSummary, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
+import { SessionManager } from './manager.js'
 
 /**
- * A session's background work across a host swap, and a process that goes away without a replacement (#648).
+ * A restart a session's background work holds back, and a process that goes away without a replacement (#648).
  *
- * The tool lists its background tasks only when they change, and says nothing at startup, so the host that adopts a
- * kept process would read it as idle: the sleeper, or a definitions refresh, would then close it and kill the shell the
- * person started with `run_in_background` (a dev server). The leaving host keeps the list; the next one seeds the
- * session from it, holds a process with no record as unknown, and a hot refresh waits for the work to end.
+ * A restart ends the process and with it the shells the person started with `run_in_background` (a dev server): a
+ * safety change restarts at once and says what stopped, any other change waits for the work to end, at most an hour.
  *
  * And when the host itself replaces a process and the new one does not come up, or a process dies, every window must
  * learn that the session is no longer live, as it does for a sleep; before, the windows kept `live: true` and the
@@ -38,7 +35,6 @@ class Handle implements SessionHandle {
   async dispose() {
     this.disposed = true
   }
-  async detach() {}
 }
 
 class Adapter implements AgentAdapter {
@@ -74,12 +70,9 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
-
 const shell: BackgroundTask = { id: 'dev', kind: 'shell', description: 'npm run dev', parentCallId: 'toolu_1', stopsWithTurn: false, stoppable: true, status: 'running' }
 const notices = (id: string) =>
   events.flatMap((e) => (e.type === 'notice' && e.sessionId === id && e.label === 'restart' ? [e.text] : []))
-const running = (s: { backgroundTasks: BackgroundTask[] }) => s.backgroundTasks.filter((t) => t.status === 'running').map((t) => t.id)
 
 let store: Store
 let events: NormalizedEvent[]
@@ -89,122 +82,23 @@ beforeEach(() => {
   events = []
 })
 
-function host(kept: ReadonlySet<string> = new Set()) {
+function host() {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir())
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, claude, session, rpc: createRpcHandler(mgr, adapters) }
 }
 
-/** A session on the first host whose agent started a dev server in the background, then the host leaves for a swap */
-async function sessionWithShell(a: ReturnType<typeof host>, withShell = true): Promise<string> {
+/** A live session whose agent started a dev server in the background, and its process */
+async function sessionWithShell(a: ReturnType<typeof host>, withShell = true) {
   const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
   if (withShell) a.claude.last.emit({ type: 'background_tasks', sessionId: s.id, live: [shell] })
-  await a.mgr.tenure.detachAll()
-  return s.id
+  return { id: s.id, old: a.claude.last }
 }
 
-async function adopt(b: ReturnType<typeof host>, id: string) {
-  const kept = new FakeProcess() as unknown as AgentProcess
-  await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
-  return b.claude.last
-}
-
-describe('background work across a host swap (#648)', () => {
-  it('the leaving host keeps the running tasks, and the next host lists them on the adopted process', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    expect(JSON.parse(store.settings.appSetting(`background_tasks:${id}`)!)).toEqual([shell])
-
-    const b = host(new Set([id]))
-    expect(running(b.session(id))).toEqual([])
-    const handle = await adopt(b, id)
-    // The adapter is told, so its tracker reports the shell's ending when the CLI says so
-    expect(handle.opts.processSource?.adopt?.backgroundTasks).toEqual([shell])
-    // The session lists it, every window hears it, and the session holds work
-    expect(running(b.session(id))).toEqual(['dev'])
-    expect(events.some((e) => e.type === 'background_tasks' && e.sessionId === id && e.live.some((t) => t.id === 'dev'))).toBe(true)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
-    expect(handle.disposed).toBe(false)
-
-    // The dev server exits: the session is idle again, and the record says so for the next swap
-    handle.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, status: 'completed' }] })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
-    expect(JSON.parse(store.settings.appSetting(`background_tasks:${id}`)!)).toEqual([])
-  })
-
-  it('a process adopted from a host that kept no record is held as unknown until its tool first lists its work', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    // What a build before the record leaves behind
-    store.settings.deleteAppSetting(`background_tasks:${id}`)
-
-    const b = host(new Set([id]))
-    const handle = await adopt(b, id)
-    expect(handle.opts.processSource?.adopt?.backgroundTasks).toEqual([])
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
-
-    // A level built from what this host saw (an ending, a /loop timer) does not settle it, and is not recorded
-    handle.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, id: 'other', status: 'completed' }] })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-    expect(store.settings.appSetting(`background_tasks:${id}`)).toBeNull()
-
-    // The CLI's own full list does: nothing runs, and the next host is told so
-    handle.emit({ type: 'background_tasks', sessionId: id, live: [], snapshot: true })
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
-    expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
-    expect(await b.mgr.processes.sleepSession(id)).toBe(true)
-  })
-
-  /*
-   * A record that does not read (#384), cut short or in a newer build's shape, used to read as "nothing running": a
-   * process the next host adopted was then free to sleep, and `close()` kills its shells silently. A record this build
-   * cannot read is no record: unknown until the tool lists its work.
-   */
-  it.each([
-    ['is not JSON', '[{"id":"dev","status":"runn'],
-    ['is not a list', '{"dev":"running"}'],
-    ['holds a task this build cannot read', JSON.stringify([{ id: 'dev', status: 'paused-by-a-newer-build' }])],
-  ])('a record that %s is held as unknown, not as nothing running', async (_label, record) => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    store.settings.setAppSetting(`background_tasks:${id}`, record)
-
-    const b = host(new Set([id]))
-    await adopt(b, id)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-    expect(await b.mgr.processes.sleepSession(id)).toBe(false)
-  })
-
-  it('an unknown state is bounded by quiet: after two hours without a word the session is taken as holding nothing, and recorded', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    store.settings.deleteAppSetting(`background_tasks:${id}`)
-    const b = host(new Set([id]))
-    vi.useFakeTimers({ toFake: ['Date'] })
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      const handle = await adopt(b, id)
-      const t0 = Date.now()
-      // Something said after an hour and a half restarts the quiet
-      vi.setSystemTime(t0 + 90 * 60_000)
-      handle.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
-      vi.setSystemTime(t0 + 150 * 60_000)
-      expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
-      vi.setSystemTime(t0 + (90 + 120) * 60_000 + 1)
-      expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
-      expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('taking it as none'))
-    } finally {
-      log.mockRestore()
-      vi.useRealTimers()
-    }
-  })
-
+describe('a restart held back by background work (#648)', () => {
   it('a deleted session takes its record with it', async () => {
     const a = host()
     const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
@@ -215,26 +109,12 @@ describe('background work across a host swap (#648)', () => {
     expect(store.settings.appSetting(`background_tasks:${s.id}`)).toBeNull()
   })
 
-  it('a new process starts known: it holds nothing, so an earlier unknown does not follow the session', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    store.settings.deleteAppSetting(`background_tasks:${id}`)
-    const b = host(new Set([id]))
-    await adopt(b, id)
-    expect(b.mgr.processes.sessionIdle(id).idle).toBe(false)
-    expect((await b.mgr.processes.restartSession(id)).resumed).toBe(true)
-    expect(b.mgr.processes.sessionIdle(id)).toEqual({ idle: true })
-    expect(store.settings.appSetting(`background_tasks:${id}`)).toBe('[]')
-  })
-
   it.each([
     ['tool definitions', 'instructions', (id: string) => store.settings.setAppSetting(`tool_prefix:${id}`, 'old-prefix')],
     ['launch settings', 'launch_settings', (_id: string, b: ReturnType<typeof host>) => void (b.claude.fingerprint = 'v2')],
-  ] as const)('a %s refresh is a safety change: an idle adopted session restarts at once, shell or not, and says what stopped', async (_what, cause, change) => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+  ] as const)('a %s refresh is a safety change: an idle session restarts at once, shell or not, and says what stopped', async (_what, cause, change) => {
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     change(id, b)
     const restart = vi.spyOn(b.mgr.processes, 'restartSession')
 
@@ -245,28 +125,14 @@ describe('background work across a host swap (#648)', () => {
     expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
   })
 
-  it('a safety refresh does not wait on an unknown background state either (a session from a host that kept no record)', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    store.settings.deleteAppSetting(`background_tasks:${id}`)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
-    b.claude.fingerprint = 'v2'
-    await b.mgr.launches.refreshToolDefinitions()
-    expect(old.disposed).toBe(true)
-    expect(notices(id)).toEqual([expect.stringContaining('before Centralu was updated')])
-  })
-
   it.each([
     ['a permission change', { permissionPreset: 'safe' as const }],
     ['a definitions change', 'definitions' as const],
-    // The #643 path: a host whose launch fingerprint differs from the one the kept process started with
+    // The #643 path: a host whose launch fingerprint differs from the one the process started with
     ['a launch-settings change', 'launch' as const],
   ])('%s made mid-turn applies at the end of the turn, while a shell runs', async (_what, settings) => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     const restart = vi.spyOn(b.mgr.processes, 'restartSession')
     if (typeof settings === 'object') expect((await b.mgr.updateSettings(id, settings)).applied).toBe('after_turn')
@@ -287,10 +153,8 @@ describe('background work across a host swap (#648)', () => {
   })
 
   it('a change that is not about safety (a model) waits for the shell, at most an hour', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     expect((await b.mgr.updateSettings(id, { model: 'opus' })).applied).toBe('after_turn')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
@@ -312,10 +176,8 @@ describe('background work across a host swap (#648)', () => {
   })
 
   it('the hour counts from when the wait began: a bound that runs out mid-turn applies at that turn\'s end', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     await b.mgr.updateSettings(id, { model: 'opus' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
@@ -340,10 +202,8 @@ describe('background work across a host swap (#648)', () => {
   })
 
   it('a restart ends the wait: a later wait gets its own full hour', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     await b.mgr.updateSettings(id, { model: 'opus' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
@@ -375,10 +235,8 @@ describe('background work across a host swap (#648)', () => {
   })
 
   it('a model change held for a shell applies as soon as the shell ends', async () => {
-    const a = host()
-    const id = await sessionWithShell(a)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     await b.mgr.updateSettings(id, { model: 'opus' })
     old.emit({ type: 'turn_complete', sessionId: id })
@@ -394,10 +252,8 @@ describe('background work across a host swap (#648)', () => {
 
 describe('a process dropped without a replacement (#648)', () => {
   it('a restart the host started that does not bring a process up tells every window the session is not live', async () => {
-    const a = host()
-    const id = await sessionWithShell(a, false)
-    const b = host(new Set([id]))
-    const old = await adopt(b, id)
+    const b = host()
+    const { id, old } = await sessionWithShell(b, false)
     expect(b.session(id).live).toBe(true)
     events.length = 0
 
@@ -418,9 +274,10 @@ describe('a process dropped without a replacement (#648)', () => {
 
   it('a restart that finds no process to drop says nothing: the windows already show it asleep', async () => {
     const a = host()
-    const id = await sessionWithShell(a, false)
-    const b = host(new Set([id]))
-    // Not adopted: the session is asleep on this host
+    const { id } = await sessionWithShell(a, false)
+    await a.mgr.tenure.disposeAll()
+    const b = host()
+    // The host quit in between: the session is asleep on this one
     events.length = 0
     b.claude.failCreate = new Error('claude did not start')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})

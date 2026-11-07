@@ -136,7 +136,5 @@ export interface MidTurnWire {
   connectionEnded(): void
   /** The conversation's end: the connection closes */
   close?(): Promise<void>
-  /** Lets go of the connection without closing it (a host swap) */
-  detach?(): Promise<void>
 }
 

@@ -112,7 +112,7 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true; cut?: true }
 /** A turn a quit or a swap ended, and who to tell, waiting for the start to finish (#698); `turn`: whose a quit's was (#1946) */
-export type QuitNotice = { sessionId: string; requester: string; swapped?: true; turn?: TurnStarter | undefined }
+export type QuitNotice = { sessionId: string; requester: string; turn?: TurnStarter | undefined }
 /**
  * A message given the tool (#1639, docs/plans/turn-starter.md): the input id and row it went in under (none in a test that gives no
  * row), whose it is, and `joined`: it is queued while a turn runs (given into it, or behind the input it opened from), which may take it in
@@ -257,8 +257,8 @@ export type PersonReportDraft = { outcome: string; body: string; answer?: string
 export class ChildOwnership {
   /**
    * Session asked to be reported on completion -> orchestrator to notify (removed once notified). Mirrored in the
-   * store's `report_marks` (v49, #646) through `markReport` / `clearReport`, so a host swap (#280) does not lose
-   * "you will be told when it ends": the constructor reads the marks back for the sessions the keeper kept.
+   * store's `report_marks` (v49, #646) through `markReport` / `clearReport`, so an update's stop (#1618) does not lose
+   * "you will be told when it ends": the constructor reads the marks back for the turns an update cut.
    */
   private readonly reports = new Map<string, string>()
   readonly awaitingReport: ReadonlyMap<string, string> = this.reports
@@ -531,24 +531,21 @@ export class ChildOwnership {
     this.store.children.clearReportMark(sessionId)
   }
   /**
-   * At startup (#646): the report marks of the sessions the keeper kept that still owe them, and nothing else. Returns
-   * the marks of kept sessions that ended their turn during the swap, whose callers are told so (#1186)
+   * At startup (#646): the report marks of the sessions whose turn goes on under this host (`goingOn`: an update cut it,
+   * and this host continues it) and of the sessions waiting on threads they handed on, and nothing else.
    */
-  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): { sessionId: string; callerSessionId: string }[] {
-    const endedInSwap: { sessionId: string; callerSessionId: string }[] = []
+  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
     /*
-     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
-     * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
-     * rather than left to name an unrelated later turn as the work's end (#166): a session with no
-     * process lost its turn with the old host, and a kept session already at rest finished its turn while the old host
-     * was letting go (`handingOver` held that report back); its answer stays readable through agent_session.
-     * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs
-     * on in the kept process, and the turn its ending starts ends under this host.
+     * "You will be told when it ends" survives an update (#646, #1618): the turn an update cut is continued under this
+     * host, so it ends here, and the report it owes goes out from here. Any other mark is dropped rather than left to
+     * name an unrelated later turn as the work's end (#166): a session with no process lost its turn with the old host;
+     * its answer stays readable through agent_session. A session going on at rest whose report was paused over its own
+     * background work (#721) still owes it.
      */
     const marks = this.store.children.listReportMarks()
     for (const mark of marks) {
       const child = sessions.get(mark.sessionId)
-      const kept = keptSessions?.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
+      const kept = goingOn.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
       const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
       if (kept && (inTurn(child.state) || paused)) {
         this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
@@ -566,27 +563,22 @@ export class ChildOwnership {
         this.adoptReport(mark.sessionId, mark.callerSessionId, kept ? paused : null)
         continue
       }
-      if (child && keptSessions?.has(mark.sessionId)) {
-        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap; its caller is told`)
-        if (sessions.has(mark.callerSessionId)) endedInSwap.push(mark)
-      }
       this.store.children.clearReportMark(mark.sessionId)
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
       this.store.settings.deleteAppSetting(reportTurnKey(mark.sessionId))
     }
-    return endedInSwap
   }
 
-  /** At startup (#676): the delegated turns of kept sessions still in them; any other row is dropped */
-  restoreTurns(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): void {
+  /** At startup (#676): the delegated turns of the sessions whose turn goes on under this host (`goingOn`); any other row is dropped */
+  restoreTurns(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
     /*
-     * A delegated turn's link survives the swap the same way (#676): a kept session still in the turn may be waiting on
-     * a question its caller is to answer, and the kept CLI sends that card again to this host. With no delegation in
-     * this host's memory, the link ends with the turn. Any other row is dropped: that turn is over.
+     * A delegated turn's link survives an update the same way (#676, #1618): the turn an update cut is continued here, and
+     * may ask its caller again. With no delegation in this host's memory, the link ends with the turn. Any other row is
+     * dropped: that turn is over.
      */
     for (const row of this.store.children.listDelegatedTurns()) {
       const s = sessions.get(row.sessionId)
-      if (keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && sessions.has(row.callerSessionId)) {
+      if (goingOn.has(row.sessionId) && !!s && inTurn(s.state) && sessions.has(row.callerSessionId)) {
         this.adoptTurn(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
         continue
       }
@@ -598,8 +590,8 @@ export class ChildOwnership {
   restoreQueued(sessions: ReadonlyMap<string, SessionInfo>, legacyOpenedByAuto: (r: QueuedRequest) => boolean): void {
     /*
      * Queued requests (#677) outlive the host: the next one delivers them when the session's turn ends, or soon after
-     * start for a session already at rest. A kept session waits for its adoption (`adoptKept`), so its first input
-     * does not start a second process. A request whose session or requester is gone is dropped.
+     * start for a session already at rest. A session whose cut turn is continued waits for that turn to end, so its first
+     * input does not start a second process. A request whose session or requester is gone is dropped.
      */
     for (const r of this.store.children.listQueuedRequests()) {
       if (!sessions.has(r.sessionId) || !sessions.has(r.callerSessionId)) {
@@ -625,14 +617,14 @@ export class ChildOwnership {
     }
   }
 
-  /** A mark the previous host left, kept for a session the keeper kept (the store already holds it) */
+  /** A mark the previous host left, kept for a session whose turn goes on here (the store already holds it) */
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)
     if (paused) this.paused.set(sessionId, paused)
     this.adoptStarter(sessionId)
   }
   /**
-   * The turn a kept session was in when the last host stopped (#1377), owed a report or not (#1946): the person's is reported to nobody
+   * The turn a session was in when the last host stopped (#1377), owed a report or not (#1946): the person's is reported to nobody
    * when it ends here, nor told to its asker when it ends cut
    */
   adoptStarter(sessionId: string): void {

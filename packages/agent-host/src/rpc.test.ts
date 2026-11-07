@@ -131,16 +131,6 @@ describe('host.stop', () => {
   })
 })
 
-/** #841 item 7: the processes the keeper holds are never offered as leftovers, even when it cannot say which they are */
-describe('processes.strays', () => {
-  const mgr = { projectRegistry: { folderRoots: () => ['/nowhere'] } } as unknown as SessionManager
-  it('refuses to list when the keeper cannot say which processes it holds', async () => {
-    const rpc = createRpcHandler(mgr, new Map(), { heldPids: () => Promise.reject(new Error('keeper gone')) })
-    await expect(rpc('processes.strays', {})).rejects.toThrow(/keeper could not say/)
-    await expect(rpc('processes.stop', { pids: [12345] })).rejects.toThrow(/keeper could not say/)
-  })
-})
-
 /** The person's answers to the limited credential's calls (#1405, host-requests.ts), as the window reaches them */
 describe('requests.list and requests.answer', () => {
   const handler = (services: Parameters<typeof createRpcHandler>[2]) => createRpcHandler({} as SessionManager, new Map(), services)

@@ -9,7 +9,7 @@ import { managerWorld } from './manager.test-helpers.js'
  */
 describe('notices kept for a session that could not be woken', () => {
   const world = (deliver: ChildReportsHost['deliver']) => {
-    const host = { handingOver: false, disposing: false, meta: new Map([['r', {}]]), deliver } as unknown as ChildReportsHost
+    const host = { disposing: false, meta: new Map([['r', {}]]), deliver } as unknown as ChildReportsHost
     return new ChildReports(host)
   }
 

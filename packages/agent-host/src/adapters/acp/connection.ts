@@ -178,12 +178,4 @@ export class AcpConnection {
     await stopToolProcess(this.proc, { graceMs, exited: this.finished })
   }
 
-  /** Lets go of the process without closing it (a host swap under the keeper): no EOF, no signal */
-  async detach(): Promise<void> {
-    if (this.closed) return
-    await this.proc.detach?.()
-    this.closed = true
-    this.finished = true
-    this.pending.rejectAll(new Error(`request abandoned: this host let go of ${this.label}`))
-  }
 }

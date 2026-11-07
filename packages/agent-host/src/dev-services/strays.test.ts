@@ -43,25 +43,24 @@ describe('pickStrays', () => {
   })
 
   /**
-   * A child the keeper holds for us (#280 step 2) is not our descendant — after a keeper handover
-   * (step 4) its parent is init — but it is ours: the host and keeper stop it. Without the keeper's
-   * list it looks exactly like pid 100, an agent's leftover.
+   * The host no longer leaves its agents with the keeper, but a keeper of an older build that died while it held some
+   * left them behind: reparented to init, in our folder, with no terminal. Nothing holds them any more, so they are ordinary
+   * leftovers, offered with what runs under them.
    */
-  it('never offers a child the keeper holds for this host, or what runs under it', () => {
-    const held = parsePsRows(
+  it('offers what a dead keeper left behind, and what runs under it, as leftovers', () => {
+    const left = parsePsRows(
       [
-        '  700     1 ??       claude --output-format stream-json', // held by the keeper, reparented
+        '  700     1 ??       claude --output-format stream-json', // once held by a keeper that died, reparented
         '  701   700 ??       node /work/proj/build.js', // its Bash tool's command
         '  900     1 ??       node host.mjs',
       ].join('\n'),
     )
-    const heldCwds = new Map([
+    const leftCwds = new Map([
       [700, '/work/proj'],
       [701, '/work/proj'],
       [900, '/work/proj'],
     ])
-    expect(pickStrays(held, heldCwds, roots, 900, [700]).map((s) => s.pid)).toEqual([])
-    expect(pickStrays(held, heldCwds, roots, 900).map((s) => s.pid)).toEqual([700, 701])
+    expect(pickStrays(left, leftCwds, roots, 900).map((s) => s.pid)).toEqual([700, 701])
   })
 
   it('leaves alone what a person launched in a terminal — tty is the line', () => {
@@ -131,7 +130,7 @@ describe('pickStrays', () => {
       ].join('\n'),
     )
     const cwd = new Map([[800, '/work/proj'], [701, '/work/proj'], [900, '/work/proj'], [30, '/work/proj'], [40, '/work/proj'], [41, '/work/proj']])
-    expect(pickStrays(wsl, cwd, roots, 900, [], 60).map((s) => s.pid)).toEqual([800])
+    expect(pickStrays(wsl, cwd, roots, 900, 60).map((s) => s.pid)).toEqual([800])
     expect(pickStrays(wsl, cwd, roots, 900).map((s) => s.pid)).toEqual([])
   })
 
@@ -159,11 +158,11 @@ describe('pickStrays', () => {
     const ended: number[] = []
     const systemd = await orphanAdopter(probe('/usr/lib/systemd/systemd --user'), (pid) => void ended.push(pid))
     expect(systemd).toBeNull()
-    expect(pickStrays(desktop, cwd, roots, 900, [], systemd).map((s) => s.pid)).toEqual([])
+    expect(pickStrays(desktop, cwd, roots, 900, systemd).map((s) => s.pid)).toEqual([])
     // The same table with WSL's helper in that place: it is the machine's init, and what it holds is listed
     const init = await orphanAdopter(probe('/init'), (pid) => void ended.push(pid))
     expect(init).toBe(611)
-    expect(pickStrays(desktop, cwd, roots, 900, [], init).map((s) => s.pid)).toEqual([800, 801, 802])
+    expect(pickStrays(desktop, cwd, roots, 900, init).map((s) => s.pid)).toEqual([800, 801, 802])
     // The probe's own process is ended each time, and only that
     expect(ended).toEqual([4242, 4242])
   })
@@ -216,7 +215,7 @@ describe('stopStrays', () => {
   it('KILLs what is still a leftover once the grace is over, measured again first', async () => {
     const sent: [number, string][] = []
     const scans = [[stray(10), stray(11), stray(12)], [stray(10)]]
-    const r = await stopStrays([10, 11, 99], ['/p'], 1, [], {
+    const r = await stopStrays([10, 11, 99], ['/p'], 1, {
       find: async () => scans.shift() ?? [],
       kill: (pid, signal) => void sent.push([pid, signal]),
       graceMs: 5,
@@ -226,18 +225,10 @@ describe('stopStrays', () => {
     await vi.waitFor(() => expect(sent).toEqual([[10, 'SIGTERM'], [11, 'SIGTERM'], [10, 'SIGKILL']]))
   })
 
-  /** After a keeper handoff its agents are init's children: with its list missing they read as leftovers (#428 review) */
-  it('stops nothing when the keeper could not say what it holds', async () => {
-    const sent: number[] = []
-    const r = stopStrays([10], ['/p'], 1, null, { find: async () => [stray(10)], kill: (pid) => void sent.push(pid), graceMs: 5 })
-    await expect(r).rejects.toThrow(/nothing was stopped/)
-    expect(sent).toEqual([])
-  })
-
   it('does not KILL a number that runs another program by the second measurement', async () => {
     const sent: [number, string][] = []
     const scans = [[stray(10)], [{ pid: 10, command: 'vim notes.md', cwd: '/p' }]]
-    await stopStrays([10], ['/p'], 1, [], { find: async () => scans.shift() ?? [], kill: (pid, signal) => void sent.push([pid, signal]), graceMs: 5 })
+    await stopStrays([10], ['/p'], 1, { find: async () => scans.shift() ?? [], kill: (pid, signal) => void sent.push([pid, signal]), graceMs: 5 })
     await new Promise((r) => setTimeout(r, 50))
     expect(sent).toEqual([[10, 'SIGTERM']])
   })
@@ -261,7 +252,7 @@ describe('stopStrays', () => {
     const own = ownProcesses()
     try {
       await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 * SLOW })
-      expect(await stopStrays([pid], [dir], process.pid, [])).toEqual({ stopped: 1 })
+      expect(await stopStrays([pid], [dir], process.pid)).toEqual({ stopped: 1 })
       await vi.waitFor(() => expect(own.alive(pid)).toBe(false), { timeout: 10_000 * SLOW, interval: 100 })
     } finally {
       own.end([pid])

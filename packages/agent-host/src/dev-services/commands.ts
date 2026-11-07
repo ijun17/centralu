@@ -1,7 +1,6 @@
 import { createRequire } from 'node:module'
-import { commandShell, type Pty, type PtyModule } from './terminal.js'
+import { commandShell, type PtyModule } from './terminal.js'
 import type { EndedRun } from '../lifecycle/update-ended.js'
-import { idNumber, type CommandTag } from '../keeper/tags.js'
 import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
 
 /**
@@ -24,9 +23,6 @@ import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
  */
 
 const require = createRequire(import.meta.url)
-
-/** A command run a previous host left in the keeper — running, or ended with its log kept (#280 step 2) */
-export type KeptRun = { cwd: string; command: string; runId: string; startedAt: number; pty: Pty }
 
 export type CommandRun = {
   command: string
@@ -60,28 +56,6 @@ export class CommandRunner {
     /** Where ptys come from. Absent: node-pty, with the master in this host */
     private ptys?: PtyModule,
   ) {}
-
-  /**
-   * Takes over the runs a previous host left in the keeper (#280 step 2): a dev server still
-   * running, or a run that ended while no host was there, whose log and exit code the keeper kept.
-   * Either way the keeper replays the last output, which becomes the log here.
-   */
-  adopt(kept: readonly KeptRun[]): void {
-    for (const k of kept) {
-      const key = this.key(k.cwd, k.command)
-      if (this.entries.has(key)) continue
-      const entry = this.entry(k.cwd, k.command, k.runId, k.startedAt)
-      this.entries.set(key, entry)
-      this.counter = Math.max(this.counter, idNumber(k.runId))
-      entry.slot.wire(k.pty)
-    }
-  }
-
-  /** The host is leaving and the keeper keeps the runs (#280 step 2): let go without signalling anything. */
-  async detachAll(): Promise<void> {
-    await Promise.allSettled([...this.entries.values()].map((e) => e.slot.detach() ?? Promise.resolve()))
-    this.entries.clear()
-  }
 
   private key(cwd: string, command: string): string {
     return `${cwd}\u0000${command}`
@@ -212,7 +186,7 @@ export class CommandRunner {
     e.slot.start(
       () => this.loadPty(),
       () => commandShell(e.command),
-      { cols, rows, cwd: e.cwd, tag: { kind: 'command', cwd: e.cwd, command: e.command, runId: e.runId, startedAt: e.startedAt } satisfies CommandTag },
+      { cols, rows, cwd: e.cwd },
       // this never fails silently — an empty log with no message leaves no way to know the cause
       (_stage, message) => `Could not run: ${message}\r\n`,
     )

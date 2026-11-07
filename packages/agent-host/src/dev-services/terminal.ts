@@ -2,8 +2,7 @@ import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { whichTool } from '../env-path.js'
 import { commandInterpreter, systemTool } from '../os.js'
-import { PtySlot, isPtyModule, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
-import { idNumber, type TerminalTag } from '../keeper/tags.js'
+import { PtySlot, isPtyModule, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import type { EndedTerminal } from '../lifecycle/update-ended.js'
 
 /**
@@ -22,9 +21,6 @@ import type { EndedTerminal } from '../lifecycle/update-ended.js'
 const require = createRequire(import.meta.url)
 
 export type { Pty, PtyModule } from './pty-slot.js'
-
-/** A terminal a previous host left running in the keeper, to be taken over at startup */
-export type KeptTerminal = { id: string; cwd: string; pty: Pty; cols: number; rows: number }
 
 export type TerminalHandle = {
   id: string
@@ -58,35 +54,6 @@ export class TerminalService {
     /** Where ptys come from. Absent: node-pty, with the master in this host */
     private ptys?: PtyModule,
   ) {}
-
-  /**
-   * Takes over the terminals a previous host left running in the keeper (#280 step 2). Each keeps its
-   * id, so a screen that still shows it finds it again, and the keeper replays its last output, which
-   * becomes the scrollback here. New ids continue after the highest one taken over.
-   */
-  adopt(kept: readonly KeptTerminal[]): void {
-    const sorted = [...kept].sort((a, b) => idNumber(a.id) - idNumber(b.id))
-    for (const k of sorted) {
-      if (this.byId.has(k.id)) continue
-      const siblings = this.byCwd.get(k.cwd) ?? []
-      const entry = this.entry(k.id, k.cwd, `Terminal ${siblings.length + 1}`, k.cols, k.rows)
-      siblings.push(entry)
-      this.byCwd.set(k.cwd, siblings)
-      this.byId.set(entry.id, entry)
-      this.counter = Math.max(this.counter, idNumber(k.id))
-      entry.slot.wire(k.pty)
-    }
-  }
-
-  /**
-   * The host is leaving and the keeper keeps the shells (#280 step 2): let go of every pty without
-   * signalling anything. The next host takes them over with `adopt`.
-   */
-  async detachAll(): Promise<void> {
-    await Promise.allSettled([...this.byId.values()].map((e) => e.slot.detach() ?? Promise.resolve()))
-    this.byCwd.clear()
-    this.byId.clear()
-  }
 
   /** That directory's terminal list. Switching sessions leaves this list untouched */
   list(cwd: string): TerminalHandle[] {
@@ -241,7 +208,7 @@ export class TerminalService {
     e.slot.start(
       () => this.loadPty(),
       () => interactiveShell(),
-      { cols, rows, cwd: e.cwd, tag: { kind: 'terminal', id: e.id, cwd: e.cwd } satisfies TerminalTag },
+      { cols, rows, cwd: e.cwd },
       // this never fails silently — an empty black screen with no message leaves no way to know the cause
       (stage, message) => `\r\n\x1b[2m${stage === 'load' ? 'Could not open terminal' : 'Could not start shell'}: ${message}\x1b[0m\r\n`,
     )

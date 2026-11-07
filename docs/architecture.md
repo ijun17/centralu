@@ -110,7 +110,7 @@ exact-name regexp is a lint error outside
 `packages/agent-host/src/adapters/` (including its registry) and tests. The host instead asks adapter capabilities
 named for the differing behaviour — tool deferral, instruction channel, sleep, process model, built-in subagents and
 peer messaging. The lint rule reads the CLI names from the registry's adapter declarations. Fixtures that
-must depict a named CLI use an explained `eslint-disable` comment. A kept process's launch settings are likewise an adapter fingerprint, not a host branch. This makes a
+must depict a named CLI use an explained `eslint-disable` comment. A live process's launch settings are likewise an adapter fingerprint, not a host branch. This makes a
 third adapter an enrollment in the registry and an implementation under `adapters/`, rather than an edit across
 session policy, links, costs and UI mocks.
 
@@ -200,10 +200,10 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
    │                                 │
    └── WebSocket ──▶ front door ─────┼─ bytes ─▶ agent-host (node, from <data>/hosts/<build>/)
        ws://127.0.0.1:DOOR           │               │
-       (one port and token per       │               │ <data>/children.sock, 0600
-        keeper)                      │               ▼   spawn · attach · signal (§4.3)
-                                     └─ holds ─▶ claude · codex app-server · terminals · commands
-                                                 (each in its own session)
+       (one port and token per                       │ spawns and stops (§4.3)
+        keeper)                                      ▼
+                                                 claude · codex app-server · terminals · commands
+                                                 (the host's own children)
 ```
 
 | Decision | Why |
@@ -220,8 +220,8 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
 | A window of another build attaches to the running host and offers to switch | The keeper knows both builds, its own included. Switching moves the keeper to the window's build (§4.4) and then runs the blue-green swap of §4.2; the window confirms first only when something can be lost. A window started by "Apply now" switches by itself when nothing can be, and only to a newer build (§4.5). |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. Every case, per platform, is in [agent-host.md](agent-host.md) §4.0, decided in one place (`start_plan`). |
 
-The keeper also holds the host's long-lived children (§4.3), so a host restart or swap no longer ends them. The
-control socket, its protocol and its trust rule are in [agent-host.md](agent-host.md) §4.1 and
+The host's long-lived children are its own (§4.3): a host restart ends them, and an update or a swap stops them for
+an update, which the next host continues. The control socket, its protocol and its trust rule are in [agent-host.md](agent-host.md) §4.1 and
 [security-boundaries.md](security-boundaries.md).
 
 ### 4.2 The front door and the blue-green swap (#280, option C step 3)
@@ -237,7 +237,7 @@ Codex orchestrator bridge connect there.
 | While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
 | A relay whose peer refuses its bytes for 30 s ends (#392) | Writes are blocking. A peer that stopped reading (a stopped bridge, a hung client) held its relay thread and descriptors until the next swap, and blocked every keeper handoff, since a freeze waits for each relay to finish its copy. A live client reads within that; the bridge reconnects on its next call. |
 | The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives a swap. The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
-| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host in a planned ending ([agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
+| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host in a swap's drain ([agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
 `switch` is a **blue-green swap** (`keeper/swap.rs`):
 
@@ -246,7 +246,8 @@ Codex orchestrator bridge connect there.
    no lock, runs no migration and attaches to nothing. Host A keeps serving.
 2. No report within 60 s, or B exits: B is stopped and its copy removed. A was never touched.
 3. The front door holds new connections; A is told to **drain**: it refuses new RPCs and tool calls, gives the
-   running ones up to 10 s, cuts the rest with an error the model can retry, detaches, flushes and closes the store,
+   running ones up to 10 s, cuts the rest with an error the model can retry, stops for an update (its agents,
+   terminals and commands end, listed for B), flushes and closes the store,
    lets go of the #278 lock and exits. An A that has not exited 15 s past the bound is sent TERM (then its group,
    after a grace), and one that ignores that is killed with its group (#840 item 1). An A still running after
    that holds the lock B needs: B is stopped, A's watcher starts A's build again once A ends, and until then the
@@ -258,11 +259,11 @@ Codex orchestrator bridge connect there.
 
 | Decision | Why |
 |---|---|
-| Drain bound 10 s, then cut with a retryable error | Only calls the host serves itself need to drain: orchestrator tools took at most 0.2 s and app tools at most 5.6 s in a real store. Bash and subagents run inside the agent's process, which outlives the host. Draining every tool was never an option (p99 78 s, max 4.5 h). |
+| Drain bound 10 s, then cut with a retryable error | Only calls the host serves itself need to drain: orchestrator tools took at most 0.2 s and app tools at most 5.6 s in a real store. Bash and subagents run inside the agent's process, which the stop for an update ends and B continues. Draining every tool was never an option (p99 78 s, max 4.5 h). |
 | B checks itself before A drains, and migrates only after | A failed check costs nothing: A is untouched. Expand-only steps during the swap keep the store readable by A's build. |
 | If B fails after A drained, A's build is started again | A has exited and released the lock, so it cannot resume; its build is known good and still reads the store, and its copy is kept until the swap succeeds. Retrying B was the alternative, but the build that just failed is the less likely one to start. The window shows the failure and that the previous build serves again; the person can retry. |
 | Every phase is pushed to attached windows (`view.swap`) | The window shows progress and a failure's reason, and asks before switching only when something can be lost: a session working or waiting, a terminal or a command. |
-| The swap's detach hands agents, terminals and commands over | They are the keeper's children (§4.3), so A lets go of them and B re-attaches in its normal startup: a running turn goes on across the swap. The host reports `keepsAgents: true` only when it has the keeper's child service; one without it still stops its children, and the window says so. |
+| The swap's drain is a stop for an update | The agents, terminals and commands are A's own children (§4.3): A stops and lists them, and B continues the turns and opens the terminals and Run commands again ([agent-host.md](agent-host.md) §4.5). Before #1895 step 4 PR 1 a host with the keeper's children service left them in the keeper and B re-attached. The host still reports `keepsAgents`, always `false`, until the swap goes ([plans/keeper-removal.md](plans/keeper-removal.md) §4, PR 5). |
 
 
 **App views opening during a swap (#580).** A relaunched window first attaches to the keeper's existing host,
@@ -291,22 +292,26 @@ it twice. Keys/outcomes live with their bounded view instances and disappear whe
 unplanned crash lost the reservation, recovery reports uncertainty and never reruns the home tool. An older linked
 host that lacks `apps.recoverView` reports the same uncertainty instead of an unknown-method error.
 
-### 4.3 The keeper holds agents, terminals and commands (#280, option C step 2)
+### 4.3 The host owns its agents, terminals and commands (#280 step 2, #1895)
 
-> **Since #1895 step 3 a keeper started fresh holds nothing** (owner decision 2026-11-03, option C): it serves no child socket,
-> the host spawns its own children inside the tree the shell started, so macOS permissions still follow the shell (§4.1), and an
-> update stops them and continues their turns: "Apply now" asks the keeper to stop the host for an update and exit, and the
-> relaunched window starts the new build's keeper through the shell. Supervision, background mode, credential issuance and the front
-> door stay. A keeper that takes over from a holding one keeps serving what it was handed until its next update, switch or quit, and
-> hands it on only while its host cannot stop for an update. What follows
-> describes the holding, which the removal design of #1895 step 4 (`docs/plans/keeper-removal.md`, on its own branch) removes; the details are in
-> [agent-host.md](agent-host.md) §4.5, "The keeper holds no children".
+The host spawns its long-lived children itself on every machine, under a keeper too: claude, codex app-server,
+terminals and project commands (dev servers), and app MCP processes (owner decision 2). On macOS they run inside the
+tree the shell started, so macOS permissions still follow the shell (§4.1). Every ending stops them. An update stops
+them for an update: the host lists the turns, terminals and Run commands it ends, and the next host continues the
+turns with Centralu's note and opens the terminals and Run commands again ("Apply now" asks the keeper to stop the
+host for an update and exit, and the relaunched window starts the new build's keeper through the shell). A crash
+ends them with the host, and a turn in flight shows stopped with Continue. Supervision, background mode, credential
+issuance and the front door stay with the keeper. The details are in [agent-host.md](agent-host.md) §4.3 and §4.5.
 
-The host no longer spawns its long-lived children itself. Under the keeper, claude, codex app-server, terminals and
-project commands (dev servers) are spawned **by the keeper**, over a second user-only socket,
-`<data>/children.sock`. A host that crashes, restarts or is swapped out releases its connections, and the children
-keep running; the next host lists them and re-attaches mid-turn. App MCP processes stay with the host and restart
-with it (owner decision 2).
+**The children service, from #280 step 2 to #1895 step 4.** Until #1895 step 3 the keeper spawned these children
+itself over a second user-only socket, `<data>/children.sock`, so they outlived a host that crashed, restarted or was
+swapped out, and the next host listed them and re-attached mid-turn. Since step 3 a keeper started fresh offers no
+such socket (owner decision 2026-11-03, option C), and since step 4 PR 1 the host never connects to one: its children
+client, the re-attach and the detach mode are gone ([plans/keeper-removal.md](plans/keeper-removal.md)). **The keeper's
+children service still exists in the keeper until the next PR (PR 2), but no host uses it.** A keeper that took
+children over from a holding keeper of an earlier build keeps serving them until its next update, switch or quit, and
+hands them on only while its host cannot stop for an update; a host of step 4 PR 1 or later never takes them over.
+What the service does in the keeper, until PR 2 removes it:
 
 | Decision | Why |
 |---|---|
@@ -318,26 +323,12 @@ with it (owner decision 2).
 | Exits are watched with kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` (macOS), pidfd (Linux) | They report a non-child's exit (and, on macOS, its status), which a keeper that took the children over from another keeper (§4.4) needs. |
 | One thread owns every descriptor | The child table is plain data plus raw descriptors, so a keeper handoff (§4.4) freezes it between two passes, serialises it and passes the descriptors to the next keeper over `SCM_RIGHTS`. |
 
-**Leaving has two modes.** *Stop* is the old ending: sessions, terminals and commands stop with the host. It is
-every ending without a keeper, and under one the keeper asks for it (`stop` on the child socket) when it is stopping
-for good: "Quit completely", "Restart completely", the last window closing with background mode off, idle exit. Whatever the host
-could not stop, the keeper ends itself afterwards (stdin EOF and SIGHUP, then TERM, then KILL). *Detach* is every
-other ending under a keeper: a crash, a restart, a swap's drain, the keeper's pipe closing. Nothing is sent to the
-tools: no deny for a waiting approval, no EOF, no signal.
-
-**Re-attach** happens in the next host's startup. Each child carries a tag the host wrote when it asked for it
-(which session, terminal or command run); the keeper stores it and parses nothing in it.
-
-| Kind | How the next host takes it over |
-|---|---|
-| claude | A new `query()` whose `spawnClaudeCodeProcess` returns the kept process. Measured: its re-`initialize` re-delivers a pending approval at once and the rest of a running turn arrives through it. |
-| codex app-server | The same stdio. The second `initialize` is rejected ("Already initialized") harmlessly; `thread/resume` re-sends a pending approval under the same request id, and the running turn comes from the resume's turns or, since the resume asks for none (#342), from `thread/turns/list`. |
-| terminal, command run | Same id or run id; the keeper's replayed ring becomes the scrollback or log. A run that ended while no host was attached comes back with its exit code. |
-
-A session with a kept process keeps its live state through the startup reset, and the transcript catch-up is skipped
-for it (the buffered output would be recorded twice). A call to one of the host's own in-process tools (orchestrator,
-app proxy) that was in flight when the old host died is never answered; the adopting adapter fails it out loud and
-interrupts the turn, which was measured to release it. The detail is in [agent-host.md](agent-host.md) §4.3.
+**Leaving has one mode.** Every ending is a stop: sessions, terminals and commands stop with the host. The keeper
+asks for it by a line on the host's stdin, plain when it is stopping for good ("Quit completely", "Restart
+completely", the last window closing with background mode off, idle exit) and with `forUpdate` for an update; a
+swap's drain is a stop for an update too. The detach mode, which left the tools running in the keeper, and the
+re-attach of the next host went with #1895 step 4 PR 1. The measurements that made the re-attach work (claude's
+re-`initialize`, codex's `thread/resume`) are in the earlier versions of [agent-host.md](agent-host.md) §4.3.
 
 ### 4.4 The keeper hands itself over (#280, option C step 4)
 
@@ -366,7 +357,8 @@ attached window's connection, and as data: every buffer with its absolute offset
 tags, pids, exit statuses, the build records, settings, idle clocks and the last swap.
 
 **What survives and what reconnects.** Nothing reconnects. The host is the same process; it never notices, since its
-pipes and its child-socket connections are the same sockets, now held by B. A WebSocket through the front door, an
+pipes are the same, now held by B, and its agents, terminals and commands are its own descendants, which go with it.
+Only a keeper that still holds children of an earlier build has a child table to pass. A WebSocket through the front door, an
 app view's traffic and a Codex bridge's connection are the same TCP connections, pumped by B. An attached window keeps
 its control connection and hears B's next status on it. Connections waiting in a listen queue are accepted by B. The
 only thing turned away is a control request other than `status` that arrives in the instant of the freeze: it is

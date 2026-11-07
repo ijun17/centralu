@@ -36,10 +36,10 @@ import { endsWorkWithJob, systemTool } from '../os.js'
  *   and Git for Windows' sh (MSYS) asks. With it allowed, what a git hook started, or anything under Git Bash (Claude
  *   Code's Bash tool on Windows), outlived the host (measured with the real host; without it, it ended, and the hook ran
  *   as before).
- * - **Under a keeper** the host does not join one: the keeper holds the agents, terminals and commands so that they
- *   outlive a host swap, and a job of the host's would end them with it. Windows has no keeper yet
- *   (docs/plans/runtime-unification.md step 9); there, an update is a quit and a new start, and the host ends its
- *   terminals, commands and agents on the way out with or without the job (measured).
+ * - **Under a keeper too.** The keeper holds none of the host's children any more (#1895 step 4: the host owns its agents,
+ *   terminals and commands, and a swap ends them with the old host), so a job of the host's takes nothing from it.
+ *   Measured on native Windows with `CC_KEEPER=1`: without the job a detached grandchild a dev server started survived
+ *   `taskkill /F` of the host, with it none did.
  * - **A host swap or restart:** the next host is started by the window, not by this host, so it is in no job of this
  *   one's.
  * - **Already in a job** (a Node launcher's under `pnpm dev`, a CI runner's): the new job nests inside it (measured
@@ -125,11 +125,10 @@ const REAL_OS: WorkJobOs = {
 }
 
 /**
- * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Not under a keeper (see the
- * file header). Never throws
+ * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Never throws
  */
-export async function joinWorkJob(place: { underKeeper: boolean }, pid: number = process.pid, os: WorkJobOs = REAL_OS): Promise<WorkJob> {
-  if (!workJobWanted(place, os)) return { state: 'not needed' }
+export async function joinWorkJob(pid: number = process.pid, os: WorkJobOs = REAL_OS): Promise<WorkJob> {
+  if (!workJobWanted(os)) return { state: 'not needed' }
   try {
     const said = (await os.powershell(JOIN_SCRIPT(pid, WORK_JOB_LIMITS))).trim()
     const joined = /^ok (\d+)$/.exec(said)
@@ -141,9 +140,9 @@ export async function joinWorkJob(place: { underKeeper: boolean }, pid: number =
   }
 }
 
-/** Whether this host joins a work job, and so starts its terminals through the broker: on Windows, without a keeper */
-export function workJobWanted(place: { underKeeper: boolean }, os: Pick<WorkJobOs, 'needed'> = REAL_OS): boolean {
-  return os.needed && !place.underKeeper
+/** Whether this host joins a work job, and so starts its terminals through the broker: on Windows, keeper or not */
+export function workJobWanted(os: Pick<WorkJobOs, 'needed'> = REAL_OS): boolean {
+  return os.needed
 }
 
 /** The log line for `job`; nothing where no job is needed */

@@ -1,15 +1,15 @@
 /**
  * Ending everything a keeper integration script started, pass or fail, and saying what went wrong;
  * and talking to a keeper's sockets and a host's WebSocket and waiting on processes, the same way in every script.
- * Shared by `keeper-integration.mjs`, `keeper-children-integration.mjs`,
- * `keeper-handoff-integration.mjs` and `keeper-content-integration.mts`, which run in CI as well as
- * by hand (the `keeper` job in `.github/workflows/build.yml`).
+ * Shared by `keeper-integration.mjs`, `keeper-handoff-integration.mjs` and
+ * `keeper-content-integration.mts`, which run in CI as well as by hand (the `keeper` jobs in
+ * `.github/workflows/build.yml`).
  *
- * Killing the pids a script recorded is not enough. The keeper starts every child in a session of
- * its own (`setsid`), and the processes those children start (a dev server under `sh -c`, a command
- * typed into a terminal, claude's tools) are recorded nowhere. SIGKILL a held shell and what it
- * started is reparented to init, where only its process group still names it. After a handoff the
- * held children's parent, the old keeper, is gone too. So the processes to end are computed from
+ * Killing the pids a script recorded is not enough. A terminal's shell runs in a session of its own
+ * (`setsid`), and the processes the host's children start (a dev server under `sh -c`, a command
+ * typed into a terminal, claude's tools) are recorded nowhere. SIGKILL a shell and what it started
+ * is reparented to init, where only its process group still names it; so is everything a crashed
+ * host left. So the processes to end are computed from
  * one process table taken before anything is signalled: every descendant of a recorded pid, and
  * every member of a process group a recorded pid leads.
  *
@@ -17,7 +17,7 @@
  * the same names as what these scripts start (CONTRIBUTING.md, "Never stop what you did not start").
  */
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 
@@ -86,22 +86,33 @@ export function request(sock, body, timeoutMs = 8000) {
   })
 }
 
+/**
+ * This process attached as a window, once the keeper's first view arrived: a keeper takes a stop for an update only from a
+ * process with a window attached now, judged by pid and start (#2117), so a script asks for one from its own process after
+ * this. Its executable has to be `CC_KEEPER_TEST_WINDOW_EXE` for the keeper to take it for a window.
+ */
+export function attachHere(sock, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const c = createConnection(sock)
+    const timer = setTimeout(() => {
+      c.destroy()
+      reject(new Error('no view after attaching'))
+    }, timeoutMs)
+    c.on('connect', () => c.write(`${JSON.stringify({ op: 'attach', protocol: 1 })}
+`))
+    c.once('data', () => {
+      clearTimeout(timer)
+      resolve(c)
+    })
+    c.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+  })
+}
+
 /** The keeper's `status` view */
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
-
-/**
- * Copies the bundled host from `from` to `to` as a host of a build before #1895 step 3: the same code, but it does not say it
- * stops for an update (`stopsForUpdate`). A keeper holding its children hands them on in a handoff only for such a host
- * (`handoff::held_children_on_handoff`); for one that says it, the keeper stops for an update instead.
- */
-export function copyEarlierHost(from, to) {
-  cpSync(from, to, { recursive: true })
-  const main = join(to, 'main.mjs')
-  const src = readFileSync(main, 'utf8')
-  const earlier = src.replace('stopsForUpdate: true', 'stopsForUpdate: false')
-  if (earlier === src) throw new Error(`${main} no longer says "stopsForUpdate: true" where copyEarlierHost expects it`)
-  writeFileSync(main, earlier)
-}
 
 /** What the keeper holds, from `keeper.sock`: the child socket answers only the keeper's hosts (#538) */
 export const heldChildren = (data) => request(join(data, 'keeper.sock'), { op: 'children' }).then((r) => r.children ?? [])

@@ -16,8 +16,8 @@ import { isPtyModule, type Pty, type PtyModule } from './pty-slot.js'
  * host starts **before** it joins the job, which is in no job of the host's; Run commands, agents, git and app servers
  * are still started here, in the job.
  *
- * `brokerPtyModule` has the surface `terminal.ts` already takes from node-pty and from the keeper
- * (`keeper/keeper-pty.ts`'s `keeperPtyModule`): `spawn(file, args, opts)`, and a handle with `pid`, `onData`,
+ * `brokerPtyModule` has the surface `terminal.ts` already takes from node-pty: `spawn(file, args, opts)`, and a
+ * handle with `pid`, `onData`,
  * `onExit`, `write`, `resize`, `kill`. The pid arrives a moment after the spawn: a kill before it goes to the broker,
  * which ends the pty once it exists (kill-tree's Windows shot falls back to `kill()` when there is no pid).
  *
