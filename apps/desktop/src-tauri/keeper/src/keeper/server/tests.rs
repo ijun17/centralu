@@ -355,9 +355,11 @@ fn keeper_with_a_host(data: &Path) -> Arc<Keeper> {
 fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
     use std::io::BufRead;
     let mut s = UnixStream::connect(sock).unwrap();
-    s.write_all(&json_line(req)).unwrap();
+    // Before the request: the keeper may answer and close at once, and macOS refuses `SO_RCVTIMEO` (EINVAL) on a socket
+    // its peer has closed, so a timeout set after the write fails on a fast machine (the GitHub runner did)
     s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
     let mut r = BufReader::new(s.try_clone().unwrap());
+    s.write_all(&json_line(req)).unwrap();
     let mut lines = Vec::new();
     let end = Instant::now() + Duration::from_secs(10);
     let mut line = String::new();
@@ -523,10 +525,10 @@ fn only_the_accepted_window_executable_gets_the_token() {
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let reply = stdout
-            .lines()
-            .find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string()))
-            .unwrap_or_else(|| panic!("the copy made no request: {stdout}"));
+        let reply = stdout.lines().find_map(|l| l.find("REPLY ").map(|at| l[at + 6..].to_string())).unwrap_or_else(|| {
+            panic!("the copy made no request ({}): {stdout}
+{}", out.status, String::from_utf8_lossy(&out.stderr))
+        });
         serde_json::from_str(&reply).unwrap()
     };
     let v = status_of(&window);
@@ -536,6 +538,100 @@ fn only_the_accepted_window_executable_gets_the_token() {
     let v = status_of(&renamed);
     assert_eq!(v["view"]["status"]["token"], json!(limited::limited_token(DOOR_TOKEN)), "{v}");
     assert_eq!(v["view"]["rights"], json!("limited"));
+    let _ = fs::remove_dir_all(&data);
+}
+
+/**
+ * #2117: installing an update replaces the app bundle under the running window, as `centralu install` does
+ * (`packaging/npm/centralu/bin/swap.mjs`): the new bundle is copied beside it as `<app>.new`, the old one renamed aside to
+ * `<app>.old-<time>`, the new one renamed in, the old one deleted. macOS then names no path for the window's pid (the real
+ * apply's ENOENT); a file replaced in place instead keeps naming the old path, which now names the new file. The window that
+ * attached before the install can still stop the keeper for the update; a process started from the same file that never
+ * attached cannot, whatever its path reads. This test binary, as the bundle's window executable, run twice, is both
+ * processes: one attaches, then the bundle is swapped, then each connects and the keeper judges it as it judges the op.
+ */
+#[test]
+fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    const NAME: &str = "keeper::server::tests::a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update";
+    // The copy, run again: it attaches when asked, waits for a line, then connects to the judging socket and waits there
+    if let Ok(judge) = std::env::var("CCK_TEST_JUDGE_SOCK") {
+        let _attached = std::env::var("CCK_TEST_ATTACH_SOCK").ok().map(|sock| {
+            let mut s = UnixStream::connect(sock).unwrap();
+            s.write_all(&json_line(&json!({ "op": "attach", "protocol": KEEPER_PROTOCOL }))).unwrap();
+            let mut answer = String::new();
+            BufReader::new(s.try_clone().unwrap()).read_line(&mut answer).unwrap();
+            s
+        });
+        println!("READY");
+        let mut go = String::new();
+        std::io::stdin().read_line(&mut go).unwrap();
+        let mut j = UnixStream::connect(judge).unwrap();
+        let _ = std::io::Read::read(&mut j, &mut [0u8; 1]);
+        return;
+    }
+    let data = PathBuf::from(format!("/tmp/cck-replaced-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let app = data.join("Centralu.app");
+    let bundle_with_window = |app: &Path| {
+        fs::create_dir_all(app.join("Contents").join("MacOS")).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), app.join("Contents").join("MacOS").join("centralu")).unwrap();
+    };
+    bundle_with_window(&app);
+    let window = app.join("Contents").join("MacOS").join("centralu");
+    k.state.lock().unwrap().desired.bundle_path = Some(app.to_string_lossy().to_string());
+    let judge_sock = data.join("judge.sock");
+    let judging = UnixListener::bind(&judge_sock).unwrap();
+    let start = |attach: bool| {
+        let mut c = Command::new(&window);
+        c.args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+            .env("CCK_TEST_JUDGE_SOCK", &judge_sock)
+            .env_remove("CC_KEEPER_TEST_WINDOW_EXE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        if attach {
+            c.env("CCK_TEST_ATTACH_SOCK", &k.sock);
+        }
+        let mut child = c.spawn().unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        while !line.contains("READY") {
+            line.clear();
+            assert!(out.read_line(&mut line).unwrap() > 0, "the copy ended before it was ready");
+        }
+        // Its output stays open until it ends, so the copy's harness never writes to a closed pipe
+        (child, out)
+    };
+    let (mut window_proc, _window_out) = start(true);
+    let (mut stranger, _stranger_out) = start(false);
+    assert_eq!(k.attached_windows().len(), 1, "the copy at the accepted path attached as a window");
+    // The update, as swap.mjs makes it: the new bundle beside, the old one aside, the new one in, the old one deleted
+    let staging = data.join("Centralu.app.new");
+    let aside = data.join("Centralu.app.old-1");
+    bundle_with_window(&staging);
+    fs::rename(&app, &aside).unwrap();
+    fs::rename(&staging, &app).unwrap();
+    fs::remove_dir_all(&aside).unwrap();
+    let judged = |child: &mut std::process::Child| {
+        writeln!(child.stdin.as_mut().unwrap()).unwrap();
+        let (s, _) = judging.accept().unwrap();
+        assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
+        k.judge_window_for_update(&s)
+    };
+    assert_eq!(judged(&mut window_proc), Ok(()), "the attached window after its executable was replaced");
+    let stranger_judged = judged(&mut stranger);
+    assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
+    for mut c in [window_proc, stranger] {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
     let _ = fs::remove_dir_all(&data);
 }
 
@@ -606,12 +702,13 @@ fn keeper_with_a_fake_host_and(data: &Path, script: &str, children: Children) ->
 fn stop_for_update_of(k: &Arc<Keeper>, host: u32, window: bool, wait: Duration) -> (bool, Value, bool, Duration) {
     use std::io::BufRead;
     let (mut keeper_end, window_end) = UnixStream::pair().unwrap();
+    // Before the keeper's end can answer and close: macOS refuses the timeout on a socket its peer closed (see `ask`)
+    window_end.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let started = Instant::now();
     let stopping = {
         let k = k.clone();
         thread::spawn(move || k.stop_for_update(&mut keeper_end, if window { Ok(()) } else { Err("a test's caller".into()) }, wait))
     };
-    window_end.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
     let mut line = String::new();
     BufReader::new(window_end).read_line(&mut line).unwrap();
     let (took, host_alive) = (started.elapsed(), crate::os::pid_alive(host));

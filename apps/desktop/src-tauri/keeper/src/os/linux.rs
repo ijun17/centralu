@@ -141,6 +141,15 @@ pub fn exe_of_pid(pid: u32) -> io::Result<std::path::PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/exe"))
 }
 
+/// When `pid` started, in clock ticks since boot (`starttime`, field 22 of `/proc/<pid>/stat`, #2117): with the pid, it names
+/// one process, since a pid is used again only by a process that started later.
+pub fn process_started(pid: u32) -> io::Result<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    // The fields after the command name, which is in parentheses and may hold either: the state is field 3, the start 22
+    let after = stat.rsplit_once(')').map(|(_, rest)| rest).ok_or_else(|| io::Error::other("no command name in stat"))?;
+    after.split_whitespace().nth(19).and_then(|s| s.parse().ok()).ok_or_else(|| io::Error::other("no start time in stat"))
+}
+
 /// No code signatures to read here (#1405): a keeper here judges a window by its executable's name.
 pub fn code_signature_display(_exe: &std::path::Path) -> Option<String> {
     None

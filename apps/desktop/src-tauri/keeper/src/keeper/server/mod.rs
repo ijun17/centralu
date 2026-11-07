@@ -206,6 +206,9 @@ pub(super) struct Window {
     /// then do its views carry the front door's token. Read from the kernel when it attached, or
     /// when another keeper handed it over (the peer's record travels with the socket).
     pub(super) full: bool,
+    /// For a window (`full`), its pid and start as it attached (#2117): what a stop for an update is judged by, since after
+    /// an install macOS names no executable, or the old path, for it (`window_peer::judge_for_update`).
+    pub(super) peer: Option<window_peer::Attached>,
     /// Shared with the writer, not duplicated: one descriptor for both.
     pub(super) stream: Arc<UnixStream>,
     pub(super) push: Arc<push::Pusher>,
@@ -234,7 +237,10 @@ impl Window {
         };
         let stream = Arc::new(stream);
         match push::Pusher::start(stream.clone(), on_fail) {
-            Ok(push) => Some(Window { id, full, stream, push }),
+            Ok(push) => {
+                let peer = if full { window_peer::attached(&stream) } else { None };
+                Some(Window { id, full, peer, stream, push })
+            }
             Err(e) => {
                 log(&format!("could not start a writer for window {id} ({e}); closing its connection"));
                 let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -378,6 +384,17 @@ impl Keeper {
     /// The same, with why not (`window_peer::judge`).
     pub(super) fn judge_window(&self, stream: &UnixStream) -> Result<(), String> {
         window_peer::judge(stream, &self.window_exes())
+    }
+
+    /// Whether the peer may stop the keeper for an update: a window attached now, by pid and start, whatever its executable
+    /// reads after an install (#2117, `window_peer::judge_for_update`).
+    pub(super) fn judge_window_for_update(&self, stream: &UnixStream) -> Result<(), String> {
+        window_peer::judge_for_update(stream, &self.attached_windows())
+    }
+
+    /// The windows attached now, as each was judged when it attached (#2117).
+    pub(super) fn attached_windows(&self) -> Vec<window_peer::Attached> {
+        self.state.lock().map(|st| st.subscribers.iter().filter_map(|w| w.peer).collect()).unwrap_or_default()
     }
 
     /**
@@ -644,7 +661,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
         },
         "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
-            let window = k.judge_window(&stream);
+            let window = k.judge_window_for_update(&stream);
             if k.stop_for_update(&mut stream, window, host_proc::STOP_FOR_UPDATE_WAIT) {
                 drop(stream);
                 exit_after_stop();

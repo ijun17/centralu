@@ -1217,6 +1217,13 @@ jobs:
         id: build
         run: cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+      # The keeper crate's unit tests on macOS, not only on Linux: the kernel answers differently here (#2117: after an
+      # install macOS names no executable, or the old path, for a window whose bundle was swapped; Linux names it with
+      # " (deleted)"), and the job below on ubuntu cannot see that.
+      - name: keeper unit tests (macOS)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
+
       # Each script runs whatever the one before said, so one failure does not hide the next.
       - name: keeper (start, attach, background, relaunch, stop, swap, drain, from a copy out of the AppImage)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
