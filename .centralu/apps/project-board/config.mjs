@@ -110,6 +110,12 @@ const checkoutEnv = process.env.PROJECT_BOARD_QUEUE_CHECKOUT
 const guardConf = config.queue?.guard ?? {}
 const DEFAULT_SETUP_INPUTS = ['.github/**/*', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '**/package.json', '**/rust-toolchain*', '**/Cargo.lock']
 const guardOn = process.env.PROJECT_BOARD_QUEUE_GUARD ? process.env.PROJECT_BOARD_QUEUE_GUARD === 'on' : guardConf.enabled !== false && CI.landTier === 'quick'
+// The queue forms no new batch while a release run, or a main run, has jobs waiting for a runner (#2115, 2026-11-07): a batch's run of the
+// quick tier is work nobody waits on, and a release's last job waited more than 30 minutes behind 40 running ones. `workflows`: release
+// workflow files; `mainRuns`: the main guard's runs (build.yml's pushes to the default branch); `maxMinutes`: the longest one hold lasts, so
+// jobs that never start cannot stop the queue. PROJECT_BOARD_QUEUE_RUNNER_HOLD (the object as JSON, or "off") and
+// PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS (how long an answer is kept): for the tests only
+const holdConf = process.env.PROJECT_BOARD_QUEUE_RUNNER_HOLD ? (process.env.PROJECT_BOARD_QUEUE_RUNNER_HOLD === 'off' ? null : JSON.parse(process.env.PROJECT_BOARD_QUEUE_RUNNER_HOLD)) : config.queue?.runnerHold
 const flaky = process.env.PROJECT_BOARD_QUEUE_FLAKY ? JSON.parse(process.env.PROJECT_BOARD_QUEUE_FLAKY) : config.queue?.flakyJobs
 export const QUEUE = {
   flakyJobs: Array.isArray(flaky) ? flaky.filter((x) => typeof x === 'string' && x) : [],
@@ -120,6 +126,14 @@ export const QUEUE = {
     timeoutMs: Math.max(1, Number(conflicts.timeoutMinutes ?? 30) || 30) * 60_000,
     checkout: checkoutEnv !== undefined ? checkoutEnv || null : (conflicts.checkout ?? APP_DIR),
   },
+  runnerHold: holdConf
+    ? {
+        workflows: (Array.isArray(holdConf.workflows) ? holdConf.workflows : []).filter((w) => typeof w === 'string' && /^[\w.-]+\.ya?ml$/.test(w)),
+        mainRuns: holdConf.mainRuns === true,
+        checkMs: process.env.PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS !== undefined ? Number(process.env.PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS) || 0 : 60_000,
+        maxMs: (Number(holdConf.maxMinutes ?? 45) || 45) * 60_000,
+      }
+    : null,
   guard: guardOn
     ? {
         // The queue lands nothing while more of main's full runs than this are unfinished (#1259): each landing adds one

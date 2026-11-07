@@ -324,6 +324,126 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       ...patch,
     })
 
+  // #2115 (2026-11-07): a release's last job waited more than 30 minutes behind 40 running jobs, work nobody waits on among them
+  describe('a release run waiting for a runner (#2115)', () => {
+    const release = (status: string) => ({ id: 7001, status, conclusion: null, event: 'push', head_branch: 'v1.0.0', head_sha: 'f'.repeat(40) })
+    const waiting = (jobStatus: string) => ({ jobs: { 7001: [{ id: 1, name: 'centralu (shim)', status: jobStatus, conclusion: null, steps: [] }] } })
+    const hold = (extra: object = {}) => ({ ...TIERS, PROJECT_BOARD_QUEUE_RUNNER_HOLD: JSON.stringify({ workflows: ['release.yml'], ...extra }), PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS: '0' })
+
+    it('forms no batch while a job of the release run is queued, says so, and forms it once nothing waits', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await morePolls(10)
+      // No branch made, nothing dispatched; the queue says what it waits for
+      expect(writes()).toEqual([])
+      expect(batchesOnDisk()).toEqual([])
+      expect(queueOnDisk().runnerHold).toMatchObject({ why: 'release.yml run 7001 has 1 job waiting for a runner' })
+      expect((await call('merge_queue')).text).toContain('New batches are held: release.yml run 7001 has 1 job waiting for a runner')
+      // The release's job started: the batch is formed and the pull request lands
+      patchGh((st) => (st.jobs[7001][0].status = 'in_progress'))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      expect(queueOnDisk().runnerHold).toBeUndefined()
+    })
+
+    it('keeps the hold, and its bound, when the pull request is queued again meanwhile, and starts a new one for another run', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      const since = queueOnDisk().runnerHold.since
+      // Queued again (the queue then waits a minute for it to be read): the hold is not started over
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await morePolls(10)
+      expect(queueOnDisk().runnerHold.since).toBe(since)
+      // Another run waiting is another hold
+      patchGh((st) => {
+        st.releaseRuns['release.yml'] = [{ ...release('in_progress'), id: 7002 }]
+        st.jobs = { 7002: st.jobs[7001] }
+      })
+      await until(() => queueOnDisk().runnerHold?.run === 'release.yml 7002', 'the hold of the other run')
+      expect(queueOnDisk().runnerHold.since).not.toBe(since)
+    })
+
+    it("holds for main's full run with a job queued when mainRuns is on (this repository leaves it off: after every landing a main run has queued jobs)", async () => {
+      const main = ghRun(null, 1, SHA, { id: 7100, head_branch: 'main', event: 'push' })
+      runtime(
+        tieredState({ branchRuns: { main: [main] }, jobs: { 7100: [{ id: 2, name: 'e2e (chromium 1/10)', status: 'queued', conclusion: null, steps: [] }] } }),
+        { ...hold({ workflows: [], mainRuns: true }), PROJECT_BOARD_QUEUE_GUARD: 'on' },
+      )
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      expect(queueOnDisk().runnerHold).toMatchObject({ why: "main's full tier run 7100 has 1 job waiting for a runner" })
+      expect(batchesOnDisk()).toEqual([])
+    })
+
+    it("does not hold the guard's own revert", async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      // The guard queues its revert like this (main-revert.mjs)
+      const q = JSON.parse(readFileSync(queueFile(), 'utf8'))
+      q.items[0].guardRevert = true
+      writeFileSync(queueFile(), JSON.stringify(q))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+    })
+
+    it('holds for no longer than maxMinutes, so jobs that never start cannot stop the queue', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('queued')] }, ...waiting('queued') }), hold({ maxMinutes: 0.001 }))
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+      // The batch was formed with the job still waiting; when the run was first waited for is written down, apart from the hold
+      expect(queueOnDisk().runnerHoldSince).toHaveProperty(['release.yml 7001'])
+    })
+
+    describe('the limit is kept for the run, not for the hold', () => {
+      const batchRun = (id: number, suite: number) => ghRun('success', 1, ONE, { id, head_branch: `queue/batch-${id - 950}`, event: 'workflow_dispatch', check_suite_id: suite })
+      const many = (n: number) => ({
+        releaseRuns: { 'release.yml': [release('queued')] },
+        ...waiting('queued'),
+        prs: Object.fromEntries(Array.from({ length: n }, (_, i) => [String(77 + i), ghPr(77 + i)])),
+        on: Object.fromEntries(Array.from({ length: n }, (_, i) => [`dispatch:queue/batch-${i + 1}`, { runs: { [ONE]: [i ? batchRun(951 + i, 6000 + i) : oneRun('success')] }, checks: { [ONE]: fullChecks(6000 + i) } }])),
+      })
+      const since = () => queueOnDisk().runnerHoldSince?.['release.yml 7001']
+
+      it('does not wait again for a run after the queue went idle and filled, with GitHub failing, or with no job of the run queued meanwhile', async () => {
+        runtime(tieredState(many(5)), hold({ maxMinutes: 0.001 }))
+        await call('queue_merge', { pr: 77, owner: 'tester' })
+        await until((x) => stateOf(x) === 'merged', 'the first merge')
+        const first = since()
+        expect(first).toBeTruthy()
+        // GitHub cannot be asked: the batch is formed, the hold is not shown, nothing is forgotten
+        patchGh((st) => (st.releaseRunsError = 'HTTP 500'))
+        await call('queue_merge', { pr: 78, owner: 'tester' })
+        await until((x) => stateOf(x, 78) === 'merged', 'the merge while GitHub fails')
+        patchGh((st) => delete st.releaseRunsError)
+        expect(queueOnDisk().runnerHold).toBeUndefined()
+        expect(since()).toBe(first)
+        // The run goes on with no job queued: it is not over, nothing is forgotten
+        patchGh((st) => (st.jobs[7001][0].status = 'in_progress'))
+        await call('queue_merge', { pr: 79, owner: 'tester' })
+        await until((x) => stateOf(x, 79) === 'merged', 'the merge with the job running')
+        expect(since()).toBe(first)
+        // A job of it waits again, the queue having been idle: the first look is already past the limit, so no new wait
+        patchGh((st) => (st.jobs[7001][0].status = 'queued'))
+        await call('queue_merge', { pr: 80, owner: 'tester' })
+        await until(() => queueOnDisk().runnerHold, 'the look at the run')
+        expect(queueOnDisk().runnerHold).toMatchObject({ run: 'release.yml 7001', since: first, expired: true })
+        await until((x) => stateOf(x, 80) === 'merged', 'the merge')
+        expect(since()).toBe(first)
+      })
+
+      it('forgets the run once it is over', async () => {
+        runtime(tieredState(many(2)), hold({ maxMinutes: 0.001 }))
+        await call('queue_merge', { pr: 77, owner: 'tester' })
+        await until((x) => stateOf(x) === 'merged', 'the first merge')
+        expect(since()).toBeTruthy()
+        patchGh((st) => (st.releaseRuns['release.yml'] = [{ ...release('completed'), conclusion: 'success' }]))
+        await call('queue_merge', { pr: 78, owner: 'tester' })
+        await until((x) => stateOf(x, 78) === 'merged', 'the second merge')
+        expect(queueOnDisk().runnerHoldSince).toBeUndefined()
+      })
+    })
+  })
+
   // #2098 (2026-11-07): open_pr turned the queued #2094 into a draft while batch-487 tested it; the batch was dropped ("changed while it
   // ran"), a person marked it ready again on the same head, and the queue raised "full-tier" attention instead of batching it again
   it('batches a pull request again, with no push, when its batch was dropped because it was a draft for a while (#2098)', async () => {

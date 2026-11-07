@@ -39,10 +39,12 @@ import {
   readRequired,
   readWorkflowChecks,
   rerunRun,
+  runJobs,
   runJobSteps,
   jobNotes,
   sameRepo,
   setPrBase,
+  workflowRuns,
 } from './github.mjs'
 import {
   ACTIVE,
@@ -819,6 +821,78 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   return { state: d.state, patch, events, wait }
 }
 
+// --- Runners for the release and main's runs (#2115) ---------------------------------------------------
+
+let pressure = { at: -Infinity, result: null }
+
+/**
+ * What waits for a runner that a new batch would take the slots of: a run of a release workflow, or of main's full tier (the main
+ * guard's), with a job queued. Answers `{ found, live }`: `found` the run waiting (or null), `live` the keys of every run of those
+ * workflows not finished. Null when GitHub cannot be asked (a hold must never be the reason the queue stops, and nothing is learned
+ * from it). Kept `checkMs`, so a tick does not ask on every poll.
+ */
+async function runnerPressure(conf, now) {
+  if (now - pressure.at < conf.checkMs) return pressure.result
+  let result = null
+  try {
+    const repo = config.repository
+    const lists = []
+    for (const wf of conf.workflows) lists.push([wf, await workflowRuns(repo, wf)])
+    if (conf.mainRuns && QUEUE.guard) {
+      const { defaultBranch } = await readRepo(repo)
+      lists.push(["main's full tier", await workflowRuns(repo, 'build.yml', { event: 'push', branch: defaultBranch })])
+    }
+    const live = new Set()
+    let found = null
+    for (const [name, runs] of lists) {
+      const going = runs.filter((r) => r.status !== 'completed')
+      for (const run of going) live.add(`${name} ${run.id}`)
+      for (const run of going.slice(0, 3)) {
+        if (found) break
+        const queued = (await runJobs(repo, run.id)).filter((j) => j.status === 'queued')
+        if (queued.length) found = { run: `${name} ${run.id}`, why: `${name} run ${run.id} has ${queued.length} job${queued.length === 1 ? '' : 's'} waiting for a runner` }
+      }
+    }
+    result = { found, live }
+  } catch (e) {
+    if (!(e instanceof GitHubError)) throw e
+  }
+  pressure = { at: now, result }
+  return result
+}
+
+/**
+ * Whether no new batch is formed now, and says so on the queue (`runnerHold`: since when and why, which `merge_queue` shows). Bounded:
+ * a run is waited for until `maxMs` after it was first waited for, then batches are formed anyway. When it was first waited for is kept
+ * apart from the hold (`runnerHoldSince`), and forgotten only when that run has finished: not when the queue goes idle and fills again,
+ * nor when a batch runs, nor when GitHub cannot be asked.
+ */
+async function holdBatches(dir, now) {
+  const conf = QUEUE.runnerHold
+  if (!conf || (!conf.workflows.length && !conf.mainRuns)) return false
+  const q = readQueue(dir)
+  const read = await runnerPressure(conf, now)
+  // GitHub cannot be asked: nothing is held, so the hold is not shown; what is known of the runs stays
+  if (!read) {
+    if (q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+    return false
+  }
+  const { found, live } = read
+  const seen = Object.fromEntries(Object.entries(q.runnerHoldSince ?? {}).filter(([run]) => live.has(run)))
+  if (found) seen[found.run] ??= new Date(now).toISOString()
+  const expired = found ? now - Date.parse(seen[found.run]) > conf.maxMs : false
+  updateQueue(dir, (fresh) => {
+    if (found) fresh.runnerHold = { since: seen[found.run], run: found.run, why: found.why, ...(expired ? { expired: true } : {}) }
+    else delete fresh.runnerHold
+    // Merged into what is there now (the earlier time wins): a driver that wrote meanwhile keeps its entries
+    const kept = Object.fromEntries(Object.entries(fresh.runnerHoldSince ?? {}).filter(([run]) => live.has(run)))
+    for (const [run, at] of Object.entries(seen)) kept[run] = kept[run] && kept[run] < at ? kept[run] : at
+    if (Object.keys(kept).length) fresh.runnerHoldSince = kept
+    else delete fresh.runnerHoldSince
+  })
+  return !!found && !expired
+}
+
 /**
  * One tick: when the queue has an item due and no other driver holds the lease, polls that one item
  * and writes back what changed. Answers what it did: `idle`, `paused`, `busy` (another driver),
@@ -829,6 +903,7 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   const active = q.items.filter((i) => ACTIVE.has(i.state))
   // A batch whose last member landed still has its end to do (its branch, the tree check)
   if (!active.length && !activeBatch(q)) {
+    if (q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
     releaseLease(dir, holder)
     return { did: 'idle' }
   }
@@ -839,7 +914,13 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   q = readQueue(dir)
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
   const work = batchWork(q, now)
-  if (work?.form) {
+  // Not while a release or main's run waits for runners (#2115): the batch would only take the slots they wait for; the items are polled meanwhile
+  // The guard's revert is not held: main is red, and it is what a release or a run waits for
+  const urgent = q.items.some((i) => ACTIVE.has(i.state) && i.guardRevert)
+  const holding = work?.form && !urgent ? await holdBatches(dir, now) : false
+  // A hold is over when the run no longer waits (holdBatches), the queue is idle, or a batch runs (when each run was first waited for is kept in runnerHoldSince)
+  if (work?.batch && q.runnerHold) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+  if (work?.form && !holding) {
     updateQueue(dir, (fresh) => formDue(fresh, now, ref))
     return { did: 'batched' }
   }
