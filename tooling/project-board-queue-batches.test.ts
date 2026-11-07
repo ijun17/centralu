@@ -363,6 +363,18 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       expect(queueOnDisk().runnerHold.since).not.toBe(since)
     })
 
+    it("holds for main's full run with a job queued when mainRuns is on (this repository leaves it off: after every landing a main run has queued jobs)", async () => {
+      const main = ghRun(null, 1, SHA, { id: 7100, head_branch: 'main', event: 'push' })
+      runtime(
+        tieredState({ branchRuns: { main: [main] }, jobs: { 7100: [{ id: 2, name: 'e2e (chromium 1/10)', status: 'queued', conclusion: null, steps: [] }] } }),
+        { ...hold({ workflows: [], mainRuns: true }), PROJECT_BOARD_QUEUE_GUARD: 'on' },
+      )
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      expect(queueOnDisk().runnerHold).toMatchObject({ why: "main's full tier run 7100 has 1 job waiting for a runner" })
+      expect(batchesOnDisk()).toEqual([])
+    })
+
     it("does not hold the guard's own revert", async () => {
       runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
       await call('queue_merge', { pr: 77, owner: 'tester' })

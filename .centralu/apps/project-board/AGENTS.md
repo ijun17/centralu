@@ -603,7 +603,7 @@ default 4: the owner's, 2026-10-19, this repository's too).
   that it made it (`branchMade`), and only while it is still the driver.
 - **No new batch while a release or main's run waits for a runner** (#2115, 2026-11-07: a release rehearsal's last job
   waited more than 30 minutes behind 40 running jobs). With `queue.runnerHold` in project.json (`workflows`: release workflow
-  files; `mainRuns`: main's full tier, the guard's runs; `maxMinutes`, 45), the tick forms no new batch while a run of one of
+  files; `mainRuns`: main's full tier, the guard's runs, off in this repository's project.json because after every landing a main run has queued jobs, which would come close to serialising the queue; `maxMinutes`, 45), the tick forms no new batch while a run of one of
   those, not finished, has a job whose status is `queued` (`holdBatches`, `runnerPressure`, queue-driver.mjs; asked at most once a
   minute, and a GitHub that cannot be asked holds nothing). A batch's run of the quick tier is work nobody waits on, and GitHub
   schedules queued jobs without priority. The items are polled as ever, a running batch goes on, landing is not held, and
