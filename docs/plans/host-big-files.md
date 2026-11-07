@@ -237,8 +237,8 @@ This round stops after 1–3.
   `heldByProject`, which nothing in production calls (greps in §2), the `MailCalls` alias, the "before slice M3a" claim
   in the file doc, and the doc of `isHidden`, which sat above `citeKey`'s; two docs in `frame.ts` and `asked-by.ts` that
   named a method that is not there. `MailboxRecords.markTurn` (5 lines and its store test), which only
-  `turnStarted` called, stays: `store/mailbox.ts` is the deep tier (a store path), so its removal is a pull request of
-  its own (`markDelivered` already writes `turn_seq`). The tests that called only the three go: `turnStarted`'s, `feed`'s
+  `turnStarted` called, goes in a pull request of its own, since `store/mailbox.ts` is the deep tier (a store path)
+  (`markDelivered` already writes `turn_seq`). The tests that called only the three go: `turnStarted`'s, `feed`'s
   page test, `heldByProject`'s two uses, and the two `feed` assertions in the phantom test. Their property, an
   ancestor held from its reader reads as a phantom with no words or facts and whole to its sender, nothing else pinned (the
   reviewer's finding), so the test now pins it through `read`'s chain and fails when `item()` answers `not_sent` for a held
