@@ -172,17 +172,35 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
   })
 
   it('does not make merge_queue wait for a GitHub that accepts and does not answer for a while, and shows the answer once it comes', async () => {
+    // GitHub holds its answer until the test lets it go (a time limit used to decide this under a loaded runner), in a
+    // gh started on its own: one answered in the app's process (system.mjs) holds the app while it holds the answer
     waiting()
-    start(4, BOARD)
-    patchGh((st) => (st.compareHangs = 6000))
-    const calls = await Promise.all([call('merge_queue'), call('merge_queue'), call('merge_queue')])
-    // The question to GitHub is still out (the fake records it when it answers): the calls did not wait for it
-    expect(asked()).toBe(0)
-    for (const c of calls) {
+    start(4, BOARD, { PROJECT_BOARD_FAKE_PROGRAMS: '' })
+    const answer = join(root, 'compare-may-answer')
+    patchGh((st) => (st.compareHangs = answer))
+    // A call that waited for the held answer would return once gh's own limit (30 s, github.mjs GH_TIMEOUT_MS) ends it,
+    // without the answer too: so each call must also return well inside that limit, generous for a loaded runner
+    const timed = async () => {
+      const at = performance.now()
+      const c = await call('merge_queue')
+      return { c, ms: performance.now() - at }
+    }
+    const first = await timed()
+    // Once the question is out and held, calls still answer, without the answer. The started gh takes a few process
+    // starts to be asked (git, then gh for the repository): wait for the question itself, not for a count of calls
+    const asking = performance.now()
+    while (asked() === 0) {
+      if (performance.now() - asking > 20_000) throw new Error('the board never asked GitHub how far main is ahead')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    const calls = [first, ...(await Promise.all([timed(), timed()]))]
+    for (const { c, ms } of calls) {
+      expect(ms).toBeLessThan(15_000)
       expect(c.isError).toBe(false)
       expect(c.data.code).toBeUndefined()
     }
     // And once GitHub answers, the next call shows it
+    writeFileSync(answer, '')
     const told = await learned()
     expect(told.text).toContain('Board code: 4 commits behind main')
   })
