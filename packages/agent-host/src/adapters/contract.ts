@@ -331,19 +331,6 @@ export type InputOrigin = { kind: 'human' } | { kind: 'channel'; server: 'centra
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
-  /**
-   * For a process this host adopted (`ProcessSource.adopt`): false when the adapter could not take over the turn it was
-   * running (it ended that process and reopened the conversation in a new one, ACP), so that turn is over. Absent: the
-   * process is the same one, and its turn goes on (`state_change` `reattached`)
-   */
-  readonly takesOverTurn?: boolean
-  /**
-   * For a process this host adopted, asked once after it is re-attached (#2020): resolves true when the tool itself said no turn runs in the
-   * conversation and nothing has been given it since, so the turn the stored state names ended while no host ran and no frame of its end will
-   * come. It waits for the conversation to open (a slow resume hands the handle out before the tool answers). Absent: the tool cannot
-   * say (Claude's CLI says nothing until its next frame, and a silent one may be running a long call), and the turn is taken to go on
-   */
-  adoptedIdle?(): Promise<boolean>
   /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
   delegationNotice?(): string | undefined
   /**
@@ -460,14 +447,6 @@ export interface SessionHandle {
    */
   appAttachment?(server: string): 'attached' | 'restart' | 'failed'
   dispose(): Promise<void>
-  /**
-   * Lets go of the session **without stopping its process** (#280 step 2): a host leaving for a
-   * restart under the keeper. Nothing is sent to the tool — no deny for a waiting approval, no EOF,
-   * no signal — and the next host re-attaches and the tool re-delivers what is pending. Output that
-   * arrives while the process is being released is still emitted. Only an adapter whose process came
-   * from a `ProcessSource` can; the others leave it unimplemented.
-   */
-  detach?(): Promise<void>
 }
 
 /** Whose price ratios between uncached input, a cache read and a cache write the tool's model is billed by (`sessions/cache-cost.ts`, #1492) */

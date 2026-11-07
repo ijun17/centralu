@@ -73,10 +73,6 @@ class Wire implements MidTurnWire {
     this.log.push('close')
   }
 
-  async detach(): Promise<void> {
-    this.log.push('detach')
-  }
-
   /** The tool answers write `n`, naming the turn that took it */
   answer(n: number, turnId: string | null): void {
     const w = this.writes[n]!
@@ -463,11 +459,6 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     blocked.ledger.send('b')
     await blocked.ledger.dispose()
     expect(blocked.events.at(-1)).toMatchObject({ type: 'error', error: { message: expect.stringContaining('were sent during compaction') } })
-    const swapped = setup()
-    swapped.ledger.send('a')
-    await swapped.ledger.detach()
-    expect(swapped.events.at(-1)).toMatchObject({ type: 'error', error: { message: expect.stringContaining('as Centralu restarted') } })
-    expect(swapped.ledger.closed).toBe(true)
   })
 
   it('an opening that finishes after the close (an answer read before the process exits) leaves it closed', async () => {
@@ -489,15 +480,6 @@ describe('a tool that takes input mid-turn: the exit and the close', () => {
     await tick()
     expect(said).toEqual(['a:fail The session process ended before the parent note finished'])
     expect(wire.writes).toEqual([])
-  })
-
-  it('a tracked input sent while it opened fails with why the opening ended, after a host swap let go of it', async () => {
-    const { wire, ledger, said, observe } = setup()
-    void ledger.sendTracked('a', observe('a')).catch(() => {})
-    await ledger.detach()
-    wire.opened.reject(new Error('request abandoned: this host let go of codex'))
-    await tick()
-    expect(said.at(-1)).toBe('a:fail request abandoned: this host let go of codex')
   })
 })
 

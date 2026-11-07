@@ -23,7 +23,6 @@ import { ClaudeAdapter } from '../packages/agent-host/src/adapters/claude/index.
 import { CodexAdapter } from '../packages/agent-host/src/adapters/codex/index.js'
 import { drive, scenariosFor, type Scenario } from '../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts } from '../packages/agent-host/src/adapters/contract.js'
-import { driveSwap, SWAP_SCENARIOS, type SwapScenario } from '../packages/agent-host/src/adapters/codex/swap-scenarios.test-helpers.js'
 import { cursorProfile } from '../packages/agent-host/src/adapters/cursor-agent/index.js'
 import { spawnLocalAgent } from '../packages/agent-host/src/adapters/local-process.js'
 import { openCodeProfile } from '../packages/agent-host/src/adapters/opencode/index.js'
@@ -61,11 +60,7 @@ async function main(): Promise<number> {
     return 2
   }
   const wanted = (s: { name: string }) => names.length === 0 || names.includes(s.name)
-  const chosen: { name: string; drive?: Scenario; swap?: SwapScenario }[] = [
-    ...scenariosFor(tool).filter(wanted).map((drive) => ({ name: drive.name, drive })),
-    // A conversation that changes hands with its app-server still running (a host swap under the keeper): Codex's
-    ...(tool === 'codex' ? SWAP_SCENARIOS.filter(wanted).map((swap) => ({ name: swap.name, swap })) : []),
-  ]
+  const chosen: { name: string; drive: Scenario }[] = scenariosFor(tool).filter(wanted).map((drive) => ({ name: drive.name, drive }))
   const data = mkdtempSync(join(tmpdir(), 'frames-data-'))
   process.env.CC_DATA_DIR = data
   let codexHome: { finish(): void } | null = null
@@ -88,37 +83,26 @@ async function main(): Promise<number> {
     codexHome = tool === 'codex' ? temporaryCodexHome(data) : null
     claudeConfig = tool === 'claude' ? temporaryClaudeConfig(data) : null
     for (const scenario of chosen) {
-      codexHome?.settings(scenario.drive?.settings === 'mcp' ? 'mcp' : undefined)
+      codexHome?.settings(scenario.drive.settings === 'mcp' ? 'mcp' : undefined)
       // Resolved, so the folder reads the same wherever a tool prints it (macOS: `/var` is `/private/var`)
       const cwd = realpathSync(mkdtempSync(join(tmpdir(), `frames-record-${scenario.name}-`)))
       const raw = keepRaw ? join(keepRaw, scenario.name) : mkdtempSync(join(tmpdir(), 'frames-raw-'))
-      // A swap scenario records from the swap on: the host that adopts a process taps it from then
-      if (scenario.swap) delete process.env.CC_RECORD_FRAMES
-      else process.env.CC_RECORD_FRAMES = raw
+      process.env.CC_RECORD_FRAMES = raw
       let last: AgentProcess | null = null
-      const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(tool === 'claude' ? claudeFlags(spec, scenario.drive?.settings, claudeConfig) : spec))
-      agy = tool === 'antigravity' ? temporaryAgy(data, scenario.name, scenario.drive?.signedOut === true) : null
+      const spawn = (spec: AgentSpawnSpec) => (last = spawnLocalAgent(tool === 'claude' ? claudeFlags(spec, scenario.drive.settings, claudeConfig) : spec))
+      agy = tool === 'antigravity' ? temporaryAgy(data, scenario.name, scenario.drive.signedOut === true) : null
       const adapter = agy ? agy.adapter(spawn) : adapterFor(tool, spawn)
       const version = (await adapter.installedVersion?.()) ?? 'unknown'
       const sessionId = `record-${scenario.name}`
       let bridge: BridgeHost | null = null
       const outside: string[] = []
       try {
-        let run: { preset?: string }
-        let events
-        if (scenario.swap) {
-          const swap = scenario.swap
-          run = { preset: swap.preset }
-          const first = { sessionId: `${sessionId}-first`, cwd, permissionPreset: swap.preset ?? ('normal' as const), projectTrusted: true, ...sessionFor(tool, spawn).session, ...(swap.model ? { model: swap.model } : {}) }
-          events = await driveSwap(adapter, swap, first, sessionId, () => last, () => void (process.env.CC_RECORD_FRAMES = raw), 300_000)
-        } else {
-          run = runAs(tool, scenario.drive!)
-          // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
-          const given = ACP_TOOLS.includes(tool) ? scenario.drive!.session?.() : undefined
-          if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
-          const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
-          events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
-        }
+        const run: { preset?: string } = runAs(tool, scenario.drive)
+        // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
+        const given = ACP_TOOLS.includes(tool) ? scenario.drive.session?.() : undefined
+        if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
+        const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
+        const events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)
           .filter((n) => n.startsWith(`${sessionId}.`))
