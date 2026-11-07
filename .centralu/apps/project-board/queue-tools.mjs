@@ -403,7 +403,7 @@ async function mergeQueue({ all = false, owner }) {
   const warning = staleWarning(age, { queue: driving, guard: guard?.state === 'driving' })
   const codeLines = age ? [age.text, ...(warning ? [warning] : [])] : []
   return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['code', '', codeLines], ['hold', '', holdLines]], {
-    ...(age ? { code: { head: age.head, behind: age.behind, appChanged: age.appChanged, warning } } : {}), counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
+    ...(age ? { code: { head: age.head, behind: age.behind, appChanged: age.appChanged, moved: age.moved, warning } } : {}), counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {

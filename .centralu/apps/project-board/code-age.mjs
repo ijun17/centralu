@@ -29,12 +29,16 @@ const LOADED = codeDir() ? await headOf(codeDir()) : null
 
 let kept = { at: -Infinity, key: '', value: null }
 let asking = null
+// The default branch does not change while the app runs
+const branches = new Map()
 
+/** The answer for the checkout now: null when the code is current (or not known), undefined when GitHub could not be asked */
 async function ask(repo, dir) {
   const current = await headOf(dir)
   if (!LOADED || !current) return null
   try {
-    const { defaultBranch } = await readRepo(repo)
+    if (!branches.has(repo)) branches.set(repo, (await readRepo(repo)).defaultBranch)
+    const defaultBranch = branches.get(repo)
     const ahead = await readBehind(repo, LOADED, defaultBranch)
     const moved = current !== LOADED
     if (!ahead || (ahead.behind === 0 && !moved)) return null
@@ -46,8 +50,8 @@ async function ask(repo, dir) {
     if (moved) lines.push(`The checkout is at ${current.slice(0, 7)} now, not at ${LOADED.slice(0, 7)} as the app started: it runs the code it started with until it is restarted.`)
     return { head: LOADED, current, moved, behind: ahead.behind, appChanged, branch: defaultBranch, text: lines.join(' ') }
   } catch (e) {
-    // A GitHub that cannot be asked: nothing known (no warning is better than a wrong one)
-    if (e instanceof GitHubError || e instanceof GitError) return null
+    // A GitHub that cannot be asked: what was known stays (no warning is better than a wrong one)
+    if (e instanceof GitHubError || e instanceof GitError) return undefined
     throw e
   }
 }
@@ -56,17 +60,25 @@ async function ask(repo, dir) {
  * `{ head, behind, appChanged, moved, text }`: the commit the running code came from, how many commits of main it lacks, whether any
  * of the app's own files changed in them (the files list GitHub gives may be cut: then yes), whether the checkout has moved on
  * since the app started, and the lines `merge_queue` shows. Null when the code is current, is not in a git checkout, is not known
- * to GitHub, or GitHub cannot be asked. Asked at most every few minutes, by one caller at a time.
+ * to GitHub, or nothing is known yet. Never waits for GitHub (a call can take seconds, or until gh gives up, and every
+ * `merge_queue` would wait with it): it answers what it last knew, and asks again in the background every few minutes, one asker at a
+ * time. The first call after the app starts therefore shows nothing.
  */
 export async function codeAge(repo, now = clock()) {
   const dir = codeDir()
   if (!dir) return null
-  const key = `${repo}\0${dir}`
-  if (kept.key === key && now - kept.at < KEEP_MS) return kept.value
-  asking ??= ask(repo, dir).finally(() => (asking = null))
-  const value = await asking
-  kept = { at: now, key, value }
-  return value
+  const key = `${repo}|${dir}`
+  if (kept.key !== key) kept = { at: -Infinity, key, value: null }
+  if (now - kept.at >= KEEP_MS) {
+    asking ??= ask(repo, dir)
+      .then(
+        (value) => void (kept = { at: clock(), key, value: value === undefined ? kept.value : value }),
+        // Something unexpected: stay quiet and try again later, merge_queue must not fail for it
+        () => void (kept = { ...kept, at: clock() }),
+      )
+      .finally(() => (asking = null))
+  }
+  return kept.value
 }
 
 /** The warning when this instance drives the queue or the main guard on code that is behind, else null */
@@ -74,5 +86,5 @@ export function staleWarning(age, { queue, guard }) {
   if (!age?.appChanged) return null
   const what = [queue ? 'the merge queue' : null, guard ? 'the main guard' : null].filter(Boolean).join(' and ')
   if (!what) return null
-  return `Warning: this instance drives ${what} with board code ${plural(age.behind, 'commit')} behind ${age.branch}. It lacks later fixes (an old main guard once filed wrong reverts, #2087): update its checkout (git pull --ff-only) and restart the app${guard ? ', or stop the guard here (queue-driver.json {"drive": false})' : ''}.`
+  return `Warning: this instance drives ${what} with board code ${plural(age.behind, 'commit')} behind ${age.branch}. It lacks later fixes (an old main guard once filed wrong reverts, #2087): ${age.moved ? 'restart the app (its checkout was updated since it started)' : 'update its checkout (git pull --ff-only) and restart the app'}${guard ? ', or stop the guard here (queue-driver.json {"drive": false})' : ''}.`
 }

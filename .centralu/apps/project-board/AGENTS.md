@@ -772,7 +772,9 @@ looked into).
   (`guardStatus`; `queue-driver.json` decides only the guard) on code where the app's folder changed since, "Warning: …" (`code` in its data).
   `codeAge`, code-age.mjs: the checkout's HEAD **as the app started** (modules load once, so a later pull changes the files and not the
   running code; "The checkout is at … now" says so) against GitHub's comparison with the default branch (`readBehind`; a files list GitHub
-  cut counts as changed; the app's folder from `git rev-parse --show-prefix`), kept 5 minutes, one asker at a time. Nothing is said when the
+  cut counts as changed; the app's folder from `git rev-parse --show-prefix`). `merge_queue` never waits for GitHub: it shows the last
+  answer (nothing on the first call after the app starts) and asks again in the background every 5 minutes, one asker at a time, the default
+  branch once per process; after a pull without a restart the warning says to restart only. Nothing is said when the
   code is current, not in a git checkout, unknown to GitHub (an unpushed commit), or GitHub cannot be asked. It never pulls: the checkout may
   be someone's working tree. `PROJECT_BOARD_CODE_DIR` (empty: do not look) and `PROJECT_BOARD_CODE_CHECK_MS` are for tests only.
 - **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
