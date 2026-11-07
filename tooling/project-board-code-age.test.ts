@@ -171,18 +171,20 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
     expect(told.text).not.toContain('git pull')
   })
 
-  it('does not make merge_queue wait for a GitHub that accepts and never answers', async () => {
+  it('does not make merge_queue wait for a GitHub that accepts and does not answer for a while, and shows the answer once it comes', async () => {
     waiting()
     start(4, BOARD)
-    patchGh((st) => (st.compareHangs = true))
-    const began = performance.now()
+    patchGh((st) => (st.compareHangs = 6000))
     const calls = await Promise.all([call('merge_queue'), call('merge_queue'), call('merge_queue')])
-    // The fake holds the question for 25 seconds: the answers did not wait for it
-    expect(performance.now() - began).toBeLessThan(10_000)
+    // The question to GitHub is still out (the fake records it when it answers): the calls did not wait for it
+    expect(asked()).toBe(0)
     for (const c of calls) {
       expect(c.isError).toBe(false)
       expect(c.data.code).toBeUndefined()
     }
+    // And once GitHub answers, the next call shows it
+    const told = await learned()
+    expect(told.text).toContain('Board code: 4 commits behind main')
   })
 
   it('asks GitHub once in a while, and once at a time, not at every merge_queue', async () => {
