@@ -1816,15 +1816,22 @@ door's port and a credential, stop the host, and make the keeper run a host from
   an update ("Apply now"), which comes from exactly that window, reads none: it is a window's only when the peer is one
   of the windows attached now, each judged by its path as it attached and known since by its pid and when that process
   started (`window_peer::Attached`; a pid used again belongs to a process that started later). Every window sends it
-  while attached. The keeper keeps every window it took by its path for its life: one whose attach ended (a write it
-  missed) and that attaches again with a path that reads as no window's is taken again by its pid and start, with the
-  token (`window_peer::judge_attaching`). Any other pid is refused whatever its path reads, a process started from the
-  window's own file that never attached included, so a replaced file widens nothing. `status`, `system_ending`,
-  `switch` and `upgrade` keep the path rule (`switch` and `upgrade` start code with the token, which a window about to
-  relaunch does not need). A keeper started after the install (it restarted or crashed) knows no window from before it:
-  "Apply now" is refused with "quit Centralu and open it again", which runs the installed build. Tests:
-  `a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update`,
-  `a_window_that_attaches_again_after_an_install_can_still_stop_for_the_update`.
+  while attached. The keeper keeps every window it took by its path while that process runs: one whose attach ended (a
+  write it missed) and that attaches again with a path that reads as no window's is taken again by its pid and start,
+  with the token (`window_peer::judge_attaching`); one whose process ended leaves the list. The pid and start are read
+  before the path is judged and again after (`window_peer::judge_path_of`): a window that ends while it is judged, its
+  pid taken by another process, is refused, not remembered as that process. Any other pid is refused whatever its path
+  reads, a process started from the window's own file that never attached included, so a replaced file widens nothing.
+  `system_ending` is a window's by either rule (an attached window, or by its path), so a window the install replaced
+  can still tell the host the system is ending. `status`, `switch` and `upgrade` keep the path rule (`switch` and
+  `upgrade` start code with the token, which a window about to relaunch does not need). A keeper started after the
+  install (it restarted or crashed) knows no window from before it: "Apply now" is refused with "only a Centralu window
+  attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it
+  ran, quit Centralu and open it again", which runs the installed build. Tests:
+  `a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update` (and `system_ending` from it),
+  `a_window_that_attaches_again_after_an_install_can_still_stop_for_the_update`,
+  `a_pid_another_process_takes_while_the_path_is_judged_is_neither_taken_nor_remembered`,
+  `a_remembered_window_whose_process_ended_is_dropped`.
 - **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees, or
   replace the file at an accepted path (an app bundle is the user's to change). A peer can connect and then `exec` the
   window's executable, keeping its pid: the window it starts flashes on screen. A process this keeper took for a window keeps that

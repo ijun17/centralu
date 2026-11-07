@@ -12,7 +12,7 @@
 //! | `{"op":"stop","forUpdate":true}` | the host is stopped for an update (it lists what it ends for the next host), then `{"ok":true}`, and the keeper exits (#1895 step 3). A window's only: anyone else gets `{"ok":false,"error":"window_only: …"}` |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
 //! | `{"op":"upgrade","exe":path,"source":BuildSource}` | a window's only (#1405): `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
-//! | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970): `{"ok":true}` once the host has been told, on its stdin, that the system is ending (a shutdown, restart or sign-out; `cancelled`: that it is not after all); `{"ok":false}` when no host is up |
+//! | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970: one attached now, by pid and start, or one by its path; `Keeper::may_tell_system_ending`): `{"ok":true}` once the host has been told, on its stdin, that the system is ending (a shutdown, restart or sign-out; `cancelled`: that it is not after all); `{"ok":false}` when no host is up |
 //! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
 //! | `{"op":"settings"}` | `{"ok":true,"background":bool}` |
 //! | `{"op":"set_background","on":bool}` | `{"ok":true,"background":bool}` |
@@ -172,10 +172,10 @@ impl State {
 
     /// Counts a window another keeper handed over as attached and adds it to the push list; returns
     /// its id. A window back spends the wait for one the keeper closed.
-    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream, full: bool) -> u64 {
+    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream, full: bool, peer: Option<window_peer::Attached>) -> u64 {
         let id = self.count_window();
         self.reattach_until = None;
-        if let Some(w) = Window::start(k, id, stream, full) {
+        if let Some(w) = Window::start(k, id, stream, full, peer) {
             self.subscribers.push(w);
         }
         id
@@ -227,8 +227,9 @@ impl Window {
      * connection shut down, when no thread could be started for it: the window attaches again.
      */
     /// `full`: whether the peer is a Centralu window (`window_peer::judge`), judged by the caller before it takes the
-    /// state lock, since the judgement may run `codesign`.
-    fn start(k: &Arc<Keeper>, id: u64, stream: UnixStream, full: bool) -> Option<Window> {
+    /// state lock, since the judgement may run `codesign`; `peer`, its pid and start as read around that judgement
+    /// (`Keeper::judge_attaching`), kept for a window only.
+    fn start(k: &Arc<Keeper>, id: u64, stream: UnixStream, full: bool, peer: Option<window_peer::Attached>) -> Option<Window> {
         let k2 = k.clone();
         let on_fail = move |e: &std::io::Error| {
             log(&format!("window {id} stopped taking its status ({e}); closing its connection"));
@@ -242,7 +243,7 @@ impl Window {
         let stream = Arc::new(stream);
         match push::Pusher::start(stream.clone(), on_fail) {
             Ok(push) => {
-                let peer = if full { window_peer::attached(&stream) } else { None };
+                let peer = if full { peer } else { None };
                 Some(Window { id, full, peer, stream, push })
             }
             Err(e) => {
@@ -393,13 +394,21 @@ impl Keeper {
     /// Whether an attaching or handed-over peer is a window: by its path, or as a window this keeper took by its path
     /// before (#2119, `window_peer::judge_attaching`); a window taken by its path is remembered. Never under the state
     /// lock while the path is judged, which may run `codesign`.
-    pub(super) fn judge_attaching(&self, stream: &UnixStream) -> Result<window_peer::Taken, String> {
-        let by_path = self.judge_window(stream);
-        let peer = window_peer::attached(stream);
+    /// With the window's record as it was read around the path check (`window_peer::judge_path_of`), which `Window::start`
+    /// keeps, so the process remembered and the one judged are the same.
+    pub(super) fn judge_attaching(&self, stream: &UnixStream) -> Result<(window_peer::Taken, Option<window_peer::Attached>), String> {
+        let (by_path, peer) = window_peer::judge_path_of(|| window_peer::attached(stream), || self.judge_window(stream));
+        let running = |w: &window_peer::Attached| crate::os::process_started(w.pid).ok() == Some(w.started);
         match self.state.lock() {
-            Ok(mut st) => window_peer::judge_attaching(by_path, peer, &mut st.known_windows),
-            Err(_) => by_path.map(|()| window_peer::Taken::ByPath),
+            Ok(mut st) => window_peer::judge_attaching(by_path, peer, &mut st.known_windows, running).map(|t| (t, peer)),
+            Err(_) => by_path.map(|()| (window_peer::Taken::ByPath, peer)),
         }
+    }
+
+    /// Whether the peer may tell the host the system is ending (#1970): a window attached now, by pid and start, as for a
+    /// stop for an update (after an install its path reads as no window's), or else by its path.
+    pub(super) fn may_tell_system_ending(&self, stream: &UnixStream) -> bool {
+        self.judge_window_for_update(stream).is_ok() || self.is_window(stream)
     }
 
     /// Whether the peer may stop the keeper for an update: a window attached now, by pid and start, whatever its executable
@@ -571,11 +580,11 @@ impl Keeper {
 
 /// The refusal of a stop for an update by a keeper that has handed over
 pub(super) const HANDED_OVER: &str = "this keeper has just handed over to a newer one; try again in a moment";
-/// The refusal of a stop for an update to a process that is not a Centralu window
-/// (#2119): the person's own window gets it when this keeper does not know it (one started after the install, or a window
-/// whose attach the keeper could not take again); quitting and reopening runs the installed build, which is the update
-pub(super) const NOT_A_WINDOW: &str =
-    "window_only: the keeper does not recognise this window since the update was installed; quit Centralu and open it again to finish the update";
+/// The refusal of a stop for an update to a process that is not a Centralu window attached to this keeper, in words true
+/// for whoever asks (#2119 review): any other process (an agent's shell) gets it, and so does the person's own window
+/// when this keeper does not know it (one started after the install, or a window whose attach could not be taken again);
+/// for that window, quitting and reopening runs the installed build, which is the update
+pub(super) const NOT_A_WINDOW: &str = "window_only: only a Centralu window attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it ran, quit Centralu and open it again to finish the update";
 
 /// Why this keeper cannot stop for an update now, or None (#1895 step 3), each in words the window shows after "Not
 /// relaunched:". Nothing is stopped when it cannot: the window says why and stays
@@ -694,7 +703,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         "relaunching" => relaunching(&k, &mut stream, &req),
         // The window heard the system end (macOS: the workspace's power-off notice). A process that is not a window could make a
         // false mark, so it is the window's alone
-        "system_ending" if !k.is_window(&stream) => {
+        "system_ending" if !k.may_tell_system_ending(&stream) => {
             log("refused system_ending to a process that is not a Centralu window");
             reply(&mut stream, &json!({ "ok": false, "error": "window_only: only a Centralu window can tell the host the system is ending" }))
         }

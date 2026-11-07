@@ -623,11 +623,13 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
         writeln!(child.stdin.as_mut().unwrap()).unwrap();
         let (s, _) = judging.accept().unwrap();
         assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
-        k.judge_window_for_update(&s)
+        (k.judge_window_for_update(&s), k.may_tell_system_ending(&s))
     };
-    assert_eq!(judged(&mut window_proc), Ok(()), "the attached window after its executable was replaced");
-    let stranger_judged = judged(&mut stranger);
+    // The window may also still tell the host the system is ending (#2119 review), which the path rule alone refused
+    assert_eq!(judged(&mut window_proc), (Ok(()), true), "the attached window after its executable was replaced");
+    let (stranger_judged, stranger_ending) = judged(&mut stranger);
     assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
+    assert!(!stranger_ending, "a process that never attached told the host the system is ending");
     for mut c in [window_proc, stranger] {
         let _ = c.kill();
         let _ = c.wait();
