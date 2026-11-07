@@ -345,6 +345,35 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
       expect(queueOnDisk().runnerHold).toBeUndefined()
     })
 
+    it('keeps the hold, and its bound, when the pull request is queued again meanwhile, and starts a new one for another run', async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      const since = queueOnDisk().runnerHold.since
+      // Queued again (the queue then waits a minute for it to be read): the hold is not started over
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await morePolls(10)
+      expect(queueOnDisk().runnerHold.since).toBe(since)
+      // Another run waiting is another hold
+      patchGh((st) => {
+        st.releaseRuns['release.yml'] = [{ ...release('in_progress'), id: 7002 }]
+        st.jobs = { 7002: st.jobs[7001] }
+      })
+      await until(() => queueOnDisk().runnerHold?.run === 'release.yml 7002', 'the hold of the other run')
+      expect(queueOnDisk().runnerHold.since).not.toBe(since)
+    })
+
+    it("does not hold the guard's own revert", async () => {
+      runtime(tieredState({ releaseRuns: { 'release.yml': [release('in_progress')] }, ...waiting('queued') }), hold())
+      await call('queue_merge', { pr: 77, owner: 'tester' })
+      await until(() => queueOnDisk().runnerHold, 'the hold')
+      // The guard queues its revert like this (main-revert.mjs)
+      const q = JSON.parse(readFileSync(queueFile(), 'utf8'))
+      q.items[0].guardRevert = true
+      writeFileSync(queueFile(), JSON.stringify(q))
+      await until((x) => stateOf(x) === 'merged', 'the merge')
+    })
+
     it('holds for no longer than maxMinutes, so jobs that never start cannot stop the queue', async () => {
       runtime(tieredState({ releaseRuns: { 'release.yml': [release('queued')] }, ...waiting('queued') }), hold({ maxMinutes: 0.001 }))
       await call('queue_merge', { pr: 77, owner: 'tester' })

@@ -775,7 +775,7 @@ async function runnerPressure(conf, now) {
       for (const run of runs.filter((r) => r.status !== 'completed').slice(0, 3)) {
         const queued = (await runJobs(repo, run.id)).filter((j) => j.status === 'queued')
         if (queued.length) {
-          value = `${name} run ${run.id} has ${queued.length} job${queued.length === 1 ? '' : 's'} waiting for a runner`
+          value = { run: `${name} ${run.id}`, why: `${name} run ${run.id} has ${queued.length} job${queued.length === 1 ? '' : 's'} waiting for a runner` }
           break search
         }
       }
@@ -795,14 +795,16 @@ async function holdBatches(dir, now) {
   const conf = QUEUE.runnerHold
   if (!conf || (!conf.workflows.length && !conf.mainRuns)) return false
   const held = readQueue(dir).runnerHold ?? null
-  const why = await runnerPressure(conf, now)
-  if (!why) {
+  const found = await runnerPressure(conf, now)
+  if (!found) {
     if (held) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
     return false
   }
-  const since = held?.since ?? new Date(now).toISOString()
-  const expired = held?.expired === true || now - Date.parse(since) > conf.maxMs
-  updateQueue(dir, (fresh) => (fresh.runnerHold = { since, why, ...(expired ? { expired: true } : {}) }))
+  // The same run keeps its hold and its bound; another run waiting is a new hold
+  const same = held && held.run === found.run
+  const since = same ? held.since : new Date(now).toISOString()
+  const expired = (same && held.expired === true) || now - Date.parse(since) > conf.maxMs
+  updateQueue(dir, (fresh) => (fresh.runnerHold = { since, run: found.run, why: found.why, ...(expired ? { expired: true } : {}) }))
   return !expired
 }
 
@@ -828,9 +830,11 @@ export async function tick(dir, { holder, now = clock(), ref = queueRef }) {
   // Batches first (#962): the running one when it is due, or a new one from items waiting for CI
   const work = batchWork(q, now)
   // Not while a release or main's run waits for runners (#2115): the batch would only take the slots they wait for; the items are polled meanwhile
-  const holding = work?.form ? await holdBatches(dir, now) : false
-  // A hold that expired is remembered while the run still waits, so the next batch is not held again; any other is over once no batch is due
-  if (!work?.form && q.runnerHold && !q.runnerHold.expired) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
+  // The guard's revert is not held: main is red, and it is what a release or a run waits for
+  const urgent = q.items.some((i) => ACTIVE.has(i.state) && i.guardRevert)
+  const holding = work?.form && !urgent ? await holdBatches(dir, now) : false
+  // A hold is over when the run no longer waits (holdBatches), the queue is idle, or a batch runs; one that expired is kept while the same run waits, and not dropped because no batch is due for a minute
+  if (work?.batch && q.runnerHold && !q.runnerHold.expired) updateQueue(dir, (fresh) => void delete fresh.runnerHold)
   if (work?.form && !holding) {
     updateQueue(dir, (fresh) => formDue(fresh, now, ref))
     return { did: 'batched' }

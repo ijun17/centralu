@@ -609,7 +609,7 @@ default 4: the owner's, 2026-10-19, this repository's too).
   schedules queued jobs without priority. The items are polled as ever, a running batch goes on, landing is not held, and
   `merge_queue` says "New batches are held: …, since HH:MM UTC" (`runnerHold` on the queue). A job waiting for an approval is not queued
   for a runner, and nothing is held for a finished run. After `maxMinutes` of one hold the batch is formed anyway and not
-  held again until nothing waits, so jobs that never start cannot stop the queue. `PROJECT_BOARD_QUEUE_RUNNER_HOLD` (the object as JSON,
+  held again while the same run waits (another run waiting is a new hold; queueing a pull request meanwhile does not start it over), so jobs that never start cannot stop the queue. The guard's own revert (`guardRevert` on its item) is never held: main is red. `PROJECT_BOARD_QUEUE_RUNNER_HOLD` (the object as JSON,
   or `off`) and `PROJECT_BOARD_QUEUE_RUNNER_HOLD_MS` are for tests only.
 - A member sent back has its own run cancelled: the item's poll reruns it (a cancelled run once per
   head), which is what tells the session what is wrong with it, if anything.
