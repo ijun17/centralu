@@ -202,8 +202,12 @@ if (args[0] === 'issue' && args[1] === 'view') {
   const key = path.split('/compare/')[1]
   const files = (st.compareFiles ?? {})[key] ?? (key.includes('queue%2Fbatch-') ? st.batchFiles : undefined)
   if (st.compareError) fail(st.compareError)
-  // GitHub that accepts and does not answer (#2121): compareHangs: how long in ms, so the process ends on its own
-  if (st.compareHangs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, st.compareHangs)
+  // GitHub that accepts and does not answer (#2121): compareHangs, until the file it names exists (the test lets it answer
+  // by writing it, so no wall-clock bound decides the test), and at most a minute, so the process ends on its own
+  if (st.compareHangs) {
+    const until = Date.now() + 60000
+    while (!require('node:fs').existsSync(st.compareHangs) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+  }
   // How far the second is ahead of the first (compareAhead: ahead_by, #2121), as the test gives it
   const ahead = (st.compareAhead ?? {})[key]
   out({ status: (st.compare ?? {})[key] ?? 'ahead', ...(ahead !== undefined ? { ahead_by: ahead } : {}), ...(files ? { files: files.map((f) => (typeof f === 'string' ? { filename: f } : f)) } : {}) })
