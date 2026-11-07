@@ -399,6 +399,11 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(asked).toBe(0)
   })
 
+  it('recall names a machine the person disconnected as that, and where to connect it, not as one that may come back', async () => {
+    const off = machine({}, { reachable: false, waitsForPerson: true })
+    expect(await linkedSessions(() => [off]).recall('x', 12)).toEqual({ hits: [[]], notSearched: ['Box (not connected; ask the person to connect it in Settings, Machines, Connect)'] })
+  })
+
   it('knows only ids of machines it links to', () => {
     const reader = linkedSessions(() => [machine({})])
     expect(reader.machineOf('m1.w1')).toBe('Box')

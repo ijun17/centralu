@@ -662,7 +662,7 @@ export function linkedSessions(
       const hits = await Promise.all(
         [...machines()].map(async (m): Promise<RecallHit[]> => {
           if (!m.reachable) {
-            notSearched.push(`${m.name} (not reachable right now)`)
+            notSearched.push(`${m.name} (${m.waitsForPerson ? 'not connected; ask the person to connect it in Settings, Machines, Connect' : NOT_REACHABLE})`)
             return []
           }
           try {
