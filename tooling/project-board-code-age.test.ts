@@ -64,7 +64,7 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
   it('shows the count without a warning when none of the commits touch the board app, or nothing here drives', async () => {
     waiting()
     start(5, ['docs/a.md', 'packages/ui/src/b.ts'])
-    let told = await call('merge_queue')
+    const told = await call('merge_queue')
     expect(told.text).toContain('Board code: 5 commits behind main')
     expect(told.text).toContain('none of them in the board app')
     expect(told.text).not.toContain('Warning')
@@ -86,7 +86,7 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
     expect(told.text).toContain('Warning: this instance drives the merge queue')
   })
 
-  it('says nothing when the code is at main, GitHub does not know the commit or cannot be asked, and says it once main moves', async () => {
+  it('says nothing when the code is at main, not in a git checkout, unknown to GitHub, or GitHub cannot be asked, and says it once main moves', async () => {
     waiting()
     const { key } = start(0, [])
     let told = await call('merge_queue')
@@ -108,12 +108,10 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
     told = await call('merge_queue')
     expect(told.isError).toBe(false)
     expect(told.text).not.toContain('Board code')
-  })
-
-  it('says nothing for code that is not in a git checkout', async () => {
+    // Code that is not in a git checkout (an installed copy): no count either
     mkdirSync(join(root, 'not-git'), { recursive: true })
     runtime(ghState({}), { ...IDLE_SERVER, PROJECT_BOARD_CODE_DIR: join(root, 'not-git'), PROJECT_BOARD_CODE_CHECK_MS: '0' }, gitWrapper(fake.bin))
-    const told = await call('merge_queue')
+    told = await call('merge_queue')
     expect(told.isError).toBe(false)
     expect(told.text).not.toContain('Board code')
   })
