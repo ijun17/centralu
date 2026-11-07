@@ -13,7 +13,7 @@ import { lastLine, npmInstall, parseRevoke, revokeCommand, type RemoteCommand, t
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { heldOnMinimum } from './versions.js'
 import { rpcError } from '../rpc-error.js'
-import { sleep } from '../timing.js'
+import { raceTimeout, sleep } from '../timing.js'
 
 /**
  * A linked machine (links.ts): its connection (linked-machine-connection.ts), and what the person
@@ -24,6 +24,12 @@ const linkError = (message: string) => rpcError(message)
 
 /** How often an update that waits for the sessions there to finish reads what is running (#1399) */
 const ACTIVITY_POLL_MS = 15_000
+/**
+ * How long the machine's own "Allow auto" may take to read before the row says it did not answer. A person waits on the
+ * row, not a model on a tool call (the orchestrator's read is `LOOKUP_MS`, 4 s), so it is longer. The set is not bound: a
+ * change the machine applies after the row said it did not would leave the row showing the old state
+ */
+const HUB_AUTO_READ_MS = 15_000
 /** How long after a reading that says none is in a turn it is read once more, right before the host is stopped (#1399) */
 const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
@@ -468,8 +474,15 @@ export class LinkedMachine extends LinkedMachineConnection {
   async hubAuto(allowed?: boolean): Promise<HubAuto | 'unreachable'> {
     const client = this.client
     if (!client?.connected) return 'unreachable'
+    const ms = this.deps.hubAutoReadMs ?? HUB_AUTO_READ_MS
+    const timedOut = Symbol('timed out')
     try {
-      return await askHubAuto((method, params) => client.call(method, params), allowed)
+      return await askHubAuto(async (method, params) => {
+        if (allowed !== undefined) return client.call(method, params)
+        const answer = await raceTimeout(client.call(method, params), ms, timedOut)
+        if (answer === timedOut) throw new Error(`no answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`)
+        return answer
+      }, allowed)
     } catch (err) {
       if (!client.connected) return 'unreachable'
       throw rpcError(`${this.name} did not answer for its "Allow auto from a linked computer": ${errorMessage(err)}`)

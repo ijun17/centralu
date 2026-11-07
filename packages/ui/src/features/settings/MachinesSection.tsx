@@ -472,6 +472,15 @@ function AsksSwitch({ m }: { m: MachineInfo }) {
   )
 }
 
+/** What the row of a machine's "Allow auto" says under its switch: a change that failed, a read that failed in its own words, or what the state means */
+export function hubAutoNote(name: string, state: 'on' | 'off' | 'older' | 'unreachable' | undefined, unread: string | null, failed: string | null): string {
+  if (failed) return `Not changed: ${failed}`
+  if (state === undefined) return unread ?? ''
+  if (state === 'older') return `${name} runs a Centralu from before this setting: an agent started there always runs under normal, and this computer asks first.`
+  if (state === 'unreachable') return `${name} is not connected, so its setting cannot be read or changed now.`
+  return `${name}'s own "Allow auto from a linked computer", set from here. On, an agent that a session under auto here starts there runs under auto too, without asking; off, it runs under normal and you are asked each time.`
+}
+
 /**
  * The machine's own "Allow auto from a linked computer" (#1273 review, owner decision 2026-10-19), read and set over the
  * link, so a machine with no window of its own (`centralu serve`) can be set from here. The machine reads it at each
@@ -487,8 +496,10 @@ function HubAutoSwitch({ m }: { m: MachineInfo }) {
   const [pending, setPending] = useState(false)
   // Read again when the link comes and goes
   const read = useLoad(() => platform.machines.hubAuto(m.id), [platform, m.id], [m.status])
-  const state = (set && set.status === m.status ? set.state : undefined) ?? read.data ?? (read.error ? 'unreachable' : undefined)
-  if (state === undefined) return null
+  const state = (set && set.status === m.status ? set.state : undefined) ?? read.data
+  // A read that failed says why in the machine's words ("did not answer within 15 s"): the link may be up
+  const unread = state === undefined ? read.error : null
+  if (state === undefined && !unread) return null
   const turn = (allowed: boolean) => {
     setPending(true)
     setFailed(null)
@@ -505,20 +516,14 @@ function HubAutoSwitch({ m }: { m: MachineInfo }) {
       label={<label htmlFor={`machine-hub-auto-input-${m.id}`}>Let auto sessions here start agents under auto on {m.name}</label>}
       hint={
         <span data-testid={`machine-hub-auto-note-${m.id}`}>
-          {failed
-            ? `Not changed: ${failed}`
-            : state === 'older'
-              ? `${m.name} runs a Centralu from before this setting: an agent started there always runs under normal, and this computer asks first.`
-              : state === 'unreachable'
-                ? `${m.name} is not connected, so its setting cannot be read or changed now.`
-                : `${m.name}'s own "Allow auto from a linked computer", set from here. On, an agent that a session under auto here starts there runs under auto too, without asking; off, it runs under normal and you are asked each time.`}
+          {hubAutoNote(m.name, state, unread, failed)}
         </span>
       }
       control={
         <Switch
           id={`machine-hub-auto-input-${m.id}`}
           checked={state === 'on'}
-          disabled={pending || state === 'older' || state === 'unreachable'}
+          disabled={pending || state === undefined || state === 'older' || state === 'unreachable'}
           onChange={(e) => turn(e.target.checked)}
           data-testid={`machine-hub-auto-${m.id}`}
         />
