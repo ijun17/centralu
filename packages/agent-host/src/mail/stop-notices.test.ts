@@ -18,8 +18,9 @@ function stopWorld() {
   const waits = new Set<string>()
   const service = new MessageService(w.store.mailbox, w.reach, { hostId: HOST, now: () => w.clock.t, turn: (a) => w.turns.get(a) ?? null, atRest: (a) => !busy.has(a), waitsOn: (sender, stopped) => waits.has(`${sender}>${stopped}`) })
   const stops = {
-    sessionStopped: (who: string, why: StopWhy, o: { quiet?: boolean; told?: readonly string[]; turnSeq?: number | null } = {}) => service.sessionStopped(who, why, { turnSeq: 1, ...o }),
+    sessionStopped: (who: string, why: StopWhy, o: { quiet?: boolean; told?: readonly string[]; held?: readonly string[]; turnSeq?: number | null } = {}) => service.sessionStopped(who, why, { turnSeq: 1, ...o }),
     sessionsStopped: service.sessionsStopped.bind(service),
+    oldPathEnded: service.oldPathEnded.bind(service),
   }
   /** A question from `from` to `to`, delivered to it in its turn `turn` and not answered */
   const ask = (from: string, to: string, text = 'what does the build need?', over: { needsReply?: boolean; turn?: number | null } = {}) => {
@@ -277,7 +278,7 @@ describe('a session stops without answering a question', () => {
     expect(notices[1]).toContain(`gamma stopped with an error before it answered ${yours.id}`)
   })
 
-  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered, a request to the orchestrator', () => {
+  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered; a request to the orchestrator is one', () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
     // Even a task that were marked as needing a reply is the report path's, not this one's
@@ -286,14 +287,44 @@ describe('a session stops without answering a question', () => {
     const waiting = w.send(A, { to: [B], text: 'not delivered', needsReply: true }).message
     const answered = w.ask(C, B, 'answered one')
     w.send(B, { replyTo: answered.id, text: 'here' })
-    const request = w.ask(A, ORC, 'can you look at CI?')
+    const request = w.ask(C, ORC, 'can you look at CI?')
 
     expect(w.stops.sessionStopped(B, 'error')).toBe(0)
-    expect(w.stops.sessionStopped(ORC, 'error')).toBe(0)
-    for (const [id, who] of [[task.id, B], [fyi.id, B], [waiting.id, B], [request.id, ORC]] as const) expect(w.rowOf(id, who)).toMatchObject({ releasedAt: null, toldAt: null })
+    for (const id of [task.id, fyi.id, waiting.id]) expect(w.rowOf(id, B)).toMatchObject({ releasedAt: null, toldAt: null })
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: null })
     expect(w.noticesTo(A)).toEqual([])
     expect(w.noticesTo(C)).toEqual([])
+    // Its sender always learns it will not be answered (owner, #1186)
+    expect(w.stops.sessionStopped(ORC, 'error')).toBe(1)
+    expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: 'error', toldAt: w.clock.t })
+    expect(w.noticesTo(C)).toHaveLength(1)
+  })
+
+  it.each(CAUSES)("$why: a request to the orchestrator is released with that cause and its sender told, as a crash's turnsLost tells it 'lost'", ({ why }) => {
+    const w = stopWorld()
+    const request = w.ask(A, ORC, 'can you look at CI?')
+    const quiet = why === 'quit' || why === 'shutdown'
+    expect(w.stops.sessionStopped(ORC, why, { quiet })).toBe(1)
+    expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: why, toldAt: w.clock.t, settled: null })
+    const [told, ...rest] = w.noticesTo(A)
+    expect(rest).toEqual([])
+    expect(told?.message.facts.unanswered).toEqual([{ id: request.id, recipient: ORC, why }])
+    expect(told?.message.body).toContain(request.id)
+  })
+
+  it('the asker the request turn’s own report tells is held for that report: told by it, no second notice; missed by it, the stop notice', () => {
+    for (const reported of [true, false]) {
+      const w = stopWorld()
+      const request = w.ask(A, ORC, 'can you look at CI?')
+      // Another session's request rode in the same turn: no report is owed to it, so it is told now
+      const other = w.ask(C, ORC, 'and the release?')
+      expect(w.stops.sessionStopped(ORC, 'stopped', { held: [A] })).toBe(2)
+      expect(w.noticesTo(A), String(reported)).toEqual([])
+      expect(w.noticesTo(C).map((n) => n.message.facts.unanswered)).toEqual([[{ id: other.id, recipient: ORC, why: 'stopped' }]])
+      w.stops.oldPathEnded(ORC, A, reported)
+      expect(w.noticesTo(A), String(reported)).toHaveLength(reported ? 0 : 1)
+      expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: 'stopped', toldAt: w.clock.t })
+    }
   })
 
   it('a reply after the stop still answers the question: the row was released, not settled', () => {
