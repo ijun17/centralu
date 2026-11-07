@@ -43,6 +43,23 @@ describe('external installs', () => {
     const update = installedUpdate(installed, OLD_WINDOW, disk)!
     expect(autoApplyDecision({ update, windowVersion: OLD_WINDOW, relaunch: disk, busy: false, typing: false, tried: false })).toEqual({ apply: true })
   })
+
+  // #2130: the host found a release past the build waiting on disk; the line offers it, not the waiting one
+  it('offers the release the host found past the build on disk, and the disk build once it is not past it', () => {
+    const disk = { ready: true, version: '0.1.0-beta.11' }
+    const past: UpdateStatus = { ...installed, phase: 'idle', latest: '0.1.0-beta.12' }
+    expect(installedUpdate(past, OLD_WINDOW, disk)).toBe(past)
+    expect(updateStateText(past, null)).toBe('0.1.0-beta.12 is available')
+    for (const latest of ['0.1.0-beta.11', '0.1.0-beta.10']) {
+      expect(installedUpdate({ ...past, latest, newer: latest !== OLD_WINDOW }, OLD_WINDOW, disk)).toMatchObject({ phase: 'restart_required', latest: disk.version })
+    }
+    // An install of it that failed does not hide the build that is there to apply, and says how it failed
+    expect(installedUpdate({ ...past, phase: 'failed', error: 'EACCES' }, OLD_WINDOW, disk)).toMatchObject({ phase: 'restart_required', latest: disk.version, error: 'EACCES' })
+    // #2131 review: npm took it and the copy was not replaced; the line says how to finish it
+    const half = 'npm installed 0.1.0-beta.12, but the copy at /Applications/Centralu.app was not replaced (busy). Quit Centralu, then run "centralu install" in a terminal.'
+    const line = installedUpdate({ ...past, phase: 'failed', error: half }, OLD_WINDOW, disk)!
+    expect(updateStateText(line, applyOffer(line, OLD_WINDOW, disk))).toBe(`Installed 0.1.0-beta.11. Apply it to relaunch into it. ${half}`)
+  })
 })
 
 describe('applyOffer', () => {
@@ -209,6 +226,8 @@ describe('agentApplyVerdict', () => {
     expect(applyOffer(installed, OLD_WINDOW, ready)).toEqual({ kind: 'apply' })
     expect(await agentApplyVerdict(port(ready), installed, OLD_WINDOW)).toEqual({ ready: true, version: installed.latest })
     expect(await agentApplyVerdict(port({ ready: true, version: '0.1.0-beta.12' }), null, OLD_WINDOW)).toEqual({ ready: true, version: '0.1.0-beta.12' })
+    // #2131 review: the host offers a release past the build on disk, which can still be applied
+    expect(await agentApplyVerdict(port(ready), { ...installed, phase: 'idle', latest: '0.1.0-beta.12' }, OLD_WINDOW)).toEqual({ ready: true, version: '0.1.0-beta.11' })
   })
 
   it('says why not, for every case the button is not offered', async () => {

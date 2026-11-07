@@ -234,7 +234,7 @@ async function fetchLatestFromRegistry(timeoutMs: number): Promise<LatestResult>
     if (res.status === 404) return { ok: false, reason: `${APP_SLUG} is not on the registry` }
     if (!res.ok) return { ok: false, reason: `The registry answered ${res.status}` }
     const body: unknown = await res.json()
-    const version = (body as { version?: unknown } | null)?.version
+    const version = typeof body === 'object' && body !== null && 'version' in body ? body.version : undefined
     return typeof version === 'string'
       ? { ok: true, version }
       : { ok: false, reason: 'The registry answered in an unexpected shape' }
@@ -297,7 +297,7 @@ export function runCommand(file: string, args: string[], resolve?: (file: string
     // windowsHide: npm and the launcher are console programs; no window for them, whatever console the host has
     execFile(cmd.file, cmd.args, { timeout: INSTALL_TIMEOUT_MS, windowsHide: true }, (err, _stdout, stderr) => {
       if (!err) return done()
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (err.code === 'ENOENT') {
         return reject(new Error(`${file} was not found on PATH (${err.message})`))
       }
       // What `failureLine` reads besides the message
@@ -320,6 +320,13 @@ export class UpdateService {
   private retryTimer: (() => void) | null = null
   /** The installed copy being brought to this host's version (`followHost`), while it runs */
   private following: Promise<void> | null = null
+  /**
+   * The release this host installed and waits to be restarted into (`restart_required`), with the notice it carried
+   * (#2130). A newer release passes it; the same one or an older one is never offered or installed again.
+   */
+  private installed: { version: string; error: string | null } | null = null
+  /** The install under way's answer (`apply`), which a second caller joins */
+  private applying: Promise<UpdateStatus> | null = null
 
   constructor(
     private publish: (status: UpdateStatus) => void,
@@ -518,23 +525,20 @@ export class UpdateService {
     // If it is not yet time to ask, return the answer already known, so that opening the window
     // does not send out a request every time.
     if (!force && this.status.checkedAt !== null && !this.isDue()) return this.current()
-    /*
-     * An update outranks a check, during and after.
-     *
-     * `updating` is obvious — overwriting it with `checking` erases the only sign that
-     * anything is happening. `restart_required` is the one that bites: the new version
-     * is on disk and the running process is still the old one, so the scheduled check
-     * six hours later would find the same "newer" it already installed and quietly
-     * replace "restart to finish" with it. The person is then told to update again,
-     * having already done so.
-     */
-    if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm' || this.status.phase === 'restart_required') return this.current()
+    // An install outranks a check: overwriting `updating` with `checking` erases the only sign that anything is happening
+    if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm') return this.current()
 
-    // Refreshing version metadata must not dismiss an install failure (including while fetching).
-    const failure = this.status.phase === 'failed' ? { error: this.status.error } : null
-    if (!failure) this.status = { ...this.status, phase: 'checking' }
+    /*
+     * Refreshing version metadata must not dismiss an install failure, nor "restart to finish" (including while
+     * fetching). A host waiting to be restarted still asks (#2130): it may stay up for days, and a release past the one
+     * it installed would otherwise never be seen nor installed. The one it installed is never offered again
+     * (`runCheck`): the running process is still the old one, so it would count it newer and tell the person to update
+     * again, having already done so.
+     */
+    const kept = this.status.phase === 'failed' || this.status.phase === 'restart_required' ? { phase: this.status.phase, error: this.status.error } : null
+    if (!kept) this.status = { ...this.status, phase: 'checking' }
     this.emit()
-    this.inFlight = this.runCheck(force, failure)
+    this.inFlight = this.runCheck(force, kept)
     try {
       return await this.inFlight
     } finally {
@@ -542,7 +546,7 @@ export class UpdateService {
     }
   }
 
-  private async runCheck(force: boolean, failure: Pick<UpdateStatus, 'error'> | null): Promise<UpdateStatus> {
+  private async runCheck(force: boolean, kept: Pick<UpdateStatus, 'phase' | 'error'> | null): Promise<UpdateStatus> {
     const res = await this.deps.fetchLatest(force ? FORCED_TIMEOUT_MS : SCHEDULED_TIMEOUT_MS)
     // An install may have started while this older check was waiting. Its fresh lookup owns the target.
     if (this.stopped || this.installing) return this.current()
@@ -554,11 +558,22 @@ export class UpdateService {
        * it had just been told it was up to date — the check would erase its own finding
        * every time the network blinked.
        */
-      this.status = { ...this.status, phase: failure ? 'failed' : 'idle', error: failure ? failure.error : res.reason }
+      this.status = { ...this.status, phase: kept ? kept.phase : 'idle', error: kept ? kept.error : res.reason }
       this.emit()
       return this.current()
     }
     const latest = res.version
+    /*
+     * Nothing past the release installed and waiting: "restart to finish" stays, never an offer of what is installed. A
+     * failed install of a later one stays failed, with its error and its retry, and the time it was seen is not renewed:
+     * the next attempt looks again and settles it (#2131 review).
+     */
+    if (!this.passesInstalled(latest)) {
+      this.status = kept?.phase === 'failed' ? { ...this.status, phase: 'failed', error: kept.error } : { ...this.waitingStatus(), checkedAt: this.deps.now() }
+      this.emit()
+      return this.current()
+    }
+    const failure = kept?.phase === 'failed' ? kept : null
     this.status = {
       ...this.status,
       latest,
@@ -587,17 +602,23 @@ export class UpdateService {
    * may be hours old, or there may be none at all with automatic checks off. "Up to date" is then
    * a result (`idle`, no error), never `failed` — a refusal recorded as a failure stayed on the
    * line through every later check.
+   *
+   * While a release waits to be restarted into, this installs only one past it (#2130), which replaces the waiting
+   * build; with none, the line goes back to "restart to finish".
    */
   apply(): Promise<UpdateStatus> {
-    if (this.stopped || this.installing || this.status.phase === 'restart_required') return Promise.resolve(this.current())
+    if (this.stopped) return Promise.resolve(this.current())
+    // A second click or call joins the install under way, and answers once its target is settled, as the first does
+    if (this.installing) return this.applying ? this.applying.then(() => this.current()) : Promise.resolve(this.current())
     this.installing = true
     // A person's click or the timer: either way this is the attempt, so no second timer waits behind it
     this.cancelRetry()
-    const known = this.status.newer && this.status.latest ? this.status.latest : null
+    const known = this.status.newer && this.status.latest && this.passesInstalled(this.status.latest) ? this.status.latest : null
     // Nothing known yet: the line says "Checking…", not "Installing…", until the lookup answers
     this.status = { ...this.status, phase: known ? 'updating' : 'checking', error: null }
     this.emit()
-    return new Promise((settled) => void this.runApply(known, settled))
+    this.applying = new Promise((settled) => void this.runApply(known, settled))
+    return this.applying
   }
 
   private async runApply(known: string | null, settled: (status: UpdateStatus) => void): Promise<void> {
@@ -629,13 +650,17 @@ export class UpdateService {
           version = target
           // Keeping an earlier observation must not renew it indefinitely across failed installs.
           this.status = { ...this.status, latest: target, newer: isNewerVersion(target, this.status.current), checkedAt: keepStored ? this.status.checkedAt : now }
+          if (!this.passesInstalled(target)) {
+            this.status = { ...this.waitingStatus(), checkedAt: this.status.checkedAt }
+            return
+          }
           if (!this.status.newer) {
             this.status = { ...this.status, phase: 'idle', error: null }
             return
           }
         } else if (version === null) {
           // Nothing stored to fall back on: the same answer as a failed check, and as little lasting
-          this.status = { ...this.status, phase: 'idle', error: fresh.reason }
+          this.status = this.installed ? { ...this.waitingStatus(), error: fresh.reason } : { ...this.status, phase: 'idle', error: fresh.reason }
           return
         } else {
           this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
@@ -705,6 +730,7 @@ export class UpdateService {
       }
       if (this.stopped) return
       this.status = { ...this.status, phase: 'restart_required' }
+      this.installed = { version, error: this.status.error }
       this.retry = null
     } catch (e) {
       /*
@@ -713,16 +739,18 @@ export class UpdateService {
        * that is the outcome most worth naming, with the one command that finishes it.
        */
       if (this.stopped) return
-      const reason = (e as Error).message
+      const reason = errorMessage(e)
       const error = packageInstalled
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
         : reason
+      // Not waiting, also when npm took it: the copy is still the old build, so this is retried as any failure is
       this.status = { ...this.status, phase: 'failed', error }
       // Counted per target: a release that is not the one that failed starts its own count
       const target = version ?? this.status.latest ?? ''
       this.retry = { version: target, failures: this.retry?.version === target ? this.retry.failures + 1 : 1, at: this.deps.now() }
     } finally {
       this.installing = false
+      this.applying = null
       if (!this.stopped) {
         this.emit()
         // Asked for in advance (#352): a failure is tried again on the backoff, not left for good (#645)
@@ -808,6 +836,18 @@ export class UpdateService {
     }
   }
 
+  /** `version` is past the release installed and waiting, or nothing is waiting */
+  private passesInstalled(version: string): boolean {
+    return !this.installed || isNewerVersion(version, this.installed.version)
+  }
+
+  /** "Restart to finish" the release installed and waiting (`installed`), with the notice its install left */
+  private waitingStatus(): UpdateStatus {
+    const w = this.installed
+    if (!w) return this.current()
+    return { ...this.status, phase: 'restart_required', latest: w.version, newer: isNewerVersion(w.version, this.status.current), error: w.error }
+  }
+
   /** The scheduled check is due; a `force: false` caller in between reuses the last answer */
   private isDue(): boolean {
     return this.deps.now() - (this.status.checkedAt ?? 0) >= CHECK_INTERVAL_MS
@@ -824,5 +864,5 @@ function npmHasNotServedVersion(err: unknown): boolean {
 
 /** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
 function retryDelay(failures: number): number {
-  return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1]!
+  return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1] ?? CHECK_INTERVAL_MS
 }
