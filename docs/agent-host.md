@@ -2048,6 +2048,11 @@ Implementation rules:
   answered, uncut, with images left out (they go out as `message_image`, #40). The host keeps the record in the store
   and strips it from everything it sends ([protocol.md](protocol.md) §2), so an adapter never has to choose between a
   small card and a complete record.
+- **Claude's thinking arrives as text** (#2062). Current models send thinking blocks with no text unless asked for a
+  summary, so every session starts the CLI with `--thinking-display summarized` (`extraArgs` in `sdk-query.ts`; not the SDK's
+  `thinking` option, which would also pass `--thinking adaptive` and decide whether the model thinks). It changes what is
+  shown, not what is thought or billed: measured on CLI 2.1.316, the output tokens of a turn stay the same. The CLI takes
+  the flag since 2.1.100 at least; an older one refuses the unknown option and the session does not start.
 - **A native subagent's steps go out wrapped, tagged with the launching call** (#222). Never as the parent's own events
   (#98): a `subagent_event` whose `step` is a text, reasoning, tool call or tool result, and whose `parentCallId` is the
   call that started the subagent. Claude: the subagent's messages carry `parent_tool_use_id`, and `forwardSubagentText`
@@ -2320,8 +2325,8 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
    sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
    does not compare the host's answers to the CLI's `mcp_message` calls (`streamJsonCodec`'s `hostAnswers`). A Claude scenario's own
-   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled
-   --thinking-display summarized`, since the adapter never asks for the text and the CLI sends it empty otherwise; `'tasks'`: `--tools TaskCreate,...`,
+   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled`,
+   as the model recorded on does not think by default; the text itself the adapter asks for in every session, #2062; `'tasks'`: `--tools TaskCreate,...`,
    since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
    The recordings also drive the UI's e2e scenarios (#1498): `adapters/frames/replay-agent.test-helpers.ts` makes a
    recorded session the agent of a running host (`--agent replay` of `e2e/fixtures/linked-host-main.ts`), the real

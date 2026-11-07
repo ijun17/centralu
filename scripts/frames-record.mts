@@ -160,12 +160,12 @@ function modelOf(tool: string): string {
 
 /**
  * Claude Code's own settings for a scenario, as flags of its process (the run reads no settings file): an MCP server to connect, or
- * extended thinking with its text shown, the task-list tools. They are appended after the flags the SDK passes.
+ * extended thinking (its text is shown in every session: the adapter asks for it, #2062), the task-list tools. They are appended after the flags the SDK passes.
  */
 function claudeFlags(spec: AgentSpawnSpec, settings: Scenario['settings'], config: { mcpConfig(): string } | null): AgentSpawnSpec {
   if (settings === 'mcp' && config) return { ...spec, args: [...spec.args, '--mcp-config', config.mcpConfig()] }
   if (settings === 'tasks') return { ...spec, args: [...spec.args, '--tools', 'TaskCreate,TaskUpdate,TaskList'] }
-  if (settings === 'thinking') return { ...spec, args: [...spec.args, '--thinking', 'enabled', '--thinking-display', 'summarized'] }
+  if (settings === 'thinking') return { ...spec, args: [...spec.args, '--thinking', 'enabled'] }
   return spec
 }
 

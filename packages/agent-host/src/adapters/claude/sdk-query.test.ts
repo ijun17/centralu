@@ -1,3 +1,4 @@
+import { query } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, flagSettings } from './sdk-query.js'
 
@@ -50,6 +51,33 @@ describe('the options of a session\'s query', () => {
     expect(options(120_000)).toMatchObject({ settings: { autoCompactWindow: 153_000, autoCompactEnabled: true } })
     // The cross-session refusal is always in the flag layer; Centralu adds nothing of its own to it
     expect(options().settings).toEqual({ crossSessionInbound: 'refuse' })
+  })
+})
+
+describe('thinking (#2062)', () => {
+  it('asks the CLI for summarized thinking text, through the flag the SDK starts it with', () => {
+    const specs: { args: string[] }[] = []
+    const o = claudeQueryOptions({
+      sessionId: 's1',
+      opts: { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' },
+      executablePath: '/nowhere/claude',
+      servers: {},
+      permissionOptions: { permissionMode: 'default' },
+      codeIntelligence: {},
+      spawn: (spec) => {
+        specs.push(spec)
+        throw new Error('not started')
+      },
+      canUseTool: () => Promise.resolve({ behavior: 'deny' as const, message: '' }),
+    })
+    // The real SDK builds the command line: the flag has to survive it, not only sit in the options
+    expect(() => query({ prompt: 'hi', options: o })).toThrow('not started')
+    const args = specs[0]?.args ?? []
+    const at = args.indexOf('--thinking-display')
+    expect(at).toBeGreaterThan(-1)
+    expect(args[at + 1]).toBe('summarized')
+    // And whether the model thinks stays the CLI's and the model's to decide
+    expect(args).not.toContain('--thinking')
   })
 })
 
