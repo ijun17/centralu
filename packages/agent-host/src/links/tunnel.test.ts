@@ -289,6 +289,11 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     const env = { FAKE_SSH_HAS: 'launcher', FAKE_SSH_NO_NODE: '1' }
     await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
     await expect(tunnel(env).open()).rejects.not.toThrow(/not installed/)
+    // One fix, not the older guess that its Centralu is too old to print the line
+    await expect(tunnel(env).open()).rejects.not.toThrow(/may predate/)
+    await expect(tunnel(env).startHost()).rejects.not.toThrow(/may predate/)
+    // A blank command is no command: the launcher runs, and the hint is for it too
+    await expect(tunnel(env, { shell: 'posix', command: '  ' }).open()).rejects.toThrow(/interactive shell/)
     await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
   })
 
