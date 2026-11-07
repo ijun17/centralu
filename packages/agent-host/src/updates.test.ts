@@ -705,7 +705,7 @@ describe('UpdateService', () => {
       expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50' })
     })
 
-    it('a failed install of it leaves the waiting build as it was, and a later check does not offer that one again', async () => {
+    it('a failed install of it stays failed through a check that sees the waiting one again; the next attempt settles it', async () => {
       let fail = false
       const h = await waiting({
         run: async (file) => {
@@ -717,24 +717,60 @@ describe('UpdateService', () => {
       await h.svc.apply()
       await settle()
       expect(h.svc.current()).toMatchObject({ phase: 'failed', latest: '0.1.0-beta.51', error: 'npm error code EACCES' })
-      // latest goes back to the waiting release: restart to finish it, not an install of it
+      // latest goes back to the waiting release: the failure and its retry stay, nothing is installed
       h.offer('0.1.0-beta.50')
-      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', error: null })
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'failed', latest: '0.1.0-beta.51', error: 'npm error code EACCES' })
+      expect(h.calls).toHaveLength(1)
+      // The next attempt, once 51 is no stale-edge observation any more, finds nothing past the waiting build
+      h.elapse(2 * 60 * 60 * 1000)
+      expect(await h.svc.apply()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', error: null })
+      await settle()
+      expect(h.calls).toHaveLength(1)
     })
 
-    it('an install npm took but whose copy was not replaced keeps saying how to finish it', async () => {
-      let launcher = true
-      const h = await waiting({
+    it.each([
+      ['with nothing waiting', null],
+      ['over a waiting build', '0.1.0-beta.50'],
+    ])('an install npm took but whose copy was not replaced stays failed and is retried, copy and all (%s)', async (_, before) => {
+      const pending: (() => void)[] = []
+      let copyFails = false
+      const o = {
+        autoApply: true,
         installedCopy: '/Applications/Centralu.app',
-        globalPackage: async () => (launcher ? { launcher: LAUNCHER, version: null } : null),
-      })
-      launcher = false
+        schedule: (fn: () => void) => {
+          pending.push(fn)
+          return () => {}
+        },
+        run: async (file: string) => {
+          if (copyFails && file === '/host/node') {
+            copyFails = false
+            throw new Error('the app is busy')
+          }
+        },
+      }
+      const h = before ? await waiting(o) : make({ ...o, registry: '0.1.0-beta.50' })
+      copyFails = true
       h.offer('0.1.0-beta.51')
-      await h.svc.apply()
+      await h.svc.check(true)
       await settle()
-      expect(h.svc.current()).toMatchObject({ phase: 'failed', error: expect.stringContaining('npm installed 0.1.0-beta.51') })
-      h.offer('0.1.0-beta.50')
-      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51', error: expect.stringContaining('centralu install') })
+      expect(h.svc.current()).toMatchObject({ phase: 'failed', latest: '0.1.0-beta.51', error: expect.stringContaining('npm installed 0.1.0-beta.51') })
+      expect(h.calls.map(([f]) => f)).toEqual(['npm', '/host/node'])
+      // The backoff's retry runs both steps again and ends waiting on 51
+      h.elapse(10 * 60 * 1000)
+      pending.shift()?.()
+      await settle()
+      expect(h.calls.map(([f]) => f)).toEqual(['npm', '/host/node', 'npm', '/host/node'])
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51', error: null })
+    })
+
+    it('a second install while one looks up the registry joins it and says what it installs', async () => {
+      const h = await waiting()
+      h.offer('0.1.0-beta.51')
+      const [first, second] = await Promise.all([h.svc.apply(), h.svc.apply()])
+      expect(first).toMatchObject({ phase: 'updating', latest: '0.1.0-beta.51' })
+      expect(second).toMatchObject({ phase: 'updating', latest: '0.1.0-beta.51' })
+      await settle()
+      expect(h.calls.filter(([f]) => f === 'npm')).toHaveLength(1)
     })
 
     it('a check that cannot reach the registry leaves "restart to finish" as it was', async () => {

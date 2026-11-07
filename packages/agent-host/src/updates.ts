@@ -325,6 +325,8 @@ export class UpdateService {
    * (#2130). A newer release passes it; the same one or an older one is never offered or installed again.
    */
   private installed: { version: string; error: string | null } | null = null
+  /** The install under way's answer (`apply`), which a second caller joins */
+  private applying: Promise<UpdateStatus> | null = null
 
   constructor(
     private publish: (status: UpdateStatus) => void,
@@ -561,9 +563,13 @@ export class UpdateService {
       return this.current()
     }
     const latest = res.version
-    // Nothing past the release installed and waiting: "restart to finish" stays, never an offer of what is installed
+    /*
+     * Nothing past the release installed and waiting: "restart to finish" stays, never an offer of what is installed. A
+     * failed install of a later one stays failed, with its error and its retry, and the time it was seen is not renewed:
+     * the next attempt looks again and settles it (#2131 review).
+     */
     if (!this.passesInstalled(latest)) {
-      this.status = { ...this.waitingStatus(), checkedAt: this.deps.now() }
+      this.status = kept?.phase === 'failed' ? { ...this.status, phase: 'failed', error: kept.error } : { ...this.waitingStatus(), checkedAt: this.deps.now() }
       this.emit()
       return this.current()
     }
@@ -601,7 +607,9 @@ export class UpdateService {
    * build; with none, the line goes back to "restart to finish".
    */
   apply(): Promise<UpdateStatus> {
-    if (this.stopped || this.installing) return Promise.resolve(this.current())
+    if (this.stopped) return Promise.resolve(this.current())
+    // A second click or call joins the install under way, and answers once its target is settled, as the first does
+    if (this.installing) return this.applying ? this.applying.then(() => this.current()) : Promise.resolve(this.current())
     this.installing = true
     // A person's click or the timer: either way this is the attempt, so no second timer waits behind it
     this.cancelRetry()
@@ -609,7 +617,8 @@ export class UpdateService {
     // Nothing known yet: the line says "Checking…", not "Installing…", until the lookup answers
     this.status = { ...this.status, phase: known ? 'updating' : 'checking', error: null }
     this.emit()
-    return new Promise((settled) => void this.runApply(known, settled))
+    this.applying = new Promise((settled) => void this.runApply(known, settled))
+    return this.applying
   }
 
   private async runApply(known: string | null, settled: (status: UpdateStatus) => void): Promise<void> {
@@ -734,14 +743,14 @@ export class UpdateService {
       const error = packageInstalled
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
         : reason
+      // Not waiting, also when npm took it: the copy is still the old build, so this is retried as any failure is
       this.status = { ...this.status, phase: 'failed', error }
-      // npm has it: a later check that finds nothing past it says so, and keeps the step that finishes it
-      if (packageInstalled && version !== null) this.installed = { version, error }
       // Counted per target: a release that is not the one that failed starts its own count
       const target = version ?? this.status.latest ?? ''
       this.retry = { version: target, failures: this.retry?.version === target ? this.retry.failures + 1 : 1, at: this.deps.now() }
     } finally {
       this.installing = false
+      this.applying = null
       if (!this.stopped) {
         this.emit()
         // Asked for in advance (#352): a failure is tried again on the backoff, not left for good (#645)

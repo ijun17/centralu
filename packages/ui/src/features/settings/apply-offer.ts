@@ -53,17 +53,28 @@ function sameVersion(a: string, b: string): boolean {
 
 /** An external install has no host `update_status` event; the window knows its own bundle. */
 export function installedUpdate(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
-  if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return update
-  if (update?.phase === 'restart_required' && update.latest === relaunch.version) return update
+  const disk = waitingOnDisk(update, windowVersion, relaunch)
+  if (!disk) return update
+  if (update?.phase === 'restart_required' && update.latest === disk.latest) return update
   if (update?.phase === 'updating' || update?.phase === 'waiting_for_npm') return update
   // A release past the one on disk, which the host offers (#2130): installing it replaces the build waiting there
-  if (update?.phase === 'idle' && update.newer && update.latest && isNewerVersion(update.latest, relaunch.version)) return update
+  if (update?.phase === 'idle' && update.newer && update.latest && disk.latest && isNewerVersion(update.latest, disk.latest)) return update
+  return disk
+}
+
+/**
+ * The build on disk newer than this window, as "restart to finish" it, or null when there is none. A failed install of
+ * a later release keeps its error there (#2130 review): npm may have it and the copy not, and the error says how to
+ * finish it.
+ */
+function waitingOnDisk(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
+  if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return null
   return {
     current: update?.current ?? windowVersion,
     auto: update?.auto ?? true,
     autoApply: update?.autoApply ?? false,
     checkedAt: update?.checkedAt ?? null,
-    latest: relaunch.version, newer: true, phase: 'restart_required', error: null,
+    latest: relaunch.version, newer: true, phase: 'restart_required', error: update?.phase === 'failed' ? update.error : null,
   }
 }
 
@@ -83,7 +94,9 @@ export async function agentApplyVerdict(
     return { ready: false, reason: 'A window that cannot relaunch itself answered (a browser window, or a desktop app whose agent host is not held by the background keeper).' }
   }
   const check = await relaunch.check().catch((e: unknown): RelaunchCheck => ({ ready: false, reason: String(e) }))
-  const u = installedUpdate(update, windowVersion, check)
+  // A release past the build on disk is offered to install; the build on disk can still be applied (#2130 review)
+  const shown = installedUpdate(update, windowVersion, check)
+  const u = shown?.phase === 'idle' ? (waitingOnDisk(update, windowVersion, check) ?? shown) : shown
   if (u?.phase === 'updating' || u?.phase === 'waiting_for_npm') {
     return { ready: false, reason: `The install of ${u.latest ?? 'the new version'} is still running; apply once it has finished.` }
   }
