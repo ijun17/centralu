@@ -9,6 +9,7 @@ import { CardIds, PendingCards } from '../session-kit.js'
 import { newFile } from './new-file.js'
 import { approvalDetail } from './normalize.js'
 import { appToolOf, isOrchestratorTool, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
+import { asObj } from '../../json-value.js'
 
 const ALLOW: StepAnswer = { grant: 'allow' }
 
@@ -35,6 +36,29 @@ const BENIGN_ASK_REASONS: readonly RegExp[] = [/^(the )?(current )?permission mo
 /** Whether the `decisionReason` of an ask is empty or one of the known benign ones (`BENIGN_ASK_REASONS`) */
 export const benignAskReason = (reason: string | undefined): boolean => reason === undefined || reason.trim() === '' || BENIGN_ASK_REASONS.some((re) => re.test(reason.trim()))
 
+/** What the CLI says about why it asks (the SDK's `canUseTool` options) */
+type AskCause = { matchedAskRule?: unknown; decisionReason?: string }
+
+/**
+ * The model's text when `auto` refuses an ask (#2134). Under `bypassPermissions` the CLI asks for an `ask` rule, a hook
+ * whose answer is `ask`, or a check of its own, and says which: the rule in `matchedAskRule`, the reason in
+ * `decisionReason` (measured with CLI 2.1.316: a PreToolUse hook's `permissionDecisionReason` arrives there as it was
+ * written). Naming a settings rule when a hook asked sent an agent looking for a rule that did not exist, and the hook's
+ * reason, which says what tripped it, was lost.
+ */
+export function autoRefusal(toolName: string, cause: AskCause | undefined): string {
+  const head = `Permission to use ${toolName} was not granted: the auto preset does not ask`
+  if (cause?.matchedAskRule) {
+    const rule = asObj(cause.matchedAskRule)
+    const name = typeof rule.toolName === 'string' ? rule.toolName : toolName
+    const text = typeof rule.ruleContent === 'string' && rule.ruleContent ? `${name}(${rule.ruleContent})` : name
+    return `${head}, and a settings "ask" rule matched (${text}${typeof rule.source === 'string' && rule.source ? ` in ${rule.source}` : ''})`
+  }
+  const reason = cause?.decisionReason?.trim()
+  if (reason) return `${head}, and approval was asked for: ${reason}`
+  return `${head}, and approval was asked for (a settings rule, a hook or a check of Claude Code's own)`
+}
+
 /**
  * A Claude session's approval and question cards: the permission callback the SDK calls (`canUseTool`), the cards it
  * raises, their answers, and their release when the CLI withdraws them or the session stops.
@@ -46,7 +70,8 @@ export class ClaudeCards {
   /**
    * The decision order (`core/grants.ts`) with the auto-approval matchers, seeded with the saved rules at session start and
    * grown with each 'always' response. Claude's `auto` denies: in `bypassPermissions` a call reaches `canUseTool` only when
-   * an `ask` rule matched (see the query options in `ClaudeSession.start`).
+   * an `ask` rule matched, a hook answered `ask` or the CLI's own check asked (see the query options in
+   * `ClaudeSession.start`, and `autoRefusal` for the text).
    */
   private readonly grants = new Grants('deny')
   /** The ids of the cards this handle raises (see `CardIds`) */
@@ -154,14 +179,15 @@ export class ClaudeCards {
       edit: editPath === null ? null : { folder: this.host.opts.cwd, paths: [editPath] },
     })
     // A card that needs no wait is raised at once, before this callback yields (the SDK's next call may come meanwhile)
-    return answer instanceof Promise ? answer.then((a) => this.answered(a, toolName, toolInput, options?.signal)) : this.answered(answer, toolName, toolInput, options?.signal)
+    return answer instanceof Promise ? answer.then((a) => this.answered(a, toolName, toolInput, options)) : this.answered(answer, toolName, toolInput, options)
   }
 
   /** The order's answer as the SDK takes it; `ask` raises the approval card */
-  private async answered(answer: GrantAnswer, toolName: string, toolInput: Record<string, unknown>, signal: AbortSignal | undefined): Promise<PermissionResult> {
+  private async answered(answer: GrantAnswer, toolName: string, toolInput: Record<string, unknown>, options: (AskCause & { signal?: AbortSignal }) | undefined): Promise<PermissionResult> {
+    const signal = options?.signal
     if (answer.grant === 'allow') return { behavior: 'allow' as const, updatedInput: toolInput }
     if (answer.grant === 'deny') {
-      const auto = `Permission to use ${toolName} was not granted (a settings "ask" rule matched; the auto preset does not ask)`
+      const auto = autoRefusal(toolName, options)
       return { behavior: 'deny' as const, message: answer.by === 'auto' ? auto : (answer.message ?? auto) }
     }
     // Whether a Write makes a new file is said on its card (#843), read without holding the host up (`newFile`)

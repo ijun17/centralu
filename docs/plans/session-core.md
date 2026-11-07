@@ -164,7 +164,7 @@ The steps are the same set, in three orders:
 | Step | Claude | Codex | ACP |
 |---|---|---|---|
 | Centralu's own tools allowed | 1 | (elicitation by server) | 2 |
-| `auto` | 3: **deny** (in `bypassPermissions` the callback is reached only when the person's `ask` rule matched; `claude/session-cards.ts:104`) | (the tool's policy allows; no request comes) | 1: **allow** |
+| `auto` | 3: **deny** (in `bypassPermissions` the callback is reached only when an `ask` rule matched, a hook answered `ask` or the CLI's own check asked; `claude/session-cards.ts` `autoRefusal` says which (#2134)) | (the tool's policy allows; no request comes) | 1: **allow** |
 | `edits` grant inside the folder | 6 | 2 | 3 |
 | always-allow rule | 8 | 1 | 4 |
 | card | 9 | 3 | 5 |
