@@ -16,7 +16,7 @@ import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
 import { codeAge, staleWarning } from './code-age.mjs'
-import { driverRole, guardStatus, STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { guardStatus, STEP_ON_READ, WORKING, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
@@ -395,7 +395,8 @@ async function mergeQueue({ all = false, owner }) {
   const guard = guardStatus(dataDir())
   // How old this instance's own code is, and a warning when it drives on old code (#2121)
   const age = await codeAge(config.repository)
-  const driving = driverRole(dataDir()) === true || readQueue(dataDir()).items.some((i) => ACTIVE.has(i.state))
+  // The queue loop runs while an item waits or is in CI; the guard by its own rule (queue-driver.json decides only that one)
+  const driving = readQueue(dataDir()).items.some((i) => WORKING.has(i.state))
   const warning = staleWarning(age, { queue: driving, guard: guard?.state === 'driving' })
   const codeLines = age ? [age.text, ...(warning ? [warning] : [])] : []
   return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['code', '', codeLines]], {

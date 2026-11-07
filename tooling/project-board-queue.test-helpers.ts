@@ -197,6 +197,7 @@ if (args[0] === 'issue' && args[1] === 'view') {
   // A batch branch's files, as the test gives them (batchFiles), for the queue's question whether it changes the screen
   const key = path.split('/compare/')[1]
   const files = (st.compareFiles ?? {})[key] ?? (key.includes('queue%2Fbatch-') ? st.batchFiles : undefined)
+  if (st.compareError) fail(st.compareError)
   // How far the second is ahead of the first (compareAhead: ahead_by, #2121), as the test gives it
   const ahead = (st.compareAhead ?? {})[key]
   out({ status: (st.compare ?? {})[key] ?? 'ahead', ...(ahead !== undefined ? { ahead_by: ahead } : {}), ...(files ? { files: files.map((f) => (typeof f === 'string' ? { filename: f } : f)) } : {}) })

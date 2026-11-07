@@ -10,88 +10,135 @@ import { R, fake, ghState, IDLE_SERVER, root, runtime, call, patchGh, seedQueue 
 // rule, and nothing said so. merge_queue now says how far the board's own code is behind main and warns when it drives on old code.
 describe("merge_queue says how far the board's own code is behind main (#2121)", { timeout: 60_000 * SLOW }, () => {
   const dataDirOnDisk = () => join(root, 'data', 'app-data', 'p1', 'project-board')
+  const top = () => join(root, 'code-checkout')
+  const commit = (message: string) => {
+    g(top(), 'add', '-A')
+    g(top(), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message, '--allow-empty')
+    return g(top(), 'rev-parse', 'HEAD')
+  }
   /** A checkout holding the app, committed once: where the board app's code is read from */
   const checkout = () => {
-    const top = join(root, 'code-checkout')
-    const app = join(top, '.centralu', 'apps', 'project-board')
+    const app = join(top(), '.centralu', 'apps', 'project-board')
     mkdirSync(app, { recursive: true })
     writeFileSync(join(app, 'queue.mjs'), '// old\n')
-    g(top, 'init', '-q')
-    g(top, 'add', '-A')
-    g(top, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'old board')
-    return { app, head: g(top, 'rev-parse', 'HEAD') }
+    g(top(), 'init', '-q')
+    return { app, head: commit('old board') }
   }
   const drive = (drives: boolean) => {
     mkdirSync(dataDirOnDisk(), { recursive: true })
     writeFileSync(join(dataDirOnDisk(), 'queue-driver.json'), JSON.stringify({ drive: drives }))
   }
+  const waiting = () =>
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', title: 'feat(ui): change 81', queuedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reruns: {} }])
   /** main is `behind` commits ahead of the checkout, changing `files` */
-  const start = (behind: number, files: string[]) => {
+  const start = (behind: number, files: string[], env: Record<string, string> = {}) => {
     const { app, head } = checkout()
     const key = `${head}...main`
-    runtime(ghState({ compareAhead: { [key]: behind }, compareFiles: { [key]: files } }), { ...IDLE_SERVER, PROJECT_BOARD_CODE_DIR: app, PROJECT_BOARD_CODE_CHECK_MS: '0' }, gitWrapper(fake.bin))
-    return head
+    runtime(ghState({ compareAhead: { [key]: behind }, compareFiles: { [key]: files } }), { ...IDLE_SERVER, PROJECT_BOARD_CODE_DIR: app, PROJECT_BOARD_CODE_CHECK_MS: '0', ...env }, gitWrapper(fake.bin))
+    return { head, key }
   }
+  const BOARD = ['docs/a.md', '.centralu/apps/project-board/main-guard.mjs']
 
-  it('shows how many commits behind and warns when this instance drives the queue, with board files changed since', async () => {
-    drive(true)
-    const head = start(32, ['docs/a.md', '.centralu/apps/project-board/main-guard.mjs'])
+  it('shows how many commits behind, and warns a queue that has work, with board files changed since', async () => {
+    waiting()
+    const { head } = start(32, BOARD)
     const told = await call('merge_queue')
+    expect(told.isError).toBe(false)
     expect(told.text).toContain(`Board code: 32 commits behind main (running ${head.slice(0, 7)}), and the board app changed since.`)
     expect(told.text).toContain('Warning: this instance drives the merge queue with board code 32 commits behind main')
     expect(told.data.code).toMatchObject({ head, behind: 32, appChanged: true, warning: expect.stringContaining('git pull --ff-only') })
   })
 
-  it('warns for a queue with an item in it, with no driver file, and for the main guard that drives', async () => {
-    const { app, head } = checkout()
-    const key = `${head}...main`
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', title: 'feat(ui): change 81', queuedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), reruns: {} }])
-    runtime(ghState({ compareAhead: { [key]: 3 }, compareFiles: { [key]: ['.centralu/apps/project-board/queue.mjs'] } }), { ...IDLE_SERVER, PROJECT_BOARD_CODE_DIR: app, PROJECT_BOARD_CODE_CHECK_MS: '0', PROJECT_BOARD_QUEUE_GUARD: 'on' }, gitWrapper(fake.bin))
-    const told = await call('merge_queue')
-    expect(told.text).toContain('Warning: this instance drives the merge queue and the main guard with board code 3 commits behind main')
+  it('warns the main guard that drives, and says how to stop it; an instance told not to drive is not warned for it', async () => {
+    drive(true)
+    start(3, ['.centralu/apps/project-board/queue.mjs'], { PROJECT_BOARD_QUEUE_GUARD: 'on' })
+    let told = await call('merge_queue')
+    expect(told.text).toContain('Warning: this instance drives the main guard with board code 3 commits behind main')
+    expect(told.text).toContain('queue-driver.json {"drive": false}')
+    drive(false)
+    told = await call('merge_queue')
+    expect(told.text).toContain('Board code: 3 commits behind main')
+    expect(told.text).not.toContain('Warning')
   })
 
-  it('shows the count without a warning when none of the commits touch the board app, or the instance does not drive', async () => {
-    drive(true)
+  it('shows the count without a warning when none of the commits touch the board app, or nothing here drives', async () => {
+    waiting()
     start(5, ['docs/a.md', 'packages/ui/src/b.ts'])
-    const told = await call('merge_queue')
+    let told = await call('merge_queue')
     expect(told.text).toContain('Board code: 5 commits behind main')
     expect(told.text).toContain('none of them in the board app')
-    expect(told.text).not.toContain('Warning: this instance drives')
+    expect(told.text).not.toContain('Warning')
     expect(told.data.code).toMatchObject({ behind: 5, appChanged: false, warning: null })
   })
 
+  it('does not warn when the board app changed but nothing waits in the queue and the guard is off', async () => {
+    start(5, BOARD)
+    const told = await call('merge_queue')
+    expect(told.text).toContain('and the board app changed since')
+    expect(told.text).not.toContain('Warning')
+  })
+
   it('counts a changed-files list GitHub may have cut as a change to the board app', async () => {
-    drive(true)
+    waiting()
     start(400, Array.from({ length: 300 }, (_, i) => `docs/f${i}.md`))
     const told = await call('merge_queue')
     expect(told.data.code).toMatchObject({ behind: 400, appChanged: true })
     expect(told.text).toContain('Warning: this instance drives the merge queue')
   })
 
-  it('does not warn an instance that does not drive: a person who set it passive, with nothing queued', async () => {
-    drive(false)
-    start(32, ['.centralu/apps/project-board/main-guard.mjs'])
-    const told = await call('merge_queue')
-    expect(told.text).toContain('Board code: 32 commits behind main')
-    expect(told.text).not.toContain('Warning: this instance drives')
-    expect(told.data.code.warning).toBeNull()
-  })
-
-  it('says nothing when the code is at main or is not in a git checkout, and says it once main moves', async () => {
-    drive(true)
-    const head = start(0, [])
+  it('says nothing when the code is at main, GitHub does not know the commit or cannot be asked, and says it once main moves', async () => {
+    waiting()
+    const { key } = start(0, [])
     let told = await call('merge_queue')
+    expect(told.isError).toBe(false)
     expect(told.text).not.toContain('Board code')
     expect(told.data.code).toBeUndefined()
-    // Main moves: said at the next look, the answer is not kept for ever
-    patchGh((st) => (st.compareAhead[`${head}...main`] = 7))
+    // Main moves: said at the next look
+    patchGh((st) => (st.compareAhead[key] = 7))
     told = await call('merge_queue')
     expect(told.text).toContain('Board code: 7 commits behind main')
-    // Not a git checkout
+    // GitHub cannot be asked: nothing is said, and merge_queue still answers
+    patchGh((st) => (st.compareError = 'HTTP 500'))
+    told = await call('merge_queue')
+    expect(told.isError).toBe(false)
+    expect(told.text).not.toContain('Board code')
+    patchGh((st) => delete st.compareError)
+    // A commit GitHub does not know: no count
+    patchGh((st) => delete st.compareAhead[key])
+    told = await call('merge_queue')
+    expect(told.isError).toBe(false)
+    expect(told.text).not.toContain('Board code')
+  })
+
+  it('says nothing for code that is not in a git checkout', async () => {
     mkdirSync(join(root, 'not-git'), { recursive: true })
     runtime(ghState({}), { ...IDLE_SERVER, PROJECT_BOARD_CODE_DIR: join(root, 'not-git'), PROJECT_BOARD_CODE_CHECK_MS: '0' }, gitWrapper(fake.bin))
-    told = await call('merge_queue')
+    const told = await call('merge_queue')
+    expect(told.isError).toBe(false)
     expect(told.text).not.toContain('Board code')
+  })
+
+  it('compares the code the app started with, and says when the checkout has been pulled since without a restart', async () => {
+    waiting()
+    const { head } = start(2, BOARD)
+    let told = await call('merge_queue')
+    expect(told.text).toContain(`running ${head.slice(0, 7)}`)
+    // Someone pulls: the files change, the running code does not
+    const pulled = commit('pulled')
+    told = await call('merge_queue')
+    expect(told.text).toContain(`The checkout is at ${pulled.slice(0, 7)} now, not at ${head.slice(0, 7)} as the app started`)
+    expect(told.text).toContain(`running ${head.slice(0, 7)}`)
+  })
+
+  it('asks GitHub once in a while, not at every merge_queue', async () => {
+    waiting()
+    start(4, BOARD, { PROJECT_BOARD_CODE_CHECK_MS: '3600000' })
+    await call('merge_queue')
+    const asked = () => fake.calls().filter((c) => c.args.join(' ').includes('/compare/')).length
+    const first = asked()
+    expect(first).toBeGreaterThan(0)
+    await call('merge_queue')
+    await call('merge_queue')
+    expect(asked()).toBe(first)
   })
 })
