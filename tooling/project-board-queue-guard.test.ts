@@ -343,6 +343,8 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     const item = queueOnDisk().items.find((i: any) => i.pr === 600)
     expect(item).toMatchObject({ state: 'waiting', owner: 'tester', author: 'writer', title: 'revert: feat(ui): change 81' })
     expect(item.front).toBeTruthy()
+    // Marked as the guard's own: the queue never holds this one for a release's or main's run waiting for a runner (#2115)
+    expect(item.guardRevert).toBe(true)
     expect(mainRedNotices()[0]!.text).toContain('Reverted it in #600, queued at the front of the merge queue; it lands after the fast tier.')
     expect(issues()[0]!.body).toContain('Reverted it in #600')
     expect(guardOnDisk().hunt.revert).toMatchObject({ pr: 600, branch })

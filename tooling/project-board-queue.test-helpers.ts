@@ -159,6 +159,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
   out({ state: 'pending', statuses: [] })
 } else if (path && /\/actions\/workflows\/(release|shell-release)\.yml\/runs\?/.test(path)) {
+  if (st.releaseRunsError) fail(st.releaseRunsError)
   const runs = (st.releaseRuns ?? {})[path.split('/workflows/')[1].split('/')[0]] ?? []
   out(args.includes('--slurp') ? [{ workflow_runs: runs }] : { workflow_runs: runs })
 } else if (path && path.includes('/actions/workflows/build.yml/runs?')) {
