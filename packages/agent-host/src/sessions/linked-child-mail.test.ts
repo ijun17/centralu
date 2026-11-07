@@ -12,7 +12,7 @@ import { SessionManager } from './manager.js'
 import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 
 const CHILD = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'api', startedAt: 1, sent: 'TASK' }
-const REFUSED = `Refused (elsewhere): ${addr(CHILD.sessionId)} is on another computer, and mail does not reach other computers yet: agent_session send reaches a session you started there.`
+const REFUSED = `Refused (elsewhere): ${addr(CHILD.sessionId)} is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.`
 
 let store: Store
 let mgr: SessionManager
@@ -38,7 +38,7 @@ afterEach(async () => {
 })
 
 describe('mail to a child on a linked machine (#2067)', () => {
-  it('by its id or address is refused as elsewhere, pointing to agent_session send', () => {
+  it('by its id or address is refused as elsewhere, naming what does reach it', () => {
     for (const to of [CHILD.sessionId, addr(CHILD.sessionId)]) {
       const sent = m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
       expect(sent).toMatchObject({ isError: true, text: REFUSED })
