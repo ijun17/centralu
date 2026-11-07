@@ -208,8 +208,8 @@ impl KeeperLink {
     }
 
     /// What "Apply now" would start (#352): Tauri's restart runs this window's own executable
-    /// path again, inside the same bundle. `centralu install` replaced that bundle (`rmSync`,
-    /// then `ditto`), so the path now names the new build — unless this window runs from a
+    /// path again, inside the same bundle. `centralu install` replaced that bundle (`swapInto`
+    /// in `swap.mjs`: the new one renamed in, the old one aside and deleted), so the path now names the new build — unless this window runs from a
     /// bundle the update did not touch (`pnpm app:open` opens the build output in place) or from
     /// no bundle at all (`pnpm app:dev`).
     pub fn relaunch_info(&self) -> RelaunchInfo {

@@ -623,15 +623,116 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
         writeln!(child.stdin.as_mut().unwrap()).unwrap();
         let (s, _) = judging.accept().unwrap();
         assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
-        k.judge_window_for_update(&s)
+        (k.judge_window_for_update(&s), k.may_tell_system_ending(&s))
     };
-    assert_eq!(judged(&mut window_proc), Ok(()), "the attached window after its executable was replaced");
-    let stranger_judged = judged(&mut stranger);
+    // The window may also still tell the host the system is ending (#2119 review), which the path rule alone refused
+    assert_eq!(judged(&mut window_proc), (Ok(()), true), "the attached window after its executable was replaced");
+    let (stranger_judged, stranger_ending) = judged(&mut stranger);
     assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
+    assert!(!stranger_ending, "a process that never attached told the host the system is ending");
     for mut c in [window_proc, stranger] {
         let _ = c.kill();
         let _ = c.wait();
     }
+    let _ = fs::remove_dir_all(&data);
+}
+
+/**
+ * #2119: a window whose attach ends after an install (it missed a write, `WINDOW_WRITE_TIMEOUT`) attaches again with a
+ * path that reads as no window's: macOS names none, Linux the deleted aside. The keeper took that process by its path
+ * before, so it is a window again, with the token, and can still stop the keeper for the update. This test binary, as
+ * the bundle's window executable, attaches, the bundle is swapped as swap.mjs does, and it drops its attach and attaches
+ * again from the same process.
+ */
+#[test]
+fn a_window_that_attaches_again_after_an_install_can_still_stop_for_the_update() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    const NAME: &str = "keeper::server::tests::a_window_that_attaches_again_after_an_install_can_still_stop_for_the_update";
+    let attach = |sock: &str| {
+        let mut s = UnixStream::connect(sock).unwrap();
+        s.write_all(&json_line(&json!({ "op": "attach", "protocol": KEEPER_PROTOCOL }))).unwrap();
+        let mut answer = String::new();
+        BufReader::new(s.try_clone().unwrap()).read_line(&mut answer).unwrap();
+        let rights = serde_json::from_str::<Value>(&answer).unwrap()["view"]["rights"].as_str().unwrap_or("").to_string();
+        (s, rights)
+    };
+    // The copy, run again: attaches, waits for a line, attaches again (the first attach dropped), says its rights, waits
+    // for a line, then connects to the judging socket and waits there
+    if let Ok(judge) = std::env::var("CCK_TEST_REATTACH_JUDGE_SOCK") {
+        let sock = std::env::var("CCK_TEST_REATTACH_SOCK").unwrap();
+        let (first, _) = attach(&sock);
+        println!("READY");
+        let mut go = String::new();
+        std::io::stdin().read_line(&mut go).unwrap();
+        drop(first);
+        let (_again, rights) = attach(&sock);
+        println!("RIGHTS {rights}");
+        std::io::stdin().read_line(&mut go).unwrap();
+        let mut j = UnixStream::connect(judge).unwrap();
+        let _ = std::io::Read::read(&mut j, &mut [0u8; 1]);
+        return;
+    }
+    let data = PathBuf::from(format!("/tmp/cck-reattach-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = keeper_with_a_host(&data);
+    {
+        let k = k.clone();
+        thread::spawn(move || accept_loop(&k));
+    }
+    let app = data.join("Centralu.app");
+    let bundle_with_window = |app: &Path| {
+        fs::create_dir_all(app.join("Contents").join("MacOS")).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), app.join("Contents").join("MacOS").join("centralu")).unwrap();
+    };
+    bundle_with_window(&app);
+    k.state.lock().unwrap().desired.bundle_path = Some(app.to_string_lossy().to_string());
+    let judge_sock = data.join("judge.sock");
+    let judging = UnixListener::bind(&judge_sock).unwrap();
+    let mut child = Command::new(app.join("Contents").join("MacOS").join("centralu"))
+        .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+        .env("CCK_TEST_REATTACH_JUDGE_SOCK", &judge_sock)
+        .env("CCK_TEST_REATTACH_SOCK", &k.sock)
+        .env_remove("CC_KEEPER_TEST_WINDOW_EXE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Its output stays open until it ends, so the copy's harness never writes to a closed pipe
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    // What the copy said from `what` on (the harness may have begun the line with the test's name)
+    let mut wait_for = |what: &str| -> String {
+        let mut line = String::new();
+        while !line.contains(what) {
+            line.clear();
+            assert!(out.read_line(&mut line).unwrap() > 0, "the copy ended before it said {what}");
+        }
+        line[line.find(what).unwrap()..].trim_end().to_string()
+    };
+    wait_for("READY");
+    assert_eq!(k.attached_windows().len(), 1, "the copy at the accepted path attached as a window");
+    // The update, as swap.mjs makes it: the new bundle beside, the old one aside, the new one in, the old one deleted
+    let staging = data.join("Centralu.app.new");
+    let aside = data.join("Centralu.app.old-1");
+    bundle_with_window(&staging);
+    fs::rename(&app, &aside).unwrap();
+    fs::rename(&staging, &app).unwrap();
+    fs::remove_dir_all(&aside).unwrap();
+    writeln!(child.stdin.as_mut().unwrap()).unwrap();
+    assert_eq!(wait_for("RIGHTS"), "RIGHTS full", "the window that attached again has the token");
+    // The first attach's end is counted before the stop is judged, so only the second attach can be what takes it
+    let end = Instant::now() + Duration::from_secs(10);
+    while k.state.lock().unwrap().subscribers.len() != 1 {
+        assert!(Instant::now() < end, "the first attach's end was never seen");
+        thread::sleep(Duration::from_millis(20));
+    }
+    writeln!(child.stdin.as_mut().unwrap()).unwrap();
+    let (s, _) = judging.accept().unwrap();
+    assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
+    assert_eq!(k.judge_window_for_update(&s), Ok(()), "the window that attached again after its executable was replaced");
+    let _ = child.kill();
+    let _ = child.wait();
     let _ = fs::remove_dir_all(&data);
 }
 

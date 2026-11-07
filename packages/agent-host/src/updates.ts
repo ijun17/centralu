@@ -678,10 +678,12 @@ export class UpdateService {
        * resolves through PATH, which the host augments from the login shell at startup
        * (`env-path.ts`) precisely because a GUI app does not inherit one.
        *
-       * **This deletes and re-creates the bundle we are running out of** (`rmSync` then
-       * `ditto`, inside `centralu install`). macOS keeps a running process alive through
-       * that — the launcher has always done exactly this to a running app — but there is a
-       * gap of a second or two where paths inside the bundle do not resolve, which is one
+       * **This replaces the bundle we are running out of** (`swapInto` in `swap.mjs`, inside
+       * `centralu install`: the new one copied to `<app>.new`, the old one renamed aside, the
+       * new one renamed in, the aside deleted). macOS keeps a running process alive through
+       * that — the launcher has always done exactly this to a running app — but between the
+       * two renames paths inside the bundle do not resolve, and the running window's own
+       * executable is named by no path from then on (#2117), which is one
        * more reason the honest end of this is "restart" and not "carry on".
        *
        * **On Windows it renames the folder we are running out of** (`Centralu` aside to

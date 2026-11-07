@@ -36,18 +36,23 @@
 //! token is not handed out on a guess. Every refusal is logged with the executable and why, and a
 //! window that was given the limited credential says so in its own log (`sidecar/link.rs`).
 //!
-//! **A window whose executable an update replaced** (#2117). Installing an update replaces the bundle's
-//! files under a running window; macOS then names no path for its pid at all (`proc_pidpath` fails with
-//! ENOENT), where Linux adds ` (deleted)`; and macOS does not even answer the same twice: one read fails and
-//! the next names the old path, which now names the new file (seen on a Mac running this crate's tests).
-//! So a path read after an install proves nothing either way, and a stop for an update, which comes
-//! from exactly such a window, reads none: it is a window's only when the peer is one of the windows
-//! attached now, each judged by its path as it attached and known since by its pid and when that
-//! process started (`Attached`, so a pid used again is not it). Every window sends it while attached
-//! (`sidecar/link.rs`). Any other pid is refused whatever its path reads, so a replaced file widens
-//! nothing an unknown process gets. `status`, `attach`, `switch` and `upgrade` keep the path rule: the
-//! last two start code of the caller's naming with the token, which a window about to relaunch has no
-//! need of.
+//! **A window whose executable an update replaced** (#2117, #2119). Installing an update swaps the app bundle under a
+//! running window (`swap.mjs` `swapInto`: the new one copied beside, the old one renamed aside and deleted). macOS then
+//! names no path for the window's pid (`proc_pidpath` fails with ENOENT, every time), and Linux names the aside path with
+//! ` (deleted)`. A file replaced in place instead keeps its path on macOS, which then names the new file, and reads as
+//! the window for any process started from that file (seen on a Mac running this crate's tests). So a path read after
+//! an install proves nothing either way. A stop for an update, which comes from exactly such a window, reads none: it is
+//! a window's only when the peer is one of the windows attached now (`Attached`: its pid and when that process
+//! started, so a pid used again is not it). Every window sends it while attached (`sidecar/link.rs`). An attach the
+//! path rule refuses is still a window's when the peer is a process this keeper took by its path before and that still
+//! runs (`judge_attaching`), so a window that attaches again after an install keeps its token and its stop. The pid and
+//! start a window is remembered by are read before its path is judged and again after (`judge_path_of`): a window
+//! that ends meanwhile, its pid taken by another process, is not remembered as that process. Any other pid is refused
+//! whatever its path reads, so a replaced file widens nothing an unknown process gets. `system_ending` is a window's
+//! by either rule (an attached window, or by its path). `status`, `switch` and `upgrade` keep the path rule: the last
+//! two start code of the caller's naming with the token, which a window about to relaunch has no need of. A keeper
+//! started after the install (a restart, a crash) knows no window from before it: there the refusal says to quit and
+//! reopen Centralu.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -125,6 +130,51 @@ pub fn attached(stream: &UnixStream) -> Option<Attached> {
     let pid = crate::os::peer_pid(stream).ok()?;
     let started = crate::os::process_started(pid).ok()?;
     Some(Attached { pid, started })
+}
+
+/// How an attaching peer was taken for a window (`judge_attaching`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Taken {
+    /// Its executable is a window's (`judge`)
+    ByPath,
+    /// A process this keeper took by its path before, whose path no longer reads as the window's (an update replaced it)
+    Known,
+}
+
+/**
+ * The path rule for an attaching peer (`by_path`, `judge`), with the peer's pid and start read before it and again after
+ * (`read`, `attached`): the record a window is remembered and judged by is the process the path was read for. A peer
+ * that ends while its path is judged (which may run `codesign`) frees its pid for another process; that one's start
+ * differs, and the attach is refused rather than remembered for it. None when the kernel names no start either time.
+ */
+pub fn judge_path_of(read: impl Fn() -> Option<Attached>, by_path: impl FnOnce() -> Result<(), String>) -> (Result<(), String>, Option<Attached>) {
+    let before = read();
+    let judged = by_path();
+    match (before, read()) {
+        (Some(b), Some(a)) if a == b => (judged, Some(b)),
+        (None, None) => (judged, None),
+        _ => (Err("the process changed while its executable was judged (its pid now names another process, or none)".into()), None),
+    }
+}
+
+/// Whether an attaching peer is a window (#2119): by its path (`by_path`, `judge_path_of`), or, when the path rule refuses
+/// it, by being a process this keeper took by its path before (`known`, by pid and start; `peer` is the attaching one). A
+/// peer taken by its path joins `known`, for as long as that process runs: after an install its path reads as no
+/// window's, and the window it is may attach again (a write it missed closed its attach). A process that ended
+/// (`running` false: its pid names no process, or one started later) leaves `known` first.
+pub fn judge_attaching(by_path: Result<(), String>, peer: Option<Attached>, known: &mut Vec<Attached>, running: impl Fn(&Attached) -> bool) -> Result<Taken, String> {
+    known.retain(|w| running(w));
+    match (by_path, peer) {
+        (Ok(()), Some(p)) => {
+            if !known.contains(&p) {
+                known.push(p);
+            }
+            Ok(Taken::ByPath)
+        }
+        (Ok(()), None) => Ok(Taken::ByPath),
+        (Err(_), Some(p)) if known.contains(&p) => Ok(Taken::Known),
+        (Err(why), _) => Err(why),
+    }
 }
 
 /// Who may stop the keeper for an update (#2117): one of the windows attached now (`windows`), by pid and start. No path is
@@ -245,6 +295,74 @@ mod tests {
         let no_start = |_: u32| -> std::io::Result<u64> { Err(std::io::Error::from(std::io::ErrorKind::NotFound)) };
         assert!(judge_pid_for_update(40, &attached, no_start).is_err(), "a start that cannot be read");
         assert!(judge_pid_for_update(40, &[], started).is_err(), "no window attached");
+    }
+
+    /// #2119: a window taken by its path is taken again when it attaches with a path that no longer reads as the window's.
+    /// A process never taken by its path is not, nor a pid used again by a later process
+    #[test]
+    fn an_attach_takes_again_a_window_taken_by_its_path_before() {
+        let window = Attached { pid: 40, started: 1_000 };
+        let refused = || Err::<(), String>("the executable of pid 40 could not be read (ENOENT)".into());
+        let mut known = Vec::new();
+        assert!(judge_attaching(refused(), Some(window), &mut known, |_| true).is_err(), "never taken by its path");
+        assert_eq!(judge_attaching(Ok(()), Some(window), &mut known, |_| true), Ok(Taken::ByPath));
+        assert_eq!(judge_attaching(Ok(()), Some(window), &mut known, |_| true), Ok(Taken::ByPath));
+        assert_eq!(known, vec![window], "kept once");
+        assert_eq!(judge_attaching(refused(), Some(window), &mut known, |_| true), Ok(Taken::Known));
+        assert!(judge_attaching(refused(), Some(Attached { pid: 41, started: 1_000 }), &mut known, |_| true).is_err(), "another pid");
+        assert!(judge_attaching(refused(), Some(Attached { pid: 40, started: 1_001 }), &mut known, |_| true).is_err(), "the pid used again");
+        assert!(judge_attaching(refused(), None, &mut known, |_| true).is_err(), "no pid or start");
+    }
+
+    /// #2119 review: the window ends while its path is judged and another process takes its pid. The path was the
+    /// window's, but the process now behind the pid is not: it is refused, and not remembered for later attaches
+    #[test]
+    fn a_pid_another_process_takes_while_the_path_is_judged_is_neither_taken_nor_remembered() {
+        use std::cell::Cell;
+        let window = Attached { pid: 40, started: 1_000 };
+        let other = Attached { pid: 40, started: 1_005 };
+        let behind = Cell::new(Some(window));
+        // The path check passes for the window, which then ends; its pid is used again before the second read
+        let (judged, peer) = judge_path_of(
+            || behind.get(),
+            || {
+                behind.set(Some(other));
+                Ok(())
+            },
+        );
+        assert!(judged.is_err(), "the attach of the process that took the pid was taken: {judged:?}");
+        assert_eq!(peer, None);
+        let mut known = Vec::new();
+        assert!(judge_attaching(judged, peer, &mut known, |_| true).is_err());
+        assert!(known.is_empty(), "the later process was remembered: {known:?}");
+        // Ended while judged, with its pid not used again yet: refused too
+        let behind = Cell::new(Some(window));
+        let (judged, _) = judge_path_of(
+            || behind.get(),
+            || {
+                behind.set(None);
+                Ok(())
+            },
+        );
+        assert!(judged.is_err());
+        // The same process both times: the path's answer stands, with the record read before it
+        assert_eq!(judge_path_of(|| Some(window), || Ok(())), (Ok(()), Some(window)));
+        assert_eq!(judge_path_of(|| None, || Ok(())), (Ok(()), None), "no start named: the path's answer, and nothing to remember");
+    }
+
+    /// #2119 review: a remembered window whose process ended leaves the list, so it does not grow for the keeper's life
+    #[test]
+    fn a_remembered_window_whose_process_ended_is_dropped() {
+        let window = Attached { pid: 40, started: 1_000 };
+        let other = Attached { pid: 41, started: 1_002 };
+        let mut known = Vec::new();
+        assert_eq!(judge_attaching(Ok(()), Some(window), &mut known, |_| true), Ok(Taken::ByPath));
+        assert_eq!(judge_attaching(Ok(()), Some(other), &mut known, |_| true), Ok(Taken::ByPath));
+        let refused = || Err::<(), String>("ENOENT".into());
+        // 40 ended: an attach by anyone drops it, and 40 is not taken again
+        assert_eq!(judge_attaching(refused(), Some(other), &mut known, |w| w.pid != 40), Ok(Taken::Known));
+        assert_eq!(known, vec![other]);
+        assert!(judge_attaching(refused(), Some(window), &mut known, |w| w.pid != 40).is_err());
     }
 
     fn paths(ps: &[&str]) -> Vec<PathBuf> {
