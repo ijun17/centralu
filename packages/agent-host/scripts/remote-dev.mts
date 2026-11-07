@@ -5,7 +5,7 @@
  * What it does and what it refuses: packages/agent-host/src/links/remote-dev.ts and dev-build.ts,
  * docs/plans/remote-hub.md §10.11.
  *
- * Reads the hub's store from `CC_DATA_DIR` (else `~/.centralu`), read only; `--data <folder>` names another.
+ * Reads the hub's store from `CC_DATA_DIR` (else `~/.centralu`, or `~/.centralu-dev` under `CC_DEV=1`), read only; `--data <folder>` names another.
  */
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -17,7 +17,7 @@ const USAGE = `pnpm remote-dev <machine> --ref <commit> --repo <path of the work
   --ref           a commit, branch or tag of this working copy; the one there must be checked out at exactly it
   --repo          the working copy on that machine, with its dependencies installed (pnpm install)
   --allow-dirty   build its uncommitted changes too; the build is then marked dirty
-  --data          the hub's data folder, whose store lists the machines (default: CC_DATA_DIR, else ~/.centralu)`
+  --data          the hub's data folder, whose store lists the machines (default: CC_DATA_DIR, else ~/.centralu, or ~/.centralu-dev under CC_DEV=1)`
 
 async function main(): Promise<number> {
   const { values, positionals } = parseArgs({

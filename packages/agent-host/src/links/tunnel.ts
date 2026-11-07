@@ -579,6 +579,20 @@ function notInstalled(where: string, spec: RemoteSpec): Error {
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
 export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
 
+/** What follows a launcher's exit 127 with no marker: its Node is gone, as after a Node upgrade (docs/agent-host.md, the connection line) */
+const STALE_LAUNCHER = '; if Node was upgraded there, run `centralu serve` once from an interactive shell on that machine'
+
+/**
+ * What a remote that printed no usable answer is reported as. A launcher that exits 127 with no marker is there and cannot
+ * run its Node: that one fix, not the guess that its Centralu is too old to print the line (the person's own command, a
+ * blank one counting as none as `remoteCommand` reads it, never gets it)
+ */
+function noAnswer(err: Error, r: RemoteRun, remote: RemoteSpec): string {
+  const why = lastLine(r.stderr)
+  if (r.code === 127 && !remote.command?.trim()) return `The Centralu there did not run: ${why || 'exit 127'}${STALE_LAUNCHER}`
+  return `${err.message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`
+}
+
 /**
  * The remote command that prints the connection line (docs/agent-host.md §4.7), in the remote
  * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
@@ -888,8 +902,7 @@ export class SshTunnel implements Tunnel {
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
-      const why = lastLine(r.stderr)
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+      throw new Error(noAnswer(err as Error, r, remote))
     }
     if (answer.ok) {
       this.linkBound = false
@@ -1054,7 +1067,7 @@ export class SshTunnel implements Tunnel {
       const why = lastLine(r.stderr)
       // Its serve.json may not be read there (#1405 review): the launcher's own advice, not a guess at an older Centralu
       if (r.code !== 0 && /cannot be read by this user \((EACCES|EPERM)\)/.test(why)) throw new Error(why.replace(/^centralu serve: /, ''))
-      throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
+      throw new Error(noAnswer(err as Error, r, remote))
     }
   }
 

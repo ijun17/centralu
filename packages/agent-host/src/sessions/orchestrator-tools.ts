@@ -210,7 +210,7 @@ const HANDLERS: ToolHandlers = {
   async recall({ query, limit }, { tools }) {
     const r = await tools.recall(query, limit)
     // A machine that is off says it could not be searched, rather than finding nothing (#82, decided 2026-10-03)
-    const unsearched = r.notSearched?.length ? `\nNot searched: ${r.notSearched.join('; ')}.` : ''
+    const unsearched = r.notSearched?.length ? `\nNot searched: ${r.notSearched.join('. ')}.` : ''
     if (r.hits.length === 0) return { text: `Nothing was found for "${query}". Try a different word.${unsearched}` }
     /*
      * The seq is included with each hit — this is the link that meshes recall with read_session.

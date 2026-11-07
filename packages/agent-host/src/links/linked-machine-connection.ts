@@ -545,7 +545,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return !!line.credential && c.id === line.credential && this.isPairedHere(c)
   }
 
- /**
+  /**
    * Marks, in a list the host answered with `nonce`, the entries whose `check` is of the secret this hub holds under
    * their id (`own`). An entry without a check (a host from before it) or a credential this hub holds no secret of is not
    * marked, and is compared by id alone
@@ -566,7 +566,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * first use there of one this hub paired in its present run, so the credentials of its own earlier runs, which it does
    * not remember, are not taken for another's
    */
-   private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
+  private notPairedHere(line: ConnectionLine, listed: readonly RemoteCredential[]): RemoteCredential[] {
     if (!line.pairedAs) return []
     const first = this.usedUnderHubLabels.findIndex((u) => this.isPairedHere(u))
     if (first < 0) return []
@@ -1444,7 +1444,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     return this.autoReconnect ? KEEPS_TRYING : WAITS_FOR_PERSON
   }
 
- /** The link is up, or was just: remembers when, and keeps it for the next start of this host */
+  /** The link is up, or was just: remembers when, and keeps it for the next start of this host */
   private seen(): void {
     this.lastConnectedAt = Date.now()
     this.deps.registry.setLastConnected?.(this.id, this.lastConnectedAt)
@@ -1464,7 +1464,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * goes ahead either way. `reads`: the versions check looking again for a change on either side; with the switch off it
    * reads the line and connects nothing (`readsOnly`)
    */
-   protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
+  protected retryLater(fixedMs?: number, mode: 'backoff' | 'within' | 'reads' = 'backoff'): void {
     if (this.stopped || this.held) return
     if (mode === 'backoff' && !this.autoReconnect && !this.inOperation()) return
     clearTimeout(this.retryTimer)

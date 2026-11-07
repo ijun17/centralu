@@ -117,6 +117,15 @@ describe('the JSON fence around an orchestrator tool result', () => {
       '    → read_session(sessionId="worker-1", around=42)',
     ])
   })
+
+  // A sentence about one machine holds a semicolon of its own, so the machines are not told apart by one
+  it('tells the machines recall did not search apart by a full stop, not a semicolon', async () => {
+    const tools = toolsWith({
+      recall: async () => ({ hits: [], notSearched: ['Box is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect)', 'Desk (not reachable right now)'] }),
+    })
+    const r = await runOrchestratorTool(tools, 'recall', { query: 'x' })
+    expect(r.text).toContain('\nNot searched: Box is not connected, and nothing here connects it by itself; ask the person to connect it (Settings, Machines, Connect). Desk (not reachable right now).')
+  })
 })
 
 describe('Centralu update tool', () => {

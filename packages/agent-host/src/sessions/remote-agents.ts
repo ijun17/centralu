@@ -1514,7 +1514,7 @@ export class RemoteAgents {
   private async autoThere(machine: { id: string; name: string }, reader: LinkedSessions): Promise<AutoThere | { error: string }> {
     const r = await reader.hubAuto(machine.id)
     if (r.ok) return r.allowed ? { auto: true } : { auto: false, withheld: 'machine_off' }
-    return { error: `Could not ask ${machine.name} whether it takes auto from this computer: ${bare(r.error)}. Nothing was started there.` }
+    return { error: `Could not tell whether ${machine.name} takes auto from this computer: ${bare(r.error)}. Nothing was started there.` }
   }
 
   /** The machine's project that is a checkout of this project's repository: the same `origin`, read on both sides */

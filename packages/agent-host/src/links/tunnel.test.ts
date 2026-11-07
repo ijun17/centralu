@@ -287,9 +287,14 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   // Exit 127 is also what a launcher says when the Node it runs on is gone: the word on stdout is what says nothing is installed
   it('does not say Centralu is not installed when its launcher is there and its Node is not', async () => {
     const env = { FAKE_SSH_HAS: 'launcher', FAKE_SSH_NO_NODE: '1' }
-    await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory/)
+    await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
     await expect(tunnel(env).open()).rejects.not.toThrow(/not installed/)
-    await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory/)
+    // One fix, not the older guess that its Centralu is too old to print the line
+    await expect(tunnel(env).open()).rejects.not.toThrow(/may predate/)
+    await expect(tunnel(env).startHost()).rejects.not.toThrow(/may predate/)
+    // A blank command is no command: the launcher runs, and the hint is for it too
+    await expect(tunnel(env, { shell: 'posix', command: '  ' }).open()).rejects.toThrow(/interactive shell/)
+    await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
   })
 
   it('says Centralu is not installed when neither answers, whatever exit code the shell passed on, and that ssh failed when it cannot connect', async () => {
@@ -530,7 +535,10 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
 
   it('runs the person’s own command in place of centralu, with no fallback', async () => {
     const cmd = 'CC_DATA_DIR=/tmp/x node /src/packaging/npm/centralu/bin/centralu.mjs'
-    await expect(tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open()).rejects.toThrow(/No such file or directory/)
+    const said = await tunnel({ FAKE_SSH_HAS: 'launcher' }, { shell: 'posix', command: cmd }).open().then(() => '', (e: unknown) => (e instanceof Error ? e.message : ''))
+    expect(said).toMatch(/No such file or directory/)
+    // The person's own command is not the launcher: the hint about the launcher's Node is not for it
+    expect(said).not.toMatch(/interactive shell/)
     const runs = (logged() as { run?: string }[]).filter((x) => x.run).map((x) => x.run)
     expect(runs).toEqual([expect.stringMatching(/^CC_DATA_DIR=\/tmp\/x node \/src\/packaging\/npm\/centralu\/bin\/centralu\.mjs serve --connection --pair hub:[A-Za-z0-9._-]+$/)])
     await expect(tunnel({ FAKE_SSH_HAS: cmd }, { shell: 'posix', command: cmd }).open()).resolves.toMatchObject({ token: 'tok' })

@@ -1,5 +1,5 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
-import { NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
+import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { askHubAuto } from './hub-auto.js'
@@ -397,7 +397,7 @@ export function linkedSessions(
     hubAuto(machineId) {
       return viaMachine(machineId, async (m) => {
         const state = await askHubAuto((method, params) => m.call(method, params))
-        if (state === 'older') throw new Error(`${m.name} runs a Centralu from before "Allow auto from a linked computer"`)
+        if (state === 'older') throw new Error(`${m.name} runs a Centralu from before "Allow auto from a linked computer"; update it there`)
         return { allowed: state === 'on' }
       })
     },
@@ -660,7 +660,7 @@ export function linkedSessions(
       const hits = await Promise.all(
         [...machines()].map(async (m): Promise<RecallHit[]> => {
           if (!m.reachable) {
-            notSearched.push(`${m.name} (${m.waitsForPerson ? 'not connected; ask the person to connect it in Settings, Machines, Connect' : NOT_REACHABLE})`)
+            notSearched.push(m.waitsForPerson ? `${m.name} ${NOT_CONNECTED_PHRASE}` : `${m.name} (${NOT_REACHABLE})`)
             return []
           }
           try {
