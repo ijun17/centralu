@@ -86,6 +86,31 @@ export function request(sock, body, timeoutMs = 8000) {
   })
 }
 
+/**
+ * This process attached as a window, once the keeper's first view arrived: a keeper takes a stop for an update only from a
+ * process with a window attached now, judged by pid and start (#2117), so a script asks for one from its own process after
+ * this. Its executable has to be `CC_KEEPER_TEST_WINDOW_EXE` for the keeper to take it for a window.
+ */
+export function attachHere(sock, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const c = createConnection(sock)
+    const timer = setTimeout(() => {
+      c.destroy()
+      reject(new Error('no view after attaching'))
+    }, timeoutMs)
+    c.on('connect', () => c.write(`${JSON.stringify({ op: 'attach', protocol: 1 })}
+`))
+    c.once('data', () => {
+      clearTimeout(timer)
+      resolve(c)
+    })
+    c.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+  })
+}
+
 /** The keeper's `status` view */
 export const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
 

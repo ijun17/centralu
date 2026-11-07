@@ -7,7 +7,7 @@
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, familyOf, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, attachHere, familyOf, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { attachClient, BIN, bundleInfo, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, started, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 /** `--claude`: the update and the crash below also cut a claude (`haiku`) turn. A few cents of model use; never in CI */
@@ -238,7 +238,10 @@ async function scenarioUpdate() {
   const before = familyOf([view.hostPid])
   check(before.length >= 3, `the host runs its terminal and dev server itself (${before.length - 1} processes under it)`)
   host.close()
+  // From a window attached now, as the shell asks: `app` is another process, and the keeper judges the one asking (#2117)
+  const here = await attachHere(sock)
   const stop = await request(sock, { op: 'stop', forUpdate: true }, 40_000)
+  here.destroy()
   check(stop.ok, 'stop for an update is answered once the host is gone', JSON.stringify(stop))
   check(
     await waitFor(() => !alive(k.pid) && before.every((pid) => !alive(pid)), 10_000, 250),
