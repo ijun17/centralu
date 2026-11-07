@@ -66,6 +66,8 @@ export type ContractContext = {
   program(path: string): void
   /** A program that writes its stdin to its stdout, as a command and its arguments */
   readonly cat: { command: string; args: string[] }
+  /** Lets `ms` go by: on the real OS by waiting, on the in-memory one by moving its clock */
+  pass(ms: number): Promise<void>
 }
 
 /** The contract's context on an in-memory OS: its waiter, a program that exits 0, and `cat` */
@@ -81,6 +83,7 @@ export function memoryContext(os: MemoryOs): ContractContext {
     waiter: (cwd) => ready(os.processes.start(os.env.execPath, ['wait'], { cwd })),
     program: (path) => os.programs.add(path, () => 0),
     cat: { command: cat, args: [] },
+    pass: (ms) => os.clock.advance(ms),
   }
 }
 
@@ -1258,6 +1261,74 @@ export const CONTRACT: Contract[] = [
         missing: await code(os.processes.start(join(root, 'missing-program'), [])),
         batch: await code(os.processes.start(join(root, 'x.cmd'), [])),
       }
+    },
+  },
+  {
+    name: "a link on PATH that leads nowhere is a tool there only to Windows' search; a start or a shim's target needs what it leads to",
+    // `tools.find` asks of the name itself on Windows (an App Execution Alias, env-path.ts `presentOnWindows`) and of
+    // what it leads to elsewhere; `tools.resolve` and a batch shim's target ask of what it leads to everywhere
+    // (tool-launch.ts). Off Windows `resolve` and `program` give the name as written: the start searches PATH itself.
+    symlinks: true,
+    want: {
+      windows: { live: true, found: true, liveResolved: true, resolved: false, shim: 'shim.exe' },
+      posix: { live: true, found: false, liveResolved: false, resolved: false, shim: 'shim' },
+    },
+    run(os, root) {
+      const { join, basename } = os.paths.path
+      const f = os.files
+      f.writeFileSync(join(root, 'real.exe'), '')
+      f.symlinkSync(join(root, 'real.exe'), join(root, 'live.exe'), 'file')
+      f.symlinkSync(join(root, 'gone.exe'), join(root, 'dangling.exe'), 'file')
+      // npm's shape of shim, its target a link that leads nowhere
+      f.symlinkSync(join(root, 'gone.exe'), join(root, 'target.exe'), 'file')
+      f.writeFileSync(join(root, 'shim.cmd'), '@"%~dp0\\target.exe" %*\r\n')
+      const at = (name: string) => {
+        const found = os.tools.find(name)
+        return found !== null && os.paths.same(found, join(root, name))
+      }
+      const resolved = (name: string) => os.tools.resolve(name, { env: { PATH: root } }).command !== name
+      // `find` and `program` read the host's own PATH
+      const path = os.env.get('PATH')
+      os.env.set('PATH', root)
+      try {
+        return {
+          live: at('live.exe'),
+          found: at('dangling.exe'),
+          liveResolved: resolved('live.exe'),
+          resolved: resolved('dangling.exe'),
+          shim: basename(os.tools.program('shim')),
+        }
+      } finally {
+        os.env.set('PATH', path)
+      }
+    },
+  },
+  {
+    name: "a change of mode or times moves a file's change time, but fchmod on Windows",
+    // Measured on Windows 11 with Node 22: fchmod sets the read-only attribute and leaves the change time as it was;
+    // chmod and utimes move it. POSIX: chmod(2), fchmod(2) and utimensat(2) each mark it for update
+    want: {
+      windows: { chmod: true, fchmod: false, utimes: true },
+      posix: { chmod: true, fchmod: true, utimes: true },
+    },
+    async run(os, root, ctx) {
+      const { join } = os.paths.path
+      const f = os.files
+      const names = ['chmod', 'fchmod', 'utimes'] as const
+      for (const n of names) f.writeFileSync(join(root, n), 'x')
+      const changed = (n: string) => f.statSync(join(root, n)).ctimeMs
+      const before = Object.fromEntries(names.map((n) => [n, changed(n)]))
+      // Well past the coarsest change-time clock (Linux's, a scheduler tick)
+      await ctx.pass(100)
+      f.chmodSync(join(root, 'chmod'), 0o444)
+      const fd = f.openSync(join(root, 'fchmod'), 'r+')
+      f.fchmodSync(fd, 0o444)
+      f.closeSync(fd)
+      f.utimesSync(join(root, 'utimes'), 1_600_000_000, 1_600_000_000)
+      const moved = Object.fromEntries(names.map((n) => [n, changed(n) > before[n]!]))
+      // The temporary folder is removed after: nothing read-only is left in it
+      for (const n of ['chmod', 'fchmod']) f.chmodSync(join(root, n), 0o644)
+      return moved
     },
   },
 ]

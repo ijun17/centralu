@@ -14,7 +14,7 @@ split in flight and is not touched here; §3.3 names the one place where a chang
 | File | Lines | Deletable with no change of behaviour | Same job done elsewhere | Drift (the two copies disagree) | Split by role |
 |---|---|---|---|---|---|
 | `os/memory.ts` | 1,729 | about 45–55 | about 40 more (`found()`, `statSync`/`lstatSync`, mode formula, detach), and about 15 against `os/real.ts` | 2 (dangling link on PATH, ctime on `fchmod`/`utimes`), both in a test fake | 7 modules, about 1,300 moved, about +150 added |
-| `mail/messages.ts` | 1,392 | about 45 (three methods nothing in production calls, aliases, stale comments) | about 30 (`changedIds`, group-by, hidden check) | 1 (`turnsLost` against `sessionsStopped`), a question for the owner, not a refactor | 9 modules, about 1,250 moved, about +250–350 added |
+| `mail/messages.ts` | 1,392 | about 45 (three methods nothing in production calls, aliases, stale comments) | about 30 (`changedIds`, group-by, hidden check) | 1 (`turnsLost` against `sessionsStopped`), a question for the owner, not a refactor (decided since: both release requests, §2) | 9 modules, about 1,250 moved, about +250–350 added |
 | `sessions/remote-agents.ts` | 1,560 | about 25 | about 35 more with `start-agent-flow.ts`, `agent-start-gates.ts`, `queued-requests.ts` | 3 (start gate wording and log, `delete` against `stop`, "started here") | 3 modules, about 600 moved, about +90 added |
 
 The split is a move, not a saving: each new module adds its host type and imports (about 20–40 lines), as D2 of
@@ -68,6 +68,12 @@ choice are the same code in both, which moves to `rules.ts` / `clock` helpers an
 Windows (`presentOnWindows`), so a test on the fake finds a tool real does not. (2) `chmod` sets `ctime`, `fchmod` and
 `utimes` do not. Both are a fake that disagrees with the real thing, so a fix is a contract case that fails on the
 fake and passes on real, then the fix (its own pull request, §5, PR 5).
+
+Fixed so, with two cases at the end of the contract. What the real OS does was narrower than the audit said: only
+`tools.find` (and the find inside `tools.program`) counts a link that leads nowhere on Windows; `tools.resolve` and a
+batch shim's target use plain `existsSync` on every OS (`tool-launch.ts`), so the fake was wrong on Windows too. And
+`fchmod` on Windows leaves the change time as it was (measured on Windows 11 with Node 22, where `chmod` and `utimes`
+move it), so the fake's `fchmod` was right there and wrong on POSIX only.
 
 **Split (after the deletions):** `memory-types.ts` (types, constants, `fsError`), `memory-clock.ts`, `memory-tree.ts`,
 `memory-ops.ts`, `memory-fds.ts`, `memory-env.ts`, `memory-processes.ts` (432 lines, ordering of `setImmediate`
@@ -123,10 +129,13 @@ sequence three times (`letGo`, then `settle`, then poke or announce) where `trus
 one effect, and unifying them changes who announces: left for a later pull request that can read `person.ts`'s
 compensating `announce()` at the same time.
 
-**Drift (a question, §6):** `turnsLost` (after a crash) releases every unanswered row that is not a task as `lost`,
+**Drift (a question, §6; decided):** `turnsLost` (after a crash) releases every unanswered row that is not a task as `lost`,
 requests included. `sessionsStopped` (a quit or a stop) skips requests, "answered by its own turn's end". After a crash
 nothing ends the request's turn, so this may be right, but nothing says so. The two loops should share one release
-step either way; which result for a request is the owner's.
+step either way; which result for a request is the owner's. **Decided** (owner): the sender of a request always learns it
+will not be answered, so a stop releases a request too, with the stop's cause, in one release step with `turnsLost`
+(`cutQuestions`). The report of the request's turn still tells the asker it was owed to; the stop notice tells the rest (an
+asker the same quit cut heard nothing before).
 
 **Guards:** `guards()` (1105–1116) still *refuses* `repeat`, `rate_limited` and `ask_rate`; the loop, cascade, host-cap
 and pair guards warn (mailbox.md D13, D32, #2014, #2035). The audit found no code that blocks agent mail beyond those
@@ -237,8 +246,8 @@ This round stops after 1–3.
   `heldByProject`, which nothing in production calls (greps in §2), the `MailCalls` alias, the "before slice M3a" claim
   in the file doc, and the doc of `isHidden`, which sat above `citeKey`'s; two docs in `frame.ts` and `asked-by.ts` that
   named a method that is not there. `MailboxRecords.markTurn` (5 lines and its store test), which only
-  `turnStarted` called, stays: `store/mailbox.ts` is the deep tier (a store path), so its removal is a pull request of
-  its own (`markDelivered` already writes `turn_seq`). The tests that called only the three go: `turnStarted`'s, `feed`'s
+  `turnStarted` called, goes in a pull request of its own, since `store/mailbox.ts` is the deep tier (a store path)
+  (`markDelivered` already writes `turn_seq`). The tests that called only the three go: `turnStarted`'s, `feed`'s
   page test, `heldByProject`'s two uses, and the two `feed` assertions in the phantom test. Their property, an
   ancestor held from its reader reads as a phantom with no words or facts and whole to its sender, nothing else pinned (the
   reviewer's finding), so the test now pins it through `read`'s chain and fails when `item()` answers `not_sent` for a held
@@ -251,7 +260,7 @@ This round stops after 1–3.
 | Proposal | What changes | Lines | Risk |
 |---|---|---|---|
 | Drop the options of `memoryOs` no caller passes (`env`, `timePrecision`, `rmSync`, `now`, `cwd`, `sqlite`), fd 3 `overlapped` and `ctx.os/pid/cwd/env` | The fake's documented API (os-layer.md §7.1, "Not modeled in memory") shrinks; no production code and no test uses them. Done: 50 lines out, 16 in; `sqlite.open` stays (the `Os` type needs it) and is `ENOSYS`, an `'overlapped'` fd 3 is refused | about 60 | Low |
-| `turnsLost` releases requests as `lost`, `sessionsStopped` does not | Which text a request's sender reads after a crash against after a quit | about 10 once the release step is shared | Medium: a person-visible notice |
+| `turnsLost` releases requests as `lost`, `sessionsStopped` does not (decided: both release them, §2) | Which text a request's sender reads after a crash against after a quit | about 10 once the release step is shared | Medium: a person-visible notice |
 | Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | about 15 | Medium: a loop that today stops would run |
 | "started from here" and "started here" in one wording | The text a model reads on a refusal | about 3 | Low |
 

@@ -13,7 +13,7 @@ import { openPr } from './contribute-tools.mjs'
 import { GitHubError, markDraft, prsWithHead, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
-import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, queueOrder, SUBJECT_MAX } from './queue.mjs'
+import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
 import { STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
@@ -238,7 +238,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
     problems.push(`${top.ref} is based on ${p.baseRefName}, not ${defaultBranch}: give the PRs under it as lowers, so the stack lands through ${top.ref}.`)
   // The squash subject is "Title (#N)" and must fit (#1593: before any batch, as integrate does, #1222); a stack lands through its top
   const long = longSubject(p)
-  if (long) problems.push(`the squash subject "${long.subject}" is ${long.length} characters, over ${SUBJECT_MAX}. Shorten the title.`)
+  if (long) problems.push(longSubjectText(long))
   // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))
 

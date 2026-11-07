@@ -330,6 +330,9 @@ async function runCi(b, ctx) {
   const { defaultBranch } = await permissionsOf(repo, now)
   // A member that moved on (pushed, closed, a draft, taken out, queued again): what the batch tests is not what would land
   const left = []
+  // Left only by being a draft for a while, on the head the batch tested (open_pr turns the lower of a new stack into a draft, #2098): it
+  // is not a change to what would land, so it is batched again once it is ready, rather than sent to its session
+  const drafted = []
   for (const s of b.steps) {
     const it = findItem(q, repo, s.pr)
     if (!it || it.batch !== b.id) {
@@ -337,7 +340,10 @@ async function runCi(b, ctx) {
       continue
     }
     const pr = await readPr(repo, s.pr, QUEUE_PR_FIELDS)
-    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) left.push(s.pr)
+    if (pr.state !== 'OPEN' || (pr.isDraft && !it.auto) || pr.headRefOid !== s.head) {
+      left.push(s.pr)
+      if (pr.state === 'OPEN' && pr.isDraft && pr.headRefOid === s.head) drafted.push(s.pr)
+    }
   }
   if (left.length) {
     await cancelBatchRuns(b, renew)
@@ -345,6 +351,10 @@ async function runCi(b, ctx) {
     return drop(b, ctx, `${list(b, left, ref)} changed while it ran; ${rest.length >= KEEP_MIN ? `${list(b, rest, ref)} are tested again without ${left.length === 1 ? 'it' : 'them'}` : 'the rest go back to their own CI'}.`, {
       then: (fq, fb) => {
         // endBatch sent them all back as batchless; the rest, tested again together, are not
+        for (const p of drafted) {
+          const i = findItem(fq, fb.repo, p)
+          if (i && !i.batch) (delete i.batchless, delete i.alone)
+        }
         const again = rest.map((p) => findItem(fq, fb.repo, p)).filter((i) => i && !i.batch && ACTIVE.has(i.state))
         if (again.length >= KEEP_MIN) {
           for (const i of again) delete i.batchless
@@ -531,6 +541,7 @@ async function landNext(b, ctx) {
   }
   if (d.do === 'stop') {
     const rest = prs.slice(k)
+    // A draft for a while is the same (#2098): its head is the one tested, and marked ready again it is batched again.
     // A title lengthened during the batch is the one stop that is nothing wrong with the head: the member is not `alone` or
     // `batchless`, so its poll says `subject` (it needs no push) and, once the title fits, a batch takes it again (#1593).
     // The members after it go back as for any stop
@@ -541,7 +552,7 @@ async function landNext(b, ctx) {
         delete it.batchless
       }
     }
-    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', why: `batch ${b.branch} stopped before ${n}: ${d.text}.`, then: d.subject ? fixable : undefined })
+    return drop(b, ctx, `stopped before ${n}: ${d.text}. ${list(b, rest, ref)} go${rest.length === 1 ? 'es' : ''} back to ${rest.length === 1 ? 'its' : 'their'} own CI${k ? ` (${list(b, prs.slice(0, k), ref)} landed)` : ''}.`, { state: 'stopped', why: `batch ${b.branch} stopped before ${n}: ${d.text}.`, then: d.subject || d.draft ? fixable : undefined })
   }
   if (d.do === 'wait') {
     save((fq, fb) => Object.assign(fb, d.patch ?? {}, { lastError: null, errors: 0, outages: 0, updatedAt: at, nextAt: new Date(now + pollMs('waiting')).toISOString() }))

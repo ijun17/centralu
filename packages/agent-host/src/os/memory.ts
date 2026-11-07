@@ -840,6 +840,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const n = existing(p, true, 'utime')
     n.atimeNs = storedTimeNs(atime, family, precision)
     n.mtimeNs = storedTimeNs(mtime, family, precision)
+    n.ctimeNs = nowNs()
   }
 
   // ---- descriptors ----
@@ -1037,6 +1038,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const fchmod = (fd: number, mode: number) => {
     const n = fdOf(fd, 'fchmod').node
     n.perm = windows ? (mode & 0o200 ? 0o666 : 0o444) : mode & 0o7777
+    // Windows keeps the change time, as chmod does not (measured on Windows 11 with Node 22, the contract)
+    if (!windows) n.ctimeNs = nowNs()
   }
   const handle = (fd: number): OsFileHandle => ({
     fd,
@@ -1591,10 +1594,15 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     pid: HOST_PID,
   }
 
+  // A name on PATH, as the real OS's `tools.find` asks it: of the name itself on Windows (env-path.ts
+  // `presentOnWindows`), of where it leads elsewhere
+  const onPath = (p: string) =>
+    files.existsSync(p) || (windows && files.lstatSync(p, { throwIfNoEntry: false }) !== undefined)
+  // A start and a shim's target need what a link leads to, on every OS (tool-launch.ts)
   const launchDeps = () => ({
     family,
     read: (p: string) => readFile(p).toString('utf8'),
-    exists: (p: string) => files.existsSync(p) || files.lstatSync(p, { throwIfNoEntry: false }) !== undefined,
+    exists: (p: string) => files.existsSync(p),
     node: env.execPath,
   })
 
@@ -1612,7 +1620,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     },
     processes,
     tools: {
-      find: (name) => findOnPath(name, env.all(), family, launchDeps().exists),
+      find: (name) => findOnPath(name, env.all(), family, onPath),
       program: (name) =>
         programFor(
           name,
@@ -1622,7 +1630,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
               n,
               pathExt ? { ...env.all(), PATHEXT: pathExt } : env.all(),
               family,
-              launchDeps().exists,
+              onPath,
             ),
           (p) => launchFor(p, launchDeps()),
           env.all(),

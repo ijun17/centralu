@@ -15,7 +15,7 @@ import { commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarn
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
-import { findItem } from './queue.mjs'
+import { ACTIVE, longSubject, longSubjectText } from './queue.mjs'
 import { readQueue } from './queue-driver.mjs'
 import { freshCache } from './cache.mjs'
 
@@ -141,9 +141,9 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   const list = await privateWords()
   const problems = [...subject.problems.map((p) => `Title: ${p}`), ...filled.problems, ...publicTextProblems(title, list, 'The title'), ...publicTextProblems(filled.body, list, 'The description')]
   const warnings = [...subject.warnings.map((w) => `Title: ${w}`), ...filled.warnings]
-  // The squash commit's subject is "Title (#N)" (the queue's squash): it has to fit too
-  const squashLength = [...String(title)].length + ' (#9999)'.length
-  if (squashLength > conventions.subjectMax) warnings.push(`Merged, the subject "${title} (#N)" will be about ${squashLength} characters, over ${conventions.subjectMax}.`)
+  // The squash commit's subject is "Title (#N)" (the queue's squash) and has to fit, as queue_merge says it: a pull request number has four digits by now
+  const long = longSubject({ number: 9999, title, body: '' })
+  if (long) problems.push(longSubjectText(long))
   warnings.push(...alsoWarn)
   if (problems.length) return refusal('Not opened:', problems, { warnings })
   // Stacked on another pull request: that one is a lower now, and a stack's lowers are drafts (#1066)
@@ -188,10 +188,10 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   return linesAnswer(`Opened ${refOf(r, pr.number)} "${title}" from ${head} into ${target}${draft ? ' as a draft' : ''}: ${pr.url}${labelled}${stacked}`, [['warnings', 'Warnings:', warnings]], { ok: true, number: pr.number, url: pr.url, ...(labelled ? { labels } : {}), ...(stacked && !queued ? { drafted: lower.number } : {}) })
 }
 
-/** Whether this machine's merge queue holds the pull request (as itself or a stack's top); a queue file that does not read holds nothing. */
+/** Whether this machine's merge queue holds the pull request: as itself, a stack's top, or one of the lowers under a top (#2098); a queue file that does not read holds nothing. */
 function inQueue(repo, number) {
   try {
-    return findItem(readQueue(centralu.dataDir), repo, number) !== null
+    return readQueue(centralu.dataDir).items.some((i) => ACTIVE.has(i.state) && String(i.repo).toLowerCase() === String(repo).toLowerCase() && (i.pr === number || (i.lowers ?? []).includes(number)))
   } catch {
     return false
   }
@@ -360,7 +360,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans and the other dependency-cruiser errors, lint on the changed files, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name> (deep when pre-pr is skipped or answers none); then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066); one the merge queue holds stays ready, as the queue never merges a draft it did not make, and the answer says to restack the new one with rebase_stack once it lands (#1673).",
+        "Instead of gh pr create: run the repository's pnpm pre-pr on the pushed head (tsc at every head of its stack, orphans and the other dependency-cruiser errors, lint on the changed files, a store step number main or another open pull request already uses, repository-wide guards run against the open pull requests (a warning), new tests that pass without the change, main merged in) and refuse with what it finds (a branch behind main is only a warning), unless prePrExempt leaves one check out or skipPrePr all of them, with the reason; a cancelled call opens nothing; pre-pr's risk tier (scripts/tier.mjs) goes into Verified as a Tier line and onto the pull request as the label tier:<name> (deep when pre-pr is skipped or answers none); then open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, situationsChecked, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Situations checked and Usability: the answer, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md or its squash subject, \"Title (#NNNN)\", would be over 72 characters (as queue_merge refuses it), a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening. Stacked (base is another open pull request's branch), it turns that one into a draft: a stack's lower pull requests are drafts, which run no CI (#1066); one the merge queue holds (as itself, as a stack's top, or as a lower under a queued top) stays ready, as the queue never merges a draft it did not make, and the answer says to restack the new one with rebase_stack once it lands (#1673).",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),

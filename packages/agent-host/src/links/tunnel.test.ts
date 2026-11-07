@@ -99,6 +99,8 @@ fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) 
 const has = (process.env.FAKE_SSH_HAS || '').split('|')
 const line = (over) => JSON.stringify({ ...JSON.parse(process.env.FAKE_SSH_LINE), hostRunning: running(), ...over })
 const answer = () => {
+  // The launcher is there and cannot run: its Node is gone. The shell says so with 127 and no word of ours on stdout
+  if (process.env.FAKE_SSH_NO_NODE) { process.stderr.write('env: node: No such file or directory' + String.fromCharCode(10)); process.exit(127) }
   // A serve from before #1405 refuses --pair, as it refuses any option it does not know
   // A remote updated meanwhile: refuses --pair only while this file exists, and prints no token without --pair
   if (process.env.FAKE_SSH_NO_PAIR_FILE && / --pair /.test(cmd) && fs.existsSync(process.env.FAKE_SSH_NO_PAIR_FILE)) { process.stderr.write('unknown option for serve: --pair' + String.fromCharCode(10)); process.exit(2) }
@@ -280,6 +282,14 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(ep.token).toBe('tok')
     // One ssh round trip, whatever the shell: the remote decided
     expect((logged() as { used?: string }[]).filter((x) => 'used' in x)).toEqual([{ used: 'launcher' }])
+  })
+
+  // Exit 127 is also what a launcher says when the Node it runs on is gone: the word on stdout is what says nothing is installed
+  it('does not say Centralu is not installed when its launcher is there and its Node is not', async () => {
+    const env = { FAKE_SSH_HAS: 'launcher', FAKE_SSH_NO_NODE: '1' }
+    await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory/)
+    await expect(tunnel(env).open()).rejects.not.toThrow(/not installed/)
+    await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory/)
   })
 
   it('says Centralu is not installed when neither answers, whatever exit code the shell passed on, and that ssh failed when it cannot connect', async () => {

@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { DATA_DIR, PROTOCOL_VERSION } from '@cc/protocol'
+import { PROTOCOL_VERSION } from '@cc/protocol'
+import { chooseDataDir } from '../data-dir.js'
 import { runGit } from '../dev-services/git-exec.js'
 import { LinkedMachineRecords } from '../dev-services/store/linked-machines.js'
 import { SettingsRecords } from '../dev-services/store/settings.js'
@@ -43,9 +43,9 @@ export type RemoteDevOptions = {
   ssh?: Pick<SshTunnelOptions, 'ssh' | 'configFile' | 'env'>
 }
 
-/** The hub's data folder: `CC_DATA_DIR`, else `~/.centralu`, as the host's */
+/** The hub's data folder, chosen as the host chooses it (`chooseDataDir`): `CC_DATA_DIR`, else `~/.centralu`, `~/.centralu-dev` for a dev hub */
 export function hubDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CC_DATA_DIR || join(homedir(), DATA_DIR)
+  return chooseDataDir(env).dir
 }
 
 /** The linked machine named `name` (its id, its name or its ssh target) in the hub's store, opened read only */
