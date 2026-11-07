@@ -814,7 +814,10 @@ async function holdBatches(dir, now) {
   updateQueue(dir, (fresh) => {
     if (found) fresh.runnerHold = { since: seen[found.run], run: found.run, why: found.why, ...(expired ? { expired: true } : {}) }
     else delete fresh.runnerHold
-    if (Object.keys(seen).length) fresh.runnerHoldSince = seen
+    // Merged into what is there now (the earlier time wins): a driver that wrote meanwhile keeps its entries
+    const kept = Object.fromEntries(Object.entries(fresh.runnerHoldSince ?? {}).filter(([run]) => live.has(run)))
+    for (const [run, at] of Object.entries(seen)) kept[run] = kept[run] && kept[run] < at ? kept[run] : at
+    if (Object.keys(kept).length) fresh.runnerHoldSince = kept
     else delete fresh.runnerHoldSince
   })
   return !!found && !expired
