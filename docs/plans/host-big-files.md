@@ -183,12 +183,18 @@ the `NOT_REACHABLE || NOT_CONNECTED_PHRASE` test.
 1. `gateError` after the card against `AgentStartGates.agentStartGateError`: the remote text says "project is not
    trusted", the local "is no longer trusted" (`start-agent.test.ts:502–530` pins the local one); and `gateError` goes
    through `autoBoundaryOpen`, which logs `[permissions] … allowed` on every send, the local check does not. Calling
-   the shared check removes about 9 lines and both differences.
+   the shared check removes about 9 lines and both differences. **Fixed in #2112**: it did not remove the lines (the check
+   became an exported function both paths call, +38/−38), and a 21-case table pins that the refusal conditions did not
+   change. The remote first gate, before anything is asked, still says "is not trusted … from the project menu", as a
+   local start's first gate does.
 2. `delete` does not clear the held `queued` notes before it interrupts; `stop` does, and restores them on failure.
    The interrupted turn's end calls `scheduleDrain`, so a held note can go to a child being deleted. Narrow (`drain`
-   re-checks the record), suspected, not yet shown by a test.
+   re-checks the record), suspected, not yet shown by a test. **Shown, and fixed in #2109** (two tests: a running child, and
+   one at rest whose turn had just ended), with one helper for `stop` and `delete`. A note held after the deletion
+   started is not covered: #2114.
 3. "started from here" against "started here" (`agent-session-actions.ts:123`, pinned by `delegation-flow.test.ts:436`).
-   This one is wording the person reads, so it is a proposal (§6), not a fix.
+   This one is wording the person reads, so it was a proposal (§6). **Decided (owner): one phrase, "started from here"
+   (#2111)**: it is true of a child on another machine too, and `agent_session list` already says it.
 
 **A change in `links/` that would help, not made:** `LinkedSessions.read` types `state` as `string`
 (`contract/orchestrator.ts`); typing it as `SessionState` removes the last state cast at line 600.
@@ -222,12 +228,12 @@ the dead method it alone called. Line counts are measured and written in each pu
 | 2 | **`memory.ts` dead code and copies** (§1 dead, `at()`, `statAt`, `runIn`, `nextPid`, `findProgram` returning the entry) | `os/memory.ts` | −45 (landed, §5.1) |
 | 3 | **`messages.ts` dead code** (§2 dead: `turnStarted`, `feed`, `heldByProject`, the alias, stale text; with the store's `markTurn`) | `mail/messages.ts`, `frame.ts`, `asked-by.ts`, three tests | −37 source, −29 test (landed, §5.1) |
 | 4 | `remote-agents.ts` dead code and `patch`/tail helpers (§3) | `sessions/remote-agents.ts`, lint allowlist | about −40 |
-| 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers; the two drifts with contract cases first | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | about −25 net |
-| 6 | The start gate of a remote agent calls `agentStartGateError` (drift 1), a bug with a failing test | `remote-agents.ts`, test | about −9 |
-| 7 | `delete` clears held notes before it interrupts (drift 2), once a test shows it | `remote-agents.ts`, test | about 0 |
+| 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers (not done); the two drifts with contract cases first (#2107) | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | about −25 net; the drifts landed, the helpers did not |
+| 6 | The start gate of a remote agent calls `agentStartGateError` (drift 1), a bug with a failing test | `remote-agents.ts`, test | #2112 (landed, §5.2) |
+| 7 | `delete` clears held notes before it interrupts (drift 2), once a test shows it | `remote-agents.ts`, test | #2109 (landed, §5.2) |
 | 8 | Moves: `memory.ts` into its seven modules; then the `messages.ts` modules after #2067; then the three `remote-agents.ts` modules after turn-owned-by-no-one | | moved, +20–40 per module |
 
-This round stops after 1–3.
+This round started with 1–3 and went on with what §5.2 lists.
 
 ### 5.1 What landed
 
@@ -255,14 +261,41 @@ This round stops after 1–3.
   as many lines as the copies it replaces), `sweep`, `watchedTo` and `labelOf` (each has a test that calls it), the `export`
   keyword on unimported types (no line saved), and everything marked kept in §2.
 
-## 6. Proposals that change behaviour (the owner decides; in no pull request here)
+### 5.2 What landed after the first three
 
-| Proposal | What changes | Lines | Risk |
-|---|---|---|---|
-| Drop the options of `memoryOs` no caller passes (`env`, `timePrecision`, `rmSync`, `now`, `cwd`, `sqlite`), fd 3 `overlapped` and `ctx.os/pid/cwd/env` | The fake's documented API (os-layer.md §7.1, "Not modeled in memory") shrinks; no production code and no test uses them. Done: 50 lines out, 16 in; `sqlite.open` stays (the `Os` type needs it) and is `ENOSYS`, an `'overlapped'` fd 3 is refused | about 60 | Low |
-| `turnsLost` releases requests as `lost`, `sessionsStopped` does not (decided: both release them, §2) | Which text a request's sender reads after a crash against after a quit | about 10 once the release step is shared | Medium: a person-visible notice |
-| Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | about 15 | Medium: a loop that today stops would run |
-| "started from here" and "started here" in one wording | The text a model reads on a refusal | about 3 | Low |
+Each is its own pull request, in the order they merged. Titles are the squash subjects.
+
+- **#2096, the store's `markTurn`** (−18, 0 added): the deep-tier deletion #2094 left out. `turn-owned-by-no-one.md` named
+  `markTurn` as the writer of a joined request's `turn_seq`; it now names `markDelivered`, which takes the turn's sequence.
+- **#2108, a stop tells a request's sender** (`messages.ts` +17/−10, tests +104/−5): `sessionsStopped` no longer skips
+  requests; it and `turnsLost` release through one step, `cutQuestions`, with the stop's own cause. Decided by the owner
+  (§2, §6).
+- **#2107, the in-memory OS agrees with the real one** (`memory.ts` +11/−3, contract cases +71): a link that leads nowhere
+  on PATH, and the change time after `utimes` and (off Windows) `fchmod`.
+- **#2105, the unused options of `memoryOs`** (`memory.ts` +16/−50): decided in §6.
+- **#2109, held notes of a child being deleted** (`remote-agents.ts` +23/−22, tests +59/−2): drift 2, §3.
+- **#2111, one wording** (+13/−15): drift 3, §3, and the "more permissions" refusal as one function.
+- **#2112, the remote start gate** (source +38/−38, tests +94/−1): drift 1, §3. Its review's one note, that nothing covered
+  the `|| null` that keeps a caller with no project from reading as the orchestrator's place, is covered here by two cases
+  in `remote-agents-boundary.test.ts` (a caller that turns orchestrator while its card stands, or before a send, is refused
+  as having no project registered); both fail with `?? null`.
+
+Not done, and why: row 4 (`remote-agents.ts` dead code and helpers: its audit's about 25 lines are small and the file is
+due to lose half of itself to `turn-owned-by-no-one.md`); the signal gate, `clock.sleep` and shell choice shared with
+`real.ts` (row 5's first half); every move of row 8. Found on the way and filed, not fixed: #2113 (a completed
+orchestrator turn that carried a second asker's request without answering it) and #2114 (a note queued for a remote child
+while it is being deleted, which needs a "deleting" marker that `hold` and `drain` respect).
+
+## 6. Proposals that change behaviour, and what the owner decided
+
+None of these was in a refactor pull request. The owner answered them on 2026-11-07; each is its own pull request or none.
+
+| Proposal | What changes | Decision |
+|---|---|---|
+| Drop the options of `memoryOs` no caller passes (`env`, `timePrecision`, `rmSync`, `now`, `cwd`, `sqlite`), fd 3 `overlapped` and `ctx.os/pid/cwd/env` | The fake's documented API (os-layer.md §7.1, "Not modeled in memory") shrinks; no production code and no test uses them | Remove: #2105 (50 lines out, 16 in). `sqlite.open` stays because the `Os` type needs it, and is `ENOSYS`; an `'overlapped'` fd 3 is refused |
+| `turnsLost` releases requests as `lost`, `sessionsStopped` does not | Which text a request's sender reads after a crash against after a quit | The sender of a request always learns it will not be answered (#1186): a stop releases a request too, with the stop's cause (#2108). One case stays silent, #2113 |
+| Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | No change. #2035 kept all three on purpose ("The post rate, identical repeats and `ask_rate` stay; they are not volume holds between a pair") and #2014 names four other guards. Put to the owner as a new decision, which would be a bug-fix pull request with a test |
+| "started from here" and "started here" in one wording | The text a model reads on a refusal | "started from here" (#2111) |
 
 ## 7. Not in this round
 
