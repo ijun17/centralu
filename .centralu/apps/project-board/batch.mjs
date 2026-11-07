@@ -341,7 +341,7 @@ export function decideLanding({ b, step, pr, item, mainTree, prevTree, defaultBr
   if (pr.state !== 'OPEN') return { do: 'stop', text: `${n} was closed` }
   if (pr.headRefOid !== step.head) return { do: 'stop', text: `${n}'s head moved from ${short(step.head)} to ${short(pr.headRefOid)}` }
   // An integrated record is a draft until land() readies and squashes it (#1259 step 3)
-  if (pr.isDraft && !item.auto) return { do: 'stop', text: `${n} became a draft` }
+  if (pr.isDraft && !item.auto) return { do: 'stop', draft: true, text: `${n} became a draft` }
   // `moved`: the one stop that is the default branch's doing and not the pull request's (#1548)
   if (mainTree !== prevTree) return { do: 'stop', moved: true, text: `${defaultBranch} is not the tree the batch had before ${n} (something else landed)` }
   if (pr.baseRefName !== defaultBranch) {
