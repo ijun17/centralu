@@ -43,6 +43,19 @@ describe('external installs', () => {
     const update = installedUpdate(installed, OLD_WINDOW, disk)!
     expect(autoApplyDecision({ update, windowVersion: OLD_WINDOW, relaunch: disk, busy: false, typing: false, tried: false })).toEqual({ apply: true })
   })
+
+  // #2130: the host found a release past the build waiting on disk; the line offers it, not the waiting one
+  it('offers the release the host found past the build on disk, and the disk build once it is not past it', () => {
+    const disk = { ready: true, version: '0.1.0-beta.11' }
+    const past: UpdateStatus = { ...installed, phase: 'idle', latest: '0.1.0-beta.12' }
+    expect(installedUpdate(past, OLD_WINDOW, disk)).toBe(past)
+    expect(updateStateText(past, null)).toBe('0.1.0-beta.12 is available')
+    for (const latest of ['0.1.0-beta.11', '0.1.0-beta.10']) {
+      expect(installedUpdate({ ...past, latest, newer: latest !== OLD_WINDOW }, OLD_WINDOW, disk)).toMatchObject({ phase: 'restart_required', latest: disk.version })
+    }
+    // An install of it that failed does not hide the build that is there to apply
+    expect(installedUpdate({ ...past, phase: 'failed', error: 'EACCES' }, OLD_WINDOW, disk)).toMatchObject({ phase: 'restart_required', latest: disk.version })
+  })
 })
 
 describe('applyOffer', () => {

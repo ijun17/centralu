@@ -647,6 +647,72 @@ describe('UpdateService', () => {
   })
 
   /**
+   * A host waiting to be restarted still hears of a later release (#2130). Seen live: beta.50 installed and waiting, beta.51
+   * on npm, and both Check now and the install still said beta.50, since both returned before asking.
+   */
+  describe('a release past the one waiting to be restarted into (#2130)', () => {
+    async function waiting(o: { autoApply?: boolean } = {}) {
+      const h = make({ registry: '0.1.0-beta.50', ...o })
+      await h.svc.check(true)
+      if (!o.autoApply) h.svc.apply()
+      await settle()
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50' })
+      h.calls.length = 0
+      return h
+    }
+
+    it('a check reports it, and an install replaces the waiting build with it', async () => {
+      const h = await waiting()
+      h.offer('0.1.0-beta.51')
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'idle', latest: '0.1.0-beta.51', newer: true, error: null })
+      expect((await h.svc.apply()).phase).toBe('updating')
+      await settle()
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@0.1.0-beta.51']])
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51' })
+    })
+
+    it('an install asks the registry itself, with no check before it', async () => {
+      const h = await waiting()
+      h.offer('0.1.0-beta.51')
+      h.svc.apply()
+      await settle()
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@0.1.0-beta.51']])
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51' })
+    })
+
+    it('with automatic updates on, a check that finds it installs it by itself', async () => {
+      const h = await waiting({ autoApply: true })
+      h.offer('0.1.0-beta.51')
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@0.1.0-beta.51']])
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51' })
+    })
+
+    it.each([
+      ['the same release', '0.1.0-beta.50'],
+      ['an older one (a rollback of latest)', '0.1.0-beta.49'],
+    ])('%s is never offered nor installed again: "restart to finish" stays', async (_, registry) => {
+      const h = await waiting({ autoApply: true })
+      h.offer(registry)
+      const seen = h.published.length
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', newer: true })
+      // Nor did the check show "Checking…" over it while it asked
+      expect(h.published.slice(seen).map((s) => s.phase)).not.toContain('checking')
+      expect(await h.svc.apply()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', newer: true })
+      await settle()
+      expect(h.calls).toEqual([])
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50' })
+    })
+
+    it('a check that cannot reach the registry leaves "restart to finish" as it was', async () => {
+      const h = await waiting()
+      h.offer(null)
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', error: null })
+    })
+  })
+
+  /**
    * "Apply updates automatically when idle" (#352): off when the host passes no stored switch (the host's stored default is
    * on since 2026-10-20, update-switches.test.ts), and with it on a newer version
    * found by any check is installed without a click. Applying it stays the window's, once idle.

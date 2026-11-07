@@ -56,6 +56,8 @@ export function installedUpdate(update: UpdateStatus | null, windowVersion: stri
   if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return update
   if (update?.phase === 'restart_required' && update.latest === relaunch.version) return update
   if (update?.phase === 'updating' || update?.phase === 'waiting_for_npm') return update
+  // A release past the one on disk, which the host offers (#2130): installing it replaces the build waiting there
+  if (update?.phase === 'idle' && update.newer && update.latest && isNewerVersion(update.latest, relaunch.version)) return update
   return {
     current: update?.current ?? windowVersion,
     auto: update?.auto ?? true,
