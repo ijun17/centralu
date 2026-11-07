@@ -4,9 +4,8 @@ import type {
 import type { Readable, Writable } from 'node:stream'
 
 /**
- * A tool's process as an adapter drives it — what a local `ChildProcess` and a process the keeper
- * holds (#280 step 2, `keeper/agent-process.ts`) both are. It is also the shape the Agent SDK's
- * `spawnClaudeCodeProcess` returns.
+ * A tool's process as an adapter drives it — what a local `ChildProcess` is. It is also the shape the
+ * Agent SDK's `spawnClaudeCodeProcess` returns.
  */
 export interface AgentProcess {
   readonly stdin: Writable
@@ -23,12 +22,9 @@ export interface AgentProcess {
   once(event: 'error', listener: (error: Error) => void): this
   off(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
   off(event: 'error', listener: (error: Error) => void): this
-  /** Lets go of the process and leaves it running (only a process someone else holds can) */
-  detach?(): Promise<void>
   /**
    * The end of what the process wrote to stderr, for a failure message (`withStderrTail`). The SDK keeps it only for
-   * a process it spawned itself; this host's own child (`local-process.ts`) and the keeper's (`keeper/agent-process.ts`)
-   * keep it here.
+   * a process it spawned itself; this host's own child (`local-process.ts`) keeps it here.
    */
   stderrTail?(): string
   /**

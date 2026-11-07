@@ -97,12 +97,6 @@ const TREE_NOTE_MS = 2_000
 const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
 export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
-  /**
-   * A process a previous host left is ended and the conversation opened again in a new one (`AcpAdapter`): a turn it was
-   * running is not carried on, so the host ends it as one the restart stopped (`HostTenure.adoptKept`)
-   */
-  readonly takesOverTurn = false
-
   constructor(opts: CreateSessionOpts, emit: EventSink, deps: AcpSessionDeps) {
     super(
       { sessionId: opts.sessionId, resumeExternalId: opts.resumeExternalId ?? null, start: deps.start, stopConfirmMs: deps.stopConfirmMs },

@@ -266,16 +266,4 @@ export class CodexClient {
     await stopToolProcess(this.proc, { exited: this.finished })
   }
 
-  /**
-   * Lets go of the app-server **without** closing it (#280 step 2): a host leaving for a restart
-   * under the keeper. No EOF, no signal; frames that arrive until the keeper ends the stream are
-   * still handled. Waiting requests are rejected — their answers will go to the next host.
-   */
-  async detach(): Promise<void> {
-    if (this.closed) return
-    await this.proc.detach?.()
-    this.closed = true
-    this.finished = true
-    this.pending.rejectAll(new Error('request abandoned: this host let go of codex'))
-  }
 }

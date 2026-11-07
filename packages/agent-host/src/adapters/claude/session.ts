@@ -118,8 +118,6 @@ export class ClaudeSession implements SessionHandle {
   /** The CLI's process when it came from a `ProcessSource` (the keeper, #280 step 2) */
   private proc: AgentProcess | null = null
   private adopted = false
-  /** Letting go of the process for the next host: its stream ending is not a crash */
-  private detaching = false
   /** A turn that lost the sign-in refresh race goes again once (see `ClaudeRaceRetry`, #353) */
   private readonly raceRetry: ClaudeRaceRetry
   /** The CLI's timers, looked at again when due (see `ClaudeScheduleLook`, #568) */
@@ -324,8 +322,7 @@ export class ClaudeSession implements SessionHandle {
        */
       liveQueries.delete(q)
       this.settleGoalKnown()
-      // A stream that ends because this host let go of the process is not a death (#280 step 2)
-      if (!this.closed && !this.detaching) this.ledger.exited(false, 'claude process ended unexpectedly')
+      if (!this.closed) this.ledger.exited(false, 'claude process ended unexpectedly')
     } catch (err) {
       liveQueries.delete(q)
       this.settleGoalKnown()
@@ -337,11 +334,11 @@ export class ClaudeSession implements SessionHandle {
        * used to surface as adapter_crashed, and the manager would treat the brand-new process it
        * had just started as dead and close it.
        */
-      if (this.closed || this.detaching) return
+      if (this.closed) return
       /*
        * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
-       * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
-       * added the same way, so a CLI that fails to start still says why.
+       * spawned here (`local-process.ts`) keeps that tail, and it is added the same way, so a CLI that fails to
+       * start still says why.
        */
       this.ledger.exited(false, withStderrTail((err as Error).message, this.proc))
     } finally {
@@ -527,24 +524,6 @@ export class ClaudeSession implements SessionHandle {
       },
     })
     void q.interrupt().catch((err: Error) => console.error(`[claude] could not release a lost call in ${this.sessionId.slice(0, 8)}: ${err.message}`))
-  }
-
-  /**
-   * Lets go of the CLI without stopping it (#280 step 2). Output keeps flowing through the normal
-   * path until the keeper ends the stream, so a turn's result that was already on its way is still
-   * recorded here; nothing is sent to the CLI, and an approval still waiting stays waiting for the
-   * next host, which the CLI re-delivers it to.
-   */
-  async detach(): Promise<void> {
-    this.detaching = true
-    this.stopAppWatch?.()
-    this.opts.apps?.close()
-    if (this.query) liveQueries.delete(this.query)
-    // An adopted process the SDK has not taken yet is let go of all the same
-    const proc = this.proc ?? (this.adopted ? null : (this.opts.processSource?.adopt?.process ?? null))
-    await proc?.detach?.()
-    this.ledger.close()
-    this.notify?.()
   }
 
   /** Every input goes out under an id with Centralu's mark, so its line in the transcript reads back as Centralu's (`centraluInputId`) */
