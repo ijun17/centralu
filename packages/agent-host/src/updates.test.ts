@@ -102,11 +102,11 @@ describe('UpdateService', () => {
       h.elapse(60_000)
       h.offer('9999.0.2')
       if (automatic) h.svc.setAutoApply(true)
-      else h.svc.apply()
+      else void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.2']]])
       expect(h.published).toContainEqual(expect.objectContaining({ phase: 'updating', latest: '9999.0.2' }))
-      h.svc.apply()
+      void h.svc.apply()
       await h.svc.check(true)
       await settle()
       expect(h.calls).toHaveLength(1)
@@ -126,7 +126,7 @@ describe('UpdateService', () => {
       const h = make({ fetchLatest })
       await h.svc.check(false)
       h.elapse(age)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(fetchLatest.mock.calls).toEqual(age < 60_000 ? [[3000]] : [[3000], [8000]])
     })
@@ -139,7 +139,7 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       h.elapse(60_000)
       h.offer(null)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(h.calls.every(([, args]) => args.includes('centralu@9999.0.1'))).toBe(true)
       const notice = 'Could not refresh latest (Could not reach the registry); using previously checked 9999.0.1.'
@@ -153,7 +153,7 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       h.elapse(60_000)
       h.offer(fresh)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.1']]])
       expect(h.svc.current()).toMatchObject({ latest: '9999.0.1', newer: true })
@@ -174,7 +174,7 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       h.elapse(age)
       h.offer('9999.0.1')
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       const target = age < 3600_000 ? '9999.0.2' : '9999.0.1'
       expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]]])
@@ -186,7 +186,7 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       h.elapse(3600_001)
       h.offer(fresh)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('idle'))
       expect(h.svc.current()).toMatchObject({ latest: fresh, newer: false })
       expect(h.calls).toEqual([])
@@ -201,12 +201,12 @@ describe('UpdateService', () => {
       const checkedAt = h.svc.current().checkedAt
       h.elapse(3599_999)
       h.offer('9999.0.1')
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
       expect(h.svc.current().checkedAt).toBe(checkedAt)
       h.elapse(2)
       fails = false
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(h.calls[1]?.[1]).toContain('centralu@9999.0.1')
     })
@@ -217,7 +217,7 @@ describe('UpdateService', () => {
         if (fails) throw new Error('EACCES: install denied')
       } })
       await h.svc.check(true)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
       // Every status, including the in-flight one, must keep the failure visible.
       h.offer(registry)
@@ -242,17 +242,17 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       h.elapse(60_000)
       const checking = h.svc.check(true)
-      h.svc.apply()
-      h.svc.apply()
+      void h.svc.apply()
+      void h.svc.apply()
       old.resolve({ ok: true, version: '9999.0.2' })
       await checking
       await vi.waitFor(() => expect(fetchLatest).toHaveBeenCalledTimes(3))
       expect(h.svc.current().phase).toBe('updating')
-      h.svc.apply()
+      void h.svc.apply()
       expect((await h.svc.check(true)).phase).toBe('updating')
       fresh.resolve({ ok: true, version: '9999.0.3' })
       await vi.waitFor(() => expect(h.calls).toHaveLength(1))
-      h.svc.apply()
+      void h.svc.apply()
       await h.svc.check(true)
       expect(fetchLatest).toHaveBeenCalledTimes(3)
       npm.resolve()
@@ -273,7 +273,7 @@ describe('UpdateService', () => {
       }, wait: () => gate.promise })
       await h.svc.check(true)
       h.elapse(60_000)
-      h.svc.apply()
+      void h.svc.apply()
       await vi.waitFor(() => {
         if (stage === 'lookup') expect(fetching).toBe(2)
         else if (stage === 'retry') expect(h.svc.current().phase).toBe('waiting_for_npm')
@@ -283,7 +283,7 @@ describe('UpdateService', () => {
       const events = h.published.length
       gate.resolve()
       await settle()
-      h.svc.apply()
+      void h.svc.apply()
       await h.svc.check(true)
       expect(h.calls).toHaveLength(stage === 'lookup' ? 0 : 1)
       expect(h.published).toHaveLength(events)
@@ -303,7 +303,7 @@ describe('UpdateService', () => {
       expect(h.fetches).toBe(2)
       now += 60_000
       h.offer('9999.0.2')
-      h.svc.apply()
+      void h.svc.apply()
       await h.svc.setAuto(false)
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
       expect(h.calls[0]?.[1]).toContain('centralu@9999.0.2')
@@ -397,7 +397,7 @@ describe('UpdateService', () => {
       },
     })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect(h.svc.current().phase).toBe('failed')
     expect(h.svc.current().error).toMatch(/EACCES/)
@@ -406,7 +406,7 @@ describe('UpdateService', () => {
   it('refreshes the installed copy after npm, through the launcher that npm just installed', async () => {
     const h = make({ registry: '9999.0.0', installedCopy: 'C:\\Users\\me\\AppData\\Local\\Programs\\Centralu' })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect(h.calls).toEqual([
       ['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']],
@@ -425,7 +425,7 @@ describe('UpdateService', () => {
       },
     })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     const s = h.svc.current()
     expect(s.phase).toBe('failed')
@@ -592,7 +592,7 @@ describe('UpdateService', () => {
       wait: async () => {},
     })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect(h.calls.filter(([file]) => file === 'npm')).toHaveLength(2)
     expect(h.published.some((s) => s.phase === 'waiting_for_npm' && s.error === 'Waiting for npm to serve 9999.0.0')).toBe(true)
@@ -608,7 +608,7 @@ describe('UpdateService', () => {
       wait: async (ms) => { elapsed += ms },
     })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect(elapsed).toBe(10 * 60 * 1000)
     expect(h.calls).toHaveLength(21)
@@ -624,7 +624,7 @@ describe('UpdateService', () => {
       wait: async (ms) => { waits.push(ms) },
     })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect(h.calls).toHaveLength(1)
     expect(waits).toEqual([])
@@ -641,7 +641,7 @@ describe('UpdateService', () => {
   it('a check does not overwrite the state while a restart is pending', async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.check(true)
-    h.svc.apply()
+    void h.svc.apply()
     await settle()
     expect((await h.svc.check(true)).phase).toBe('restart_required')
   })
@@ -651,10 +651,10 @@ describe('UpdateService', () => {
    * on npm, and both Check now and the install still said beta.50, since both returned before asking.
    */
   describe('a release past the one waiting to be restarted into (#2130)', () => {
-    async function waiting(o: { autoApply?: boolean } = {}) {
+    async function waiting(o: Parameters<typeof make>[0] = {}) {
       const h = make({ registry: '0.1.0-beta.50', ...o })
       await h.svc.check(true)
-      if (!o.autoApply) h.svc.apply()
+      if (!o.autoApply) void h.svc.apply()
       await settle()
       expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50' })
       h.calls.length = 0
@@ -674,7 +674,7 @@ describe('UpdateService', () => {
     it('an install asks the registry itself, with no check before it', async () => {
       const h = await waiting()
       h.offer('0.1.0-beta.51')
-      h.svc.apply()
+      void h.svc.apply()
       await settle()
       expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@0.1.0-beta.51']])
       expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51' })
@@ -703,6 +703,38 @@ describe('UpdateService', () => {
       await settle()
       expect(h.calls).toEqual([])
       expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50' })
+    })
+
+    it('a failed install of it leaves the waiting build as it was, and a later check does not offer that one again', async () => {
+      let fail = false
+      const h = await waiting({
+        run: async (file) => {
+          if (fail && file === 'npm') throw new Error('npm error code EACCES')
+        },
+      })
+      fail = true
+      h.offer('0.1.0-beta.51')
+      await h.svc.apply()
+      await settle()
+      expect(h.svc.current()).toMatchObject({ phase: 'failed', latest: '0.1.0-beta.51', error: 'npm error code EACCES' })
+      // latest goes back to the waiting release: restart to finish it, not an install of it
+      h.offer('0.1.0-beta.50')
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', error: null })
+    })
+
+    it('an install npm took but whose copy was not replaced keeps saying how to finish it', async () => {
+      let launcher = true
+      const h = await waiting({
+        installedCopy: '/Applications/Centralu.app',
+        globalPackage: async () => (launcher ? { launcher: LAUNCHER, version: null } : null),
+      })
+      launcher = false
+      h.offer('0.1.0-beta.51')
+      await h.svc.apply()
+      await settle()
+      expect(h.svc.current()).toMatchObject({ phase: 'failed', error: expect.stringContaining('npm installed 0.1.0-beta.51') })
+      h.offer('0.1.0-beta.50')
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51', error: expect.stringContaining('centralu install') })
     })
 
     it('a check that cannot reach the registry leaves "restart to finish" as it was', async () => {

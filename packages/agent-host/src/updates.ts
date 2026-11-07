@@ -234,7 +234,7 @@ async function fetchLatestFromRegistry(timeoutMs: number): Promise<LatestResult>
     if (res.status === 404) return { ok: false, reason: `${APP_SLUG} is not on the registry` }
     if (!res.ok) return { ok: false, reason: `The registry answered ${res.status}` }
     const body: unknown = await res.json()
-    const version = (body as { version?: unknown } | null)?.version
+    const version = typeof body === 'object' && body !== null && 'version' in body ? body.version : undefined
     return typeof version === 'string'
       ? { ok: true, version }
       : { ok: false, reason: 'The registry answered in an unexpected shape' }
@@ -297,7 +297,7 @@ export function runCommand(file: string, args: string[], resolve?: (file: string
     // windowsHide: npm and the launcher are console programs; no window for them, whatever console the host has
     execFile(cmd.file, cmd.args, { timeout: INSTALL_TIMEOUT_MS, windowsHide: true }, (err, _stdout, stderr) => {
       if (!err) return done()
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (err.code === 'ENOENT') {
         return reject(new Error(`${file} was not found on PATH (${err.message})`))
       }
       // What `failureLine` reads besides the message
@@ -730,11 +730,13 @@ export class UpdateService {
        * that is the outcome most worth naming, with the one command that finishes it.
        */
       if (this.stopped) return
-      const reason = (e as Error).message
+      const reason = errorMessage(e)
       const error = packageInstalled
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
         : reason
       this.status = { ...this.status, phase: 'failed', error }
+      // npm has it: a later check that finds nothing past it says so, and keeps the step that finishes it
+      if (packageInstalled && version !== null) this.installed = { version, error }
       // Counted per target: a release that is not the one that failed starts its own count
       const target = version ?? this.status.latest ?? ''
       this.retry = { version: target, failures: this.retry?.version === target ? this.retry.failures + 1 : 1, at: this.deps.now() }
@@ -853,5 +855,5 @@ function npmHasNotServedVersion(err: unknown): boolean {
 
 /** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
 function retryDelay(failures: number): number {
-  return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1]!
+  return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1] ?? CHECK_INTERVAL_MS
 }
