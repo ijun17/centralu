@@ -1,8 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { posix, win32 } from 'node:path'
 import type { PlatformPath } from 'node:path'
-import { Duplex, PassThrough, Readable, type Writable } from 'node:stream'
-import type Database from 'better-sqlite3'
+import { type Duplex, PassThrough, Readable, type Writable } from 'node:stream'
 import type {
   Env,
   LinkKind,
@@ -25,7 +24,6 @@ import type {
   RmOptions,
   RunSyncOptions,
   RunSyncResult,
-  SqliteOptions,
   StartOptions,
   WatchListener,
   WriteOptions,
@@ -53,7 +51,6 @@ import {
   storedTimeNs,
   timePrecision,
   rmSyncImplementation,
-  type TimePrecision,
   traitsOf,
   type OsFamily,
 } from './rules.js'
@@ -89,22 +86,16 @@ import { runChild } from './run.js'
  *
  * Not modeled: 8.3 short names, Windows' reserved names and trailing dots, alternate data streams, shares (UNC),
  * `\\?\` paths, permissions beyond the mode bits (and on Windows the read-only bit), hard links to folders, file
- * locking between processes, a program's file read through a link, PTYs, and SQLite (given with `sqlite`).
+ * locking between processes, a program's file read through a link, PTYs, an `'overlapped'` fd 3 (refused), and SQLite
+ * (`sqlite.open` is `ENOSYS`).
  */
 
 export type ProgramContext = {
   readonly args: readonly string[]
-  readonly cwd: string
-  readonly env: Env
-  readonly pid: number
   /** What the host writes; ended when the host ends its stdin */
   readonly stdin: Readable
   readonly stdout: Writable
   readonly stderr: Writable
-  /** The `'overlapped'` fd 3, when asked for */
-  readonly extra: Duplex | null
-  /** The OS as this program sees it: what it starts is its own child */
-  readonly os: MemoryOs
   /** Starts a child of this program (in its group unless `contained`) */
   start(command: string, args: readonly string[], options?: StartOptions): OsChild
   /** Called for a signal before it ends the process; answer true to trap it (POSIX; never SIGKILL, never on Windows) */
@@ -166,18 +157,6 @@ export type MemoryOsOptions = {
   volumes?: readonly string[]
   /** Windows: whether this account may make a symlink (an administrator, Developer Mode). Default true. */
   symlinks?: boolean
-  /** Variables set on top of the family's defaults (`undefined` removes one) */
-  env?: Env
-  /** How finely `utimes` keeps a time. Default: as the running Node's libuv does it for the family (`timePrecision`) */
-  timePrecision?: TimePrecision
-  /** How `rmSync` is made. Default: as the running Node's is (`rmSyncImplementation`); it decides the code of a busy folder */
-  rmSync?: 'js' | 'native'
-  /** When the clock starts, in ms since 1970 */
-  now?: number
-  /** The host's working folder (made if missing); default the home folder */
-  cwd?: string
-  /** The engine `sqlite.open` uses: the in-memory OS has none of its own */
-  sqlite?: (path: string, options: SqliteOptions) => Database.Database
 }
 
 type Meta = {
@@ -277,10 +256,12 @@ const later = (fn: () => void) => void setImmediate(fn)
 export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const family = options.as
   const windows = family === 'windows'
-  const precision = options.timePrecision ?? timePrecision(family)
-  const nativeRmSync = (options.rmSync ?? rmSyncImplementation()) === 'native'
+  // How finely `utimes` keeps a time, and the code `rmSync` gives for a busy folder: as the running Node's
+  const precision = timePrecision(family)
+  const nativeRmSync = rmSyncImplementation() === 'native'
   const HOME = windows ? 'C:\\Users\\person' : '/home/person'
-  const cwd = options.cwd ?? HOME
+  // The host's working folder
+  const cwd = HOME
   // Relative paths are read from this OS's working folder, never from the one of the process running the tests
   const P: PlatformPath = pathRulesFrom(family, () => cwd)
   const traits = traitsOf(family)
@@ -288,7 +269,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const canSymlink = options.symlinks ?? true
 
   // ---- time ----
-  let nowMs = options.now ?? Date.UTC(2026, 0, 1)
+  let nowMs = Date.UTC(2026, 0, 1)
   let timerSeq = 0
   const timers: Array<{ at: number; seq: number; fn: () => void }> = []
   const nowNs = () => BigInt(Math.round(nowMs)) * 1_000_000n
@@ -859,6 +840,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const n = existing(p, true, 'utime')
     n.atimeNs = storedTimeNs(atime, family, precision)
     n.mtimeNs = storedTimeNs(mtime, family, precision)
+    n.ctimeNs = nowNs()
   }
 
   // ---- descriptors ----
@@ -1056,6 +1038,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const fchmod = (fd: number, mode: number) => {
     const n = fdOf(fd, 'fchmod').node
     n.perm = windows ? (mode & 0o200 ? 0o666 : 0o444) : mode & 0o7777
+    // Windows keeps the change time, as chmod does not (measured on Windows 11 with Node 22, the contract)
+    if (!windows) n.ctimeNs = nowNs()
   }
   const handle = (fd: number): OsFileHandle => ({
     fd,
@@ -1161,7 +1145,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     if (value === undefined) vars.delete(key)
     else vars.set(key, value)
   }
-  for (const [k, v] of Object.entries({ ...defaults, ...(options.env ?? {}) })) setVar(k, v)
+  for (const [k, v] of Object.entries(defaults)) setVar(k, v)
   const env = {
     get: (name: string) => envValue(Object.fromEntries(vars), name, family),
     all: (): Env => Object.fromEntries(vars),
@@ -1179,8 +1163,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   }
   // The folders every machine of the family has
   for (const dir of windows
-    ? [HOME, env.temp, `${HOME}\\AppData\\Roaming`, 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs', cwd]
-    : [HOME, '/tmp', '/usr/bin', '/usr/local/bin', '/bin', '/dev', cwd]) {
+    ? [HOME, env.temp, `${HOME}\\AppData\\Roaming`, 'C:\\Windows\\System32', 'C:\\Program Files\\nodejs']
+    : [HOME, '/tmp', '/usr/bin', '/usr/local/bin', '/bin', '/dev']) {
     mkdir(dir, { recursive: true })
   }
   for (const v of options.volumes ?? [])
@@ -1316,6 +1300,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     parentGroup: number,
     parentPipes?: { stdout: OutPipe; stderr: OutPipe },
   ): OsChild {
+    // No test asks for one: refused rather than started without it
+    if (o.stdio?.[3] === 'overlapped') throw new Error("memoryOs: an 'overlapped' fd 3 is not modeled")
     const child = new MemoryChild(nowMs)
     const cwdPath = o.cwd ?? env.cwd()
     const childEnv = o.env ?? env.all()
@@ -1355,7 +1341,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
 
     const stdio = o.stdio ?? ['pipe', 'pipe', 'pipe']
     const programStdin = new PassThrough()
-    let extra: Duplex | null = null
     const hostSide: Array<Readable | Writable | Duplex | null> = []
     // fd 0: a pipe from the host, a file the host opened (read from its position), or nothing
     if (stdio[0] === 'pipe') {
@@ -1396,12 +1381,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     child.stdout = out.host
     child.stderr = err.host
     hostSide.push(child.stdout, child.stderr)
-    if (stdio[3] === 'overlapped') {
-      const toProgram = new PassThrough()
-      const toHost = new PassThrough()
-      extra = Duplex.from({ readable: toProgram, writable: toHost })
-      hostSide.push(Duplex.from({ readable: toHost, writable: toProgram }))
-    }
     child.stdio = hostSide
 
     const ended = new AbortController()
@@ -1426,7 +1405,6 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
         if (programStdin.writableLength > 0)
           programStdin.destroy(Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }))
         for (const pipe of held) releasePipe(pipe)
-        extra?.end()
         child.exitCode = exit.code
         child.signalCode = exit.signal
         later(() => {
@@ -1446,14 +1424,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     const pipes = { stdout: out.pipe, stderr: err.pipe }
     const ctx: ProgramContext = {
       args: [...args],
-      cwd: cwdPath,
-      env: childEnv,
-      pid,
       stdin: programStdin,
       stdout: out.pipe.stream,
       stderr: err.pipe.stream,
-      extra,
-      os: memory,
       // A program's children stay in its group unless it contains them, as a plain spawn does; `'inherit'` hands them its pipes
       start: (c, a, so = {}) => startProcess(c, a, { contained: false, ...so }, pid, row.pgid, pipes),
       onSignal: (listener) => void proc.traps.push(listener),
@@ -1621,10 +1594,15 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     pid: HOST_PID,
   }
 
+  // A name on PATH, as the real OS's `tools.find` asks it: of the name itself on Windows (env-path.ts
+  // `presentOnWindows`), of where it leads elsewhere
+  const onPath = (p: string) =>
+    files.existsSync(p) || (windows && files.lstatSync(p, { throwIfNoEntry: false }) !== undefined)
+  // A start and a shim's target need what a link leads to, on every OS (tool-launch.ts)
   const launchDeps = () => ({
     family,
     read: (p: string) => readFile(p).toString('utf8'),
-    exists: (p: string) => files.existsSync(p) || files.lstatSync(p, { throwIfNoEntry: false }) !== undefined,
+    exists: (p: string) => files.existsSync(p),
     node: env.execPath,
   })
 
@@ -1642,7 +1620,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     },
     processes,
     tools: {
-      find: (name) => findOnPath(name, env.all(), family, launchDeps().exists),
+      find: (name) => findOnPath(name, env.all(), family, onPath),
       program: (name) =>
         programFor(
           name,
@@ -1652,7 +1630,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
               n,
               pathExt ? { ...env.all(), PATHEXT: pathExt } : env.all(),
               family,
-              launchDeps().exists,
+              onPath,
             ),
           (p) => launchFor(p, launchDeps()),
           env.all(),
@@ -1662,12 +1640,8 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     env,
     clock,
     sqlite: {
-      open: (path, o = {}) => {
-        if (!options.sqlite)
-          throw Object.assign(new Error('memoryOs: no SQLite engine was given (memoryOs({ sqlite }))'), {
-            code: 'ENOSYS',
-          })
-        return options.sqlite(path, o)
+      open: () => {
+        throw Object.assign(new Error('memoryOs: SQLite is not modeled'), { code: 'ENOSYS' })
       },
     },
     traits,

@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /**
  * A local stand-in for registry.npmjs.org and nodejs.org/dist (links/install tests): signed version
@@ -113,9 +115,10 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  *
  * The data folder's lock (#1903): `--detach` refuses, as a host does, while `<data>/host.lock` names a live process.
  * With `realServe` (the URL of the real `serve.mjs`), `FAKE_HANGS=<version>` plays a version whose host takes the lock
- * and then hangs: a process started outside the session as the real launcher starts its host, which never listens,
+ * and then hangs: a process started outside the session as the real launcher starts its host, which never answers,
  * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
- * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`).
+ * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`). It listens on a port of its own,
+ * `<data>/hung.port`: `hungListening` is how a test tells that it lives (not by its pid: a freed pid goes to the next process, #2082).
  *
  * The switch (plan §10.5a): with `realServe`, `--switch`, `--switch-run` and `--switch-status` are the real launcher's,
  * and `--detach` asks its gate first (`beforeHostStart`), so the real switcher drives these fake versions through their
@@ -161,6 +164,8 @@ const log = (s) => appendFileSync(d + '/events', s + '\\n')
 const lockPid = () => {
   try {
     const pid = JSON.parse(readFileSync(d + '/host.lock', 'utf8')).pid
+    // With the real launcher the lock is read as it reads it, by the pid and the time it started: a freed pid names the next process (#2082)
+    if (real) return real.lockHolderIsAlive(d) ? pid : null
     process.kill(pid, 0)
     return pid
   } catch {
@@ -198,8 +203,12 @@ if (real && a.startsWith('serve --switch')) {
     appendFileSync(d + '/host.log', 'host ' + V + ': the data folder is in use by another Centralu host (pid ' + lockPid() + ')\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
   } else if (real && F('FAKE_HANGS') === V) {
-    const hung = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', 'setInterval(() => {}, 1e6)'], env: process.env, cwd: d })
+    // It listens on a port of its own and writes it to <data>/hung.port, so a test tells it is gone by that: a pid names nothing once the process
+    // is, since Windows hands it to the next process that starts (see hungListening)
+    const hung = await real.startDetached({ how: process.platform === 'win32' ? 'wmi' : 'setsid', execPath: process.execPath, args: ['-e', "require('net').createServer().listen(0,'127.0.0.1',function(){require('fs').writeFileSync(process.argv[1],String(this.address().port))});setInterval(function(){},1e6)", d + '/hung.port'], env: process.env, cwd: d })
     if (!hung.ok) throw new Error(hung.message)
+    // The answer below says the host never answered: it is said once the process has listened, so what a test finds is what it left
+    for (let i = 0; i < 400 && !(existsSync(d + '/hung.port') && readFileSync(d + '/hung.port', 'utf8') !== ''); i++) await new Promise((r) => setTimeout(r, 50))
     writeFileSync(d + '/host.lock', JSON.stringify({ pid: hung.pid, started: real.processStartTime(hung.pid), at: Date.now(), by: 'serve' }))
     writeFileSync(d + '/hung', String(hung.pid))
     const free = createServer()
@@ -237,3 +246,29 @@ if (real && a.startsWith('serve --switch')) {
   }
 } else console.log('unexpected ' + a)
 `
+
+/**
+ * Whether the process a `FAKE_HANGS` version left behind lives: whether anything accepts a connection on the port it wrote to
+ * `<data>/hung.port`. Not by `process.kill(pid, 0)`: Windows hands a freed pid to a process that starts later, within seconds on a
+ * busy runner, and that one answers the same (#2082: the check ran after the stop had seen the process gone, and found its pid alive).
+ */
+export function hungListening(dataDir: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ port: Number(readFileSync(join(dataDir, 'hung.port'), 'utf8')), host: '127.0.0.1' })
+    socket.once('connect', () => (socket.destroy(), resolve(true)))
+    socket.once('error', () => resolve(false))
+  })
+}
+
+const SERVE_FILES = pathToFileURL(resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve-files.mjs')).href
+
+/**
+ * Whether the process a `FAKE_HANGS` version left behind is still the one its lock names: the launcher's own reading of
+ * `host.lock` (`lockHolderIsAlive`: the pid and the time it started, or created before the lock was written), so a freed pid
+ * that another process took reads as gone. What a test's cleanup asks before it kills that pid, port or no port: a fake that
+ * failed before it listened still leaves its process behind.
+ */
+export async function hungHolderAlive(dataDir: string): Promise<boolean> {
+  const { lockHolderIsAlive } = (await import(SERVE_FILES)) as { lockHolderIsAlive: (dir: string) => boolean }
+  return lockHolderIsAlive(dataDir)
+}

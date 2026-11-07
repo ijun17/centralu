@@ -4,6 +4,7 @@ import { readSwitchStatus, type HostControl } from './update.js'
 import { WIN_NODE_V, pwsh7ModulePath } from './windows-remote.test-helpers.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { windowsRemote } from './install-windows.test-helpers.js'
+import { hungHolderAlive, hungListening } from './fake-registry.test-helpers.js'
 
 /**
  * Updating a Windows machine: the switch the machine runs itself, and its failures.
@@ -79,10 +80,12 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
         await expect(done).rejects.toThrow(/Centralu 9\.9\.2 did not start on box \(the host did not answer within 30 s\); it runs Centralu 9\.9\.1 again\./)
         expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2', 'stop hung (for update)', 'start 9.9.1'])
         expect(running()).toBe('9.9.1')
-        expect(() => process.kill(hung(), 0)).toThrow()
+        // Told by the port it listens on, not by its pid: Windows hands a freed pid to the next process that starts, and the
+        // check below ran on a CI runner after the stop had seen the pid gone, and found it alive (#2082)
+        expect(await hungListening(data())).toBe(false)
       } finally {
-        // Only the process this test's fake started
-        if (existsSync(data('hung'))) {
+        // Only the process this test's fake started: the one its lock still names, listening or not (a pid alone may be another's by now)
+        if (existsSync(data('hung')) && (await hungHolderAlive(data()))) {
           try {
             process.kill(hung())
           } catch {

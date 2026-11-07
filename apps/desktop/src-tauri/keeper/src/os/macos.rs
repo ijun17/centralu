@@ -226,6 +226,21 @@ pub fn exe_of_pid(pid: u32) -> io::Result<std::path::PathBuf> {
     Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(&buf)))
 }
 
+/// When `pid` started, in microseconds since the epoch (`pbi_start_tvsec`, `pbi_start_tvusec`, #2117): with the pid, it names
+/// one process, since a pid is used again only by a process that started later.
+pub fn process_started(pid: u32) -> io::Result<u64> {
+    let pid = libc::c_int::try_from(pid).map_err(|_| io::Error::other("pid out of range"))?;
+    // SAFETY: proc_bsdinfo is plain data, for which all zeroes is a valid value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer is valid for `size` bytes for the duration of the call.
+    let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+    if n != size {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
 /// What `codesign --display --verbose=2` says about `exe` (#1405, `window_peer::team_in` reads its
 /// team): written to stderr. None when it could not be run.
 pub fn code_signature_display(exe: &std::path::Path) -> Option<String> {

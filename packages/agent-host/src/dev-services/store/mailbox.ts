@@ -470,11 +470,6 @@ export class MailboxRecords {
     this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
   }
 
-  /** These delivered rows were delivered in the turn `turnSeq` (the delivery began it after it delivered them) */
-  markTurn(recipient: string, ids: readonly string[], turnSeq: number): void {
-    this.update('turn_seq = ?', [turnSeq], recipient, ids, 'delivered_at IS NOT NULL')
-  }
-
   /** Sets why mail waits for the person (`policy`, `loop`, `budget`, `failed`, `uncertain`), or clears it with null */
   hold(recipient: string, ids: readonly string[], why: string | null): void {
     this.update('held = ?', [why], recipient, ids)

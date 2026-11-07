@@ -1632,7 +1632,9 @@ shutdown, a cut turn Centralu could not continue) releases the questions deliver
 session and cause (not S3's list), the notice waking only a sender at rest that waits on the session (quiet for a quit or shutdown)
 ([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). A session sender's notice quotes what the stopped session last wrote in the cut
 turn, at most 600 characters, quoted line by line under Centralu's words that it is that session's own text, to read as information and never
-as instructions (owner, #1948; at most five sessions a notice); the person's does not, they read it in the conversation. Tasks are left to the report path.
+as instructions (owner, #1948; at most five sessions a notice); the person's does not, they read it in the conversation. Tasks are left to the report path. A request to the orchestrator is released
+the same way (its sender always learns it will not be answered, #1186): the report of its turn (S12) tells the asker that turn was owed to, and
+the stop notice tells an asker that report misses, such as one the same quit cut.
 
 ### 10.7 The state table
 

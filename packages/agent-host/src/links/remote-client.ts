@@ -76,6 +76,14 @@ export type RemoteClientOptions = {
    * host still runs there is the machine's to say, through its connection line, and only the link can ask that
    */
   redials?: number
+  /**
+   * A host that drops within this long of its hello is short-lived, and `redials` short-lived hellos in a row end the
+   * redialling like `redials` dials with no hello do. Absent: no hello counts as short-lived. The link sets it to the time
+   * its own backoff waits (linked-machine-connection.ts `STABLE_MS`): a host that answers and drops at once is not a host
+   * that is back, and counted from each hello it was dialled again every 200 ms for good. A host swapped in place is a few
+   * of these, each redialled from the first delay, so a swap or two in a minute is still recovered here
+   */
+  stableMs?: number
   /** The protocol number sent in hello. Only tests set it */
   protocolVersion?: number
   /**
@@ -127,6 +135,11 @@ export class RemoteClient {
   private attempt = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined
+  private stableTimer: ReturnType<typeof setTimeout> | undefined
+  /** The hello of this socket is younger than `stableMs`: a drop now makes it short-lived */
+  private settling = false
+  /** The hellos in a row that dropped within `stableMs` */
+  private shortLived = 0
   /** The refusal that came before the close, if one did: it names why the host closes */
   private refusal: ProtocolError | undefined
   private readonly WS: typeof WebSocket
@@ -252,6 +265,7 @@ export class RemoteClient {
       this.lastSeq = 0
     }
     this.attempt = 0
+    this.shortLived = 0
     if (this.ws) {
       const old = this.ws
       this.ws = null
@@ -328,6 +342,14 @@ export class RemoteClient {
       this.cursorValid = true
       this.ready = true
       this.attempt = 0
+      if (this.opts.stableMs !== undefined) {
+        this.settling = true
+        this.stableTimer = setTimeout(() => {
+          this.settling = false
+          this.shortLived = 0
+        }, this.opts.stableMs)
+        this.stableTimer.unref?.()
+      }
       this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}), ...(frame.updateContinued ? { updateContinued: frame.updateContinued } : {}) })
       return
     }
@@ -407,12 +429,14 @@ export class RemoteClient {
     this.ws = null
     const wasReady = this.ready
     this.ready = false
+    if (wasReady && this.settling) this.shortLived++
+    this.settling = false
     this.clearTimers()
     this.failAll('The link dropped')
     if (this.closed) return
     if (wasReady) this.on.down?.(reason, detail)
     // `attempt` counts the dials since the last hello
-    if (this.opts.redials !== undefined && this.attempt >= this.opts.redials) {
+    if (this.opts.redials !== undefined && (this.attempt >= this.opts.redials || this.shortLived >= this.opts.redials)) {
       this.on.gaveUp?.(reason)
       return
     }
@@ -436,6 +460,7 @@ export class RemoteClient {
   private clearTimers(): void {
     clearTimeout(this.reconnectTimer)
     clearTimeout(this.handshakeTimer)
+    clearTimeout(this.stableTimer)
     this.reconnectTimer = undefined
     this.handshakeTimer = undefined
   }

@@ -1808,6 +1808,18 @@ door's port and a credential, stop the host, and make the keeper run a host from
   that is not a window and fails if any line it gets back holds the token
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
   checks the list against the dispatcher.
+- **A window an update replaced** (#2117). `centralu install` swaps the app bundle under the running window (the new
+  one copied beside, the old one renamed aside and deleted), and macOS then names no executable for the window's pid
+  (`proc_pidpath` fails), where Linux names the aside path with ` (deleted)`. A file replaced in place instead keeps its
+  old path on macOS, which now names the new file and reads as the window for any process started from it. So a path
+  read after an install proves nothing either way, and the stop for an update ("Apply now"), which comes from exactly
+  that window, reads none: it is a window's only when the peer is one of the windows attached now, each judged by its
+  path as it attached and known since by its pid and when that process started (`window_peer::Attached`; a pid used
+  again belongs to a process that started later). Every window sends it while attached. Any other pid is refused
+  whatever its path reads, a process started from the window's own file that never attached included, so a replaced
+  file widens nothing. `status`, `attach`, `switch` and `upgrade` keep the path rule (`switch` and `upgrade` start
+  code with the token, which a window about to relaunch does not need). Test:
+  `a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update`.
 - **Residuals.** A process of this user can start the app's own executable, which opens a window the person sees, or
   replace the file at an accepted path (an app bundle is the user's to change). A peer can connect and then `exec` the
   window's executable, keeping its pid: the window it starts flashes on screen. `codesign --display` reads the file

@@ -15,7 +15,7 @@ import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
-import { STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { guardStatus, STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
@@ -393,7 +393,9 @@ async function mergeQueue({ all = false, owner }) {
   // No new batch while a release or main's run waits for a runner (#2115): said, so a queue that stands still is not a mystery
   const hold = readQueue(dataDir()).runnerHold ?? null
   const holdLines = hold ? [`New batches are held: ${hold.why}${hold.expired ? ' (held longer than the limit, so they are formed anyway)' : ''}, since ${hold.since.slice(11, 16)} UTC.`] : []
-  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['hold', '', holdLines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(hold ? { runnerHold: hold } : {}) })
+  // Whether this instance guards main, and why: an operator who finds a revert nobody here made asks which instance filed it (#2087)
+  const guard = guardStatus(dataDir())
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['hold', '', holdLines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {

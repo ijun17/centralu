@@ -68,6 +68,10 @@ pub fn exe_of_pid(_pid: u32) -> io::Result<std::path::PathBuf> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "a process's executable is not read here"))
 }
 
+pub fn process_started(_pid: u32) -> io::Result<u64> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "a process's start is not read here"))
+}
+
 /// No code signatures to read here (#1405): a keeper here judges a window by its executable's name.
 pub fn code_signature_display(_exe: &std::path::Path) -> Option<String> {
     None

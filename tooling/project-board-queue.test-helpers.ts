@@ -57,7 +57,11 @@ const path = args[0] === 'api' ? args.filter((a) => a.startsWith('repos/'))[0] :
 const write = (w) => { st.writes = [...(st.writes ?? []), w]; const patch = st.on && st.on[w[0] + ':' + w[1]]; if (patch) for (const [k, v] of Object.entries(patch)) st[k] = { ...st[k], ...v }; save() }
 if (st.viewLost && st.viewLost.n > 0 && args[0] === 'pr' && args[1] === 'view') { st.viewLost.n--; save(); fail('Post "https://api.github.com/graphql": EOF') }
 if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
-if (args[0] === 'pr' && args[1] === 'view') {
+if (args[0] === 'issue' && args[1] === 'view') {
+  const n = Number(args[2])
+  if (st.issueViewFails) fail('GraphQL: Could not resolve to an Issue with the number of ' + n + '. (HTTP 404)')
+  out({ body: '', state: (st.issueStates ?? {})[n]?.state === 'closed' ? 'CLOSED' : 'OPEN', comments: (st.comments ?? []).filter((c) => c.issue === n).map((c) => ({ body: c.body })) })
+} else if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
   if (!pr) fail('Could not resolve to a PullRequest with the number of ' + args[2] + '.')
   out(pr)
@@ -84,6 +88,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
   // The connection dropped after GitHub did it: gh fails, the merge happened
   if (st.mergeLost) fail(st.mergeLost)
 } else if (args[0] === 'pr' && args[1] === 'close') {
+  if (st.closeFails) fail('GraphQL: Pull request is already merged')
   write(['close', args[2], args[args.indexOf('--comment') + 1]])
   st.prs[args[2]].state = 'CLOSED'
   save()
@@ -220,10 +225,17 @@ if (args[0] === 'pr' && args[1] === 'view') {
   write(['issue', body.title])
   out({ number: 500 + st.issues.length, html_url: 'https://github.com/ijun17/centralu/issues/' + (500 + st.issues.length) })
 } else if (path && /\/issues\/\d+\/comments$/.test(path) && args.includes('POST')) {
+  if (st.commentFails > 0) { st.commentFails--; save(); fail('HTTP 502: Bad Gateway') }
   const body = JSON.parse(stdin)
   st.comments = [...(st.comments ?? []), { issue: Number(path.split('/')[4]), body: body.body }]
   write(['comment', path.split('/')[4]])
   out({ id: 700 + st.comments.length, html_url: 'https://github.com/ijun17/centralu/issues/' + path.split('/')[4] + '#issuecomment-1', user: { login: 'tester' }, created_at: '2026-10-23T00:00:00Z', body: body.body })
+} else if (path && /\/issues\/\d+$/.test(path) && args.includes('PATCH')) {
+  // An issue closed (or reopened) with its reason: the main guard takes back what it filed (#2082)
+  const body = JSON.parse(stdin)
+  st.issueStates = { ...st.issueStates, [path.split('/')[4]]: body }
+  write(['issue-state', path.split('/')[4], body.state])
+  out({ number: Number(path.split('/')[4]), state: body.state })
 } else if (path && args.includes('DELETE')) {
   write(['delete', path.split('/heads/')[1]])
 } else fail('fake gh: unexpected call ' + JSON.stringify(args) + ' (HTTP 400)')

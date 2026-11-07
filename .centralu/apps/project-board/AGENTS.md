@@ -751,6 +751,21 @@ looked into).
   unfinished, the queue lands nothing and moves nothing (`tick` answers `held`; `merge_queue` says
   "Landing held: N of main's full runs unfinished"): each landing adds a full run, and the runners
   are shared.
+- **One guard per repository (#2087, 2026-11-06)**: reverts #2079 and #2084 were filed by the guard of the board app on a second
+  machine, started because sessions there open pull requests; the maintainer's queue knew nothing of them. The lease is per data
+  folder, so it cannot tell two machines apart; the guard therefore runs only in an instance that has work of its own
+  (`guardDrives`, queue-driver.mjs): an item waiting or in CI, a batch, an item in attention for no longer than 3 hours (from `attentionAt`, else when it was queued: a batch's attention sets none), a hunt of
+  its own, a revert and an issue it filed and has not taken back (`guard.blamed` for 3 days), a rerun it asked for in the last 3
+  hours, something it landed in the last 3 hours (`GUARD_LANDED_MS`), or main's full run for a commit **it** landed in the last day still going
+  (`guard.pendingShas`, written at each step; a run of another instance's landing does not count; `GUARD_PENDING_MS`: a run can wait many hours for runners, #2115, and must not be left to nobody). Any other instance is passive:
+  `runGuard` answers `passive`, reads nothing of main, files and reruns nothing, writes `guard.passive` (when and why; the reason
+  is rewritten when it changes) and no longer holds the app running for "main's full run" (`queueBusy`); the queue loop was already
+  local to the items an instance holds. A person's word overrides both ways: `queue-driver.json` in the app's data folder,
+  `{ "drive": true }` to guard always, also with nothing landed here (the maintainer's instance: a merge made by hand, or anything
+  else no instance landed, is answered for only by an instance told so) or `{ "drive": false }` to never (an instance that must stay
+  out although it queues). Read at every step, so no restart. `merge_queue` says which it is ("Main guard: driving/passive (why)",
+  with this rule and the known limit, and `guard` in its data). What this does not do: two instances that both land within the same
+  3 hours both guard; set `{ "drive": false }` on the one that should not.
 - **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
   and the queue opened a revert of reviewed work. The guard reads the failed run's jobs and steps as the
   queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run
@@ -824,6 +839,25 @@ looked into).
     fails half of them, and the bisect moves past the culprit and blames a later commit. What this does not catch: a flake that makes a
     run pass when it should fail (the commit after the real culprit is then blamed for the pass it got by chance), and a probe that
     fails once by chance in a hunt that is under way. Each failed run costs one more run of its failed jobs.
+- **A blame is taken back when the run passes (#2082, 2026-11-06)**: the guard blamed #2076 for one failure of a Windows job, filed
+  a revert and an issue, and a person's rerun of the run (attempt 2) then passed; both were closed by hand. A hunt that ended with
+  a revert or an issue (`guard.hunt`, which keeps the run's id and the attempt it saw fail, `attempt`) is retracted when that same run
+  completes `success` on a later attempt (`passedAfterBlame`, `retractRed` in main-revert.mjs). Main going green first does not
+  lose it: a finished hunt that main's green or another hunt replaces is kept in `guard.blamed` (`rememberBlame`, up to 10, for
+  `BLAME_KEEP_MS` = 3 days or until retracted), since the revert lands, its run passes, and only then does a person rerun the run
+  that was blamed. What is done depends on what the blame rested on (`blameRestedOnMore`): after **one failure** (a run an older
+  driver or a person blamed on) the revert pull request leaves the merge queue (after it is closed, not before, so a close
+  refused because it merged meanwhile leaves it queued for the queue to record) and is closed with a comment, the issue is closed
+  as not planned, and the session that queued the commit gets a `main-green` message. After **more than one failed attempt** (the rerun failed too, or a bisect probe failed
+  on the commit: a race the commit brought in fails some of the time), the revert is withdrawn the same way, but the issue stays
+  open with a comment saying a later attempt passed and a `flaky-suspect` label, and a person decides; main is left as it was. A revert that has
+  already landed is left alone and the issue only gets a comment, since putting a commit back is a person's call; an issue a person
+  closed already gets nothing. A newer run that passes retracts nothing: the commit may be what it fixed; nor does a blame
+  that rested on the failure coming again and again (`repeats`). Each step is written down as it is done (`retracted`), and each
+  issue comment carries a mark (`<!-- main-guard-retract run=N -->`) that is looked for before posting, so a try that stopped half
+  way, or a restart, posts nothing twice. The note on the known failures issue says a commit was blamed earlier, and that the guard
+  takes it back, for a run it filed something for. A retraction that fails for its own reasons (an issue it cannot read; not an outage, which is waited out) is tried `RETRACT_TRIES` (10) steps and then left to a person (`retracted.gaveUp`), and never stops the guard from reading main. The close of an issue is written down (`closing`) before it is made, so a try that stopped between the close and its comment still owes the comment and does not take the close for a person's; the label goes on before the comment. The first failure of a test is still rerun before any commit is blamed (above);
+  this only covers a blame that was filed anyway (a rerun by a person, a driver on an older build).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
