@@ -338,12 +338,14 @@ export async function guardTick({ q, update, now = clock(), renew, act, retract,
   }
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
+  // Whose landings main's unfinished runs are for (#2087): an instance waits only for a run of a commit it landed
+  const pendingShas = runs.filter((r) => r.status !== 'completed').map((r) => r.headSha).filter(Boolean).slice(0, 10)
   const save = (patch) =>
     update((fresh) => {
       const guard = fresh.guard ?? {}
       // A finished hunt that main's green or another hunt replaces is kept, with what it filed, to be taken back later
       const blamed = 'hunt' in patch && guard.hunt && String(patch.hunt?.run) !== String(guard.hunt.run) ? rememberBlame(guard.blamed, guard.hunt, now) : null
-      fresh.guard = { ...guard, pending, unfinished, ...patch, ...(blamed ? { blamed } : {}), nextAt: new Date(now + GUARD_MS).toISOString() }
+      fresh.guard = { ...guard, pending, pendingShas, unfinished, ...patch, ...(blamed ? { blamed } : {}), nextAt: new Date(now + GUARD_MS).toISOString() }
     })
   const hunt = g.hunt ?? null
   const hunted = g.hunted ?? []

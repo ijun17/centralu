@@ -15,7 +15,7 @@ import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
-import { STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { guardStatus, STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
@@ -390,7 +390,9 @@ async function mergeQueue({ all = false, owner }) {
     : who
       ? [`${plural(waiting.length, 'message')} not acknowledged by ${who}; act on each, then ack({ owner, seqs }) (or upTo: ${waiting.at(-1).seq}):`, ...waiting.map((e) => `#${e.seq} ${e.text}`)]
       : [`${plural(waiting.length, 'message')} not acknowledged, for ${owners.map((o) => `${o} (${waiting.filter((e) => e.owner === o).length})`).join(', ')}; merge_queue({ owner }) lists them.`]
-  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq })
+  // Whether this instance guards main, and why: an operator who finds a revert nobody here made asks which instance filed it (#2087)
+  const guard = guardStatus(dataDir())
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {
