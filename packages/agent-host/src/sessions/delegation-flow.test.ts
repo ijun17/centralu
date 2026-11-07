@@ -139,7 +139,6 @@ describe('the place a start holds', () => {
  * next one. The child's turn is driven as the manager drives it, through the wait in `agentRuns`.
  */
 describe("a child's turn and the call waiting on it", () => {
-  let handingOver = false
   /** The host is quitting (`disposeAll`) */
   let quitting = false
   let running: BackgroundTask[] = []
@@ -152,7 +151,6 @@ describe("a child's turn and the call waiting on it", () => {
   let root: string
 
   beforeEach(() => {
-    handingOver = false
     quitting = false
     running = []
     cards = []
@@ -182,11 +180,8 @@ describe("a child's turn and the call waiting on it", () => {
       agentRuns,
       readGrants,
       handles: new Map([['child', { interrupt: () => void interrupted.push('child') } as unknown as SessionHandle]]),
-      get handingOver() {
-        return handingOver
-      },
       get closing() {
-        return handingOver || quitting
+        return quitting
       },
       autoBoundaryOpen: () => false,
       routedCards: () => cards,
@@ -361,18 +356,9 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.awaitingReport.get('other')).toBe('someone')
   })
 
-  it("a host handing over or quitting keeps the turn's link for the next host; one that is not lets it go", async () => {
+  it("a quitting host keeps the turn's link for the next host; one that is not quitting lets it go", async () => {
     const flow = flowWith()
-    meta.set('kept', session('kept', { askedBy: 'caller' }))
-    const leaving = flow.startDelegation('caller>kept', 'caller', 'kept', target(), false)
-    handingOver = true
-    leaving.wait.fail(new Error('the host is handing over'))
-    await leaving.outcome
-    await flush()
-    expect(children.turnOwners.get('kept')?.callerId).toBe('caller')
-    handingOver = false
-
-    // A quit's failed wait neither (#1618): the next start tells the turn stopped, or continues it after an update, for its caller
+    // A quit's failed wait ends no link (#1618): the next start tells the turn stopped, or continues it after an update, for its caller
     meta.set('cut', session('cut', { askedBy: 'caller' }))
     const quit = flow.startDelegation('caller>cut', 'caller', 'cut', target(), true)
     children.markReport('cut', 'caller')

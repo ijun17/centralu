@@ -2,7 +2,7 @@ import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
 import { applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
-import type { AgentProcess, SessionHandle } from '../adapters/contract.js'
+import type { SessionHandle } from '../adapters/contract.js'
 import { centraluInputId } from '../adapters/input-receipts.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -78,7 +78,7 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
     readonly selfCompaction: Pick<SelfCompaction, 'compactTurn'>
-    resumeSession: (sessionId: string, adopt?: AgentProcess) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
+    resumeSession: (sessionId: string) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
 /**

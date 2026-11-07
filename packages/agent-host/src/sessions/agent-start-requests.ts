@@ -133,7 +133,7 @@ export class AgentStartRequests {
     void (async () => {
       const decision = await this.host.hostCards.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
       // The host is leaving again: the row stays for the next one
-      if (decision === null && (this.host.handingOver || this.host.disposing)) return
+      if (decision === null && this.host.disposing) return
       const consent = this.starts.agentConsentFrom(req.callerId, req.projectId, decision)
       if (!consent.ok) {
         this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), denied: consent.why === 'denied' })
@@ -200,7 +200,7 @@ export class AgentStartRequests {
       const outcome = await this.host.memoryGate.wait(ctl.signal)
       rec.stopWaiting = undefined
       // Withdrawn while it waited, or the host is leaving: the stored request goes to the next host
-      if (rec.ended || outcome === 'aborted' || this.host.handingOver || this.host.disposing) return
+      if (rec.ended || outcome === 'aborted' || this.host.disposing) return
       if (outcome === 'timeout') {
         const error =
           `Memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes, so no agent was started. ` +

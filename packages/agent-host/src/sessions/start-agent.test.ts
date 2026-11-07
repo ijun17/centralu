@@ -648,7 +648,7 @@ describe('starting another agent in the same project', () => {
     await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
     await p
     vi.useRealTimers()
-    // A host swap's drain cut the first call short and told the model to call again
+    // A host restart cut the first call short and told the model to call again
     expect(await w.mgr.startAgent(s, { task: 'one job', wait: false })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s && (e as { seq?: number }).seq != null)).toHaveLength(1)
     expect(w.store.children.listAgentStartRequests()).toHaveLength(1)
@@ -731,7 +731,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => childrenOf(s).length === 1)
       // The report promised for any child that outlives the call is there
       expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
-      // and stored, so a host swap keeps it (#646)
+      // and stored, so a host restart keeps it (#646)
       expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
 
@@ -746,7 +746,7 @@ describe('starting another agent in the same project', () => {
       await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
       const r = await p
       expect(r).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
-      // The armed report is stored, so a host swap keeps it (#646)
+      // The armed report is stored, so a host restart keeps it (#646)
       expect(w.store.children.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
     })
 
@@ -1358,11 +1358,11 @@ describe('starting another agent in the same project', () => {
       handleOf(s)!.answer('Coordination complete.')
     })
 
-    it.each(['askedBy', 'parentSessionId'] as const)('recognizes an existing %s link after host handoff and keeps the deletion across reload', async (link) => {
+    it.each(['askedBy', 'parentSessionId'] as const)('recognizes an existing %s link after a host restart and keeps the deletion across reload', async (link) => {
       allowProject()
       const s = await session()
       const c = await startRunning(s)
-      await w.mgr.tenure.detachAll()
+      await w.mgr.tenure.disposeAll()
       const row = w.store.sessions.listSessions().find((child) => child.id === c)!
       w.store.sessions.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
       const next = new SessionManager(w.store, w.adapters, (e) => w.events.push(e))
@@ -1370,7 +1370,7 @@ describe('starting another agent in the same project', () => {
         expect(await next.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
         expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ [link]: s })
       } finally {
-        await next.tenure.detachAll()
+        await next.tenure.disposeAll()
       }
       const reloaded = new SessionManager(w.store, w.adapters, () => {})
       try {
@@ -1625,7 +1625,7 @@ describe('starting another agent in the same project', () => {
       expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('still working') })
       handleOf(c.id)!.answer('done')
       await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
-      await w.mgr.tenure.detachAll()
+      await w.mgr.tenure.disposeAll()
       const next = new SessionManager(w.store, w.adapters, () => {})
       // Its startup merge check would otherwise ask the machine's gh about the branch (#415)
       next.prLookup = async () => null
@@ -1709,27 +1709,25 @@ describe('starting another agent in the same project', () => {
       allowProject()
       const s = await session()
       await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/checked', wait: false })
-      await w.mgr.tenure.detachAll()
-      for (const letGo of ['disposeAll', 'detachAll'] as const) {
-        const next = new SessionManager(w.store, w.adapters, () => {})
-        let asked = false
-        let stopped: boolean | undefined
-        let answered = false
-        // A gh that answers only once it is told to stop, and a moment after that
-        next.prLookup = (_cwd, _branch, signal) => new Promise((resolve) => {
-          asked = true
-          stopped = signal?.aborted ?? false
-          signal?.addEventListener('abort', () => setTimeout(() => {
-            stopped = true
-            answered = true
-            resolve(null)
-          }, 50))
-        })
-        await w.until(() => asked, 10_000)
-        await next.tenure[letGo]()
-        expect(stopped).toBe(true)
-        expect(answered).toBe(true)
-      }
+      await w.mgr.tenure.disposeAll()
+      const next = new SessionManager(w.store, w.adapters, () => {})
+      let asked = false
+      let stopped: boolean | undefined
+      let answered = false
+      // A gh that answers only once it is told to stop, and a moment after that
+      next.prLookup = (_cwd, _branch, signal) => new Promise((resolve) => {
+        asked = true
+        stopped = signal?.aborted ?? false
+        signal?.addEventListener('abort', () => setTimeout(() => {
+          stopped = true
+          answered = true
+          resolve(null)
+        }, 50))
+      })
+      await w.until(() => asked, 10_000)
+      await next.tenure.disposeAll()
+      expect(stopped).toBe(true)
+      expect(answered).toBe(true)
     })
 
     describe('whose folder is already gone (#715)', () => {

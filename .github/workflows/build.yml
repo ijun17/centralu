@@ -626,7 +626,6 @@ jobs:
           packages/agent-host/src/temp-dir
           packages/agent-host/src/data-dir
           packages/agent-host/src/tool-launch
-          packages/agent-host/src/keeper/
           tooling/launcher-
           tooling/e2e-lock
           tooling/screen-protocol-rules

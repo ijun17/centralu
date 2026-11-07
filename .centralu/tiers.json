@@ -87,7 +87,6 @@
       "paths": [
         "packages/agent-host/src/links/**",
         "packages/agent-host/src/sessions/linked-host.ts",
-        "packages/agent-host/src/keeper/**",
         "packages/agent-host/src/keeper-link.ts",
         "packages/agent-host/src/swap-control.ts",
         "packages/agent-host/src/lifecycle/**",

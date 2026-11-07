@@ -1,6 +1,6 @@
 import type { PermissionPreset, RebuildCause, SessionInfo, ToolName } from '@cc/protocol'
 import { errorMessage } from '@cc/protocol'
-import type { AgentProcess, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { EventSink, SessionHandle } from '../adapters/contract.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -95,7 +95,6 @@ export class SessionProcesses {
    */
   async resumeSession(
     sessionId: string,
-    adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     // If it is already being resumed, wait on that same promise — if each caller started its own, two
     // processes would come up
@@ -103,15 +102,8 @@ export class SessionProcesses {
     const going = this.sleeping.get(sessionId)
     if (going) await going
     const inflight = this.resuming.get(sessionId)
-    if (inflight) {
-      // A kept process with a wake already under way would run beside the one it brings up (#839): stopped, unused
-      if (adopt) {
-        console.error(`[agent-host] kept process for ${sessionId.slice(0, 8)} met a wake already under way; stopping it`)
-        adopt.kill('SIGTERM')
-      }
-      return inflight
-    }
-    const p = this.host.starts.doResumeSession(sessionId, adopt).finally(() => this.resuming.delete(sessionId))
+    if (inflight) return inflight
+    const p = this.host.starts.doResumeSession(sessionId).finally(() => this.resuming.delete(sessionId))
     this.resuming.set(sessionId, p)
     return p
   }

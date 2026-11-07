@@ -1,19 +1,19 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest'
-import type { BackgroundTask, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess } from '../adapters/contract.js'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { NormalizedEvent, ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
-import { Adapter, FakeProcess, Handle, processes } from './kept-host.test-helpers.js'
+import { Adapter, type Handle } from './fake-claude.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
- * "You will be told when it ends" across a host swap (#646): a parent that started an agent without waiting is told
- * when the child's turn ends, even when that turn ends under the next host. The leaving host lets go of the child's
- * process, the keeper keeps it, and the next host adopts it (#280 step 2) and finds the report it still owes in the
- * store's `report_marks`.
+ * "You will be told when it ends" (#646): a parent that started an agent without waiting is told when the child's turn
+ * ends; the report it still owes is kept in the store's `report_marks`. A host that starts after the child's process went
+ * drops the mark: that turn died with the old host. A turn an update cut goes on under the next host and its end is
+ * reported from the mark (interruptions.test.ts, "a turn a linked hub's update cut").
  */
 
 let store: Store
@@ -32,10 +32,10 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function host(kept: ReadonlySet<string> = new Set()) {
+function host() {
   const claude = new Adapter(true)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'), { processes, keptSessions: kept })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, join(root, 'worktrees'))
   mgr.prLookup = async () => null
   hosts.push(mgr)
   return { mgr, claude }
@@ -55,9 +55,8 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** What reaches the parent's model is a wake naming the source; the report's text is in the parent's conversation */
 const reports = (h: Handle | undefined, child: string) => (h?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))
-const stored = (parent: string) => store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The session ended its turn'))
 
-describe('the report a child owes its parent, across a host swap (#646)', () => {
+describe('the report a child owes its parent, across a restart (#646)', () => {
   it('is written to the store when it is asked for, and cleared once delivered', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
@@ -67,184 +66,15 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(store.children.listReportMarks()).toEqual([])
   })
 
-  it('reaches the parent from the next host, which adopted the kept child and found the mark in the store', async () => {
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    await a.mgr.tenure.detachAll()
-    // Letting go is not the end of the child's turn: no failure report, and the mark stays for the next host
-    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
-    // Only the next host's handles exist now: the parent hears nothing through the old host's
-    b.claude.handles.get(child)!.answer('finished under the new host')
-    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
-    expect(stored(parent)).toHaveLength(1)
-    expect(stored(parent)[0]).toContain('finished under the new host')
-    expect(reports(a.claude.handles.get(parent), child)).toEqual([])
-    expect(store.children.listReportMarks()).toEqual([])
-    // Delivered once: a later turn of the child is the child's own
-    b.claude.handles.get(child)!.answer('a later, unrelated turn')
-    await new Promise((r) => setTimeout(r, 20))
-    expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
-  })
-
-  /*
-   * The mark goes, so a later turn of the person is not reported (#166); the parent is told once that a turn ended in
-   * the swap and where to read it (#1186), where it used to hear nothing of the work it was promised the end of
-   */
-  it('is dropped when the kept child finished its turn while the old host let go, and the parent is told once that a turn ended then', async () => {
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
-    await a.mgr.tenure.detachAll()
-    expect(store.sessions.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
-
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    expect(store.children.listReportMarks()).toEqual([])
-    expect(b.mgr.processes.waitsOn(parent)).not.toContain(child)
-    // The answer it finished with is there for the parent to read
-    expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
-    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
-    const told = reports(b.claude.handles.get(parent), child)[0]!
-    expect(told).toContain('ended a turn while Centralu was restarting')
-    expect(told).toMatch(new RegExp(`read_session\\(sessionId="${child}", around=\\d+\\)`))
-    // Not called finished: a turn that had not started yet would look the same
-    expect(stored(parent)).toEqual([])
-    // The person's own turn in the child afterwards is the child's, not the assigned work
-    await b.mgr.inputs.send(child, 'person work')
-    b.claude.handles.get(child)!.answer('person answer')
-    await new Promise((r) => setTimeout(r, 20))
-    expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
-    expect(stored(parent)).toEqual([])
-  })
-
   it('is dropped by a host that finds no process for the child: that turn died with the old host', async () => {
     const a = host()
     const { child } = await parentAndChild(a)
-    await a.mgr.tenure.detachAll()
+    await a.mgr.tenure.disposeAll()
 
     const c = host()
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
     expect(store.children.listReportMarks()).toEqual([])
     expect(c.mgr.processes.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
-  })
-
-  it('held over the child\'s own background work (#721), it stays owed in the next host, which tells the work\'s end', async () => {
-    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
-    a.claude.handles.get(child)!.answer('waiting for verify')
-    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    await a.mgr.tenure.detachAll()
-
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    // At rest, yet still owing: the verify runs on in the kept process
-    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    const h = b.claude.handles.get(child)!
-    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
-    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
-    h.answer('verify passed, PR opened')
-    await eventually(() => stored(parent).length === 1)
-    expect(stored(parent)[0]).toContain('verify passed, PR opened')
-    expect(store.children.listReportMarks()).toEqual([])
-    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-  })
-
-  /*
-   * #1460: an ask_project into another project's session whose turn ended on its own background work owes the asker the
-   * work's end like a start_agent child does, and the next host delivers it once from the stored mark and pause.
-   */
-  it('held over the work of an asked session (ask_project, #1460), it stays owed in the next host, which tells the end once', async () => {
-    const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
-    const a = host()
-    const here = await a.mgr.projectCreation.addProject(root)
-    await a.mgr.setProjectTrusted(here.id, true)
-    const otherRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cc-report-marks-target-')))
-    onTestFinished(() => rmSync(otherRoot, { recursive: true, force: true }))
-    const there = await a.mgr.projectCreation.addProject(otherRoot)
-    store.permissions.setProjectConsent(here.id, there.id, 'delegate')
-    const parent = (await a.mgr.createSession({ projectId: here.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
-    const child = (await a.mgr.createSession({ projectId: there.id, cwd: otherRoot, tool: 'claude', permissionPreset: 'normal' })).id
-    const call = a.mgr.askProject(parent, { project: there.id, session: child, task: 'run the suite' })
-    await eventually(() => (a.claude.handles.get(child)?.sent.length ?? 0) > 0)
-    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
-    a.claude.handles.get(child)!.answer('started verify, will summarize when it ends')
-    expect(await call).toMatchObject({ ok: true, state: 'done', paused: expect.stringContaining('pnpm verify') })
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    expect(store.settings.appSetting(`report_paused:${child}`)).not.toBeNull()
-    await a.mgr.tenure.detachAll()
-
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    // At rest, yet still owing: the verify runs on in the kept process
-    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    const h = b.claude.handles.get(child)!
-    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
-    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
-    h.answer('8 pass / 2 fail')
-    await eventually(() => stored(parent).length === 1)
-    expect(stored(parent)[0]).toContain('8 pass / 2 fail')
-    expect(store.children.listReportMarks()).toEqual([])
-    // Once: a later turn of the session is its own
-    h.answer('an unrelated later turn')
-    await new Promise((r) => setTimeout(r, 20))
-    expect(stored(parent)).toHaveLength(1)
-  })
-
-  // #1377: the person's turn in flight at the swap is theirs under the next host too, and the report stays open
-  it("held over background work, with the person's own turn in flight at the swap, it stays open and their turn is not reported by the next host", async () => {
-    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
-    a.claude.handles.get(child)!.answer('waiting for verify')
-    await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    // The person writes while it is at rest: their turn starts, and is in flight when this host lets go
-    await a.mgr.inputs.send(child, 'a question of the person')
-    expect(a.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'person' })
-    await a.mgr.tenure.detachAll()
-
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('working')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    // Their turn ends under the new host: reported to nobody, the report still open
-    const h = b.claude.handles.get(child)!
-    h.answer("the person's answer")
-    await new Promise((r) => setTimeout(r, 30))
-    expect(reports(b.claude.handles.get(parent), child)).toEqual([])
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
-    expect(store.settings.appSetting(`report_turn:${child}`)).toBeNull()
-    // The work ends and the turn that starts reports it
-    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
-    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
-    h.answer('verify passed, PR opened')
-    await eventually(() => stored(parent).length === 1)
-    expect(stored(parent)[0]).toContain('verify passed, PR opened')
-    expect(store.children.listReportMarks()).toEqual([])
-  })
-
-  it("a turn of the work in flight at the swap is the work's under the next host: reported when it ends", async () => {
-    const a = host()
-    const { parent, child } = await parentAndChild(a)
-    expect(JSON.parse(store.settings.appSetting(`report_turn:${child}`)!)).toEqual({ by: 'work' })
-    await a.mgr.tenure.detachAll()
-    const b = host(new Set([child]))
-    await b.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
-    b.claude.handles.get(child)!.answer('finished under the new host')
-    await eventually(() => reports(b.claude.handles.get(parent), child).length === 1)
-    expect(stored(parent)[0]).toContain('finished under the new host')
   })
 
   it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {
@@ -254,7 +84,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     a.claude.handles.get(child)!.answer('waiting for verify')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
-    await a.mgr.tenure.detachAll()
+    await a.mgr.tenure.disposeAll()
 
     const c = host()
     expect(store.children.listReportMarks()).toEqual([])

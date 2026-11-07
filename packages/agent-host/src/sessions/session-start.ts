@@ -1,10 +1,10 @@
 import { scriptMessageFrame } from './script-messages.js'
 import { unfitError } from './tool-fit.js'
 import { randomUUID } from 'node:crypto'
-import type { BackgroundTask, CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
+import type { CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, launchRefusal, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, OrchestratorTools, ProcessSource, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
@@ -89,8 +89,6 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     handleSink: () => { sink: EventSink; own: (h: SessionHandle) => void }
     readonly handoffChildren: HandoffChildren
     readonly handoffNotes: HandoffNotes
-    /** Where agent processes live when not with this host (the keeper, #280 step 2) */
-    readonly keeperOpts: { processes?: { spawn(sessionId: string, tool: ToolName, spec: AgentSpawnSpec, version?: string): AgentProcess } }
     readonly launches: LaunchRecords
     /** Session waiting for a wake to finish so it can be deleted or switched -> the reason (#163) */
     readonly leaving: Map<string, string>
@@ -549,16 +547,15 @@ export class SessionStarts {
    * whose window reading follows the point it was started with, said to `ModelWindows`, so that reading is not taken for the
    * model's window; another tool's readings always count.
    */
-  private autoCompactFor(m: SessionInfo, adopted: boolean): Pick<CreateSessionOpts, 'autoCompactTokens' | 'autoCompactCeiling'> {
+  private autoCompactFor(m: SessionInfo): Pick<CreateSessionOpts, 'autoCompactTokens' | 'autoCompactCeiling'> {
     const { tokens } = autoCompactPlan(autoCompactOf(this.host.uiPreferences()), this.host.modelWindows, m)
-    this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null), adopted)
+    this.host.modelWindows.started(m.id, tokens === null ? null : (this.host.adapters.get(m.tool)?.windowCeilingFor?.(tokens) ?? null), false)
     // The point of the process before this one is not this one's: its first reading says the new (#1553)
     if (m.context?.compactAt !== undefined) {
       const { compactAt: _before, ...rest } = m.context
       m.context = rest
     }
-    const kept = adopted ? this.host.modelWindows.ceilingOf(m.id) : null
-    return { ...(tokens === null ? {} : { autoCompactTokens: tokens }), ...(kept === null ? {} : { autoCompactCeiling: kept }) }
+    return tokens === null ? {} : { autoCompactTokens: tokens }
   }
 
   /**
@@ -571,8 +568,6 @@ export class SessionStarts {
     o: Pick<CreateSessionOpts, 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'resumeExternalId' | 'knownGoal' | 'outputSchema'> & {
       tool: ToolName
       cwd: string
-      adopt?: AgentProcess
-      kept?: readonly BackgroundTask[] | null
       noCodeIntelligence: boolean
       inheritsHandoff: boolean
       choice: { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined }
@@ -586,13 +581,12 @@ export class SessionStarts {
     return {
       sessionId: m.id,
       cwd: o.cwd,
-      ...this.processSourceFor(m.id, o.tool, o.adopt, m.agentVersion, o.kept),
       model: o.model,
       effort: o.effort,
       verbosity: o.verbosity,
       serviceTier: o.serviceTier,
       // Where the agent compacts by itself (#1376), read at every start and wake: a change reaches a session when its process next starts
-      ...this.autoCompactFor(m, !!o.adopt),
+      ...this.autoCompactFor(m),
       permissionPreset: o.permissionPreset,
       resumeExternalId: o.resumeExternalId,
       runningCost: this.host.launches.runningCostFor(m.id, !!o.resumeExternalId),
@@ -660,51 +654,13 @@ export class SessionStarts {
     }
   }
 
-  /**
-   * The keeper as a `ProcessSource` for one session, when this host runs under one (#280 step 2). `version` is the CLI
-   * version a process spawned now is started from, written on its keeper tag (#297).
-   */
-  private processSourceFor(
-    sessionId: string,
-    tool: ToolName,
-    adopt?: AgentProcess,
-    version?: string | null,
-    /** The background tasks the previous host last saw running in the adopted process (#648), if it kept a list */
-    kept?: readonly BackgroundTask[] | null,
-  ): { processSource?: ProcessSource } {
-    const host = this.host.keeperOpts.processes
-    if (!host) return {}
-    return {
-      processSource: {
-        spawn: (spec) => host.spawn(sessionId, tool, spec, version ?? undefined),
-        ...(adopt ? { adopt: { process: adopt, openCalls: this.openToolCalls(sessionId), backgroundTasks: kept ?? [] } } : {}),
-      },
-    }
-  }
-
-  /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
-  private openToolCalls(sessionId: string): { callId: string; tool: string }[] {
-    const open = new Map<string, string>()
-    for (const r of this.host.store.messages.loadMessages(sessionId, 200)) {
-      const p = r.payload as { callId?: unknown; summary?: { tool?: unknown } }
-      if (typeof p?.callId !== 'string') continue
-      if (r.kind === 'tool_call' && typeof p.summary?.tool === 'string') open.set(p.callId, p.summary.tool)
-      else if (r.kind === 'tool_result') open.delete(p.callId)
-    }
-    return [...open].map(([callId, tool]) => ({ callId, tool }))
-  }
-
   async doResumeSession(
     sessionId: string,
-    adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     const m = this.host.openSession(sessionId)
 
-    // If it is already alive, use it as-is (never create a duplicate process); a kept process offered too is stopped (#839)
-    if (this.host.handles.has(sessionId)) {
-      adopt?.kill('SIGTERM')
-      return { session: m, resumed: true }
-    }
+    // If it is already alive, use it as-is (never create a duplicate process)
+    if (this.host.handles.has(sessionId)) return { session: m, resumed: true }
 
     const tool = m.tool
     const adapter = this.host.adapters.get(tool)
@@ -721,8 +677,7 @@ export class SessionStarts {
      */
     const resumeId = m.externalId ?? m.importedFrom
 
-    // An adopted process is the conversation itself, whatever ids the store has for it
-    if (!resumeId && !adopt) {
+    if (!resumeId) {
       /*
        * **Tells apart what was actually lost from what was deliberately left behind.**
        *
@@ -765,7 +720,7 @@ export class SessionStarts {
      */
     // If two sessions try to hold the same conversation, the tool refuses — block it first and report who
     // holds it
-    if (resumeId && !adopt) {
+    if (resumeId) {
       const holder = this.host.externals.holderOf(resumeId, sessionId)
       if (holder) {
         return {
@@ -787,8 +742,7 @@ export class SessionStarts {
      * check (listing), start (process + resume), catch-up.
      */
     const t0 = Date.now()
-    // A running process is proof enough that its conversation exists (and asking codex would start another app-server)
-    const gone = adopt ? false : await this.host.externals.externalGone(m, cwd)
+    const gone = await this.host.externals.externalGone(m, cwd)
     const tCheck = Date.now() - t0
     if (gone) {
       return { session: m, resumed: false, reason: externalMissingReason(this.host.toolLabel(m.tool), cwd) }
@@ -816,21 +770,14 @@ export class SessionStarts {
       serviceTier: m.serviceTier,
       permissionPreset: m.permissionPreset,
     }
-    /*
-     * The CLI version this process runs, until it says (#297): a new process starts from what is installed now. An
-     * adopted one keeps the version its keeper tag gave (adoptKept) — it was started long before.
-     */
-    if (!adopt) m.agentVersion = this.host.versionHint?.(tool) ?? null
-    // What the previous host saw running in the process this one adopts (#648); null when it kept no list
-    const kept = adopt ? this.host.launches.keptBackgroundTasks(sessionId) : null
+    // The CLI version this process runs, until it says (#297): a new process starts from what is installed now
+    m.agentVersion = this.host.versionHint?.(tool) ?? null
     try {
       const creating = startFit(
         adapter,
         this.launchOptions(m, {
           tool,
           cwd,
-          adopt,
-          kept,
           model: launched.model ?? undefined,
           effort: launched.effort ?? undefined,
           verbosity: launched.verbosity ?? undefined,
@@ -905,15 +852,13 @@ export class SessionStarts {
         this.host.emit({ type: 'settings_changed', sessionId, model: m.model, effort: m.effort, verbosity: m.verbosity, serviceTier: m.serviceTier, by: 'tool' })
       }
       this.host.handles.set(sessionId, handle)
-      if (!adopt) {
-        // The process before it held the messages given it for turns to come, and a new one holds none (#1604)
-        this.host.children.dropInputOrigins(sessionId)
-        this.host.launches.rememberToolPrefix(sessionId)
-        this.host.launches.rememberLaunchSettings(m, cwd)
-        // A new process holds no background work yet (#648); whatever an earlier adopted one left unknown is over
-        this.host.restartPolicy.backgroundUnknown.delete(sessionId)
-        this.host.launches.rememberBackgroundTasks(m)
-      }
+      // The process before it held the messages given it for turns to come, and a new one holds none (#1604)
+      this.host.children.dropInputOrigins(sessionId)
+      this.host.launches.rememberToolPrefix(sessionId)
+      this.host.launches.rememberLaunchSettings(m, cwd)
+      // A new process holds no background work yet (#648)
+      this.host.restartPolicy.backgroundUnknown.delete(sessionId)
+      this.host.launches.rememberBackgroundTasks(m)
       // Every window learns it is awake, not only the one that asked (#568)
       this.host.emit({ type: 'session_live', sessionId, live: true })
       // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
@@ -923,24 +868,7 @@ export class SessionStarts {
       handle.applyRules?.(this.host.approvalRules.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
-      if (adopt) {
-        /*
-         * A re-attached process keeps the state it had (#280 step 2): a running turn is still
-         * running, and a waiting approval has been, or is about to be, re-delivered by the tool —
-         * which sets the state itself. Forcing `idle` here would tear down that fresh card.
-         */
-        this.host.store.sessions.upsertSession(m)
-        this.host.emit({ type: 'state_change', sessionId, state: m.state, reason: 'reattached' })
-        /*
-         * And it keeps its background work (#648): the shells the previous host saw running still run in it, and the
-         * tool will not list them again until something changes. They are listed from the kept record, as the tool's
-         * own level would be; with no record (the previous host predates it), the session is held as unknown until
-         * the tool first speaks, rather than read as idle and put to sleep over a running dev server.
-         */
-        if (kept === null) this.host.restartPolicy.backgroundUnknown.set(sessionId, Date.now())
-        // Listed through onEvent, which also keeps the record for the host after this one
-        else if (kept.length > 0) this.host.onEvent({ type: 'background_tasks', sessionId, live: kept })
-      } else if (this.host.restartPolicy.continuingTurns.has(sessionId)) {
+      if (this.host.restartPolicy.continuingTurns.has(sessionId)) {
         // A turn an update cut, woken to be continued (#1618): it stays in its turn until the note's turn takes over
         this.host.store.sessions.upsertSession(m)
         this.host.emit({ type: 'state_change', sessionId, state: m.state, reason: 'continued' })
@@ -953,11 +881,9 @@ export class SessionStarts {
       // An orchestrator is a session the app manages, so there is nothing for it to catch up on
       // outside — since it has no project, this branch never fires for it in the first place
       // (an orchestrator with a project no longer exists).
-      // Not for a re-attached process: what it said meanwhile arrives from the keeper's buffer, and
-      // reading it from the transcript too would record it twice.
       let tCatchup = 0
       let added = 0
-      if (project && !adopt) {
+      if (project) {
         // Even if catch-up stalls, the session is already alive — do not block on it, leave it for next time
         const tCatchupFrom = Date.now()
         const catchingUp = this.host.externals.syncImportedHistory(m, adapter)
@@ -974,7 +900,7 @@ export class SessionStarts {
       // If catchup is under a few hundred ms, it was skipped (nothing changed, so the full transcript was
       // never read)
       console.error(
-        `[agent-host] ${adopt ? 're-attached' : 'resumed'} ${sessionId.slice(0, 8)} tool=${m.tool} ` +
+        `[agent-host] resumed ${sessionId.slice(0, 8)} tool=${m.tool} ` +
           `check=${tCheck}ms start=${tStart}ms catchup=${tCatchup}ms added=${added} total=${Date.now() - t0}ms`,
       )
       return { session: m, resumed: true }
@@ -991,8 +917,6 @@ export class SessionStarts {
       // A cap applies to this after-the-fact check too — the worst outcome would be holding the real
       // failure reason (err) but losing it because the check itself hung. The same rule as elsewhere:
       // if it cannot be determined, it does not block (false).
-      // A kept process that could not be re-attached has nobody left to address it: `adoptKept` stops it
-      if (adopt) return { session: m, resumed: false, reason: (err as Error).message }
       // The tool said so itself (an ACP tool that does not list the conversation, #1676): no list to ask
       const gone =
         (err instanceof Error && Reflect.get(err, 'code') === 'conversation_gone') ||

@@ -1,23 +1,20 @@
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { SessionManager, type AgentProcessHost } from './manager.js'
-import { FakeProcess } from './kept-host.test-helpers.js'
+import { SessionManager } from './manager.js'
 
 /**
  * A host leaving while a process comes up or a turn ends (#839, item 7). Quitting (`disposeAll`) stops the processes it
- * holds, and handing over (`detachAll`) lets go of them for the next host; either way a handle that arrives after that
- * sweep is nobody's. A wake or a new session that came up then was registered all the same and never stopped; a
- * deferred restart at a turn's end during a handover stopped the process the keeper was keeping and started one nobody
- * kept; and a kept process offered while a wake was already under way was never used and never stopped.
+ * holds, and a handle that arrives after that sweep is nobody's. A wake or a new session that came up then was
+ * registered all the same and never stopped, and a deferred restart at a turn's end while the host left started a
+ * process nobody would stop.
  */
 
 class Handle implements SessionHandle {
   externalId: string | null
   disposed = false
-  detached = false
   sent: string[] = []
   constructor(
     readonly sessionId: string,
@@ -39,12 +36,6 @@ class Handle implements SessionHandle {
   async dispose() {
     await this.disposeGate
     this.disposed = true
-  }
-  /** A test holds the release here to put a turn's end inside the handover */
-  detachGate: Promise<void> = Promise.resolve()
-  async detach() {
-    await this.detachGate
-    this.detached = true
   }
 }
 
@@ -75,8 +66,6 @@ class Adapter implements AgentAdapter {
   }
 }
 
-const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
-
 let store: Store
 let events: NormalizedEvent[]
 let claude: Adapter
@@ -88,7 +77,7 @@ beforeEach(async () => {
   events = []
   claude = new Adapter()
   const other = Object.assign(new Adapter(), { tool: 'claude-two' as ToolName })
-  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, tmpdir(), { processes })
+  mgr = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', claude], ['claude-two' as ToolName, other]]), (e) => events.push(e), undefined, tmpdir())
   projectId = (await mgr.projectCreation.addProject(tmpdir())).id
 })
 afterEach(async () => {
@@ -106,16 +95,11 @@ const holdNextStart = () => {
   }
 }
 const session = async () => (await mgr.createSession({ projectId, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })).id
-/**
- * Starts the host leaving and holds it while it lets go of a live session's process: a quit's sweep, or a handover.
- * The returned function lets it finish.
- */
-const leaveHeld = (live: Handle, leave: 'disposeAll' | 'detachAll') => {
+/** Starts the host quitting and holds it while its sweep stops a live session's process. The returned function lets it finish */
+const leaveHeld = (live: Handle) => {
   let release!: () => void
-  const gate = new Promise<void>((r) => (release = r))
-  live.disposeGate = gate
-  live.detachGate = gate
-  const leaving = mgr.tenure[leave]()
+  live.disposeGate = new Promise<void>((r) => (release = r))
+  const leaving = mgr.tenure.disposeAll()
   return async () => {
     release()
     await leaving
@@ -130,13 +114,13 @@ const asleep = async () => {
 }
 
 describe('a host leaving (#839)', () => {
-  it.each(['disposeAll', 'detachAll'] as const)('a wake whose process comes up during %s stops it, and does not register it', async (leave) => {
+  it('a wake whose process comes up during a quit stops it, and does not register it', async () => {
     const id = await asleep()
     await session()
     const live = claude.last
     const release = holdNextStart()
     const waking = mgr.processes.resumeSession(id)
-    const left = leaveHeld(live, leave)
+    const left = leaveHeld(live)
     release()
     const r = await waking
     await left()
@@ -148,12 +132,12 @@ describe('a host leaving (#839)', () => {
     expect(mgr.listSessions().find((s) => s.id === id)?.live).toBe(false)
   })
 
-  it.each(['disposeAll', 'detachAll'] as const)('a new session whose process comes up during %s stops it, and is not created', async (leave) => {
+  it('a new session whose process comes up during a quit stops it, and is not created', async () => {
     const live = await session()
     const release = holdNextStart()
     const creating = mgr.createSession({ projectId, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
     void creating.catch(() => {})
-    const left = leaveHeld(claude.last, leave)
+    const left = leaveHeld(claude.last)
     release()
     await expect(creating).rejects.toThrow(/restarting or quitting/)
     await left()
@@ -162,74 +146,31 @@ describe('a host leaving (#839)', () => {
     expect(store.sessions.listSessions().map((s) => s.id)).toEqual([live])
   })
 
-  it('a turn that ends during a handover does not apply a deferred restart', async () => {
+  it('a turn that ends during a quit does not apply a deferred restart', async () => {
     const id = await session()
-    const kept = claude.last
+    const live = claude.last
     await mgr.inputs.send(id, 'work')
     // A model change mid-turn waits for the turn's end (#164)
     await mgr.updateSettings(id, { model: 'other' })
-    let release!: () => void
-    kept.detachGate = new Promise<void>((r) => (release = r))
-    const leaving = mgr.tenure.detachAll()
-    // The turn ends while the host is letting go of the process
-    kept.emit({ type: 'turn_complete', sessionId: id })
-    release()
-    await leaving
-    await new Promise((r) => setImmediate(r))
-    expect(kept.disposed).toBe(false)
-    expect(claude.created).toHaveLength(1)
-  })
-
-  it('a kept process offered while a wake is under way is stopped, not left running beside it', async () => {
-    const id = await asleep()
-    const release = holdNextStart()
-    const waking = mgr.processes.resumeSession(id)
-    const kept = new FakeProcess()
-    const adopting = mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
-    release()
-    await Promise.all([waking, adopting])
-    expect(kept.kills).toEqual(['SIGTERM'])
-    expect(claude.created.filter((h) => h.opts.processSource?.adopt)).toEqual([])
-  })
-
-  it('a kept process offered for a session already live is stopped', async () => {
-    const id = await session()
-    const kept = new FakeProcess()
-    await mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept as unknown as AgentProcess }])
-    expect(kept.kills).toEqual(['SIGTERM'])
-    expect(claude.created).toHaveLength(1)
-  })
-
-  it('a kept process whose start is refused is stopped, whatever the refusal, unless the host is handing over (#1720)', async () => {
-    const id = await asleep()
-    const other = await asleep()
-    await session()
-    // The tool can no longer resume (a build that dropped it, a project removed meanwhile): the start answers `resumed: false`
-    Object.assign(claude.capabilities, { resume: false })
-    const kept = new FakeProcess()
-    await mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
-    expect(kept.kills).toEqual(['SIGTERM'])
-    expect(claude.created).toHaveLength(3)
-    // Handing over, the same refusal leaves the process for the next host
-    const left = leaveHeld(claude.last, 'detachAll')
-    const next = new FakeProcess()
-    await mgr.tenure.adoptKept([{ sessionId: other, tool: 'claude', process: next }])
+    const left = leaveHeld(live)
+    // The turn ends while the host is stopping the process
+    live.emit({ type: 'turn_complete', sessionId: id })
     await left()
-    expect(next.kills).toEqual([])
+    await new Promise((r) => setImmediate(r))
+    expect(claude.created).toHaveLength(1)
   })
 
   it.each([
     ['a restart (the settings, a proposal)', (id: string) => mgr.processes.restartSession(id)],
     ['a tool switch', (id: string) => mgr.processes.switchTool(id, 'claude-two' as ToolName)],
-  ] as const)('%s asked during a handover is refused, and leaves the kept process alone', async (_, act) => {
+  ] as const)('%s asked during a quit is refused, and starts no process', async (_, act) => {
     const id = await session()
-    const kept = claude.last
-    const left = leaveHeld(kept, 'detachAll')
+    const live = claude.last
+    const left = leaveHeld(live)
     await expect(act(id)).rejects.toThrow(/restarting or quitting/)
-    expect(kept.disposed).toBe(false)
-    expect(claude.created).toHaveLength(1)
     await left()
-    expect(kept.detached).toBe(true)
+    expect(live.disposed).toBe(true)
+    expect(claude.created).toHaveLength(1)
   })
 
 })

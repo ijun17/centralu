@@ -1,6 +1,5 @@
 import { appendFileSync } from 'node:fs'
 import { MAX_LOG_BYTES, rotateIfLarge } from '../log-file.js'
-import { signalMode, type LeaveMode } from './shutdown.js'
 
 /**
  * Every way the host process can be asked to end, and what each one means (lessons HO5–HO7,
@@ -156,19 +155,16 @@ export function crashRecorder(
 /**
  * Every ending, wired to the one shutdown (HO15).
  *
- * - a signal, a crash and the parent going away: `signalMode`, a detach exactly when the keeper's
- *   child service holds the children. A signal under it is a restart, and the next host takes the
- *   open app views over; a crash or a vanished parent hands nothing over (nothing is known to start
- *   a next host, and the state that threw is not one to carry forward);
- * - the keeper's `stop` on the child service, and `host.stop` (`centralu serve --stop`): a stop. The keeper's is the
- *   person quitting Centralu here, said first through `quit` (#1143: a linked hub then starts no host here by itself).
- *   `host.stop` is not: `serve --stop` remembers the person's stop itself, and a hub's update stops through it too.
+ * - a signal, a crash and the parent going away: a stop. Nothing is handed over: the host owns its
+ *   children and stops them (#1895), and a crash or a vanished parent hands no open app views over
+ *   either (nothing is known to start a next host, and the state that threw is not one to carry forward);
+ * - `host.stop` (`centralu serve --stop`): a stop. `serve --stop` remembers the person's stop itself, and a hub's
+ *   update stops through it too.
  */
 export function wireEndings(o: {
   proc: ProcessLike
   signals: { act(onSignal: () => void): void }
-  heldChildren: boolean
-  leave: (mode: LeaveMode, handOver: boolean) => void
+  leave: (handOver: boolean) => void
   /** Exit now, without finishing the shutdown */
   force: (why: string) => void
   record: (kind: string, err: unknown) => void
@@ -176,11 +172,8 @@ export function wireEndings(o: {
   watchParent: boolean
   log: (line: string) => void
   now?: () => number
-  /** The keeper stops this host for good: the person quit Centralu here (lifecycle/stopped-mark.ts `markQuit`) */
-  quit?: () => void
-}): { stopAsked: () => void; keeperStop: () => void } {
-  const mode = signalMode(o.heldChildren)
-  guardErrors(o.proc, { record: o.record, onCrash: () => o.leave(mode, false) })
+}): { stopAsked: () => void } {
+  guardErrors(o.proc, { record: o.record, onCrash: () => o.leave(false) })
   /*
    * A second signal while leaving is someone insisting (a second Ctrl+C on `centralu serve`): the
    * host exits at once rather than run a second, different ending. Not one within `REPEAT_AFTER_MS`
@@ -196,18 +189,13 @@ export function wireEndings(o: {
       return
     }
     signalledAt = now()
-    o.leave(mode, mode === 'detach')
+    o.leave(false)
   })
   watchParent(o.watchParent, o.stdin, () => {
     o.log('[agent-host] parent process exited; shutting down')
-    o.leave(mode, false)
+    o.leave(false)
   })
   return {
-    stopAsked: () => o.leave('stop', false),
-    // No next host to hand the views to
-    keeperStop: () => {
-      o.quit?.()
-      o.leave('stop', false)
-    },
+    stopAsked: () => o.leave(false),
   }
 }

@@ -7,7 +7,7 @@ import type { WorktreeHost } from './worktree-sessions.js'
  * What the merge checks reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type MergeChecksHost = Pick<DelegationHost, 'disposing' | 'emit' | 'handingOver' | 'meta'> &
+export type MergeChecksHost = Pick<DelegationHost, 'disposing' | 'emit' | 'meta'> &
   Pick<WorktreeHost, 'cwdOf' | 'trunkOf'> & {
     /** The PR status checker (#76, stage 3): the manager's field, which a test swaps out */
     readonly prLookup: (projectCwd: string, branch: string, signal?: AbortSignal) => Promise<BranchPr | 'unavailable' | null>
@@ -27,9 +27,9 @@ export class MergeChecks {
    * **The merge checks nobody awaits, so `disposeAll` can end them** (#368). Started at startup and on every project
    * refresh, each runs git, and gh where it is installed, in the project's folder. They used to outlive the manager:
    * a test that disposed a manager and removed its temporary project right away met a gh still running in that folder,
-   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` and `detachAll` abort the checks and
-   * wait for them: an aborted `gitBranchPr` ends gh with the processes it started and returns once gh has exited,
-   * and a check stops at its next session once either has begun, so what is left to wait for is at most one git read
+   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` aborts the checks and
+   * waits for them: an aborted `gitBranchPr` ends gh with the processes it started and returns once gh has exited,
+   * and a check stops at its next session once it has begun, so what is left to wait for is at most one git read
    * (its own 10 s limit). A `prLookup` swapped in by a test is waited for as it is.
    */
   readonly mergeChecks = new Set<Promise<void>>()
@@ -65,7 +65,7 @@ export class MergeChecks {
     const trunk = this.host.trunkOf(projectId) ?? 'HEAD'
     // Over a copy: the loop waits on git and gh, and a reorder meanwhile refills the sessions in place (#1143)
     for (const m of [...this.host.meta.values()]) {
-      if (this.host.disposing || this.host.handingOver) return
+      if (this.host.disposing) return
       if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged) continue
       let merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
       /*
@@ -78,7 +78,7 @@ export class MergeChecks {
        * network call, a per-session TTL applies (this sweep runs every time a turn ends), and once gh
        * itself is missing (ENOENT), this process never asks again — the answer to that cannot change either.
        */
-      if (!merged && this.ghAvailable && !this.host.disposing && !this.host.handingOver) {
+      if (!merged && this.ghAvailable && !this.host.disposing) {
         const now = Date.now()
         // Not for a session deleted during the git check above: its entry would outlive it (#392)
         if (this.host.meta.get(m.id) === m && now - (this.prCheckedAt.get(m.id) ?? 0) >= this.host.prPollMs) {
