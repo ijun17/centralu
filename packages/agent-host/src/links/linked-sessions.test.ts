@@ -7,7 +7,7 @@ import { PAUSED_REPORT_SETTLE_MS } from '../sessions/child-ownership.js'
 import { SessionManager } from '../sessions/manager.js'
 import { runOrchestratorTool } from '../sessions/orchestrator-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
-import type { LinkedSessions, OrchestratorTools } from '../adapters/contract.js'
+import { NOT_CONNECTED_PHRASE, type LinkedSessions, type OrchestratorTools } from '../adapters/contract.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { linkedSessions } from './linked-sessions.js'
 import { Qualifier } from './qualifier.js'
@@ -96,7 +96,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
 
   // The window reads 'older' for it (`LinkedMachine.hubAuto`, links.test.ts): the model is told the same, not the machine's "Unknown method" (#1143)
   it('says a machine from before "Allow auto from a linked computer" has none, as the window does', async () => {
-    expect(await linkedSessions(() => [machine({})]).hubAuto('m1')).toEqual({ ok: false, error: 'Box runs a Centralu from before "Allow auto from a linked computer"' })
+    expect(await linkedSessions(() => [machine({})]).hubAuto('m1')).toEqual({ ok: false, error: 'Box runs a Centralu from before "Allow auto from a linked computer"; update it there' })
   })
 
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
@@ -404,7 +404,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
 
   it('recall names a machine the person disconnected as that, and where to connect it, not as one that may come back', async () => {
     const off = machine({}, { reachable: false, waitsForPerson: true })
-    expect(await linkedSessions(() => [off]).recall('x', 12)).toEqual({ hits: [[]], notSearched: ['Box (not connected; ask the person to connect it in Settings, Machines, Connect)'] })
+    expect(await linkedSessions(() => [off]).recall('x', 12)).toEqual({ hits: [[]], notSearched: [`Box ${NOT_CONNECTED_PHRASE}`] })
   })
 
   it('knows only ids of machines it links to', () => {

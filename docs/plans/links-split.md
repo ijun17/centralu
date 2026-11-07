@@ -140,8 +140,8 @@ small host type of what it reads, getters never copies (the `parts()` rule of `s
 `readonly` field; `LinkedMachine`'s `protected` seams become the module's public methods; `tunnel.ts` keeps the transport
 (about 420 lines) and the other three roles are modules the importers name directly, with no re-export from `tunnel.ts`.
 
-**What is done of it** is smaller (§4, decision D1): the deletions of §2 (measured: -6 lines in #2110, not the -250 the first estimate gave; see below), the text
-readers out of `tunnel.ts`, and the two roles cross-machine mail needs as modules (`session-mirror`, `call-reach`).
+**What is done of it** is smaller (§4, decision D1): the deletions of §2 (measured: -6 lines in #2110, not the -250 the first estimate gave; see below), and the two roles cross-machine mail
+needs as modules (`session-mirror`, `call-reach`). The text readers out of `tunnel.ts` were built (#2120) and stopped: +9 lines.
 Each module adds about 25 lines of its own (host type and imports), so a move that ends no smaller and serves no feature
 is not made; the rest stays a map.
 
@@ -161,7 +161,7 @@ the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allow
 | 6 | **B7**: exit 127 is not "not installed" | #2102 | fix | 2 / 2 (+10 test) |
 | 7 | **B5**: the client's redials stop at hellos that drop at once (short-lived hellos counted apart) | #2104 | fix | 1 / 27 (+46 test) |
 | 8 | ~~B6~~: a dev remote judged as one before its hello | #2106, closed | dropped | see §2.4a |
-| 9 | **`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts` | branch `centralu/links-split-ssh-text`, opened once #2092 lands | move | 148 / 150 (+6 import lines) |
+| 9 | ~~**`ssh-text.ts`** out of `tunnel.ts`; the code page lookup behind `os.ts`~~ | **stopped under D1** (#2120, closed): built and measured at 158 lines out and 167 in (+9), and #2067 does not need it. The code page lookup behind `os.ts` alone is not a rule fix either: `tunnel.ts` is on `tooling/os-allowlist.txt` because it spawns ssh and opens sockets, so the lookup is allowed there and moving it would leave the file on the list | move | not made |
 | 10 | **Deletions**: the dead `hidden` set, `lastWords` and `read` through `viaSession` (D1), the update's `sleep` (D9), two doc comments back above their methods | #2110 | deletion | 75 / 69 (-6) |
 | 10a | What the deletions of §2.3 would still do, measured and found not to shrink: D2 and D3 as helpers (+4 lines, one source), D5 (a shared reader adds what it saves), D6, D7, D11 (a decision on one spelling each, across files) | not made | | 0 |
 | 11 | **`session-mirror.ts`** (the shown and hidden sessions) | after the deletions; #2067 needs it | move | ~90 |
@@ -169,8 +169,7 @@ the assertion), and the allowlists (`tooling/lint-allowlist/`, `tooling/os-allow
 | 13 | **The reverse-calls allowlist** as the one table a machine's calls to the hub pass | with #2067 | move | small |
 
 Decided (D1, §7): the deletions land first. Of the moves, only those that end smaller, or that cross-machine mail (#2067)
-needs, are done: 9 (it removes a file's worth of non-transport code from `tunnel.ts` and one OS touch from `links/`), 11, 12
-and 13. The rest of the split of §1 (the credentials, `connection-line`, `remote-command`, `host-starts`, `machine-offers`,
+needs, are done: 11, 12 and 13. Row 9 was built and ended 9 lines larger, so it stopped; 11 and 12 wait for #2067 to start. The rest of the split of §1 (the credentials, `connection-line`, `remote-command`, `host-starts`, `machine-offers`,
 `switch-watch`) is **not done**: each adds about 25 lines and would move code with no one to read it differently. They stay
 in §1 as the map of the roles, for when a feature needs one of them to be a module.
 

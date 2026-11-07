@@ -138,7 +138,7 @@ export class RemoteClient {
   private stableTimer: ReturnType<typeof setTimeout> | undefined
   /** The hello of this socket is younger than `stableMs`: a drop now makes it short-lived */
   private settling = false
-  /** The hellos in a row that dropped within `stableMs` */
+  /** The hellos in a row that dropped within `stableMs`; cleared by a hello that stayed up that long and by every `updateEndpoint` */
   private shortLived = 0
   /** The refusal that came before the close, if one did: it names why the host closes */
   private refusal: ProtocolError | undefined
@@ -253,7 +253,9 @@ export class RemoteClient {
 
   /**
    * Points the client at another address or token (the tunnel came back on another port, or the token rotated), and
-   * the id of the credential the token is, when it was paired (#1405)
+   * the id of the credential the token is, when it was paired (#1405). Every call, the same address or not, starts the
+   * dials and the count of short-lived hellos over: the link has read the connection line again, which is the answer
+   * the redials were a stand-in for
    */
   updateEndpoint(url: string, token: string, credential?: string): void {
     const sameHost = this.opts.url === url

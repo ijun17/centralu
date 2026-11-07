@@ -287,9 +287,9 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
   // Exit 127 is also what a launcher says when the Node it runs on is gone: the word on stdout is what says nothing is installed
   it('does not say Centralu is not installed when its launcher is there and its Node is not', async () => {
     const env = { FAKE_SSH_HAS: 'launcher', FAKE_SSH_NO_NODE: '1' }
-    await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory/)
+    await expect(tunnel(env).open()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
     await expect(tunnel(env).open()).rejects.not.toThrow(/not installed/)
-    await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory/)
+    await expect(tunnel(env).startHost()).rejects.toThrow(/env: node: No such file or directory.*run `centralu serve` once from an interactive shell/)
   })
 
   it('says Centralu is not installed when neither answers, whatever exit code the shell passed on, and that ssh failed when it cannot connect', async () => {
