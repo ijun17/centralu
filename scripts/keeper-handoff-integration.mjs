@@ -31,23 +31,26 @@
  *     and keeper A serves on as before; with `--old-keeper`, a real old keeper starts that executable,
  *     meets the refusal and rolls back;
  *   - every handoff after that is asked with the keeper executable, as a window of this build asks;
- *   - keeper A (build A) with its host, a terminal printing a counter, a dev server, a claude turn
- *     mid-tool-call and a codex turn, hands over to keeper B (`upgrade`): same host pid, same child
- *     pids, the counter and the dev server's ticks continuous (nothing lost or doubled), each
- *     agent's tool calls recorded once and its turn finished, the front door on the same port and
- *     token, the WebSocket opened before the handoff never closed and still answers, a new client
- *     connects, the attached window was never dropped and hears from B, `keeper.json` names B, A
- *     has exited, and `keeper.lock` is held by B (a third keeper is turned away);
+ *   - no keeper here serves a child socket: the host spawns its own terminals, dev servers and
+ *     agents (#1895), so a handoff carries no child table;
+ *   - keeper A (build A) with its host, the host's terminal printing a counter, its dev server, a
+ *     claude turn mid-tool-call and a codex turn, hands over to keeper B (`upgrade`): the same host
+ *     pid, so the terminal's shell and the dev server are the same processes, the counter and the
+ *     dev server's ticks continuous (nothing lost or doubled), each agent's tool calls recorded once
+ *     and its turn finished, the front door on the same port and token, the WebSocket opened before
+ *     the handoff never closed and still answers, a new client connects, the attached window was
+ *     never dropped and hears from B, `keeper.json` names B, A has exited, and `keeper.lock` is held
+ *     by B (a third keeper is turned away);
  *   - an app view opened before the handoff (a user-folder app from the bundled template) is served
  *     at the same address through the front door after it, and again after the host swap below;
  *   - build A's executable is deleted and written anew while keeper A runs (what `tauri build` does
  *     to a bundle), and keeper A goes on serving and hands over from it;
  *   - B starting keeper C, killed before the commit: B rolls back, says how C ended, and serves
- *     everything as before;
+ *     everything as before, the host's terminal and dev server running on;
  *   - "Switch to this build" from build C (`switch` with `keeper`): the keeper moves to C and C
- *     swaps the host to build C, the terminal and dev server still the same processes, and C's host
- *     copy survives the cleanup that lands between copying and starting it;
- *   - stop ends the keeper, the host and every child.
+ *     swaps the host to build C, the old host's terminal and dev server ending with it (the host
+ *     owns them), and C's host copy survives the cleanup that lands between copying and starting it;
+ *   - stop ends the keeper, the host and every process it started.
  *
  * `--old-keeper <exe>` makes build A's window executable that file (an earlier release's
  * `Contents/MacOS/centralu`, copied, with no keeper beside it, started as `centralu --keeper`), so
@@ -68,17 +71,13 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alive, cleanupOnExit, copyEarlierHost, heldChildren, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, familyOf, hostClient, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildKeeper, HOST_SRC, log, readyView, recordedOnce, started, STEPS, TARGET, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
 // executable as a window's, so they get the token and may switch and upgrade (#1405, keeper/window_peer.rs). A release
 // keeper ignores it.
 process.env.CC_KEEPER_TEST_WINDOW_EXE = process.execPath
-// Keepers that hold their hosts' children, as every keeper did before #1895 step 3, with hosts of that time (`makeBuild`): a
-// handoff carries them (the move to a keeper that holds none starts from such a handoff, keeper-children-integration.mjs).
-// Step 4 deletes this script with the holding
-process.env.CC_KEEPER_HOLDS_CHILDREN = '1'
 
 const BIN = join(TARGET, 'debug', 'centralu')
 const KEEPER_BIN = join(TARGET, 'debug', 'centralu-keeper')
@@ -116,8 +115,7 @@ function check(cond, what, detail = '') {
 function makeBuild(root, name, windowBin = BIN, keeperBin = KEEPER_BIN) {
   const dir = join(root, name)
   const host = join(dir, 'host')
-  // Of a build before #1895 step 3, so the keepers here hand on what they hold (`copyEarlierHost`)
-  copyEarlierHost(HOST_SRC, host)
+  cpSync(HOST_SRC, host, { recursive: true })
   const infoPath = join(host, 'bundle-info.json')
   const info = JSON.parse(readFileSync(infoPath, 'utf8'))
   writeFileSync(infoPath, JSON.stringify({ ...info, commit: `handoff-${name}`, builtAt: new Date().toISOString() }))
@@ -224,6 +222,11 @@ async function turnDone(host, id, n) {
 function numbers(text, tag) {
   return [...text.matchAll(new RegExp(`^${tag} (\\d+)\\r?$`, 'gm'))].map((m) => Number(m[1]))
 }
+/**
+ * The pid a terminal's shell printed as `P <pid>`. Not anchored at the line's start: a shell may write a mode change and a
+ * carriage return before the output, and the typed command line itself has `P $$`, no digits
+ */
+const shellPid = (screen) => Number(screen.match(/P (\d+)\r?$/m)?.[1]) || undefined
 /** Consecutive and each once: nothing lost or doubled */
 function continuous(ns) {
   if (ns.length < 2) return { ok: false, why: `only ${ns.length} numbers` }
@@ -278,11 +281,16 @@ async function scenario() {
   const p = await host.call('projects.add', { path: project })
   const term = await host.call('terminal.create', { projectId: p.id, cols: 80, rows: 24 })
   await sleep(1500)
-  await host.call('terminal.input', { terminalId: term.terminalId, data: "i=0; while true; do echo \"C $i\"; i=$((i+1)); sleep 0.05; done\n" })
+  // The shell says its pid first: the host spawns it itself, so no keeper lists it
+  await host.call('terminal.input', { terminalId: term.terminalId, data: "echo \"P $$\"; i=0; while true; do echo \"C $i\"; i=$((i+1)); sleep 0.05; done\n" })
   check(await waitFor(() => numbers(host.screen(term.terminalId), 'C').length > 10, 15_000), 'the terminal counts', host.screen(term.terminalId).slice(-300))
-  const cmd = `node -e "let i=0;setInterval(()=>console.log('tick '+(i++)),100)"`
+  const termPid = shellPid(host.screen(term.terminalId))
+  const cmd = `node -e "console.log('pid '+process.pid);let i=0;setInterval(()=>console.log('tick '+(i++)),100)"`
   const run = await host.call('commands.run', { projectId: p.id, command: cmd })
   check(await waitFor(async () => (await host.call('commands.log', { projectId: p.id, command: cmd })).run?.history.includes('tick 5'), 15_000), 'the dev server ticks')
+  const devPid = numbers((await host.call('commands.log', { projectId: p.id, command: cmd })).run?.history ?? '', 'pid')[0]
+  // An old keeper (--old-keeper) still serves one, which this host never connects to
+  if (!OLD_KEEPER) check(!existsSync(join(data, 'children.sock')), 'keeper A serves no child socket: the host spawns its own children')
   const opened = await host.call('apps.openView', { appId: 'demo', projectId: null })
   const frame = await viewFrame(host, opened)
   check(new URL(frame.url).port === String(door.port), 'an app view is addressed through the front door')
@@ -303,12 +311,13 @@ async function scenario() {
   if (claudeId) check(await waitFor(() => toolResults(host, claudeId) >= 1, 90_000, 250), 'the claude turn is under way (first tool result)')
   if (codexId) check(await waitFor(() => toolResults(host, codexId) >= 1, 120_000, 250), 'the codex turn is under way (first tool result)')
 
-  const before = await heldChildren(data)
-  for (const c of before) heldPids.add(c.pid)
   const hostPid = view.hostPid
   heldPids.add(hostPid)
-  const livePids = before.filter((c) => c.alive).map((c) => c.pid)
-  log(`  (host pid ${hostPid}; held ${before.map((c) => `${c.tag?.kind}:${c.pid}`).join(', ')})`)
+  // The host's own terminal shell and dev server: a keeper handoff leaves the host running, so they run on through it
+  const livePids = [termPid, devPid]
+  for (const pid of livePids) if (pid) heldPids.add(pid)
+  check(livePids.every((pid) => alive(pid) && familyOf([hostPid]).includes(pid)), "the terminal's shell and the dev server are the host's own processes", JSON.stringify(livePids))
+  log(`  (host pid ${hostPid}; terminal shell ${termPid}, dev server ${devPid})`)
 
   // ---- the bundle rewritten under a running keeper: delete, then write anew (tauri build's way)
   log('\nrewriting build A on disk while keeper A runs')
@@ -360,8 +369,7 @@ async function scenario() {
     check(failed, 'the handoff fails', keeperLog().slice(-1500))
     check(failed && failed.keeper.pid === keeperA.pid, 'keeper A is still the keeper', JSON.stringify(failed?.keeper))
     check(failed && failed.hostPid === hostPid && alive(hostPid), 'with the same host', String(failed?.hostPid))
-    const held = await heldChildren(data)
-    check(livePids.filter(alive).every((pid) => held.some((c) => c.pid === pid)), 'and every child it held')
+    check(livePids.every(alive), "and the host's terminal and dev server")
     const counted = numbers(host.screen(term.terminalId), 'C').length
     check(await waitFor(() => numbers(host.screen(term.terminalId), 'C').length > counted, 5000), 'the terminal still counts')
   }
@@ -397,12 +405,8 @@ async function scenario() {
   check(view.status.port === door.port && view.status.token === door.token, 'the front door has the same port and token')
   check(view.source?.commit === 'handoff-A', 'the host is still build A (only the keeper moved)', view.source?.commit)
   check(view.attached === 1, 'keeper B counts the attached window', String(view.attached))
-  const after = await heldChildren(data)
-  check(
-    livePids.every((pid) => after.some((c) => c.pid === pid && c.alive)),
-    'every child is the same process, still alive, held by keeper B',
-    JSON.stringify(after.map((c) => [c.pid, c.alive])),
-  )
+  check(livePids.every(alive), "the host's terminal shell and dev server are the same processes, still running", JSON.stringify(livePids.map((pid) => [pid, alive(pid)])))
+  if (!OLD_KEEPER) check(!existsSync(join(data, 'children.sock')), 'keeper B serves no child socket either')
   check(!host.closed, 'the WebSocket opened before the handoff was never closed')
   check(Array.isArray(await host.call('sessions.list', {})), 'and it still answers RPCs')
   const fresh = await hostClient(door.port, door.token).catch(() => null)
@@ -461,8 +465,7 @@ async function scenario() {
   check(view?.swap?.message?.includes('hand over'), 'the window is told the handoff failed', view?.swap?.message)
   check(view?.swap?.message?.includes('killed by signal 9'), 'and how the new keeper ended, not a read error', view?.swap?.message)
   check(view?.hostPid === hostPid && alive(hostPid), 'the host was not touched')
-  const afterFail = await heldChildren(data)
-  check(livePids.filter(alive).every((pid) => afterFail.some((c) => c.pid === pid)), 'keeper B still holds every child')
+  check(livePids.every(alive), "the host's terminal and dev server run on")
   check(!host.closed && Array.isArray(await host.call('sessions.list', {})), 'the WebSocket still works')
   check(alive(app.pid) && !readFileSync(windowOut, 'utf8').includes('"closed"'), 'the window is still attached')
   await sleep(1500)
@@ -472,6 +475,8 @@ async function scenario() {
 
   // ---- "Switch to this build" from build C: keeper first, then the host
   log('\nswitching everything to build C (keeper, then host)')
+  const oldFamily = familyOf([hostPid])
+  for (const pid of oldFamily) heldPids.add(pid)
   // What a window of this build sends: its keeper executable (sidecar.rs `switch_build`)
   const sw = await request(sock, { op: 'switch', source: sourceOf(C), keeper: { exe: C.keeper } })
   check(sw.ok, 'the switch is accepted', JSON.stringify(sw))
@@ -491,20 +496,21 @@ async function scenario() {
   )
   check(await waitFor(() => !alive(keeperB), 10_000), 'keeper B has exited')
   check(view.status.port === door.port && view.status.token === door.token, 'the front door still has the same port and token')
-  const termPid = before.find((c) => c.tag?.kind === 'terminal')?.pid
-  check(termPid && alive(termPid), 'the terminal is still the same process')
+  // The host owns its children: the old one's terminal shell and dev server end with it, nothing is left unowned
+  check(
+    await waitFor(() => oldFamily.every((pid) => !alive(pid)), 15_000, 250),
+    `the old host and the ${oldFamily.length - 1} processes it had started have ended`,
+    oldFamily.filter(alive).join(', '),
+  )
   const h2 = await hostClient(door.port, door.token)
-  const terms = await h2.call('terminal.list', { projectId: p.id })
-  check(terms.terminals.some((t) => t.terminalId === term.terminalId && t.alive), 'the new host took the terminal over')
   check((await fetchStatus(frame.url)) === 200, 'the app view still loads at the same address after the host swap')
   check((await viewFrame(h2, opened).catch((e) => ({ url: String(e) }))).url === frame.url, 'and the new host gives the same address for it')
 
   // ---- stop
   log('\nquit completely')
-  const held = await heldChildren(data)
-  for (const c of held) if (c.alive) heldPids.add(c.pid)
   const keeperC = view.keeper.pid
   check(exeOf(keeperC) === C.keeper, "keeper C runs build C's centralu-keeper", exeOf(keeperC))
+  for (const pid of familyOf([view.hostPid])) heldPids.add(pid)
   const pids = [...heldPids].filter(alive)
   h2.close()
   host.close()
