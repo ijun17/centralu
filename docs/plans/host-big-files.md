@@ -139,7 +139,7 @@ asker the same quit cut heard nothing before).
 
 **Guards:** `guards()` (1105–1116) still *refuses* `repeat`, `rate_limited` and `ask_rate`; the loop, cascade, host-cap
 and pair guards warn (mailbox.md D13, D32, #2014, #2035). The audit found no code that blocks agent mail beyond those
-three. This round keeps them as they are and asks (§6) whether #2014 meant those three too.
+three. This round kept them as they are; §6 has the answer.
 
 **Split:** `mail-writer.ts` (core), `mail-views.ts`, `message-send.ts`, `message-read.ts`, `message-drain.ts`,
 `held-mail.ts`, `stop-notices.ts`, `stop-words.ts` (pure text), `handoff.ts`; `MessageService` keeps a facade of about
@@ -184,8 +184,8 @@ the `NOT_REACHABLE || NOT_CONNECTED_PHRASE` test.
    trusted", the local "is no longer trusted" (`start-agent.test.ts:502–530` pins the local one); and `gateError` goes
    through `autoBoundaryOpen`, which logs `[permissions] … allowed` on every send, the local check does not. Calling
    the shared check removes about 9 lines and both differences. **Fixed in #2112**: it did not remove the lines (the check
-   became an exported function both paths call, +38/−38), and a 21-case table pins that the refusal conditions did not
-   change. The remote first gate, before anything is asked, still says "is not trusted … from the project menu", as a
+   became an exported function both paths call, +38/−38), and a table of 4 paths × 5 conditions (20 cases, and one more for a caller that is gone) pins that the refusal conditions
+   did not change. The remote first gate, before anything is asked, still says "is not trusted … from the project menu", as a
    local start's first gate does.
 2. `delete` does not clear the held `queued` notes before it interrupts; `stop` does, and restores them on failure.
    The interrupted turn's end calls `scheduleDrain`, so a held note can go to a child being deleted. Narrow (`drain`
@@ -263,7 +263,7 @@ This round started with 1–3 and went on with what §5.2 lists.
 
 ### 5.2 What landed after the first three
 
-Each is its own pull request, in the order they merged. Titles are the squash subjects.
+Each is its own pull request, in the order they were opened (they merged in another order); the names are not the squash subjects.
 
 - **#2096, the store's `markTurn`** (−18, 0 added): the deep-tier deletion #2094 left out. `turn-owned-by-no-one.md` named
   `markTurn` as the writer of a joined request's `turn_seq`; it now names `markDelivered`, which takes the turn's sequence.
@@ -294,7 +294,7 @@ None of these was in a refactor pull request. The owner answered them on 2026-11
 |---|---|---|
 | Drop the options of `memoryOs` no caller passes (`env`, `timePrecision`, `rmSync`, `now`, `cwd`, `sqlite`), fd 3 `overlapped` and `ctx.os/pid/cwd/env` | The fake's documented API (os-layer.md §7.1, "Not modeled in memory") shrinks; no production code and no test uses them | Remove: #2105 (50 lines out, 16 in). `sqlite.open` stays because the `Os` type needs it, and is `ENOSYS`; an `'overlapped'` fd 3 is refused |
 | `turnsLost` releases requests as `lost`, `sessionsStopped` does not | Which text a request's sender reads after a crash against after a quit | The sender of a request always learns it will not be answered (#1186): a stop releases a request too, with the stop's cause (#2108). One case stays silent, #2113 |
-| Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | No change. #2035 kept all three on purpose ("The post rate, identical repeats and `ask_rate` stay; they are not volume holds between a pair") and #2014 names four other guards. Put to the owner as a new decision, which would be a bug-fix pull request with a test |
+| Whether #2014 meant `repeat`, `rate_limited` and `ask_rate` to warn rather than refuse | An agent's mail that repeats or exceeds a rate would warn the person and still go | No change. #2035 kept all three on purpose ("The post rate, identical repeats and `ask_rate` stay; they are not volume holds between a pair") and #2014 names four other guards. Nothing is changed. Whether they should warn instead is a new decision for the owner, still open; it would be a bug-fix pull request with a test |
 | "started from here" and "started here" in one wording | The text a model reads on a refusal | "started from here" (#2111) |
 
 ## 7. Not in this round
