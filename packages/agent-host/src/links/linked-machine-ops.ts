@@ -24,8 +24,12 @@ const linkError = (message: string) => rpcError(message)
 
 /** How often an update that waits for the sessions there to finish reads what is running (#1399) */
 const ACTIVITY_POLL_MS = 15_000
-/** How long the machine's own "Allow auto" may take to read or set before the row says it did not answer (as `LOOKUP_MS` for the orchestrator's read, #700) */
-const HUB_AUTO_MS = 4_000
+/**
+ * How long the machine's own "Allow auto" may take to read before the row says it did not answer. A person waits on the
+ * row, not a model on a tool call (the orchestrator's read is `LOOKUP_MS`, 4 s), so it is longer. The set is not bound: a
+ * change the machine applies after the row said it did not would leave the row showing the old state
+ */
+const HUB_AUTO_READ_MS = 15_000
 /** How long after a reading that says none is in a turn it is read once more, right before the host is stopped (#1399) */
 const ACTIVITY_SETTLE_MS = 3_000
 /** How many times a reading that failed is repeated before the update stops waiting for what it cannot see (#1399) */
@@ -470,10 +474,11 @@ export class LinkedMachine extends LinkedMachineConnection {
   async hubAuto(allowed?: boolean): Promise<HubAuto | 'unreachable'> {
     const client = this.client
     if (!client?.connected) return 'unreachable'
-    const ms = this.deps.hubAutoMs ?? HUB_AUTO_MS
+    const ms = this.deps.hubAutoReadMs ?? HUB_AUTO_READ_MS
     const timedOut = Symbol('timed out')
     try {
       return await askHubAuto(async (method, params) => {
+        if (allowed !== undefined) return client.call(method, params)
         const answer = await raceTimeout(client.call(method, params), ms, timedOut)
         if (answer === timedOut) throw new Error(`no answer within ${ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`}`)
         return answer

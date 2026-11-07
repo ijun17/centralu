@@ -105,8 +105,8 @@ export type LinkDeps = {
   retryMs?: [number, number]
   /** For tests: how often an update that waits for the sessions there reads what is running (15 s when absent, #1399) */
   activityPollMs?: number
-  /** For tests: how long the machine's "Allow auto from a linked computer" may take to read or set before the row says it did not answer (4 s when absent) */
-  hubAutoMs?: number
+  /** For tests: how long the machine's "Allow auto from a linked computer" may take to read before the row says it did not answer (15 s when absent; the set is not bound) */
+  hubAutoReadMs?: number
   /** For tests: how long a call waits for an attempt to connect that is under way (60 s when absent, #1341) */
   attemptWaitMs?: number
   /** For tests: how long a call that needs a machine which is down waits for the attempt it starts (10 s when absent, #1532) */

@@ -24,14 +24,17 @@ describe('what a machine says of its "Allow auto from a linked computer"', () =>
 })
 
 describe('the window asking a machine for its "Allow auto from a linked computer"', () => {
+  const machine = (call: () => Promise<unknown>) =>
+    Object.assign(Object.create(LinkedMachine.prototype), { record: { name: 'Box' }, deps: { hubAutoReadMs: 30 }, client: { connected: true, call } }) as LinkedMachine
+
   // A link that is up and never answers: the row says so after the bound, not after the client's whole call limit
-  it('says a machine that never answers did not, within the bound, for the read and for the set', async () => {
-    const m = Object.assign(Object.create(LinkedMachine.prototype), {
-      record: { name: 'Box' },
-      deps: { hubAutoMs: 30 },
-      client: { connected: true, call: () => new Promise<never>(() => {}) },
-    }) as LinkedMachine
-    await expect(m.hubAuto()).rejects.toThrow('Box did not answer for its "Allow auto from a linked computer": no answer within 30 ms')
-    await expect(m.hubAuto(false)).rejects.toThrow('no answer within 30 ms')
+  it('says a machine that never answers did not, within the bound, for the read', async () => {
+    await expect(machine(() => new Promise<never>(() => {})).hubAuto()).rejects.toThrow('Box did not answer for its "Allow auto from a linked computer": no answer within 30 ms')
+  })
+
+  // The machine applies a change when it gets to it: the row shows what it then answered, not that it did not answer
+  it('waits for a machine that is slow to set it, and answers what the machine then has', async () => {
+    const slow = machine(() => new Promise((resolve) => setTimeout(() => resolve({ allowed: true }), 90)))
+    expect(await slow.hubAuto(true)).toBe('on')
   })
 })
