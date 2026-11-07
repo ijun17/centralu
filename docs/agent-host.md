@@ -2842,7 +2842,7 @@ with that result — not when the install is done. Only during installation, a s
 answer to tolerate a stale npm edge. Retaining it preserves its original check time; an older stored version yields
 to the fresh tag so a release rollback takes effect. A target at or below the running version installs nothing.
 If the refresh fails, it installs the stored version and keeps a fallback notice during and after installation.
-Lookup, npm retries and bundle replacement are one busy operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
+Lookup, npm retries and bundle replacement are one busy operation; concurrent checks/clicks cannot replace its target or start a second install, and answer with that target once it is settled (#2131 review), not with the release the status named while it looked. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
 `centralu install`, then reports `restart_required`; it never restarts anything. npm is the source of truth for
 releases, so the copy is replaced whatever released version it holds, a higher one too: a release pulled from
 `latest` must not survive in /Applications to be offered by "Apply now". The one copy left alone is a maintainer's

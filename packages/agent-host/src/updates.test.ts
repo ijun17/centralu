@@ -245,12 +245,14 @@ describe('UpdateService', () => {
       void h.svc.apply()
       void h.svc.apply()
       old.resolve({ ok: true, version: '9999.0.2' })
-      await checking
       await vi.waitFor(() => expect(fetchLatest).toHaveBeenCalledTimes(3))
       expect(h.svc.current().phase).toBe('updating')
       void h.svc.apply()
-      expect((await h.svc.check(true)).phase).toBe('updating')
+      const during = h.svc.check(true)
       fresh.resolve({ ok: true, version: '9999.0.3' })
+      // Both checks answer with the install's settled target, not a release seen on the way (#2131 review)
+      expect(await checking).toMatchObject({ phase: 'updating', latest: '9999.0.3' })
+      expect(await during).toMatchObject({ phase: 'updating', latest: '9999.0.3' })
       await vi.waitFor(() => expect(h.calls).toHaveLength(1))
       void h.svc.apply()
       await h.svc.check(true)
@@ -771,6 +773,29 @@ describe('UpdateService', () => {
       expect(second).toMatchObject({ phase: 'updating', latest: '0.1.0-beta.51' })
       await settle()
       expect(h.calls.filter(([f]) => f === 'npm')).toHaveLength(1)
+    })
+
+    // #2131 review: during the install's lookup the status still names 50, which a check would report as available
+    it('a check while an install looks up the registry answers with what it installs', async () => {
+      const h = await waiting()
+      h.offer('0.1.0-beta.51')
+      const [during, installing] = await Promise.all([h.svc.check(true), h.svc.apply(), h.svc.apply()])
+      expect(during).toMatchObject({ phase: 'updating', latest: '0.1.0-beta.51' })
+      expect(installing).toMatchObject({ phase: 'updating', latest: '0.1.0-beta.51' })
+      await settle()
+      expect(h.svc.current()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.51' })
+      expect(h.calls.filter(([f]) => f === 'npm')).toHaveLength(1)
+    })
+
+    it("an install that cannot reach the registry keeps the waiting build's own notice beside why", async () => {
+      const local = '0.1.0-beta.50.local.1'
+      const h = await waiting({ installedCopy: '/Applications/Centralu.app', installedCopyVersion: () => local })
+      const notice = `The local build ${local} at /Applications/Centralu.app is newer than 0.1.0-beta.50 and was kept.`
+      expect(h.svc.current().error).toBe(notice)
+      h.offer(null)
+      h.elapse(2 * 60 * 1000)
+      expect(await h.svc.apply()).toMatchObject({ phase: 'restart_required', latest: '0.1.0-beta.50', error: `Could not reach the registry. ${notice}` })
+      expect(h.calls).toEqual([])
     })
 
     it('a check that cannot reach the registry leaves "restart to finish" as it was', async () => {
