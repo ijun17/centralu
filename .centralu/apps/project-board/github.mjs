@@ -808,6 +808,13 @@ export async function createIssue(repo, { title, body, labels }) {
   return { number: issue.number, url: issue.html_url ?? null }
 }
 
+/** Closes an issue as not planned, then says why (the main guard's retraction, #2082): closing twice changes nothing, so a try that stops between the two does not say it twice. */
+export async function closeIssue(repo, number, comment) {
+  checkRepo(repo)
+  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: 'not_planned' }, `closing #${number}`)
+  await postComment(repo, number, comment)
+}
+
 /** Moves a pull request onto another base branch. */
 export async function setPrBase(repo, number, base) {
   checkRepo(repo)

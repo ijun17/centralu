@@ -11,7 +11,7 @@
 // Decisions are pure functions here; `guardTick` reads GitHub and the checkout for them and keeps its
 // state in the queue file (`q.guard`), so it carries on in whichever driver holds the lease, and after
 // either restarts. It runs in the same ticks as the queue, at most once per GUARD_MS.
-import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
+import { createBranch, deleteBranch, dispatchWorkflow, GitHubError, FATAL, GUARD_NOTE, isOutage, jobNotes, postComment, readJobLog, readRepo, rerunRun, runJobSteps, workflowRuns } from './github.mjs'
 import { failingStepText, isTestFailure, testName } from './ci.mjs'
 import { CI, config, QUEUE } from './config.mjs'
 import { fetchRefs, git, GitError, remoteFor, topLevel } from './git.mjs'
@@ -222,11 +222,46 @@ async function noteFlakes({ repo, runs, g, update }) {
       if (fresh.guard?.reruns?.[id]) fresh.guard.reruns[id].flaked = true
     })
     if (!CI.knownFailures) continue
-    const body = `${GUARD_NOTE}\nIntermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so no commit was blamed and nothing was reverted.${r.line ? ` The first failing line: "${r.line}"` : ''}`
+    // A run the guard blamed a commit for did lead to a revert or an issue (#2082): the note says so, and that they are taken back
+    const blame = [g.hunt, ...(g.blamed ?? [])].find((h) => h && String(h.run) === id && (h.issue != null || h.revert?.pr))
+    const filed = blame ? [blame.revert?.pr ? `the revert #${blame.revert.pr}` : null, blame.issue != null ? `the issue #${blame.issue}` : null].filter(Boolean).join(' and ') : ''
+    const outcome = blame ? `a commit was blamed earlier (${filed}), which the main guard takes back` : 'no commit was blamed and nothing was reverted'
+    const body = `${GUARD_NOTE}\nIntermittent failure: ${r.jobs.join(', ')} failed on main at ${short(r.sha)} (${r.url ?? `run ${id}`}) and passed when its failed jobs were rerun, so ${outcome}.${r.line ? ` The first failing line: "${r.line}"` : ''}`
     await postComment(repo, CI.knownFailures, body).catch((e) => {
       if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
     })
   }
+}
+
+/**
+ * The run a finished hunt filed a revert or an issue for, when it has since passed on a later attempt than the one that failed
+ * (#2082: a person reran main's run after the guard blamed a commit, and the same job passed); null while it has not, or when
+ * there is nothing filed, or the retraction is done, or the failure came again and again (`repeats`: a rerun that passes is what it always does). A newer run that passes says nothing: the commit may be what a later one fixed.
+ */
+export function passedAfterBlame({ hunt, runs, now = clock() }) {
+  if (!hunt?.endedAt || hunt.retracted?.done || hunt.retracted?.gaveUp || hunt.repeats || (hunt.issue == null && !hunt.revert?.pr)) return null
+  // Kept as long as `BLAME_KEEP_MS`, whichever list it is in
+  if (now - Date.parse(hunt.endedAt) > BLAME_KEEP_MS) return null
+  const run = runs.find((r) => String(r.id) === String(hunt.run))
+  return run && run.status === 'completed' && run.conclusion === 'success' && (run.attempt ?? 1) > (hunt.attempt ?? 1) ? run : null
+}
+
+/** How long a finished hunt's revert and issue can still be taken back after main went green or another hunt began (#2082) */
+/** How many steps a retraction that fails for its own reasons is tried before it is left to a person */
+export const RETRACT_TRIES = 10
+export const BLAME_KEEP_MS = Number(process.env.PROJECT_BOARD_QUEUE_BLAME_KEEP_MS) || 3 * 24 * 3600_000
+const BLAMED_KEPT = 10
+
+/**
+ * `guard.blamed` with a finished hunt added: what `passedAfterBlame` needs of it once main is green again (the revert that lands
+ * has its own green run, and only then does a person rerun the run that was blamed), so the retraction is not lost with the hunt.
+ * Kept until retracted, or `BLAME_KEEP_MS`. Null when there is nothing to add.
+ */
+export function rememberBlame(blamed, hunt, now) {
+  if (!hunt?.endedAt || hunt.retracted?.done || (hunt.issue == null && !hunt.revert?.pr)) return null
+  const fresh = (blamed ?? []).filter((b) => !b.retracted?.done && now - Date.parse(b.endedAt) < BLAME_KEEP_MS && String(b.run) !== String(hunt.run))
+  const { probe: _probe, ...record } = hunt
+  return [...fresh, record].slice(-BLAMED_KEPT)
 }
 
 /** The text of the step that failed first in a failed job's log; empty when the log cannot be read */
@@ -271,7 +306,7 @@ export function carried(all, known, pos) {
  * found, and answers what to record (`outcome` and anything else), or null when another driver holds the
  * lease. `probeCommit` makes a commit without known culprits for a probe. Answers what it did.
  */
-export async function guardTick({ q, update, now = clock(), renew, act, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
+export async function guardTick({ q, update, now = clock(), renew, act, retract, dir = QUEUE.conflicts.checkout, failingLine, probeCommit = commitWithout }) {
   if (!QUEUE.guard) return { did: 'off' }
   const g = q.guard ?? {}
   if (g.nextAt && Date.parse(g.nextAt) > now) return { did: 'wait' }
@@ -280,9 +315,36 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const runs = await workflowRuns(repo, WORKFLOW, { event: 'push', branch: defaultBranch })
   const { green, red, unfinished } = mainVerdict(runs)
   await noteFlakes({ repo, runs, g, update })
+  // The run a revert and an issue were filed for passed when rerun: the guard takes them back (#2082)
+  // The hunt under way or ended, and the ended ones main went green over (`guard.blamed`)
+  const passed = retract ? [g.hunt, ...(g.blamed ?? [])].map((h) => ({ h, run: passedAfterBlame({ hunt: h, runs, now }) })).find((x) => x.run) : null
+  if (passed) {
+    try {
+      if (!(await retract(passed.h, passed.run))) return { did: 'yielded' }
+    } catch (e) {
+      // What GitHub's outage or the machine's state (no network, no login, a limit) stops is waited out; anything else (an issue gone or unreadable)
+      // is tried `RETRACT_TRIES` times and then left to a person, and never stops the guard from looking at main's red
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind) || isOutage(e)) throw e
+      console.error(`[project-board] main guard: could not take back the blame for run ${passed.h.run}: ${e.message}`)
+      await update((fresh) => {
+        for (const h of [fresh.guard?.hunt, ...(fresh.guard?.blamed ?? [])]) {
+          if (h && String(h.run) === String(passed.h.run)) {
+            const tries = (h.retracted?.tries ?? 0) + 1
+            h.retracted = { ...(h.retracted ?? {}), tries, ...(tries >= RETRACT_TRIES ? { gaveUp: new Date(now).toISOString() } : {}) }
+          }
+        }
+      })
+    }
+  }
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
-  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
+  const save = (patch) =>
+    update((fresh) => {
+      const guard = fresh.guard ?? {}
+      // A finished hunt that main's green or another hunt replaces is kept, with what it filed, to be taken back later
+      const blamed = 'hunt' in patch && guard.hunt && String(patch.hunt?.run) !== String(guard.hunt.run) ? rememberBlame(guard.blamed, guard.hunt, now) : null
+      fresh.guard = { ...guard, pending, unfinished, ...patch, ...(blamed ? { blamed } : {}), nextAt: new Date(now + GUARD_MS).toISOString() }
+    })
   const hunt = g.hunt ?? null
   const hunted = g.hunted ?? []
   const known = g.known ?? []
@@ -304,7 +366,7 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   const lastGreen = green ?? g.green ?? null
   const jobs = await diagnose(repo, red, { failingLine })
   const line = jobs.first && failingLine ? await failingLine(repo, jobs.first) : ''
-  const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, kind: jobs.kind, cause: jobs.cause, step: jobs.step ?? null, at: new Date(now).toISOString() }
+  const base = { red: red.headSha, run: red.id, url: red.url ?? null, jobs: jobs.names, line, attempt: red.attempt ?? 1, kind: jobs.kind, cause: jobs.cause, step: jobs.step ?? null, at: new Date(now).toISOString() }
   const stop = async (why) => {
     const record = await act({ red: base, culprit: null, why })
     if (!record) return { did: 'yielded' }
