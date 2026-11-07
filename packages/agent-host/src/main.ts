@@ -101,7 +101,7 @@ const launch = takeLaunchEnv()
  * PowerShell it takes runs while the store opens; awaited at `work job`, before anything else is started.
  */
 let ptyBroker: PtyBroker | null = null
-if (workJobWanted(launch)) {
+if (workJobWanted()) {
   try {
     ptyBroker = PtyBroker.start()
   } catch (err) {
@@ -109,7 +109,7 @@ if (workJobWanted(launch)) {
     console.error(`[agent-host] ${(err as Error).message}; terminals start in the host`)
   }
 }
-const workJob = joinWorkJob(launch)
+const workJob = joinWorkJob()
 /*
  * The token, when the launcher hands it over on stdin (#538) rather than in the environment. Read before the control
  * channel and the parent watch take stdin, which then see only what follows it. Without it no client could reach

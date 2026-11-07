@@ -1122,9 +1122,9 @@ opens) must outlive a host that crashes. They are started by a broker the host s
 JSON line per message over its stdin and stdout, behind a node-pty-shaped surface. It ends
 with the host and its pseudoconsoles with it, so the shell ends as before, but what the shell started outside its
 console stays. A quit still ends each terminal's tree as before. Run commands, agents, git and app servers stay in the
-job. A broker that cannot start, or ends, leaves new terminals to start in the host. Under a keeper the host joins no
-job (`lifecycle/work-job.ts`), a rule from when the keeper held what had to outlive a host swap; #1895 step 4 PR 1
-leaves it as it is, and no keeper runs on Windows. The host opens nothing for the person: "Open in IDE" and
+job. A broker that cannot start, or ends, leaves new terminals to start in the host. The host joins the job under a keeper too
+(`lifecycle/work-job.ts`): the keeper holds none of its children any more (#1895 step 4), and a detached grandchild
+of a dev server survived `taskkill /F` of a host that did not join (measured with `CC_KEEPER=1`). The host opens nothing for the person: "Open in IDE" and
 `system.openUrl` are the window's. A host that cannot join (PowerShell refused, an outer job that forbids it) says so
 in its log and runs as before.
 

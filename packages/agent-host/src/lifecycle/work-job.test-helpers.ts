@@ -18,7 +18,7 @@ import { joinWorkJob } from './work-job.js'
 
 const [out, mode] = process.argv.slice(2) as [string, string]
 const broker = PtyBroker.start()
-const job = mode === 'join' ? await joinWorkJob({ underKeeper: false }) : { state: 'not joined' }
+const job = mode === 'join' ? await joinWorkJob() : { state: 'not joined' }
 
 const powershell = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
 const sleeper = join(out, 'sleeper.cjs')
