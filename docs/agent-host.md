@@ -2943,8 +2943,11 @@ to apply it. `centralu install` applies the same rule by itself and takes `--for
 purpose (#645). With `autoApply` on ("Apply updates
 automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
 default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
-version already known starts it at once. Not over an install under way or one already finished: a check after it leaves
-`restart_required` alone, so it installs once. A failed install stays visible until another install attempt;
+version already known starts it at once. Not over an install under way, nor again over one already finished: a check
+after it still asks the registry (#2130), since a host may wait days to be restarted, but the release it installed, or
+an older one, leaves `restart_required` as it was, so that release installs once. A release past it is reported as
+newer (`idle`), and installing it, by a click or by itself, replaces the waiting build; the window then offers it
+rather than the build on disk. A failed install stays visible until another install attempt;
 a background or requested check does not erase its error. With `autoApply` on, the host tries again by itself on a
 backoff — 10 minutes, then 1 hour, then every 6 hours — from a timer kept in memory (#645): a check that lands
 before the delay starts nothing, one after it retries too, and a release other than the one that failed is tried at
