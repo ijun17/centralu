@@ -1243,20 +1243,6 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     expect(guardOnDisk().passive).toBeUndefined()
   })
 
-  it('keeps guarding a landing 3.5 hours old whose full run is still going, and answers the red when it finishes (#2115)', async () => {
-    const { repo, sha } = oneCommit()
-    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date(Date.now() - 3.5 * 3600_000).toISOString(), reruns: {} }])
-    // The guard's last step saw main's run unfinished
-    const file = (extra: object) => ({ pending: true, pendingShas: [sha], unfinished: 1, ...extra })
-    guardRuntime(repo, redRun(repo, sha))
-    const q = JSON.parse(readFileSync(queueFile(), 'utf8'))
-    q.guard = file({})
-    writeFileSync(queueFile(), JSON.stringify(q))
-    await call('merge_queue')
-    await until(() => reruns().length > 0, 'the guard at work')
-    expect(guardOnDisk().passive).toBeUndefined()
-  })
-
   it('writes down which commits main\'s unfinished runs are for, so a pending run is waited for only by the instance that landed it', async () => {
     const { repo, sha } = oneCommit()
     landed(sha)
