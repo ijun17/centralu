@@ -233,7 +233,7 @@ describe('what is kept for the turns a hub may be owed', () => {
       expect(JSON.parse(spans(id)!).latest.ended).toBe(true)
       expect(await restarted.linkedHost.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'half of the second' })
     } finally {
-      await restarted.disposeAll()
+      await restarted.tenure.disposeAll()
     }
   })
 

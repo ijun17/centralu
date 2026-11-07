@@ -95,9 +95,9 @@ async function swapMidTurn(takesOverTurn: boolean | undefined, hubGave = false, 
     store.settings.setAppSetting(`input_origins:${s.id}`, JSON.stringify([['note-1', { seq: 2, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }]]))
     store.settings.setAppSetting(`turn_span:${s.id}`, JSON.stringify({ latest: { since: 1 } }))
   }
-  await a.mgr.detachAll()
+  await a.mgr.tenure.detachAll()
   const b = host(takesOverTurn, new Set([s.id]), failSend)
-  await b.mgr.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() }])
+  await b.mgr.tenure.adoptKept([{ sessionId: s.id, tool: 'claude', process: new FakeProcess() }])
   return { b, id: s.id }
 }
 

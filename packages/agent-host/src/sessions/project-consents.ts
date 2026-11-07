@@ -7,7 +7,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * What the cross-project consents reach of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ProjectConsentsHost = Pick<DelegationHost, 'askHost' | 'emit' | 'meta' | 'store'> &
+export type ProjectConsentsHost = Pick<DelegationHost, 'hostCards' | 'emit' | 'meta' | 'store'> &
   Pick<SessionTrashHost, 'appsHub'> &
   { readonly queue: Pick<QueuedRequests, 'withdrawReaches'> }
 
@@ -48,7 +48,7 @@ export class ProjectConsents {
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
     if (this.host.store.permissions.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
-    const decision = await this.host.askHost(
+    const decision = await this.host.hostCards.askHost(
       callerSessionId,
       {
         kind: 'project_access',

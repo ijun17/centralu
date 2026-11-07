@@ -24,7 +24,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   vi.useRealTimers()
-  for (const mgr of later.splice(0)) await mgr.disposeAll()
+  for (const mgr of later.splice(0)) await mgr.tenure.disposeAll()
   await w.dispose()
 })
 

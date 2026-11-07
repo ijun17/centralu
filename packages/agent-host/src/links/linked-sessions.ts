@@ -2,6 +2,7 @@ import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadS
 import { NOT_CONNECTED, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
+import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
 import { awaySentence, notReachable, TAIL, type Tail } from './machine-reach.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
@@ -118,8 +119,8 @@ export function linkedSessions(
     return m.reachable ? null : { ok: false, error: awaySentence(m, tail) }
   }
   /** The router's call, its refusal as the sentence the model reads */
-  const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>): Promise<({ ok: true } & T) | Refusal> => {
-    const down = await reach(m, TAIL.tryAgain)
+  const attempt = async <T>(m: RoutedMachine, run: () => Promise<T>, tail: Tail = TAIL.tryAgain): Promise<({ ok: true } & T) | Refusal> => {
+    const down = await reach(m, tail)
     if (down) return down
     try {
       return { ok: true, ...(await run()) }
@@ -136,13 +137,13 @@ export function linkedSessions(
       const m = find(id)
       return m ? [m, null] : [null, { ok: false, error: refusal(id) }]
     }
-    const via = async <T>(id: string, run: (m: RoutedMachine) => Promise<T>) => {
+    const via = async <T>(id: string, run: (m: RoutedMachine) => Promise<T>, tail?: Tail) => {
       const [m, refused] = found(id)
-      return m ? attempt(m, () => run(m)) : refused
+      return m ? attempt(m, () => run(m), tail) : refused
     }
     return [found, via] as const
   }
-  const [findSession, viaSession] = reaching(owner, (id) => `Not a session of a linked machine: ${id}`)
+  const [, viaSession] = reaching(owner, (id) => `Not a session of a linked machine: ${id}`)
   const [findProject, viaProject] = reaching(owner, (id) => `Not a project of a linked machine: ${id}`)
   const [findMachineRef, viaMachine] = reaching(machineById, (id) => `No linked machine ${id}`)
   /** What a machine answers to a list method, as an array: none when it did not answer with a list */
@@ -395,8 +396,9 @@ export function linkedSessions(
 
     hubAuto(machineId) {
       return viaMachine(machineId, async (m) => {
-        const r = (await m.call('host.hubAuto', {})) as { allowed?: unknown }
-        return { allowed: r?.allowed === true }
+        const state = await askHubAuto((method, params) => m.call(method, params))
+        if (state === 'older') throw new Error(`${m.name} runs a Centralu from before "Allow auto from a linked computer"`)
+        return { allowed: state === 'on' }
       })
     },
 
@@ -588,21 +590,19 @@ export function linkedSessions(
       return { name: oneLine(s.name), project: `${isObj(p) ? oneLine(p.name) : '(none)'} on ${m.name}` }
     },
 
-    async lastWords(sessionId, maxChars, opts) {
-      const [m, refusal] = findSession(sessionId)
-      if (!m) return refusal
-      const down = await reach(m, TAIL.none)
-      if (down) return down
-      try {
-        const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}), ...(opts?.since !== undefined ? { since: opts.since } : {}) })
-        const r = HostLastAnswerResult.safeParse(answer)
-        if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
-        // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
-        const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
-        return { ok: true, text, length: r.data.length, seq: r.data.seq }
-      } catch (err) {
-        return { ok: false, error: cause(err) }
-      }
+    lastWords(sessionId, maxChars, opts) {
+      return viaSession(
+        sessionId,
+        async (m) => {
+          const answer = await m.call('host.lastAnswer', { sessionId: m.q.strip(sessionId, 'The session'), maxChars: Math.min(maxChars, ANSWER_MAX_CHARS), ...(opts?.turn ? { turn: true } : {}), ...(opts?.since !== undefined ? { since: opts.since } : {}) })
+          const r = HostLastAnswerResult.safeParse(answer)
+          if (!r.success) throw new Error(`${m.name} answered in a shape this Centralu does not read`)
+          // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
+          const text = r.data.text.length > maxChars || r.data.length > r.data.text.length ? `${r.data.text.slice(0, maxChars)}…` : r.data.text
+          return { text, length: r.data.length, seq: r.data.seq }
+        },
+        TAIL.none,
+      )
     },
 
     async list() {
@@ -624,37 +624,35 @@ export function linkedSessions(
       return owner(sessionId)?.name ?? null
     },
 
-    async read(sessionId, limit, opts) {
-      const [m, refusal] = findSession(sessionId)
-      if (!m) return refusal
-      const down = await reach(m, TAIL.readAgain)
-      if (down) return down
+    read(sessionId, limit, opts) {
       const toolMode = toolLinesOf(opts?.tools)
-      try {
-        const answer = await m.call('host.readSession', {
-          sessionId: m.q.strip(sessionId, 'The session'),
-          ...(limit !== undefined ? { limit } : {}),
-          ...(opts?.around !== undefined ? { around: opts.around } : {}),
-          ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
-          ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
-          ...(opts?.before !== undefined ? { before: opts.before } : {}),
-          ...(opts?.from !== undefined ? { from: opts.from } : {}),
-          ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
-        })
-        const r = HostReadSessionResult.safeParse(answer)
-        if (!r.success) return { ok: false, error: `${m.name} answered in a shape this Centralu does not read` }
-        // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
-        const all = r.data.lines
-        const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all
-        // An `around` read: where the spot is in the machine's window, which it centres on it when lines come before it
-        const spot = Math.min(Math.floor(Math.min(limit ?? 40, 200) / 2), all.length - 1)
-        const around = opts?.around !== undefined && opts.before === undefined && opts.from === undefined
-        const center = !around ? null : Math.min(toolMode === 'none' ? all.slice(0, spot).filter((l) => !isToolLine(l)).length : spot, kept.length - 1)
-        const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
-        return { ok: true, state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
-      } catch (err) {
-        return { ok: false, error: cause(err) }
-      }
+      return viaSession(
+        sessionId,
+        async (m) => {
+          const answer = await m.call('host.readSession', {
+            sessionId: m.q.strip(sessionId, 'The session'),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(opts?.around !== undefined ? { around: opts.around } : {}),
+            ...(opts?.tools !== undefined ? { toolLines: toolMode } : {}),
+            ...(opts?.maxChars !== undefined ? { maxChars: budgetOf(opts.maxChars) } : {}),
+            ...(opts?.before !== undefined ? { before: opts.before } : {}),
+            ...(opts?.from !== undefined ? { from: opts.from } : {}),
+            ...(opts?.offset !== undefined ? { offset: opts.offset } : {}),
+          })
+          const r = HostReadSessionResult.safeParse(answer)
+          if (!r.success) throw new Error(`${m.name} answered in a shape this Centralu does not read`)
+          // The held bounds apply to every answer, a machine's own too: tool lines left out for `none`, then the budget
+          const all = r.data.lines
+          const kept = toolMode === 'none' ? all.filter((l) => !isToolLine(l)) : all
+          // An `around` read: where the spot is in the machine's window, which it centres on it when lines come before it
+          const spot = Math.min(Math.floor(Math.min(limit ?? 40, 200) / 2), all.length - 1)
+          const around = opts?.around !== undefined && opts.before === undefined && opts.from === undefined
+          const center = !around ? null : Math.min(toolMode === 'none' ? all.slice(0, spot).filter((l) => !isToolLine(l)).length : spot, kept.length - 1)
+          const lines = fitMachineLines(kept, budgetOf(opts?.maxChars), center)
+          return { state: oneLine(r.data.state, 40), lines: lines.map(fencedLine) }
+        },
+        TAIL.readAgain,
+      )
     },
 
     async recall(query, limit) {
@@ -662,7 +660,7 @@ export function linkedSessions(
       const hits = await Promise.all(
         [...machines()].map(async (m): Promise<RecallHit[]> => {
           if (!m.reachable) {
-            notSearched.push(`${m.name} (not reachable right now)`)
+            notSearched.push(`${m.name} (${m.waitsForPerson ? 'not connected; ask the person to connect it in Settings, Machines, Connect' : NOT_REACHABLE})`)
             return []
           }
           try {

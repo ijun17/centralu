@@ -42,7 +42,7 @@ export class AgentConsents {
     if (this.trustIsAgentConsent(callerId, detail.project.id)) return { ok: true }
     const requestId = `ag-${randomUUID()}`
     if (this.host.meta.get(callerId)?.permissionPreset !== 'auto') onCard?.(requestId)
-    return this.agentConsentFrom(callerId, detail.project.id, await this.host.askHost(callerId, detail, signal, { requestId }))
+    return this.agentConsentFrom(callerId, detail.project.id, await this.host.hostCards.askHost(callerId, detail, signal, { requestId }))
   }
 
   /** A `normal` or `edits` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */

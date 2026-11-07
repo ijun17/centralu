@@ -678,11 +678,15 @@ jobs:
   # WebKit (e2e/playwright.config.ts). Not gated by the files: every full run has it, documents only
   # included.
   #
-  # Sharded so the job finishes inside the time the slowest other job already takes (`windows
-  # tests`, about 6.5 minutes). Measured 2026-10-11: the suite is about 18 minutes of one runner's
-  # time; 4 shards took 5.7 to 6.3 minutes a job, 5 take 3.9 to 5.3 (about 45 seconds of it setup
-  # and installing WebKit). Playwright's default of 2 workers on these 4-CPU runners: 3 workers
-  # were no faster. Each shard runs a slice of the tests with its own dev servers and hosts; every
+  # Sharded so every shard ends well inside the tests' step limit (12 minutes) on a slow runner too.
+  # Measured 2026-10-11: the suite was about 18 minutes of one runner's time and 5 shards took 3.9 to
+  # 5.3 minutes of tests. Measured 2026-11-06: 1,330 tests, 5 shards took 5.7 to 12.0 minutes, and 6 of
+  # 270 timed out with nothing hung: the same tests ran up to 1.6 times slower on some runners than on
+  # others (a shard of 260 tests: 770 s of test time on one, 1,200 s on another), the replay's 60 tests
+  # (one worker, 4 to 8 s each) all fell in shard 1 (`--shard` cuts the list in the order of the projects),
+  # and a shard's time is about half its test time (Playwright's default of 2 workers on these 4-CPU
+  # runners; 3 were no faster). So 10 shards, and each plays its share of the replay on its own, then the rest
+  # (.github/scripts/e2e-shard.sh): the shards of full runs on this branch took 4.8 to 9.1 minutes on 8 (WebKit) and 3.9 to 7.2 on 10. Each shard runs a slice of the tests with its own dev servers and hosts; every
   # shard keeps a blob report, and when one fails the `e2e report` job below merges them into one
   # HTML report with traces. A failed test runs once more (Playwright's `retries`, CI only), and one
   # that passes then is flaky, not green: e2e/flaky-report.ts names it on the run and has `e2e
@@ -692,7 +696,7 @@ jobs:
   # Time limits (2026-10-19): one shard hung 35 minutes and held a merge batch. A job's limit is its
   # slowest green run of the last 20 full runs with about half again on top, so a hang ends as a
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
-  # e2e shards 9.7/15 (WebKit; Chromium 8.3), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
+  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
   # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
@@ -713,8 +717,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -793,12 +797,9 @@ jobs:
         timeout-minutes: 12
         env:
           E2E_BROWSER: webkit
-          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
-          # One name per shard, so the merge below does not overwrite one shard's report with another's
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
         # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
         # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
+        run: bash .github/scripts/e2e-shard.sh ${{ matrix.shard }} ${{ matrix.shards }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -825,8 +826,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -896,11 +897,9 @@ jobs:
         timeout-minutes: 12
         env:
           E2E_BROWSER: chromium
-          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
-          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.shard }}.zip
         # A failed test runs once more (e2e/playwright.config.ts `retries`), and one that passes then is named by
         # e2e/flaky-report.ts: an annotation, the job summary and `flaky=true` on this step's outputs
-        run: pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob,./e2e/flaky-report.ts --trace=retain-on-failure
+        run: bash .github/scripts/e2e-shard.sh ${{ matrix.shard }} ${{ matrix.shards }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -918,8 +917,8 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        shards: [5]
-        shard: [1, 2, 3, 4, 5]
+        shards: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - run: echo "Only documents changed (.github/scripts/ci-changes.mjs)"
 
@@ -949,14 +948,15 @@ jobs:
           pattern: e2e-blob-*
           path: blobs
 
-      # download-artifact puts each artifact in a folder of its own name: e2e-blob-<engine>-<shard>
+      # download-artifact puts each artifact in a folder of its own name: e2e-blob-<engine>-<shard>; in it a shard keeps the
+      # replay run's report in a folder of its own (.github/scripts/e2e-shard.sh)
       - name: Merge the shard reports, per engine
         run: |
           set -euo pipefail
           for engine in webkit chromium; do
             mkdir -p "merge/$engine"
             for dir in blobs/e2e-blob-"$engine"-*; do
-              if [ -d "$dir" ]; then cp "$dir"/*.zip "merge/$engine/"; fi
+              if [ -d "$dir" ]; then find "$dir" -name '*.zip' -exec cp {} "merge/$engine/" \; ; fi
             done
             if ls "merge/$engine"/*.zip >/dev/null 2>&1; then
               # The flaky tests' table goes to this job's summary under the engine's name; their annotations came from the shards

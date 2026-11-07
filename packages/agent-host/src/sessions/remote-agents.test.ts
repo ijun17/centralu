@@ -52,7 +52,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     linkedReader: reader,
     meta: new Map([[caller.id, caller]]),
     settleLinkedTurn: (id: string) => settled.push(id),
-    linkedTasksRunning: () => [],
+    linkedReports: { ownTasksRunning: () => [] },
     tellSession: async (_to: string, text: string) => void told.push(text),
     ...extra,
   } as unknown as RemoteAgentsHost
@@ -207,7 +207,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       linkedReader: reader,
       meta: new Map([[caller.id, caller]]),
       settleLinkedTurn: (id: string) => settled.push(id),
-      linkedTasksRunning: () => [],
+      linkedReports: { ownTasksRunning: () => [] },
       tellSession: async (_to: string, text: string) => void told.push(text),
       autoBoundaryOpen: () => false,
       emit: () => {},

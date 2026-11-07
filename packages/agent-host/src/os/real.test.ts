@@ -46,6 +46,7 @@ describe('the real OS and the in-memory one answer the contract alike', () => {
               ),
             program: (path) => copyFileSync(process.execPath, path),
             cat: { command: process.execPath, args: ['-e', 'process.stdin.pipe(process.stdout)'] },
+            pass: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           }),
         )
         const memory = memoryOs({ as: HOST_FAMILY, symlinks: canSymlink })

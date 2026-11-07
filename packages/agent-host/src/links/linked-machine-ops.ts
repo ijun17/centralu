@@ -1,6 +1,7 @@
 import { errorMessage, HostActivity, isLocalBuildVersion, isNewerVersion, releaseOf, turnsRunning } from '@cc/protocol'
 import type { MachineAutostartResult, MachineInfo, MachineInstallResult, MachineOperation, MachineUninstallResult } from '@cc/protocol'
 import { autostartRemote } from './autostart.js'
+import { askHubAuto, type HubAuto } from './hub-auto.js'
 import { installRemote, type InstallResult } from './install.js'
 import type { LinkInstaller } from './link-deps.js'
 import { LinkedMachineConnection } from './linked-machine-connection.js'
@@ -464,17 +465,14 @@ export class LinkedMachine extends LinkedMachineConnection {
    * or went down during the call. Any other failure (a timeout, a refusal there) is thrown in its own words (#1273
    * review), never passed off as the link being down
    */
-  async hubAuto(allowed?: boolean): Promise<'on' | 'off' | 'older' | 'unreachable'> {
+  async hubAuto(allowed?: boolean): Promise<HubAuto | 'unreachable'> {
     const client = this.client
     if (!client?.connected) return 'unreachable'
     try {
-      const r = (await (allowed === undefined ? client.call('host.hubAuto', {}) : client.call('host.setHubAuto', { allowed }))) as { allowed?: unknown }
-      return r?.allowed === true ? 'on' : 'off'
+      return await askHubAuto((method, params) => client.call(method, params), allowed)
     } catch (err) {
-      const message = (err as Error)?.message ?? String(err)
-      if (/^Unknown method/.test(message)) return 'older'
       if (!client.connected) return 'unreachable'
-      throw rpcError(`${this.name} did not answer for its "Allow auto from a linked computer": ${message}`)
+      throw rpcError(`${this.name} did not answer for its "Allow auto from a linked computer": ${errorMessage(err)}`)
     }
   }
 

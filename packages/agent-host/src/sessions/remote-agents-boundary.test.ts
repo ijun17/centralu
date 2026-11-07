@@ -3,6 +3,7 @@ import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import type { ChildRunResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
+import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
@@ -47,6 +48,10 @@ class Machine {
   readGate: Promise<void> | null = null
   /** The error the hub's send gets, as a link that dropped as it went */
   sendError: string | null = null
+  /** What a stop does there as the hub's interrupt reaches it (its turn ends), the error it gets instead, and a gate the deletion waits at */
+  onInterrupt: (() => void) | null = null
+  interruptError: string | null = null
+  deleteGate: Promise<void> | null = null
   private seq = 0
   private cards = 0
 
@@ -141,8 +146,15 @@ class Machine {
       createSession: async () => ({ ok: true, sessionId: CHILD, name: 'Child' }),
       projects: async () => ({ projects: [{ id: 'm1.p', machineId: 'm1', machine: 'Box', name: 'app', path: '/app' }], away: [] }),
       origin: async () => ({ ok: true, origin: 'git@github.com:me/app.git' }),
-      interrupt: async () => ({ ok: true }),
-      deleteSession: async () => ({ ok: true }),
+      interrupt: async () => {
+        if (this.interruptError) return { ok: false, error: this.interruptError }
+        this.onInterrupt?.()
+        return { ok: true }
+      },
+      deleteSession: async () => {
+        if (this.deleteGate) await this.deleteGate
+        return { ok: true }
+      },
       backgroundTasks: async () => (this.reachable ? [{ sessionId: CHILD, tasks: this.live }] : null),
     } as unknown as LinkedSessions
   }
@@ -158,6 +170,10 @@ class Hub {
   readonly toldModel: string[] = []
   readonly delivered: string[] = []
   readonly results: ChildRunResult[] = []
+  /** The sessions here, the caller among them, which a test may change */
+  readonly meta = new Map([[caller.id, caller]])
+  /** What a test puts in place of the session manager's members (its cards, its `auto` boundary), at the next boot */
+  more: Record<string, unknown> = {}
 
   constructor(
     readonly store: Store,
@@ -184,15 +200,16 @@ class Hub {
       children: this.children,
       store: this.store,
       linkedReader: reader,
-      meta: new Map([[caller.id, caller]]),
+      meta: this.meta,
       settleLinkedTurn: (id: string) => this.reports.observe({ type: 'turn_complete', sessionId: id }),
-      linkedTasksRunning: (id: string) => this.reports.ownTasksRunning(id),
+      linkedReports: { ownTasksRunning: (id: string) => this.reports.ownTasksRunning(id) },
       tellSession: async (_to: string, text: string, _ref: unknown, _quiet: unknown, forModel?: string) => void (this.told.push(text), this.toldModel.push(forModel ?? text)),
       autoBoundaryOpen: () => false,
       emit: () => {},
       uiPreferences: () => ({}),
-      askHost: async () => 'allow',
-      projectOrigin: async () => 'https://github.com/me/app',
+      hostCards: { askHost: async () => 'allow' },
+      files: { projectOrigin: async () => 'https://github.com/me/app' },
+      ...this.more,
     } as unknown as RemoteAgentsHost, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
     this.agents.restore()
   }
@@ -716,6 +733,52 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       expect(notes()).toHaveLength(0)
     })
 
+    it("is kept when the stop before a deletion does not go, and not sent to a child being deleted whose stopped turn ends first", async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      machine.interruptError = 'Box is not reachable right now'
+      expect(await hub.act('delete')).toMatchObject({ ok: false, error: expect.stringContaining('before deleting it') })
+      expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toHaveLength(1)
+      machine.interruptError = null
+      // The deletion is still on its way when the stopped turn's end has been read there
+      let release!: () => void
+      machine.deleteGate = new Promise<void>((resolve) => (release = resolve))
+      machine.onInterrupt = () => machine.selfTurnEnds()
+      const deleting = hub.act('delete')
+      await flush()
+      expect(notes()).toHaveLength(0)
+      release()
+      expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
+      await flush()
+      expect(notes()).toHaveLength(0)
+    })
+
+    it('is not sent to a child being deleted at rest, when the turn that freed it ended just before', async () => {
+      await reportedThenBusy()
+      expect(await hub.act('send', queue)).toMatchObject({ ok: true, state: 'queued' })
+      await flush()
+      // The held note's read of the child is answered late; the deletion's own read is not
+      machine.reads = 0
+      let answer!: () => void
+      const late = new Promise<void>((resolve) => (answer = resolve))
+      machine.onRead = (n) => {
+        machine.readGate = n === 1 ? late : null
+      }
+      machine.selfTurnEnds()
+      await flush()
+      let release!: () => void
+      machine.deleteGate = new Promise<void>((resolve) => (release = resolve))
+      const deleting = hub.act('delete')
+      await eventually(() => machine.reads === 2)
+      answer()
+      await flush()
+      expect(notes()).toHaveLength(0)
+      release()
+      expect(await deleting).toMatchObject({ ok: true, state: 'deleted' })
+      expect(notes()).toHaveLength(0)
+    })
+
     const gotten = () => machine.fromHub.filter((t) => /first note|second note|third note|C-note/.test(t)).map((t) => /first|second|third|C-note/.exec(t)![0])
     const queueNote = async (text: string) => {
       const r = await hub.act('send', { text, ifBusy: 'queue' })
@@ -1023,5 +1086,92 @@ describe("a person's message on the child's machine does not close the report (#
     await linkUp()
     expect(hub.delivered).toEqual([])
     expect(hub.told.filter((t) => t.includes('did not give it'))).toHaveLength(1)
+  })
+})
+
+/**
+ * What a start on a linked machine, and a send to its child, rest on in the caller (#1038, RV13): read before anything
+ * is asked, again after the card and before each send. After the card it is the check a local start reads after its card
+ * (`agentStartGateError`), in its words, and an `auto` caller in an untrusted project is logged once, at the start's first
+ * gate, as a local start logs it, not at every send.
+ */
+describe('what a start and a send on a linked machine rest on in the caller', () => {
+  /** The session manager's `auto` boundary as it is: open for an `auto` caller, logged when it names what it opens */
+  const autoBoundaryOpen = (id: string, boundary?: string) => {
+    if (hub.meta.get(id)?.permissionPreset !== 'auto') return false
+    if (boundary) console.error(`[permissions] auto session ${id}: ${boundary} allowed`)
+    return true
+  }
+  const boot = (more: Record<string, unknown> = {}) => {
+    hub.more = { autoBoundaryOpen, ...more }
+    hub.boot()
+  }
+  const asAuto = () => hub.meta.set(caller.id, { ...caller, permissionPreset: 'auto' })
+  let log: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    boot()
+  })
+  afterEach(() => log.mockRestore())
+
+  it('refuses a start whose project the person stopped trusting while its card stood, in the words of a local start', async () => {
+    boot({ hostCards: { askHost: async () => (store.projects.setProjectTrusted('p1', false), 'allow') } })
+    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is no longer trusted, so it cannot start agents.") })
+    expect(machine.sends).toBe(0)
+  })
+
+  it('logs an auto caller in an untrusted project once, at the start, not after its card or at each send', async () => {
+    store.projects.setProjectTrusted('p1', false)
+    asAuto()
+    await started()
+    expect(await hub.act('send', { text: 'a note' })).toMatchObject({ ok: true, state: 'working' })
+    machine.callerTurnEnds()
+    await flush()
+    expect(await hub.act('send', { text: 'more work' })).toMatchObject({ ok: true, state: 'working' })
+    expect(machine.fromHub).toHaveLength(3)
+    const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('start in an untrusted project'))
+    expect(crossed).toEqual(['[permissions] auto session h1: start in an untrusted project allowed'])
+  })
+
+  // Who may start, and send, in which project (RV13): each condition, on each path that reads it, refused or let through
+  const CONDITIONS: Record<string, { set: () => void; refused: string | null }> = {
+    'a trusted project, normal': { set: () => {}, refused: null },
+    'an untrusted project, normal': { set: () => store.projects.setProjectTrusted('p1', false), refused: 'trusted, so it cannot start agents' },
+    'an untrusted project, auto': { set: () => (store.projects.setProjectTrusted('p1', false), asAuto()), refused: null },
+    'its project no longer registered': { set: () => hub.meta.set(caller.id, { ...caller, projectId: 'p-gone' }), refused: 'no longer registered' },
+    'at the agent depth': { set: () => store.settings.setAppSetting(agentDepthKey(caller.id), '9'), refused: AGENT_DEPTH_SETTING },
+  }
+  const PATHS: Record<string, (set: () => void) => Promise<ChildRunResult>> = {
+    'a start, before its card': async (set) => (set(), hub.start()),
+    'a start, while its card stands': async (set) => {
+      boot({ hostCards: { askHost: async () => (set(), 'allow') } })
+      return hub.start()
+    },
+    'a note into its turn': async (set) => {
+      await started()
+      set()
+      return hub.act('send', { text: 'a note' })
+    },
+    'new work at rest': async (set) => {
+      await started()
+      machine.callerTurnEnds()
+      await flush()
+      set()
+      return hub.act('send', { text: 'more work' })
+    },
+  }
+  describe.each(Object.keys(PATHS))('%s', (path) => {
+    it.each(Object.keys(CONDITIONS))('%s', async (name) => {
+      const { set, refused } = CONDITIONS[name]!
+      const r = await PATHS[path]!(set)
+      if (refused) expect(r).toMatchObject({ ok: false, error: expect.stringContaining(refused) })
+      else expect(r).toMatchObject({ ok: true })
+    })
+  })
+
+  it('refuses a start whose caller is gone once its card is answered', async () => {
+    boot({ hostCards: { askHost: async () => (hub.meta.delete(caller.id), 'allow') } })
+    expect(await hub.start()).toMatchObject({ ok: false, error: 'The session that asked is no longer here.' })
+    expect(machine.sends).toBe(0)
   })
 })

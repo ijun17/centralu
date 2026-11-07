@@ -453,7 +453,7 @@ describe('asking another project', () => {
     w.store.sessions.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
     if (ownerState !== 'live') await w.mgr.trash.trashSession(caller)
     if (ownerState === 'purged') await w.mgr.trash.purgeSession(caller)
-    await w.mgr.disposeAll()
+    await w.mgr.tenure.disposeAll()
     const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }
     raw.db.pragma('user_version = 54')
     raw.migrate()

@@ -10,7 +10,7 @@ export type { AppUpkeepRequest }
 export type AppUpkeepAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the app upkeep commands reach of the session manager: its cards */
-export type AppUpkeepFlowHost = Pick<HostCards, 'askHost'>
+export type AppUpkeepFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> }
 
 /** An app as the window's calls name it: its id, its project (null for a user-folder app), and its machine when it is a linked one's */
 type Ref = { appId: string; projectId: string | null; machine?: string }
@@ -191,7 +191,7 @@ export class AppUpkeepFlow {
       `Its folder moves to app-trash/ ${where}, kept and not deleted, and the app is detached from every session it was attached to, so its tools vanish from them.`,
       'Anything that calls it stops working until it is put back. Moving the folder back from app-trash/ by hand restores it as an ordinary user-folder app: if it was imported and had not been reviewed, that waiting review is forgotten.',
     ].join('\n')
-    const decision = await this.host.askHost(caller, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(caller, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return { ok: false, error: 'The person did not approve it, so the app was not removed. Do not ask again unless they tell you to.' }
     if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so the app was not removed.' }
     // Still the app the card named, and still a user-folder app

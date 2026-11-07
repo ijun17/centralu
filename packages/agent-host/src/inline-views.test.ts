@@ -150,7 +150,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   inline?.dispose()
-  await mgr?.disposeAll()
+  await mgr?.tenure.disposeAll()
   await views?.dispose()
   await rt?.dispose()
   store?.close()

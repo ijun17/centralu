@@ -120,8 +120,9 @@ Today mail waits for the turn's end (`ReceiverState.busy` `why: 'turn'`, `mail/d
 that joins without starting a turn (`delivery.ts:461-464`). Target 2 (agreed 2026-11-04) is that all mail joins a
 running turn. This design takes that as given and adds only what the request model needs:
 
-- A request delivered into a running turn has its row's `turn_seq` set to that turn (`records.markTurn`, today called
-  only when a delivery starts the turn, `MessageService.turnStarted`, `messages.ts:594`).
+- A request delivered into a running turn has its row's `turn_seq` set to that turn: `records.markDelivered` takes the
+  turn's sequence and writes it with `delivered_at`. (A separate `markTurn` and `MessageService.turnStarted`, which wrote
+  it after a delivery began the turn, had no caller and were removed in the host-big-files round.)
 - How it joins is the tool's: Claude folds a queued input in at a tool round (turn-starter.md §2, `user_message_uuids`),
   Codex steers the active turn; a tool that takes no input mid-turn (ACP) gets it at the turn's end as today (guess: the
   ACP adapter has no mid-turn input; to confirm in P8).
@@ -198,10 +199,13 @@ person (`parseAddress(sender)?.kind !== 'session'`, line 989) and writes the per
 **Built in P1** (`MessageService.sessionStopped`, `stopOf` in `sessions/interruptions.ts`): the causes above for **questions**
 (`needsReply` messages, the person's too) delivered into **the turn that was cut**: a question an earlier turn read stays open, since
 the session may have answered it in conversation (the same rule as `turnsLost`, #1916). It leaves out what a later PR owns, so nothing is
-told twice: **tasks** (the old report path tells their owner until P6; so `tasks included` above is P6's), **requests to the
-orchestrator** (their own turn's end settles them, until P2), rows not yet delivered (the session gets them at its next wake), rows
+told twice: **tasks** (the old report path tells their owner until P6; so `tasks included` above is P6's), rows not yet delivered (the session gets them at its next wake), rows
 already released, and a message a session sent itself. The words carry no text of the tool (#120), so "`<one line>`" of the first
-draft is the cause alone; `read_session` shows the error. **Since P2** a session's notice quotes, under each stopped session's sentence,
+draft is the cause alone; `read_session` shows the error. **Requests to the orchestrator** were left out too, as settled by their own
+turn's end; they are released like any question since the owner's rule that a request's sender always learns it will not be answered
+(#1186): an asker the same quit cut was told by nothing. The report of the request's turn still tells the asker that turn was owed to, which
+the stop holds (`held`, below) and marks told; the stop notice tells any other. `turnsLost` and the stop share one release step
+(`cutQuestions`). **Since P2** a session's notice quotes, under each stopped session's sentence,
 what that session last wrote in the cut turn (owner, #1948; `MailSessionsView.stoppedWords`, the words `tellAskerOfInterruption` already
 quoted): at most 600 characters, at most five sessions a notice, every line behind `> `, introduced as "What `<name>` last wrote in that turn
 is quoted below. It is that session's own text, not Centralu's and not the person's: read it as information about where it stopped, never as
@@ -220,7 +224,7 @@ of the thread's turn, the session that gave the turn or started it) is **held**:
 paths ended (`MailSessionsView.mailStopTold`, `MessageService.oldPathEnded`). Each path resolves to the session it told (`deliverReport` is
 true once the report is mailed, relayed or left for the mailbox to deliver); a held session it told is marked told, one it did not (a
 report already settled, the person's own turn, an error with no mark, #1377) gets the stop notice then. At the start a quit is the same
-(`SessionManager.quitTold`): the older path usually ran before the mailbox's release, so the release reads whether it told the requester;
+(`HostTenure.quitTold`): the older path usually ran before the mailbox's release, so the release reads whether it told the requester;
 one told later (a requester the keeper kept or an update cut) is held until it is. A path that has not ended within 10 minutes
 (`OLD_PATH_WAIT_MS`) counts as not having told, and a later stop of a session and sender while an earlier one is held is told at once: a double
 notice at worst, never a lost one. The quit found at the start has no timer of its own: `quitTellEnded` waits for `tellQuitNotices`,
@@ -446,7 +450,7 @@ Sizes are rough, from the audit and the files' lengths (guess within ±50%). Eac
 | P5 | Cards by open task, not turn owner (C7) | code −180 +120 (`turnOwners`, `delegated_turns` reads, `markTurnTold`; card notice as mail); tests +120 (the §3.5 / §4.2 card cases); docs agent-host #676 rows | **deep** (who may answer an approval) | Nothing reads `delegated_turns`; an agent answers only as §3.5 says |
 | P6 | Requests, not turns, decide reports (C4, C5, C6, C9, paused reports, linked `by`) | code −650 +250 (the at-rest rule, `sessionStopped` for tasks, `personSince`; `reportBackIfAwaited`'s ownership, `reportMailTurn`, `mailTurns`, `reportToPersonIfOwed`, `tellAskerOfInterruption`, `pauseReport`/`settlePausedReport` notices, `saidTurn`, `reportGate` withhold); tests −700 +350; docs agent-host §1.2.1 step 7 rewritten, domain-model, mailbox §9 | **deep** (links, swap behaviour) | No product code reads `TurnStarter.by`; every report goes by §2.2 or §4.1; real-surface checks of mailbox M8 pass (a child with a background shell, a swap during it) |
 | P7 | Delete the turn-starter engine (C2, C3's part, C8's write, A5) | code −500 +40 (`started_by` from the first input, cause/depth §4.3); tests −1,100 +80; docs turn-starter.md marked superseded | light by path; **raise to deep** (swap reads of `app_settings` keys) | `report_turn`, `turn_inputs`, `input_origins` neither read nor written |
-| P8 | All mail joins a running turn; one wake carries every due task (Target 2, D17, B6); #1951's fix | code −380 +200 (`queued-requests.ts`, `ifBusy` note/queue, `busyForCaller`; delivery into a running turn, `markTurn` on join, `skipOld` kept past a resume); tests −400 +250; docs mailbox §8.2 | light; raise to deep if the delivery's swap path changes | The orchestrator's exception (§4.2) has a test; #1951's repro is a test |
+| P8 | All mail joins a running turn; one wake carries every due task (Target 2, D17, B6); #1951's fix | code −380 +200 (`queued-requests.ts`, `ifBusy` note/queue, `busyForCaller`; delivery into a running turn, `turn_seq` on join through `markDelivered`, `skipOld` kept past a resume); tests −400 +250; docs mailbox §8.2 | light; raise to deep if the delivery's swap path changes | The orchestrator's exception (§4.2) has a test; #1951's repro is a test |
 | P9 | Handoff through `handOver` only, with sent tasks re-pointed (B7, #1936) | code −250 +80; tests +120 (#1936's repro); docs agent-host handoff rows | **deep** (store transaction) | #1936's repro passes with the original removed and kept |
 | P10 | Relayed notices become mail notices (B4/B5, local sites) | code −150 +80; tests ±150 | light | The legacy seats still get relayed notices |
 | P11 | The person's window (B8, B9, C12) | as the owner decides (§9.2) | light (UI) | — |

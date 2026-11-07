@@ -107,7 +107,7 @@ export type MessageFrameItem = {
   kind: MailKind
   /** The sender's address */
   from: string
-  /** Centralu's word for the sender's relation to the receiver (`MessageService.relationWord`) */
+  /** Centralu's word for the sender's relation to the receiver */
   relation: string
   /** A `message` waits for the receiver's answer (`needsReply="1"`) or does not (`"0"`); the other kinds say neither */
   needsReply?: boolean

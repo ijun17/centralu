@@ -32,6 +32,11 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
   return PRESET_RANK[child] <= PRESET_RANK[parent]
 }
 
+/** Why a send gives no work to a child that now runs above its caller (#1273 review), here or on a linked machine; null when it may */
+export function aboveCallerError(name: string, child: PermissionPreset, caller: PermissionPreset): string | null {
+  return presetWithin(child, caller) ? null : `"${name}" now has more permissions (${child}) than this session (${caller}), so this session cannot give it work. Tell the person.`
+}
+
 /** How a child reaches its parent before it finishes (#1984): the address `mail` resolves to the session that started it, which nothing else the child sees names */
 const PARENT_MAIL = 'To write to it before you finish, call mail with `to: "parent"`. '
 

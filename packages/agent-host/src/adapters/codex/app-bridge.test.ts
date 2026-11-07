@@ -130,7 +130,7 @@ afterEach(async () => {
   for (const b of bridges) b.kill()
   bridges = []
   handedBridge.clear()
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await rt.dispose()
   await server.close()
   rmSync(root, { recursive: true, force: true })

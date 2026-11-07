@@ -215,7 +215,11 @@ async function transition({ data, sock, project, p, keeper, app, view, host, ter
     return v?.keeper?.build?.commit === b.commit && v?.source?.commit === b.commit && v?.status?.state === 'ready' && v?.swap?.phase === 'done' && v
   }, 90_000, 250)
   if (!check(view, 'the keeper and the host both end on this build', readFileSync(join(data, 'keeper.log'), 'utf8').slice(-2500))) return
-  check(view.stopsForUpdate === true, 'the keeper of this build stops for an update')
+  /*
+   * Said by the new host's line after its ready line, which the keeper's watcher of it reads on its own thread: the swap shows
+   * `done` as soon as the keeper adopts the host, so the view that first says `done` may come before that line was read
+   */
+  check(await waitFor(async () => (await status(sock))?.stopsForUpdate === true, 10_000, 100), 'the keeper of this build stops for an update')
   check(
     /handing the children this keeper holds on to the next keeper: its host cannot stop for an update/.test(readFileSync(join(data, 'keeper.log'), 'utf8')),
     'the earlier keeper handed its children on because its host could not stop for an update, and said so',

@@ -88,7 +88,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   vi.restoreAllMocks()
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -125,7 +125,7 @@ describe('a session at rest stays at rest (#428)', () => {
     const a = await session()
     a.h.turn()
     a.h.backgroundCall = 'toolu_bg'
-    await a.mgr.disposeAll()
+    await a.mgr.tenure.disposeAll()
     expect(store.sessions.listSessions().find((x) => x.id === a.s.id)?.state).toBe('waiting_input')
 
     const b = host()
@@ -212,11 +212,11 @@ describe('a session at rest stays at rest (#428)', () => {
     const a = await session()
     a.h.turn()
     a.h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    await a.mgr.detachAll()
+    await a.mgr.tenure.detachAll()
 
     // The keeper kept the process: the next host adopts it, still waiting_approval, and the tool raises the card again
     const b = host(new Set([a.s.id]))
-    await b.mgr.adoptKept([{ sessionId: a.s.id, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    await b.mgr.tenure.adoptKept([{ sessionId: a.s.id, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     const adopted = b.claude.handles.get(a.s.id)!
     adopted.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
     b.mgr.inputs.respondApproval(a.s.id, 'r1', 'allow')
@@ -236,7 +236,7 @@ describe('a session at rest stays at rest (#428)', () => {
     const c = await session()
     c.h.turn()
     c.h.ev({ type: 'approval_request', requestId: 'r2', detail: { kind: 'command', command: 'ls', cwd: '/' } })
-    await c.mgr.detachAll()
+    await c.mgr.tenure.detachAll()
     // Not kept: the process is gone with its card, and the next start forgets the rest
     host()
     expect(store.settings.appSetting(CARD_RESTS_KEY)).toBeNull()

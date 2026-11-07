@@ -58,7 +58,7 @@ async function hub(away?: string) {
   // A hub linked to this computer, down as the machine is (#550)
   const hubProject = { id: 'h9.p-web', projectId: 'p-web', name: 'web', hub: 'Desk', hubId: 'h9', ...(away ? { away } : {}) }
   mgr.useLinkedHubs({ projects: async () => ({ projects: [hubProject], away: [] }), ask: () => Promise.reject(new Error('asked a hub that is down')) })
-  cleanup.push(() => void mgr.disposeAll())
+  cleanup.push(() => void mgr.tenure.disposeAll())
   return { mgr, reader, movedReads: () => movedReads }
 }
 

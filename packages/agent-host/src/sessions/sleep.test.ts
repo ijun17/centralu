@@ -135,7 +135,8 @@ describe('the sleeper', () => {
     expect(saved).toEqual([null, 5])
     expect(await sleeper.sweep()).toEqual(['a'])
     sleeper.stop()
-    const fast = new SessionSleeper({ sessions: fakeSessions().sessions, processes: fakeSessions().sessions, canSleep: () => true, readAfterMinutes: () => 15, overrideMs: 2000 })
+    const none = fakeSessions().sessions
+    const fast = new SessionSleeper({ sessions: none, processes: none, canSleep: () => true, readAfterMinutes: () => 15, overrideMs: 2000 })
     expect(fast.afterMs()).toBe(2000)
   })
 })
@@ -219,7 +220,7 @@ describe('a session put to sleep, on the manager', () => {
     ;({ m: mgr, rpc } = build(store))
   })
   afterEach(async () => {
-    await mgr.disposeAll()
+    await mgr.tenure.disposeAll()
     store.close()
   })
 
@@ -315,7 +316,7 @@ describe('a session put to sleep, on the manager', () => {
     await next.m.inputs.send(id, 'back again')
     expect(adapter.last.opts.resumeExternalId).toBe(`ext-${id}`)
     expect(adapter.last.sent).toEqual(['back again'])
-    await next.m.disposeAll()
+    await next.m.tenure.disposeAll()
   })
 
   it('the sleeper wired to the manager, as main.ts wires it: quiet sessions sleep, a session that spoke does not', async () => {

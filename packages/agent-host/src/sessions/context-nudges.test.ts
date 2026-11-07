@@ -291,7 +291,7 @@ describe('on the session manager (#1492)', () => {
     world = managerWorld()
   })
   afterEach(async () => {
-    await world.mgr.disposeAll()
+    await world.mgr.tenure.disposeAll()
     world.store.close()
   })
 

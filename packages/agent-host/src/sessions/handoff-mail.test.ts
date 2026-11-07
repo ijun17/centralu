@@ -36,7 +36,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks()
   vi.useRealTimers()
-  for (const mgr of hosts.splice(0)) await mgr.disposeAll()
+  for (const mgr of hosts.splice(0)) await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
@@ -284,10 +284,10 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     const child = await startChild(h, parent, 'long work')
     const fromChild = ask(h, child, [parent], 'Which branch?')
     const heir = await handOff(h, project, parent, false)
-    await h.mgr.detachAll()
+    await h.mgr.tenure.detachAll()
 
     const next = host(new Set([child]))
-    await next.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
+    await next.mgr.tenure.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() }])
     expect(read.row(fromChild.id, at(heir))).toMatchObject({ settled: null })
     expect(pendingFor(heir, fromChild.id)).toBe(true)
     expect(pendingFor(parent, fromChild.id)).toBe(false)

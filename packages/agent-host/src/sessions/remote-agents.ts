@@ -8,15 +8,16 @@ import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 import { inTurn } from '../idle.js'
 import { errorKind } from './error-kind.js'
-import { agentDepthRefusal, depthOf } from './agent-depth.js'
+import { depthOf } from './agent-depth.js'
+import { agentStartGateError } from './agent-start-gates.js'
 import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } from './ask-project.js'
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
 import { HUB_SENDER } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
-import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
-import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
+import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS, UNTRUSTED_START } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
 
@@ -168,7 +169,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'askHost' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'projectOrigin' | 'linkedTasksRunning' | 'settleLinkedTurn'
+  'hostCards' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
 >
 
 /**
@@ -384,9 +385,12 @@ export class RemoteAgents {
         ? 'The orchestrator starts a session on a linked machine with create_session; start_agent with a machine is for a project\'s session.'
         : 'This session belongs to no project, so it cannot start agents.' }
     }
+    // Said, and an `auto` caller's crossing logged, before anything is asked, as by a local start's first gate
+    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
+    if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
+    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) return { ok: false, error: UNTRUSTED_START }
     const refused = this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
-    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)!
     // Counted under the caller's project, as a local child is (#1038); checked before anything is asked
     const full = this.places.agentCeilingError(callerId, project.id)
     if (full) return { ok: false, error: full }
@@ -446,14 +450,14 @@ export class RemoteAgents {
     const unasked = there?.auto === true && this.host.autoBoundaryOpen(callerId, `start an agent on ${machine.name} under auto`)
     // The card is bounded as a local start's setup is (#660): past it the card goes and nothing is made
     const ctl = new AbortController()
-    let decision: Awaited<ReturnType<RemoteAgentsHost['askHost']>> = 'allow'
+    let decision: Awaited<ReturnType<RemoteAgentsHost['hostCards']['askHost']>> = 'allow'
     if (!unasked) {
       const onAbort = () => ctl.abort()
       signal?.addEventListener('abort', onAbort, { once: true })
       if (signal?.aborted) ctl.abort()
       const timer = setTimeout(() => ctl.abort(), START_AGENT_SETUP_MS)
       try {
-        decision = await this.host.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
+        decision = await this.host.hostCards.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
       } finally {
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
@@ -631,11 +635,8 @@ export class RemoteAgents {
         const text = opts.text?.trim()
         if (!text) return { ok: false, error: 'Give the text to send.' }
         // Never work for a child above its caller (#1273 review), as a local child's send (agent-session-actions.ts)
-        const childPreset = rec.preset ?? 'normal'
-        const own = this.callerPreset(callerId)
-        if (!presetWithin(childPreset, own)) {
-          return { ok: false, error: `"${rec.name}" now has more permissions (${childPreset}) than this session (${own}), so this session cannot give it work. Tell the person.` }
-        }
+        const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
+        if (above) return { ok: false, error: above }
         const now = await stateOf()
         if (!now.ok) return now
         if (now.running) {
@@ -681,19 +682,8 @@ export class RemoteAgents {
         return this.sendAtRest(rec, callerId, text, label, reader)
       }
       case 'stop': {
-        // Stopped by the one it would report to: nothing more is owed. Taken down first, as the stopped turn's end can
-        // reach the hub before the machine's answer does; put back if the stop does not go
-        const owed = this.host.children.linkedReports.get(rec.sessionId)
-        if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-        // The stopped turn's end must not send what was held for it
-        const held = rec.queued
-        this.setQueued(rec.sessionId, [])
-        const r = await reader.interrupt(rec.sessionId)
-        if (!r.ok) {
-          if (held) this.setQueued(rec.sessionId, held)
-          if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
-          return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
-        }
+        const r = await this.interruptFor(rec, callerId, reader)
+        if (!r.ok) return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
         return { ok: true, state: 'stopped', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
       }
       case 'delete': {
@@ -709,15 +699,10 @@ export class RemoteAgents {
         const now = await stateOf()
         if (!now.ok) return now
         if (now.running) {
-          // Nothing is owed of a child being deleted, and its stopped turn's end may come in first; put back if the stop fails
-          const owed = this.host.children.linkedReports.get(rec.sessionId)
-          if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
-          const stopped = await reader.interrupt(rec.sessionId)
-          if (!stopped.ok) {
-            if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
-            return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
-          }
-        }
+          const stopped = await this.interruptFor(rec, callerId, reader)
+          if (!stopped.ok) return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
+          // At rest, the turn that freed it may have just set a held note going (`drain`, which reads the record again)
+        } else this.setQueued(rec.sessionId, [])
         /*
          * The worktree made for it there goes with it when nothing would be lost (#1161 item 3): the machine decides, as
          * only it can read that worktree, and says what it left and why. Only one made for it: the record names the
@@ -1039,6 +1024,23 @@ export class RemoteAgents {
     return { ok: true, tool: rec.tool, state: 'queued', sessionId: rec.sessionId, sessionName: rec.name, queueId: entry.id, position: (same ? held.indexOf(same) : held.length) + 1 }
   }
 
+  /**
+   * Stops the child's turn there for a stop or a deletion by the one it would report to: nothing more is owed, and its
+   * end must not send what was held for it. Both are taken down first, as the stopped turn's end can reach the hub before
+   * the machine's answer does, and put back if the stop does not go
+   */
+  private async interruptFor(rec: RemoteAgent, callerId: string, reader: LinkedSessions): ReturnType<LinkedSessions['interrupt']> {
+    const owed = this.host.children.linkedReports.get(rec.sessionId)
+    if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+    const held = this.of(rec.sessionId)?.queued
+    this.setQueued(rec.sessionId, [])
+    const r = await reader.interrupt(rec.sessionId)
+    if (r.ok) return r
+    if (held) this.setQueued(rec.sessionId, held)
+    if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
+    return r
+  }
+
   private setQueued(sessionId: string, queued: { id: string; text: string }[]): void {
     if (!queued.length && !this.of(sessionId)?.queued) return
     this.save(this.records().map((r) => (r.sessionId === sessionId ? { ...r, queued: queued.length ? queued : undefined } : r)))
@@ -1176,7 +1178,7 @@ export class RemoteAgents {
     // That turn's words (#1812), though the next one has begun or ended by the time the read is there
     const words = await this.lastWords(rec, reader, r.since)
     // The turn left the child's own background work running there (#721): the report waits for that work's end
-    const running: BackgroundTask[] = this.host.linkedTasksRunning(rec.sessionId)
+    const running: BackgroundTask[] = this.host.linkedReports.ownTasksRunning(rec.sessionId)
     if (running.length) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false, paused: running })
     return {
       ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, readable: [], outside: [],
@@ -1368,7 +1370,7 @@ export class RemoteAgents {
       const report = this.host.children.linkedReports.get(rec.sessionId)
       const told = this.toldDown.get(rec.sessionId)
       // A report paused on work that has ended is settled by the linked reports now (`LinkedReports.linkChanged`); on work still going it is kept, and the caller told
-      const settling = !!report?.paused && !report.busy && this.host.linkedTasksRunning(rec.sessionId).length === 0
+      const settling = !!report?.paused && !report.busy && this.host.linkedReports.ownTasksRunning(rec.sessionId).length === 0
       if (!report || report.orchestratorId !== rec.callerId || settling || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
       /*
@@ -1491,16 +1493,10 @@ export class RemoteAgents {
     if (this.host.children.linkedReports.has(sessionId)) this.host.children.dropLinkedReport(sessionId)
   }
 
-  /** What start_agent and a send rest on in the caller, read again after a card: here, in a trusted project, above the depth */
+  /** What start_agent and a send rest on in the caller, read again after a card and before each send: a local start's (`agentStartGateError`) */
   private gateError(callerId: string): string | null {
-    const caller = this.host.meta.get(callerId)
-    if (!caller) return 'The session that asked is no longer here.'
-    const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
-    if (!project) return 'This session\'s project is no longer registered.'
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
-      return `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}`
-    }
-    return agentDepthRefusal(this.host, callerId, 'start agents')
+    // Never the orchestrator's place (`''`): a caller here is a project's session, and one with none has none registered
+    return agentStartGateError(this.host, callerId, this.host.meta.get(callerId)?.projectId || null)
   }
 
   /** The caller's preset as it is now; `safe` for one gone, so nothing is decided on a preset no one has */
@@ -1527,7 +1523,7 @@ export class RemoteAgents {
     project: { id: string; name: string },
     reader: LinkedSessions,
   ): Promise<{ project: LinkedProject } | { error: string }> {
-    const origin = await this.host.projectOrigin(project.id)
+    const origin = await this.host.files.projectOrigin(project.id)
     const key = origin ? gitRemoteKey(origin) : null
     if (!origin || !key) {
       return { error: `This project has ${origin ? 'a local folder as its origin remote' : 'no origin remote'}, so no checkout of it on ${machine.name} can be told apart. Start the agent here, without machine.` }

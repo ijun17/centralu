@@ -78,7 +78,7 @@ import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { alive, listSome, plural, short, span, writeJsonAtomic } from './util.mjs'
 import { GUARD_MS, guardTick } from './main-guard.mjs'
-import { actOnRed } from './main-revert.mjs'
+import { actOnRed, retractRed } from './main-revert.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
 export const LEASE_FILE = 'merge-queue.lease.json'
@@ -216,7 +216,7 @@ export function queueBusy(q, now = clock()) {
  * One step of the main guard (#1259, main-guard.mjs), at most once per its interval, by the driver holding the
  * lease: whichever driver runs, one guards. A step that fails is said once and waits the interval.
  */
-export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act = actOnRed } = {}) {
+export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act = actOnRed, retract = retractRed } = {}) {
   if (!QUEUE.guard) return { did: 'off' }
   const q = readQueue(dir)
   // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
@@ -240,6 +240,7 @@ export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act
       update: (fn) => updateQueue(dir, fn),
       renew: () => takeLease(dir, holder, systemNow()),
       act: (found) => act(QUEUE.conflicts.checkout, found, { now, ref, update: (fn) => updateQueue(dir, fn), renew: () => takeLease(dir, holder, systemNow()) }),
+      retract: (hunt, run) => retract(hunt, run, { now, ref, update: (fn) => updateQueue(dir, fn), renew: () => takeLease(dir, holder, systemNow()) }),
       failingLine,
     })
   } finally {

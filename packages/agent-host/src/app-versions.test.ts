@@ -43,7 +43,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   await rt.dispose()
   store.close()
   await removeTree(root)

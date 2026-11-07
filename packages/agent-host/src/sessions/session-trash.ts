@@ -37,6 +37,7 @@ import type { SessionRecord } from './session-record.js'
 import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
 import type { HandedOverMessage } from '../mail/messages.js'
+import type { CardRests } from './card-rest.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -52,7 +53,7 @@ export type SessionTrashHost = {
   readonly emit: (e: NormalizedEvent) => void
   forgetCommits: (sessionId: string) => void
   /** The rest a card of it was raised in, if one is remembered (`CardRests`) */
-  forgetCardRest: (sessionId: string) => void
+  readonly cardRests: Pick<CardRests, 'forget'>
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
   /** The mail it held: its watched rows are settled and their senders told (#1347, `MessageService.partyGone`). Never throws */
@@ -67,7 +68,6 @@ export type SessionTrashHost = {
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
   readonly hostCards: HostCards
-  loadMessages: (sessionId: string, limit: number, beforeSeq?: number) => Promise<StoredMessage[]>
   readonly meta: Map<string, SessionInfo>
   moveChildren: (from: string, to: string, scope: 'kept' | 'goes' | 'removed') => unknown
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
@@ -435,7 +435,7 @@ export class SessionTrash {
     for (const [child, owner] of [...this.host.children.turnOwners]) if (owner.callerId === sessionId) this.host.children.releaseTurn(child)
     this.host.children.dropObserverNotesOf(sessionId)
     this.host.forgetCommits(sessionId)
-    this.host.forgetCardRest(sessionId)
+    this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
@@ -550,7 +550,7 @@ export class SessionTrash {
     if (!this.host.store.trash.isTrashed(sessionId)) {
       throw rpcError(`Not in the session archive: ${sessionId}`, 'session_not_found')
     }
-    return this.host.loadMessages(sessionId, limit, beforeSeq)
+    return this.host.record.loadMessages(sessionId, limit, beforeSeq)
   }
 
   /**

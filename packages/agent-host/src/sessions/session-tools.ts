@@ -10,6 +10,7 @@ import type { SessionAppWiring } from './session-app-wiring.js'
 import { toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import { profileAllows } from './tool-seats.js'
 import type { UpdatesAsked } from './updates-asked.js'
+import type { SelfCompaction } from './self-compaction.js'
 
 /**
  * What a session's tool choice reaches of the session manager (#428), typed as the manager declares each member. The
@@ -22,12 +23,12 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   askProject: AskProjectFlow['askProject']
   startAgent: AgentStartFlow['startAgent']
   agentSession: DelegationFlow['agentSession']
-  listAgents: DelegationFlow['listAgents']
+  readonly delegationFlow: Pick<DelegationFlow, 'listAgents'>
   readonly apps: Pick<SessionAppWiring, 'requireAppAccess'>
   /** The `mail` tool of a session (#1347): the mailbox answers, or says it is not there */
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
   /** The `compact_self` tool of a session (#1451) */
-  compactSelf: (sessionId: string, focus?: string, then?: string) => { text: string; isError?: boolean }
+  readonly selfCompaction: Pick<SelfCompaction, 'request'>
   /** One step of the orchestrator, asked about when a session's request is its turn (#1447) */
   whenAsked: WhenAsked
 }
@@ -141,7 +142,7 @@ export class SessionTools {
       // Other agents in its own project (#561) — behind the person's consent, never above this session's preset
       startAgent: async (opts, signal) => this.host.startAgent(sessionId, opts, signal),
       agentSession: async (opts, signal) => this.host.agentSession(sessionId, opts, signal),
-      listAgents: async () => ({ ok: true, agents: await this.host.listAgents(sessionId) }),
+      listAgents: async () => ({ ok: true, agents: await this.host.delegationFlow.listAgents(sessionId) }),
       // An ordinary session answers through agent_session (#676)
       answerQuestion: async () => ({ ok: false, error: 'Answer it with agent_session, action "answer"' }),
       sendToSession: refuse,
@@ -166,7 +167,7 @@ export class SessionTools {
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),
       detachApp: async (app) => this.host.apps.requireAppAccess().detach(sessionId, app),
       mail: (args) => this.host.mailTool(sessionId, args),
-      compactSelf: (focus, then) => this.host.compactSelf(sessionId, focus, then),
+      compactSelf: (focus, then) => this.host.selfCompaction.request(sessionId, focus, then),
     }
   }
 }

@@ -145,7 +145,16 @@ test('the composer rises smoothly rather than snapping up', async ({ page }) => 
   await openGrid(page, [a])
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   const panel = page.getByTestId(`grid-panel-${a}`)
-  await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
+  const shell = panel.getByTestId('composer-shell')
+  await expect(shell).not.toHaveAttribute('data-up', 'true')
+  /*
+   * The card has to be at rest below the edge before the hand comes. `not data-up` is no proof of that: it holds for an
+   * open pane too, and a pane that has not measured itself yet is open. The card then slides down for 300ms once it
+   * folds, and a hand arriving in that time raised it from where it had got to (216px, not 312px down), so the rise
+   * read as a few pixels and 3 steps in 10 were the same position (17 runs in 60 in WebKit, 1 in 8 alone).
+   */
+  const edge = (await panel.getByTestId('session-view').boundingBox())!
+  await expect.poll(async () => Math.round((await settled(shell)).y - (edge.y + edge.height))).toBeGreaterThanOrEqual(0)
 
   /*
    * The positions are read off the rise itself, not off the frames that happen to be drawn during
@@ -516,4 +525,305 @@ test('the pinned message leaves while the pane is folded and comes back when it 
   await expect(banner).toHaveAttribute('data-folded', 'true')
   await expect(banner).toHaveCSS('opacity', '0')
   await expect.poll(original).toBe('visible')
+})
+
+/**
+ * A short panel keeps its composer open while a note with a button shows above it (owner, 2026-11-07).
+ *
+ * The folded card rises over the bottom of the pane, which is exactly where the notes (Done after an error, Continue
+ * after an interruption, Retry on a session that could not wake) wait: it would cover the button just as a hand came to
+ * press it. So while such a note shows the pane behaves as an open one, and when the note goes it folds again.
+ */
+const noteCases = [
+  {
+    name: 'an error (Done)',
+    note: 'error-note',
+    button: 'error-done',
+    show: (page: Page, id: string) =>
+      page.evaluate((sid) => {
+        const m = (window as never as { __mock: any }).__mock
+        m.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+        m.emit({ type: 'error', sessionId: sid, error: { code: 'internal', message: 'boom', retryable: true } })
+      }, id),
+    // Pressing the button is the way out
+    dismiss: (page: Page) => page.getByTestId('error-done').click(),
+  },
+  {
+    name: 'an interruption (Continue)',
+    note: 'interrupted-note',
+    button: 'interrupted-continue',
+    show: (page: Page, id: string) =>
+      page.evaluate((sid) => {
+        const m = (window as never as { __mock: any }).__mock
+        // The prompt left the turn running; a note offers Continue once it has stopped
+        m.emit({ type: 'state_change', sessionId: sid, state: 'idle' })
+        m.emit({ type: 'interruption', sessionId: sid, interruption: { reason: 'quit', at: Date.now() } })
+      }, id),
+    dismiss: (page: Page) => page.getByTestId('interrupted-continue').click(),
+  },
+  {
+    name: 'a session that could not wake (Retry)',
+    note: 'dormant-note',
+    button: 'dormant-retry',
+    show: (page: Page, id: string) =>
+      page.evaluate((sid) => {
+        const store = (window as never as { __store: any }).__store
+        const st = store.getState()
+        store.setState({
+          sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], live: false } },
+          wakeError: { ...st.wakeError, [sid]: 'it cannot be resumed' },
+        })
+      }, id),
+    // The state changes: the reason is cleared (a retry that worked does this)
+    dismiss: (page: Page) =>
+      page.evaluate(() => (window as never as { __store: any }).__store.setState({ wakeError: {} })),
+  },
+]
+
+for (const c of noteCases) {
+  test(`a short panel keeps its composer open while ${c.name} shows, and folds when it goes`, async ({ page }) => {
+    await setup(page)
+    const a = await newSession(page, 'alpha', 'claude', 'one')
+    await openGrid(page, [a])
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+    const panel = page.getByTestId(`grid-panel-${a}`)
+    const shell = panel.getByTestId('composer-shell')
+    expect((await panel.boundingBox())!.height).toBeLessThan(570)
+    const hangsBelow = async () => {
+      const p = (await panel.boundingBox())!
+      const s = (await shell.boundingBox())!
+      return s.y + s.height > p.y + p.height + 1
+    }
+    await expect.poll(hangsBelow).toBe(true)
+
+    await c.show(page, a)
+    const note = panel.getByTestId(c.note)
+    await expect(note).toBeVisible()
+    // Open in place: wholly inside the panel, below the note, and nothing hangs below the edge
+    await expect.poll(hangsBelow).toBe(false)
+    await transitionsDone(panel)
+    const noteBox = (await note.boundingBox())!
+    const shellBox = (await shell.boundingBox())!
+    expect(shellBox.y).toBeGreaterThanOrEqual(noteBox.y + noteBox.height - 1)
+
+    // A hand at the bottom of the panel, where the folded card would have risen: the button is still what is under it
+    const pane = (await panel.getByTestId('session-view').boundingBox())!
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 10)
+    const button = panel.getByTestId(c.button)
+    const box = (await button.boundingBox())!
+    const covered = await button.evaluate((el, at) => {
+      const hit = document.elementFromPoint(at.x, at.y)
+      return !hit || !(hit === el || el.contains(hit))
+    }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
+    expect(covered).toBe(false)
+
+    // The note goes, the pane folds again
+    await c.dismiss(page)
+    await expect(note).toHaveCount(0)
+    await page.mouse.move(pane.x + pane.width / 2, pane.y + 80)
+    await expect.poll(hangsBelow).toBe(true)
+  })
+}
+
+/**
+ * Two things that outlive the note (found in review). The hand that was in the bottom strip when the note came must
+ * not leave the card raised when the note goes while the hand is elsewhere; and a panel in the band where the fold and
+ * the open line overlap (the folded card measures a few pixels taller than the open one) folds again after the note,
+ * as it was folded before it.
+ */
+const fail = (page: Page, id: string) =>
+  page.evaluate((sid) => {
+    const m = (window as never as { __mock: any }).__mock
+    m.emit({ type: 'state_change', sessionId: sid, state: 'working' })
+    m.emit({ type: 'error', sessionId: sid, error: { code: 'internal', message: 'boom', retryable: true } })
+  }, id)
+const clear = (page: Page, id: string) =>
+  page.evaluate((sid) => (window as never as { __mock: any }).__mock.emit({ type: 'state_change', sessionId: sid, state: 'idle' }), id)
+
+test('a hand that left the strip while a note showed does not leave the card raised when the note goes', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const pane = (await panel.getByTestId('session-view').boundingBox())!
+
+  // The hand is in the bottom strip (the card is raised) when the error arrives
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 20)
+  await expect(shell).toHaveAttribute('data-up', 'true')
+  await fail(page, a)
+  await expect(panel.getByTestId('error-note')).toBeVisible()
+  // It leaves the panel, and then the error goes by another way (Done from the inbox, a new turn)
+  await page.mouse.move(pane.x + pane.width / 2, 2)
+  await clear(page, a)
+  await expect(panel.getByTestId('error-note')).toHaveCount(0)
+  await expect(shell).not.toHaveAttribute('data-up', 'true')
+})
+
+test('a panel in the band where the fold and open lines overlap folds again when the note goes', async ({ page }) => {
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 450 })
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const hangsBelow = async () => {
+    const p = (await panel.boundingBox())!
+    const s = (await shell.boundingBox())!
+    return s.y + s.height > p.y + p.height + 1
+  }
+  // The card's height folded, and open (a note holds it open): the two lines are 1/6 of one and 0.16 of the other
+  await expect.poll(hangsBelow).toBe(true)
+  await transitionsDone(panel)
+  const folded = (await shell.boundingBox())!.height
+  await fail(page, a)
+  await expect.poll(hangsBelow).toBe(false)
+  const open = (await shell.boundingBox())!.height
+  await clear(page, a)
+  await expect.poll(hangsBelow).toBe(true)
+
+  // A panel between "open / 0.16" and "folded / 0.16": a folded panel stays folded there (the fold line was crossed
+  // on the way down), and it has to be folded once a note has come and gone
+  const target = Math.round((open / 0.16 + folded / 0.16) / 2)
+  expect(target, 'the folded card must measure more than the open one for this band to exist').toBeGreaterThan(open / 0.16 + 1)
+  const panelH = async () => Math.round((await panel.boundingBox())!.height)
+  const chrome = (await panelH()) === 0 ? 0 : 450 - (await panelH())
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: target + chrome })
+  await expect.poll(panelH).toBe(target)
+  await expect.poll(hangsBelow).toBe(true)
+
+  await fail(page, a)
+  await expect.poll(hangsBelow).toBe(false)
+  await clear(page, a)
+  await expect(panel.getByTestId('error-note')).toHaveCount(0)
+  await expect.poll(hangsBelow).toBe(true)
+})
+
+/**
+ * Opening the composer is animated like folding it (owner: every fold and unfold is, design-system §9). The card comes
+ * up from below the pane's edge into its place, by both ways a pane opens (a note shows; the panel grows), and does not
+ * move under reduced motion. Read off the animation itself, as "the composer rises smoothly" does: the moment the card
+ * is told to rise, what runs on it is paused and stepped, so a slow frame cannot make a slide look like a jump.
+ */
+async function watchOpening(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const shell = document.querySelector('[data-testid="composer-shell"]') as HTMLElement
+    const pane = shell.closest('[data-testid="session-view"]') as HTMLElement
+    const w = window as never as { __open: Promise<{ names: string[]; tops: number[]; edge: number; place: number; clip: string }> }
+    w.__open = new Promise((resolve) => {
+      const watch = new MutationObserver(() => {
+        if (!shell.classList.contains('cc-composer-rise')) return
+        watch.disconnect()
+        void getComputedStyle(shell).transform
+        const running = shell.getAnimations()
+        const names = running.map((x) => (x as CSSAnimation).animationName ?? '')
+        for (const x of running) x.pause()
+        const tops: number[] = []
+        for (let step = 0; step <= 10; step++) {
+          for (const x of running) x.currentTime = (Number(x.effect?.getComputedTiming().duration) * step) / 10
+          tops.push(Math.round(shell.getBoundingClientRect().top))
+        }
+        for (const x of running) x.finish()
+        resolve({ names, tops, edge: Math.round(pane.getBoundingClientRect().bottom), place: Math.round(shell.getBoundingClientRect().top), clip: getComputedStyle(pane).overflow })
+      })
+      watch.observe(shell, { attributes: true, attributeFilter: ['class'] })
+    })
+  })
+}
+const opening = (page: Page) => page.evaluate(() => (window as never as { __open: Promise<{ names: string[]; tops: number[]; edge: number; place: number; clip: string }> }).__open)
+
+test('a note opening the composer slides the card up from below the edge into its place', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const edge = (await panel.getByTestId('session-view').boundingBox())!
+  await expect.poll(async () => Math.round((await settled(shell)).y - (edge.y + edge.height))).toBeGreaterThanOrEqual(0)
+
+  await watchOpening(page)
+  await fail(page, a)
+  const open = await opening(page)
+  expect(open.names).toEqual(['cc-composer-rise'])
+  // It starts at the pane's edge (wholly below it), passes through several places, and ends where the layout puts it
+  expect(open.tops[0]).toBeGreaterThanOrEqual(open.edge - 1)
+  expect(new Set(open.tops).size, `tops ${open.tops.join(', ')}`).toBeGreaterThan(5)
+  expect(open.tops[10]).toBeLessThan(open.edge - 50)
+  // The pane clips (not hides: a scroll container would scroll to a field focused below its edge) while the card is out of it
+  expect(open.clip).toBe('clip')
+  // Nothing waits on it: the button is there to press at once, and the pane stops clipping once the card is in place
+  await expect(panel.getByTestId('error-done')).toBeEnabled()
+  await expect.poll(() => panel.getByTestId('session-view').evaluate((el) => getComputedStyle(el).overflow)).not.toBe('clip')
+})
+
+test('a panel that grows slides the card up into the open composer', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const edge = (await panel.getByTestId('session-view').boundingBox())!
+  await expect.poll(async () => Math.round((await settled(shell)).y - (edge.y + edge.height))).toBeGreaterThanOrEqual(0)
+
+  await watchOpening(page)
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 800 })
+  const open = await opening(page)
+  expect(open.names).toEqual(['cc-composer-rise'])
+  expect(new Set(open.tops).size, `tops ${open.tops.join(', ')}`).toBeGreaterThan(5)
+  expect(open.tops[0]).toBeGreaterThanOrEqual(open.edge - 1)
+})
+
+test('under reduced motion the card does not slide when the composer opens', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const edge = (await panel.getByTestId('session-view').boundingBox())!
+  await expect.poll(async () => Math.round((await settled(shell)).y - (edge.y + edge.height))).toBeGreaterThanOrEqual(0)
+
+  await fail(page, a)
+  await expect(panel.getByTestId('error-note')).toBeVisible()
+  // In place at once, with no class that moves it and nothing running on it, and the pane never clips for it
+  const state = await shell.evaluate((el) => ({
+    cls: el.classList.contains('cc-composer-rise'),
+    running: el.getAnimations().length,
+    clip: getComputedStyle(el.closest('[data-testid="session-view"]')!).overflow === 'clip',
+    top: Math.round(el.getBoundingClientRect().top),
+  }))
+  expect(state).toMatchObject({ cls: false, running: 0, clip: false })
+  expect(state.top).toBeLessThan(Math.round(edge.y + edge.height) - 50)
+})
+
+test('a card that was raised when the pane opens its composer stays where it is and does not slide', async ({ page }) => {
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const pane = (await panel.getByTestId('session-view').boundingBox())!
+  await expect.poll(async () => Math.round((await settled(shell)).y - (pane.y + pane.height))).toBeGreaterThanOrEqual(0)
+
+  // The hand is in the strip: the card is up, wholly inside the pane, when the note opens the composer
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height - 20)
+  await expect(shell).toHaveAttribute('data-up', 'true')
+  const up = await settled(shell)
+  await fail(page, a)
+  await expect(panel.getByTestId('error-note')).toBeVisible()
+  const now = await shell.evaluate((el) => ({
+    cls: el.classList.contains('cc-composer-rise'),
+    running: el.getAnimations().filter((x) => x instanceof CSSAnimation).length,
+    bottom: Math.round(el.getBoundingClientRect().bottom),
+  }))
+  expect(now).toMatchObject({ cls: false, running: 0 })
+  // Wholly inside the pane and at the bottom edge, as the raised card was
+  expect(Math.abs(now.bottom - Math.round(up.y + up.height))).toBeLessThanOrEqual(6)
 })

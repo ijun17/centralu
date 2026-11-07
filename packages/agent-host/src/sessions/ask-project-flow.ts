@@ -59,8 +59,9 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
-  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'> & {
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+  {
+    readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
   }
@@ -270,7 +271,7 @@ export class AskProjectFlow {
     if (!opts.task && !outstanding.length) {
       const named = (id: string) => !wantedSession || id === wantedSession || this.host.meta.get(id)?.name.toLowerCase() === wantedSession.toLowerCase()
       const gone = [...this.host.children.handedOver].find(([id, h]) => h.from === callerId && this.host.meta.get(id)?.projectId === target.id && named(id))
-      if (gone) return this.host.handedOverReply(callerId, gone[0])
+      if (gone) return this.host.delegationFlow.handedOverReply(callerId, gone[0])
     }
     if (!opts.task && !wantedSession && outstanding.length === 1) {
       const [key, pending] = outstanding[0]!
@@ -339,7 +340,7 @@ export class AskProjectFlow {
     const delegatedId = chosen.id
     const midTurn = inTurn(this.host.meta.get(delegatedId)!.state)
     let releaseInput: (() => void) | undefined
-    const d = this.host.startDelegation(key, callerId, delegatedId, target, false, midTurn)
+    const d = this.host.delegationFlow.startDelegation(key, callerId, delegatedId, target, false, midTurn)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
       const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
@@ -352,7 +353,7 @@ export class AskProjectFlow {
       const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
       if (midTurn) {
         const releaseHold = d.wait.holdInput()
-        const release = () => { releaseHold(); this.host.applyDeferredRestart(delegatedId) }
+        const release = () => { releaseHold(); this.host.restartPolicy.applyDeferredRestart(delegatedId) }
         releaseInput = release
         await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', (h, input, inputId) => {
           const fail = (e: Error) => { d.wait.fail(e); release() }
@@ -435,7 +436,7 @@ export class AskProjectFlow {
       return { ok: false, error: `The session "${chosen.name}" in ${label} is busy with a turn that is not yours (${chosen.state}). A note or a queue into a session on another machine is not available yet: name another session, or ask again once it is idle.` }
     }
 
-    const decision = await this.host.askHost(
+    const decision = await this.host.hostCards.askHost(
       callerId,
       {
         kind: 'project_access',
@@ -587,10 +588,10 @@ export class AskProjectFlow {
   private async awaitDelegation(key: string, d: Delegation, signal?: AbortSignal): Promise<AskProjectResult> {
     const sessionName = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
     const base = { project: d.target.name, sessionId: d.sessionId }
-    const r = await this.host.awaitTurn(key, d, { signal, stopWhy: 'the call that asked was cancelled' })
+    const r = await this.host.delegationFlow.awaitTurn(key, d, { signal, stopWhy: 'the call that asked was cancelled' })
     switch (r.kind) {
       case 'handedOver':
-        return this.host.handedOverReply(r.owner, d.sessionId)
+        return this.host.delegationFlow.handedOverReply(r.owner, d.sessionId)
       case 'asking':
         return { ok: true, state: 'asking', ...base, sessionName: sessionName(), cards: r.cards }
       case 'working':
@@ -613,7 +614,7 @@ export class AskProjectFlow {
             : `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
     }
-    const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
+    const { granted, outside } = this.host.delegationFlow.grantReads(d.callerId, r.answer, d.target.path)
     /*
      * A turn that completed with the session's own background work still running was paused where the delegation ended
      * (`startDelegation`, #721, #1460), whether or not this call was waiting: the caller reads the answer now as a pause,

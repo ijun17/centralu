@@ -34,6 +34,7 @@ import type { ToolQueries } from './tool-queries.js'
 import { codeIntelligenceKey, codeIntelligenceOff } from './tool-profiles.js'
 import { withTimeout } from '../timing.js'
 import { worktreeSetupNotice, type WorktreeSessions } from './worktree-sessions.js'
+import type { ApprovalRules } from './approval-rules.js'
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -103,7 +104,7 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     /** The orchestrator's memory handoff for a new process */
     orchestratorMemory: (sessionId: string) => string
     /** The remembered approval rules for a session's process */
-    rulesFor: (sessionId: string, projectId: string | null) => string[]
+    readonly approvalRules: Pick<ApprovalRules, 'rulesFor'>
     /** The orchestrator's approved skills, as its role text names them (#71) */
     skillsPrompt: () => string
     toolLabel: (tool: ToolName) => string
@@ -426,7 +427,7 @@ export class SessionStarts {
       serviceTier: info.serviceTier,
       permissionPreset: info.permissionPreset,
     })
-    handle.applyRules?.(this.host.rulesFor(id, params.projectId))
+    handle.applyRules?.(this.host.approvalRules.rulesFor(id, params.projectId))
     // What the tool said while it was starting, now that the session exists to record it (see `unborn`)
     const early = this.host.record.unborn.get(id) ?? []
     this.host.record.unborn.delete(id)
@@ -919,7 +920,7 @@ export class SessionStarts {
       this.host.cacheLedger.note(sessionId, this.host.restartPolicy.restartReasons.get(sessionId) ?? 'new_process')
       this.host.restartPolicy.restartReasons.delete(sessionId)
       this.host.running.set(sessionId, launched)
-      handle.applyRules?.(this.host.rulesFor(sessionId, m.projectId))
+      handle.applyRules?.(this.host.approvalRules.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
       if (handle.externalId && handle.externalId !== m.externalId) m.externalId = handle.externalId
       if (adopt) {

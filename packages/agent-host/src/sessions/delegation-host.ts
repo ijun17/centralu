@@ -19,7 +19,11 @@ import type {
 import type { AgentAdapter, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, LinkedSessions, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
-import type { HostAsk, HostAskAnswer } from './host-cards.js'
+import type { HostCards } from './host-cards.js'
+import type { RestartPolicy } from './restart-policy.js'
+import type { WorktreeSessions } from './worktree-sessions.js'
+import type { ProjectFiles } from '../dev-services/project-files.js'
+import type { LinkedReports } from './linked-reports.js'
 
 /** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the orchestrator, or a linked machine's session */
 export type DelegationTarget = { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }
@@ -34,15 +38,15 @@ export type DelegationHost = {
   readonly adapters: Map<string, AgentAdapter>
   readonly agentRuns: Map<string, AgentRunWait>
   answerRoutedCard: (callerId: string, sessionId: string, card: string | undefined, text: string) => Promise<ChildRunResult>
-  applyDeferredRestart: (sessionId: string) => void
-  askHost: (sessionId: string, detail: HostAsk["detail"], signal?: AbortSignal, card?: { requestId?: string; shown?: boolean; alwaysAsk?: boolean }) => Promise<HostAskAnswer>
+  readonly restartPolicy: Pick<RestartPolicy, 'applyDeferredRestart'>
+  readonly hostCards: Pick<HostCards, 'askHost' | 'withdrawHostAsk'>
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   builderRefOf: (m: Pick<SessionInfo, "id" | "appId" | "projectId">) => AppRef | null
   busyAnswer: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => Extract<BusyAnswer, { state: "busy"; }>
   busyChoices: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => BusyChoice[]
   busyForCaller: (callerId: string, sessionId: string) => boolean
   readonly children: ChildOwnership
-  cleanUpWorktreeChild: (target: SessionInfo) => Promise<{ ok: true; branch: string; setAside: { changedFiles: number; commits: number; }; warning?: string; note?: string; } | { ok: false; error: string; }>
+  readonly worktrees: Pick<WorktreeSessions, 'cleanUpWorktreeChild'>
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; onSetupProblems?: (problems: string[]) => void; onWorktreeBase?: (note: string) => void; }) => Promise<SessionInfo>
   cwdFor: (m: SessionInfo) => string
   /** A session as Centralu's word names it to another: as read_session lists it, or its id once it is gone */
@@ -84,11 +88,10 @@ export type DelegationHost = {
   readonly turnObservers: Map<string, Set<AgentRunWait>>
   uiPreferences: () => UiPreferences
   untilCard: (sessionId: string, callerId: string) => { asked: Promise<"asked">; done(): void; }
-  withdrawHostAsk: (requestId: string) => void
   /** A project's `origin` remote (#1038); null with no repository or no origin */
-  projectOrigin: (projectId: string) => Promise<string | null>
+  readonly files: Pick<ProjectFiles, 'projectOrigin'>
   /** A linked machine's session's own background work running there, as the hub last heard it (`LinkedReports`, #723) */
-  linkedTasksRunning: (sessionId: string) => BackgroundTask[]
+  readonly linkedReports: Pick<LinkedReports, 'ownTasksRunning'>
   /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
   settleLinkedTurn: (sessionId: string) => void
   /**

@@ -102,13 +102,13 @@ async function sessionWithShell(a: ReturnType<typeof host>, withShell = true): P
   const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
   if (withShell) a.claude.last.emit({ type: 'background_tasks', sessionId: s.id, live: [shell] })
-  await a.mgr.detachAll()
+  await a.mgr.tenure.detachAll()
   return s.id
 }
 
 async function adopt(b: ReturnType<typeof host>, id: string) {
   const kept = new FakeProcess() as unknown as AgentProcess
-  await b.mgr.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
+  await b.mgr.tenure.adoptKept([{ sessionId: id, tool: 'claude', process: kept }])
   return b.claude.last
 }
 

@@ -10,7 +10,7 @@ import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
 import type { RemoteAgents } from './remote-agents.js'
 import { agentState, ownAgents } from './own-agents.js'
-import { agentFrame, agentNoteFrame, canMailParent, presetWithin } from './start-agent.js'
+import { aboveCallerError, agentFrame, agentNoteFrame, canMailParent } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { raceBound } from '../timing.js'
@@ -120,7 +120,7 @@ export class AgentSessionActions {
     const seat = caller?.projectId ? 'project' : caller?.kind === 'orchestrator' ? 'orchestrator' : null
     const owns = seat === 'orchestrator' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
     if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
-      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'orchestrator' || s.askedBy === callerId))}` }
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'orchestrator' || s.askedBy === callerId))}` }
     }
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
@@ -197,19 +197,15 @@ export class AgentSessionActions {
           // A timer the tool held (`/loop`) does not hold the cleanup (#718): it ends with the process, and the caller is told
           const timers = this.host.handles.has(child.id) ? liveBackgroundTasks(child.backgroundTasks).filter((t) => t.timer) : []
           if (!observing) this.host.children.finishedWith(callerId, child.id)
-          const r = await this.host.cleanUpWorktreeChild(child)
+          const r = await this.host.worktrees.cleanUpWorktreeChild(child)
           if (!r.ok) return r
           if (d) this.host.children.dropDelegation(key, d)
           const note = [r.note, timers.length ? `Its timers ended with its process: ${taskList(timers)}.` : ''].filter(Boolean).join(' ')
           return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside, ...(r.warning ? { warning: r.warning } : {}), ...(note ? { note } : {}) }
         }
         case 'send': {
-          if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
-            return {
-              ok: false,
-              error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
-            }
-          }
+          const above = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset)
+          if (above) return { ok: false, error: above }
           // §7.4: before anything is sent, queued or forked
           const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'agent_session', target: child.name || child.id, text: opts.text ?? '' })
           if (refused) return { ok: false, error: refused }
@@ -260,7 +256,7 @@ export class AgentSessionActions {
             const releaseHold = wait.holdInput()
             const release = () => {
               releaseHold()
-              this.host.applyDeferredRestart(child.id)
+              this.host.restartPolicy.applyDeferredRestart(child.id)
             }
             try {
               await this.host.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input, inputId) => {

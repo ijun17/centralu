@@ -830,6 +830,25 @@ looked into).
     fails half of them, and the bisect moves past the culprit and blames a later commit. What this does not catch: a flake that makes a
     run pass when it should fail (the commit after the real culprit is then blamed for the pass it got by chance), and a probe that
     fails once by chance in a hunt that is under way. Each failed run costs one more run of its failed jobs.
+- **A blame is taken back when the run passes (#2082, 2026-11-06)**: the guard blamed #2076 for one failure of a Windows job, filed
+  a revert and an issue, and a person's rerun of the run (attempt 2) then passed; both were closed by hand. A hunt that ended with
+  a revert or an issue (`guard.hunt`, which keeps the run's id and the attempt it saw fail, `attempt`) is retracted when that same run
+  completes `success` on a later attempt (`passedAfterBlame`, `retractRed` in main-revert.mjs). Main going green first does not
+  lose it: a finished hunt that main's green or another hunt replaces is kept in `guard.blamed` (`rememberBlame`, up to 10, for
+  `BLAME_KEEP_MS` = 3 days or until retracted), since the revert lands, its run passes, and only then does a person rerun the run
+  that was blamed. What is done depends on what the blame rested on (`blameRestedOnMore`): after **one failure** (a run an older
+  driver or a person blamed on) the revert pull request leaves the merge queue (after it is closed, not before, so a close
+  refused because it merged meanwhile leaves it queued for the queue to record) and is closed with a comment, the issue is closed
+  as not planned, and the session that queued the commit gets a `main-green` message. After **more than one failed attempt** (the rerun failed too, or a bisect probe failed
+  on the commit: a race the commit brought in fails some of the time), the revert is withdrawn the same way, but the issue stays
+  open with a comment saying a later attempt passed and a `flaky-suspect` label, and a person decides; main is left as it was. A revert that has
+  already landed is left alone and the issue only gets a comment, since putting a commit back is a person's call; an issue a person
+  closed already gets nothing. A newer run that passes retracts nothing: the commit may be what it fixed; nor does a blame
+  that rested on the failure coming again and again (`repeats`). Each step is written down as it is done (`retracted`), and each
+  issue comment carries a mark (`<!-- main-guard-retract run=N -->`) that is looked for before posting, so a try that stopped half
+  way, or a restart, posts nothing twice. The note on the known failures issue says a commit was blamed earlier, and that the guard
+  takes it back, for a run it filed something for. A retraction that fails for its own reasons (an issue it cannot read; not an outage, which is waited out) is tried `RETRACT_TRIES` (10) steps and then left to a person (`retracted.gaveUp`), and never stops the guard from reading main. The close of an issue is written down (`closing`) before it is made, so a try that stopped between the close and its comment still owes the comment and does not take the close for a person's; the label goes on before the comment. The first failure of a test is still rerun before any commit is blamed (above);
+  this only covers a blame that was filed anyway (a rerun by a person, a driver on an older build).
 - **The candidates** are the first-parent commits after the last green one up to the red one, with
   their subjects and files, read from the checkout (`QUEUE.conflicts.checkout`, fetched into
   `refs/centralu-guard`; the checkout's branches and work are not touched). No green commit known, or
@@ -1010,9 +1029,14 @@ and refuses with every reason at once, sending nothing.
   With a `base` that is another open pull request's branch, it turns that one into a draft
   (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
   build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure. One this
-  machine's merge queue holds (`findItem` on its file, as itself or a stack's top) stays ready
+  machine's merge queue holds (its file: as itself, a stack's top, or a lower under a queued top, #2098) stays ready
   (#1673): the queue never merges a draft it did not make, so drafting it would stall it. The answer
   says so, and that the new one moves onto the default branch with `rebase_stack` once it landed.
+  A title whose squash subject ("Title (#NNNN)", `longSubject`, queue.mjs, the helper `queue_merge` uses) is over 72 characters is
+  refused with the same words, not warned: the queue refused #2090 and #2092 for it only after they were open (#2098).
+  A batch that is dropped because a member was a draft for a while (`open_pr` made it a lower), on the head the batch tested, does
+  not mark that member `batchless` or `alone` (queue-batch.mjs `runCi`): marked ready again with no push, it is batched again, not
+  sent to its session as "full-tier" (#2098, 2026-11-07: #2094 under batch-487).
 - **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,
   a type from the conventions' table, lowercase scope and description, no trailing period, the
   subject's length in characters), a blank second line, and the public text rules. Body lines past

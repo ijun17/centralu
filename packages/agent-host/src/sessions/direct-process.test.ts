@@ -133,7 +133,7 @@ describe('a session’s own process without a keeper, for real', () => {
     const second = h.adapter.created.at(-1)!
     expect(second.opts.resumeExternalId).toBe(first.externalId)
     expect(alive(second.process.pid!) && alive(second.helper)).toBe(true)
-    await h.mgr.disposeAll()
+    await h.mgr.tenure.disposeAll()
     expect(await goneWithin(second.helper, GONE_MS)).toBe(true)
   })
 
@@ -154,7 +154,7 @@ describe('a session’s own process without a keeper, for real', () => {
     const second = h.adapter.created.at(-1)!
     expect(alive(second.process.pid!) && alive(second.helper)).toBe(true)
     expect(h.mgr.listSessions().find((x) => x.id === s)!.agentVersion).toBe('2.1.290')
-    await h.mgr.disposeAll()
+    await h.mgr.tenure.disposeAll()
     expect(await goneWithin(second.helper, GONE_MS)).toBe(true)
   })
 })

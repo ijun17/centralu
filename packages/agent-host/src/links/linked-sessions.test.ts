@@ -92,8 +92,11 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(r).toEqual({ ok: false, error: 'git said no' })
     const reading = linkedSessions(() => [m], async () => ({ origin: 'git@github.com:me/apps.git' }))
     expect(await reading.origin(project!)).toEqual({ ok: true, origin: 'git@github.com:me/apps.git' })
-    // A machine without a method says so as it came, with nothing more (#1143)
-    expect(await linkedSessions(() => [m]).hubAuto('m1')).toEqual({ ok: false, error: expect.stringMatching(/^Unknown method: host\.hubAuto/) })
+  })
+
+  // The window reads 'older' for it (`LinkedMachine.hubAuto`, links.test.ts): the model is told the same, not the machine's "Unknown method" (#1143)
+  it('says a machine from before "Allow auto from a linked computer" has none, as the window does', async () => {
+    expect(await linkedSessions(() => [machine({})]).hubAuto('m1')).toEqual({ ok: false, error: 'Box runs a Centralu from before "Allow auto from a linked computer"' })
   })
 
   // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
@@ -399,6 +402,11 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(asked).toBe(0)
   })
 
+  it('recall names a machine the person disconnected as that, and where to connect it, not as one that may come back', async () => {
+    const off = machine({}, { reachable: false, waitsForPerson: true })
+    expect(await linkedSessions(() => [off]).recall('x', 12)).toEqual({ hits: [[]], notSearched: ['Box (not connected; ask the person to connect it in Settings, Machines, Connect)'] })
+  })
+
   it('knows only ids of machines it links to', () => {
     const reader = linkedSessions(() => [machine({})])
     expect(reader.machineOf('m1.w1')).toBe('Box')
@@ -523,7 +531,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
       }
       const mgr = new SessionManager(store, scriptedAdapters(), () => {})
       mgr.useLinkedReader(linkedSessions(() => [stalled], undefined, undefined, { lookupMs: 30 }))
-      cleanupSeat.push(() => mgr.disposeAll())
+      cleanupSeat.push(() => mgr.tenure.disposeAll())
       return { mgr, asked }
     }
     const cleanupSeat: (() => Promise<void>)[] = []
@@ -790,7 +798,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
         expect(Date.now() - t0).toBeLessThan(400 * SLOW)
         expect(tried.count).toBe(0)
       } finally {
-        await mgr.disposeAll()
+        await mgr.tenure.disposeAll()
       }
     })
   })
@@ -858,7 +866,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await new Promise((r) => setTimeout(r, 50))
     }
     const send = (reportBack: boolean) => mgr.runOrchestratorTool('orch', 'send_to_session', { sessionId: 'm1.w1', text: 'go', reportBack })
-    cleanup.push(() => mgr.disposeAll())
+    cleanup.push(() => mgr.tenure.disposeAll())
     return {
       mgr, reports, settle, send,
       /** What the orchestrator's agent answered: "echo: <what its model read>" for the scripted agent */

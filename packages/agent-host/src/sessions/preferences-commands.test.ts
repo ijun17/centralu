@@ -108,7 +108,7 @@ beforeEach(() => {
   mgr.useWindowRpc(rpc)
 })
 afterEach(async () => {
-  await mgr.disposeAll()
+  await mgr.tenure.disposeAll()
   store.close()
   rmSync(root, { recursive: true, force: true })
 })
