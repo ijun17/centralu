@@ -511,8 +511,9 @@ export class UpdateService {
   async check(force: boolean): Promise<UpdateStatus> {
     // A second caller joins the first rather than opening its own request. The button
     // and the timer landing together used to be two fetches racing to write one field.
-    if (this.stopped || this.installing) return this.current()
-    if (this.inFlight) return this.inFlight
+    if (this.stopped) return this.current()
+    if (this.installing) return this.withInstallTarget(this.current())
+    if (this.inFlight) return this.withInstallTarget(await this.inFlight)
     /*
      * With automatic checking off, nothing reaches the network unless a person asked.
      *
@@ -539,11 +540,23 @@ export class UpdateService {
     if (!kept) this.status = { ...this.status, phase: 'checking' }
     this.emit()
     this.inFlight = this.runCheck(force, kept)
+    let found: UpdateStatus
     try {
-      return await this.inFlight
+      found = await this.inFlight
     } finally {
       this.inFlight = null
     }
+    return this.withInstallTarget(found)
+  }
+
+  /**
+   * `found`, or, while an install runs, its answer once its target is settled (#2131 review): during its registry lookup
+   * the status still names the release waiting, which a check would otherwise report as available. Not awaited inside
+   * `runCheck`, which the install itself waits for.
+   */
+  private withInstallTarget(found: UpdateStatus): Promise<UpdateStatus> {
+    const applying = this.applying
+    return this.installing && applying ? applying.then(() => this.current()) : Promise.resolve(found)
   }
 
   private async runCheck(force: boolean, kept: Pick<UpdateStatus, 'phase' | 'error'> | null): Promise<UpdateStatus> {
@@ -660,7 +673,9 @@ export class UpdateService {
           }
         } else if (version === null) {
           // Nothing stored to fall back on: the same answer as a failed check, and as little lasting
-          this.status = this.installed ? { ...this.waitingStatus(), error: fresh.reason } : { ...this.status, phase: 'idle', error: fresh.reason }
+          // Over a release waiting, its own notice (a local build kept) stays beside why nothing was looked up (#2131 review)
+          const notice = this.installed?.error
+          this.status = this.installed ? { ...this.waitingStatus(), error: notice ? `${fresh.reason}. ${notice}` : fresh.reason } : { ...this.status, phase: 'idle', error: fresh.reason }
           return
         } else {
           this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
