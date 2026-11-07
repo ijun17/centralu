@@ -745,10 +745,10 @@ looked into).
 - **One guard per repository (#2087, 2026-11-06)**: reverts #2079 and #2084 were filed by the guard of the board app on a second
   machine, started because sessions there open pull requests; the maintainer's queue knew nothing of them. The lease is per data
   folder, so it cannot tell two machines apart; the guard therefore runs only in an instance that has work of its own
-  (`guardDrives`, queue-driver.mjs): an item waiting or in CI, a batch, an item in attention for no longer than 3 hours, a hunt of
+  (`guardDrives`, queue-driver.mjs): an item waiting or in CI, a batch, an item in attention for no longer than 3 hours (from `attentionAt`, else when it was queued: a batch's attention sets none), a hunt of
   its own, a revert and an issue it filed and has not taken back (`guard.blamed` for 3 days), a rerun it asked for in the last 3
-  hours, something it landed in the last 3 hours (`GUARD_LANDED_MS`), or main's full run for a landing of the last day still going
-  (`GUARD_PENDING_MS`: a run can wait many hours for runners, #2115, and must not be left to nobody). Any other instance is passive:
+  hours, something it landed in the last 3 hours (`GUARD_LANDED_MS`), or main's full run for a commit **it** landed in the last day still going
+  (`guard.pendingShas`, written at each step; a run of another instance's landing does not count; `GUARD_PENDING_MS`: a run can wait many hours for runners, #2115, and must not be left to nobody). Any other instance is passive:
   `runGuard` answers `passive`, reads nothing of main, files and reruns nothing, writes `guard.passive` (when and why; the reason
   is rewritten when it changes) and no longer holds the app running for "main's full run" (`queueBusy`); the queue loop was already
   local to the items an instance holds. A person's word overrides both ways: `queue-driver.json` in the app's data folder,

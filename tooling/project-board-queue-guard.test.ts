@@ -1135,7 +1135,7 @@ describe('the main guard blames a commit only for a test that fails again on a r
 describe('only one instance guards main, the one with work of its own (#2087)', { timeout: 120_000 * SLOW }, () => {
   const NOW = Date.parse('2026-11-06T20:00:00Z')
   const hour = 3600_000
-  const merged = (hoursAgo: number) => ({ state: 'merged', updatedAt: new Date(NOW - hoursAgo * hour).toISOString() })
+  const merged = (hoursAgo: number, commit = 'aaa') => ({ state: 'merged', commit, updatedAt: new Date(NOW - hoursAgo * hour).toISOString() })
   const reruns = () => writes().filter((w) => w[0] === 'rerun-failed')
   const dataDirOnDisk = () => join(root, 'data', 'app-data', 'p1', 'project-board')
 
@@ -1167,9 +1167,16 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     expect(guardDrives({ ...none, guard: { blamed: [{ run: 1, endedAt: new Date(NOW - 20 * hour).toISOString(), issue: 5, retracted: { done: 'x' } }] } }, NOW)).toMatchObject({ drives: false })
     // A red main is never unguarded because the run for a landing waited on runners (#2115): its landing is 3.5 hours old, the run was still
     // going at the last step, and it guards until a day has passed; one with no run going, or a landing from long ago, does not
-    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: true } }, NOW)).toMatchObject({ drives: true, why: expect.stringContaining('still going') })
-    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: false } }, NOW)).toMatchObject({ drives: false })
-    expect(guardDrives({ ...none, items: [merged(30)], guard: { pending: true } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: true, pendingShas: ['aaa'] } }, NOW)).toMatchObject({ drives: true, why: expect.stringContaining('still going') })
+    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: false, pendingShas: [] } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [merged(30)], guard: { pending: true, pendingShas: ['aaa'] } }, NOW)).toMatchObject({ drives: false })
+    // The run going is another instance's landing (a second machine must not guard for as long as the first one lands), or an older state names none
+    expect(guardDrives({ ...none, items: [merged(20)], guard: { pending: true, pendingShas: ['bbb'] } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [merged(20)], guard: { pending: true } }, NOW)).toMatchObject({ drives: false })
+    // An item with no readable time does not make a fresh landing read as long ago
+    expect(guardDrives({ ...none, items: [{ state: 'merged' }, merged(1)] }, NOW)).toMatchObject({ drives: true })
+    // An attention a batch set has no attentionAt and a poll moves updatedAt: when it was queued is the fallback
+    expect(guardDrives({ ...none, items: [{ state: 'attention', queuedAt: new Date(NOW - 5 * hour).toISOString(), updatedAt: new Date(NOW).toISOString() }] }, NOW)).toMatchObject({ drives: false })
     // A person's word decides, either way
     expect(guardDrives(none, NOW, true)).toMatchObject({ drives: true })
     expect(guardDrives({ ...none, items: [{ state: 'waiting' }] }, NOW, false)).toMatchObject({ drives: false })
@@ -1240,7 +1247,7 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     const { repo, sha } = oneCommit()
     seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date(Date.now() - 3.5 * 3600_000).toISOString(), reruns: {} }])
     // The guard's last step saw main's run unfinished
-    const file = (extra: object) => ({ pending: true, unfinished: 1, ...extra })
+    const file = (extra: object) => ({ pending: true, pendingShas: [sha], unfinished: 1, ...extra })
     guardRuntime(repo, redRun(repo, sha))
     const q = JSON.parse(readFileSync(queueFile(), 'utf8'))
     q.guard = file({})
@@ -1248,6 +1255,15 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     await call('merge_queue')
     await until(() => reruns().length > 0, 'the guard at work')
     expect(guardOnDisk().passive).toBeUndefined()
+  })
+
+  it('writes down which commits main\'s unfinished runs are for, so a pending run is waited for only by the instance that landed it', async () => {
+    const { repo, sha } = oneCommit()
+    landed(sha)
+    guardRuntime(repo, { branchRuns: { main: [mainRun(991, sha, null), mainRun(980, repo.green, 'success')] } })
+    await call('merge_queue')
+    await until(() => guardOnDisk().pending === true, 'the guard step')
+    expect(guardOnDisk().pendingShas).toEqual([sha])
   })
 
   it('says in merge_queue whether this instance guards, why, and how to change it, and refreshes a reason that stopped applying', async () => {

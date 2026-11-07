@@ -282,7 +282,9 @@ export async function guardTick({ q, update, now = clock(), renew, act, dir = QU
   await noteFlakes({ repo, runs, g, update })
   // Main's newest run still going: a landing not judged yet, which keeps the app running (queueBusy)
   const pending = runs.length > 0 && runs[0].status !== 'completed'
-  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
+  // Whose landings main's unfinished runs are for (#2087): an instance waits only for a run of a commit it landed
+  const pendingShas = runs.filter((r) => r.status !== 'completed').map((r) => r.headSha).filter(Boolean).slice(0, 10)
+  const save = (patch) => update((fresh) => (fresh.guard = { ...(fresh.guard ?? {}), pending, pendingShas, unfinished, ...patch, nextAt: new Date(now + GUARD_MS).toISOString() }))
   const hunt = g.hunt ?? null
   const hunted = g.hunted ?? []
   const known = g.known ?? []

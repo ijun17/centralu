@@ -161,7 +161,8 @@ export function guardDrives(q, now, role = null) {
   if (role === false) return { drives: false, why: `${DRIVER_FILE} says this instance does not drive` }
   if (role === true) return { drives: true, why: `${DRIVER_FILE} says this instance drives` }
   // An item waiting or in CI is work in hand; one in attention waits on a person, and for no longer than a landing counts (#2087 review)
-  const attentive = (i) => i.state === 'attention' && now - Date.parse(i.attentionAt ?? i.updatedAt) < GUARD_LANDED_MS
+  // (`attentionAt` is not set by a batch's attention, and `updatedAt` moves at every poll: `queuedAt` is the fallback)
+  const attentive = (i) => i.state === 'attention' && now - Date.parse(i.attentionAt ?? i.queuedAt ?? i.updatedAt) < GUARD_LANDED_MS
   if (q.items.some((i) => i.state === 'waiting' || i.state === 'ci' || attentive(i)) || activeBatch(q)) return { drives: true, why: 'it holds queued work' }
   const g = q.guard ?? {}
   const own = g.hunt && (!g.hunt.endedAt || ((g.hunt.issue != null || g.hunt.revert) && !g.hunt.retracted?.done))
@@ -169,11 +170,14 @@ export function guardDrives(q, now, role = null) {
   if (g.acting || own || kept) return { drives: true, why: 'it has a hunt, or a revert and an issue to follow' }
   // A rerun it asked for lately: it may wait on runners past the landing's window, and a failure it confirms is still its to hunt
   if (Object.values(g.reruns ?? {}).some((r) => now - Date.parse(r.at) < GUARD_LANDED_MS)) return { drives: true, why: 'it asked for a rerun lately' }
-  const landed = q.items.filter((i) => i.state === 'merged').map((i) => Date.parse(i.updatedAt))
-  const last = landed.length ? Math.max(...landed) : -Infinity
+  // An item with no readable time counts for nothing (one such item must not make every landing read as long ago)
+  const landed = q.items.filter((i) => i.state === 'merged' && Number.isFinite(Date.parse(i.updatedAt)))
+  const last = landed.length ? Math.max(...landed.map((i) => Date.parse(i.updatedAt))) : -Infinity
   if (now - last < GUARD_LANDED_MS) return { drives: true, why: 'it landed something lately' }
-  // Main's full run for what it landed has not finished (a run can wait many hours for runners, #2115): still its to judge
-  if (g.pending && now - last < GUARD_PENDING_MS) return { drives: true, why: "main's full run for what it landed is still going" }
+  // Main's full run for a commit it landed has not finished (a run can wait many hours for runners, #2115): still its to judge. A run of
+  // another instance's landing is not (it would keep a second machine guarding for as long as the first one lands)
+  const waits = landed.some((i) => now - Date.parse(i.updatedAt) < GUARD_PENDING_MS && i.commit && (g.pendingShas ?? []).includes(i.commit))
+  if (g.pending && waits) return { drives: true, why: "main's full run for what it landed is still going" }
   return { drives: false, why: 'it holds no queued work and landed nothing lately' }
 }
 
