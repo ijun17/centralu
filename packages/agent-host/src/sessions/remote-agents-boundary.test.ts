@@ -1169,6 +1169,23 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
     })
   })
 
+  // The orchestrator's place is no project (`''`), and a caller of a linked machine's agent is a project's session: one that
+  // reads as the orchestrator by the time its card is answered, or when it sends, has no project registered, not the
+  // orchestrator's place to start from (`|| null`, not `?? null`)
+  const turnsOrchestrator = () => hub.meta.set(caller.id, { ...caller, kind: 'orchestrator', projectId: '' } as unknown as SessionInfo)
+
+  it('does not read a caller that became the orchestrator while its card stood as the orchestrator starting an agent', async () => {
+    boot({ hostCards: { askHost: async () => (turnsOrchestrator(), 'allow') } })
+    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining('no longer registered') })
+    expect(machine.sends).toBe(0)
+  })
+
+  it('does not send a caller that became the orchestrator to its child as the orchestrator', async () => {
+    await started()
+    turnsOrchestrator()
+    expect(await hub.act('send', { text: 'a note' })).toMatchObject({ ok: false, error: expect.stringContaining('no longer registered') })
+  })
+
   it('refuses a start whose caller is gone once its card is answered', async () => {
     boot({ hostCards: { askHost: async () => (hub.meta.delete(caller.id), 'allow') } })
     expect(await hub.start()).toMatchObject({ ok: false, error: 'The session that asked is no longer here.' })
