@@ -766,6 +766,17 @@ looked into).
   out although it queues). Read at every step, so no restart. `merge_queue` says which it is ("Main guard: driving/passive (why)",
   with this rule and the known limit, and `guard` in its data). What this does not do: two instances that both land within the same
   3 hours both guard; set `{ "drive": false }` on the one that should not.
+- **The board's own code against main** (#2121, 2026-11-06: two instances ran 252 and 32 commits behind, one with a guard that filed wrong
+  reverts, and nothing said so). `merge_queue` says "Board code: N commits behind main (running abc1234), and the board app changed since"
+  (or "none of them in the board app") and, when the instance drives the queue (an item waiting or in CI) or the main guard
+  (`guardStatus`; `queue-driver.json` decides only the guard) on code where the app's folder changed since, "Warning: …" (`code` in its data).
+  `codeAge`, code-age.mjs: the checkout's HEAD **as the app started** (modules load once, so a later pull changes the files and not the
+  running code; "The checkout is at … now" says so) against GitHub's comparison with the default branch (`readBehind`; a files list GitHub
+  cut counts as changed; the app's folder from `git rev-parse --show-prefix`). `merge_queue` never waits for GitHub: it shows the last
+  answer (nothing on the first call after the app starts) and asks again in the background every 5 minutes, one asker at a time, the default
+  branch once per process; after a pull without a restart the warning says to restart only. Nothing is said when the
+  code is current, not in a git checkout, unknown to GitHub (an unpushed commit), or GitHub cannot be asked. It never pulls: the checkout may
+  be someone's working tree. `PROJECT_BOARD_CODE_DIR` (empty: do not look) and `PROJECT_BOARD_CODE_CHECK_MS` are for tests only.
 - **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
   and the queue opened a revert of reviewed work. The guard reads the failed run's jobs and steps as the
   queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run

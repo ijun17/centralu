@@ -15,7 +15,8 @@ import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
-import { guardStatus, STEP_ON_READ, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
+import { codeAge, staleWarning } from './code-age.mjs'
+import { guardStatus, STEP_ON_READ, WORKING, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { plural, shellQuote } from './util.mjs'
 import { acknowledge, dueReposts, markReposted, noticeText, unacked } from './notice-acks.mjs'
@@ -395,7 +396,14 @@ async function mergeQueue({ all = false, owner }) {
   const holdLines = hold ? [`New batches are held: ${hold.why}${hold.expired ? ' (held longer than the limit, so they are formed anyway)' : ''}, since ${hold.since.slice(11, 16)} UTC.`] : []
   // Whether this instance guards main, and why: an operator who finds a revert nobody here made asks which instance filed it (#2087)
   const guard = guardStatus(dataDir())
-  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['hold', '', holdLines]], { counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
+  // How old this instance's own code is, and a warning when it drives on old code (#2121)
+  const age = await codeAge(config.repository)
+  // The queue loop runs while an item waits or is in CI; the guard by its own rule (queue-driver.json decides only that one)
+  const driving = readQueue(dataDir()).items.some((i) => WORKING.has(i.state))
+  const warning = staleWarning(age, { queue: driving, guard: guard?.state === 'driving' })
+  const codeLines = age ? [age.text, ...(warning ? [warning] : [])] : []
+  return linesAnswer(v.summary, [['unacked', '', head], ['items', '', v.lines], ['guard', '', guard ? [guard.text] : []], ['code', '', codeLines], ['hold', '', holdLines]], {
+    ...(age ? { code: { head: age.head, behind: age.behind, appChanged: age.appChanged, moved: age.moved, warning } } : {}), counts: v.counts, queue: v.queue, batches: v.batches, events: v.events, unacked: waiting, pause: v.pause, seq: v.seq, ...(guard ? { guard: { state: guard.state, why: guard.why, drive: guard.role } } : {}), ...(hold ? { runnerHold: hold } : {}) })
 }
 
 async function ack({ owner, seqs = [], upTo }) {
@@ -467,7 +475,7 @@ export const tools = {
     config: {
       title: 'The merge queue',
       description:
-        'The merge queue (queue_merge): each item waiting, in CI (alone or in a batch), needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, the batches, who drives it now, and the latest messages. Instead of gh pr list / gh run list to follow merges.',
+        'The merge queue (queue_merge): each item waiting, in CI (alone or in a batch), needing attention (and why: dirty, failed twice and the job, a draft, …) or merged, the batches, who drives it now, how far its own code is behind main (with a warning when it drives on old code), and the latest messages. Instead of gh pr list / gh run list to follow merges.',
       inputSchema: z.object({
         all: z.boolean().optional().describe('Also items finished more than a day ago'),
         owner: z.string().max(80).optional().describe("Yours: list first the messages needing attention to you that you have not acknowledged (ack them with ack)"),
