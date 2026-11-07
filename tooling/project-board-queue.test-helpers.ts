@@ -203,7 +203,8 @@ if (args[0] === 'issue' && args[1] === 'view') {
   const files = (st.compareFiles ?? {})[key] ?? (key.includes('queue%2Fbatch-') ? st.batchFiles : undefined)
   if (st.compareError) fail(st.compareError)
   // GitHub that accepts and does not answer (#2121): compareHangs, until the file it names exists (the test lets it answer
-  // by writing it, so no wall-clock bound decides the test), and at most a minute, so the process ends on its own
+  // by writing it, so no wall-clock bound decides the test), and at most a minute, so the process ends on its own. Only
+  // with a started gh (PROJECT_BOARD_FAKE_PROGRAMS empty): answered in the app's process, this wait holds the whole app
   if (st.compareHangs) {
     const until = Date.now() + 60000
     while (!require('node:fs').existsSync(st.compareHangs) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)

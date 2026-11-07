@@ -172,14 +172,17 @@ describe("merge_queue says how far the board's own code is behind main (#2121)",
   })
 
   it('does not make merge_queue wait for a GitHub that accepts and does not answer for a while, and shows the answer once it comes', async () => {
+    // GitHub holds its answer until the test lets it go (a time limit used to decide this under a loaded runner), in a
+    // gh started on its own: one answered in the app's process (system.mjs) holds the app while it holds the answer
     waiting()
-    start(4, BOARD)
-    // GitHub holds its answer until the test lets it go: a time limit used to decide this under a loaded runner
+    start(4, BOARD, { PROJECT_BOARD_FAKE_PROGRAMS: '' })
     const answer = join(root, 'compare-may-answer')
     patchGh((st) => (st.compareHangs = answer))
-    const calls = await Promise.all([call('merge_queue'), call('merge_queue'), call('merge_queue')])
-    // The question to GitHub is still out (the fake records it when it answers): the calls did not wait for it
-    expect(asked()).toBe(0)
+    const first = await call('merge_queue')
+    // Once the question is out and held, calls still answer, without the answer. The started gh takes a few process
+    // starts to be asked (git, then gh for the repository): wait for the question itself, not for a count of calls
+    while (asked() === 0) await new Promise((resolve) => setTimeout(resolve, 20))
+    const calls = [first, ...(await Promise.all([call('merge_queue'), call('merge_queue')]))]
     for (const c of calls) {
       expect(c.isError).toBe(false)
       expect(c.data.code).toBeUndefined()
