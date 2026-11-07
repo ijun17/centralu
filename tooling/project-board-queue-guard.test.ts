@@ -1145,20 +1145,33 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     // A second machine whose queue once landed something, long ago
     expect(guardDrives({ ...none, items: [merged(30)] }, NOW)).toMatchObject({ drives: false, why: expect.stringContaining('landed nothing lately') })
     expect(guardDrives({ ...none, items: [{ state: 'closed', updatedAt: new Date(NOW).toISOString() }] }, NOW)).toMatchObject({ drives: false })
-    expect(guardDrives({ ...none, items: [merged(2)] }, NOW)).toEqual({ drives: true })
-    for (const state of ['waiting', 'ci', 'attention']) expect(guardDrives({ ...none, items: [{ state }] }, NOW)).toEqual({ drives: true })
-    expect(guardDrives({ ...none, batches: [{ state: 'ci', members: [] }] }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, items: [merged(2)] }, NOW)).toMatchObject({ drives: true })
+    for (const state of ['waiting', 'ci']) expect(guardDrives({ ...none, items: [{ state }] }, NOW)).toMatchObject({ drives: true })
+    // An item stuck in attention is work for a landing's window, not for ever (a second machine that once queued something)
+    const attention = (hoursAgo: number) => ({ state: 'attention', updatedAt: new Date(NOW - hoursAgo * hour).toISOString() })
+    expect(guardDrives({ ...none, items: [attention(1)] }, NOW)).toMatchObject({ drives: true })
+    expect(guardDrives({ ...none, items: [attention(5)] }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [{ ...attention(5), attentionAt: new Date(NOW - hour).toISOString() }] }, NOW)).toMatchObject({ drives: true })
+    expect(guardDrives({ ...none, batches: [{ state: 'ci', members: [] }] }, NOW)).toMatchObject({ drives: true })
     // Its own hunt, and the revert and issue it filed until it has taken them back
-    expect(guardDrives({ ...none, guard: { hunt: { red: 'a' } } }, NOW)).toEqual({ drives: true })
-    expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5 } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a' } } }, NOW)).toMatchObject({ drives: true })
+    expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5 } } }, NOW)).toMatchObject({ drives: true })
     expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', issue: 5, retracted: { done: 'x' } } } }, NOW)).toMatchObject({ drives: false })
     expect(guardDrives({ ...none, guard: { hunt: { red: 'a', endedAt: 'x', outcome: 'explained' } } }, NOW)).toMatchObject({ drives: false })
-    expect(guardDrives({ ...none, guard: { acting: { red: 'a' } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, guard: { acting: { red: 'a' } } }, NOW)).toMatchObject({ drives: true })
     // A rerun it asked for lately (its landing may be older: the rerun waits on runners), but not one from long ago
-    expect(guardDrives({ ...none, items: [merged(4)], guard: { reruns: { 5: { at: new Date(NOW - hour).toISOString() } } } }, NOW)).toEqual({ drives: true })
+    expect(guardDrives({ ...none, items: [merged(4)], guard: { reruns: { 5: { at: new Date(NOW - hour).toISOString() } } } }, NOW)).toMatchObject({ drives: true })
     expect(guardDrives({ ...none, items: [merged(30)], guard: { reruns: { 5: { at: new Date(NOW - 20 * hour).toISOString() } } } }, NOW)).toMatchObject({ drives: false })
+    // A blame kept to be taken back (#2082) is its to follow, for days
+    expect(guardDrives({ ...none, guard: { blamed: [{ run: 1, endedAt: new Date(NOW - 20 * hour).toISOString(), issue: 5 }] } }, NOW)).toMatchObject({ drives: true })
+    expect(guardDrives({ ...none, guard: { blamed: [{ run: 1, endedAt: new Date(NOW - 20 * hour).toISOString(), issue: 5, retracted: { done: 'x' } }] } }, NOW)).toMatchObject({ drives: false })
+    // A red main is never unguarded because the run for a landing waited on runners (#2115): its landing is 3.5 hours old, the run was still
+    // going at the last step, and it guards until a day has passed; one with no run going, or a landing from long ago, does not
+    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: true } }, NOW)).toMatchObject({ drives: true, why: expect.stringContaining('still going') })
+    expect(guardDrives({ ...none, items: [merged(3.5)], guard: { pending: false } }, NOW)).toMatchObject({ drives: false })
+    expect(guardDrives({ ...none, items: [merged(30)], guard: { pending: true } }, NOW)).toMatchObject({ drives: false })
     // A person's word decides, either way
-    expect(guardDrives(none, NOW, true)).toEqual({ drives: true })
+    expect(guardDrives(none, NOW, true)).toMatchObject({ drives: true })
     expect(guardDrives({ ...none, items: [{ state: 'waiting' }] }, NOW, false)).toMatchObject({ drives: false })
   })
 
@@ -1212,4 +1225,47 @@ describe('only one instance guards main, the one with work of its own (#2087)', 
     expect(reruns()).toEqual([])
     expect(guardOnDisk().passive.why).toContain('queue-driver.json')
   })
+  it('guards on {"drive": true} though nothing was ever landed here and nothing is stored: a merge made by hand is still answered for', async () => {
+    const { repo, sha } = oneCommit()
+    mkdirSync(dataDirOnDisk(), { recursive: true })
+    writeFileSync(join(dataDirOnDisk(), 'queue-driver.json'), JSON.stringify({ drive: true }))
+    guardRuntime(repo, redRun(repo, sha))
+    await call('merge_queue')
+    await until(() => reruns().length > 0, 'the guard at work')
+    expect(reruns()).toEqual([['rerun-failed', '990']])
+    expect(guardOnDisk().passive).toBeUndefined()
+  })
+
+  it('keeps guarding a landing 3.5 hours old whose full run is still going, and answers the red when it finishes (#2115)', async () => {
+    const { repo, sha } = oneCommit()
+    seedQueue([{ repo: R, pr: 81, lowers: [], owner: 'tester', author: 'writer', state: 'merged', commit: sha, title: 'feat(ui): change 81', updatedAt: new Date(Date.now() - 3.5 * 3600_000).toISOString(), reruns: {} }])
+    // The guard's last step saw main's run unfinished
+    const file = (extra: object) => ({ pending: true, unfinished: 1, ...extra })
+    guardRuntime(repo, redRun(repo, sha))
+    const q = JSON.parse(readFileSync(queueFile(), 'utf8'))
+    q.guard = file({})
+    writeFileSync(queueFile(), JSON.stringify(q))
+    await call('merge_queue')
+    await until(() => reruns().length > 0, 'the guard at work')
+    expect(guardOnDisk().passive).toBeUndefined()
+  })
+
+  it('says in merge_queue whether this instance guards, why, and how to change it, and refreshes a reason that stopped applying', async () => {
+    const { repo, sha } = oneCommit()
+    seedOld(sha)
+    guardRuntime(repo, redRun(repo, sha))
+    const first = await call('merge_queue')
+    await until(() => !!guardOnDisk().passive, 'the passive mark')
+    expect(first.data.guard).toMatchObject({ state: 'passive', why: expect.stringContaining('landed nothing lately') })
+    expect(first.text).toContain('Main guard: passive (it holds no queued work and landed nothing lately).')
+    expect(first.text).toContain('two instances that both landed lately both guard')
+    expect(first.text).toContain('"drive": false')
+    // The stored reason follows the rule: told not to drive, the mark says so, not the reason it had
+    mkdirSync(dataDirOnDisk(), { recursive: true })
+    writeFileSync(join(dataDirOnDisk(), 'queue-driver.json'), JSON.stringify({ drive: false }))
+    await until(() => String(guardOnDisk().passive?.why).includes('queue-driver.json'), 'the reason refreshed')
+    const told = await call('merge_queue')
+    expect(told.data.guard).toMatchObject({ state: 'passive', drive: false })
+  })
+
 })

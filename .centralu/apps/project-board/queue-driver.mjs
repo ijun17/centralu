@@ -159,15 +159,35 @@ export function driverRole(dir) {
  */
 export function guardDrives(q, now, role = null) {
   if (role === false) return { drives: false, why: `${DRIVER_FILE} says this instance does not drive` }
-  if (role === true) return { drives: true }
-  if (q.items.some((i) => ACTIVE.has(i.state)) || activeBatch(q)) return { drives: true }
+  if (role === true) return { drives: true, why: `${DRIVER_FILE} says this instance drives` }
+  // An item waiting or in CI is work in hand; one in attention waits on a person, and for no longer than a landing counts (#2087 review)
+  const attentive = (i) => i.state === 'attention' && now - Date.parse(i.attentionAt ?? i.updatedAt) < GUARD_LANDED_MS
+  if (q.items.some((i) => i.state === 'waiting' || i.state === 'ci' || attentive(i)) || activeBatch(q)) return { drives: true, why: 'it holds queued work' }
   const g = q.guard ?? {}
   const own = g.hunt && (!g.hunt.endedAt || ((g.hunt.issue != null || g.hunt.revert) && !g.hunt.retracted?.done))
-  if (g.acting || own) return { drives: true }
+  const kept = (g.blamed ?? []).some((b) => !b.retracted?.done && now - Date.parse(b.endedAt) < GUARD_LANDED_MS * 24)
+  if (g.acting || own || kept) return { drives: true, why: 'it has a hunt, or a revert and an issue to follow' }
   // A rerun it asked for lately: it may wait on runners past the landing's window, and a failure it confirms is still its to hunt
-  if (Object.values(g.reruns ?? {}).some((r) => now - Date.parse(r.at) < GUARD_LANDED_MS)) return { drives: true }
-  if (q.items.some((i) => i.state === 'merged' && now - Date.parse(i.updatedAt) < GUARD_LANDED_MS)) return { drives: true }
+  if (Object.values(g.reruns ?? {}).some((r) => now - Date.parse(r.at) < GUARD_LANDED_MS)) return { drives: true, why: 'it asked for a rerun lately' }
+  const landed = q.items.filter((i) => i.state === 'merged').map((i) => Date.parse(i.updatedAt))
+  const last = landed.length ? Math.max(...landed) : -Infinity
+  if (now - last < GUARD_LANDED_MS) return { drives: true, why: 'it landed something lately' }
+  // Main's full run for what it landed has not finished (a run can wait many hours for runners, #2115): still its to judge
+  if (g.pending && now - last < GUARD_PENDING_MS) return { drives: true, why: "main's full run for what it landed is still going" }
   return { drives: false, why: 'it holds no queued work and landed nothing lately' }
+}
+
+/** How long main's full run for a landing of this instance can stay unfinished before nobody is thought to wait for it */
+export const GUARD_PENDING_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_PENDING_MS) || 24 * 3600_000
+
+const GUARD_LIMIT = `An instance guards main only for queued work, a hunt, a rerun it asked for or a landing in the last 3 hours (or while main's full run for a landing is going, up to a day); two instances that both landed lately both guard. ${DRIVER_FILE} in the app's data folder sets it by hand: {"drive": true} always guards (also for a merge made by hand), {"drive": false} never.`
+
+/** What `merge_queue` says of the main guard: driving or passive and why, with the rule an operator needs to change it; null where there is no guard */
+export function guardStatus(dir, now = clock()) {
+  if (!QUEUE.guard) return null
+  const role = driverRole(dir)
+  const { drives, why } = guardDrives(readQueue(dir), now, role)
+  return { state: drives ? 'driving' : 'passive', why, role, text: `Main guard: ${drives ? 'driving' : 'passive'} (${why}). ${GUARD_LIMIT}` }
 }
 
 /**
@@ -196,12 +216,14 @@ export async function runGuard(dir, { holder, now = clock(), ref = queueRef, act
   if (!QUEUE.guard) return { did: 'off' }
   const q = readQueue(dir)
   // It watches what the queue landed: a queue that never landed anything has nothing on main to answer for
-  if (!q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
+  const role = driverRole(dir)
+  if (role !== true && !q.items.some((i) => i.state === 'merged') && !q.guard) return { did: 'off' }
   if (q.guard?.nextAt && Date.parse(q.guard.nextAt) > now) return { did: 'wait' }
   // One guard per repository (#2087): an instance with no queued work and no landing of its own watches nothing, and says so
-  const { drives, why } = guardDrives(q, now, driverRole(dir))
+  const { drives, why } = guardDrives(q, now, role)
   if (!drives) {
-    if (!q.guard?.passive) updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), pending: false, unfinished: 0, passive: { at: new Date(now).toISOString(), why } }))
+    // Written when it begins and again when the reason changes, so what is stored is what applies
+    if (q.guard?.passive?.why !== why) updateQueue(dir, (fq) => (fq.guard = { ...(fq.guard ?? {}), pending: false, unfinished: 0, passive: { at: new Date(now).toISOString(), why } }))
     return { did: 'passive', why }
   }
   if (q.guard?.passive) updateQueue(dir, (fq) => void delete fq.guard?.passive)

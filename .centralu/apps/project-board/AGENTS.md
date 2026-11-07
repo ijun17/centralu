@@ -745,15 +745,18 @@ looked into).
 - **One guard per repository (#2087, 2026-11-06)**: reverts #2079 and #2084 were filed by the guard of the board app on a second
   machine, started because sessions there open pull requests; the maintainer's queue knew nothing of them. The lease is per data
   folder, so it cannot tell two machines apart; the guard therefore runs only in an instance that has work of its own
-  (`guardDrives`, queue-driver.mjs): an item or a batch queued in it, a hunt of its own, or a revert and issue it filed and has
-  not taken back, a rerun it asked for in the last 3 hours (the run waits on runners past the landing's window), or something it
-  landed in the last 3 hours (`GUARD_LANDED_MS`), which covers main's full run for it. Any other
-  instance is passive: `runGuard` answers `passive`, reads nothing of main, files and reruns nothing, writes `guard.passive`
-  (when and why) and no longer holds the app running for "main's full run" (`queueBusy`); the queue loop was already local to
-  the items an instance holds. A person's word overrides both ways: `queue-driver.json` in the app's data folder, `{ "drive": true }`
-  to guard always (an instance that should watch main though it landed nothing lately, for a merge made by hand) or `{ "drive": false }`
-  to never (an instance that must stay out although it queues). Read at every step, so no restart. What this does not do: two
-  instances that both land within the same 3 hours both guard; set `{ "drive": false }` on the one that should not.
+  (`guardDrives`, queue-driver.mjs): an item waiting or in CI, a batch, an item in attention for no longer than 3 hours, a hunt of
+  its own, a revert and an issue it filed and has not taken back (`guard.blamed` for 3 days), a rerun it asked for in the last 3
+  hours, something it landed in the last 3 hours (`GUARD_LANDED_MS`), or main's full run for a landing of the last day still going
+  (`GUARD_PENDING_MS`: a run can wait many hours for runners, #2115, and must not be left to nobody). Any other instance is passive:
+  `runGuard` answers `passive`, reads nothing of main, files and reruns nothing, writes `guard.passive` (when and why; the reason
+  is rewritten when it changes) and no longer holds the app running for "main's full run" (`queueBusy`); the queue loop was already
+  local to the items an instance holds. A person's word overrides both ways: `queue-driver.json` in the app's data folder,
+  `{ "drive": true }` to guard always, also with nothing landed here (the maintainer's instance: a merge made by hand, or anything
+  else no instance landed, is answered for only by an instance told so) or `{ "drive": false }` to never (an instance that must stay
+  out although it queues). Read at every step, so no restart. `merge_queue` says which it is ("Main guard: driving/passive (why)",
+  with this rule and the known limit, and `guard` in its data). What this does not do: two instances that both land within the same
+  3 hours both guard; set `{ "drive": false }` on the one that should not.
 - **Infrastructure before blame** (#1435, 2026-10-21): a browser install got a 403 from a package source,
   and the queue opened a revert of reviewed work. The guard reads the failed run's jobs and steps as the
   queue reads a pull request's run (`diagnose`, `classifyRun`), before it looks for a culprit. A run
