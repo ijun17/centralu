@@ -149,6 +149,52 @@ describe('the link client (#82)', () => {
     expect(gaveUp).toHaveLength(1)
   })
 
+  it('redials a host swapped a few times in a minute, and stops at one that drops every hello at once (`stableMs`)', async () => {
+    // Swaps: each drops the connection soon after a hello, and the client is back from its first delay each time
+    const first = await host()
+    const hellos: number[] = []
+    const swapGaveUp: string[] = []
+    const swapped = new RemoteClient(
+      { url: `ws://127.0.0.1:${first.port}`, token: TOKEN, maxBackoffMs: 20, redials: 4, stableMs: 60_000 },
+      { hello: () => hellos.push(Date.now()), gaveUp: (r) => swapGaveUp.push(r) },
+    )
+    cleanups.push(() => swapped.close())
+    swapped.connect()
+    await eventually(() => hellos.length === 1)
+    let running = first.server
+    for (const n of [2, 3, 4]) {
+      await running.close()
+      running = (await host(first.port)).server
+      await eventually(() => hellos.length === n)
+    }
+    // Three swaps in a minute are three short-lived hellos, one fewer than `redials`
+    expect(swapGaveUp).toEqual([])
+
+    // A host that answers every hello and drops the connection at once: a crash in a resume, a migration
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    wss.on('connection', (ws) => {
+      ws.on('message', () => {
+        ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' }))
+        ws.close(1011)
+      })
+    })
+    const { opened, Counted } = counted()
+    const gaveUp: string[] = []
+    const c = new RemoteClient(
+      { url: `ws://127.0.0.1:${(wss.address() as { port: number }).port}`, token: TOKEN, maxBackoffMs: 20, redials: 2, stableMs: 60_000, WebSocketImpl: Counted },
+      { gaveUp: (r) => gaveUp.push(r) },
+    )
+    cleanups.push(() => c.close())
+    c.connect()
+    await eventually(() => gaveUp.length === 1)
+    // Two hellos that came and went, and no more: they did not give back the redials
+    expect(opened.n).toBe(2)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(opened.n).toBe(2)
+  })
+
   it('a client closed while it redials never says it gave up: the link closed it on purpose', async () => {
     const gone = await host()
     const { opened, Counted } = counted()
