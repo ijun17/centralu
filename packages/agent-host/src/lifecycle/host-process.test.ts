@@ -252,6 +252,24 @@ describe('the host process, started for real', () => {
   }, 60_000 * SLOW)
 
   /*
+   * #1895 step 4 PR 5: only a keeper of an earlier build starts a host with `--standby`, to swap the host it runs to this
+   * build. This build swaps nothing: it exits before it writes anything in the data folder, so that keeper's swap fails
+   * and its running host, which holds the folder, is untouched.
+   */
+  it('a host started to stand by for a swap exits 1 before it touches the data folder', () => {
+    const s = setup()
+    const r = spawnSync(process.execPath, ['--import', 'tsx', MAIN, '--db', s.db, '--port', '0', '--standby'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: env(s, { CC_KEEPER: '1' }),
+    })
+    expect(r.status).toBe(1)
+    expect(r.stderr).toContain('not standing by: this build does not swap hosts')
+    for (const f of ['host.log', 'host.lock', 'store.db']) expect(existsSync(join(s.dir, f)), f).toBe(false)
+  }, 60_000 * SLOW)
+
+  /*
    * #1223: on a linked Windows machine the folder is often held by the host a hub's link started. host.lock says who
    * started it and from where, and a second host on the folder (the desktop window's) says so instead of "close the
    * running window", which sent the person looking for a window that was not there.
@@ -312,12 +330,6 @@ describe('the host process, started for real', () => {
       update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'stop', forUpdate: true })}\n`),
       plain: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'stop' })}\n`),
     },
-    drain: {
-      env: { CC_KEEPER: '1' },
-      update: async (h: Running) => void h.p.stdin!.write(`${JSON.stringify({ op: 'drain', timeoutMs: 100 })}
-`),
-      plain: async (h: Running) => void h.p.stdin!.end(),
-    },
   }
   // An update stop that never reaches the host is a failure in seconds, not the runner's timeout
   const exitsSoon = (h: { exited: Promise<number | null> }) => Promise.race([h.exited, settle(30_000 * SLOW).then(() => 'still running')])
@@ -369,7 +381,6 @@ describe('the host process, started for real', () => {
   }
   it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', () => bringsBack(stops.hub), 180_000 * SLOW)
   it("the same for the window's stop line on the host's stdin (#1895)", () => bringsBack(stops.window), 180_000 * SLOW)
-  it('the same for a keeper draining a host that holds no agents for a swap (#1895)', () => bringsBack(stops.drain), 180_000 * SLOW)
   it("the same for the keeper's stop line, which a keeper with no child service sends (#1895 step 3)", () => bringsBack(stops.keeper), 180_000 * SLOW)
 
   /*

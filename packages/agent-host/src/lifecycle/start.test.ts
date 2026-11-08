@@ -25,8 +25,7 @@ describe('the start order', () => {
     expect(at('hold signals')).toBe(at('lock') + 1)
   })
 
-  it('a swap waits before the lock; the services are wired before the server listens', () => {
-    expect(at('standby')).toBeLessThan(at('lock'))
+  it('the services are wired before the server listens', () => {
     expect(at('services')).toBeLessThan(at('listen'))
     expect(at('listen')).toBeLessThan(at('ready'))
     expect(START_ORDER.at(-1)).toBe('endings')

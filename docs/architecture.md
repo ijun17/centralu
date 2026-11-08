@@ -237,13 +237,14 @@ Codex orchestrator bridge connect there.
 | While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
 | A relay whose peer refuses its bytes for 30 s ends (#392) | Writes are blocking. A peer that stopped reading (a stopped bridge, a hung client) held its relay thread and descriptors until the next swap, and blocked every keeper handoff, since a freeze waited for each relay to finish its copy (both gone since #1895 step 4 PR 4; the bound stays). A live client reads within that; the bridge reconnects on its next call. |
 | The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives its restart (`keeper-integration.mjs`, `front-door` scenario). The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
-| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances were handed to the next host in a swap's drain ([agent-host.md](agent-host.md) §4.2; #1895 step 4 PR 5 writes them on a stop for an update instead), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
+| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host by a stop for an update (a swap's drain did it until #1895 step 4 PR 5; [agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
 **The blue-green swap, until #1895 step 4 PR 4.** `switch` started host B of the new build with `--standby` beside
 host A, had A drain and stop for an update once B had checked itself, then activated B behind the same front door, and
 started A's build again if B failed. Since the host's children became its own (§4.3), the drain stopped them for an
 update anyway, so the swap kept only the door's address across builds, and an update is now the keeper's stop instead
-(§4.5). The host still takes `--standby`, `activate` and `drain`, which no keeper sends, until PR 5
+(§4.5). Since PR 5 a host started with `--standby` exits before it touches the data folder, so a keeper of an earlier
+build that still swaps fails with its running host untouched, and `activate` and `drain` get no answer
 ([plans/keeper-removal.md](plans/keeper-removal.md) §4). The drain's 10 s bound came from a real store: orchestrator
 tools took at most 0.2 s and app tools at most 5.6 s, while draining every tool was never an option (p99 78 s, max 4.5 h).
 
@@ -265,7 +266,7 @@ to tool calls and messages with side effects.
 | Parked conversation view | `apps.inlineReopen` reuses the session/call's instance and kept outcome; it never repeats the tool. |
 | Reconnect lease claims and conversation-view discovery | `apps.holdViews` and `apps.inlineViews` are idempotent and wait/retry too. A missing leased instance returns its slot to idle for a fresh keyed open. |
 
-A keyed home open reserves its instance **before** running the home tool. If the drain cuts that tool while it is
+A keyed home open reserves its instance **before** running the home tool. If a stop cuts that tool while it is
 still running, the reservation is handed over and recovery reports the uncertain tool outcome instead of calling
 it twice. Keys/outcomes live with their bounded view instances and disappear when those instances close. Failure reservations release the app immediately and expire under the lease grace period. If an
 unplanned crash lost the reservation, recovery reports uncertainty and never reruns the home tool. An older linked

@@ -4,33 +4,32 @@ import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 
 /**
- * Open app views across a planned hand-over (#280 option C step 4).
+ * Open app views across a stop for an update (#280 option C step 4; since #1895, the update's stop).
  *
- * Under the keeper, a build switch replaces the host while the window stays open: the old host
- * drains and a new one takes over behind the same front door. View instances live only in the
- * host's memory, so without this an open view went blank, or its next call failed with "This app
- * view is not open", until the person reopened it.
+ * View instances live only in the host's memory, so without this an open view went blank after an update, or its next
+ * call failed with "This app view is not open", until the person reopened it.
  *
- * So the leaving host writes down what it takes to serve each open view again — its id, its app
- * and its `ui://` address. A keyed pinned open also carries its home outcome or unfinished reservation — and the next host started under the keeper
- * opens them again under the same ids at startup. With the view's address also stable (the front
- * door's port and a secret derived from the keeper's token, main.ts), the UI's re-request after
- * the reconnect gets the very address it already has and leaves the view alone (AppFrame).
+ * So the host stopping for an update (the window's or the keeper's stop line, a linked hub's `host.stop { forUpdate }`)
+ * writes down what it takes to serve each open view again: its id, its app and its `ui://` address. A keyed pinned open
+ * also carries its home outcome or unfinished reservation. The next host on the data folder, whoever starts it, opens
+ * them again under the same ids at startup, so a card in a conversation still finds its view. The view's address does
+ * not survive an update: the next host has a new secret, and under a keeper a new front door, so the UI loads the
+ * address it asks for again after it reconnects (AppFrame).
  *
- * Only a **planned** ending writes the record: the drain of a swap, or a signal while the keeper's
- * child service holds the agents (a restart; main.ts). A crash writes nothing, and its views are
- * lost as before: there is no moment to write in, and an uncaught exception's state is not one to
- * carry forward.
+ * Built for the blue-green swap, whose drain wrote the record while the window stayed open; no host swaps since #1895.
+ *
+ * Only a stop for an update writes the record. Any other stop (a quit) closes its views, and a crash writes nothing:
+ * there is no moment to write in, and an uncaught exception's state is not one to carry forward.
  */
 
 /** The `app_settings` key the record lives under */
 export const VIEW_HANDOVER_KEY = 'views.handover'
 
 /**
- * How old a record may be and still be restored. A swap's gap is the drain bound (10 s) plus the
- * new host's start; ten minutes leaves room for a slow start while making sure a record left by a
- * host that was stopped and not replaced does not reopen views at some unrelated later start (a
- * restored view holds its app from going idle until the UI closes it).
+ * How old a record may be and still be restored. An update's gap is the stop plus the next host's start (and, for an
+ * update of the app, its relaunch); ten minutes leaves room for a slow start while making sure a record left by an
+ * update that never started a next host does not reopen views at some unrelated later start (a restored view holds
+ * its app from going idle until the UI closes it).
  */
 export const VIEW_HANDOVER_MAX_AGE_MS = 10 * 60_000
 

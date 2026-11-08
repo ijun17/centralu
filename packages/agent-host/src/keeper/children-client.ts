@@ -34,8 +34,8 @@ export function keeperHeldIo(dataDir: string): HeldIo {
 
 /**
  * Whether anything listens on `sock`. Only a socket that is not there or that nobody listens on (one a keeper that died
- * left, which this build's keeper also removes) is none; any other answer counts as a service, so that a standby that
- * cannot tell refuses (`refuseStandby`).
+ * left, which this build's keeper also removes) is none; any other answer counts as a service, so that a start that
+ * cannot tell asks the keeper and, unanswered, ends nothing (`endHeld`).
  */
 function answers(sock: string): Promise<boolean> {
   return new Promise((resolve) => {

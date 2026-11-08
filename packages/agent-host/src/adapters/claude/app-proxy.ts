@@ -102,7 +102,7 @@ export function appProxy(apps: SessionApps, server: string): AppProxy {
     // If the CLI cancels the call (notifications/cancelled), extra.signal fires — it propagates through to the app call.
     const call = () =>
       apps.call(server, name, args ?? {}, { signal: extra?.signal, ...(typeof toolUseId === 'string' && toolUseId ? { callId: toolUseId } : {}) })
-    // The host serves this call itself (it proxies to the app), so a planned swap waits for it, within a bound (#280, drain.ts)
+    // The host serves this call itself (it proxies to the app), so a stop that drains first waits for it, within a bound (drain.ts)
     return hostDrain.track(`tool ${server}/${name}`, call).catch((e: unknown) => {
       if (e instanceof DrainCut) return drainToolResult(e)
       throw e

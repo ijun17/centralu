@@ -7,18 +7,17 @@
  * handoff in PR 6 (`docs/plans/keeper-removal.md` §4), which waits four releases.
  *
  * Such a keeper, refused by this build's keeper at handoff, rolls back and swaps its host to this build under itself
- * anyway (its `move_keeper`). Its host's drain hands its agents, terminals and commands to the keeper's children
- * service; this host never asks for them, so they would run on unseen while this host shows their turns stopped, and
- * Continue would start a second CLI on the same conversation. So:
+ * anyway (its `move_keeper`). This build's host does not stand by for any swap (#1895 step 4 PR 5, main.ts): that swap
+ * fails before the running host is touched, and the running host serves on. Until PR 5 a standby went ahead when the
+ * keeper said nothing it held ran; now quitting Centralu completely is the update from such a build.
  *
- * - **A standby** (`--standby`) under a keeper whose children service answers stands by only when that keeper says
- *   plainly that nothing it holds runs; otherwise the swap ends before the running host is touched, and that host
- *   serves on (`refuseStandby`). A keeper that answers `ok: false`, does not answer, or lists a child that cannot be
- *   read is taken to hold one. Read-only, through `keeper.sock`.
- * - **A plain start** under one (its host is gone: a crash, or a stop) ends what it holds before this host restores its
- *   sessions; their turns then show stopped, as after any crash (`endHeld`). Each child's process group gets the signal
- *   through the children service, and a terminal's other groups (jobs its shell put in groups of their own, `sleep &`)
- *   get it from here, as that keeper's own stop sends it to every group in a terminal's session (`sessionGroups`).
+ * What it still holds matters at a **plain start** under one (its host is gone: a crash, or a stop): the agents,
+ * terminals and commands an earlier host gave its children service would run on unseen while this host shows their
+ * turns stopped, and Continue would start a second CLI on the same conversation. So this host ends what it holds
+ * before it restores its sessions; their turns then show stopped, as after any crash (`endHeld`). A keeper that answers
+ * `ok: false`, does not answer, or lists a child that cannot be read is told nothing. Each child's process group gets
+ * the signal through the children service, and a terminal's other groups (jobs its shell put in groups of their own,
+ * `sleep &`) get it from here, as that keeper's own stop sends it to every group in a terminal's session (`sessionGroups`).
  *
  * A keeper of this build or of a step-3 build serves no `children.sock` (it removes one a holding keeper left), and
  * nothing is asked; this build's answers `children` with an empty list. The sockets and the process table are `keeper/children-client.ts`.
@@ -85,18 +84,6 @@ export async function runningHeld(io: HeldIo): Promise<Held> {
     listed.push(read)
   }
   return { running: listed.filter((c) => c.exit === null) }
-}
-
-/**
- * The reason a standby gives up, or null to stand by: only no children service, or a keeper that says nothing it holds
- * runs, lets it. Read-only: the running host is still connected to the children service, and nothing is sent there.
- */
-export async function refuseStandby(io: HeldIo): Promise<string | null> {
-  const held = await runningHeld(io)
-  const rest = 'and this build no longer takes them over; the running host serves on. Quit Centralu completely and open it again to update'
-  if ('unknown' in held) return `the keeper holds processes of the running host and cannot say whether any still runs (${held.unknown}), ${rest}`
-  if (held.running.length === 0) return null
-  return `the keeper still holds ${held.running.length} agent, terminal or command process(es) of the running host, ${rest}`
 }
 
 /**

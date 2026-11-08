@@ -83,7 +83,7 @@ export function hostBusyBesides(s: ActivitySnapshot, sessionId: string): boolean
 }
 
 /**
- * Whether applying an update is what the person's Automatic updates would do now (#1509): the switch is on, no swap is draining,
+ * Whether applying an update is what the person's Automatic updates would do now (#1509): the switch is on, the host is not draining to stop,
  * and nothing is running (`hostBusy`; `besides` is a session asking, whose own turn is not counted, `hostBusyBesides`).
  * Pure, so each condition is tested by itself; main.ts reads the switch, the drain and the activity into it
  */

@@ -42,7 +42,7 @@ export type Schema = { version: number; tables: SchemaTable[] }
 
 type Db = Database.Database
 
-/** A store as this file reaches into it: the same reach `Store.inspect` takes into a probe */
+/** A store as this file reaches into it: a probe that never ran its constructor */
 class SchemaStore extends Store {
   get database(): Db {
     return this.db
@@ -52,7 +52,7 @@ class SchemaStore extends Store {
   static probe(db: Db): SchemaStore {
     const bare: unknown = Object.create(SchemaStore.prototype)
     if (!(bare instanceof SchemaStore)) throw new Error('A probe made from the store is not a store')
-    return Object.assign(bare, { db, dbPath: ':memory:', opts: {}, migrationsRun: 0 })
+    return Object.assign(bare, { db, dbPath: ':memory:', migrationsRun: 0 })
   }
 
   stepsToReplay(): { to: number; run: () => void }[] {

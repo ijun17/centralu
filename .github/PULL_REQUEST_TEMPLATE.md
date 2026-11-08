@@ -20,7 +20,7 @@
 
 <!--
   If this changes behaviour: what it does in each situation, one line each
-  (CONTRIBUTING.md#situations-checked). Host swap (an older build serving the same store); link
+  (CONTRIBUTING.md#situations-checked). Two builds on one store (an older build opening it after a newer one); link
   loss and reconnect; an older build reading what this one writes; two of the same thing at once
   (sends, deletes, sessions); the person using the same session; data loss (what is deleted,
   what is kept, what a crash in the middle leaves). "Does not apply, because ..." is an answer.

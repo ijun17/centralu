@@ -28,8 +28,8 @@ import { activeTheme, readHostStyles } from './hostStyles.js'
  * is already listening. That is why there is no readiness handshake with the proxy (host
  * views/proxy-page.ts).
  *
- * **Another host behind the connection** (a restart, or a build switch behind the keeper's front
- * door, #280): the view asks for its address again. The same address means the new host serves
+ * **Another host behind the connection** (a restart, or an update's next host, which opens the
+ * views the last one handed over, #280, #1895): the view asks for its address again. The same address means the new host serves
  * this instance where the old one did, so the frame and the bridge are left alone and the view
  * keeps its state. Another address is loaded the way the first one was; a failure goes the same
  * way as a first load's failure.

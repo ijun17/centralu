@@ -125,7 +125,7 @@ export type ViewHostOptions = {
   ports: OriginPorts
   /**
    * The port the view's address points at. Only decided after listen(). Under the keeper this is
-   * the front door's port rather than the host's own (swap-control.ts `viewPort`), so an address
+   * the front door's port rather than the host's own (keeper-control.ts `viewPort`), so an address
    * given out by one host still reaches whichever host is current after a swap
    */
   hostPort: () => number | null

@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mkdirSync, readFileSync, writeSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
@@ -58,8 +58,8 @@ import { SystemEndNotice, askSystemStopping } from './lifecycle/system-end.js'
 import { clearStoppedMark, markQuit, takeSystemEnd, updateResumeFolder, writeSystemEnd } from './lifecycle/stopped-mark.js'
 import { recordUpdateEnded } from './lifecycle/update-resume.js'
 import { restartEnded } from './lifecycle/update-ended.js'
-import { bridgeAddress, ControlChannel, onDrain, standby, viewPort } from './swap-control.js'
-import { endHeld, refuseStandby } from './lifecycle/keeper-held.js'
+import { bridgeAddress, ControlChannel, viewPort } from './keeper-control.js'
+import { endHeld } from './lifecycle/keeper-held.js'
 import { keeperHeldIo } from './keeper/children-client.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
@@ -137,10 +137,20 @@ const { values } = parseArgs({
     /** Exits together if the parent dies (turned on by the supervisor) */
     'watch-parent': { type: 'boolean' },
     memory: { type: 'boolean', default: false },
-    /** Started by the keeper next to a running host, for a swap (#280 step 3, swap-control.ts) */
+    /** Only a keeper of an earlier build passes it, to swap to this build; refused below (#1895) */
     standby: { type: 'boolean', default: false },
   },
 })
+
+/*
+ * A host started to stand by for a swap (#280 step 3): only a keeper of an earlier build starts one, next to the host it
+ * runs. This build swaps nothing (#1895): it goes before it touches the data folder or takes the lock, so that keeper's
+ * swap fails and the host it runs keeps serving, untouched.
+ */
+if (values.standby) {
+  console.error('[agent-host] not standing by: this build does not swap hosts; quit Centralu completely to run it')
+  process.exit(1)
+}
 
 /*
  * Control lines on stdin: the keeper's (#280 step 3) and the desktop window's, the host's parent, which stops it for an
@@ -158,7 +168,7 @@ const keeperToken = launch.underKeeper && !values.token && handedToken ? token :
  * built by the host as part of the RPC answer, so nobody needs to know this value in advance.
  *
  * Under the keeper it is derived one-way from the keeper's token instead of drawn at random, so
- * every host the keeper runs has the same one and a view's address survives a swap (#280 step 4;
+ * every host the keeper runs has the same one and a view's address survives the keeper restarting its host (#280 step 4;
  * why that keeps the two doors apart: `deriveHttpSecret`).
  */
 const httpSecret = keeperToken ? deriveHttpSecret(keeperToken) : randomBytes(32).toString('base64url')
@@ -217,34 +227,6 @@ if (pathResult.source !== 'unchanged') {
   console.error(`[agent-host] PATH augmented (${pathResult.source === 'shell' ? 'login shell' : 'default candidates'})`)
 }
 
-/*
- * A swap's standby (#280 step 3): checks the store without writing to it, reports, and waits here,
- * before the ownership lock, until the keeper says the running host has let go.
- */
-start.at('standby')
-const swapping = values.standby === true && control !== null
-if (values.standby && !control) {
-  console.error('[agent-host] --standby is only meaningful under a keeper; starting normally')
-}
-if (swapping && dbPath !== ':memory:') {
-  // A keeper of beta.48 or older still holding the running host's children swaps to this build even after this build's
-  // keeper refused its handoff: not standing by ends that swap with the running host untouched (`keeper-held.ts`)
-  const why = await refuseStandby(keeperHeldIo(dirname(dbPath)))
-  if (why) {
-    console.error(`[agent-host] not standing by: ${why}`)
-    process.exit(1)
-  }
-}
-if (swapping) {
-  await standby({
-    control: control!,
-    inspect: () => Store.inspect(dbPath),
-    write: (line) => void writeSync(1, `${line}\n`),
-    log: (line) => console.error(line),
-    exit: (code) => process.exit(code),
-  })
-}
-
 /**
  * Two hosts on the same data folder desync the session list and contend over SQLite (lessons LK2).
  * Failing to start with a stated reason is better than going quietly wrong.
@@ -269,9 +251,9 @@ if (!lock.ok) {
 /*
  * Under a keeper of beta.48 or older, what an earlier build's host gave it to hold, now that no host is up to take it
  * over: ended before the sessions are restored, so a turn it cut shows stopped and its Continue starts the only CLI
- * (`keeper-held.ts`). A standby that got here took over from a host that held nothing (its check above).
+ * (`keeper-held.ts`).
  */
-if (launch.underKeeper && !swapping && dbPath !== ':memory:') {
+if (launch.underKeeper && dbPath !== ':memory:') {
   await endHeld(keeperHeldIo(dirname(dbPath)), (line) => console.error(line))
 }
 /*
@@ -329,8 +311,7 @@ const signals = holdSignals(process, (line) => console.error(line))
 start.at('store')
 let store: Store
 try {
-  // Taking over in a swap: only what the previous build can still read runs now (store.ts, "During a swap")
-  store = new Store(dbPath, { swap: swapping })
+  store = new Store(dbPath)
 } catch (err) {
   if (!(err instanceof StoreTooNewError)) throw err
   refuse(err.message)
@@ -589,7 +570,7 @@ const views: ViewHost = new ViewHost({
     save: (book) => store.settings.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
     update: (fn) => store.settings.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
   }),
-  // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
+  // Under the keeper, the front door's port: the address outlives this host (keeper-control.ts)
   hostPort: () => viewPort(launch.frontDoor, port),
   // A linked machine's views are served here too, their documents asked of that machine through the router (#82)
   remote: linkedViews((method, params) => router.handle(method, params)),
@@ -601,16 +582,15 @@ const views: ViewHost = new ViewHost({
  */
 const inlineViews = attachInlineViews(mgr.apps, externalApps, views)
 /*
- * The views the previous host had open, if it handed them over in a planned ending (#280 step 4,
- * view-handover.ts). Before listen(), so the first client to reconnect already finds them.
+ * The views the previous host had open, if its stop was an update's (view-handover.ts). Before listen(), so the first
+ * client to reconnect already finds them. Whoever started this host: the record is the data folder's, and one too old
+ * is dropped here either way.
  */
-if (launch.underKeeper) {
-  try {
-    const { restored, skipped } = restoreViewHandover(store.settings, views, inlineViews)
-    if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
-  } catch (err) {
-    console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
-  }
+try {
+  const { restored, skipped } = restoreViewHandover(store.settings, views, inlineViews)
+  if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
+} catch (err) {
+  console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
 }
 /*
  * `host.stop` (`centralu serve --stop`). The server listens before the endings are wired below, so
@@ -618,7 +598,7 @@ if (launch.underKeeper) {
  */
 let stopNow: (() => void) | null = null
 let stopAsked = false
-/** The stop is an update's (a linked hub's `host.stop { forUpdate }`, the window's stop line, a swap that holds no agents): what it ends is listed for the next host */
+/** The stop is an update's (a linked hub's `host.stop { forUpdate }`, the window's or the keeper's stop line): what it ends, and the open app views, are written down for the next host */
 let stoppingForUpdate = false
 /** The one start of a stop for an update: the turns it ends are listed for the host that starts next (#1618) */
 const beginStopForUpdate = () => {
@@ -687,7 +667,7 @@ const links = new Links(linkDepsFor(store, {
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
-  // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts mid-swap
+  // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop
   autoUpdate: () => hubUpdatesMachines({ build: BUILD, current: APP_VERSION, autoApply: autoApplyUpdates.read(), draining: hostDrain.draining }),
   reverse: reverseCalls({
     allowed: (machineId) => store.machines.linkedMachineAsks(machineId),
@@ -729,14 +709,14 @@ const activity = (): ActivitySnapshot => ({
 /**
  * Whether the person's Automatic updates are on and the host is idle (#1509): applying an update then is what the host does by
  * itself, so the cards that guard it (an agent's `update_centralu` apply, a script's `updates.apply`) are not raised. `besides`
- * is the session asking, whose own turn is not counted (`hostBusyBesides`). Never while the host drains for a swap
+ * is the session asking, whose own turn is not counted (`hostBusyBesides`). Never while the host drains to stop
  */
 const updateAtRest = (besides?: string): boolean =>
   updateAtRestOf({ automatic: autoApplyUpdates.read(), draining: hostDrain.draining, activity: activity(), ...(besides !== undefined ? { besides } : {}) })
 mgr.useUpdateAtRest(updateAtRest)
 /**
  * The limited credential's calls that wait for the person (#1405, host-requests.ts): raised while a window that shows
- * them is attached, run through the router once allowed, as a call this host serves (a swap's drain refuses or cuts it)
+ * them is attached, run through the router once allowed, as a call this host serves (a drain before a stop refuses or cuts it)
  */
 const requests: HostRequests = new HostRequests({
   emit: (e) => events.push(e),
@@ -872,7 +852,7 @@ const server = new HostServer({
   handover: () => handover,
   // The turns this host continued after an update cut them, for a linked hub's callers (#1618)
   updateContinued: () => mgr.tenure.updateContinued(),
-  // A planned swap waits for running RPCs, within a bound (#280 step 3, drain.ts)
+  // A stop that drains first waits for running RPCs, within a bound (`host.stop {ifIdle}`, drain.ts)
   drain: hostDrain,
 })
 // From here on what services send reaches the server: its replay buffer, then whoever connects
@@ -886,8 +866,8 @@ events.open((e) => server.broadcast(e))
  */
 let stopActivity: () => void = () => {}
 const shutdown = new Shutdown({
-  plan: (handOver) =>
-    stopPlan(handOver, {
+  plan: () =>
+    stopPlan({
       recordEnded: () => {
         if (!updateResume || !stoppingForUpdate) return
         try {
@@ -897,6 +877,8 @@ const shutdown = new Shutdown({
         }
       },
       handOverViews: () => {
+        // Only an update's stop: the next host starts at once, with the same app views. Any other stop closes them
+        if (!stoppingForUpdate) return
         try {
           const n = recordViewHandover(store.settings, views, inlineViews)
           if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
@@ -944,15 +926,14 @@ start.at('ready')
 // This line is parsed by the supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
 /*
- * What a swap would cost with this build, for the app to say before it asks (#280 step 3, swap-control.ts), and that this host
- * takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through the keeper
+ * That this host takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through
+ * the keeper. Said in the shape keepers of earlier builds read (`swap.stopsForUpdate`; this build's keeper takes any `swap`
+ * line as the same), and `keepsAgents: false` for the windows of beta.40 to 52, which still show what a swap would cost
  */
-// It holds no agents: no host uses the keeper's children service any more (#1895 step 4), so a swap ends them as an update's stop does
 if (launch.underKeeper) console.log(JSON.stringify({ swap: { keepsAgents: false, stopsForUpdate: true } }))
 /*
- * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready, where the steps a
- * swap left for later run: by then the host it replaced is gone, so a host failing before ready never leaves the
- * previous build serving on copies already marked as moved. One that appears later (an approved MCP server) follows.
+ * User-folder apps become projects in place (#1141, user-app-adoption.ts) once this host is ready: a host failing before
+ * ready never leaves copies marked as moved behind it. One that appears later (an approved MCP server) follows.
  */
 setTimeout(() => {
   userAppAdoption.run().catch((e: Error) => console.error(`[apps] moving user-folder apps into projects failed: ${e.message}`))
@@ -966,22 +947,6 @@ setTimeout(() => {
   // What an older build left (§6.3, §9.5): its pending thread mail moves, its report marks and tasks come in step, then delivery starts
   hostMailbox.afterReady()
 }, 0)
-/*
- * The heavy and breaking steps a swap left for later (store.ts, "During a swap"), and a vacuum a
- * stopped host left owed (#396). By the time this timer fires the ready line has gone out and the
- * keeper has pointed the front door here: the host this one replaced is gone, so a breaking step can
- * no longer strand it.
- */
-if (swapping && (store.deferredSteps.length > 0 || store.vacuumOwed)) {
-  setTimeout(() => {
-    try {
-      store.runDeferred()
-    } catch (err) {
-      console.error(`[store] a step left from the swap failed; it runs again on the next start: ${(err as Error).stack ?? err}`)
-    }
-  }, 0)
-}
-
 /*
  * Once right after startup, and then every 6 hours (issue #43). **After listen**: the result goes
  * out as a broadcast, and right after startup is exactly when a new version is most likely to have
@@ -1018,14 +983,14 @@ if (launch.underKeeper) {
 
 /*
  * Every way of ending, wired to the one shutdown (lifecycle/endings.ts): signals (and one held
- * while starting), a crash, the parent's pipe with `--watch-parent`, `host.stop`, the stop line on
- * the control channel, and the keeper's drain for a swap.
+ * while starting), a crash, the parent's pipe with `--watch-parent`, `host.stop`, and the stop line on
+ * the control channel.
  */
 start.at('endings')
 const endings = wireEndings({
   proc: process,
   signals,
-  leave: (handOver) => void shutdown.leave(handOver),
+  leave: () => void shutdown.leave(),
   force: (why) => shutdown.force(why),
   record: crashRecorder(join(dirname(dbPath), 'host-errors.log'), (line) => console.error(line)),
   stdin: process.stdin,
@@ -1035,31 +1000,4 @@ const endings = wireEndings({
 stopNow = endings.stopAsked
 if (stopAsked) stopNow()
 
-/*
- * The keeper's drain (#280 step 3, swap-control.ts): finish or cut what the host serves itself,
- * stop its agents, terminals and commands, let go of the lock, say so, exit. The next host takes over from there.
- */
-if (control && launch.underKeeper) {
-  onDrain(control, {
-    drain: hostDrain,
-    // A swap: the next host is already waiting, and it takes the open views over. The agents end: that is an update's
-    // stop, so the next host continues what it ends (#1895). A signal arriving mid-drain runs no second, different ending.
-    detach: () => {
-      beginStopForUpdate()
-      return shutdown.stopServices(true)
-    },
-    keepsAgents: false,
-    // The data folder is the next host's from here: nothing this one learns later is written in it
-    release: () => {
-      systemEnding.close()
-      ownership.release()
-    },
-    write: (line) => void writeSync(1, `${line}\n`),
-    log: (line) => console.error(line),
-    exit: (code) => {
-      stopLog()
-      process.exit(code)
-    },
-  })
-}
 start.done()

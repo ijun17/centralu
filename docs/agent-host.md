@@ -6,7 +6,7 @@ A standalone Node process. In dev the developer starts it directly (`pnpm host`)
 
 ```
 agent-host/src/
-├─ main.ts              # CLI (--port --token --db --watch-parent --memory --standby), the wiring of the
+├─ main.ts              # CLI (--port --token --db --watch-parent --memory; --standby refused), the wiring of the
 │                       #   services, each start step marked against lifecycle/start.ts's START_ORDER
 ├─ lifecycle/           # the process's start and ending (runtime-unification.md step 3):
 │                       #   launch-env (variables read once, deleted), start (the order as data,
@@ -31,9 +31,9 @@ agent-host/src/
 ├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
 ├─ links/               # linked machines (#82): links, the remote client, install and update over ssh
 ├─ dev-services/        # git/fs/store, terminals, commands (not dev-only — it is where messages live, §5)
-├─ swap-control.ts      # the host's half of a swap (#280 step 3); drain.ts waits out the calls it serves
+├─ keeper-control.ts    # the control lines on stdin, and the addresses that outlive a host (§4.2); drain.ts: a stop's wait for calls
 ├─ keeper-link.ts       # what the host tells the keeper, and its own build
-├─ view-handover.ts     # open app views across a swap (#280 step 4)
+├─ view-handover.ts     # open app views across a stop for an update (#280 step 4)
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ stream-text.ts       # text read off a child's stream: a kept tail, lines, decoded as one stream (#428)
@@ -536,7 +536,7 @@ below retained for `safe` and `normal`:
    ask_project task meanwhile), and its preset is no higher than the one on the card; otherwise no child starts and the
    caller is told why. Turning trust off withdraws the project's standing cards at once and tells their callers. The
    same caller asking the same task (and tool, when named) while its card stands gets the existing handle back, not a
-   second card: a host swap's drain tells a cut call to call again, and that call never read its `pending`. A
+   second card: a drain before a stop tells a cut call to call again, and that call never read its `pending`. A
    request ends when it is answered,
    when the caller withdraws it (`agent_session stop`), when its call is cancelled while the card stands, or when the
    caller is deleted; each end without a child leaves a notice in the caller's session for the person
@@ -2666,7 +2666,7 @@ stdin; a host told to expect it that gets no such line within 10 s ends its star
 0.1.0-beta.45 on reads it there (#1143). A host not told to read it there still reads `CC_HOST_TOKEN`, as one started
 by hand from a shell does (CONTRIBUTING.md).
 
-The Codex bridge is started with the front door's address (`swap-control.ts`, `bridgeAddress`): a running codex
+The Codex bridge is started with the front door's address (`keeper-control.ts`, `bridgeAddress`): a running codex
 keeps its bridge, and only an address that outlives this host survives its restart (the `front-door` scenario of
 `keeper-integration.mjs` kills the host and checks the bridge reaches the next run). Without a keeper the bridge gets the host's own port, as before.
 
@@ -2680,44 +2680,43 @@ token, so the next host accepts a running bridge's credential without anything b
 this change refuses it: after switching back to such a build, a Codex session started by a newer one loses its
 Centralu tools until it is restarted, and the bridge says so.
 
-**Control lines on stdin** (`swap-control.ts`). The keeper's pipe also carries one JSON object per line; the host
-answers on stdout next to its ready line. Neither side parses anything else the other says.
+**Control lines on stdin** (`keeper-control.ts`). The keeper's pipe, and the desktop window's when it started the
+host, also carries one JSON object per line. The host parses nothing else the parent sends.
 
-| keeper → host | host → keeper |
+| parent → host | what the host does |
 |---|---|
-| (started with `--standby`) | `{"standby":{pid,schema}}` once its own checks pass |
-| `{"op":"activate"}` | the ordinary ready line once it serves |
-| `{"op":"drain","timeoutMs":N}` | `{"drained":{waitedFor,cut,ms,keptAgents}}`, then it exits |
-| — | `{"swap":{"keepsAgents":false,"stopsForUpdate":true}}` once per start |
+| `{"op":"stop"}` | stops; from the keeper it first notes that the person quit (#1143) |
+| `{"op":"stop","forUpdate":true}` | stops for an update (§4.5) |
+| `{"op":"system-ending"}`, `{"op":"system-ending","cancelled":true}` | notes that the system is ending, or no longer is (§4.6.2, #1397) |
 
-Since #1895 step 4 PR 4 no keeper starts a host with `--standby` or writes `activate` or `drain`; the host still
-takes them until PR 5 removes them ([plans/keeper-removal.md](plans/keeper-removal.md) §4). The keeper reads the last
-line's `stopsForUpdate` and nothing else of it.
+Under a keeper the host says once per start, after its ready line, `{"swap":{"keepsAgents":false,"stopsForUpdate":true}}`:
+that it takes the keeper's stop lines. This build's keeper reads any `swap` line as that; keepers of earlier builds
+read `stopsForUpdate`, and windows of beta.40 to 52 still read `keepsAgents`.
 
-**Standby.** Before the ownership lock: the host has loaded its bundle and found its tools; it reads the store
-read-only (`Store.inspect`) and, if `min_reader_version` is past it, says the "written by a newer Centralu" sentence
-and exits 1, so the swap fails while the running host is untouched. Otherwise it reports and waits for `activate`;
-the pipe closing (the keeper gave up) ends it without having touched anything. It does not listen in standby: the
-front door hides the port, and the server needs the session manager, which needs the store open for writing.
+**No swap** (#1895 step 4 PR 5). Until then a keeper could start a second host with `--standby` next to the running
+one, write it `activate`, and write the running one `drain` (the blue-green swap, #280 step 3; [architecture.md](architecture.md)
+§4.2). No keeper of PR 4 or later does. A host started with `--standby`, which only a keeper of an earlier build
+starts, says it does not stand by and exits 1 before it touches the data folder, so that keeper's swap fails and its
+running host serves on (`lifecycle/host-process.test.ts`). `activate` and `drain` get no answer: a keeper of an
+earlier build that writes `drain` to a host of this build waits out its bound and then stops the host with a
+signal, which is a plain stop, not one for an update, so the turns it cuts show stopped with Continue rather than
+being continued (§4.6.2). That takes a keeper of an earlier build running a host of this one (it starts its host
+from the bundle's paths, which hold this build once it is installed: `lifecycle/keeper-held.ts`) and a window of an
+earlier build asking it to switch; quitting Centralu completely ends it.
 
 **Drain** (`drain.ts`). Every WebSocket RPC and every in-process MCP tool call (the orchestrator tools, the
-app-tool proxy) runs through one tracker. On `drain`, new calls are refused and running ones get the bound; past
-it each is answered with an error saying the host switched builds and stopped waiting, that the call may or may
-not have finished, and to check and call again. RPC errors from a refusal or a cut carry `retryable: true`. Then,
-in order: a moment for a cut call's error to reach its agent, the **stop hook** (`stopServices(true)`), the lock
-released, `drained` written, exit. The stop hook is a stop for an update: it writes the open app views down (below),
-lists the turns, terminals and runs it ends, and stops everything the host started, agents included, as every ending
-does (§4.3); the host that takes over continues what it ended (§4.5). `drained.keptAgents` and the start-up
-`keepsAgents` are still sent, and always `false`: no host keeps agents in the keeper any more (#1895 step 4 PR 1).
+app-tool proxy) runs through one tracker. Built for the swap's drain, it is begun now only by `host.stop {ifIdle}`
+(`lifecycle/stop-gate.ts`, #1224): once the host is found idle, new calls are refused, answered with an error saying
+the host is restarting and to call again (RPC errors carry `retryable: true`), and a call still running past the
+bound is cut with one saying it may or may not have finished. `updateAtRest` and a hub's automatic updates of its
+machines wait while it drains.
 
-**Taking over.** After `activate` the host takes the lock and opens the store with `swap: true`: expand steps run
-now, heavy and breaking steps run after its ready line (§5.1).
-
-**Open app views** (#280 step 4). A view's frame address names the front door's port (`swap-control.ts`, `viewPort`)
-and a secret derived from the keeper's token (`transport/http.ts`, `deriveHttpSecret`), so every host the keeper
-runs gives out the same address for the same instance; without a keeper both stay as before (the host's port, a
-random secret). The instances themselves live in memory, so a swap's drain (above) writes each open one's id, app and `ui://` address to `app_settings`
-(`views.handover`, `view-handover.ts`), first thing in `stopServices`. The next host started under the keeper reads
+**Open app views** (#280 step 4). A view's frame address names the front door's port (`keeper-control.ts`, `viewPort`)
+and a secret derived from the keeper's token (`transport/http.ts`, `deriveHttpSecret`), so every host one keeper
+runs (one it restarts after a crash) gives out the same address for the same instance; without a keeper both stay as
+before (the host's port, a random secret). The instances themselves live in memory, so a stop for an update (§4.5)
+writes each open one's id, app and `ui://` address to `app_settings` (`views.handover`, `view-handover.ts`), first
+thing in its stop plan; any other stop writes nothing. The next host on the data folder, whoever started it, reads
 the record before it listens, deletes it, and if it is at most ten minutes old reopens them under the same ids:
 each holds its app again as `open()` does, an app that no longer exists is skipped, and a view in a conversation
 is re-bound to its card (`InlineViews.adopt`) so its messages still go only there. What a conversation's view does
@@ -2725,7 +2724,9 @@ not keep is its call's input and result (never written down), so once closed it 
 restart. A crash writes nothing and its views are lost, as before. Per-app origin ports are bound lazily by the new
 host the first time `apps.viewFrame` or the proxy page needs them. On the UI side, every open `AppFrame` asks for
 its address again after a resync (`hostResyncs` in the store): the same address leaves the view and its state
-alone, another one is loaded, a failure takes the first load's failure path.
+alone, another one is loaded, a failure takes the first load's failure path. After an update the address is another
+one (a new keeper, so a new front door and secret; or a new window's host with a new random secret), so each open
+view loads once more, under its old id and card.
 
 ### 4.3 The children the host starts, under a keeper too (#280, #1895)
 
@@ -2761,13 +2762,13 @@ each pty in a `PtySlot` (`dev-services/pty-slot.ts`, #428): its output (256 KiB)
 has ended (at most 1 s after it, `exit-after-drain.ts`), its tree stopped, and a failed start, node-pty not loading
 included, said on screen and followed by an exit.
 
-**Leaving** (`lifecycle/shutdown.ts`, `stopPlan(handOver, parts)`). Every ending is a stop: SIGTERM, SIGINT, SIGHUP,
-the parent's pipe closing, an uncaught exception, `host.stop`, the keeper's stop line and a swap's drain. Terminals and
+**Leaving** (`lifecycle/shutdown.ts`, `stopPlan(parts)`). Every ending is a stop: SIGTERM, SIGINT, SIGHUP,
+the parent's pipe closing, an uncaught exception, `host.stop`, and the keeper's or the window's stop line. Terminals and
 runs are ended first, synchronously, then sessions are disposed and app processes and the in-process servers stop.
-A stop for an update (the keeper's or the window's stop line with `forUpdate`, a hub's `host.stop { forUpdate }`, a
-swap's drain) is the same stop, and first lists the turns, terminals and runs it ends for the next host, which
-continues and reopens them (§4.5). `handOver` only adds writing the open app views down first, for a swap's drain
-(§4.2). The adapters have no detach any more, and there is no leave mode that lets agents run on.
+A stop for an update (the keeper's or the window's stop line with `forUpdate`, a hub's `host.stop { forUpdate }`)
+is the same stop, and first writes the open app views down (§4.2) and lists the turns, terminals and runs it ends for
+the next host, which reopens and continues them (§4.5). The adapters have no detach any more, and there is no leave
+mode that lets agents run on.
 
 **A host that crashes.** The keeper restarts it by its usual rules (§4.1). The agents end with the old host through
 the host watch, its terminals and runs with it; a turn in flight shows stopped with Continue (§4.6.2), as on Windows
@@ -2929,8 +2930,8 @@ host the relaunched window starts continues the turns the stop ended, tells the 
 and opens the terminals and Run commands again. A host that does not end in time is stopped the usual way, and its turns end as a
 quit's. The update line says so (`RelaunchCheck.restartsHost`). Only where `relaunch_info` is ready, as with a keeper: from an app
 bundle the update replaced (macOS). No Linux package or Windows install is a bundle, so those keep "Restart Centralu to finish
-updating", and the busy report is the keeper's, so nothing applies by itself without one. A swap whose host holds no agents (a
-host of #1895 step 4 PR 1 or later) is the same stop: the drain begins it before it stops them, and the host that takes over continues what it ended.
+updating", and the busy report is the keeper's, so nothing applies by itself without one. Between #1895 step 4 PR 1 and PR 5 a
+swap's drain of a host that held no agents was the same stop; no host is drained for a swap since PR 5 (§4.2).
 
 **The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
 the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 to PR 3 are built). The macOS release keeps its shape, shell then keeper then host, because the
@@ -2972,15 +2973,15 @@ whose child table still had a running child, and one of PR 2 or later refuses an
 rolls back and carries on with its children and its host, and the update is refused with "quit Centralu completely and
 open it again to update". Quitting stops those children, and the keeper the shell starts next holds none.
 
-Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`), and its
-host's drain would hand its children to it, where no host of this build looks. So the host keeps one small check, past
+Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`). Since
+PR 5 no host of this build stands by for that swap (§4.2), so it fails before the running host is touched, and that host
+serves on with its children; quitting completely is the update. Its children matter at one more moment, so the host keeps one small check, past
 PR 2 since such a keeper runs this host whatever this build's keeper is, and past PR 3 since it starts its host from the bundle's
 paths, which after the update hold this build: a host of its that exits comes back as this build with no window involved. It goes
 with PR 6 (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
-standby under a keeper whose `children.sock` answers stands by only when that keeper lists its children and none runs
-(an `ok: false`, no answer or an unreadable list refuses it too), so that swap fails before the running host is touched
-and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it restores
-its sessions, so their turns show stopped and Continue starts the only CLI. It signals each child's process group
+plain start under one (its host crashed or stopped) ends what the keeper holds before it restores its sessions, so their
+turns show stopped and Continue starts the only CLI (an `ok: false`, no answer or an unreadable list ends nothing). Until
+PR 5 a standby under such a keeper also stood by only when that keeper listed its children and none ran. It signals each child's process group
 through the service and, for a terminal, every group in the shell's session (found by its controlling terminal), as
 that keeper's own stop does, so a job the shell put in a group of its own (`sleep &`) ends too. A keeper of step 3 or
 later serves no `children.sock` (it removes one a holding keeper left), and nothing is asked; one of PR 2 or later
@@ -3020,7 +3021,7 @@ waits for terminals to close. Moving one session to a newly installed agent CLI 
 rule, `sessionIdle` (§4.6).
 
 **What the host sees.** A stop for an update, by the keeper's stop line (since step 3; until step 4 PR 3 a relaunched
-window could also switch a keeper of an earlier build, whose swap's drain was the same stop). It stops this host's agents,
+window could also switch a keeper of an earlier build, whose swap's drain was the same stop until PR 5 removed it). It stops this host's agents,
 terminals and commands, and the next host continues the listed turns and opens the terminals and Run commands again.
 The new host's update status starts fresh at its own version.
 
@@ -3526,7 +3527,7 @@ host that crashed or is missing, not one the person stopped:
   `systemStoppingQueries`), and `Shutdown` waits for the answer before it stops anything: the first `stopping` answers, at
   most a second in all, and the queries still running are ended then or as the host exits, however it exits. Elsewhere
   there is nothing to ask, and the leave begins at once as before. A notice the host outlives by 2 minutes is called off
-  (the system did not go). Nothing is written once a swap's drain lets go of the lock. The next host takes the file once
+  (the system did not go). The next host takes the file once
   it holds the lock (read and removed, before `stopped.json` is cleared); with it, the turns the last host lost are the
   system's (§4.6.2, `shutdown`). A host killed with no notice writes nothing, so the next start knows nothing and guesses
   nothing. Separate from `stopped.json`, which keeps its meaning for a hub.
@@ -3681,7 +3682,7 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | After | Success: the switcher prunes what neither pointer nor the switch's runner names. Failure: the end of `host.log`, `serve --stop` again, the old pointers back (none, after a first update over an npm install: then the launcher goes too), the old version started if one was running, and the call fails with that sentence. That stop is for an update too: the turns the new host had not continued, and those it was running, stay listed for the version put back (one from before #1618 ignores the list) | Failure: the same, towards the version it left | The link opens again and finds what is left (an npm install, or nothing) |
 
 **Following the hub** (#1508, owner 2026-10-24). While the hub's "Automatic updates" are on (`updates.autoApply`;
-`LinkDeps.autoUpdate`, which main.ts reads as off while the hub drains for a swap), a linked machine on an older release
+`LinkDeps.autoUpdate`, which main.ts reads as off while the hub drains to stop), a linked machine on an older release
 of the hub's channel follows the hub's version with no one's click: one switch covers both. The condition is
 `LinkedMachine.followsHub` and lives there only: automatic updates on, the hub can update the machine (`operationRefusal`),
 the person did not remove what the hub installed there, neither side runs a local build (`<base>.local.N`), and
@@ -3822,7 +3823,7 @@ the person's Continue would.
   `commands.state` were empty after the restart. They are not a session's, so they have no conversation mark and a list of their
   own (`recordUpdateEnded`, lifecycle/update-resume.ts; the shapes are in lifecycle/update-ended.ts), written by the stopping host in
   its first step (`recordEnded` in `stopPlan`, before the shells are killed: no await comes before the kill; only a stop that was
-  asked for an update records, `host.stop { forUpdate }`, the desktop window's stop line or a drain that holds no agents: §4.5). Only what opening them again needs is kept, and nothing a shell printed or
+  asked for an update records, `host.stop { forUpdate }`, or the desktop window's or the keeper's stop line: §4.5). Only what opening them again needs is kept, and nothing a shell printed or
   a person typed: per terminal its folder and size (`TerminalService.snapshot`); per running Run command its folder and command
   (`CommandRunner.runningSnapshot`), with the time of the stop. The next host takes the list whole, once, before it listens
   (`UpdateResumeLists.takeEnded`, `restartEnded`). **The list is removed first**, by the path the lists of turns are removed by, and
@@ -3848,10 +3849,10 @@ the person's Continue would.
   continued. A session whose turn had ended but whose background work (a dev server, a watcher) still ran loses that
   work with its process and is not continued as a turn, but its agent is told (above). One whose tool cannot take it up again
   ends as a crash's does (`turnLostInSwap`): `quit`, and its report or its requester told it stopped.
-- **A swap's cut is continued the same way** (#1966). Since #1895 step 4 PR 1 a swap's drain is a stop for an update
-  (§4.2), so the turns it cuts are listed and continued as above, through the same door (`HostTenure.sendUpdateNote`),
-  the state kept `working` while the new process comes up (`continuingTurns`). Only when that send fails does it end as
-  above. A turn cut by the person's own quit (`markQuit`, no list) is not continued, as before (#1947).
+- **A swap's cut was continued the same way** (#1966). Between #1895 step 4 PR 1 and PR 5 a swap's drain was a stop for
+  an update, so the turns it cut were listed and continued as above, through the same door (`HostTenure.sendUpdateNote`),
+  the state kept `working` while the new process comes up (`continuingTurns`). No host is drained for a swap since PR 5
+  (§4.2). A turn cut by the person's own quit (`markQuit`, no list) is not continued, as before (#1947).
 - **Its caller hears nothing of the cut** (#1966). The update used to send one notice per cut child, each waking the parent's turn
   for no decision. Now the parent is told nothing until the continued turn ends; that report carries one line, "An update of
   Centralu cut this turn and Centralu continued it." (`TurnStarter.cut`, set before the Continue goes in and dropped if it fails, `ChildOwnership.noteContinuedCut`; the machine's host
@@ -4040,8 +4041,7 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   Moving to git2 (Rust) **is not done until measurement confirms a bottleneck** (m2-plan decision 3).
   The port interface is the same, so moving it later leaves the UI unchanged.
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
-  migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
-  `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
+  migrations through the two classes it extends: the runner (`store/migrate-runner.ts`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
   `store/vacuum.ts`. The records are one module per concept in `dev-services/store/` (projects, sessions, messages,
   the session archive, app runs, …), held as fields that callers name (`store.projects.listProjects()`), and the step list is in
   `store/migrations/`. The schema DDL lives in exactly one place,
@@ -4080,24 +4080,22 @@ step against:
    refuses the same way, naming the row, since a floor worked out from fewer steps could open what it cannot read
    (#384).
 4. **Heavy steps are marked `heavy: true`:** a step that rewrites or re-indexes every message, or `VACUUM`s (v3, v11,
-   v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). A swap runs them after the switch rather
-   than during it.
-5. **During a swap (#280 step 3)** the host taking over runs the expand steps and leaves every heavy or breaking
-   step for `runDeferred`, which it calls just after its ready line, once the front door points at it and the host
-   it replaced is gone for good. The previous build still reads an expanded store, so a new host that fails before
-   it is ready can be replaced by the previous build again; a breaking step is exactly what would stop that.
-   `user_version` moves past a deferred step, and `app_settings.deferred_migrations` lists what is still owed: a
-   host that dies first leaves it to the next open, which runs it in its place. So a heavy or breaking step must
-   be correct when it runs after later steps, and the build that ships it must work before it has run (a contract
-   step keeps this by rule 2; a heavy step by only reshaping data the code reads either way).
+   v21, v40 so far; v40 held the start for 1.9s on 137,722 messages). The start says in host.log that it migrated
+   and how long it took.
+5. **What a swap left (#280 step 3, gone since #1895 step 4 PR 5).** A host of an earlier build that took over in a
+   swap ran the expand steps and left every heavy or breaking step for after it, with `user_version` already past
+   them and `app_settings.deferred_migrations` listing what was owed; one that died first left the list behind. This
+   build writes no such list, and an open that finds one runs those steps in their place in the order and crosses
+   each off in its own commit (`store-migrations.test.ts`). So a step that was ever left that way must be correct
+   when it runs after later steps.
 6. **A step commits as one unit with the record that it ran (#396):** its statements, the `min_reader_version` raise
-   and the `user_version` bump (with the `deferred_migrations` list when it changes: shortened when a step a swap left
-   for later runs, lengthened when a swap leaves one) go in one transaction.
+   and the `user_version` bump (with the `deferred_migrations` list shortened when a step a swap left for later runs)
+   go in one transaction.
    Each statement used to commit on its own, so a start killed between two `ALTER`s of v12 or v17 left the first
    column, and the next start, finding it, skipped the rest of the step for good. `VACUUM` cannot run in a
    transaction, so a step queues it for after its commit and records in that commit that it is owed (a `vacuum_owed`
    row in `app_settings`, deleted once the vacuum has run or failed; `vacuumAfterStep`). A host stopped during the
-   vacuum leaves the row, and the next open vacuums, or, in a swap, `runDeferred` does. v10 switches `foreign_keys`,
+   vacuum leaves the row, and the next open vacuums. v10 switches `foreign_keys`,
    which SQLite ignores inside a transaction, and commits on its own (`ownTransaction`), as one unit by itself.
 
 | Steps | What they do | Older build |

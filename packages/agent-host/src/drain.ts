@@ -1,27 +1,23 @@
 import { raceTimeout } from './timing.js'
 
 /**
- * Calls the host serves itself, and how a planned host swap waits for them (#280, option C step 3).
+ * Calls the host serves itself, and how a stop waits for them: work it is doing **itself** on someone's behalf, a
+ * WebSocket RPC (the UI, the Codex bridge) and an in-process MCP tool call (the orchestrator tools, the app-tool proxy).
  *
- * A blue-green swap stops the running host while its agents keep going. What the host must not
- * drop on the floor is work it is doing **itself** on someone's behalf: a WebSocket RPC (the UI,
- * the Codex bridge) and an in-process MCP tool call (the orchestrator tools, the app-tool proxy).
- * Everything else an agent runs (Bash, subagents, file tools) runs inside the agent's own process,
- * which outlives the host, so it never holds a swap up.
+ * Built for the blue-green swap (#280 step 3), which drained the old host while its agents kept going; no host swaps
+ * since #1895. What begins a drain now is `host.stop {ifIdle}` (lifecycle/stop-gate.ts): from the moment it finds the
+ * host idle, every new call is refused as retryable, so nothing starts on a host that is going.
  *
  * Measured on a real store (2026-10-04, #280 "Measurements for option C" §2): orchestrator tools
  * took at most 0.2 s, app tools at most 5.6 s (GitHub round trips), over 88 calls. A bound of about
  * 10 s covers every recorded call with margin; past it the call is cut and the model is told to try
- * again, rather than the swap waiting on an app that may never answer. Draining every tool was never
+ * again, rather than the stop waiting on an app that may never answer. Draining every tool was never
  * an option: p99 over all tools is 78 s and the longest ran 4.5 h.
  */
 
-/** The bound the keeper asks for when it does not say otherwise */
-export const DEFAULT_DRAIN_MS = 10_000
-
 /**
- * A call refused or cut because the host is handing over to another build. `retryable`: the same
- * call made again reaches the next host.
+ * A call refused or cut because the host is stopping. `retryable`: the same call made again reaches the host that
+ * starts next.
  */
 export class DrainCut extends Error {
   readonly retryable = true
@@ -33,7 +29,7 @@ export class DrainCut extends Error {
 
 /** Said to a call that arrives once the drain has begun */
 export const REFUSED_MESSAGE =
-  'Centralu is switching the agent host to another build and is not taking new calls for a moment. Try again in a few seconds.'
+  'Centralu is restarting the agent host and is not taking new calls for a moment. Try again in a few seconds.'
 
 /**
  * Said to a call still running when the bound passes. The work itself may still finish (the host
@@ -43,7 +39,7 @@ export const REFUSED_MESSAGE =
 export function cutMessage(boundMs: number): string {
   const s = Math.round(boundMs / 100) / 10
   return (
-    `Centralu switched the agent host to another build and stopped waiting for this call after ${s}s. ` +
+    `Centralu restarted the agent host and stopped waiting for this call after ${s}s. ` +
     'It may or may not have finished. Check its effect, then call it again if it is needed.'
   )
 }

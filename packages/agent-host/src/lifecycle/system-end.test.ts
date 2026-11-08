@@ -50,13 +50,6 @@ describe('a host’s notice that the system is ending', () => {
     expect(t.outlived()).toBe(0)
     expect(t.last()).toEqual({ at: 1_000 })
   })
-
-  it('writes nothing once the folder is the next host’s', () => {
-    const t = notice()
-    t.n.close()
-    t.n.notice()
-    expect(t.written).toEqual([])
-  })
 })
 
 describe('the notice in the data folder', () => {

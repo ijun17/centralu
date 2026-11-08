@@ -368,7 +368,7 @@ Platforms: Windows.
 **HO1. stdout carries the handshake and nothing else.**
 Happened: the ready line carries the token, so stdout must never reach a file; the opposite failure also happened: a
 migration announced itself on stdout and left no trace in a Finder-launched app.
-Rule: stdout carries only protocol lines (`ready`; under a keeper `swap`, `activity`, `standby`, `drained`) and final
+Rule: stdout carries only protocol lines (`ready`; under a keeper `swap`, `activity`) and final
 refusals; diagnostics go to stderr; the stderr copy to `host.log` never includes stdout; lint allows only
 `console.error`/`warn` outside `main.ts`.
 Guard: `host/log-file.test.ts` "teeStderrToFile does not touch stdout — the token goes out that way".
@@ -500,12 +500,14 @@ Platforms: macOS, Linux.
 **HO12. The keeper's control lines reach only a host the keeper started.**
 Happened: under the keeper, the host's stdin carries JSON control lines (#280 step 3); anyone else's stdin is not the
 host's to read.
-Rule: the control channel is attached only with `CC_KEEPER=1`; one object per line, anything else ignored, a buffer
-past 64 KiB without a newline dropped; when the stream ends every waiter is rejected.
-Guard: `host/swap-control.test.ts` "reads one JSON object per line, across chunk boundaries, and ignores anything
-else"; `host/swap-control.test.ts` "a waiter is rejected when the keeper closes the pipe"; `host/swap-control.test.ts`
-"a line that grows past 64 KiB without a newline is dropped, even one that would parse, and the next line is read
-(HO12)". *Changed by step 3.*
+Rule: the control channel is attached only with `CC_KEEPER=1` or `CC_STARTED_BY=app` (the window, #1895); one object
+per line, anything else ignored, a buffer past 64 KiB without a newline dropped; a line that comes before its handler
+is kept for it.
+Guard: `host/keeper-control.test.ts` "reads one JSON object per line, across chunk boundaries, and ignores anything
+else"; `host/keeper-control.test.ts` "a line that grows past 64 KiB without a newline is dropped, even one that would
+parse, and the next line is read (HO12)"; `host/keeper-control.test.ts` "keeps the last line of an op that came before
+its handler, and gives it when the handler is set (#1895)". *Changed by step 3 and by #1895 step 4 PR 5, which removed
+the waiters with the standby.*
 Platforms: macOS, Linux.
 
 **HO13. The host listens on loopback only, and a busy port is a sentence.**
@@ -984,7 +986,7 @@ reads its address once per thread, so a new port or token silently cut every bri
 Rule: the keeper's front door keeps one port and token for its life and hands the token to every host; bridges and app
 views get the front door's address, derived HTTP secret included.
 Guard: `scripts/keeper-integration.mjs` check "the host is given the front door’s token, so clients keep one token
-across hosts"; `host/swap-control.test.ts` "under a keeper is the front door, which outlives this host, and not the
+across hosts"; `host/keeper-control.test.ts` "under a keeper is the front door, which outlives this host, and not the
 host’s own port"; `host/transport/server.test.ts` "is the same for every host given the same keeper token, differs per
 token, is a valid secret and is not the token".
 Platforms: macOS, Linux.
@@ -1015,18 +1017,19 @@ Platforms: macOS, Linux.
 **SW4. The next host checks itself before the running one drains.**
 Rule: a `--standby` host opens the store read-only, refuses a store it cannot read before anything stops, takes no lock,
 migrates nothing, attaches nothing, and exits untouched if the keeper abandons the swap.
-Guard: `host/swap-control.test.ts` "reports its schema check and waits for activate before it takes anything over";
-`host/swap-control.test.ts` "refuses a store this build cannot read, before the running host is asked to drain";
-`host/swap-control.test.ts` "exits without touching anything when the keeper abandons the swap".
+Removed: went with #1895 step 4 PR 5, which removed the host's standby (`swap-control.ts` `standby`, `Store.inspect`).
+What is left of the rule: a host started with `--standby`, which only a keeper of an earlier build starts, exits 1
+before it touches the data folder, so that keeper's swap fails with its running host untouched
+(`host/lifecycle/host-process.test.ts` "a host started to stand by for a swap exits 1 before it touches the data
+folder").
 Platforms: macOS, Linux.
 
 **SW5. Draining is bounded by what was measured.**
 Happened: measured 2026-10-04: orchestrator tools took at most 0.2 s and app tools at most 5.6 s over 88 calls; all
 tool calls: p99 78 s, longest 4.5 h.
-Rule: drain only calls the host serves itself, 10 s, then cut with a retryable error; release the lock even if detach
-threw.
-Guard: `host/drain.test.ts` "cuts a call still running at the bound with a retryable error, and does not wait for it";
-`host/swap-control.test.ts` "a failing detach still lets go of the lock, or the next host could never start".
+Rule: drain only calls the host serves itself, 10 s, then cut with a retryable error. Since #1895 step 4 PR 5 only
+`host.stop {ifIdle}` drains (the swap's drain, and its rule to release the lock even if detach threw, went with it).
+Guard: `host/drain.test.ts` "cuts a call still running at the bound with a retryable error, and does not wait for it".
 Platforms: macOS, Linux.
 
 **SW6. A swap that fails falls back to the build that served.**
@@ -1047,7 +1050,8 @@ Platforms: all.
 
 **SW8. Migrations expand first and contract a release later.**
 Happened: of the first 40 steps, v13, v28 and v32 broke the previous build (2026-10-04), and the previous build is the
-one still serving during a swap or a remote rollback.
+one a person goes back to, or a linked machine's `serve --switch` puts back (until #1895 step 4 PR 5, also the one still
+serving during a swap).
 Rule: every step declares `breaksOlderReaders` and `heavy`; drops and renames land one release after the code stopped
 using what they remove; a breaking step raises `min_reader_version` before it runs. One step back is the only safe
 rollback.
@@ -1059,10 +1063,14 @@ Platforms: all.
 **SW9. During a swap only what the previous build can read runs.**
 Rule: expand steps run at activation; heavy and breaking ones are written to `deferred_migrations` in the same commit
 and run after the ready line, one commit at a time.
-Guard: `host/dev-services/store-swap.test.ts` "runs the expand steps now and leaves a heavy step for after the swap";
-`host/dev-services/store-swap.test.ts` "a breaking step waits too, and min_reader_version only rises once it runs";
-`host/dev-services/store-swap.test.ts` "a swap stopped as it leaves a step for later still owes that step (#396)".
-Platforms: macOS, Linux.
+*Changed by #1895 step 4 PR 5*, which removed the swap's open (`swap: true`, `runDeferred`). What is left: a store a
+host of an earlier build left with `deferred_migrations` owed runs them at the next open, in their place in the order,
+each crossed off in its own commit.
+Guard: `host/dev-services/store-migrations.test.ts` "run at the next open, after the later steps, and the list goes";
+`host/dev-services/store-migrations.test.ts` "a breaking step among them raises min_reader_version when it runs, not
+before"; `host/dev-services/store-migrations.test.ts` "each is crossed off in its own commit: an open stopped part way
+still owes the rest, and the next open runs it".
+Platforms: all.
 
 **SW10. A step commits whole, with its version.**
 Happened: a start killed between two ALTERs of one step left the first column added, and the next start skipped the

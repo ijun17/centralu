@@ -1503,7 +1503,7 @@ Stopping an update is what the person's Cancel does and changes nothing there, s
 `machines.rollback`, `machines.uninstall`, `machines.install` and `machines.acceptVersions` still ask. `updates.apply` reads the
 host's state in the same way (`RightsHost.updateAtRest`, #1509, owner 2026-10-24): it runs without a card while the person's
 Automatic updates are on and nothing is running (`hostBusy`: no turn, no card waiting, no background work, no terminal or command, and
-no swap draining), since the host installs the known update by itself then (`UpdateService.setAutoApply`). Anything else, and a
+not draining to stop), since the host installs the known update by itself then (`UpdateService.setAutoApply`). Anything else, and a
 server given no state, asks. Turning the setting on stays an ask. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
 restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
 and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows
@@ -1540,8 +1540,8 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   counted again when the card is raised (a trash delete reads the trash first, so many at once cannot pass the bound).
 - **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
   timer, since a raw call has no turn to end it), no window shows requests for 30 seconds (a window that reloads comes
-  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a swap: the caller asks the
-  next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
+  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a restart: the caller asks the
+  next host again. An allowed call runs as a call the host serves, so a drain before a stop refuses or cuts it like any other.
 - **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
   linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
   machine's token). A linked machine's own limited callers are refused there: no window there shows host requests, and
@@ -2371,7 +2371,7 @@ response sends `Referrer-Policy: no-referrer`, so a view cannot read the secret 
 A frame address is given only to a parent on the WebSocket origin allowlist (`view-host.ts`
 `frame`; "gives no address to a parent origin outside the allow list, and 404s even when the
 address is tampered with"). Under the keeper the address names the front door's port rather than
-the host's (`swap-control.ts` `viewPort`); the door relays the request unread, so the host applies
+the host's (`keeper-control.ts` `viewPort`); the door relays the request unread, so the host applies
 exactly the same secret and allowlist checks. The desktop CSP opens frames to `http://127.0.0.1:*`
 and nothing wider (`tooling/desktop-csp.test.ts`): the port changes every launch, and the secret
 locks the path.
@@ -2488,13 +2488,13 @@ Limits:
   puts a link or text into a composer's draft, never sends it. An app the person is pressing in at
   that moment could still post an end pointing at a session of its choosing; what it gets is text
   in a draft the person sees before sending.
-- Open view instances survive a planned hand-over under the keeper (`view-handover.ts`): the
-  leaving host writes each instance's id, app and `ui://` address (nothing the app returned) to the
-  store under `views.handover`, and the next host reopens them under the same ids if the record is
+- Open view instances survive a stop for an update (`view-handover.ts`; a swap's drain until #1895
+  step 4 PR 5): the leaving host writes each instance's id, app and `ui://` address (nothing the app
+  returned) to the store under `views.handover`, and the next host reopens them under the same ids if the record is
   at most ten minutes old, then deletes it. Each reopened instance holds its app as a fresh one
   does and must still match its app on every request; a view in a conversation is re-bound to its
   card so its messages still go only there. An instance id is a bearer handle to that one view for
-  whoever holds the WebSocket token, as it was before; it now lives across the swap too.
+  whoever holds the WebSocket token, as it was before; it now lives across an update too.
 
 ## Desktop command permissions
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { parseProcRows } from '../keeper/children-client.js'
-import { endHeld, type HeldIo, type ProcRow, refuseStandby, runningHeld, sessionGroups } from './keeper-held.js'
+import { endHeld, type HeldIo, type ProcRow, runningHeld, sessionGroups } from './keeper-held.js'
 
 /**
- * An update from a keeper of beta.48 or older (#1895 step 4, PR 1 review): such a keeper swaps its host to this build
- * under itself even after this build's keeper refused its handoff, and its host's drain hands its children to it. A
- * standby of this build then gives up, and a plain start ends what the keeper holds.
+ * An update from a keeper of beta.48 or older (#1895 step 4, PR 1 review): such a keeper may still hold children an
+ * earlier host gave it when it starts this build's host plainly (after a crash or a stop). That start ends what the
+ * keeper holds before it restores its sessions. (Its swap to this build fails: no host of this build stands by.)
  */
 
 type Row = { id: string; pid: number; kind?: string; exit: unknown }
@@ -54,7 +54,7 @@ function holdingKeeper(table: Row[], opts: { onSignal?: (c: Row, sig: string) =>
 const noWait = { sleep: () => Promise.resolve() }
 
 describe('a keeper that still holds children (beta.48 or older)', () => {
-  it('a keeper with no children service is not asked anything: a standby stands by and a start ends nothing', async () => {
+  it('a keeper with no children service is not asked anything: a start ends nothing', async () => {
     const asked = () => Promise.reject(new Error('asked'))
     const io: HeldIo = {
       servesChildren: () => Promise.resolve(false),
@@ -67,24 +67,18 @@ describe('a keeper that still holds children (beta.48 or older)', () => {
       self: HOST,
     }
     expect(await runningHeld(io)).toEqual({ running: [] })
-    expect(await refuseStandby(io)).toBeNull()
     expect(await endHeld(io, () => {}, noWait)).toEqual({ ended: 0, left: 0, strays: 0 })
   })
 
-  it('a standby gives up while the keeper holds a running child of the running host, and sends its service nothing', async () => {
+  it('reads what the keeper holds, read-only: the running children only, and sends its service nothing', async () => {
     const k = holdingKeeper([child('c1', 101), child('c2', 102, { code: 0, signal: null })])
-    const why = await refuseStandby(k.io)
-    expect(why).toMatch(/still holds 1 agent, terminal or command process/)
-    expect(why).toMatch(/Quit Centralu completely and open it again/)
+    const held = await runningHeld(k.io)
+    expect('running' in held && held.running.map((c) => c.id)).toEqual(['c1'])
+    expect(await runningHeld(holdingKeeper([child('c1', 101, { code: 1, signal: null })]).io)).toEqual({ running: [] })
     expect(k.sent).toEqual([])
   })
 
-  it('a standby stands by when the keeper says everything it holds has exited', async () => {
-    expect(await refuseStandby(holdingKeeper([child('c1', 101, { code: 1, signal: null })]).io)).toBeNull()
-    expect(await refuseStandby(holdingKeeper([]).io)).toBeNull()
-  })
-
-  it('a standby gives up when a keeper with a children service cannot say: it answers ok:false, not at all, or a list it cannot be read from', async () => {
+  it('a keeper with a children service that cannot say is unknown: it answers ok:false, not at all, or a list it cannot be read from', async () => {
     const base = holdingKeeper([]).io
     const cases: [string, HeldIo['askKeeper'], RegExp][] = [
       ['ok:false', () => Promise.resolve({ ok: false, error: 'the keeper has no child service' }), /answered "the keeper has no child service"/],
@@ -94,10 +88,8 @@ describe('a keeper that still holds children (beta.48 or older)', () => {
       ['a child without a pid', () => Promise.resolve({ ok: true, children: [{ id: 'c1', exit: null }] }), /cannot be read/],
     ]
     for (const [name, askKeeper, said] of cases) {
-      const why = await refuseStandby({ ...base, askKeeper })
-      expect(why, name).toMatch(/cannot say whether any still runs/)
-      expect(why, name).toMatch(said)
-      expect(why, name).toMatch(/Quit Centralu completely and open it again/)
+      const held = await runningHeld({ ...base, askKeeper })
+      expect('unknown' in held && held.unknown, name).toMatch(said)
     }
   })
 

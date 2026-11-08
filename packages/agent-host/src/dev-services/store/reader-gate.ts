@@ -58,8 +58,8 @@ function unreadableFloorMessage(stored: string, userVersion: number, knownVersio
 /**
  * The min-reader version gate (#292): which builds can still read the store, and the refusal of one this host cannot.
  * The bottom of `Store`, below the migration runner (store/migrate-runner.ts). A base class rather than a module the
- * store holds: the runner raises the floor inside a step's commit, and `Store.inspect`, the schema-doc probe and tests
- * reach these methods on a `Store` that never ran its constructor.
+ * store holds: the runner raises the floor inside a step's commit, and the schema-doc probe and tests reach these
+ * methods on a `Store` that never ran its constructor.
  */
 export abstract class ReaderGate {
   protected abstract db: Database.Database

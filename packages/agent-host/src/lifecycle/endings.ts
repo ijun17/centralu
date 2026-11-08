@@ -164,7 +164,7 @@ export function crashRecorder(
 export function wireEndings(o: {
   proc: ProcessLike
   signals: { act(onSignal: () => void): void }
-  leave: (handOver: boolean) => void
+  leave: () => void
   /** Exit now, without finishing the shutdown */
   force: (why: string) => void
   record: (kind: string, err: unknown) => void
@@ -173,7 +173,7 @@ export function wireEndings(o: {
   log: (line: string) => void
   now?: () => number
 }): { stopAsked: () => void } {
-  guardErrors(o.proc, { record: o.record, onCrash: () => o.leave(false) })
+  guardErrors(o.proc, { record: o.record, onCrash: () => o.leave() })
   /*
    * A second signal while leaving is someone insisting (a second Ctrl+C on `centralu serve`): the
    * host exits at once rather than run a second, different ending. Not one within `REPEAT_AFTER_MS`
@@ -189,13 +189,13 @@ export function wireEndings(o: {
       return
     }
     signalledAt = now()
-    o.leave(false)
+    o.leave()
   })
   watchParent(o.watchParent, o.stdin, () => {
     o.log('[agent-host] parent process exited; shutting down')
-    o.leave(false)
+    o.leave()
   })
   return {
-    stopAsked: () => o.leave(false),
+    stopAsked: () => o.leave(),
   }
 }

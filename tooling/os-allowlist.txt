@@ -179,12 +179,10 @@ packages/agent-host/src/dev-services/store-min-reader.test.ts
 packages/agent-host/src/dev-services/store-older-builds.test.ts
 packages/agent-host/src/dev-services/store-subagent-trash.test.ts
 packages/agent-host/src/dev-services/store-subagent.test.ts
-packages/agent-host/src/dev-services/store-swap.test.ts
 packages/agent-host/src/dev-services/store-tool-record.test.ts
 packages/agent-host/src/dev-services/store-usage.test.ts
 packages/agent-host/src/dev-services/store.test.ts
 packages/agent-host/src/dev-services/store.ts
-packages/agent-host/src/dev-services/store/migrate-runner.ts
 packages/agent-host/src/dev-services/store/rows.test.ts
 packages/agent-host/src/dev-services/strays.test.ts
 packages/agent-host/src/dev-services/strays.ts

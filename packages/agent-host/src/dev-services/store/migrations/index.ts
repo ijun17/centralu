@@ -18,8 +18,9 @@ import { StepsV65 } from './v65.js'
  * The migration list.
  *
  * **How a step may change the store (#292): expand, then contract.** Two builds meet one store more often than it
- * looks: a person goes back to an older release, and a host swap (#280) keeps the previous host serving while the
- * next one starts, and hands back to it if the next one fails. So:
+ * looks: a person goes back to an older release, and a linked machine's `serve --switch` starts the previous build
+ * again when the next one fails. (Until #1895 a host swap kept the previous host serving while the next one started.)
+ * So:
  *
  * 1. **Expand.** A step may add tables, nullable or defaulted columns and indexes, or rewrite data into a form the
  *    previous build still reads. It declares `breaksOlderReaders: false`.
@@ -32,19 +33,12 @@ import { StepsV65 } from './v65.js'
  *    opening the store and failing on the first missing column. A host older than the store but at or above it
  *    opens it and runs nothing it does not know.
  * 4. **Heavy steps are marked `heavy: true`**: a step that rewrites or re-indexes every message, or `VACUUM`s. On the
- *    real store these take seconds (v40: 1.9s on 137,722 messages), too long for a swap window, so a swap can run
- *    them after the switch rather than during it.
+ *    real store these take seconds (v40: 1.9s on 137,722 messages), which the host's start says in its log.
  *
- * **During a swap (#280 step 3).** The host taking over opens the store with `swap: true` after the previous host
- * has drained and let go of it. It runs the expand steps now and leaves every heavy or breaking step for
- * `runDeferred`, which runs once the swap is over: the previous build can still read an expanded store, so if the
- * new host fails before it is ready the keeper can start the previous build again. Because `user_version` moves
- * past a deferred step, two promises follow for such a step:
- *    - it must still be correct when it runs **after** later steps (out of order);
- *    - the build that ships it must work before it has run. A contract step keeps this by rule 2 (the code stopped
- *      using what it drops a release earlier); a heavy step keeps it by only reshaping data the code reads either
- *      way (a re-index, merged rows, a `VACUUM`).
- * A store whose `min_reader_version` is above the new host is refused before the swap begins (`Store.inspect`).
+ * **What a swap left (#280 step 3, gone since #1895).** A host of an earlier build that took over in a swap left every
+ * heavy or breaking step for after it (`deferred_migrations`), with `user_version` already past them. A store that
+ * still lists some runs them at the next open, in their place in the order (store/migrate-runner.ts), so a step that
+ * was ever left that way must still be correct when it runs **after** later steps.
  *
  * Measured for #280 (2026-10-04): of the first 40 steps, v13, v28 and v32 broke an older build, the last two within
  * twelve days of each other, and nothing stopped an older host from opening the store.

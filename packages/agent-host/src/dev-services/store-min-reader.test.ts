@@ -183,7 +183,6 @@ describe('which builds can still read the store (#292)', () => {
     expect(message).toContain('This data was written by a newer Centralu')
     expect(message).toContain('app_settings.min_reader_version')
     expect(message).toContain(`Store: ${file}`)
-    expect(Store.inspect(file).tooNew).toBe(message)
     raw(file, (db) => {
       expect(db.pragma('user_version', { simple: true })).toBe(KNOWN + 2)
       expect(floorOf(db)).toBe('v9')
