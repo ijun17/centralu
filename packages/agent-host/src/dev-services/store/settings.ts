@@ -93,10 +93,12 @@ export function listSetting(
 }
 
 /**
- * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md) gives a new key, by their old key. Callers
- * name the old key. Until step 4 the old key is read first and the new one only when the old one was never written,
- * and a write or delete reaches both: every build that can open the store writes the old key, so the old key is never
- * the stale one, also after a person goes back a release and forward again. The new key is kept equal so step 4 can
+ * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md §3.1) gives a new key, by their old key.
+ * Callers name the old key. A write or delete reaches both keys; a read takes the old key only. Every build that can
+ * open the store writes the old key, so it is never the stale one, also after a person goes back a release and
+ * forward again. The new key is not read even when the old one is missing: the build before this one deletes only
+ * the old key (a list that empties), and the new key it leaves would bring back what the person removed. No build
+ * that can open this store writes the new key alone (step 4 writes both). The new key is kept equal so step 4 can
  * read it first once the store's reader floor keeps out the builds that write only the old key.
  * `orchestrator_mcp_servers` keeps its name: no build since M4 A-7 writes it, it is only read to be moved into apps.
  */
@@ -170,9 +172,8 @@ export class SettingsRecords {
    * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
    */
   appSetting(key: string): string | null {
-    const read = (k: string) => this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(k)?.value ?? null
-    const renamed = RENAMED_SETTINGS.get(key)
-    return read(key) ?? (renamed === undefined ? null : read(renamed))
+    const row = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)
+    return row?.value ?? null
   }
 
   setAppSetting(key: string, value: string): void {

@@ -1,8 +1,8 @@
 /**
- * The Assistant's settings under both keys (#2133 step 3, docs/plans/assistant-rename.md, `RENAMED_SETTINGS`): the old
- * key is read first and the new one only when the old one was never written, and a write or delete reaches both. The
- * build before this one writes only the old key, so after a person goes back to it and changes a setting, the new key
- * is stale and the old one is not.
+ * The Assistant's settings under both keys (#2133 step 3, docs/plans/assistant-rename.md §3.1, `RENAMED_SETTINGS`): a
+ * write or delete reaches both keys, and a read takes the old key only. The build before this one writes and deletes
+ * only the old key, so after a person goes back to it and changes or removes a setting, the new key is stale and the
+ * old one is not.
  */
 import { describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -30,7 +30,7 @@ describe('the Assistant’s settings under both keys (#2133)', () => {
     s.close()
   })
 
-  it('reads the old key first: the build before this one changed it after this one wrote both', () => {
+  it('reads the old key: the build before this one changed it after this one wrote both', () => {
     const s = new RawStore()
     s.settings.setAppSetting('orchestrator_tool', 'codex')
     // The previous release, gone back to, writes only the old key
@@ -39,10 +39,12 @@ describe('the Assistant’s settings under both keys (#2133)', () => {
     s.close()
   })
 
-  it('reads the new key when the old one was never written, as a later build may leave it', () => {
+  it('does not read the new key the build before this one left behind when it deleted the old one', () => {
     const s = new RawStore()
-    put(s, 'assistant_tool', 'codex')
-    expect(s.settings.appSetting('orchestrator_tool')).toBe('codex')
+    s.settings.setAppSetting('orchestrator_skills', '[{"name":"notes","content":"x"}]')
+    // The previous release, gone back to, removes the last skill: its list write deletes the old key only
+    s.raw.prepare(`DELETE FROM app_settings WHERE key = 'orchestrator_skills'`).run()
+    expect(s.settings.appSetting('orchestrator_skills')).toBeNull()
     s.close()
   })
 
