@@ -1,6 +1,6 @@
 //! The keeper's decisions about verified content, without a keeper: where it runs from, what a
 //! handoff refuses, where it copies, and what the cleanup removes. Content is signed here with a key
-//! made for the test; scripts/keeper-content-integration.mts runs the real handoff.
+//! made for the test.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -180,16 +180,6 @@ fn a_host_in_verified_content_is_found_by_its_version_folder() {
     assert_eq!(version_dir_of(&data, &version_dir(&data, "0.2.0")), None);
     assert_eq!(version_dir_of(&data, &content_root(&data).join("x/host")), None);
     assert_eq!(version_dir_of(&data, Path::new("/Applications/Centralu.app/Contents/Resources/resources/host")), None);
-}
-
-#[test]
-fn the_new_bundle_content_is_found_from_the_executable_the_window_names() {
-    let want = Some(PathBuf::from("/Applications/Centralu.app/Contents/Resources/content"));
-    assert_eq!(bundle_content_of_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper")), want);
-    // A window from before #440 named its own executable, beside it: no longer a keeper (#461)
-    assert_eq!(bundle_content_of_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), None);
-    assert_eq!(bundle_content_of_exe(Path::new("/tmp/build/centralu-keeper")), None, "not in a bundle");
-    assert_eq!(bundle_content_of_bundle(Path::new("/Applications/Centralu.app")), want.unwrap());
 }
 
 // ---- what a handoff refuses
@@ -413,12 +403,11 @@ fn the_cleanup_keeps_the_keepers_own_the_running_hosts_and_the_claimed_versions(
     fs::create_dir_all(&fresh).unwrap();
     age(&dead, 3600);
 
-    // The keeper runs from 0.2.1, its host from 0.2.0, a swap or handoff holds 0.3.0
+    // The keeper runs from 0.2.1, its host from 0.2.0, a launch holds 0.3.0
     let copies = Copies::new(&data, Some(dirs["0.2.1"].clone()));
     let host = BuildSource { commit: "c".into(), host_dir: Some(dirs["0.3.0"].join("host").to_string_lossy().into()), ..Default::default() };
     let held = copies.claim(&host).unwrap();
     assert_eq!(held.path(), dirs["0.3.0"].join("host"), "a verified host runs where it is");
-    assert_eq!(held.folder(), dirs["0.3.0"]);
     assert!(!data.join("hosts").exists(), "and is never copied into hosts/");
 
     let mut removed = copies.clean(|| vec![dirs["0.2.0"].join("host")]);
@@ -436,47 +425,6 @@ fn the_cleanup_keeps_the_keepers_own_the_running_hosts_and_the_claimed_versions(
     removed.sort();
     assert_eq!(removed, ["content/0.2.0", "content/0.3.0"]);
     assert!(dirs["0.2.1"].is_dir(), "the keeper's own folder is never removed");
-}
-
-/// A swap whose verified build did not start gives its folder up without removing it: it may be
-/// the folder the keeper itself runs from.
-#[test]
-fn discarding_a_claim_on_verified_content_leaves_the_folder() {
-    let c = Case::new("discard");
-    let dir = c.take(&c.bundle("B", "0.2.1")).unwrap();
-    let copies = Copies::new(&c.data(), None);
-    let src = BuildSource { commit: "c".into(), host_dir: Some(dir.join("host").to_string_lossy().into()), ..Default::default() };
-    copies.claim(&src).unwrap().discard(None);
-    assert!(dir.join("host/main.mjs").is_file());
-}
-
-/// A handoff places its version under the same lock as every cleanup, and is told whether the
-/// folder is in use: claimed, the keeper's own, or a running host's.
-#[test]
-fn placing_a_version_knows_whether_it_is_in_use() {
-    let c = Case::new("claim-content");
-    let data = c.data();
-    let own = version_dir(&data, "0.2.0");
-    let copies = Copies::new(&data, Some(own.clone()));
-    let seen = |folder: &Path, running: &[PathBuf]| -> bool {
-        let mut in_use = None;
-        let claim = copies.claim_content(folder, running, || "frozen", |u| {
-            in_use = Some(u);
-            Ok(folder.to_path_buf())
-        });
-        drop(claim);
-        in_use.unwrap()
-    };
-    let next = version_dir(&data, "0.2.1");
-    assert!(seen(&own, &[]), "the keeper's own");
-    assert!(!seen(&next, &[]), "nothing runs from it");
-    assert!(seen(&next, &[next.join("host")]), "a host runs from it");
-    let claim = copies.claim_content(&next, &[], || "frozen", |_| Ok(next.clone())).unwrap();
-    assert_eq!(claim.path(), next.join("host"));
-    assert!(seen(&next, &[]), "a handoff holds it");
-    drop(claim);
-    copies.freeze(std::time::Duration::from_secs(1)).unwrap();
-    assert_eq!(copies.claim_content(&next, &[], || "frozen", |_| Ok(next.clone())).err(), Some("frozen"));
 }
 
 // ---- why the window's own content would be refused

@@ -106,8 +106,6 @@ mod tests {
             background: false,
             attached: 1,
             busy: false,
-            swap: None,
-            keeps_agents: None,
             rights: None,
             stops_for_update,
         };

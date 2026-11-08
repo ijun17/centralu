@@ -39,8 +39,6 @@ pub const CONTENT_DIR: &str = "content";
 pub const FLOOR_FILE: &str = "highest-started";
 /// Where in the content the host is (the shell's `run::HOST_DIR`).
 pub const HOST_DIR: &str = "host";
-/// Where a window's bundle carries its signed content, below `Contents/` (thin-shell.md §10.2).
-pub const BUNDLE_CONTENT: &str = "Resources/content";
 
 pub fn content_root(data: &Path) -> PathBuf {
     data.join(CONTENT_DIR)
@@ -74,11 +72,6 @@ impl Origin {
             Origin::Content { dir, .. } => Some(dir),
             Origin::Direct => None,
         }
-    }
-
-    /// Whether a handoff from here takes only signed content (`server::content_route`).
-    pub fn signed(&self) -> bool {
-        matches!(self, Origin::Content { signed: true, .. })
     }
 
     /// The same origin where every content folder must be signed: on an OS whose release signs its
@@ -137,26 +130,6 @@ pub fn version_dir_of(data: &Path, host_dir: &Path) -> Option<PathBuf> {
         within(&root, &fs::canonicalize(host_dir).ok()?)
     })?;
     Some(version_dir(data, &version))
-}
-
-/// The signed content a window's bundle carries, found from the executable the window named as its
-/// keeper: `<bundle>/Contents/MacOS/centralu-keeper` gives `<bundle>/Contents/Resources/content`.
-/// Windows from before #440 named their own `centralu` instead; since #461 that names no content,
-/// and the bundle path the window sends with it is used, as for a window that named no executable.
-pub fn bundle_content_of_exe(exe: &Path) -> Option<PathBuf> {
-    if !super::exe::is_keeper_exe(exe) {
-        return None;
-    }
-    let macos = exe.parent()?;
-    if macos.file_name()? != "MacOS" {
-        return None;
-    }
-    Some(macos.parent()?.join(BUNDLE_CONTENT))
-}
-
-/// The same from a bundle path (`/Applications/Centralu.app`), for a window that named no executable.
-pub fn bundle_content_of_bundle(bundle: &Path) -> PathBuf {
-    bundle.join("Contents").join(BUNDLE_CONTENT)
 }
 
 /// Why the next content was not taken. The ids are the shell's where the meaning is the same

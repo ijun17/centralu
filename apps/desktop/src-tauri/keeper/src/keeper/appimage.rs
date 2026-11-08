@@ -11,7 +11,6 @@
 //! environment names files that are gone. A keeper from content sheds them before it does anything
 //! else; one started from the mount keeps them, since they are what keeps its own code there.
 
-use std::os::fd::RawFd;
 
 /// Variables the AppImage runtime sets that only mean something inside it.
 const RUNTIME_VARS: [&str; 4] = ["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
@@ -43,10 +42,9 @@ pub fn env_changes(vars: &[(String, String)]) -> Vec<(String, Option<String>)> {
     out
 }
 
-/// Sheds what the AppImage left on this process: its variables and every inherited descriptor but
-/// `keep` (a handoff's channel). Only at the very start of a keeper that runs from content, while
-/// it is a single thread. Returns what it did, for the log.
-pub fn shed(keep: Option<RawFd>) -> String {
+/// Sheds what the AppImage left on this process: its variables and every inherited descriptor. Only at the very start of
+/// a keeper that runs from content, while it is a single thread. Returns what it did, for the log.
+pub fn shed() -> String {
     let vars: Vec<(String, String)> = std::env::vars_os()
         .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
         .collect();
@@ -57,7 +55,7 @@ pub fn shed(keep: Option<RawFd>) -> String {
             None => std::env::remove_var(k),
         }
     }
-    let closed = crate::os::close_inherited(&keep.into_iter().collect::<Vec<_>>());
+    let closed = crate::os::close_inherited(&[]);
     let names: Vec<&str> = changes.iter().map(|(k, _)| k.as_str()).collect();
     format!("closed inherited descriptors {closed:?}; cleaned variables {names:?}")
 }

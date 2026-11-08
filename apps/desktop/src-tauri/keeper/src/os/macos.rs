@@ -1,11 +1,9 @@
-//! What macOS does differently from Linux: the peer of a socket by `getpeereid`, a process's exit by
-//! kqueue, and descriptors received without `MSG_CMSG_CLOEXEC` (each is set close-on-exec after).
+//! What macOS does differently from Linux: the peer of a socket by `getpeereid` and `LOCAL_PEERPID`, a process's
+//! executable and start by `proc_pidinfo`, and launchd's stop.
 
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-
-use super::process::{set_cloexec, Watch};
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = true;
@@ -48,7 +46,7 @@ pub fn on_system_stop(told: impl Fn() + Send + 'static) {
     }
     let (read, write) = (fds[0], fds[1]);
     for fd in [read, write] {
-        let _ = set_cloexec(fd);
+        let _ = super::set_cloexec(fd);
     }
     // SAFETY: fcntl on a descriptor just made; a full pipe must not block the handler
     unsafe { libc::fcntl(write, libc::F_SETFL, libc::fcntl(write, libc::F_GETFL) | libc::O_NONBLOCK) };
@@ -69,9 +67,6 @@ pub fn on_system_stop(told: impl Fn() + Send + 'static) {
         libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
     }
 }
-
-/// No flag makes `recvmsg` set close-on-exec here; `handles::recv_fds` sets it on each descriptor.
-pub const RECV_FLAGS: libc::c_int = 0;
 
 /// The uid of the process on the other end of a unix socket.
 /// `LOCAL_PEERPID` (sys/un.h): the pid of the process that connected, recorded at `connect`.
@@ -115,58 +110,6 @@ pub fn is_zombie(pid: u32) -> bool {
     // SAFETY: the buffer is valid for `size` bytes for the duration of the call.
     let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 1, &mut info as *mut _ as *mut libc::c_void, size) };
     n == size && info.pbi_status == libc::SZOMB
-}
-
-/// kqueue `EVFILT_PROC` with `NOTE_EXIT`: an exit seen even by a process that is not the parent (`ProcessWatch`).
-pub struct ExitBackend {
-    kq: OwnedFd,
-}
-
-impl ExitBackend {
-    pub fn new() -> io::Result<Self> {
-        // SAFETY: kqueue takes no arguments.
-        let fd = unsafe { libc::kqueue() };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        set_cloexec(fd)?;
-        // SAFETY: kqueue just returned it.
-        Ok(ExitBackend { kq: unsafe { OwnedFd::from_raw_fd(fd) } })
-    }
-
-    pub fn watch(&mut self, pid: i32) -> Watch {
-        let ev = libc::kevent {
-            ident: pid as libc::uintptr_t,
-            filter: libc::EVFILT_PROC,
-            flags: libc::EV_ADD | libc::EV_ONESHOT,
-            fflags: libc::NOTE_EXIT,
-            data: 0,
-            udata: std::ptr::null_mut(),
-        };
-        // SAFETY: one valid changelist entry, no event list.
-        let rc = unsafe { libc::kevent(self.kq.as_raw_fd(), &ev, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
-        if rc == 0 {
-            Watch::Registered
-        } else {
-            Watch::after_error(io::Error::last_os_error())
-        }
-    }
-
-    /// Whether an exit event for `pid` has been queued since the last call, without waiting.
-    pub fn ended(&mut self, pid: i32) -> bool {
-        let mut ended = false;
-        loop {
-            // SAFETY: kevent is plain data; zeroed is a valid value for it.
-            let mut evs: [libc::kevent; 8] = unsafe { std::mem::zeroed() };
-            let zero = libc::timespec { tv_sec: 0, tv_nsec: 0 };
-            // SAFETY: an event list of 8 valid entries, a zero timeout.
-            let n = unsafe { libc::kevent(self.kq.as_raw_fd(), std::ptr::null(), 0, evs.as_mut_ptr(), 8, &zero) };
-            if n <= 0 {
-                return ended;
-            }
-            ended |= evs[..n as usize].iter().any(|ev| ev.filter == libc::EVFILT_PROC && ev.fflags & libc::NOTE_EXIT != 0 && ev.ident as i32 == pid);
-        }
-    }
 }
 
 /// The executable `pid` runs (#1405), by `proc_pidpath`.

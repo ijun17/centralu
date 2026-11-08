@@ -12,31 +12,23 @@
 //!   - holds the host: launches it, restarts it by the same rules the app used, stops it;
 //!   - runs every host from a per-build copy under the data folder (`source.rs`);
 //!   - answers a user-only control socket (`server/`) through which the app attaches, learns
-//!     the host's port, token and build, and asks to stop or switch builds;
+//!     the host's port, token and build, and asks it to stop (for good, or for an update);
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
 //!     window detaches, as quitting the app always did; with it on they keep running.
 //!
 //! It no longer holds the host's agents, terminals and commands (step 2's children service, gone in
 //! #1895 step 4): the host spawns its own, and an update stops them and continues their turns.
 //!
-//! Step 3 adds two things:
-//!   - **the front door** (`front_door.rs`): one loopback port and one token for the keeper's whole
-//!     life, relayed byte for byte to whichever host is current, so clients and Codex bridges never
-//!     learn a host's own port;
-//!   - **the blue-green swap** (`swap.rs`): `switch` starts the next build in standby next to the
-//!     running host, drains the running one, and hands the front door over, instead of stopping
-//!     the host and cutting every turn.
+//! **The front door** (`front_door.rs`, step 3): one loopback port and one token for the keeper's whole
+//! life, relayed byte for byte to the host, so clients and Codex bridges never learn a host's own port.
 //!
-//! Step 4 (`handoff/`) replaces the keeper itself: the new build's keeper is started from the new
-//! bundle's keeper executable, the running one freezes and passes it every descriptor it owns (the
-//! sockets, the host's pipes, every relayed connection) with its
-//! state, and exits once the new one has rebuilt everything. Nothing is restarted and no address
-//! changes.
+//! A keeper runs one build for its whole life (#1895 step 4, PR 4): the blue-green swap to another build
+//! (step 3) and the handoff to another build's keeper (step 4) are gone. An update or another build is a
+//! stop: the window stops this keeper (`stop {forUpdate}`, or a plain `stop`) and starts its own build's
+//! keeper (docs/plans/keeper-removal.md §2.3).
 //!
 //! A keeper the macOS shell started runs from verified content, `<data>/content/<version>/`
-//! (`content.rs`, thin-shell plan §10 step 5). Its handoffs never start a window's bundle: it
-//! verifies and copies the new build's signed content first and hands over to the keeper in that
-//! copy, and its hosts run from the copy as well.
+//! (`content.rs`, thin-shell plan §10 step 5), and its hosts run from that copy as well.
 
 mod accept;
 pub mod appimage;
@@ -45,13 +37,11 @@ pub mod client;
 pub mod content;
 pub mod exe;
 pub mod front_door;
-pub mod handoff;
 pub mod keys;
 pub mod limited;
 pub mod window_peer;
 pub mod server;
 pub mod source;
-pub mod swap;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
@@ -62,7 +52,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::host_proc::HostStatus;
 use source::BuildSource;
-use swap::SwapView;
 
 /// The control socket's protocol version. An app refuses a keeper that speaks another one
 /// rather than guessing at its answers.
@@ -188,13 +177,8 @@ pub struct KeeperView {
     pub attached: usize,
     /// The host's last activity report: a session working or waiting, a terminal, a command run.
     pub busy: bool,
-    /// The current or last blue-green swap (#280 step 3), with its phase, so the app can show it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub swap: Option<SwapView>,
-    /// Whether the current host hands its agents over in a swap (step 2) or stops them. Unknown
-    /// until the host says, and for a host from before step 3.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keeps_agents: Option<bool>,
+    // `swap` and `keepsAgents` went with the swap (#1895 step 4, PR 4): every window build since step 3 reads both as
+    // optional, so an earlier window attached to this keeper reads their absence as no swap and unknown.
     /**
      * Which credential `status.token` is (#1405): `full`, the front door's token, for a window;
      * `limited`, the limited credential (`limited.rs`), for any other process. Absent from a keeper
@@ -222,16 +206,15 @@ pub struct KeeperInfo {
     /// Seconds since the epoch.
     pub started_at: u64,
     pub data_dir: String,
-    /// The build this keeper's own executable is from: the build the app that launched it (or the
-    /// handoff that started it) named with `--host-source` (#280 step 4). Absent from keepers that
-    /// predate step 4, which cannot hand themselves over.
+    /// The build this keeper's own executable is from: the build the app or shell that launched it named with
+    /// `--host-source` (#280 step 4). A window tells a keeper of another build by it. Absent from keepers that predate
+    /// step 4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildSource>,
 }
 
 impl KeeperInfo {
-    /// This process, started now, serving `data`, from the build `build`. A fresh keeper and one
-    /// that took over from another describe themselves the same way. The version is the build's, as
+    /// This process, started now, serving `data`, from the build `build`. The version is the build's, as
     /// the app passed it (`--app-version`); a keeper running the source host has none (`DEV_VERSION`).
     pub(super) fn of_this_process(data: &Path, build: BuildSource) -> KeeperInfo {
         KeeperInfo {

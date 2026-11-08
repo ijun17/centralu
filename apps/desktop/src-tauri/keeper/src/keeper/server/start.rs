@@ -10,8 +10,8 @@ pub struct Options {
     pub host_source: Option<PathBuf>,
     pub bundle_path: Option<String>,
     pub app_version: Option<String>,
-    /// Started by another keeper to take over from it (#280 step 4): the handoff channel's
-    /// descriptor, inherited from that keeper.
+    /// Started by a keeper of an earlier build to take over from it (#280 step 4). This build takes no keeper over (#1895
+    /// step 4, PR 4): it exits at once (`EXIT_NO_TAKE_OVER`), and that keeper rolls back and serves on.
     pub take_over_fd: Option<i32>,
 }
 
@@ -49,8 +49,8 @@ pub(in crate::keeper) fn own_build(o: &Options) -> BuildSource {
 
 /// Why these options cannot start a keeper, or None. A built host (`--host-source`) needs the app's
 /// version (`--app-version`): git holds none, so nothing compiled in can stand for it (#1501), and the
-/// content folder, the build record and the handoff are named after it. Every starter passes it: the
-/// window and the shell (`exe::Start`), and a keeper handing over to its successor (`handoff`).
+/// content folder and the build record are named after it. Every starter passes it: the window and the shell
+/// (`exe::Start`).
 pub(in crate::keeper) fn missing_option(o: &Options) -> Option<&'static str> {
     (o.host_source.is_some() && o.app_version.as_deref().is_none_or(|v| v.trim().is_empty()))
         .then_some("--host-source without --app-version: the app's version is not compiled in, so a keeper running a built host must be told it")
@@ -60,15 +60,24 @@ pub(in crate::keeper) fn missing_option(o: &Options) -> Option<&'static str> {
 /// from 1 (could not start) and 3 (another keeper holds the folder)
 pub(in crate::keeper) const EXIT_USAGE: i32 = 2;
 
+/// The exit code of a keeper an earlier build's keeper started to take over from it: the code that keeper's handoff reads
+/// as "the new keeper gave the handoff up" (its `EXIT_ABORTED`), after which it rolls back and serves on
+pub(in crate::keeper) const EXIT_NO_TAKE_OVER: i32 = 7;
+
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
-    // Before anything opens a descriptor; a keeper that takes over from another raises its own.
-    let raised = os::raise_descriptor_limit();
     let opts = parse_args(args);
+    // Started to take an earlier build's keeper over: nothing here can, and that keeper still holds everything
+    if opts.take_over_fd.is_some() {
+        log("started to take over from another keeper, which this build no longer does (#1895 step 4); leaving everything to it");
+        return EXIT_NO_TAKE_OVER;
+    }
+    // Before anything opens a descriptor
+    let raised = os::raise_descriptor_limit();
     let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     // From content nothing runs from an AppImage's mount any more: let it go before anything else
-    // opens a descriptor or starts a thread (FI4, FI5, `appimage.rs`). The handoff channel stays.
-    let shed = content::own_origin(&data).dir().is_some().then(|| super::appimage::shed(opts.take_over_fd));
+    // opens a descriptor or starts a thread (FI4, FI5, `appimage.rs`).
+    let shed = content::own_origin(&data).dir().is_some().then(super::appimage::shed);
     if let Some(what) = &shed {
         log(what);
     }
@@ -78,10 +87,6 @@ pub fn run(args: &[String]) -> i32 {
     if let Some(why) = missing_option(&opts) {
         log(&format!("not starting: {why}"));
         return EXIT_USAGE;
-    }
-    // Started by another keeper to take its place (step 4): everything comes from that keeper.
-    if let Some(fd) = opts.take_over_fd {
-        return handoff::take(opts, fd);
     }
     // Before anything creates the folder: the host leaves a legacy folder alone once the new one
     // exists, so creating it first would strand the person's data (data-dir.ts).
@@ -167,12 +172,8 @@ pub fn run(args: &[String]) -> i32 {
         state: Mutex::new(State::new(desired, settings)),
         idle: idle_limit(),
         started: Instant::now(),
-        lock,
+        _lock: lock,
         listener,
-        frozen: AtomicBool::new(false),
-        handed_over: AtomicBool::new(false),
-        accept_parked: AtomicBool::new(false),
-        requests: AtomicUsize::new(0),
     });
     log(&format!(
         "keeper {} started (pid {}, data {}, front door {}, background {}, idle limit {}s)",
@@ -190,12 +191,12 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// Says in the log where this keeper runs from, and whether it trusts a test key.
-pub(in crate::keeper) fn log_origin(origin: &content::Origin) {
+fn log_origin(origin: &content::Origin) {
     if let content::Origin::Content { dir, signed: false, .. } = origin {
-        log(&format!("running from the copy {} a window made; a switch hands over to the copy the next window names", dir.display()));
+        log(&format!("running from the copy {} a window made", dir.display()));
     } else if let content::Origin::Content { dir, .. } = origin {
         log(&format!(
-            "running from verified content {}; a switch verifies the next build's content first{}",
+            "running from verified content {}{}",
             dir.display(),
             if keys::TEST_BUILD { " (a test build, trusting a key beyond keys.json)" } else { "" }
         ));
@@ -203,9 +204,8 @@ pub(in crate::keeper) fn log_origin(origin: &content::Origin) {
 }
 
 /// Writes our pid into the lock file — a description of the holder for someone reading it,
-/// not the lock itself (the flock is). From the start of the file: a keeper that took the lock
-/// over in a handoff shares the previous keeper's file offset.
-pub(in crate::keeper) fn record_lock_holder(mut lock: &File) {
+/// not the lock itself (the flock is). From the start of the file.
+fn record_lock_holder(mut lock: &File) {
     let _ = lock.set_len(0);
     let _ = lock.seek(std::io::SeekFrom::Start(0));
     let _ = writeln!(lock, "{}", std::process::id());

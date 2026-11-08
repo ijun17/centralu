@@ -2,7 +2,7 @@
  * Keeper scenarios (`keeper-integration.mjs`): the keeper and its host with background mode off and
  * on, stop, a busy host holding off the idle limit, and a keeper killed outright.
  */
-import { cpSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { attachClient, bundleInfo, check, FAKE_BUNDLE, helloOk, HOST_SRC, hostsFor, keyOf, log, newData, ready, startKeeper, tempDirs } from './keeper-integration-harness.mjs'
@@ -99,30 +99,15 @@ async function scenarioBackgroundOn() {
     `pid ${first?.view?.hostPid} vs ${view.hostPid}`,
   )
 
-  // Another build: the same host folder with a different stamp.
-  const src2 = mkdtempSync('/tmp/ck-src2-')
-  tempDirs.push(src2)
-  cpSync(HOST_SRC, src2, { recursive: true })
-  writeFileSync(join(src2, 'bundle-info.json'), JSON.stringify({ ...info, commit: 'fakecommit2' }))
-  const sw = await request(sock, { op: 'switch', source: { commit: 'fakecommit2', hostDir: src2, bundlePath: '/tmp/Other.app' } })
-  check(sw.ok, 'switch is accepted')
-  const switched = await waitFor(async () => {
-    const v = await status(sock)
-    return ready(v) && v.source?.commit === 'fakecommit2' && v
-  }, 30_000)
-  check(switched && switched.hostPid !== view.hostPid, 'the host restarts from the other build', JSON.stringify(switched?.source))
-  check(existsSync(join(data, 'hosts', 'fakecommit2', 'main.mjs')), "the other build gets its own copy")
-  const oldCopy = join(data, 'hosts', keyOf(info.commit, info.builtAt))
-  check(await waitFor(() => !existsSync(oldCopy), 5000), 'the copy no host uses any more is removed')
-  check(!alive(view.hostPid) && hostsFor(data).length === 1, 'the old host is gone and one host remains', JSON.stringify(hostsFor(data)))
-  check(
-    app2.lines.some((l) => l.event === 'status' && l.view?.source?.commit === 'fakecommit2'),
-    'the attached client was told about the switch',
-  )
+  // A keeper runs one build for its life (#1895 step 4, PR 4): an earlier window's switch is refused, the host untouched
+  const sw = await request(sock, { op: 'switch', source: { commit: 'fakecommit2', hostDir: HOST_SRC } })
+  check(!sw.ok && String(sw.error).startsWith('gone: '), 'switch answers gone', JSON.stringify(sw))
+  const up = await status(sock)
+  check(up?.hostPid === view.hostPid && up?.source?.commit === info.commit, 'and the host serves on, of the same build', JSON.stringify(up?.source))
 
   app2.kill()
   const detachedAt = Date.now()
-  const hostPid = switched?.hostPid
+  const hostPid = view.hostPid
   const ended = await waitFor(() => !alive(k.pid) && !alive(hostPid), (IDLE + 15) * 1000, 250)
   const after = (Date.now() - detachedAt) / 1000
   check(ended && after >= IDLE - 1, `with nothing attached and nothing running, it ends itself after the idle limit (${IDLE}s)`, `ended ${!!ended} after ${after.toFixed(1)}s`)

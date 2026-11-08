@@ -1173,8 +1173,8 @@ jobs:
   # first to notice (fixed in #348). These steps are the parts of the keeper scripts that need no
   # model and no network; the claude and codex turns stay a manual run.
   #
-  # macOS, because that is where the packaged app always uses the keeper and where its exit watch is
-  # kqueue. The same image as the darwin bundle above. Linux (pidfd) is the `keeper-linux` job below.
+  # macOS, because that is where the packaged app always uses the keeper. The same image as the darwin bundle above.
+  # Linux is the `keeper-linux` job below.
   keeper:
     name: keeper e2e
     needs: changes
@@ -1224,13 +1224,9 @@ jobs:
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
 
       # Each script runs whatever the one before said, so one failure does not hide the next.
-      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, swap, drain, from a copy out of the AppImage)
+      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, the front door across a restart, from a copy out of the AppImage)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: node scripts/keeper-integration.mjs --no-build
-
-      - name: keeper handing itself over, its host and the host's children running on
-        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: node scripts/keeper-handoff-integration.mjs --no-build --no-claude --no-codex
 
       # The shell that holds macOS permissions (docs/plans/thin-shell.md §3). Here because this job
       # already has the workspace's debug dependencies built and cached: the shell's unit tests and
@@ -1244,14 +1240,6 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: pnpm exec tsx scripts/shell-integration.mts
 
-      # Thin shell step 5 (docs/plans/thin-shell.md §10.3): a keeper the shell started verifies the
-      # next build's content before it hands over. Builds a test keeper and a test shell trusting a
-      # throwaway key (the keeper crate and the shell only, on top of the build above), then puts the
-      # plain debug keeper back in the target folder. About a minute on top of its builds.
-      - name: keeper handing over to verified content, the host's terminal running on (tampered and older content refused, cleanup)
-        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: pnpm exec tsx scripts/keeper-content-integration.mts --no-build
-
   # The same keeper scripts on Linux (#350, 2026-10-08). A first trial here (2026-10-05) ended when
   # SIGTERM reached the script itself: the keeper stopped its host's group with
   # `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (this image's) sends to the group named by the
@@ -1260,9 +1248,8 @@ jobs:
   #
   # The keeper crate's unit tests run here too: `kill_group_signals_the_group_the_pid_leads_and_
   # nothing_else` only tells the two apart against Linux's `kill`, and nothing else runs them on
-  # Linux. The window is built as well, because the handoff script starts it as an old keeper
-  # would; that needs webkit2gtk's headers (the same list as the bundle job). No shell steps: the
-  # shell is macOS's, though the content script builds and runs it here like any unix program.
+  # Linux. The window crate is built as well, since `centralu-keeper`'s binary is one of its targets; that needs
+  # webkit2gtk's headers (the same list as the bundle job). No shell steps: the shell is macOS's.
   keeper-linux:
     name: keeper e2e (linux)
     needs: changes
@@ -1317,14 +1304,6 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
 
-      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, swap, drain, from a copy out of the AppImage)
+      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, the front door across a restart, from a copy out of the AppImage)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: node scripts/keeper-integration.mjs --no-build
-
-      - name: keeper handing itself over, its host and the host's children running on
-        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: node scripts/keeper-handoff-integration.mjs --no-build --no-claude --no-codex
-
-      - name: keeper handing over to verified content, the host's terminal running on (tampered and older content refused, cleanup)
-        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: pnpm exec tsx scripts/keeper-content-integration.mts --no-build

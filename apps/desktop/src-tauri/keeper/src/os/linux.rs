@@ -1,21 +1,15 @@
-//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, a process's exit by
-//! a `pidfd`, and descriptors received with
-//! `MSG_CMSG_CLOEXEC`.
+//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, and a process's state, executable and
+//! start read from `/proc`.
 
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-
-use super::process::{set_cloexec, Watch};
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
 
 /// Nothing to hear: the host asks systemd itself where there is one (#1397), and elsewhere nothing says who sent a stop
 pub fn on_system_stop(_told: impl Fn() + Send + 'static) {}
-
-/// Received descriptors are close-on-exec from the moment they exist.
-pub const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 
 /// The uid of the process on the other end of a unix socket.
 /// The pid of the process at the other end of a unix socket (`SO_PEERCRED`), as of its `connect`.
@@ -55,38 +49,6 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
         Ok(cred.uid)
     } else {
         Err(io::Error::last_os_error())
-    }
-}
-
-/// A `pidfd`, readable once the process exits (`ProcessWatch`).
-pub struct ExitBackend {
-    pidfd: Option<OwnedFd>,
-}
-
-impl ExitBackend {
-    pub fn new() -> io::Result<Self> {
-        Ok(ExitBackend { pidfd: None })
-    }
-
-    pub fn watch(&mut self, pid: i32) -> Watch {
-        // SAFETY: pidfd_open(pid, 0) takes no pointers.
-        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
-        if fd < 0 {
-            // Gone (ESRCH), or a kernel without pidfd_open (before 5.3) and anything else: polled
-            return Watch::after_error(io::Error::last_os_error());
-        }
-        let _ = set_cloexec(fd);
-        // SAFETY: the syscall just returned it.
-        self.pidfd = Some(unsafe { OwnedFd::from_raw_fd(fd) });
-        Watch::Registered
-    }
-
-    /// Whether the watched process's pidfd reports it gone (readable), without waiting.
-    pub fn ended(&mut self, _pid: i32) -> bool {
-        let Some(fd) = &self.pidfd else { return true };
-        let mut p = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        // SAFETY: one valid pollfd, no wait.
-        unsafe { libc::poll(&mut p, 1, 0) == 1 }
     }
 }
 

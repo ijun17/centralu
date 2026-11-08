@@ -193,15 +193,15 @@ fn a_store_too_new_is_final_like_a_lock_conflict() {
     ));
     assert!(!is_final_refusal("agent-host exited (code Some(1))\nTypeError: x is undefined"));
     let too_new = "[agent-host] This data was written by a newer Centralu.";
-    assert_eq!(after_exit(0, Duration::ZERO, false, too_new, Some(1)), AfterExit::GiveUp(too_new.into()));
+    assert_eq!(after_exit(0, Duration::ZERO, too_new, Some(1)), AfterExit::GiveUp(too_new.into()));
 }
 
 #[test]
 fn counts_consecutive_failures_and_gives_up_after_five() {
     let quick = Duration::from_secs(1);
-    assert_eq!(after_exit(0, quick, false, "", Some(1)), AfterExit::Retry { attempt: 1 });
-    assert_eq!(after_exit(4, quick, false, "", Some(1)), AfterExit::Retry { attempt: 5 });
-    match after_exit(5, quick, false, "boom", Some(1)) {
+    assert_eq!(after_exit(0, quick, "", Some(1)), AfterExit::Retry { attempt: 1 });
+    assert_eq!(after_exit(4, quick, "", Some(1)), AfterExit::Retry { attempt: 5 });
+    match after_exit(5, quick, "boom", Some(1)) {
         AfterExit::GiveUp(m) => assert!(m.contains("boom") && m.contains("Some(1)"), "{m}"),
         other => panic!("expected to give up, got {other:?}"),
     }
@@ -209,20 +209,13 @@ fn counts_consecutive_failures_and_gives_up_after_five() {
 
 #[test]
 fn a_death_after_a_stable_run_starts_the_count_over() {
-    assert_eq!(after_exit(5, STABLE_UPTIME, false, "", None), AfterExit::Retry { attempt: 1 });
+    assert_eq!(after_exit(5, STABLE_UPTIME, "", None), AfterExit::Retry { attempt: 1 });
 }
 
 #[test]
 fn another_owner_of_the_data_is_reported_at_once() {
     let reason = "[agent-host] Another Centralu is already using this data (pid 7).";
-    assert_eq!(after_exit(0, Duration::ZERO, false, reason, Some(1)), AfterExit::GiveUp(reason.into()));
-}
-
-/// The keeper's build switch stops the host on purpose; that exit must not count as a
-/// crash, or five switches in a row would leave the person with "gave up".
-#[test]
-fn a_deliberate_bounce_starts_again_without_counting() {
-    assert_eq!(after_exit(5, Duration::ZERO, true, "anything", Some(0)), AfterExit::Again);
+    assert_eq!(after_exit(0, Duration::ZERO, reason, Some(1)), AfterExit::GiveUp(reason.into()));
 }
 
 #[test]
@@ -230,61 +223,6 @@ fn backoff_doubles_and_stops_at_five_seconds() {
     assert_eq!(backoff(1), Duration::from_millis(400));
     assert_eq!(backoff(2), Duration::from_millis(800));
     assert_eq!(backoff(9), Duration::from_millis(5000));
-}
-
-/// The keeper handoff (#280 step 4): a host's stdout reader stops between two lines and hands
-/// over every byte it read but did not deliver, the half line included; while frozen it reads
-/// nothing more, and a thaw carries on where it stopped.
-#[cfg(unix)]
-#[test]
-fn a_frozen_host_reader_hands_over_what_it_read_and_stops_between_lines() {
-    use std::os::unix::net::UnixStream;
-    let (r, mut w) = UnixStream::pair().unwrap();
-    w.write_all(b"one\ntwo\nfour-five\nthr").unwrap();
-    let out = HostOut::new(r.into(), Vec::new());
-    let gate = out.gate();
-    // The supervisor's thread: it hands each line on and waits until it is taken (a sink)
-    let (tx, rx) = std::sync::mpsc::sync_channel::<String>(0);
-    thread::spawn(move || {
-        for line in out {
-            if tx.send(line).is_err() {
-                return;
-            }
-        }
-    });
-    let t = Duration::from_secs(10);
-    let until = |what: &str, done: fn(&[u8], bool) -> bool| {
-        let end = Instant::now() + t;
-        while !matches!(gate.peek(), (buf, frozen) if done(&buf, frozen)) {
-            assert!(Instant::now() < end, "{what}: {:?}", gate.peek());
-            thread::sleep(Duration::from_millis(5));
-        }
-    };
-    assert_eq!(rx.recv_timeout(t).unwrap(), "one");
-    // The reader takes "two" and waits for the sink to take it. Waited for, not slept on: a freeze
-    // asked for before the reader took "two" parks it with "two" still held, and the sink never
-    // gets it (#368: the 100 ms sleep this replaces failed under load on Linux).
-    until("the reader took \"two\"", |buf, _| buf == b"four-five\nthr");
-    // The freeze is asked for while the reader is in the sink, and lands once the sink takes the
-    // line and the reader comes back for the next one.
-    let freezer = {
-        let gate = gate.clone();
-        thread::spawn(move || gate.freeze(t))
-    };
-    until("the freeze was asked for", |_, frozen| frozen);
-    assert_eq!(rx.recv_timeout(t).unwrap(), "two");
-    let held = freezer.join().unwrap();
-    assert_eq!(held.unwrap(), b"four-five\nthr", "what the next keeper starts with: a whole line and a half one");
-    w.write_all(b"ee\n").unwrap();
-    assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "nothing is delivered while frozen");
-    gate.thaw();
-    assert_eq!(rx.recv_timeout(t).unwrap(), "four-five");
-    assert_eq!(rx.recv_timeout(t).unwrap(), "three");
-}
-
-#[test]
-fn bouncing_with_no_host_running_does_nothing() {
-    assert!(!Supervisor::new().bounce());
 }
 
 /// Retry can relaunch a supervisor that has given up, and does not launch a second one on
@@ -890,21 +828,6 @@ impl Drop for GroupGuard {
         if !thread::panicking() {
             assert!(left.is_empty(), "the group {pgid} still has live processes after it was killed: {left:?}");
         }
-    }
-}
-
-/// A supervisor's host and its group ended when a test is over, as `GroupGuard` does for a child the test holds
-#[cfg(unix)]
-pub(crate) struct HostGuard<'a>(pub(crate) &'a Supervisor);
-
-#[cfg(unix)]
-impl Drop for HostGuard<'_> {
-    fn drop(&mut self) {
-        // A poisoned lock (a test thread panicked holding it) still names the child
-        let pgid = self.0.inner.lock().unwrap_or_else(|e| e.into_inner()).child.as_ref().map(|c| c.id());
-        // First: it marks the supervisor as stopping, so its watcher cannot start another host in between
-        self.0.shutdown();
-        drop(GroupGuard(pgid));
     }
 }
 

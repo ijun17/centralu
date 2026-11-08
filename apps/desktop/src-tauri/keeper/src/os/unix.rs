@@ -4,8 +4,6 @@
 //! shell probe (below); watching a handed-over host (`process`) and descriptor passing for a
 //! handoff (`handles`), both until the handoff goes. What differs between the two is in `macos.rs` and `linux.rs`.
 
-pub mod handles;
-pub mod process;
 
 use std::fs::File;
 use std::io;
@@ -39,6 +37,18 @@ pub fn close_inherited(keep: &[i32]) -> Vec<i32> {
         unsafe { libc::close(fd) };
     }
     fds
+}
+
+/// Sets close-on-exec on a descriptor this process made.
+pub fn set_cloexec(fd: std::os::fd::RawFd) -> io::Result<()> {
+    // SAFETY: fcntl on a descriptor we own.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 /// Takes an exclusive `flock` without waiting. `Ok(false)` means someone else holds it.

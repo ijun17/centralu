@@ -12,9 +12,6 @@ struct KeeperSink(Arc<Keeper>);
 impl StatusSink for KeeperSink {
     fn status(&self, status: &HostStatus) {
         let k = &self.0;
-        if k.handed_over.load(Ordering::SeqCst) {
-            return;
-        }
         // Clients only ever see the front door (#280 step 3): a ready host becomes the door's
         // target, and what the windows are told is the door's port and token, not the host's.
         let shown = match status {
@@ -35,7 +32,6 @@ impl StatusSink for KeeperSink {
             st.status = shown.clone();
             if !matches!(status, HostStatus::Ready(_)) {
                 st.busy = false;
-                st.keeps_agents = None;
                 st.host_stops_for_update = false;
             }
             k.broadcast(&mut st);
@@ -48,9 +44,7 @@ impl StatusSink for KeeperSink {
             HostStatus::Restarting { attempt } => log(&format!("host restarting (attempt {attempt})")),
             HostStatus::Starting => {}
         }
-        // Once a host is up, every copy but its own and those a launch or swap holds is unused.
-        // Which copy is the running host's is read when the cleanup runs, not now: a swap may have
-        // adopted its new host in between (#368).
+        // Once a host is up, every copy but its own and those a launch holds is unused (#368).
         if ready {
             let k = k.clone();
             thread::spawn(move || {
@@ -69,20 +63,13 @@ impl StatusSink for KeeperSink {
     /// The host's activity report, `{"activity":{"busy":bool}}` on its stdout — the one thing
     /// the keeper reads from the host besides the ready line. It feeds the idle rule.
     fn json_line(&self, line: &Value) -> bool {
-        // The swap's two reports (#280 step 3, swap-control.ts): what a swap costs with this host,
-        // and what a draining host finished or cut
-        if let Some(keeps) = line.pointer("/swap/keepsAgents").and_then(Value::as_bool) {
+        // What the host can be asked (`main.ts`; the line keeps its `swap` name until the host's half of the swap goes, #1895
+        // step 4 PR 5): whether it takes the keeper's stop for an update on its stdin. A host of beta.48 or earlier says
+        // only `keepsAgents`, and is stopped as a quit
+        if let Some(report) = line.get("swap") {
             if let Ok(mut st) = self.0.state.lock() {
-                st.keeps_agents = Some(keeps);
-                st.host_stops_for_update = line.pointer("/swap/stopsForUpdate").and_then(Value::as_bool) == Some(true);
+                st.host_stops_for_update = report.get("stopsForUpdate").and_then(Value::as_bool) == Some(true);
                 self.0.broadcast(&mut st);
-            }
-            return true;
-        }
-        if let Some(report) = line.get("drained") {
-            log(&format!("old host drained: {report}"));
-            if let Ok(mut st) = self.0.state.lock() {
-                st.drained = Some(report.clone());
             }
             return true;
         }
@@ -103,9 +90,23 @@ impl StatusSink for KeeperSink {
 }
 
 /// A test hook: wait this long after a host is ready before removing unused copies, so a test can
-/// have the cleanup land after a swap has copied its build and before it starts it (#368).
+/// have the cleanup land while a launch holds a copy (#368).
 pub(super) fn test_clean_hold() -> Option<Duration> {
     std::env::var("CC_KEEPER_CLEAN_HOLD_MS").ok()?.trim().parse::<u64>().ok().map(Duration::from_millis)
+}
+
+/**
+ * The host folders in use: the running host's (its copy, or its verified content) and the one the next launch runs. No
+ * cleanup removes them (`source::Copies::clean`).
+ */
+pub(in crate::keeper) fn host_dirs_in_use(st: &State) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut add = |b: &BuildSource| dirs.extend(b.copy_dir.iter().chain(b.host_dir.iter()).map(PathBuf::from));
+    if let Some(s) = &st.source {
+        add(s);
+    }
+    add(&st.desired);
+    dirs
 }
 
 /// Builds each launch: copies the desired build to its per-build folder and runs it from there.
@@ -140,9 +141,9 @@ pub(in crate::keeper) fn launcher(k: &Arc<Keeper>) -> Launcher {
 }
 
 /**
- * The environment every host this keeper starts gets, normal start or swap alike:
+ * The environment every host this keeper starts gets:
  *   - `CC_DATA_DIR`: the folder, so user-folder apps, attachments and worktrees land in it;
- *   - `CC_KEEPER`: turns on the reports only the keeper reads (activity, swap);
+ *   - `CC_KEEPER`: turns on the reports only the keeper reads (activity, what it can be asked);
  *   - `CC_HOST_SOURCE`: the build record its `hello_ok` repeats;
  *   - `CC_FRONT_DOOR`: the address the host gives the Codex bridge instead of its own port.
  *

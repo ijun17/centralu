@@ -5,42 +5,33 @@
 //!
 //! | request | answer |
 //! |---|---|
-//! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and a credential (the token for a Centralu window, the limited credential for any other process, #1405, `view.rights`), build source, the last swap |
+//! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and a credential (the token for a Centralu window, the limited credential for any other process, #1405, `view.rights`), build source |
 //! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. (`relaunched`, for the window an announced relaunch started, went with `relaunching` in #1895 step 4 PR 3: an earlier window reads its absence as false) |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
 //! | `{"op":"stop","forUpdate":true}` | the host is stopped for an update (it lists what it ends for the next host), then `{"ok":true}`, and the keeper exits (#1895 step 3). A window's only: anyone else gets `{"ok":false,"error":"window_only: …"}` |
-//! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
-//! | `{"op":"upgrade","exe":path,"source":BuildSource}` | a window's only (#1405): `{"ok":true}`, then the keeper hands itself over to the keeper at `exe` (of build `source`), leaving the host alone (#280 step 4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
+//! | `{"op":"switch"}`, `{"op":"upgrade"}` | `{"ok":false,"error":"gone: …"}` (#1895 step 4, PR 4): a keeper runs one build for its life. An earlier window that asks shows the refusal and offers "Restart completely", which starts a keeper of its own build |
 //! | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970: one attached now, by pid and start, or one by its path; `Keeper::may_tell_system_ending`): `{"ok":true}` once the host has been told, on its stdin, that the system is ending (a shutdown, restart or sign-out; `cancelled`: that it is not after all); `{"ok":false}` when no host is up |
-//! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up (refused during a swap) |
+//! | `{"op":"restart"}` | `{"ok":true,"started":bool}` — Retry after the host gave up |
 //! | `{"op":"settings"}` | `{"ok":true,"background":bool}` |
 //! | `{"op":"set_background","on":bool}` | `{"ok":true,"background":bool}` |
 //!
 //! The socket is created `0600` (under `umask 077`, so there is no window before a chmod) and
 //! every connection's peer uid must be ours: only this user's processes get in. Of those, only a
-//! Centralu window gets the front door's token and may switch or upgrade (#1405, `window_peer.rs`:
+//! Centralu window gets the front door's token and may stop the keeper for an update (#1405, `window_peer.rs`:
 //! the kernel's record of the peer names the window's executable); any other process gets the
 //! limited credential (`limited.rs`) on `status` and `attach`, and each attached client's pushes
 //! carry its own.
 //!
 //! The port and token in `status` are the **front door's** (#280 step 3, `front_door.rs`), not a
-//! host's: the same for as long as this keeper lives, whichever host is behind them — and, since
-//! step 4, across keepers too: a handoff passes the door, its token and this socket on.
-//!
-//! **Frozen** (step 4): while the keeper is handing itself over, it accepts nothing on this socket
-//! (connections wait in the listen queue, which the next keeper inherits), answers only `status`,
-//! pushes nothing to windows, and its idle rule does not run. After the commit (`handed_over`)
-//! nothing in this process acts again; it exits.
+//! host's: the same for as long as this keeper lives, whichever host run is behind them.
 //!
 //! **Files.** This one: the keeper's state, the accept loop and the requests. `start.rs`: the
 //! options and a fresh keeper's start. `host.rs`: the status sink and the launcher. `windows.rs`:
-//! attach, detach, relaunch; `push.rs`, each window's writer. `switch.rs`: build switches, keeper handoffs and moves to verified
-//! content.
+//! attach and detach; `push.rs`, each window's writer.
 
 mod host;
 mod push;
 mod start;
-mod switch;
 mod windows;
 
 use std::fs::{self, File, OpenOptions};
@@ -48,7 +39,6 @@ use std::io::{BufReader, Seek, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -56,11 +46,10 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::accept::{self, AcceptErrors};
-use super::{content, handoff, keys, limited, window_peer};
+use super::{content, keys, limited, window_peer};
 use super::client::{self, json_line, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
-use super::swap::{self, Phase, SwapView};
 use super::{
     idle_decision, idle_limit, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
     KEEPER_PROTOCOL, REATTACH_GRACE,
@@ -71,22 +60,22 @@ use crate::os;
 
 pub use self::start::{parse_args, run, Options};
 pub(super) use self::host::{launcher, sink};
-pub(super) use self::start::{log_origin, own_build, record_lock_holder};
 #[cfg(test)]
-use self::start::{missing_option, EXIT_USAGE};
-pub(super) use self::switch::{begin_switch, host_dirs_in_use};
-pub(super) use self::windows::{adopt_window, WINDOW_WRITE_TIMEOUT};
+use self::start::{missing_option, own_build, EXIT_NO_TAKE_OVER, EXIT_USAGE};
+pub(super) use self::windows::WINDOW_WRITE_TIMEOUT;
+#[cfg(test)]
+use self::windows::add_test_window;
 // What the moved parts name as `super::…` (the keeper module itself).
-use super::{appimage, data_dir, exe, prepare_default_dir};
+use super::{appimage, data_dir, prepare_default_dir};
+#[cfg(test)]
 use self::host::*;
-use self::switch::*;
 use self::windows::*;
 
 pub(super) struct State {
     pub(super) status: HostStatus,
     /// The build the current host runs or is starting.
     pub(super) source: Option<BuildSource>,
-    /// The build the next launch runs. Changed by `switch`.
+    /// The build every launch runs: this keeper's own.
     pub(super) desired: BuildSource,
     /// The attached windows status is pushed to.
     pub(super) subscribers: Vec<Window>,
@@ -98,15 +87,6 @@ pub(super) struct State {
     pub(super) last_busy: Instant,
     pub(super) settings: Settings,
     pub(super) stopping: bool,
-    /// The current or last swap, as the windows are shown it.
-    pub(super) swap: Option<SwapView>,
-    /// A swap (or a keeper handoff) is running: a second `switch` and `restart` are refused until
-    /// it ends.
-    pub(super) swapping: bool,
-    /// The draining host's `{"drained":..}` report.
-    pub(super) drained: Option<Value>,
-    /// The current host's `{"swap":{"keepsAgents":..}}` report.
-    pub(super) keeps_agents: Option<bool>,
     /// The current host said it takes the keeper's stop lines on its stdin (`{"swap":{"stopsForUpdate":true}}`, #1895 step
     /// 3): only then is "Apply now" a stop for an update here (`view.stops_for_update`). A host of an earlier build takes
     /// them only from a window, and would be stopped as a quit
@@ -136,34 +116,18 @@ impl State {
             last_busy: now,
             settings,
             stopping: false,
-            swap: None,
-            swapping: false,
-            drained: None,
-            keeps_agents: None,
             host_stops_for_update: false,
             reattach_until: None,
             known_windows: Vec::new(),
         }
     }
 
-    /// Counts a window as attached and returns its id. Shared by `attach`, which adds the window to
-    /// the push list once it has answered, and `add_window`.
+    /// Counts a window as attached and returns its id. `attach` adds the window to the push list once it has answered.
     fn count_window(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.attached += 1;
         self.ever_attached = true;
-        id
-    }
-
-    /// Counts a window another keeper handed over as attached and adds it to the push list; returns
-    /// its id. A window back spends the wait for one the keeper closed.
-    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream, full: bool, peer: Option<window_peer::Attached>) -> u64 {
-        let id = self.count_window();
-        self.reattach_until = None;
-        if let Some(w) = Window::start(k, id, stream, full, peer) {
-            self.subscribers.push(w);
-        }
         id
     }
 
@@ -183,19 +147,16 @@ impl State {
     }
 }
 
-/// An attached window: its connection (passed on in a handoff) and the writer that pushes to it
+/// An attached window: its connection and the writer that pushes to it
 /// (`push.rs`).
 pub(super) struct Window {
     pub(super) id: u64,
     /// Whether the process at the other end is a Centralu window (#1405, `window_peer.rs`): only
-    /// then do its views carry the front door's token. Read from the kernel when it attached, or
-    /// when another keeper handed it over (the peer's record travels with the socket).
+    /// then do its views carry the front door's token. Read from the kernel when it attached.
     pub(super) full: bool,
     /// For a window (`full`), its pid and start as it attached (#2117): what a stop for an update is judged by, since after
     /// an install macOS names no executable, or the old path, for it (`window_peer::judge_for_update`).
     pub(super) peer: Option<window_peer::Attached>,
-    /// Shared with the writer, not duplicated: one descriptor for both.
-    pub(super) stream: Arc<UnixStream>,
     pub(super) push: Arc<push::Pusher>,
 }
 
@@ -225,7 +186,7 @@ impl Window {
         match push::Pusher::start(stream.clone(), on_fail) {
             Ok(push) => {
                 let peer = if full { peer } else { None };
-                Some(Window { id, full, peer, stream, push })
+                Some(Window { id, full, peer, push })
             }
             Err(e) => {
                 log(&format!("could not start a writer for window {id} ({e}); closing its connection"));
@@ -246,24 +207,15 @@ pub(super) struct Keeper {
     /// The per-build host copies and which are in use (#368, `source::Copies`).
     pub(super) copies: source::Copies,
     /// Where this keeper's own executable is: verified content (`<data>/content/<version>/`, the
-    /// shell started it or a keeper from there handed over to it) or anywhere else (`content.rs`).
+    /// shell started it) or anywhere else (`content.rs`).
     pub(super) origin: content::Origin,
     pub(super) state: Mutex<State>,
     pub(super) idle: Duration,
     pub(super) started: Instant,
-    /// `keeper.lock`, held (flock) for this keeper's life and passed on in a handoff (step 4).
-    pub(super) lock: File,
-    /// `keeper.sock`'s listener, polled so a handoff can stop accepting and pass it on.
+    /// `keeper.lock`, held (flock) for this keeper's life: kept open, never read.
+    pub(super) _lock: File,
+    /// `keeper.sock`'s listener.
     pub(super) listener: UnixListener,
-    /// Handing over to another keeper: no accepting, no pushing, no idle rule (step 4).
-    pub(super) frozen: AtomicBool,
-    /// The handoff committed: this process only waits to exit and must not act on anything.
-    pub(super) handed_over: AtomicBool,
-    /// The accept loop has noticed `frozen` and stopped.
-    pub(super) accept_parked: AtomicBool,
-    /// Requests being answered right now (an attach counts until it is registered). A freeze
-    /// waits for them, so no answer is half written when the socket changes hands.
-    pub(super) requests: AtomicUsize,
 }
 
 /// Runs a keeper that is fully set up: the idle rule and the control socket, until it exits.
@@ -279,63 +231,21 @@ pub(super) fn serve(k: Arc<Keeper>) -> i32 {
     0
 }
 
-/// Accepts on `keeper.sock`, looking up every 100 ms for a freeze (step 4). A blocking `accept`
-/// could not be stopped without closing the socket, and the socket must stay open: it is passed to
-/// the next keeper with whatever is waiting in its queue.
+/// Accepts on `keeper.sock`, one thread per request.
 fn accept_loop(k: &Arc<Keeper>) {
-    use std::os::fd::AsRawFd;
-    let _ = k.listener.set_nonblocking(true);
     let mut errors = AcceptErrors::new(log);
     loop {
-        if k.handed_over.load(Ordering::SeqCst) {
-            // The next keeper owns the socket now; this process is about to exit.
-            thread::sleep(Duration::from_secs(3600));
-            continue;
-        }
-        if k.frozen.load(Ordering::SeqCst) {
-            k.accept_parked.store(true, Ordering::SeqCst);
-            thread::sleep(Duration::from_millis(20));
-            continue;
-        }
-        k.accept_parked.store(false, Ordering::SeqCst);
-        let mut p = libc::pollfd { fd: k.listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        // SAFETY: one valid pollfd.
-        if unsafe { libc::poll(&mut p, 1, 100) } <= 0 {
-            continue;
-        }
         match k.listener.accept() {
             Ok((stream, _)) => {
                 errors.accepted();
-                let _ = stream.set_nonblocking(false);
-                k.requests.fetch_add(1, Ordering::SeqCst);
-                let guard = Request(Some(k.clone()));
                 let k2 = k.clone();
-                // Refused: the request (dropped with the closure) is not counted any more, and the
-                // window retries on the closed connection.
-                if let Err(e) = accept::spawn("keeper-request", move || handle(k2, stream, guard)) {
+                // Refused: the window retries on the closed connection.
+                if let Err(e) = accept::spawn("keeper-request", move || handle(k2, stream)) {
                     log(&format!("could not start a thread for a request: {e}"));
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(e) => thread::sleep(errors.failed(&e)),
         }
-    }
-}
-
-/// One request being answered; dropping it (or `done`) stops a freeze from waiting for it.
-pub(super) struct Request(Option<Arc<Keeper>>);
-
-impl Request {
-    fn done(&mut self) {
-        if let Some(k) = self.0.take() {
-            k.requests.fetch_sub(1, Ordering::SeqCst);
-        }
-    }
-}
-
-impl Drop for Request {
-    fn drop(&mut self) {
-        self.done();
     }
 }
 
@@ -347,7 +257,7 @@ impl Keeper {
     /**
      * The window executables this keeper accepts (#1405, `window_peer::accepted_windows`): the one beside its own
      * executable, unless it runs from content, and the window of each build it names: its own (`--bundle-path`), the
-     * current host's and the next launch's (each `switch` a window made). Read under the state lock, which is let go
+     * current host's and the next launch's. Read under the state lock, which is let go
      * before anything is judged.
      */
     pub(super) fn window_exes(&self) -> Vec<PathBuf> {
@@ -370,7 +280,7 @@ impl Keeper {
         window_peer::judge(stream, &self.window_exes())
     }
 
-    /// Whether an attaching or handed-over peer is a window: by its path, or as a window this keeper took by its path
+    /// Whether an attaching peer is a window: by its path, or as a window this keeper took by its path
     /// before (#2119, `window_peer::judge_attaching`); a window taken by its path is remembered. Never under the state
     /// lock while the path is judged, which may run `codesign`.
     /// With the window's record as it was read around the path check (`window_peer::judge_path_of`), which `Window::start`
@@ -419,40 +329,27 @@ impl Keeper {
             background: st.settings.background,
             attached: st.attached,
             busy: st.busy,
-            swap: st.swap.clone(),
-            keeps_agents: st.keeps_agents,
             rights: Some(if full { "full" } else { "limited" }.to_string()),
             stops_for_update: st.host_stops_for_update,
         }
     }
 
-    /// Pushes the current view to every attached window. Not while frozen for a handoff: the
-    /// windows' sockets may be in two keepers' hands then, and two writers could interleave half
-    /// lines.
-    ///
-    /// Only queued here: each window's writer sends it (`push.rs`), so a window that stopped
+    /// Pushes the current view to every attached window. Only queued here: each window's writer sends it (`push.rs`), so a window that stopped
     /// reading holds up neither this lock nor the other windows (#840 item 5). One whose write fails
     /// has its connection closed (`Window::start`): that is its detach, which `watch_window` counts,
     /// and the window attaches again.
     pub(super) fn broadcast(&self, st: &mut State) {
-        if self.frozen.load(Ordering::SeqCst) || self.handed_over.load(Ordering::SeqCst) {
-            return;
-        }
         // One line per credential: a window's carries the token, any other client's the limited one (#1405)
         let full = json_line(&json!({ "event": "status", "view": self.view(st, true) }));
         let limited = json_line(&json!({ "event": "status", "view": self.view(st, false) }));
-        let phase = st.swap.as_ref().map(|s| s.phase);
         for w in &st.subscribers {
-            w.push.status(if w.full { full.clone() } else { limited.clone() }, phase);
+            w.push.status(if w.full { full.clone() } else { limited.clone() });
         }
     }
 
     /// `keeper.json`: what this keeper is and what it runs, for a person reading the data folder
     /// (the socket is how programs ask). It holds no token.
     pub(super) fn write_state_file(&self) {
-        if self.handed_over.load(Ordering::SeqCst) {
-            return;
-        }
         let Ok(st) = self.state.lock() else { return };
         let body = json!({
             "pid": self.info.pid,
@@ -481,11 +378,6 @@ impl Keeper {
 
     /// Stops the host and ends the keeper. Idempotent.
     fn shutdown(self: &Arc<Self>, reason: &str) {
-        // A keeper that has handed over owns nothing any more: stopping now would stop the next
-        // keeper's host.
-        if self.handed_over.load(Ordering::SeqCst) {
-            return;
-        }
         {
             let Ok(mut st) = self.state.lock() else { return };
             if st.stopping {
@@ -515,10 +407,6 @@ impl Keeper {
      * other process of this user could otherwise cut every turn and have it continued as if Centralu had been updated.
      */
     pub(super) fn stop_for_update(self: &Arc<Self>, stream: &mut UnixStream, window: Result<(), String>, wait: Duration) -> bool {
-        if self.handed_over.load(Ordering::SeqCst) {
-            reply(stream, &json!({ "ok": false, "error": HANDED_OVER }));
-            return false;
-        }
         {
             let Ok(mut st) = self.state.lock() else { return false };
             if let Some(why) = stop_for_update_refusal(&st, window.is_ok()) {
@@ -541,8 +429,6 @@ impl Keeper {
     }
 }
 
-/// The refusal of a stop for an update by a keeper that has handed over
-pub(super) const HANDED_OVER: &str = "this keeper has just handed over to a newer one; try again in a moment";
 /// The refusal of a stop for an update to a process that is not a Centralu window attached to this keeper, in words true
 /// for whoever asks (#2119 review): any other process (an agent's shell) gets it, and so does the person's own window
 /// when this keeper does not know it (one started after the install, or a window whose attach could not be taken again);
@@ -556,8 +442,6 @@ pub(super) fn stop_for_update_refusal(st: &State, window: bool) -> Option<&'stat
         Some(NOT_A_WINDOW)
     } else if st.stopping {
         Some("Centralu is already stopping (a quit, or another update); open it again once it has")
-    } else if st.swapping {
-        Some("a build switch is under way; apply the update once it has ended")
     } else if !st.host_stops_for_update {
         Some("the agent host is not up to be stopped for the update (it is starting or restarting); try again in a moment")
     } else {
@@ -568,9 +452,6 @@ pub(super) fn stop_for_update_refusal(st: &State, window: bool) -> Option<&'stat
 pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(1));
-        if k.frozen.load(Ordering::SeqCst) || k.handed_over.load(Ordering::SeqCst) {
-            continue;
-        }
         let reason = {
             let Ok(st) = k.state.lock() else { return };
             let now = Instant::now();
@@ -595,7 +476,7 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
     });
 }
 
-/// Ends the keeper once it has stopped for an update (this op, and a handoff that stops instead). A test runs the dispatcher inside its own binary: there this panics on the
+/// Ends the keeper once it has stopped for an update. A test runs the dispatcher inside its own binary: there this panics on the
 /// request's thread instead, so a stop that should not have happened fails the test rather than end the run as if it passed
 pub(in crate::keeper) fn exit_after_stop() -> ! {
     #[cfg(test)]
@@ -603,6 +484,11 @@ pub(in crate::keeper) fn exit_after_stop() -> ! {
     #[cfg(not(test))]
     std::process::exit(0)
 }
+
+/// The refusal of a restart by a keeper on its way out
+pub(super) const KEEPER_STOPPING: &str = "the keeper is stopping";
+/// The answer to `switch` and `upgrade` (#1895 step 4, PR 4), in words an earlier window shows as it is
+pub(super) const GONE: &str = "gone: this keeper runs one build for its whole life and no longer switches builds; \"Restart completely\" starts this window's build";
 
 fn reply(stream: &mut UnixStream, v: &Value) {
     let _ = stream.write_all(&json_line(v));
@@ -613,7 +499,7 @@ fn reply(stream: &mut UnixStream, v: &Value) {
 #[cfg(test)]
 pub(super) const OPS: &[&str] = &["status", "attach", "children", "stop", "system_ending", "switch", "upgrade", "restart", "settings", "set_background"];
 
-fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
+fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
     if !accept::from_this_user(&stream, log) {
         return;
     }
@@ -629,10 +515,6 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         _ => return,
     };
     let op = req.get("op").and_then(Value::as_str).unwrap_or("");
-    if k.frozen.load(Ordering::SeqCst) && op != "status" {
-        // A request that slipped in as the freeze began. The next keeper answers it once retried.
-        return reply(&mut stream, &json!({ "ok": false, "error": "the keeper is handing over to a new build; try again in a moment" }));
-    }
     match op {
         "status" => {
             // A window's status carries the token; anyone else's the limited credential (#1405)
@@ -640,7 +522,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             let view = k.state.lock().map(|st| k.view(&st, full)).ok();
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
-        "attach" => attach(k, stream, reader, &req, guard),
+        "attach" => attach(k, stream, reader, &req),
         // What the keeper holds (#538): nothing since #1895 step 4, said so to the tools and hosts that still ask
         "children" => reply(&mut stream, &json!({ "ok": true, "children": [] })),
         "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
@@ -669,19 +551,12 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
                 Err(e) => reply(&mut stream, &json!({ "ok": false, "error": format!("the host was not told: {e}") })),
             }
         }
-        // Both start code the request names and hand it the token: a window's only (#1405)
-        "switch" | "upgrade" if !k.is_window(&stream) => {
-            log(&format!("refused {op} to a process that is not a Centralu window"));
-            reply(&mut stream, &json!({ "ok": false, "error": "window_only: only a Centralu window can switch or upgrade the keeper" }))
-        }
-        "switch" => switch(k, &mut stream, &req),
-        "upgrade" => upgrade(k, &mut stream, &req),
+        // The swap and the move to another build's keeper went in #1895 step 4, PR 4: an earlier window that asks shows this and
+        // offers "Restart completely"
+        "switch" | "upgrade" => reply(&mut stream, &json!({ "ok": false, "error": GONE })),
         "restart" => {
             if k.state.lock().map(|st| st.stopping).unwrap_or(true) {
-                return reply(&mut stream, &json!({ "ok": false, "error": switch::KEEPER_STOPPING }));
-            }
-            if k.state.lock().map(|st| st.swapping).unwrap_or(false) {
-                return reply(&mut stream, &json!({ "ok": false, "error": "a build switch is in progress" }));
+                return reply(&mut stream, &json!({ "ok": false, "error": KEEPER_STOPPING }));
             }
             let started = k.sup.restart(sink(&k), launcher(&k));
             reply(&mut stream, &json!({ "ok": true, "started": started }));

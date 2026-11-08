@@ -1,5 +1,5 @@
 /**
- * What the keeper integration scenarios share (`keeper-integration.mjs`, `keeper-handoff-integration.mjs`): where the binary and the
+ * What the keeper integration scenarios share (`keeper-integration.mjs`): where the binary and the
  * bundled host are, the processes and folders a run made (ended and removed by `cleanup`), how a
  * check is reported, and how a keeper, an attached app and a host client are started.
  */
@@ -14,7 +14,6 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
 
 // The keeper executable (#440), started the way a window of this build starts it.
-// keeper-handoff-integration.mjs covers the window's executable turning into it.
 const BIN = join(TARGET, 'debug', 'centralu-keeper')
 
 const HOST_SRC = join(ROOT, 'apps/desktop/src-tauri/resources/host')
