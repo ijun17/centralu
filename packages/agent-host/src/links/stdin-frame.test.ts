@@ -236,7 +236,9 @@ else {
 
   it('fails when PowerShell never says it runs, naming that, and does not send the step again', async () => {
     const { ssh, runs } = fakeSsh(['none', 'none'])
-    const t = new SshTunnel({ target: 'win-pc', ssh, env: process.env, stdinReadyMs: 400 * SLOW, stdinAckMs: 400 * SLOW, execTimeoutMs: 600_000 })
+    // The ready wait starts at the spawn, so it must outlast the stand-in's own Node start under a loaded machine:
+    // at 400 ms, a full `pnpm verify` saw the wait end before the stand-in had counted its run (runs() was 0)
+    const t = tunnel(ssh)
     const at = Date.now()
     await expect(t.exec(framed())).rejects.toThrow(/win-pc did not start this step's PowerShell within \d+ seconds/)
     expect(Date.now() - at).toBeLessThan(20_000 * SLOW)
