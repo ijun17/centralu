@@ -657,7 +657,7 @@ Platforms: macOS, Linux.
 Happened: #840 item 8: a handed-over host was watched by its bare pid, so once it ended and its parent reaped it, a
 new process given that pid read as the host still running, and a stop would have sent it SIGKILL.
 Rule: a handed-over host is not the keeper's child: it is watched by a kqueue registration (macOS) or a pidfd
-(Linux) made in the handoff's `prepare`, before `ready` (`os::children::ProcessWatch`), and an end once seen stays
+(Linux) made in the handoff's `prepare`, before `ready` (`os::process::ProcessWatch`), and an end once seen stays
 seen. Only "no such process" (`ESRCH`) at registration means it has gone; any other failure, and a system with
 neither, falls back to the pid, where EPERM from `kill(pid, 0)` means alive.
 Guard: `host_proc/handover.rs` `a_handed_over_host_that_ended_stays_ended_when_its_number_is_reused`;

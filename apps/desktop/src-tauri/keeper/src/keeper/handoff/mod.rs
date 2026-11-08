@@ -182,8 +182,10 @@ fn thaw(k: &Keeper, f: &Frozen) {
 }
 
 /// The refusal of a handed child table (#1895 step 4, `docs/plans/keeper-removal.md` §6): this keeper has no children
-/// service and its host takes over nothing a keeper holds, so those processes would run on with no host to read them. The
-/// outgoing keeper rolls back and carries on with them, and its window offers "Restart completely"
+/// service and its host takes over nothing a keeper holds, so running children would go on with no host to read them. A
+/// table with none running is refused too: the descriptors it carries include the sending host's connections to that
+/// service, which taking the handoff would close under it. The outgoing keeper rolls back and carries on, and its own
+/// host swap still runs (`lifecycle/keeper-held.ts` lets that standby through when nothing it holds runs)
 pub(super) fn refuse_child_table(table: Option<&Value>) -> Result<(), String> {
     match table {
         None => Ok(()),

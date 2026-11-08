@@ -2979,7 +2979,7 @@ spawning through it, and nothing running is cut by the transition itself. Its ne
 stop for an update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell
 starts next serves none. A handoff passes a child table on only while the keeper's host cannot stop for an update (an earlier
 build's host, or one not up), and keeper.log says so; otherwise the keeper stops for an update and exits instead
-(`handoff::held_children_on_handoff`), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
+(step 3's `held_children_on_handoff`, gone with step 4 PR 2), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
 (`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
 turns, and they would have ended as a quit's. This was checked end to end by `keeper-children-integration.mjs`, removed
 in #1895 step 4 PR 1. A host of that PR or later never takes children over. A keeper of that build refused a handoff

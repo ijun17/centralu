@@ -258,7 +258,10 @@ So that the removal deletes the switch instead of leaving two paths:
      cannot stop for an update, which is rare (a swap that failed after the transition).
   2. A received table could only be ended as a quit is: its host cannot list the turns for an update, so receiving
      would buy nothing over the refusal, and would keep the child-table code alive for N releases.
-  3. The refusal is the handoff's existing failure path: the sender rolls back and carries on with what it holds, the
+  3. Any table is refused, one with nothing running too: its descriptors include the sending host's connections to the
+     children service, which taking the handoff would close under that host. The sender's own host swap still runs after
+     the rollback, and the host's check lets its standby through when nothing the keeper holds runs (PR 2 as built).
+  4. The refusal is the handoff's existing failure path: the sender rolls back and carries on with what it holds, the
      window shows the refusal and offers "Restart completely", and from PR 3 the window's `stop {forUpdate}`, or a plain
      `stop` behind the loss confirmation for a keeper that cannot (§5, risk 1), ends it. Nothing is orphaned.
 - **The stop for an update is one keeper op** (`stop {forUpdate:true}`), shared by step 3 and by PR 3 onward.
