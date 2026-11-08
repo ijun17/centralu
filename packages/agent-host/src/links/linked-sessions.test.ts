@@ -9,6 +9,7 @@ import { runCentraluTool } from '../sessions/centralu-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
 import { NOT_CONNECTED_PHRASE, type LinkedSessions, type CentraluTools } from '../adapters/contract.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { hiddenKind } from './linked-machine-connection.js'
 import { linkedSessions } from './linked-sessions.js'
 import { Qualifier } from './qualifier.js'
 import type { RoutedMachine } from './router.js'
@@ -34,7 +35,8 @@ function machine(answers: Record<string, unknown>, o: { reachable?: boolean; wai
     },
     lastKnown: (kind) => (o.mirror?.[kind] as unknown[] | undefined) ?? null,
     observe: () => {},
-    hides: (s) => typeof s === 'object' && s !== null && ['orchestrator', 'coordinator'].includes(String((s as { kind?: string }).kind)),
+    // The rule a real machine connection hides by
+    hides: hiddenKind,
   }
 }
 
@@ -63,12 +65,13 @@ describe('reading a linked machine for the hub’s assistant', () => {
 
   it("changes no setting of a session the machine hides, though the machine would (#1941 review)", async () => {
     const calls: string[] = []
-    const rows = [{ id: 'orch', kind: 'orchestrator' }, { id: 'coord', kind: 'coordinator' }]
+    // `asst`: the Assistant of a machine of a later release, which sends the kind under the role's new name (#2133)
+    const rows = [{ id: 'orch', kind: 'orchestrator' }, { id: 'coord', kind: 'coordinator' }, { id: 'asst', kind: 'assistant' }]
     const reader = linkedSessions(() => [machine({ 'sessions.list': rows })], async (method) => {
       calls.push(method)
       return { id: 'm1.orch', applied: 'saved' }
     })
-    for (const id of ['m1.orch', 'm1.coord']) expect(await reader.updateSettings(id, { model: 'opus' })).toEqual({ ok: false, error: `Not a session Box shares: ${id}` })
+    for (const id of ['m1.orch', 'm1.coord', 'm1.asst']) expect(await reader.updateSettings(id, { model: 'opus' })).toEqual({ ok: false, error: `Not a session Box shares: ${id}` })
     expect(calls).toEqual([])
   })
 

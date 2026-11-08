@@ -1,4 +1,4 @@
-import { errorMessage, type SessionInfo } from '@cc/protocol'
+import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { wentWithItsProcess } from '../sessions/interruptions.js'
 import type { Store } from '../dev-services/store.js'
@@ -296,7 +296,7 @@ function askGroupMembers(sessions: HostMailSessions, hostId: string, address: st
       const up = all.find((s) => s.id === at)?.askedBy
       const upper = up ? all.find((s) => s.id === up) : undefined
       // The walk stops before the Assistant: it starts sessions in every project, so they are not one group (only their project is)
-      if (!upper || upper.kind === 'orchestrator') break
+      if (!upper || isAssistantKind(upper.kind)) break
       at = upper.id
     }
     return at

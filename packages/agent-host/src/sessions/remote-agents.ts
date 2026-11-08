@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -381,7 +381,7 @@ export class RemoteAgents {
     const startedAt = Date.now()
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) {
-      return { ok: false, error: caller?.kind === 'orchestrator'
+      return { ok: false, error: isAssistantKind(caller?.kind)
         ? 'The Assistant starts a session on a linked machine with create_session; start_agent with a machine is for a project\'s session.'
         : 'This session belongs to no project, so it cannot start agents.' }
     }

@@ -533,6 +533,51 @@ describe('guard/no-sleeps', () => {
   })
 })
 
+describe('guard/assistant-kind', () => {
+  const file = 'packages/agent-host/src/x.ts'
+  it.each([
+    ["s.kind === 'orchestrator'"],
+    ["s?.kind !== 'orchestrator'"],
+    ["'orchestrator' === m.kind"],
+    ['s.kind === `orchestrator`'],
+    ['s.kind === ASSISTANT_KIND'],
+    ["host.meta.get(id)?.kind == 'orchestrator'"],
+    ['switch (s.kind) { case "orchestrator": }'],
+  ])('reports %s', async (code) => {
+    expect((await lines(file, code, 'assistant-kind')).length).toBeGreaterThan(0)
+  })
+  it.each([
+    ['isAssistantKind(s.kind)'],
+    ["s.kind === 'coordinator'"],
+    ["kind === 'orchestrator'"],
+    ["s.profile === 'assistant'"],
+    // A chat row's kind says `assistant` too
+    ["item.kind === 'assistant'"],
+    ["// s.kind === 'orchestrator' is what this forbids"],
+    ["const kind: SessionKind = 'orchestrator'"],
+  ])('does not report %s', async (code) => {
+    await quiet(file, 'assistant-kind', code, "s.kind === 'orchestrator'")
+  })
+  it('reads the shipped sources of every package and the web entry, not tests', async () => {
+    const code = "s.kind === 'orchestrator'"
+    const found = Object.fromEntries(
+      await Promise.all(
+        ['packages/ui/src/x.tsx', 'packages/core/src/x.ts', 'packages/platform/src/mock/x.ts', 'apps/web/src/x.ts', 'packages/agent-host/src/x.test.ts', 'packages/ui/src/x.test-helpers.ts'].map(
+          async (f) => [f, await lines(f, code, 'assistant-kind')] as const,
+        ),
+      ),
+    )
+    expect(found).toEqual({
+      'packages/ui/src/x.tsx': [1],
+      'packages/core/src/x.ts': [1],
+      'packages/platform/src/mock/x.ts': [1],
+      'apps/web/src/x.ts': [1],
+      'packages/agent-host/src/x.test.ts': [],
+      'packages/ui/src/x.test-helpers.ts': [],
+    })
+  })
+})
+
 describe('the guard rules as a set', () => {
   it('has every rule switched on somewhere, and names no rule that is not there', () => {
     const on = new Set(guardConfigs.flatMap((c) => Object.entries(c.rules).filter(([, level]) => level !== 'off').map(([r]) => r.slice('guard/'.length))))

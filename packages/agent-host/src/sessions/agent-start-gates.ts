@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol'
 import { agentDepthRefusal } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AGENT_CEILING } from './start-agent.js'
@@ -83,7 +84,7 @@ export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' 
   const caller = host.meta.get(callerId)
   if (!caller) return 'The session that asked is no longer here.'
   // The Assistant's place is no project (#853): nothing to be registered or trusted
-  if (projectId === ASSISTANT_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(host, callerId, 'start agents')
+  if (projectId === ASSISTANT_PLACE && isAssistantKind(caller.kind)) return agentDepthRefusal(host, callerId, 'start agents')
   const now = host.store.projects.listProjects().find((p) => p.id === projectId)
   if (!now) return 'This session\'s project is no longer registered.'
   const auto = caller.permissionPreset === 'auto'

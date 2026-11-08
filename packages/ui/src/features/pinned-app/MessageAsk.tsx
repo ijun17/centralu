@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { useMemo } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -91,7 +92,7 @@ function Target({ session, project, onPick }: { session: SessionSummary; project
       <span className="readout flex size-[14px] shrink-0 items-center justify-center rounded-sm border border-line-strong text-2xs text-ink">
         {meta.mark}
       </span>
-      <span className="truncate">{session.kind === 'orchestrator' ? 'Assistant' : session.name}</span>
+      <span className="truncate">{isAssistantKind(session.kind) ? 'Assistant' : session.name}</span>
       {project && <span className="ml-auto shrink-0 truncate text-2xs text-ink-faint">{project}</span>}
     </button>
   )
@@ -101,7 +102,7 @@ function Target({ session, project, onPick }: { session: SessionSummary; project
 export function messageTargets(all: SessionSummary[], projectId: string | null): SessionSummary[] {
   const rank = (s: SessionSummary) => {
     if (projectId && s.projectId === projectId) return 0
-    if (s.kind === 'orchestrator') return 1
+    if (isAssistantKind(s.kind)) return 1
     return 2
   }
   return [...all].sort((a, b) => rank(a) - rank(b))

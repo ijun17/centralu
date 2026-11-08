@@ -1,4 +1,4 @@
-import { SessionId, errorMessage, type SessionInfo } from '@cc/protocol'
+import { SessionId, errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import type { HousekeepingRequest } from '../adapters/contract.js'
 import { findProject, readProjects, shown, whereText } from './app-lookup.js'
 import { plainQuoted, plural } from './tool-answers.js'
@@ -67,7 +67,7 @@ export class HousekeepingFlow {
     if (checked.data === caller) return { error: 'This session is the one asking; it does not change itself.' }
     const row = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === checked.data)
     if (!row) return { error: `No session [${checked.data}] is listed; list_sessions shows them.` }
-    if (row.kind !== 'worker') return { error: `${shown(row.name)} is ${row.kind === 'orchestrator' ? 'an Assistant' : 'a coordinator'}; only the person changes those.` }
+    if (row.kind !== 'worker') return { error: `${shown(row.name)} is ${isAssistantKind(row.kind) ? 'an Assistant' : 'a coordinator'}; only the person changes those.` }
     if (row.unreachable) return { error: `${shown(row.name)} is on a machine that cannot be reached just now; try again when it answers.` }
     return { row }
   }

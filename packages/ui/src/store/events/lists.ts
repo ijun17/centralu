@@ -38,8 +38,9 @@ export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
     return true
   }
 
-  // The host saved a change to a proposal list (#703): both lists are read after the write, whichever tool made it
-  if (e.type === 'orchestrator_proposals_changed') {
+  // The host saved a change to a proposal list (#703): both lists are read after the write, whichever tool made it. A host of a
+  // later release names the event after the role's new name (#2133)
+  if (e.type === 'orchestrator_proposals_changed' || e.type === 'assistant_proposals_changed') {
     void get().refreshMcpProposals()
     void get().refreshSkillProposals()
     return true

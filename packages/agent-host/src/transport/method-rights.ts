@@ -193,6 +193,12 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'orchestrator.configure': 'everyday',
   'orchestrator.tools': 'bridge',
   'orchestrator.tool': 'bridge',
+  // #2133 step 3: the same five under the role's new name, with the same rights
+  'assistant.get': 'everyday',
+  'assistant.peek': 'everyday',
+  'assistant.configure': 'everyday',
+  'assistant.tools': 'bridge',
+  'assistant.tool': 'bridge',
 
   // Git and files in a project: what the OS user does with git and a shell anyway
   'git.status': 'everyday',

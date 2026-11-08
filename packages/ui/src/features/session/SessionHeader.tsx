@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import type { DragEvent, ReactNode } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { formatClock } from '../../app/format.js'
@@ -58,7 +59,7 @@ export function SessionHeader({
         third time, so it is left out of the header. Only the Assistant gets a crown to the
         left of its title, marking not status but a **role**.
       */}
-      {session.kind === 'orchestrator' && (
+      {isAssistantKind(session.kind) && (
         <span className="flex shrink-0 text-ink-muted" data-testid="session-header-crown">
           <CrownIcon size={14} />
         </span>

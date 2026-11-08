@@ -3,6 +3,7 @@ import {
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
+  isAssistantKind,
 } from '@cc/protocol'
 import type { ChildRunResult } from '../adapters/contract.js'
 import type { AgentConsents } from './agent-consents.js'
@@ -211,7 +212,7 @@ export class AgentStartRequests {
     }
     if (rec.ended) return
     const caller = this.host.meta.get(req.callerId)
-    const project = req.projectId === ASSISTANT_PLACE && caller?.kind === 'orchestrator' ? assistantPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === req.projectId)
+    const project = req.projectId === ASSISTANT_PLACE && caller && isAssistantKind(caller.kind) ? assistantPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === req.projectId)
     const r = project
       ? await this.starts.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset, req.requestId)
       : { done: { ok: false as const, error: "This session's project is no longer registered." } }

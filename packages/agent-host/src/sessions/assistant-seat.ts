@@ -1,5 +1,5 @@
 import { stamped } from '../log-file.js'
-import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy } from '@cc/protocol'
+import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus, type UsageHistory, type UsageHistoryBy, isAssistantKind } from '@cc/protocol'
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
@@ -167,7 +167,7 @@ export function centraluToolsFor(
     scopeIds !== undefined ? scopeIds.includes(s.id)
     : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
     // What a hub reads of this host: every session but its Assistant (remote-hub.md §3.4, #1941); it acts on none through this view
-    : hubView ? s.kind !== 'orchestrator'
+    : hubView ? !isAssistantKind(s.kind)
     : true
   /*
    * What a seat may read (#984, owner decision 2026-10-17; #1941, 2026-11-04). An ordinary session of a **trusted** project
@@ -185,7 +185,7 @@ export function centraluToolsFor(
     return !!ownProject && own !== null && trustedIds().has(own)
   }
   /** An Assistant's row is never read, even one with a project (a project assistant restored from before #1941) */
-  const readable = (s: SessionInfo) => s.kind !== 'orchestrator' && (inScope(s) || wide())
+  const readable = (s: SessionInfo) => !isAssistantKind(s.kind) && (inScope(s) || wide())
   /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one (`CentraluTools.mayRead`) */
   const mayRead = (sessionId: string): boolean => {
     if (sessionId === assistantId) return false
@@ -673,15 +673,15 @@ export function centraluToolsFor(
      * CLI's own subagent, which Centralu never shows. A coordinator and a hub's view direct sessions with their own tools
      */
     startAgent: async (opts, signal) =>
-      central && host.meta.get(assistantId)?.kind === 'orchestrator'
+      central && isAssistantKind(host.meta.get(assistantId)?.kind)
         ? host.startAgent(assistantId, opts, signal)
         : { ok: false, error: 'Only an ordinary project session or the Assistant can start agents this way' },
     agentSession: async (opts, signal) =>
-      central && host.meta.get(assistantId)?.kind === 'orchestrator'
+      central && isAssistantKind(host.meta.get(assistantId)?.kind)
         ? host.agentSession(assistantId, opts, signal)
         : { ok: false, error: 'Only an ordinary project session or the Assistant can start agents this way' },
     listAgents: async () =>
-      central && host.meta.get(assistantId)?.kind === 'orchestrator'
+      central && isAssistantKind(host.meta.get(assistantId)?.kind)
         ? { ok: true, agents: await host.listAgents(assistantId) }
         : { ok: false, error: 'Only an ordinary project session or the Assistant can start agents this way' },
 

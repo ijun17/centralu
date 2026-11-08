@@ -24,8 +24,20 @@ import { machineField } from './machine-fields.js'
  * marker stays — having the judgment live in one place is still better, and a migration to
  * revert it would carry risk with nothing to gain.
  */
-export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator'])
+export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'assistant'])
 export type SessionKind = z.infer<typeof SessionKind>
+
+/**
+ * Whether a session of this kind is the Assistant (#2133). The kind is sent as `'orchestrator'`, the value every
+ * release before the rename knows; a later release sends `'assistant'` (docs/plans/assistant-rename.md, step 4), and a
+ * linked machine or a window may meet either. Every reader asks this, never the literal (lint: `guard/assistant-kind`).
+ */
+export function isAssistantKind(kind: unknown): boolean {
+  return kind === 'orchestrator' || kind === 'assistant'
+}
+
+/** The Assistant's kind as this build sends and stores it: the old value, which every supported release parses (#2133) */
+export const ASSISTANT_KIND = 'orchestrator' satisfies SessionKind
 
 export const SessionInfo = z.object({
   id: z.string(),

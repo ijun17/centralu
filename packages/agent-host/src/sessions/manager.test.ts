@@ -396,6 +396,19 @@ describe('a settings change actually takes effect', () => {
     expect(changed[0]).not.toHaveProperty('person')
   })
 
+  // #2133 step 3: a hub of a later release names the same hand `assistant`; this build broadcasts it under the old name
+  it("announces a change by: 'assistant' as the Assistant's, under the name this build sends (#2133)", async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', model: 'fable' })) as { id: string }
+    events.length = 0
+
+    await rpc('agents.updateSettings', { sessionId: s.id, model: 'opus', by: 'assistant' })
+
+    const changed = events.filter((e) => e.type === 'settings_changed')
+    expect(changed).toMatchObject([{ model: 'opus', by: 'orchestrator' }])
+    expect(changed[0]).not.toHaveProperty('person')
+  })
+
   it('sends nothing for a session that does not exist (#659)', async () => {
     events.length = 0
     await expect(mgr.updateSettings('nope', { model: 'opus' })).rejects.toMatchObject({ code: 'session_not_found' })

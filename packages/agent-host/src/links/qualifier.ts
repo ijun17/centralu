@@ -305,6 +305,7 @@ export class Qualifier {
       case 'mail_changed':
       case 'external_app_questions_changed':
       case 'orchestrator_proposals_changed':
+      case 'assistant_proposals_changed':
         return null
       case 'error':
         return sid === undefined ? null : base

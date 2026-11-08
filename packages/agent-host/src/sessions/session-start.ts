@@ -3,7 +3,7 @@ import { unfitError } from './tool-fit.js'
 import { randomUUID } from 'node:crypto'
 import type { CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
-import { autoCompactOf, launchRefusal, sessionLiveDefaults } from '@cc/protocol'
+import { autoCompactOf, launchRefusal, sessionLiveDefaults, isAssistantKind } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, CentraluTools, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
@@ -577,7 +577,7 @@ export class SessionStarts {
   ): CreateSessionOpts {
     const { profile, tools } = o.choice
     // The past conversation handed over in the prompt when the tool changed (the person's words and the Assistant's own answers)
-    const past = m.kind === 'orchestrator' && o.memory ? this.host.assistantMemory(m.id) : ''
+    const past = isAssistantKind(m.kind) && o.memory ? this.host.assistantMemory(m.id) : ''
     return {
       sessionId: m.id,
       cwd: o.cwd,
@@ -610,7 +610,7 @@ export class SessionStarts {
       ...this.host.handoffNotes.handoffReadDirs(m.projectId, o.inheritsHandoff),
       // Paths another project handed back to this session (#371), asked on every read
       mayRead: (path: string) => this.host.mayRead(m.id, path, o.cwd),
-      ...(m.kind === 'orchestrator' ? { requestTurn: this.host.requestTurn(m.id) } : {}),
+      ...(isAssistantKind(m.kind) ? { requestTurn: this.host.requestTurn(m.id) } : {}),
       // An Assistant gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
       // the rest), an ordinary session its own project, read-only (#320, #561)
       /*
@@ -633,7 +633,7 @@ export class SessionStarts {
        * so the same text is never inserted twice.
        */
       systemPromptAppend:
-        m.kind === 'orchestrator'
+        isAssistantKind(m.kind)
           ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
             // (unchanged rule)
             assistantRole() + this.host.skillsPrompt() + past

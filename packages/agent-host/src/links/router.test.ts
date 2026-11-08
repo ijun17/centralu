@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RpcMethods } from '@cc/protocol'
+import { hiddenKind } from './linked-machine-connection.js'
 import { encodeNumber } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { ROUTES } from './routes.js'
@@ -32,9 +33,9 @@ class FakeMachine implements RoutedMachine {
   observe(kind: 'sessions' | 'projects', list: unknown[]) {
     this.mirror[kind] = list
   }
+  // The rule a real machine connection hides by
   hides(s: unknown) {
-    const kind = (s as { kind?: string }).kind
-    return kind === 'orchestrator' || kind === 'coordinator'
+    return hiddenKind(s)
   }
 }
 
@@ -605,7 +606,8 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       const { router, localAnswers, m1, m2 } = rig()
       localAnswers['sessions.list'] = [session('h1')]
       m1.answers['sessions.list'] = [session('a'), session('orch', { kind: 'orchestrator', projectId: null }), session('co', { kind: 'coordinator' })]
-      m2.answers['sessions.list'] = [session('b')]
+      // m2 is of a later release, which sends its Assistant's kind under the role's new name (#2133)
+      m2.answers['sessions.list'] = [session('b'), session('asst', { kind: 'assistant', projectId: null })]
       const list = (await router.handle('sessions.list', {})) as { id: string; machine?: string }[]
       expect(list.map((s) => s.id)).toEqual(['h1', 'm1.a', 'm2.b'])
       // What was read becomes the mirror, the hidden ones included in what the machine itself said

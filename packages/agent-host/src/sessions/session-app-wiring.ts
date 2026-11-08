@@ -1,6 +1,6 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
@@ -112,7 +112,7 @@ export class SessionAppWiring {
          */
         allowed: (session, app) => {
           const profile = this.host.toolProfileOf(session.id) ?? this.starting.get(session.id)?.profile ?? null
-          return (profile === 'reader' || (profile === 'assistant' && session.kind === 'orchestrator')) && (this.appAccess?.allowed(session, app) ?? false)
+          return (profile === 'reader' || (profile === 'assistant' && isAssistantKind(session.kind))) && (this.appAccess?.allowed(session, app) ?? false)
         },
       },
     })
@@ -224,7 +224,7 @@ export class SessionAppWiring {
    */
   rootAppsNotice(sessionId: string): string | null {
     const m = this.host.meta.get(sessionId)
-    if (!m || m.kind !== 'orchestrator') return null
+    if (!m || !isAssistantKind(m.kind)) return null
     const settings = this.host.store.settings
     const key = `${ROOT_APPS_NOTICE_PREFIX}${sessionId}`
     if (settings.appSetting(key) !== null) return null

@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import {
@@ -119,7 +120,7 @@ export const Composer = memo(function Composer({
    */
   const alive = useStore((s) => !!s.sessions[sessionId])
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')
-  const isAssistant = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator')
+  const isAssistant = useStore((s) => isAssistantKind(s.sessions[sessionId]?.kind))
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
   // Pulls out just this one setting — subscribing to the whole preferences record would

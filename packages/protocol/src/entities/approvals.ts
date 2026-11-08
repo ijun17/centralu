@@ -409,7 +409,7 @@ export function isMachineChange(d: ApprovalDetail): boolean {
  */
 export const ASSISTANT_CHANGE = 'orchestrator_change'
 
-/** The Assistant's card for a change to its settings or the trash (#1219) */
+/** The Assistant's card for a change to its settings or the trash (#1219); `assistant_change` is its `about` under the role's new name, which a host of a later release sends (#2133) */
 export function isAssistantChange(d: ApprovalDetail): boolean {
-  return d.kind === 'other' && d.about === ASSISTANT_CHANGE
+  return d.kind === 'other' && (d.about === ASSISTANT_CHANGE || d.about === 'assistant_change')
 }

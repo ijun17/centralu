@@ -10,4 +10,12 @@ export const assistantResults = {
     z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() }),
   ),
   'orchestrator.tool': z.object({ text: z.string(), isError: z.boolean().optional() }),
+  // #2133 step 3: the same five under the new name (./assistant.params.ts)
+  'assistant.get': SessionInfo,
+  'assistant.peek': SessionInfo.nullable(),
+  'assistant.configure': z.object({ ok: z.literal(true) }),
+  'assistant.tools': z.array(
+    z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() }),
+  ),
+  'assistant.tool': z.object({ text: z.string(), isError: z.boolean().optional() }),
 } as const

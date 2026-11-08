@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
+import { ASSISTANT_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { bytesText } from '../bytes-text.js'
@@ -168,7 +168,7 @@ export class TrashFlow {
     const row = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === id)
     if (!row) return { ok: false, error: `No session [${id}] is listed; list_sessions shows them. Nothing was deleted.` }
     const name = shown(row.name)
-    if (row.kind !== 'worker') return { ok: false, error: `${name} is ${row.kind === 'orchestrator' ? 'an Assistant' : 'a coordinator'}; only the person deletes those.` }
+    if (row.kind !== 'worker') return { ok: false, error: `${name} is ${isAssistantKind(row.kind) ? 'an Assistant' : 'a coordinator'}; only the person deletes those.` }
     if (row.askedBy === caller) return { ok: false, error: `${name} is a child you started; delete it with agent_session (action delete), which also settles its report and its worktree.` }
     if (row.unreachable) return { ok: false, error: `${name} is on a machine that cannot be reached just now; try again when it answers.` }
     if (row.state === 'working' || row.pendingApproval || row.pendingQuestions.length > 0) {

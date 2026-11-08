@@ -159,6 +159,16 @@ export function createRpcHandler(
   { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
+  /**
+   * The Centralu tools the bridge offers a session (`orchestrator.tools`, `assistant.tools`): the full list when no session is given
+   * (for compatibility), only that session's bundle when one is known (#69: the manager takes a subset), and nothing for a session
+   * with no bundle, since the full list would advertise tools its calls are refused
+   */
+  const sessionToolSchemas = (sessionId: string | undefined) => {
+    if (!sessionId) return centraluToolSchemas('assistant')
+    const profile = mgr.tools.toolProfileOf(sessionId)
+    return profile ? centraluToolSchemas(profile) : []
+  }
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw rpcError('Theme files are unavailable')
     return themes
@@ -363,7 +373,8 @@ export function createRpcHandler(
       const { sessionId, by, ...settings } = p
       // `by` comes only from a hub's Assistant, which directs no Assistant nor coordinator here (#1941 review)
       if (by) mgr.linkedHost.directedFromHub(sessionId)
-      return await mgr.updateSettings(sessionId, settings, by ?? 'person')
+      // `assistant` is the same hand under the role's new name (#2133); this build records and broadcasts it as `orchestrator`
+      return await mgr.updateSettings(sessionId, settings, by ? 'orchestrator' : 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {
       return mgr.processes.switchTool(sessionId, tool)
@@ -465,6 +476,10 @@ export function createRpcHandler(
     'orchestrator.get': async () => mgr.assistant(),
     'orchestrator.peek': async () => mgr.assistantSlot.assistantPeek(),
     'orchestrator.configure': async (p) => ack(mgr.assistantSlot.configureAssistant(p.tool)),
+    // #2133 step 3: the same methods under the role's new name, answered alike; nothing calls them until step 4
+    'assistant.get': async () => mgr.assistant(),
+    'assistant.peek': async () => mgr.assistantSlot.assistantPeek(),
+    'assistant.configure': async (p) => ack(mgr.assistantSlot.configureAssistant(p.tool)),
     'apps.viewFrame': async ({ appId, projectId, instanceId, hostOrigin }) => {
       return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
     },
@@ -630,14 +645,13 @@ export function createRpcHandler(
         { ref: { appId, projectId }, text, attachments, instanceId },
       )
     },
-    'orchestrator.tools': async ({ sessionId }) => {
-      // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
-      if (!sessionId) return centraluToolSchemas('assistant')
-      // A session with no bundle is offered nothing — the full list here would advertise tools its calls are refused
-      const profile = mgr.tools.toolProfileOf(sessionId)
-      return profile ? centraluToolSchemas(profile) : []
-    },
+    'orchestrator.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
     'orchestrator.tool': async ({ sessionId, name, args }) => {
+      return mgr.runCentraluTool(sessionId, name, args)
+    },
+    // #2133 step 3: the bridge's two methods under the role's new name, answered alike
+    'assistant.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
+    'assistant.tool': async ({ sessionId, name, args }) => {
       return mgr.runCentraluTool(sessionId, name, args)
     },
     'apps.sessionTools': async ({ sessionId, server }) => {

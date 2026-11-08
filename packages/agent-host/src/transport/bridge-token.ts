@@ -54,6 +54,9 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 export const BRIDGE_METHODS: ReadonlySet<string> = new Set([
   'orchestrator.tools',
   'orchestrator.tool',
+  // #2133 step 3: the same two under the role's new name, which a bridge of a later release calls
+  'assistant.tools',
+  'assistant.tool',
   'apps.sessionTools',
   'apps.sessionCall',
 ])

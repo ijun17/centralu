@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol'
 import type { LaunchDemands, PermissionPreset, SessionInfo } from '@cc/protocol'
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import { rpcError } from '../rpc-error.js'
@@ -17,7 +18,7 @@ export function sessionDemands(
     permissionPreset: preset,
     ...(files.projectTrusted === undefined ? {} : { projectTrusted: files.projectTrusted }),
     ...(files.noSettingFiles ? { noSettingFiles: true } : {}),
-    roleText: m.kind === 'orchestrator' || !!m.roleAppend,
+    roleText: isAssistantKind(m.kind) || !!m.roleAppend,
   }
 }
 

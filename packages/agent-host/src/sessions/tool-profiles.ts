@@ -1,5 +1,5 @@
 import type { SessionKind } from '@cc/protocol'
-import { RESERVED_APP_IDS } from '@cc/protocol'
+import { RESERVED_APP_IDS, isAssistantKind } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 
 /**
@@ -51,7 +51,7 @@ export function readsOwnProject(f: ToolProfileFacts): boolean {
  * agent and a session outside a project get nothing.
  */
 export function toolProfileFor(f: ToolProfileFacts): ToolProfile | null {
-  if (f.kind === 'orchestrator') return 'assistant'
+  if (isAssistantKind(f.kind)) return 'assistant'
   if (f.kind === 'coordinator') return 'scoped'
   if (f.builder) return 'builder'
   return readsOwnProject(f) ? 'reader' : null

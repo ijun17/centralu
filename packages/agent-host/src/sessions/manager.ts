@@ -71,6 +71,7 @@ import {
   ASSISTANT_CHANGE,
   oneLineText,
   PermissionPreset as PresetSchema,
+  isAssistantKind,
 } from '@cc/protocol'
 import type { AgentAdapter, LinkedSessions, CentraluTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -1260,7 +1261,7 @@ export class SessionManager {
 
   /** The Assistant's session id, or none while it has not been made (#1447: `mail send to "assistant"`) */
   assistantId(): string | null {
-    return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
+    return [...this.meta.values()].find((m) => isAssistantKind(m.kind))?.id ?? null
   }
 
   /** The tools given to an Assistant (FR-11), built over this manager (`assistant-seat.ts`) */

@@ -484,6 +484,19 @@ describe("the Centralu tools see only this app's sessions", () => {
     expect(r.text).toContain(a.id)
   })
 
+  // #2133 step 3: the methods under the role's new name are answered as the old ones, for a window or bridge of a later release
+  it('answers the assistant.* methods as the orchestrator.* ones (#2133)', async () => {
+    expect(await rpc('assistant.peek', {})).toBeNull()
+    await rpc('assistant.configure', { tool: 'claude' })
+    const { a, orc } = await setup()
+    expect(await rpc('assistant.get', {})).toEqual(await rpc('orchestrator.get', {}))
+    expect(await rpc('assistant.peek', {})).toEqual(await rpc('orchestrator.peek', {}))
+    expect(await rpc('assistant.tools', { sessionId: orc.id })).toEqual(await rpc('orchestrator.tools', { sessionId: orc.id }))
+    expect(await rpc('assistant.tools', { sessionId: a.id })).toEqual(await rpc('orchestrator.tools', { sessionId: a.id }))
+    const listed = (await rpc('assistant.tool', { sessionId: orc.id, name: 'list_sessions', args: {} })) as { text: string }
+    expect(listed.text).toContain(a.id)
+  })
+
   it('a plain session can be switched', async () => {
     const { a } = await setup()
     const r = await mgr.processes.switchTool(a.id, 'codex')

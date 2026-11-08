@@ -27,7 +27,7 @@ export type SessionSummary = {
    * were gathered into this one field. The Assistant that belongs to a project (#13) has since been
    * dropped, but deciding it in one place is still better.
    */
-  kind: 'worker' | 'orchestrator' | 'coordinator'
+  kind: 'worker' | 'orchestrator' | 'coordinator' | 'assistant'
   /**
    * The tool this session uses.
    *

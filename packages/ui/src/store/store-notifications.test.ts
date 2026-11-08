@@ -281,13 +281,14 @@ describe('MCP server suggestions', () => {
     expect(mock.badge).toBe(1)
   })
 
-  it('one broadcast re-reads both lists, whichever tool or command made the change', async () => {
+  // 'assistant_proposals_changed': the same broadcast from a host of a later release, under the role's new name (#2133)
+  it.each(['orchestrator_proposals_changed', 'assistant_proposals_changed'] as const)('one broadcast (%s) re-reads both lists, whichever tool or command made the change', async (type) => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
     mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
 
-    mock.emit({ type: 'orchestrator_proposals_changed' })
+    mock.emit({ type })
 
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals.map((p) => p.name)).toEqual(['playwright'])

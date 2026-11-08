@@ -8,6 +8,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   ApprovalDetail,
+  ASSISTANT_KIND,
+  isAssistantChange,
+  isAssistantKind,
+  UpdateSettingsParams,
   turnsRunning,
   type HostActivity,
   ProjectInfo,
@@ -522,6 +526,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'external_app_questions_changed' },
   // An Assistant proposal list changed (#703): carries nothing, the screen refetches both lists
   { type: 'orchestrator_proposals_changed' },
+  { type: 'assistant_proposals_changed' },
   { type: 'project_consents_changed' },
   { type: 'projects_changed' },
   // A project the Assistant added once the person allowed it (#1220)
@@ -1242,5 +1247,33 @@ describe('turnsRunning', () => {
     expect(turnsRunning(act({ terminals: 5, commandRuns: 2 }))).toBe(0)
     expect(turnsRunning(null)).toBe(0)
     expect(turnsRunning(undefined)).toBe(0)
+  })
+})
+
+/**
+ * #2133 step 3: the Assistant's wire values under the role's new name, which a host of a later release sends
+ * (docs/plans/assistant-rename.md). This build reads both and sends the old one.
+ */
+describe("the Assistant's values under both names (#2133)", () => {
+  it('reads both kinds as the Assistant, and no other kind', () => {
+    expect(['orchestrator', 'assistant', 'worker', 'coordinator', undefined, 'Assistant'].map(isAssistantKind)).toEqual([true, true, false, false, false, false])
+    expect(ASSISTANT_KIND).toBe('orchestrator')
+  })
+
+  it("parses a session a later release sends with the kind 'assistant'", () => {
+    const row = SessionInfo.parse({ ...currentSession('s1'), kind: 'assistant' })
+    expect(row.kind).toBe('assistant')
+  })
+
+  it("takes a settings change by: 'assistant' as by: 'orchestrator'", () => {
+    expect(UpdateSettingsParams.parse({ sessionId: 's1', by: 'assistant' }).by).toBe('assistant')
+    expect(UpdateSettingsParams.parse({ sessionId: 's1', by: 'orchestrator' }).by).toBe('orchestrator')
+    expect(UpdateSettingsParams.safeParse({ sessionId: 's1', by: 'someone' }).success).toBe(false)
+  })
+
+  it("reads the Assistant's card under both abouts", () => {
+    expect(isAssistantChange({ kind: 'other', about: 'orchestrator_change', raw: 'q' })).toBe(true)
+    expect(isAssistantChange({ kind: 'other', about: 'assistant_change', raw: 'q' })).toBe(true)
+    expect(isAssistantChange({ kind: 'other', about: 'machine_change', raw: 'q' })).toBe(false)
   })
 })

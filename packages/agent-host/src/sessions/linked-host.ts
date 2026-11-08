@@ -1,5 +1,5 @@
 import type { OrchestratedSession, RecallHit } from '../adapters/contract.js'
-import { oneLineText } from '@cc/protocol'
+import { oneLineText, isAssistantKind } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { budgetOf } from './session-lines.js'
@@ -88,7 +88,7 @@ export class LinkedHost {
    */
   directedFromHub(sessionId: string): void {
     const target = this.host.meta.get(sessionId)
-    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
+    if (!target || isAssistantKind(target.kind) || target.kind === 'coordinator') {
       throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
     }
   }
@@ -171,7 +171,7 @@ export class LinkedHost {
        */
       lastAnswer: async (sessionId, maxChars, turn, since) => {
         const m = this.host.meta.get(sessionId)
-        if (!m || m.kind === 'orchestrator') throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
+        if (!m || isAssistantKind(m.kind)) throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
         const rows = this.host.store.messages.loadMessages(sessionId, 200)
         const span = turn ? this.host.children.turnRows(sessionId, since) : undefined
         const text = lastResponse(rows, span)

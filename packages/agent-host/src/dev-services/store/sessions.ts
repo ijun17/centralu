@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { SessionInfo } from '@cc/protocol'
-import { Interruption as InterruptionSchema, PermissionPreset, sessionLiveDefaults } from '@cc/protocol'
+import { Interruption as InterruptionSchema, PermissionPreset, sessionLiveDefaults, isAssistantKind } from '@cc/protocol'
 import { z } from 'zod'
 import { readJson, readJsonList } from './json.js'
 
@@ -45,7 +45,7 @@ export class SessionRecords {
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
         // The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed
-        isAssistant: s.kind === 'orchestrator' ? 1 : 0,
+        isAssistant: isAssistantKind(s.kind) ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
         serviceTier: s.serviceTier ?? null,

@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol'
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { AgentStartRequest, Delegation } from './child-ownership.js'
@@ -200,7 +201,7 @@ export class AgentStartFlow {
     const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.host.meta.get(callerId)
     // The Assistant starts children outside any project (#853); any other session in its own project
-    const fromAssistant = caller?.kind === 'orchestrator'
+    const fromAssistant = isAssistantKind(caller?.kind)
     if (!caller || (!caller.projectId && !fromAssistant)) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
     // How deep agents may start agents (#867): a setting, read now, that no preset opens
     const deep = agentDepthRefusal(this.host, callerId, 'start agents')

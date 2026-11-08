@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isInTurn, isMirrored, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -138,9 +139,9 @@ export function assistantChildren(
   assistantId: string | null,
 ): { current: SessionSummary[]; earlier: SessionSummary[] } {
   // The store learns `assistantId` when the screen opens; the listed row says it from the start
-  const assistants = new Set(Object.values(sessions).filter((s) => s.kind === 'orchestrator' && !s.machine).map((s) => s.id))
+  const assistants = new Set(Object.values(sessions).filter((s) => isAssistantKind(s.kind) && !s.machine).map((s) => s.id))
   if (assistantId) assistants.add(assistantId)
-  const started = Object.values(sessions).filter((s) => !s.projectId && !s.appId && !s.machine && s.kind !== 'orchestrator' && !!s.askedBy)
+  const started = Object.values(sessions).filter((s) => !s.projectId && !s.appId && !s.machine && !isAssistantKind(s.kind) && !!s.askedBy)
   return {
     current: started.filter((s) => assistants.has(s.askedBy!)),
     earlier: started.filter((s) => !assistants.has(s.askedBy!) && !sessions[s.askedBy!]),

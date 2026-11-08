@@ -293,6 +293,38 @@ const noSleeps = guard('no-sleeps', { sleep: '{{what}} waits for time: wait for 
   },
 }))
 
+/**
+ * The Assistant's kind as this build sends it, and the constant naming it (#2133). Not `'assistant'`: a chat row's and a
+ * message's `kind` say that too, and without types the rule cannot tell them apart; nothing compares a session's kind to
+ * the new value but `isAssistantKind`, which this rule sends every reader to
+ */
+const ASSISTANT_KIND_VALUES = new Set(['orchestrator'])
+const isKindRead = (node) => {
+  const u = unwrap(node)
+  // `s?.kind` is a chain around the member
+  const n = u?.type === 'ChainExpression' ? u.expression : u
+  return n?.type === 'MemberExpression' && nameOf(n) === 'kind'
+}
+const isAssistantKindValue = (node) => {
+  const n = unwrap(node)
+  return ASSISTANT_KIND_VALUES.has(plain(n)) || (n?.type === 'Identifier' && n.name === 'ASSISTANT_KIND')
+}
+/**
+ * A session's kind is compared to one Assistant value by hand (#2133): `x.kind === 'orchestrator'` misses the
+ * `'assistant'` a later release sends, so every reader asks `isAssistantKind` (@cc/protocol)
+ */
+const assistantKind = guard('assistant-kind', { hand: "a session's kind is compared to {{value}} by hand: ask isAssistantKind(…) from @cc/protocol, which knows both of the Assistant's kind values (#2133)" }, (_context, add) => ({
+  BinaryExpression(node) {
+    if (!['===', '!==', '==', '!='].includes(node.operator)) return
+    const [kind, value] = isKindRead(node.left) ? [node.left, node.right] : [node.right, node.left]
+    if (isKindRead(kind) && isAssistantKindValue(value)) add(node, 'hand', { value: plain(unwrap(value)) ?? 'ASSISTANT_KIND' })
+  },
+  SwitchStatement(node) {
+    if (!isKindRead(node.discriminant)) return
+    for (const c of node.cases) if (c.test && isAssistantKindValue(c.test)) add(c, 'hand', { value: plain(unwrap(c.test)) ?? 'ASSISTANT_KIND' })
+  },
+}))
+
 /** The plugin eslint.config.js registers as `guard` */
 export const guards = {
   rules: {
@@ -309,6 +341,7 @@ export const guards = {
     'import-boundary': importBoundary,
     'no-tool-names': noToolNames,
     'no-sleeps': noSleeps,
+    'assistant-kind': assistantKind,
     ...tsRules,
   },
 }
@@ -371,6 +404,8 @@ export const guardConfigs = [
     },
   },
   { files: [`${HOST_SRC}/adapters/{acp,frames,cursor-agent}/*.test.ts`], rules: { 'guard/no-sleeps': 'error' } },
+  // Every shipped reader of a session's kind, on both sides of the wire (#2133)
+  { files: ['packages/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'], ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'], rules: { 'guard/assistant-kind': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))
 

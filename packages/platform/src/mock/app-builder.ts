@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, ExternalAppInfo, ProjectInfo, SessionInfo, ToolName } from '@cc/protocol/client'
-import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem } from '@cc/protocol/client'
+import { appKeyOf, errorMessage, noSuchAppText, builderErrorFrame, builderRequestOf, newAppIdProblem, isAssistantKind } from '@cc/protocol/client'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -207,7 +207,7 @@ export class AppBuilderMock {
       if (!app) return { reachable: false, reason: 'unavailable' }
       const key = appKeyOf(projectId, appId)
       const given =
-        (s.kind === 'orchestrator' ? projectId === null : s.projectId !== null && s.projectId === projectId) ||
+        (isAssistantKind(s.kind) ? projectId === null : s.projectId !== null && s.projectId === projectId) ||
         this.registry.appBuilders.get(key) === sessionId
       if (!given) return { reachable: false, reason: 'other-project' }
       if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }

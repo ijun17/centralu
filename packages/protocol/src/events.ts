@@ -672,7 +672,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      * From an adapter, the snapshot is the adapter's own view; the host applies only the fields that differ from what
      * the process was launched with, and re-sends its full snapshot.
      */
-    by: z.enum(['orchestrator', 'tool']).optional(),
+    // `assistant`: the same as `orchestrator`, under the role's new name, which a host of a later release sends (#2133)
+    by: z.enum(['orchestrator', 'tool', 'assistant']).optional(),
     /**
      * A client changed it through `agents.updateSettings` (#659). The caller already has the answer, but every other
      * window, linked machine and the person's own window (when an agent made the call) only learns it from this event.
@@ -913,6 +914,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * from the Assistant's `tool_call`, which arrives before the host has saved anything.
    */
   z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
+  // The same event under the role's new name, which a host of a later release sends (#2133 step 4); this build sends the old one
+  z.object({ ...appScoped, type: z.literal('assistant_proposals_changed') }),
   /**
    * A remembered cross-project consent was added or revoked (#371). The same coarseness: this carries nothing, and
    * Settings refetches `projectConsents.list`.

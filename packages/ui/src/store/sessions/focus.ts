@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
@@ -78,7 +79,7 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
      */
     // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
     const onGrid = !!id && !!opts?.preferGrid && gridSessionIds(get().gridPanels).includes(id)
-    const assistant = !!id && (id === get().assistantId || get().sessions[id]?.kind === 'orchestrator')
+    const assistant = !!id && (id === get().assistantId || isAssistantKind(get().sessions[id]?.kind))
     /*
      * If the picked session's project is folded, it is unfolded (#205) — a picked session must also
      * be visible in the sidebar. The inbox, palette, notification card, next-waiting (⌘⇧A) and

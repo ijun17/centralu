@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
@@ -272,7 +272,7 @@ export class MailSessionsView {
    * the Assistant run a command or write a file unasked, so it is not taken
    */
   assistantAsks(): string | null {
-    const assistant = [...this.host.meta.values()].find((m) => m.kind === 'orchestrator')
+    const assistant = [...this.host.meta.values()].find((m) => isAssistantKind(m.kind))
     if (!assistant || this.host.adapters.get(assistant.tool)?.capabilities.gatesSteps === true) return null
     return 'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
   }

@@ -305,6 +305,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'orchestrator.get': HUB,
   'orchestrator.peek': HUB,
   'orchestrator.configure': HUB,
+  'assistant.get': HUB,
+  'assistant.peek': HUB,
+  'assistant.configure': HUB,
   'workspace.save': HUB,
   'workspace.load': HUB,
   // The mailbox is the hub's: a linked machine's mail reaches it there (slice 4 of #1347)
@@ -379,6 +382,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
   'orchestrator.tool': INTERNAL,
+  'assistant.tools': INTERNAL,
+  'assistant.tool': INTERNAL,
   'apps.sessionTools': INTERNAL,
   'apps.sessionCall': INTERNAL,
 }

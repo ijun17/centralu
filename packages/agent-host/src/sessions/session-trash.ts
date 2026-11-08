@@ -20,6 +20,7 @@ import {
   type TrashedSession,
   type TrashedSubagentSteps,
   type ToolName,
+  isAssistantKind,
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
@@ -592,7 +593,7 @@ export class SessionTrash {
         } else {
           throw rpcError(`Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`)
         }
-      } else if (t.session.kind === 'orchestrator' && this.host.store.sessions.assistantId()) {
+      } else if (isAssistantKind(t.session.kind) && this.host.store.sessions.assistantId()) {
         // Two central Assistants would answer the same questions; the app has one (FR-11)
         throw rpcError('Another assistant is in place — the app runs one at a time')
       }

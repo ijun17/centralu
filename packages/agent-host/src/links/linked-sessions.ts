@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/centralu-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
@@ -575,7 +575,7 @@ export function linkedSessions(
       const m = at.machine
       // A coordinator is read too, though the window does not show it (#1941); an Assistant never
       const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id) ?? m.unshown?.(at.id)
-      if (!isObj(s) || s.kind === 'orchestrator') return null
+      if (!isObj(s) || isAssistantKind(s.kind)) return null
       if (typeof s.projectId !== 'string') return { trusted: true }
       const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
       return { trusted: isObj(p) && p.trusted === true }

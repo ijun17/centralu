@@ -1,5 +1,5 @@
 import { createListeners } from '@cc/common'
-import { APP_ID_MAX_LENGTH, appKeyOf } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, appKeyOf, isAssistantKind } from '@cc/protocol'
 import type { AppReach, ExternalAppInfo, PermissionPreset, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName, runsUnasked } from '../apps/contract.js'
@@ -153,7 +153,7 @@ export type OnDemandApps = {
  */
 function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
   return (
-    (session.kind === 'orchestrator' ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
+    (isAssistantKind(session.kind) ? app.projectId === null : session.projectId !== null && app.projectId === session.projectId) ||
     (session.builderOf?.appId === app.appId && session.builderOf.projectId === app.projectId)
   )
 }
@@ -466,7 +466,7 @@ export class SessionAppsHub {
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     // A root app the Assistant has not attached (#1205): it attaches it itself, with nothing for the person to do
-    const selfServed = !!session && !own && session.kind === 'orchestrator' && app.root === true && !!this.opts.onDemand
+    const selfServed = !!session && !own && isAssistantKind(session.kind) && app.root === true && !!this.opts.onDemand
     // One it attached whose project has since lost trust: the person is told to trust the project, not that it is another's
     const lostTrust = !!own && app.status === 'untrusted'
     if (!session || (!givesApp(session, app) && !onDemand && !selfServed && !lostTrust)) return { reachable: false, reason: 'other-project' }
@@ -728,7 +728,7 @@ class Attachment implements SessionApps {
      * and an app the session attached itself (`attach_app`) belongs to another project or to the user: neither is
      * covered by this project's trust, so their tools keep asking.
      */
-    const own = this.session.kind !== 'orchestrator' && hit.ref.projectId !== null && hit.ref.projectId === this.session.projectId
+    const own = !isAssistantKind(this.session.kind) && hit.ref.projectId !== null && hit.ref.projectId === this.session.projectId
     return runsUnasked(found, { own, preset, args })
   }
 

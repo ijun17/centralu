@@ -1,5 +1,5 @@
 import type { LaunchDemands, SessionInfo, ToolName } from '@cc/protocol'
-import { ASSISTANT_DEMANDS } from '@cc/protocol'
+import { ASSISTANT_DEMANDS, isAssistantKind, ASSISTANT_KIND } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { assistantHome } from './assistant-home.js'
@@ -71,7 +71,7 @@ export class AssistantSlot {
   /** Restarts the Assistant if it is alive — the shared path for reflecting a skill or MCP change
    * immediately */
   private async restartAssistant(): Promise<void> {
-    const orch = [...this.host.meta.values()].find((m) => m.kind === 'orchestrator')
+    const orch = [...this.host.meta.values()].find((m) => isAssistantKind(m.kind))
     if (orch) await this.host.restartSession(orch.id, 'instructions').catch(() => {})
   }
 
@@ -201,7 +201,7 @@ export class AssistantSlot {
       projectId: null,
       // The marker is born together with the session — stamping it separately would leave a window with no
       // marker at all
-      kind: 'orchestrator',
+      kind: ASSISTANT_KIND,
       cwd: assistantHome(),
       tool: this.host.firstTool(configured),
       permissionPreset: ASSISTANT_DEMANDS.permissionPreset,
