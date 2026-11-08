@@ -884,6 +884,20 @@ describe('resets, notices, retries and refusals (#304)', () => {
       { type: 'turn_complete', sessionId: SID },
     ])
   })
+
+  it('an API error the CLI writes as an assistant message is no bubble, and is said even if the turn then succeeds (#2050)', () => {
+    // A failed turn is the recorded `failed` scenario (replay.test.ts); a turn that goes on after one is not recorded
+    const n = new ClaudeStreamNormalizer(SID)
+    const synthetic = {
+      type: 'assistant', parent_tool_use_id: null, error: 'max_output_tokens',
+      message: { id: 'm1', model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: 'Output limit hit' }] },
+    }
+    expect(n.push(sdk(synthetic)).filter((e) => e.type === 'message_delta')).toEqual([])
+    expect(n.push(sdk({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} }))).toEqual([
+      { type: 'notice', sessionId: SID, level: 'warning', text: 'Output limit hit', from: 'Claude Code', label: 'api-error' },
+      { type: 'turn_complete', sessionId: SID },
+    ])
+  })
 })
 
 /*

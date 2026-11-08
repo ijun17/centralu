@@ -167,6 +167,9 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
     const { events } = await run('failed')
     expect(of(events, 'error')).toHaveLength(1)
     expect(of(events, 'error')[0]!.error.message).toContain('no-such-model-xyz')
+    // The CLI writes the same words as a synthetic assistant message first: that is no answer of the agent's (#2050)
+    expect(said(events)).toBe('')
+    expect(of(events, 'notice')).toEqual([])
     expect(ended(events)).toBe(0)
   })
 

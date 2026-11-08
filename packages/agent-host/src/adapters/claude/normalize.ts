@@ -264,11 +264,12 @@ export class ClaudeStreamNormalizer {
   /** The CLI is retrying a failed API call (`system/api_retry`, #304): the same rule as Codex's (`RetryActivity`) */
   private readonly retry: RetryActivity
   /**
-   * What the CLI said when the model refused and no fallback ran (`model_refusal_no_fallback`, #304), held until the
-   * turn's result: if the turn failed, this is its message (the result itself only says *that* it failed); if not, it
-   * goes out as a notice.
+   * What the CLI said in the model's place, held until the turn's result: if the turn failed, this is its error's
+   * message (the result itself may only say *that* it failed); if not, it goes out as a notice. Two sources: a refusal
+   * no fallback ran for (`model_refusal_no_fallback`, #304), and an API error the CLI writes as an assistant message
+   * (`error` set, model "<synthetic>", #2050), which is not the agent's words and so is no bubble of its own.
    */
-  private refusal: string | null = null
+  private held: { text: string; label: string } | null = null
 
   constructor(
     private readonly sessionId: string,
@@ -304,8 +305,8 @@ export class ClaudeStreamNormalizer {
     const explanation = str(m.api_refusal_explanation)
     if (m.subtype === 'model_refusal_no_fallback') {
       const category = str(m.api_refusal_category)
-      this.refusal =
-        str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
+      const text = str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
+      this.held = { text, label: 'refusal' }
       return []
     }
     const from = str(m.original_model, 'the model')
@@ -490,13 +491,18 @@ export class ClaudeStreamNormalizer {
     if (!subagent) events = this.followTasks(msg.type === 'user' ? msg : undefined, events)
     if (subagent) return events
     events = this.followRetry(type, events)
-    if (type === 'result' && this.refusal !== null) {
-      const refusal = this.refusal
-      this.refusal = null
+    if (msg.type === 'assistant' && msg.error !== undefined) {
+      const text = events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
+      events = events.filter((e) => e.type !== 'message_delta')
+      if (text) this.held = { text, label: 'api-error' }
+    }
+    if (type === 'result' && this.held !== null) {
+      const { text, label } = this.held
+      this.held = null
       const failed = events.some((e) => e.type === 'error')
       events = failed
-        ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: refusal } } : e))
-        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text: refusal, from: 'Claude Code', label: 'refusal' }, ...events]
+        ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
+        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label }, ...events]
     }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
