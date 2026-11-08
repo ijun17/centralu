@@ -309,6 +309,7 @@ impl Supervisor {
     }
 
     /// Whether a watcher thread is running: a host is up, starting, or between restarts.
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.inner.lock().map(|i| i.running).unwrap_or(false)
     }

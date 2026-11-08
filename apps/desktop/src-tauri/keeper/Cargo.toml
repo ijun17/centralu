@@ -35,11 +35,4 @@ sha2 = "0.10"
 base64 = "0.22"
 
 [features]
-# A test build of the keeper that also trusts one more public key, given at compile time in
-# CENTRALU_KEEPER_TEST_KEY (raw 32 bytes, base64), so scripts/keeper-content-integration.mts can
-# sign content with a throwaway key and watch a keeper hand over to it. A release build refuses to
-# compile with it (`compile_error!` in src/keeper/keys.rs), nothing on the way to a release turns it
-# on, and tooling/keeper-executable.test.ts checks both: the keeper people run trusts
-# packaging/shell/keys.json and nothing else, as the shell does.
-test-key = []
 test-support = []

@@ -190,16 +190,12 @@ pub fn run(args: &[String]) -> i32 {
     serve(keeper)
 }
 
-/// Says in the log where this keeper runs from, and whether it trusts a test key.
+/// Says in the log where this keeper runs from.
 fn log_origin(origin: &content::Origin) {
     if let content::Origin::Content { dir, signed: false, .. } = origin {
         log(&format!("running from the copy {} a window made", dir.display()));
     } else if let content::Origin::Content { dir, .. } = origin {
-        log(&format!(
-            "running from verified content {}{}",
-            dir.display(),
-            if keys::TEST_BUILD { " (a test build, trusting a key beyond keys.json)" } else { "" }
-        ));
+        log(&format!("running from verified content {}", dir.display()));
     }
 }
 

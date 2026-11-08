@@ -1,5 +1,5 @@
-//! The keeper's decisions about verified content, without a keeper: where it runs from, what a
-//! handoff refuses, where it copies, and what the cleanup removes. Content is signed here with a key
+//! The keeper's decisions about verified content, without a keeper: where it runs from, what the
+//! verifier refuses (for the window to say why the shell refused), and what the cleanup removes. Content is signed here with a key
 //! made for the test.
 
 use std::fs;
@@ -113,13 +113,11 @@ impl Case {
     fn check(&self, src: &Path) -> Result<(Manifest, Vec<u8>), Refusal> {
         self.verify(|v| v.check(&self.data(), src))
     }
-    /// `check`, then `place` with nothing in use.
-    fn take(&self, src: &Path) -> Result<PathBuf, Refusal> {
-        self.take_in_use(src, false)
-    }
-    fn take_in_use(&self, src: &Path, in_use: bool) -> Result<PathBuf, Refusal> {
-        let (m, bytes) = self.check(src)?;
-        self.verify(|v| v.place(&self.data(), src, &m, &bytes, in_use))
+    /// `<data>/content/<version>/`, signed by this case's key, as the shell places it.
+    fn put(&self, version: &str) -> PathBuf {
+        let dir = version_dir(&self.data(), version);
+        write_content(&dir, version, &files(version), &self.k);
+        dir
     }
 }
 
@@ -182,19 +180,7 @@ fn a_host_in_verified_content_is_found_by_its_version_folder() {
     assert_eq!(version_dir_of(&data, Path::new("/Applications/Centralu.app/Contents/Resources/resources/host")), None);
 }
 
-// ---- what a handoff refuses
-
-#[test]
-fn signed_content_is_copied_read_only_into_its_version_folder() {
-    let c = Case::new("copy");
-    let src = c.bundle("B", "0.2.1");
-    let dest = c.take(&src).unwrap();
-    assert_eq!(dest, version_dir(&c.data(), "0.2.1"));
-    assert_eq!(fs::read(dest.join(KEEPER_EXE)).unwrap(), fs::read(src.join(KEEPER_EXE)).unwrap());
-    assert!(dest.join(MANIFEST_NAME).is_file() && dest.join(SIGNATURE_NAME).is_file(), "the copy can be verified again");
-    assert_eq!(fs::metadata(&dest).unwrap().permissions().mode() & 0o222, 0, "read-only");
-    assert_eq!(fs::metadata(dest.join("host/main.mjs")).unwrap().permissions().mode() & 0o222, 0);
-}
+// ---- what the verifier refuses
 
 #[test]
 fn a_bundle_with_no_content_is_refused() {
@@ -213,43 +199,6 @@ fn content_signed_with_a_key_this_build_does_not_trust_is_refused() {
     // The window words the check, not the sentence
     assert_eq!((r.check, r.file), (Some("unknown-key"), None));
     assert!(!version_dir(&c.data(), "0.2.1").exists());
-}
-
-/// The manifest verifies; a file it lists does not. Found while copying, and nothing is left.
-#[test]
-fn content_changed_after_signing_is_refused_and_nothing_is_left_behind() {
-    let c = Case::new("tamper");
-    let src = c.bundle("X", "0.2.2");
-    fs::write(src.join("host/main.mjs"), "// not what was signed\n").unwrap();
-    let r = c.take(&src).unwrap_err();
-    assert_eq!(r.reason, "content", "{r}");
-    assert!(r.message.contains("host/main.mjs"), "{}", r.message);
-    // A file of another size: which file, and the sizes
-    assert_eq!((r.check, r.file.as_deref()), (Some("size-mismatch"), Some("host/main.mjs")));
-    assert!(r.message.contains("bytes, the manifest says"), "{}", r.message);
-    assert!(!version_dir(&c.data(), "0.2.2").exists());
-    let left: Vec<_> = fs::read_dir(content_root(&c.data())).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert!(left.is_empty(), "no partial copy is left: {left:?}");
-}
-
-/// The same size and other bytes: the hash says it, and the refusal carries both hashes in full.
-#[test]
-fn a_file_of_the_same_size_with_other_bytes_is_refused_with_both_hashes() {
-    let c = Case::new("same-size");
-    let src = c.bundle("X", "0.2.2");
-    let mut bytes = fs::read(src.join("host/main.mjs")).unwrap();
-    bytes[0] ^= 1;
-    fs::write(src.join("host/main.mjs"), &bytes).unwrap();
-    let r = c.take(&src).unwrap_err();
-    assert_eq!((r.reason, r.check, r.file.as_deref()), ("content", Some("hash-mismatch"), Some("host/main.mjs")));
-    assert!(r.message.contains("the signed manifest lists") && r.message.contains(", the file is "), "{}", r.message);
-    let found = r.message.rsplit(", the file is ").next().unwrap();
-    assert_eq!(found.len(), 64, "the file's hash, in full: {found}");
-    assert_eq!(found, content_verify::sha256_file(&src.join("host/main.mjs")).unwrap());
-    let (m, _) = c.check(&src).unwrap();
-    let listed = m.files.iter().find(|f| f.path == "host/main.mjs").unwrap();
-    assert!(r.message.contains(&hex(&listed.sha256)), "the manifest's hash: {}", r.message);
-    assert!(!version_dir(&c.data(), "0.2.2").exists());
 }
 
 #[test]
@@ -305,49 +254,8 @@ fn an_unreadable_floor_is_said_and_ignored() {
 #[test]
 fn content_from_inside_the_content_folder_is_refused() {
     let c = Case::new("inside");
-    let src = c.bundle("X", "0.2.1");
-    let dest = c.take(&src).unwrap();
+    let dest = c.put("0.2.1");
     assert_eq!(c.check(&dest).unwrap_err().reason, "content");
-}
-
-// ---- where it goes
-
-/// A restart of the same release must not copy it again, nor trust a folder that changed.
-#[test]
-fn a_version_already_there_is_reused_when_it_verifies_and_copied_again_when_not() {
-    let c = Case::new("reuse");
-    let src = c.bundle("B", "0.2.1");
-    let dest = c.take(&src).unwrap();
-    use std::os::unix::fs::MetadataExt;
-    let inode = fs::metadata(dest.join(KEEPER_EXE)).unwrap().ino();
-    assert_eq!(c.take(&src).unwrap(), dest);
-    assert_eq!(fs::metadata(dest.join(KEEPER_EXE)).unwrap().ino(), inode, "reused, not copied again");
-
-    // Someone of this user changed the copy: it is replaced, from the signed source
-    fs::set_permissions(dest.join("host"), fs::Permissions::from_mode(0o700)).unwrap();
-    fs::set_permissions(dest.join("host/main.mjs"), fs::Permissions::from_mode(0o600)).unwrap();
-    fs::write(dest.join("host/main.mjs"), "// changed\n").unwrap();
-    assert_eq!(c.take(&src).unwrap(), dest);
-    assert_eq!(fs::read_to_string(dest.join("host/main.mjs")).unwrap(), "// the host of 0.2.1\n");
-}
-
-/// The folder a keeper or host runs from is never removed under it: an update that would have to
-/// replace it is refused instead.
-#[test]
-fn a_version_folder_in_use_that_does_not_verify_is_refused_and_left_alone() {
-    let c = Case::new("in-use");
-    let src = c.bundle("B", "0.2.1");
-    let dest = c.take(&src).unwrap();
-    fs::set_permissions(dest.join("host"), fs::Permissions::from_mode(0o700)).unwrap();
-    fs::set_permissions(dest.join("host/main.mjs"), fs::Permissions::from_mode(0o600)).unwrap();
-    fs::write(dest.join("host/main.mjs"), "// running\n").unwrap();
-    let r = c.take_in_use(&src, true).unwrap_err();
-    assert_eq!(r.reason, "in-use", "{r}");
-    assert_eq!(fs::read_to_string(dest.join("host/main.mjs")).unwrap(), "// running\n", "nothing that runs was touched");
-    // In use and verifying: taken as it is
-    let fresh = c.bundle("C", "0.2.2");
-    let d2 = c.take(&fresh).unwrap();
-    assert_eq!(c.take_in_use(&fresh, true).unwrap(), d2);
 }
 
 // ---- what the cleanup removes
@@ -394,7 +302,7 @@ fn the_cleanup_keeps_the_keepers_own_the_running_hosts_and_the_claimed_versions(
     let data = c.data();
     let mut dirs = std::collections::HashMap::new();
     for v in ["0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0"] {
-        dirs.insert(v, c.take(&c.bundle(&format!("v{v}"), v)).unwrap());
+        dirs.insert(v, c.put(v));
     }
     fs::write(floor_path(&data), "0.3.0\n").unwrap();
     let dead = content_root(&data).join(".0.4.0.partial-1-a-0");

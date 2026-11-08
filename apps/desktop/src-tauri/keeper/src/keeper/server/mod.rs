@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::accept::{self, AcceptErrors};
-use super::{content, keys, limited, window_peer};
+use super::{content, limited, window_peer};
 use super::client::{self, json_line, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
