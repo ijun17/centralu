@@ -193,14 +193,28 @@ describe('the whole migration list, from v1 to the newest', () => {
  */
 const KNOWN = new Store().latestKnownVersion
 
-/** A store this build made, with a project in it */
-function currentStore(): string {
+/**
+ * A store this build made, with a project in it. The steps in `skipped` do nothing on that first open, as on a store an
+ * earlier host's swap left: it moved `user_version` past them without running them.
+ */
+function currentStore(skipped: number[] = []): string {
   const file = join(dir(), 'store.db')
-  const s = new Store(file)
-  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  s.close()
+  const proto = Store.prototype as unknown as { migrationSteps: () => MigrationStep[] }
+  const real = proto.migrationSteps
+  const spy = vi.spyOn(proto, 'migrationSteps').mockImplementation(function (this: unknown) {
+    return real.call(this).map((step) => (skipped.includes(step.to) ? { ...step, run: () => {} } : step))
+  })
+  try {
+    const s = new Store(file)
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.close()
+  } finally {
+    spy.mockRestore()
+  }
   return file
 }
+const hasTable = (file: string, name: string) =>
+  raw(file, (db) => db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name) !== undefined)
 
 function raw<T>(file: string, f: (db: Database.Database) => T): T {
   const db = new Database(file)
@@ -223,11 +237,14 @@ function leftBySwap(file: string, list: string, minReader = 28): void {
 
 describe('steps an earlier host swap left for later (#280 step 3, #1895)', () => {
   it('run at the next open, after the later steps, and the list goes', () => {
-    const file = currentStore()
+    const file = currentStore([40, 56])
+    // What v56 drops, still there because the swap skipped it (a store that old had the table)
+    raw(file, (db) => db.exec(`CREATE TABLE usage_facts (id INTEGER PRIMARY KEY)`))
     leftBySwap(file, '[40,56]')
 
     const s = new Store(file)
     expect(s.migrationsRun).toBe(2)
+    expect(hasTable(file, 'usage_facts')).toBe(false)
     expect(s.schemaVersion).toBe(KNOWN)
     expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     s.close()
@@ -239,7 +256,7 @@ describe('steps an earlier host swap left for later (#280 step 3, #1895)', () =>
   })
 
   it('a breaking step among them raises min_reader_version when it runs, not before', () => {
-    const file = currentStore()
+    const file = currentStore([56])
     leftBySwap(file, '[56]')
     const before = raw(file, (db) => db.prepare(`SELECT value FROM app_settings WHERE key = 'min_reader_version'`).get()) as { value: string }
     expect(before.value).toBe('28')
@@ -250,7 +267,7 @@ describe('steps an earlier host swap left for later (#280 step 3, #1895)', () =>
   })
 
   it('each is crossed off in its own commit: an open stopped part way still owes the rest, and the next open runs it', () => {
-    const file = currentStore()
+    const file = currentStore([40, 56])
     leftBySwap(file, '[40,56]')
     const proto = Store.prototype as unknown as { migrationSteps: () => MigrationStep[] }
     const real = proto.migrationSteps

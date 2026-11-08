@@ -2697,12 +2697,16 @@ read `stopsForUpdate`, and windows of beta.40 to 52 still read `keepsAgents`.
 one, write it `activate`, and write the running one `drain` (the blue-green swap, #280 step 3; [architecture.md](architecture.md)
 §4.2). No keeper of PR 4 or later does. A host started with `--standby`, which only a keeper of an earlier build
 starts, says it does not stand by and exits 1 before it touches the data folder, so that keeper's swap fails and its
-running host serves on (`lifecycle/host-process.test.ts`). `activate` and `drain` get no answer: a keeper of an
-earlier build that writes `drain` to a host of this build waits out its bound and then stops the host with a
-signal, which is a plain stop, not one for an update, so the turns it cuts show stopped with Continue rather than
-being continued (§4.6.2). That takes a keeper of an earlier build running a host of this one (it starts its host
-from the bundle's paths, which hold this build once it is installed: `lifecycle/keeper-held.ts`) and a window of an
-earlier build asking it to switch; quitting Centralu completely ends it.
+running host serves on (`lifecycle/host-process.test.ts`). It says so on stdout as well as stderr: that keeper puts
+the last plain lines a standby printed into the reason its swap failed, so the earlier window's bar says to quit
+Centralu completely. `activate` and `drain` get no answer: a keeper of an earlier build that writes `drain` to a host
+of this build waits out its bound and then stops the host with a signal, which is a plain stop, not one for an
+update, so the turns it cuts show stopped with Continue rather than being continued (§4.6.2), and the host's own
+children stop with it. Until then the earlier window shows the switch draining. That takes a keeper of an earlier
+build running a host of this one (it starts its host from the bundle's paths, which hold this build once it is
+installed: `lifecycle/keeper-held.ts`), and a window of an earlier build asking it to switch to a third build whose
+standby passed its store check: the keeper writes `drain` only after that, and a build older than this store refuses
+there, failing the swap before any drain. Quitting Centralu completely ends it.
 
 **Drain** (`drain.ts`). Every WebSocket RPC and every in-process MCP tool call (the orchestrator tools, the
 app-tool proxy) runs through one tracker. Built for the swap's drain, it is begun now only by `host.stop {ifIdle}`
@@ -2726,7 +2730,9 @@ host the first time `apps.viewFrame` or the proxy page needs them. On the UI sid
 its address again after a resync (`hostResyncs` in the store): the same address leaves the view and its state
 alone, another one is loaded, a failure takes the first load's failure path. After an update the address is another
 one (a new keeper, so a new front door and secret; or a new window's host with a new random secret), so each open
-view loads once more, under its old id and card.
+view loads once more, under its old id and card. A view a window leased waits `LEASE_GRACE_MS` for a window to claim
+it and is then closed; a conversation's view is closed by its own layer (the person, the session's deletion, its app
+going), not by a window being away, so one that no window comes back for stays open as it was before the stop.
 
 ### 4.3 The children the host starts, under a keeper too (#280, #1895)
 

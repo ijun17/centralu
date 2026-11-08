@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeSync } from 'node:fs'
 import { APP_VERSION, autoCompactOf, errorMessage, PROTOCOL_VERSION, RESERVED_APP_IDS, type HostHandover, type HostLogon, type NormalizedEvent } from '@cc/protocol'
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, inTurn, updateAtRest as updateAtRestOf, type ActivitySnapshot } from './idle.js'
@@ -145,10 +145,14 @@ const { values } = parseArgs({
 /*
  * A host started to stand by for a swap (#280 step 3): only a keeper of an earlier build starts one, next to the host it
  * runs. This build swaps nothing (#1895): it goes before it touches the data folder or takes the lock, so that keeper's
- * swap fails and the host it runs keeps serving, untouched.
+ * swap fails and the host it runs keeps serving, untouched. The reason goes to stdout too, written at once: that keeper
+ * puts the last plain lines its standby printed into the reason a failed start check gives, so the earlier window's bar
+ * says to quit.
  */
 if (values.standby) {
-  console.error('[agent-host] not standing by: this build does not swap hosts; quit Centralu completely to run it')
+  const reason = 'not standing by: this build does not swap hosts; quit Centralu completely to run it'
+  console.error(`[agent-host] ${reason}`)
+  writeSync(1, `${reason}\n`)
   process.exit(1)
 }
 

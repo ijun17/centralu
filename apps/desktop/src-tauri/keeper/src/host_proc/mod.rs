@@ -554,8 +554,8 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
     Ok(child)
 }
 
-/// Stops a host the supervisor does not hold (a swap's standby that failed its check, #280 step 3)
-/// the same way the supervisor stops its own, and reaps it.
+/// Stops a host the supervisor does not hold yet (one launched while the supervisor was shutting down
+/// or its lock was poisoned) the same way the supervisor stops its own, and reaps it.
 pub fn stop_child(child: &mut Child) {
     let pid = child.id();
     let stdin = child.stdin.take().map(|s| Box::new(s) as Box<dyn Send>);

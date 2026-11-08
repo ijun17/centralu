@@ -266,6 +266,8 @@ describe('the host process, started for real', () => {
     })
     expect(r.status).toBe(1)
     expect(r.stderr).toContain('not standing by: this build does not swap hosts')
+    // stdout too: an earlier keeper shows a standby's last plain lines as the reason its swap failed
+    expect(r.stdout).toContain('quit Centralu completely')
     for (const f of ['host.log', 'host.lock', 'store.db']) expect(existsSync(join(s.dir, f)), f).toBe(false)
   }, 60_000 * SLOW)
 

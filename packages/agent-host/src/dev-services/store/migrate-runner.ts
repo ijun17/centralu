@@ -81,6 +81,7 @@ export abstract class MigrationRunner extends ReaderGate {
      * that build that died before it ran them left them here for the next one.
      */
     const deferred = new Set(this.storedDeferred())
+    const owed = steps.filter((s) => s.to <= current && deferred.has(s.to)).map((s) => s.to)
     this.sayUnreadableDeferred()
     for (const step of steps) {
       const due = current < step.to || deferred.has(step.to)
@@ -102,7 +103,7 @@ export abstract class MigrationRunner extends ReaderGate {
      */
     if (this.migrationsRun > 0 && this.dbPath !== ':memory:') {
       console.error(
-        `[store] migrated v${current} → v${this.schemaVersion} (${this.migrationsRun} steps, ${Date.now() - t0}ms)`,
+        `[store] migrated v${current} → v${this.schemaVersion} (${this.migrationsRun} steps${owed.length > 0 ? `, ${owed.map((v) => `v${v}`).join(' ')} left by a swap` : ''}, ${Date.now() - t0}ms)`,
       )
     }
     // An older host on a newer store is allowed (the record says so) but unusual — host.log should show it happened
