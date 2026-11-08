@@ -1,5 +1,5 @@
 /**
- * FR-11 end-to-end smoke test: **does a real Claude assistant actually assign work to another
+ * FR-11 end-to-end smoke test: **does the Assistant, run on a real Claude, actually assign work to another
  * session?**
  *
  * The contract tests only check that the tool is attached. Whether the model actually calls that

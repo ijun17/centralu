@@ -5,70 +5,70 @@
   "selection": [
     {
       "id": "rare-app-project",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Make me a small tool with its own screen for the {project} project: a shared shopping list the team can add items to.",
       "expect": ["create_app"]
     },
     {
       "id": "rare-app-user",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "I'd like a little screen of my own, usable from any project, where I can log how many glasses of water I drink each day.",
       "expect": ["create_app"]
     },
     {
       "id": "rare-skill",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Every Monday I ask you the same thing: go through every project's sessions and give me five bullet points on what changed last week. Keep that procedure so I don't have to explain it each time.",
       "expect": ["propose_skill"]
     },
     {
       "id": "rare-browser",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "I want you to be able to open web pages in a real browser and click through them yourself. Can you get that ability?",
       "expect": ["propose_mcp_server"]
     },
     {
       "id": "rare-branch",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "In {project}, I want to try a login fix on its own git branch so main stays untouched. Set that up for me.",
       "expect": ["propose_worktree_session"]
     },
     {
       "id": "core-overview",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Which sessions are there in {project}, and what is each one doing?",
       "expect": ["list_sessions", "read_session"]
     },
     {
       "id": "core-delegate",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
       "expect": ["send_to_session"]
     },
     {
       "id": "core-recall",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Last time we talked about it, what did we decide about backing up the database?",
       "expect": ["recall"]
     },
     {
       "id": "core-new-session",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "Open a new session in {project} called docs-check. Don't give it any task yet.",
       "expect": ["create_session"]
     },
     {
       "id": "core-no-tool",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "fresh": true,
       "prompt": "What is 17 times 23? Answer with the number only.",
       "expect": []

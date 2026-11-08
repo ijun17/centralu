@@ -43,6 +43,12 @@ Each step is one PR on `dev`, landing with the next dev → main PR.
 | 3. Read both | protocol: `assistant.*` methods added beside `orchestrator.*` (the host answers both, the window calls the new ones); `SessionKind` gains `'assistant'`, `by` accepts `'assistant'`, and every reader treats the two values alike; stored: an expand step adds `sessions.is_assistant` and copies `is_orchestrator`, the `app_settings` keys are read under the new name first and the old one second, `via` and the hub sender read both; folders: `<data>/assistant` is used if present, else `<data>/orchestrator` | none; every value written and sent is still the old one | release N |
 | 4. Write new | send `'assistant'`, `by: 'assistant'` and the new event and approval names; write the new keys, `via` and sender; a contract step rewrites old values, drops `is_orchestrator` (`breaksOlderReaders: true`) and renames the folders; the `orchestrator.*` methods go | none visible; a build older than N can no longer open the store | release N+1 or later |
 
+No alias has two consequences in step 1. A worker the person names "Assistant" is reachable only by its id, since
+the role's address wins over a session name. Mail to `orchestrator` falls through to the name lookup, so a role
+session still named "Orchestrator" gets it by name: one restored from the trash after the host started, or one the
+person renamed back. `renameFromOldName` cannot tell a name an earlier build gave from one the person chose, so a
+deliberate "Orchestrator" is renamed too.
+
 Step 4 needs release N to be the previous release on every machine a person can go back to. A hub that updates a
 linked machine to N+1 keeps N as its rollback, and N reads the new values.
 

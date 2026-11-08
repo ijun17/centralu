@@ -648,6 +648,15 @@ describe('view restoration', () => {
     expect((mock.workspaceSnapshot as { view?: string } | null)?.view).toBe('grid')
   })
 
+  // #2133: the view was saved as 'orchestrator' before the rename, and a workspace an earlier build saved still opens the Assistant
+  it.each(['assistant', 'orchestrator'])('a workspace saved with view %s reopens the Assistant screen', async (view) => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { view }
+
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().view).toBe('assistant')
+  })
+
   it('an unknown view name is ignored — a snapshot is just a file', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { view: 'hologram' }

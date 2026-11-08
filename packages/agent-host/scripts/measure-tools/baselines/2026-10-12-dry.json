@@ -67,7 +67,7 @@
     },
     {
      "id": "orch-overview",
-     "profile": "orchestrator",
+     "profile": "assistant",
      "prompt": "Which sessions are there in {project}, and what is each one doing?",
      "expect": [
       "list_sessions",
@@ -76,7 +76,7 @@
     },
     {
      "id": "orch-delegate",
-     "profile": "orchestrator",
+     "profile": "assistant",
      "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
      "expect": [
       "send_to_session"
@@ -89,8 +89,8 @@
  "summary": {
   "definitions": {
    "claude": {
-    "orchestrator": {
-     "profile": "orchestrator",
+    "assistant": {
+     "profile": "assistant",
      "cli": "claude",
      "tools": 12,
      "residentTools": 12,
@@ -141,8 +141,8 @@
     }
    },
    "codex": {
-    "orchestrator": {
-     "profile": "orchestrator",
+    "assistant": {
+     "profile": "assistant",
      "cli": "codex",
      "tools": 12,
      "residentTools": 12,
@@ -249,7 +249,7 @@
      }
     },
     {
-     "step": "orchestrator",
+     "step": "assistant",
      "event": "first",
      "usage": null,
      "tools": "first",

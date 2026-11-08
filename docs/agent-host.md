@@ -191,7 +191,7 @@ or a worktree, or work the person will follow; the CLI's own subagents stay the 
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states
 in words adds its line there. Before #564 the reader set had no instructions, on the principle that Centralu offered
 tools to the person's sessions and did not direct them; the owner withdrew that principle. The switches that turned either off
-(`CC_ASSISTANT_PREAMBLE`, `CC_READER_INSTRUCTIONS`) were measurement tools and are removed. What
+(`CC_ORCHESTRATOR_PREAMBLE`, `CC_READER_INSTRUCTIONS`) were measurement tools and are removed. What
 they cost and change: [tool-cost.md](tool-cost.md) §11.
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts

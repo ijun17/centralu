@@ -47,14 +47,14 @@ export class StepsV13ToV27 extends MigrationRange {
            * The directory a session was created in. Stored, not recomputed. (issue #28)
            *
            * Until now every start derived the cwd again — the project's path, or
-           * `assistantHome()` (= `dataRoot()/assistant`) for the Assistant. Then the
+           * `assistantHome()` (= `dataRoot()/orchestrator`) for the Assistant. Then the
            * data directory was renamed to `~/.centralu` from the folder named just below, and
            * the Assistant's cwd moved with it. Claude Code keys its session store **by
            * working directory**, so the tool went looking in a project slug that had never
            * existed and answered "not found". The 821KB transcript sat untouched under the old
            * slug the whole time, and the app told its owner the conversation had been deleted.
            *
-           *   old cwd `~/.control-center/assistant` → transcript filed here, still there // legacy-name
+           *   old cwd `~/.control-center/orchestrator` → transcript filed here, still there // legacy-name
            *   new cwd `~/.centralu/orchestrator`       → no such slug, so "not found"
            *
            * The old name is spelled out because naming it is the whole explanation; nothing

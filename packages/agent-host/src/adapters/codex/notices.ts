@@ -112,7 +112,7 @@ export function noticeWords(kind: NoticeKind, text: string, mcpServer?: string):
       return words
     case 'mcpStartup':
       /*
-       * Centralu's own Centralu tools bridge is ours to fix. An app's bridge (`app-<id>`) may fail for the app's own
+       * The bridge to Centralu's own tools (CentraluTools) is ours to fix. An app's bridge (`app-<id>`) may fail for the app's own
        * reasons, so it is left unsaid. Any other server is one the person put in their Codex config.
        */
       if (mcpServer === RESERVED_NAME_PREFIX) return { ...words, audience: 'centralu' }

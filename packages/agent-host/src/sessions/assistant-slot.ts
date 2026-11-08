@@ -179,8 +179,8 @@ export class AssistantSlot {
 
   /**
    * #2133: the role's session a build before the rename made is named "Orchestrator". It takes the new name once, at the host's start, so the
-   * screen shows the role's name and mail to `orchestrator` is not delivered to it by name (the old address has no alias). A name the person
-   * gave it stays. A session name is free text to every build, so the previous release reads the new one
+   * screen shows the role's name and mail to `orchestrator` is not delivered to it by name (the old address has no alias). Any other name
+   * stays; a person who chose "Orchestrator" themselves cannot be told apart and is renamed too. A session name is free text to every build, so the previous release reads the new one
    */
   renameFromOldName(): void {
     const id = this.host.store.sessions.assistantId()
