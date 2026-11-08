@@ -84,16 +84,9 @@ export type RelaunchCheck = {
   /**
    * Applying the update stops the agent host, and the next one continues from it (#1895): running turns go on once it is
    * back, and open terminals and Run commands start again. Without a keeper the window stops it before the relaunch; a
-   * keeper of #1895 step 3 stops it and exits; with an older keeper the switch the relaunched window makes does. Absent
-   * only when an older keeper's host hands its agents to it, which holds them through the whole update (`keepsAgents`), and
-   * where the window cannot tell
+   * keeper stops it and exits. Absent where the window cannot tell (Windows, Linux, a browser)
    */
   restartsHost?: boolean
-  /**
-   * Running agents, terminals and commands keep going through the update: an older keeper's host hands them to it. Only
-   * this says so; a check without it (Windows, Linux, a browser, a window not attached to a keeper yet) claims nothing
-   */
-  keepsAgents?: boolean
   /**
    * The keeper reports whether the host is busy (`watchBusy`), so "Automatic updates" can wait for nothing to be running
    * and apply by itself. Absent without a keeper, where only a press applies
@@ -106,9 +99,7 @@ export type RelaunchCheck = {
  *
  * Only a desktop app can offer this. The host is stopped for an update first and the next one continues what it ended
  * (#1895: `RelaunchCheck.restartsHost`): by the window where it starts the host itself, by the keeper, which then exits,
- * where it has one (step 3). An older keeper is told instead and holds the host through the relaunch, and the new window
- * switches the keeper and host to its build. A platform that
- * cannot leaves `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
+ * where it has one. A platform that cannot leaves `Platform.relaunch` undefined, and the update line keeps saying "restart to finish".
  */
 export interface RelaunchPort {
   /** Whether a relaunch now would start a different build than this window (the bundle on disk was replaced) */

@@ -4,8 +4,8 @@ import { App, useStore } from '@cc/ui'
 import { createMockPlatform } from '@cc/platform/mock'
 import { isDemoScene, seedDemo } from '@cc/platform/mock/demo'
 import type { ShellHostBuild } from '@cc/platform/tauri'
-import { buildBar } from '../../../../packages/platform/src/tauri/switch-plan.js'
-import { BuildBarView, RestartKeeperDialog, SwitchBuildDialog } from '../../../desktop/src/build-bar.js'
+import { buildBar, restartPlan } from '../../../../packages/platform/src/tauri/switch-plan.js'
+import { BuildBarView, RestartKeeperDialog } from '../../../desktop/src/build-bar.js'
 import { QuitDialog } from '../../../desktop/src/quit-dialog.js'
 import '../../../../packages/ui/src/styles/index.css'
 
@@ -25,17 +25,16 @@ import '../../../../packages/ui/src/styles/index.css'
  * readable; the spec reads the same position from tauri.conf.json to measure against.
  *
  * Query: `?demo=focus|grid` picks the scene; `?state=` the keeper's report:
- *   - `other`: the host is of another build (the switch is offered)
+ *   - `other`: the host and the keeper are of another build, a keeper that stops for an update, with something running
+ *     (the restart into this build is offered, behind a question)
+ *   - `earlier`: the same with a keeper of an earlier build, which gets a plain stop
+ *   - `idle`: the same with nothing running (the restart goes without a question)
  *   - `older`: this window is an older build than the host and the keeper (#352: a backed-up
- *     app opened while a newer one runs; the switch back is offered, by hand only)
- *   - `progress`: a swap is starting
- *   - `failed`: a swap failed before the old host was touched (a real failure)
- *   - `keeper-later`: the host is on this build and the keeper could not move (beta.10's
- *     "Message too long", the second click), `keeper-later-first`: the same on the first click
+ *     app opened while a newer one runs; the restart back is offered, by hand only)
  *   - `shell`: everything on this build, but a release started its keeper without the permission
  *     shell (thin-shell plan §6), which refused the content
- * `?dialog=quit&background=on|off|serve` (`serve`: the window runs on the computer's `centralu serve` host, #1466; `&running=n`: sessions in a turn) opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
- * switch-build and restart-completely questions (e2e/desktop-dialog-layers.spec.ts).
+ * `?dialog=quit&background=on|off|serve` (`serve`: the window runs on the computer's `centralu serve` host, #1466; `&running=n`: sessions in a turn) opens the quit question instead; `?dialog=restart` the
+ * restart question (e2e/desktop-dialog-layers.spec.ts).
  *
  * Only on the dev server: `vite build`'s only input is index.html.
  */
@@ -61,43 +60,17 @@ const newer = {
   bundlePath: '/Users/someone/Downloads/Centralu 0.1.0-beta.7/Centralu.app',
 }
 const older = { commit: '2ffcaec5', version: '0.1.0-beta.6', bundlePath: '/Applications/Centralu.app' }
-const tooLong = 'could not pass the state on: Message too long (os error 40)'
 
 /** What the keeper would report in each state, as the shell hands it to the window */
 function reported(): ShellHostBuild {
-  const base = { mode: 'keeper' as const, app: newer, keeper: older, keeperSameBuild: false, keepsAgents: true, busy: true }
+  const base = { mode: 'keeper' as const, app: newer, host: older, keeper: older, sameBuild: false, keeperSameBuild: false, stopsForUpdate: true, busy: true }
   switch (state) {
     case 'older':
-      return { ...base, app: older, host: newer, keeper: newer, sameBuild: false, keeperSameBuild: false }
-    case 'progress':
-      return { ...base, host: older, sameBuild: false, swap: { phase: 'starting', target: newer, from: older, startedAt: 1 } }
-    case 'failed':
-      return {
-        ...base,
-        host: older,
-        sameBuild: false,
-        swap: {
-          phase: 'failed',
-          target: newer,
-          from: older,
-          message: 'the new build did not pass its start check: no answer within 60s',
-          startedAt: 1,
-        },
-      }
-    case 'keeper-later':
-      return {
-        ...base,
-        host: newer,
-        sameBuild: true,
-        swap: {
-          phase: 'failed',
-          target: newer,
-          from: newer,
-          message: `could not hand over to the new build's keeper: ${tooLong}`,
-          keeperMessage: tooLong,
-          startedAt: 2,
-        },
-      }
+      return { ...base, app: older, host: newer, keeper: newer }
+    case 'earlier':
+      return { ...base, stopsForUpdate: false }
+    case 'idle':
+      return { ...base, busy: false }
     case 'shell':
       return {
         ...base,
@@ -114,26 +87,24 @@ function reported(): ShellHostBuild {
           shellVersion: 1,
         },
       }
-    case 'keeper-later-first':
-      return {
-        ...base,
-        host: newer,
-        sameBuild: true,
-        swap: { phase: 'done', target: newer, from: older, keeperMessage: tooLong, startedAt: 1 },
-      }
     default:
-      return { ...base, host: older, sameBuild: false }
+      return base
   }
 }
 
+/** What main.tsx does with the bar, with the keeper's request recorded instead of sent */
 function Banner() {
   const [build] = useState(reported)
   const [dismissed, setDismissed] = useState(false)
-  const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
   const [dismissedShell, setDismissedShell] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const bar = buildBar({ build, dismissed, dismissedSwap, dismissedShell })
+  const bar = buildBar({ build, dismissed, dismissedShell })
+  const plan = restartPlan(build)
+  const restart = () => {
+    setRestarting(true)
+    calls.push('restart_keeper')
+  }
   return (
     <>
       <BuildBarView
@@ -141,21 +112,16 @@ function Banner() {
         bar={bar}
         error={null}
         restarting={restarting}
-        onSwitch={() => calls.push('switch_host_build')}
-        onDismiss={() => {
-          if (bar.kind === 'shell') return setDismissedShell(true)
-          if (build.swap) setDismissedSwap(build.swap.startedAt)
-          setDismissed(true)
-        }}
-        onRestart={() => setAskRestart(true)}
+        onRestart={() => (plan.confirm ? setAskRestart(true) : restart())}
+        onDismiss={() => (bar.kind === 'shell' ? setDismissedShell(true) : setDismissed(true))}
       />
       {askRestart && (
         <RestartKeeperDialog
+          loses={plan.loses}
           onCancel={() => setAskRestart(false)}
           onConfirm={() => {
             setAskRestart(false)
-            setRestarting(true)
-            calls.push('restart_keeper')
+            restart()
           }}
         />
       )}
@@ -191,23 +157,19 @@ function Quit() {
   )
 }
 
-/** The desktop's other two questions, drawn alone; a press outside or a button closes them, as in the app */
-function Ask({ kind }: { kind: 'switch' | 'restart' }) {
+/** The desktop's restart question, drawn alone; a press outside or a button closes it, as in the app */
+function AskRestart() {
   const [open, setOpen] = useState(true)
   if (!open) return null
-  const answer = (call: string) => {
-    calls.push(call)
-    setOpen(false)
-  }
-  return kind === 'switch' ? (
-    <SwitchBuildDialog
-      loses="Stops 2 agents and 1 terminal."
-      keepsAgents={false}
+  return (
+    <RestartKeeperDialog
+      loses={restartPlan({ busy: true, stopsForUpdate: true }).loses}
       onCancel={() => setOpen(false)}
-      onConfirm={() => answer('switch_host_build')}
+      onConfirm={() => {
+        calls.push('restart_keeper')
+        setOpen(false)
+      }}
     />
-  ) : (
-    <RestartKeeperDialog onCancel={() => setOpen(false)} onConfirm={() => answer('restart_keeper')} />
   )
 }
 
@@ -242,7 +204,7 @@ void (async () => {
     <>
       <App platform={mock} banner={dialog ? null : <Banner />} />
       {dialog === 'quit' && <Quit />}
-      {(dialog === 'switch' || dialog === 'restart') && <Ask kind={dialog} />}
+      {dialog === 'restart' && <AskRestart />}
       <TrafficLights />
     </>,
   )

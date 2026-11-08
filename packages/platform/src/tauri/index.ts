@@ -8,24 +8,19 @@ import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, Sy
 import type { HostBuild } from '@cc/protocol/client'
 import { isRecord } from '@cc/protocol/client'
 import { createWebPlatform } from '../web/index.js'
-import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
 import { asError, rethrowAsError, toError } from './to-error.js'
-import type { ShellStart, SwapView } from './switch-plan.js'
+import type { ShellStart } from './switch-plan.js'
 
 export { keepRunningThenQuit } from './keep-running.js'
 
 export {
-  autoSwitch,
+  autoRestart,
   buildBar,
-  keeperStaysBehind,
+  restartPlan,
   shellBarText,
-  swapProgressText,
-  swapRunning,
-  switchPlan,
   type BuildBar,
+  type RestartPlan,
   type ShellStart,
-  type SwapView,
-  type SwitchPlan,
 } from './switch-plan.js'
 
 /**
@@ -184,7 +179,7 @@ export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
  * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
  * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
  * `sameBuild` is false when a window of one build is attached to a host of another — the case the
- * window offers to switch. The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's `HostBuild`, which is
+ * window offers a restart into its build for. The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's `HostBuild`, which is
  * one host's record (#428).
  */
 export type ShellHostBuild = {
@@ -195,28 +190,18 @@ export type ShellHostBuild = {
   /** The build of the keeper itself (#280 step 4); absent for a keeper older than step 4 */
   keeper?: BuildSource
   /**
-   * False when the keeper is from another build than this window; switching moves it too. A keeper
-   * older than step 4 (no `keeper`) counts as another build (#461), one only a full restart moves.
-   * Absent when not attached to a keeper.
+   * False when the keeper is from another build than this window: a restart into this build is offered. A keeper older
+   * than step 4 (no `keeper`) counts as another build (#461). Absent when not attached to a keeper.
    */
   keeperSameBuild?: boolean
   background?: boolean
-  /** The current or last blue-green swap (#280 step 3) */
-  swap?: SwapView
   /**
-   * Whether that swap went to this window's build, by the keeper's rule (`SwapView::is_to`: a clean commit is one
-   * build whatever its build time). Absent without a swap, and from a window older than the field.
+   * The keeper stops for an update (#1895 step 3), so a restart into this build continues the turns it cuts; an earlier
+   * keeper gets a plain stop. Absent before the keeper's first report
    */
-  swapToThisBuild?: boolean
-  /** Whether the running host hands agents over in a swap (step 2) or stops them */
-  keepsAgents?: boolean
-  /** A session working or waiting, a terminal or a command running: what a switch could cost */
+  stopsForUpdate?: boolean
+  /** A session working or waiting, a terminal or a command running: what a restart could cost */
   busy?: boolean
-  /**
-   * This window was started by "Apply now" (#352): the keeper held on through the relaunch and
-   * said so when the window attached. The window then switches by itself when nothing can be lost.
-   */
-  relaunched?: boolean
   /** How the last keeper start went through the macOS shell (thin-shell plan §6); absent when none was tried */
   shell?: ShellStart
 }
@@ -226,7 +211,7 @@ export async function hostBuild(): Promise<ShellHostBuild> {
 }
 
 /**
- * Listens for changes to which builds are involved (a host restarted, a switch finished).
+ * Listens for changes to which builds are involved (a host or the keeper restarted).
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
 const isHostBuild = (p: unknown): p is ShellHostBuild => isRecord(p) && typeof p.mode === 'string'
@@ -269,15 +254,6 @@ export function watchHostBuild(cb: (b: ShellHostBuild) => void, onAskFailed?: ()
 }
 
 /**
- * Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). Returns
- * once the keeper has taken the request; the swap's phases arrive in `watchHostBuild` (`swap`), and the
- * window reconnects through the same front door. What it can cost is `switchPlan`'s to say.
- */
-export async function switchHostBuild(): Promise<void> {
-  await invoke('switch_host_build').catch(rethrowAsError)
-}
-
-/**
  * "Quit completely" (#280): stops the keeper, the host and everything they hold (agents,
  * terminals, running commands, app processes) whatever background mode says, then quits
  */
@@ -286,10 +262,10 @@ export async function quitAndStopAgents(): Promise<void> {
 }
 
 /**
- * "Restart completely" (#387): stops the keeper and everything it holds, as "Quit completely" does,
- * but keeps this window open; the window then starts a keeper of its own build and reattaches.
- * For a keeper that could not move to this build by itself. Returns once the keeper has taken the
- * request; the reconnect arrives as `host-status` and `host-build`.
+ * The build bar's restart into this build (#387, #1895 step 4 PR 3): stops the keeper of another build, for an update when
+ * it can (`stopsForUpdate`) and as "Quit completely" does otherwise, but keeps this window open; the window then starts a
+ * keeper of its own build and reattaches. Returns once the keeper has taken the request (a stop for an update answers once
+ * its host is gone); the reconnect arrives as `host-status` and `host-build`. What it can cost is `restartPlan`'s to say.
  */
 export async function restartKeeper(): Promise<void> {
   await invoke('restart_keeper').catch(rethrowAsError)
@@ -473,7 +449,7 @@ export function tauriRelaunchPort(): RelaunchPort {
   }
 }
 
-export type TauriPlatform = Platform & { relaunchSwap: RelaunchSwapResult }
+export type TauriPlatform = Platform
 
 /**
  * Follows the host's address from before the first read of it (#972 item 1).
@@ -524,11 +500,6 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
 }
 
 async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
-  await waitForHost()
-  const attached = await hostBuild().catch(() => null)
-  const relaunchSwap = attached
-    ? await finishRelaunchSwap(attached, listenHostBuild, switchHostBuild)
-    : { tried: false }
   const { port, token } = await waitForHost()
 
   // Ask the shell how much of our top bar the OS has already claimed. Only Rust knows
@@ -583,7 +554,6 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
 
   return {
     ...base,
-    relaunchSwap: { ...relaunchSwap, previousSwapStartedAt: attached?.swap?.startedAt },
     ...(mode === 'keeper'
       ? {
           background: {

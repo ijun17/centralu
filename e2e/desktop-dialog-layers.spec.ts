@@ -28,7 +28,6 @@ async function cardWaiting(page: Page) {
 
 const DIALOGS = [
   { dialog: 'quit&background=off', testId: 'confirm-quit' },
-  { dialog: 'switch', testId: 'confirm-switch-build' },
   { dialog: 'restart', testId: 'confirm-restart-keeper' },
 ] as const
 

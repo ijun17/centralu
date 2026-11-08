@@ -1,29 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import {
   COMPLETELY_STOPS,
-  KEEPER_LATER_TEXT,
   RESTART_COMPLETELY_LOSES,
-  autoSwitch,
+  UPDATE_STOP_LOSES,
+  autoRestart,
   buildBar,
   isNewerBuild,
-  keeperStaysBehind,
   olderBuildText,
+  restartPlan,
   shellBarText,
-  swapProgressText,
-  swapRunning,
-  switchPlan,
-  type AutoSwitchInput,
+  type AutoRestartInput,
+  type Build,
   type BuildBarInput,
   type ShellStart,
-  type SwapBuild,
-  type SwapView,
 } from './switch-plan.js'
 
 /** Release builds as the keeper records them: version from the app, `builtAt` from bundle-info.json */
-const beta10: SwapBuild = { commit: '2ffcaec5', version: '0.1.0-beta.10', builtAt: '2026-10-01T09:00:00.000Z' }
-const beta11: SwapBuild = { commit: '53b9cf7', version: '0.1.0-beta.11', builtAt: '2026-10-06T09:00:00.000Z' }
+const beta10: Build = { commit: '2ffcaec5', version: '0.1.0-beta.10', builtAt: '2026-10-01T09:00:00.000Z' }
+const beta11: Build = { commit: '53b9cf7', version: '0.1.0-beta.11', builtAt: '2026-10-06T09:00:00.000Z' }
 
-describe('which of two builds is newer, for switching by itself only forward (#352)', () => {
+describe('which of two builds is newer, for restarting by itself only forward (#352)', () => {
   it('orders by app version, prereleases included', () => {
     expect(isNewerBuild(beta11, beta10)).toBe(true)
     expect(isNewerBuild(beta10, beta11)).toBe(false)
@@ -53,7 +49,7 @@ describe('which of two builds is newer, for switching by itself only forward (#3
   })
 
   it('what cannot be ordered is never newer, either way', () => {
-    const cases: [SwapBuild | undefined, SwapBuild | undefined][] = [
+    const cases: [Build | undefined, Build | undefined][] = [
       // A side is missing
       [beta11, undefined],
       [undefined, beta10],
@@ -78,158 +74,79 @@ describe('which of two builds is newer, for switching by itself only forward (#3
   })
 })
 
-describe('what switching builds costs (#280 step 3)', () => {
-  it('switches without asking when nothing is running', () => {
-    expect(switchPlan({ keepsAgents: false, busy: false }).confirm).toBe(false)
-    expect(switchPlan({ keepsAgents: true, busy: false }).confirm).toBe(false)
+describe('what a restart into this build costs (#1895 step 4, PR 3)', () => {
+  it('restarts without asking when nothing is running, and asks when something is or nobody knows', () => {
+    expect(restartPlan({ busy: false, stopsForUpdate: true }).confirm).toBe(false)
+    expect(restartPlan({ busy: false }).confirm).toBe(false)
+    expect(restartPlan({ busy: true, stopsForUpdate: true }).confirm).toBe(true)
+    expect(restartPlan({}).confirm).toBe(true)
   })
 
-  it('does not ask for a working session or pending card when the keeper hands agents over', () => {
-    expect(switchPlan({ keepsAgents: true, busy: true }).confirm).toBe(false)
-    expect(switchPlan({}).confirm).toBe(true)
-  })
-
-  it('a host that keeps agents only puts a slow in-process tool call at risk', () => {
-    const { loses } = switchPlan({ keepsAgents: true, busy: true })
-    expect(loses).toContain('Agents keep running')
-    expect(loses).toContain('10 seconds')
-    expect(loses).not.toContain('turns stop')
-  })
-
-  it('moving only the keeper asks nothing and loses nothing (#280 step 4)', () => {
-    const plan = switchPlan({ keepsAgents: true, busy: true, sameBuild: true, keeperSameBuild: false })
-    expect(plan.confirm).toBe(false)
-    expect(plan.loses).toContain('Nothing stops')
-    // A host of another build still costs what a host swap costs
-    expect(switchPlan({ keepsAgents: true, busy: true, sameBuild: false, keeperSameBuild: false }).confirm).toBe(false)
-  })
-
-  it('a host that stops for an update says turns stop and go on, rather than pretending they keep running (#1895 step 3)', () => {
-    const { loses } = switchPlan({ keepsAgents: false, busy: true })
-    expect(loses).toContain('Running turns stop and go on once the new build is up')
-    expect(loses).toContain('terminals and commands start again')
+  it('a keeper that stops for an update: turns stop and go on, terminals and commands start again', () => {
+    const { loses } = restartPlan({ busy: true, stopsForUpdate: true })
+    expect(loses).toBe(UPDATE_STOP_LOSES)
+    expect(loses).toContain('Running turns stop and go on once this build is up')
     expect(loses).not.toContain('keep running')
-    expect(loses).toContain('10 seconds')
-    // Unknown is treated as the host that cannot
-    expect(switchPlan({ busy: true }).loses).toBe(loses)
+  })
+
+  it('an earlier keeper, or one that cannot be told: what "Quit completely" stops', () => {
+    expect(restartPlan({ busy: true, stopsForUpdate: false }).loses).toBe(RESTART_COMPLETELY_LOSES)
+    expect(restartPlan({ busy: true }).loses).toBe(RESTART_COMPLETELY_LOSES)
+    expect(RESTART_COMPLETELY_LOSES).toContain(COMPLETELY_STOPS)
+    expect(COMPLETELY_STOPS).toBe('Also stops agents, terminals and running commands.')
   })
 })
 
-describe('a swap’s progress in the bar (#280 step 3)', () => {
-  const swap = (over: Partial<SwapView>): SwapView => ({ phase: 'starting', target: { commit: 'b' }, startedAt: 1, ...over })
-
-  it('names each phase while it runs and nothing once it is done', () => {
-    expect(swapProgressText(swap({ phase: 'draining' }))).toContain('finish')
-    expect(swapProgressText(swap({ phase: 'activating' }))).toContain('Reconnecting')
-    expect(swapProgressText(swap({ phase: 'done' }))).toBeNull()
-    expect(swapRunning(swap({ phase: 'standby' }))).toBe(true)
-    expect(swapRunning(swap({ phase: 'failed' }))).toBe(false)
-  })
-
-  it('names the keeper moving, and says so when it stayed behind (#280 step 4)', () => {
-    expect(swapProgressText(swap({ phase: 'handing_over' }))).toContain('background keeper')
-    expect(swapRunning(swap({ phase: 'handing_over' }))).toBe(true)
-    expect(swapProgressText(swap({ phase: 'done', keeperMessage: 'the new keeper did not start: x\ny' }))).toBe(
-      'Switched builds, but the background keeper stays on the previous build: the new keeper did not start: x.',
-    )
-  })
-
-  it('a failure says why, on one line, and which build is serving now', () => {
-    const before = swapProgressText(swap({ phase: 'failed', message: 'the new build did not pass its start check: it exited\nline 2' }))
-    expect(before).toBe(
-      'Could not switch builds: the new build did not pass its start check: it exited. The running build was not touched and is still serving.',
-    )
-    const after = swapProgressText(swap({ phase: 'failed', message: 'x', rolledBack: true }))
-    expect(after).toContain('previous build was started again')
-  })
-})
-
-/** The window "Apply now" started, or the automatic mode, switching by itself (#352) */
-describe('switching by itself after an update (#352)', () => {
-  const quiet: AutoSwitchInput = {
-    build: {
-      app: beta11,
-      host: beta10,
-      keeper: beta10,
-      keepsAgents: true,
-      busy: false,
-      sameBuild: false,
-      keeperSameBuild: false,
-      relaunched: true,
-    },
-    autoApply: false,
+/** The automatic mode restarting into this build by itself (#352) */
+describe('restarting by itself with automatic updates on (#352)', () => {
+  const idle: AutoRestartInput = {
+    build: { app: beta11, host: beta10, keeper: beta10, busy: false, sameBuild: false, keeperSameBuild: false },
+    autoApply: true,
     tried: false,
     dismissed: false,
   }
 
-  it('the window "Apply now" started switches without a click when nothing can be lost', () => {
-    expect(autoSwitch(quiet)).toBe('switch')
+  it('restarts without a click when nothing is running, the keeper alone behind included', () => {
+    expect(autoRestart(idle)).toBe(true)
+    expect(autoRestart({ ...idle, build: { ...idle.build, host: beta11, sameBuild: true } })).toBe(true)
   })
 
-  it('switches through a keeper-held working session or card without asking', () => {
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true } })).toBe('switch')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: undefined } })).toBe('switch')
-  })
-
-  it('a keeper alone behind moves without a question, busy or not', () => {
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, busy: true, sameBuild: true } })).toBe('switch')
-  })
-
-  it('the automatic mode switches through keeper-held agent work too', () => {
-    const auto = { ...quiet, autoApply: true, build: { ...quiet.build, relaunched: false } }
-    expect(autoSwitch(auto)).toBe('switch')
-    expect(autoSwitch({ ...auto, build: { ...auto.build, busy: true } })).toBe('switch')
-  })
-
-  it('a window opened by hand, with the automatic mode off, leaves it to the bar', () => {
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, relaunched: false } })).toBe('none')
-  })
-
-  it('never twice, never after "Not now", never during a swap, never when nothing is behind', () => {
-    expect(autoSwitch({ ...quiet, tried: true })).toBe('none')
-    expect(autoSwitch({ ...quiet, dismissed: true })).toBe('none')
-    const swap: SwapView = { phase: 'draining', target: { commit: 'b' }, startedAt: 1 }
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, swap } })).toBe('none')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, sameBuild: true, keeperSameBuild: true } })).toBe('none')
+  it('never while something runs or nobody knows, never with the setting off, never twice, never after "Not now"', () => {
+    expect(autoRestart({ ...idle, build: { ...idle.build, busy: true } })).toBe(false)
+    expect(autoRestart({ ...idle, build: { ...idle.build, busy: undefined } })).toBe(false)
+    expect(autoRestart({ ...idle, autoApply: false })).toBe(false)
+    expect(autoRestart({ ...idle, tried: true })).toBe(false)
+    expect(autoRestart({ ...idle, dismissed: true })).toBe(false)
+    expect(autoRestart({ ...idle, build: { ...idle.build, sameBuild: true, keeperSameBuild: true } })).toBe(false)
   })
 
   /*
-   * Opening an older build's window (a backed-up beta.10 app while beta.11 runs) must not quietly
-   * downgrade the keeper and the host: not with the automatic mode on, not from "Apply now", idle
-   * or busy. The bar still offers the switch by hand.
+   * Opening an older build's window (a backed-up beta.10 app while beta.11 runs) must not quietly downgrade the keeper and
+   * the host. The bar still offers the restart by hand.
    */
-  it('only forward: a window of an older build never switches, asks or waits by itself', () => {
-    const older = { ...quiet.build, app: beta10, host: beta11, keeper: beta11 }
-    for (const autoApply of [false, true]) {
-      for (const relaunched of [false, true]) {
-        for (const busy of [false, true]) {
-          const i = { ...quiet, autoApply, build: { ...older, relaunched, busy } }
-          expect(autoSwitch(i), JSON.stringify({ autoApply, relaunched, busy })).toBe('none')
-        }
-      }
-    }
+  it('only forward: a window of an older build never restarts by itself', () => {
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: beta10, host: beta11, keeper: beta11 } })).toBe(false)
     // A keeper alone behind, of a newer build than this window, is not moved back either
-    const keeperNewer = { ...quiet.build, app: beta10, host: beta10, keeper: beta11, sameBuild: true }
-    expect(autoSwitch({ ...quiet, autoApply: true, build: keeperNewer })).toBe('none')
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: beta10, host: beta10, keeper: beta11, sameBuild: true } })).toBe(false)
     // Nor is a newer host when only the keeper is older than this window
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: beta10, host: beta11, keeper: { ...beta10, version: '0.1.0-beta.9' } } })).toBe('none')
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: beta10, host: beta11, keeper: { ...beta10, version: '0.1.0-beta.9' } } })).toBe(false)
   })
 
   it('a window whose build cannot be ordered against the running one leaves it to the bar', () => {
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, host: { commit: '2ffcaec5' }, keeper: { commit: '2ffcaec5' } } })).toBe('none')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: { commit: 'dev' } } })).toBe('none')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, host: undefined } })).toBe('none')
+    expect(autoRestart({ ...idle, build: { ...idle.build, host: { commit: '2ffcaec5' }, keeper: { commit: '2ffcaec5' } } })).toBe(false)
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: { commit: 'dev' } } })).toBe(false)
+    expect(autoRestart({ ...idle, build: { ...idle.build, host: undefined } })).toBe(false)
     // The same version built twice: only the later one goes ahead by itself
     const rebuilt = { ...beta10, commit: 'abc1234-dirty', builtAt: '2026-10-02T09:00:00.000Z' }
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: rebuilt, host: beta10, keeper: beta10 } })).toBe('switch')
-    expect(autoSwitch({ ...quiet, build: { ...quiet.build, app: beta10, host: rebuilt, keeper: rebuilt } })).toBe('none')
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: rebuilt, host: beta10, keeper: beta10 } })).toBe(true)
+    expect(autoRestart({ ...idle, build: { ...idle.build, app: beta10, host: rebuilt, keeper: rebuilt } })).toBe(false)
   })
 })
 
 describe('the bar for a window of an older build (#352)', () => {
-  const input = (build: BuildBarInput['build']): BuildBarInput => ({ build, dismissed: false, dismissedSwap: null })
+  const input = (build: BuildBarInput['build']): BuildBarInput => ({ build, dismissed: false })
 
-  it('says the window is the older build, so the switch it offers goes back', () => {
+  it('says the window is the older build, so the restart it offers goes back', () => {
     const bar = buildBar(input({ mode: 'keeper', app: beta10, host: beta11, keeper: beta11, sameBuild: false, keeperSameBuild: false }))
     expect(bar).toEqual({ kind: 'other', who: 'host', older: true })
     expect(
@@ -247,137 +164,17 @@ describe('the bar for a window of an older build (#352)', () => {
   })
 })
 
-/**
- * A keeper of an older build that cannot hand itself over (#387): beta.10's keeper fails with
- * "Message too long" on macOS, and the fix lives in the sending keeper, which an update does not
- * replace. The host swap goes ahead under it; the window must not keep offering a switch that can
- * only fail again, nor call the second try a failure.
- */
-describe('a keeper that stays on its build while the host runs this one (#387)', () => {
-  const app = { commit: '9e77999e', builtAt: '2026-10-05T10:00:00Z' }
-  const tooLong = 'could not pass the state on: Message too long (os error 40)'
-  /** What beta.10's keeper reports when the host already runs this build (the second click) */
-  const secondTry: SwapView = {
-    phase: 'failed',
-    target: app,
-    from: app,
-    message: `could not hand over to the new build's keeper: ${tooLong}`,
-    keeperMessage: tooLong,
-    startedAt: 2,
-  }
-  /** ...and on the first click, when the host swap went ahead under it */
-  const firstTry: SwapView = { phase: 'done', target: app, from: { commit: 'daf4ecf5' }, keeperMessage: tooLong, startedAt: 1 }
-  const behindKeeper = { mode: 'keeper' as const, app, keeper: { commit: 'daf4ecf5' }, sameBuild: true, keeperSameBuild: false }
-  const input = (swap: SwapView | undefined, over: Partial<BuildBarInput> = {}): BuildBarInput => ({
-    build: { ...behindKeeper, ...(swap ? { swap } : {}) },
-    dismissed: false,
-    dismissedSwap: null,
-    ...over,
-  })
-
-  it('reads the host on this build with the keeper left behind as running the new version, not as a failure', () => {
-    for (const swap of [secondTry, firstTry]) {
-      expect(keeperStaysBehind({ ...behindKeeper, swap })).toBe(true)
-      const bar = buildBar(input(swap))
-      expect(bar).toEqual({ kind: 'keeper_later', text: KEEPER_LATER_TEXT, detail: tooLong })
-      expect(JSON.stringify(bar)).not.toContain('Could not switch builds')
-    }
-  })
-
-  it('a restart is what moves the keeper, and it says plainly what stops', () => {
-    expect(KEEPER_LATER_TEXT).toContain('next time it restarts')
-    expect(RESTART_COMPLETELY_LOSES).toContain(COMPLETELY_STOPS)
-    expect(COMPLETELY_STOPS).toBe('Also stops agents, terminals and running commands.')
-  })
-
-  it('does not switch by itself again either', () => {
-    const build = { ...behindKeeper, keepsAgents: true, busy: false, relaunched: true, swap: secondTry }
-    expect(autoSwitch({ build, autoApply: true, tried: false, dismissed: false })).toBe('none')
-  })
-
-  it('only for this build, only once the host is on it, and only when the keeper said why it stayed', () => {
-    // The swap was to another window's build
-    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, target: { commit: 'other' } } })).toBe(false)
-    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, target: { ...app, builtAt: 'later' } } })).toBe(false)
-    // The host did not reach this build: that is a real failure
-    expect(keeperStaysBehind({ ...behindKeeper, sameBuild: false, swap: secondTry })).toBe(false)
-    // Nothing went wrong with the keeper, or it is on this build already
-    const { keeperMessage: _, ...noReason } = secondTry
-    expect(keeperStaysBehind({ ...behindKeeper, swap: noReason })).toBe(false)
-    expect(keeperStaysBehind({ ...behindKeeper, keeperSameBuild: true, swap: secondTry })).toBe(false)
-    // Still running
-    expect(keeperStaysBehind({ ...behindKeeper, swap: { ...secondTry, phase: 'handing_over' } })).toBe(false)
-  })
-
-  /*
-   * Two local builds of one clean commit are one build to the keeper (`BuildSource::same_build`), which ignores the
-   * build time, and were two to this rule, which compared it: the bar showed the retry notice for a swap that had
-   * reached this build. The window now says which it is (`swapToThisBuild`), by the keeper's rule.
-   */
-  it("takes the window's word for whether the swap went to this build, and falls back to its own rule without it", () => {
-    const rebuilt = { ...secondTry, target: { ...app, builtAt: '2026-10-05T09:00:00Z' } }
-    expect(keeperStaysBehind({ ...behindKeeper, swap: rebuilt, swapToThisBuild: true })).toBe(true)
-    expect(buildBar(input(rebuilt, { build: { ...behindKeeper, swap: rebuilt, swapToThisBuild: true } }))).toEqual({
-      kind: 'keeper_later',
-      text: KEEPER_LATER_TEXT,
-      detail: tooLong,
-    })
-    expect(keeperStaysBehind({ ...behindKeeper, swap: secondTry, swapToThisBuild: false })).toBe(false)
-    // A window from before the field: the commit and the build time, as before
-    expect(keeperStaysBehind({ ...behindKeeper, swap: rebuilt })).toBe(false)
-    expect(keeperStaysBehind({ ...behindKeeper, swap: secondTry })).toBe(true)
-  })
-
-  it('a keeper behind that has not tried yet is still offered the switch, which stops nothing', () => {
-    expect(buildBar(input(undefined))).toEqual({ kind: 'other', who: 'keeper' })
-  })
-
-  it('"Dismiss" hides the note until the window is no longer behind', () => {
-    expect(buildBar(input(secondTry, { dismissed: true }))).toEqual({ kind: 'none' })
-  })
-
-  /*
-   * #461: a keeper older than #280 step 4 says no build of its own. It ignores the keeper a switch
-   * names, so "Switch to this build" would swap the host and leave it behind on every try. The
-   * window counts it as another build, and the bar offers the full restart from the start.
-   */
-  it('a keeper that says no build of its own is offered the full restart, never the switch', () => {
-    const { keeper: _, ...noBuild } = behindKeeper
-    expect(keeperStaysBehind(noBuild)).toBe(true)
-    expect(buildBar({ build: noBuild, dismissed: false, dismissedSwap: null })).toEqual({ kind: 'keeper_later', text: KEEPER_LATER_TEXT })
-    expect(autoSwitch({ build: { ...noBuild, keepsAgents: true, busy: false, relaunched: true }, autoApply: true, tried: false, dismissed: false })).toBe(
-      'none',
-    )
-    // While the host is still on another build, the host switch is offered first
-    expect(buildBar({ build: { ...noBuild, sameBuild: false }, dismissed: false, dismissedSwap: null })).toEqual({ kind: 'other', who: 'host' })
-  })
-})
-
 describe('the build bar otherwise (#280)', () => {
   const app = { commit: 'new' }
   const host = { mode: 'keeper' as const, app, sameBuild: false, keeperSameBuild: false }
-  const input = (build: BuildBarInput['build'], over: Partial<BuildBarInput> = {}): BuildBarInput => ({
-    build,
-    dismissed: false,
-    dismissedSwap: null,
-    ...over,
+  const input = (build: BuildBarInput['build'], over: Partial<BuildBarInput> = {}): BuildBarInput => ({ build, dismissed: false, ...over })
+
+  it('offers the restart for a host or a keeper of another build, a keeper that says no build of its own included (#461)', () => {
+    expect(buildBar(input(host))).toEqual({ kind: 'other', who: 'host' })
+    expect(buildBar(input({ ...host, sameBuild: true }))).toEqual({ kind: 'other', who: 'keeper' })
   })
 
-  it('a real failure says "Could not switch builds" with its reason and offers to try again, as before', () => {
-    const swap: SwapView = { phase: 'failed', target: app, message: 'the new build did not pass its start check: it exited', startedAt: 3 }
-    expect(buildBar(input({ ...host, swap }))).toEqual({
-      kind: 'failed',
-      text: 'Could not switch builds: the new build did not pass its start check: it exited. The running build was not touched and is still serving.',
-      retry: true,
-    })
-    // The keeper stayed too, but the host did not reach this build either: still a failure
-    expect(buildBar(input({ ...host, swap: { ...swap, keeperMessage: 'x' } })).kind).toBe('failed')
-    // Dismissed: the switch is offered again, without the error
-    expect(buildBar(input({ ...host, swap }, { dismissedSwap: 3 }))).toEqual({ kind: 'other', who: 'host' })
-  })
-
-  it('shows a running swap, nothing in direct mode, and nothing once everything is on this build', () => {
-    expect(buildBar(input({ ...host, swap: { phase: 'draining', target: app, startedAt: 1 } })).kind).toBe('switching')
+  it('nothing in direct mode, once everything is on this build, or after "Not now"', () => {
     expect(buildBar(input({ ...host, mode: 'direct' }))).toEqual({ kind: 'none' })
     expect(buildBar(input({ mode: 'keeper', app, sameBuild: true, keeperSameBuild: true }))).toEqual({ kind: 'none' })
     expect(buildBar(input(host, { dismissed: true }))).toEqual({ kind: 'none' })
@@ -398,7 +195,6 @@ describe('a keeper started without the permission shell (docs/plans/thin-shell.m
   const input = (shell: ShellStart | undefined, over: Partial<BuildBarInput> = {}): BuildBarInput => ({
     build: { ...onThisBuild, shell },
     dismissed: false,
-    dismissedSwap: null,
     ...over,
   })
 
@@ -426,10 +222,8 @@ describe('a keeper started without the permission shell (docs/plans/thin-shell.m
     expect(buildBar(input(undefined))).toEqual({ kind: 'none' })
   })
 
-  it('a switch to make or a swap running comes first', () => {
+  it('a restart to offer comes first', () => {
     const behind = { ...input(refused()), build: { ...onThisBuild, sameBuild: false, shell: refused() } }
     expect(buildBar(behind).kind).toBe('other')
-    const swapping = { ...input(refused()), build: { ...onThisBuild, shell: refused(), swap: { phase: 'draining' as const, target: app, startedAt: 1 } } }
-    expect(buildBar(swapping).kind).toBe('switching')
   })
 })

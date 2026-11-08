@@ -26,13 +26,13 @@ const frames = (page: Page) =>
 test('the desktop entry draws the app once the bundled fonts are in, not with the fallback', async ({ page }) => {
   const release = await holdFonts(page)
   // Held fonts hold the load event too
-  await page.goto('/relaunch.html?scenario=plain', { waitUntil: 'domcontentloaded' })
-  // The Tauri platform's last question is its second `host_build` (which mode): from here on, only the fonts are missing
+  await page.goto('/relaunch.html', { waitUntil: 'domcontentloaded' })
+  // The Tauri platform's last question is its `host_build` (which mode): from here on, only the fonts are missing
   await expect
     .poll(() =>
       page.evaluate(() => (window as unknown as { __relaunch: { asked: string[] } }).__relaunch.asked.filter((c) => c === 'host_build').length),
     )
-    .toBeGreaterThanOrEqual(2)
+    .toBeGreaterThanOrEqual(1)
   await frames(page)
   await expect(page.getByTestId('starting')).toBeVisible()
   await expect(page.getByTestId('open-settings')).toHaveCount(0)

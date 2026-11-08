@@ -254,8 +254,7 @@ describe('agentApplyVerdict', () => {
 describe('applyWords', () => {
   const keepsGoing = /keep (going|running)/
 
-  it('says agents keep going only where the keeper says it holds them through the update', () => {
-    expect(applyWords({ ...ready, keepsAgents: true }).applying).toMatch(keepsGoing)
+  it('says running turns go on, never that agents keep going through the update', () => {
     for (const r of [{ ...ready, restartsHost: true }, { ...ready, restartsHost: true, idleReported: true }]) {
       const w = applyWords(r)
       expect(w.applying).toMatch(/running turns go on once the agent host is back/)
@@ -280,7 +279,6 @@ describe('applyWords', () => {
 
   it('promises applying by itself only where something reports idle', () => {
     expect(applyWords({ ...ready, restartsHost: true, idleReported: true }).hint).toMatch(/applies a newer version once nothing is busy/)
-    expect(applyWords({ ...ready, keepsAgents: true }).hint).toMatch(/applies a newer version once nothing is busy/)
     const direct = applyWords({ ...ready, restartsHost: true })
     expect(direct.hint).not.toMatch(/applies/)
     expect(direct.more).toMatch(/when you press Update/)

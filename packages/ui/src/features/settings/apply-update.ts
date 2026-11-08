@@ -53,9 +53,8 @@ export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingF
 }
 
 /**
- * What Settings says applying an update does, from the relaunch check (#1895 step 3). Four cases:
+ * What Settings says applying an update does, from the relaunch check (#1895 step 3). Three cases:
  *
- * - an older keeper's host hands its agents to it (`keepsAgents`, said only then): agents, terminals and commands keep going;
  * - the update stops the host and the next one continues (`restartsHost`), with a keeper that reports when nothing is
  *   busy (`idleReported`): automatic updates still wait for that and apply by themselves;
  * - the same without that report (no keeper): nothing applies by itself, the person presses Update;
@@ -64,13 +63,6 @@ export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingF
  */
 export function applyWords(relaunch: RelaunchCheck | null | undefined): { applying: string; hint: string; more: string } {
   const waits = 'applied once no session is working or waiting for you, no terminal or command is running, and you are not typing.'
-  if (relaunch?.keepsAgents) {
-    return {
-      applying: 'Applying it relaunches the window, and running agents, terminals and commands keep going.',
-      hint: 'Checks, installs and applies a newer version once nothing is busy.',
-      more: `A newer version is installed as soon as it is found, and ${waits} Applying relaunches the window; agents keep running through it.`,
-    }
-  }
   if (!relaunch?.restartsHost) {
     return {
       applying: 'Restarting Centralu applies it.',

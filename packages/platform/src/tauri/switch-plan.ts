@@ -1,107 +1,58 @@
 /**
- * What switching the host to this window's build costs, and how to say a swap's progress (#280,
- * option C step 3). Pure, so the wording rules are tested without a webview.
+ * What the window's build bar shows, and what a restart into this window's build costs (#280, #387, #1895 step 4 PR 3).
+ * Pure, so the wording rules are tested without a webview.
  *
- * Since step 4 a switch also moves the keeper (the background process that holds the host and the
- * agents) to the new build first: it hands its handles to the new build's keeper and exits, which
- * stops nothing. When only the keeper is behind, that is all a switch does.
+ * A window of one build attached to a keeper or host of another (the app was updated or opened by hand while the keeper
+ * ran on) offers a restart into its own build. The window stops the keeper (`restart_keeper`): for an update when the keeper
+ * can (`stopsForUpdate`, #1895 step 3 and later), so this window's host continues the turns it cut and opens its terminals
+ * and Run commands again; with a plain stop otherwise, which ends what that keeper holds as "Quit completely" does. Then the
+ * window starts a keeper of its own build. It asks first only when something is running (`restartPlan`).
  *
- * Switching is a blue-green swap: the keeper starts the new build next to the running host, the
- * running host gets up to 10 seconds to finish the calls it serves itself (orchestrator and app
- * tools, RPCs), and the front door moves to the new host. Whether agents survive depends on the
- * running host: a host of #280 step 2 to #1895 step 2 hands them over (`keepsAgents`); since #1895 step 3 the running
- * host stops them for an update and the new one continues the turns it ended (`keepsAgents: false`).
+ * Until #1895 step 4 this was a switch: the keeper's blue-green swap, with its phases on the bar. No window asks for one now.
  *
- * A keeper that cannot hand itself over leaves the host swap to go ahead under it, and then stays
- * on its build until it next starts (#387, `keeperStaysBehind`). The bar says so calmly and offers
- * "Restart completely" instead of a switch that would only fail again.
- *
- * A window switches by itself only forward (`isNewerBuild`): opening an older build's window (a
- * backed-up app, an older local build) must not quietly downgrade the keeper and the host. Going
- * back to an older build stays a button press, and the bar says it is an older build.
+ * A window restarts by itself only with "Apply updates automatically when idle" on, only when nothing is running, and only
+ * forward (`isNewerBuild`): opening an older build's window (a backed-up app, an older local build) must not quietly
+ * downgrade the keeper and the host. Going back to an older build stays a button press, and the bar says it is an older
+ * build.
  */
 
 import { isNewerVersion } from '@cc/protocol/client'
 
 /** Where a build came from, as the keeper records it */
-export type SwapBuild = { commit: string; builtAt?: string; version?: string; bundlePath?: string }
+export type Build = { commit: string; builtAt?: string; version?: string; bundlePath?: string }
 
-export type SwapPhase = 'handing_over' | 'starting' | 'standby' | 'draining' | 'activating' | 'done' | 'failed'
-
-/** The keeper's account of the current or last swap */
-export type SwapView = {
-  phase: SwapPhase
-  target: SwapBuild
-  from?: SwapBuild
-  message?: string
-  /** Failed after the old host had drained, and the old build was started again */
-  rolledBack?: boolean
-  /** In-process calls the old host cut at the drain bound */
-  cut?: string[]
-  /** The keeper could not move to the new build (#280 step 4); the host switch went ahead anyway */
-  keeperMessage?: string
-  /**
-   * A keeper running from verified content refused the new build's content (thin-shell plan §10 step 5):
-   * `content`, `downgrade`, `copy`, `in-use` or `no-content`, with the words in `message`. Nothing moved.
-   */
-  refused?: string
-  startedAt: number
-}
-
-export type SwitchPlan = {
+export type RestartPlan = {
   /** Ask first: something can be lost */
   confirm: boolean
   /** What can be lost, for the confirmation */
   loses: string
 }
 
-/** The keeper's drain bound, in the words the person reads */
-const DRAIN_WORDS = '10 seconds'
+/** What a restart into this build costs when the keeper stops for an update, as "Apply now" does */
+export const UPDATE_STOP_LOSES =
+  'Running turns stop and go on once this build is up, and open terminals and Run commands start again there. ' +
+  'A waiting approval or question is asked again.'
 
 /**
- * Whether to ask before switching, and what to say.
- *
- * Asked only when something can be lost: a session working or waiting, a terminal or a command
- * running (`busy`). Unknown counts as busy, because a confirmation too many costs a click and one
- * too few costs a turn.
+ * Whether to ask before a restart into this build, and what to say. Asked only when something can be lost: a session working
+ * or waiting, a terminal or a command running (`busy`). Unknown counts as busy, because a confirmation too many costs a
+ * click and one too few costs a turn.
  */
-export function switchPlan(b: { keepsAgents?: boolean; busy?: boolean; sameBuild?: boolean; keeperSameBuild?: boolean }): SwitchPlan {
-  // Only the keeper is behind: moving it hands every handle over and stops nothing (#280 step 4)
-  if (b.sameBuild === true && b.keeperSameBuild === false) {
-    return { confirm: false, loses: 'Nothing stops: agents, terminals and this window carry on.' }
-  }
-  if (b.keepsAgents === true) {
-    return {
-      // The keeper owns and hands agents over. A working turn or Centralu card is therefore not
-      // a loss; only terminals, commands and an in-process host call remain drain-sensitive.
-      confirm: false,
-      loses:
-        `Agents keep running and this window reconnects in a moment. A tool call Centralu serves itself ` +
-        `(an orchestrator or app tool) that is still running after ${DRAIN_WORDS} is stopped, and the agent ` +
-        `is told to try it again.`,
-    }
-  }
-  const confirm = b.busy !== false
-  return {
-    confirm,
-    loses:
-      `Running turns stop and go on once the new build is up, and open terminals and commands start again ` +
-      `there. A waiting approval or question is asked again. Tool calls Centralu serves itself get up to ` +
-      `${DRAIN_WORDS} to finish first.`,
-  }
+export function restartPlan(b: { busy?: boolean; stopsForUpdate?: boolean }): RestartPlan {
+  return { confirm: b.busy !== false, loses: b.stopsForUpdate ? UPDATE_STOP_LOSES : RESTART_COMPLETELY_LOSES }
 }
 
 /**
- * Whether build `a` is newer than build `b`, for switching by itself only forward (#352).
+ * Whether build `a` is newer than build `b`, for restarting by itself only forward (#352).
  *
  * Newer means a higher app version (semver, prereleases included: 0.1.0-beta.11 is newer than
  * 0.1.0-beta.10), and on equal versions a later build time (`builtAt`: the ISO time in
  * `bundle-info.json`, or the whole seconds the keeper falls back to when that file has none). When
  * either side lacks what it takes to order them (no version, a version that is not semver, equal
- * versions without both build times, a host run from source), `a` is **not** newer: a switch
+ * versions without both build times, a host run from source), `a` is **not** newer: a restart
  * nobody can tell to be forward is left to the person.
  */
-export function isNewerBuild(a: SwapBuild | undefined, b: SwapBuild | undefined): boolean {
+export function isNewerBuild(a: Build | undefined, b: Build | undefined): boolean {
   if (!a || !b || isDev(a) || isDev(b)) return false
   const va = semverOf(a.version)
   const vb = semverOf(b.version)
@@ -123,7 +74,7 @@ function semverOf(v: string | undefined): string | null {
 }
 
 /** `BuildSource::dev()`: a host run from source, which every source run shares */
-function isDev(b: SwapBuild): boolean {
+function isDev(b: Build): boolean {
   return b.commit.trim() === 'dev'
 }
 
@@ -137,13 +88,13 @@ function builtAtMs(t: string | undefined): number | null {
 }
 
 /**
- * The window's build is newer than every build a switch would replace: the host's when that is of
+ * The window's build is newer than every build a restart would replace: the host's when that is of
  * another build, and the keeper's when that is (#352, forward only).
  */
 function forwardOnly(b: {
-  app?: SwapBuild
-  host?: SwapBuild
-  keeper?: SwapBuild
+  app?: Build
+  host?: Build
+  keeper?: Build
   sameBuild?: boolean
   keeperSameBuild?: boolean
 }): boolean {
@@ -152,140 +103,40 @@ function forwardOnly(b: {
   return true
 }
 
-export type AutoSwitchInput = {
+export type AutoRestartInput = {
   build: {
-    app?: SwapBuild
-    /** The running host's build: a switch by itself only replaces an older one */
-    host?: SwapBuild
-    /** The keeper's build, likewise when it is behind */
-    keeper?: SwapBuild
-    keepsAgents?: boolean
+    app?: Build
+    host?: Build
+    keeper?: Build
     busy?: boolean
     sameBuild?: boolean
     keeperSameBuild?: boolean
-    /** Started by "Apply now" (#352): the keeper held on through the relaunch and said so */
-    relaunched?: boolean
-    swap?: SwapView
-    swapToThisBuild?: boolean
   }
   /** "Apply updates automatically when idle" is on (#352) */
   autoApply: boolean
-  /** This window already switched or asked once by itself; it never does so twice */
+  /** This window already restarted once by itself; it never does so twice */
   tried: boolean
   /** The person dismissed the bar ("Not now") */
   dismissed: boolean
 }
 
 /**
- * What a window of a newer build than its keeper or host does by itself (#352):
- *
- * - `switch`: switch now, without a click. Only for a window started by "Apply now", or with
- *   "Apply updates automatically when idle" on, and only when the plan says nothing can be lost
- *   (`switchPlan`: nothing running, or only the keeper behind).
- * - `ask`: something can be lost, and the person pressed "Apply now" a moment ago: open the
- *   question now rather than leave them to find the bar.
- * - `wait`: something can be lost and nobody pressed anything (the automatic mode): wait until it
- *   cannot, which the next activity report brings.
- * - `none`: the bar as before.
- *
- * Never while a swap runs, never twice from one window (a failure stays on the bar with "Try
- * again"), and never after "Not now". And only forward: never when the window's build is not newer
- * than the host or keeper it would replace (`isNewerBuild`), so a window of an older build cannot
- * downgrade them without a click.
+ * Whether a window of a newer build than its keeper or host restarts into its build by itself (#352): only with "Apply
+ * updates automatically when idle" on, only when the keeper reports nothing running, never twice from one window and never
+ * after "Not now". Only forward: never when the window's build is not newer than the host or keeper it would replace.
  */
-export function autoSwitch(i: AutoSwitchInput): 'switch' | 'ask' | 'wait' | 'none' {
+export function autoRestart(i: AutoRestartInput): boolean {
   const b = i.build
   const behind = b.sameBuild === false || b.keeperSameBuild === false
-  if (!behind || i.tried || i.dismissed || swapRunning(b.swap)) return 'none'
-  // The keeper already said it cannot move to this build: asking again would only fail again
-  if (keeperStaysBehind(b)) return 'none'
-  if (!b.relaunched && !i.autoApply) return 'none'
-  // Forward only: a window of an older build, or of one that cannot be ordered, leaves it to the bar
-  if (!forwardOnly(b)) return 'none'
-  if (!switchPlan(b).confirm) return 'switch'
-  if (i.autoApply) return 'wait'
-  return 'ask'
-}
-
-/** One line for the bar while a swap runs, or after it failed; null when there is nothing to show */
-export function swapProgressText(s: SwapView | undefined): string | null {
-  if (!s) return null
-  switch (s.phase) {
-    case 'handing_over':
-      return 'Moving the background keeper to the new build…'
-    case 'starting':
-      return 'Starting the new build next to the running one…'
-    case 'standby':
-      return 'The new build is ready to take over…'
-    case 'draining':
-      return `Letting running calls finish (up to ${DRAIN_WORDS})…`
-    case 'activating':
-      return 'Handing over to the new build. Reconnecting…'
-    case 'done':
-      return s.keeperMessage
-        ? `Switched builds, but the background keeper stays on the previous build: ${firstLine(s.keeperMessage)}.`
-        : null
-    case 'failed': {
-      const after = s.rolledBack
-        ? ' The previous build was started again.'
-        : ' The running build was not touched and is still serving.'
-      return `Could not switch builds: ${firstLine(s.message ?? 'no reason given')}.${after}`
-    }
-  }
-}
-
-/**
- * The background keeper stayed on its build while the host moved to this window's (#387).
- *
- * A keeper hands itself over to the new build's keeper before the host swap, and a handoff that
- * fails rolls back and leaves the host swap to go ahead under the old keeper (`move_keeper`, which
- * beta.10 does too). The fix for a handoff that fails lives in the **sending** keeper, so a keeper
- * of an older build can fail the same way on every try: beta.10's keeper fails with "Message too
- * long" on macOS once it holds enough descriptors (#387). Offering "Switch to this build" again
- * then loops forever, and the second try even reads as a failure, although the window already runs
- * against a host of its own build.
- *
- * So: the host is on this window's build, the keeper is not, and the last swap was to this build
- * and says why the keeper stayed (`keeperMessage`). Nothing is wrong that a switch could fix; the
- * keeper moves when it next starts, which a full restart does now.
- *
- * A keeper that does not say its build at all (`keeper` absent: older than #280 step 4) cannot hand
- * itself over either, and ignores the keeper a switch names, so it stays behind from the start.
- * Until #461 the window could not tell such a keeper's build and left it alone; now the window
- * reports it as another build (`keeperSameBuild: false`) and this offers the full restart.
- */
-export function keeperStaysBehind(b: {
-  app?: SwapBuild
-  sameBuild?: boolean
-  keeper?: SwapBuild
-  keeperSameBuild?: boolean
-  swap?: SwapView
-  swapToThisBuild?: boolean
-}): boolean {
-  const s = b.swap
-  if (b.sameBuild !== true || b.keeperSameBuild !== false) return false
-  if (!b.keeper) return true
-  if (!s?.keeperMessage) return false
-  if (s.phase !== 'done' && s.phase !== 'failed') return false
-  // The window says it by the keeper's rule; a window from before `swapToThisBuild` leaves it to this one
-  return b.swapToThisBuild ?? (!b.app || sameBuildKey(s.target, b.app))
+  return behind && i.autoApply && !i.tried && !i.dismissed && b.busy === false && forwardOnly(b)
 }
 
 /** What the window's build bar shows: one of these, or nothing */
 export type BuildBar =
   | { kind: 'none' }
-  /** A swap is running: its phase, in words */
-  | { kind: 'switching'; text: string }
-  /** The host is on this build and the keeper stayed behind: a calm note, and a full restart on offer */
-  | { kind: 'keeper_later'; text: string; detail?: string }
   /**
-   * How the last swap ended, until dismissed: a failure, or a switch that left the keeper behind.
-   * `retry`: the window is still behind, so the switch is offered again ("Try again").
-   */
-  | { kind: 'failed' | 'notice'; text: string; retry: boolean }
-  /**
-   * The host or the keeper is of another build than this window: offer to switch. `older`: the
-   * build running there is newer than this window's, so a switch goes back, and only by hand.
+   * The host or the keeper is of another build than this window: offer a restart into this build. `older`: the build
+   * running there is newer than this window's, so the restart goes back.
    */
   | { kind: 'other'; who: 'host' | 'keeper'; older?: true }
   /**
@@ -310,28 +161,21 @@ export type ShellStart = {
 export type BuildBarInput = {
   build: {
     mode: 'keeper' | 'direct' | 'serve'
-    app?: SwapBuild
-    host?: SwapBuild
-    keeper?: SwapBuild
+    app?: Build
+    host?: Build
+    keeper?: Build
     sameBuild?: boolean
     keeperSameBuild?: boolean
-    swap?: SwapView
-    swapToThisBuild?: boolean
     shell?: ShellStart
   }
-  /** "Not now" or "Dismiss" was pressed, for as long as the window stays behind */
+  /** "Not now" was pressed, for as long as the window stays behind */
   dismissed: boolean
   /** The shell note was dismissed (it stays dismissed for the window's life) */
   dismissedShell?: boolean
-  /** The swap (`startedAt`) whose failure or note was dismissed */
-  dismissedSwap: number | null
 }
 
-/** The note for a keeper that stays on its build while the host runs this one */
-export const KEEPER_LATER_TEXT = 'Running this build. The background keeper moves to it the next time it restarts.'
-
 /**
- * What a full restart and a full quit stop, in the words both use (#387). The keeper and the host
+ * What a full quit, and a restart that stops an earlier keeper, stop, in the words both use (#387). The keeper and the host
  * stop, and with them every agent process, terminal and running command; nothing else does that.
  */
 export const COMPLETELY_STOPS = 'Also stops agents, terminals and running commands.'
@@ -343,37 +187,20 @@ export const COMPLETELY_STOPS = 'Also stops agents, terminals and running comman
 export const SERVE_COMPLETELY_STOPS =
   'Quit completely stops the host on this computer (centralu serve) with its agents, terminals and running commands, and ends the link a hub has to this computer.'
 
-/** What restarting the keeper costs, for its confirmation */
+/** What a restart into this build costs when the keeper cannot stop for an update, for its confirmation */
 export const RESTART_COMPLETELY_LOSES =
   `${COMPLETELY_STOPS} Conversations are saved and resume on this build in a moment; waiting ` +
   `approvals have to be asked again.`
 
 /**
- * What the bar shows (#280, #387). In order:
- *
- * 1. A swap running: its phase.
- * 2. The keeper stayed behind and the host is on this build (`keeperStaysBehind`): a calm note and
- *    "Restart completely", never "Switch to this build" again and never "Could not switch builds".
- * 3. How the last swap ended, until dismissed: a failure with its reason ("Could not switch
- *    builds"), with "Try again" while the window is still behind.
- * 4. A host or keeper of another build: the builds and "Switch to this build", or, when the build
- *    running there is newer than this window's, that this window is an older build (#352).
- * 5. The keeper started without the permission shell, in a release (`shellBarText`), until dismissed.
+ * What the bar shows (#280, #387). A host or keeper of another build: the builds and a restart into this build, or, when
+ * the build running there is newer than this window's, that this window is an older build (#352). Otherwise the keeper
+ * started without the permission shell, in a release (`shellBarText`), until dismissed.
  */
 export function buildBar(i: BuildBarInput): BuildBar {
   const b = i.build
   if (b.mode !== 'keeper') return { kind: 'none' }
-  const s = b.swap
-  if (swapRunning(s)) return { kind: 'switching', text: swapProgressText(s) ?? '' }
-  if (keeperStaysBehind(b)) {
-    if (i.dismissed) return { kind: 'none' }
-    return { kind: 'keeper_later', text: KEEPER_LATER_TEXT, ...(s?.keeperMessage ? { detail: s.keeperMessage } : {}) }
-  }
-  const behind = (b.sameBuild === false || b.keeperSameBuild === false) && !i.dismissed
-  if (s && i.dismissedSwap !== s.startedAt && (s.phase === 'failed' || (s.phase === 'done' && s.keeperMessage))) {
-    return { kind: s.phase === 'failed' ? 'failed' : 'notice', text: swapProgressText(s) ?? '', retry: behind }
-  }
-  if (behind) {
+  if ((b.sameBuild === false || b.keeperSameBuild === false) && !i.dismissed) {
     const who = b.sameBuild === false ? 'host' : 'keeper'
     const older = isNewerBuild(who === 'host' ? b.host : b.keeper, b.app)
     return { kind: 'other', who, ...(older ? { older: true as const } : {}) }
@@ -408,29 +235,12 @@ export function shellBarText(reason: string | undefined): string {
 }
 
 /** A build in a few words: its version and commit (`0.1.0-beta.10, 2ffcaec5`), or just the commit */
-export function shortBuild(b: SwapBuild | undefined): string {
+export function shortBuild(b: Build | undefined): string {
   if (!b) return 'unknown'
   return b.version ? `${b.version}, ${b.commit}` : `build ${b.commit}`
 }
 
 /** The bar's line when this window is of an older build than the one running (#352) */
-export function olderBuildText(app: SwapBuild | undefined, running: SwapBuild | undefined): string {
+export function olderBuildText(app: Build | undefined, running: Build | undefined): string {
   return `This window is an older build (${shortBuild(app)}) than the one running (${shortBuild(running)}).`
-}
-
-/**
- * One build for a window that does not say `swapToThisBuild`: the same commit and build time, whatever the path.
- * Stricter than the keeper's rule (`BuildSource::same_build`), which ignores the build time of a clean commit.
- */
-function sameBuildKey(a: SwapBuild, b: SwapBuild): boolean {
-  return a.commit.trim() === b.commit.trim() && (a.builtAt ?? '') === (b.builtAt ?? '')
-}
-
-/** True while a swap is between its start and its end */
-export function swapRunning(s: SwapView | undefined): boolean {
-  return !!s && s.phase !== 'done' && s.phase !== 'failed'
-}
-
-function firstLine(text: string): string {
-  return (text.split('\n')[0] ?? '').replace(/[.\s]+$/, '')
 }
