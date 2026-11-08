@@ -85,7 +85,6 @@ impl StatusSink for KeeperSink {
     }
 }
 
-
 /**
  * The host folders in use: the running host's (its copy, or its verified content) and the one the next launch runs. No
  * cleanup removes them (`source::Copies::clean`).

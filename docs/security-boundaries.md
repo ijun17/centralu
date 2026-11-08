@@ -1427,7 +1427,7 @@ on a machine with other users, any of them can fetch `http://127.0.0.1:5173/` an
 served bundle, and then connect to the front door and read every conversation. So `dev:live` is for single-user
 machines, and it prints a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`): do not expose it (no
 `--host` other than `127.0.0.1`, no tunnel). The credential is derived from the front door's token, which the keeper makes once per
-keeper lifetime and keeps across host swaps and keeper handoffs (`front_door.rs`); it changes only when the
+keeper lifetime and keeps across the host's restarts (`front_door.rs`); it changes only when the
 keeper restarts, that is, when the app is fully quit and opened again, and the script is run again then.
 
 ## Who holds full power (#1405)
@@ -1778,7 +1778,8 @@ A host started with `centralu serve` on another machine is reached by the app th
 ## The keeper's control socket
 
 The keeper (`centralu-keeper`, #280, #440) is a new trust boundary: through its socket a process can read the front
-door's port and a credential, stop the host, and make the keeper run a host from another folder (`switch`). The rule:
+door's port and a credential and stop the host (until #1895 step 4 PR 4 also make the keeper run a host from another
+folder, `switch`). The rule:
 **only this user's processes get in, and only a Centralu window gets the token** (#1405).
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
@@ -1786,8 +1787,8 @@ door's port and a credential, stop the host, and make the keeper run a host from
   exact resolved path, one of the window executables the keeper accepts (`accepted_windows`): the `centralu` beside
   the keeper's own executable (the macOS bundle's `Contents/MacOS/`, a debug build), unless the keeper runs from
   `<data>/content/`, where a file dropped beside it proves nothing; and the window of each build the keeper names: its
-  own `--bundle-path` and the bundle of the current host's and the next launch's build, which only a window's `switch`
-  sets (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
+  own `--bundle-path` and the bundle of the current host's and the next launch's build, the keeper's own since #1895 step 4 PR 4 (until
+  then a window's `switch` set them) (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
   about its own build in `attach` counts for nothing. A file named `centralu` anywhere else, a renamed `node` among
   them, is not a window. Linux's ` (deleted)` mark is taken only after an accepted path (an update replaced the
   file). On a keeper signed with a team identifier the executable must also be signed by that team (`codesign
@@ -1838,7 +1839,7 @@ door's port and a credential, stop the host, and make the keeper run a host from
   now at the path, not the code running in the peer; a team-signed keeper should judge the peer's audit token
   (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). On
   Linux, where the keeper runs only with `CC_USE_KEEPER=1`, a window runs from its AppImage's mount, whose path
-  changes at every launch: only the window that started or switched the keeper is accepted, and a later launch gets
+  changes at every launch: only the window that started the keeper is accepted, and a later launch gets
   the limited credential until a window of its own starts a keeper; to settle before the Linux keeper runs by
   default.
   A debug keeper started with `CC_KEEPER_TEST_WINDOW_EXE=<path>` also accepts that executable, for the integration
@@ -1858,10 +1859,9 @@ door's port and a credential, stop the host, and make the keeper run a host from
 
 Limits:
 
-- `switch` runs `main.mjs` from whatever host folder the request names, and only a window may ask (#1405): it would
-  otherwise hand the token to code of the caller's choosing. A process of this user can still replace the files of a
-  host folder before a window switches to it; that is the same-user residual, not a boundary. The same holds with no
-  window at all: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
+- `switch` ran `main.mjs` from whatever host folder the request named, so only a window could ask (#1405); it answers
+  `gone` to anyone since #1895 step 4 PR 4. A process of this user can still replace the files of a host folder; that
+  is the same-user residual, not a boundary: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
   or `<data>/content/<version>/host/`, not verified again before each launch), so a process that edits the copy and
   then ends the host (its pid is in `status`) has its own code started with the token.
 - `children` (#538) lists what the keeper holds (each child's id, pid, kind, tag and state), read-only: the child
@@ -1915,8 +1915,8 @@ host. It changes where a client connects, not what it must prove:
   out of the one process that held it for a session; per the bullet above, the token itself stays within reach of
   the same user.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
-  the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
-  same one on to the new keeper over the handoff channel below.
+  the agents it serves; a keeper restart makes a new one, and so does an update, which restarts the keeper (until
+  #1895 step 4 PR 4 a keeper update passed the same one on over the handoff channel below).
 - While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.
