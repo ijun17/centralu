@@ -676,7 +676,9 @@ impl KeeperLink {
      * The build bar's restart into this build (#1895 step 4, PR 3), for a keeper or host of another build. A keeper that stops for
      * an update is asked to (`stop {forUpdate}`): this window's host continues the turns it cut and opens its terminals and Run
      * commands again, as after "Apply now". An earlier keeper gets a plain stop, which ends what it holds as "Quit completely"
-     * does; the bar asked first when something was running. Either way this window stays: the attach loop (`run`) sees the
+     * does; the bar asks first before any plain stop. Which stop goes is read from the view now, not from the one the bar
+     * planned with: a host that went down in between turns a planned stop for an update into a plain stop, which is harmless,
+     * since such a keeper holds nothing once its host is gone (review). Either way this window stays: the attach loop (`run`) sees the
      * connection end when the keeper has exited and starts a keeper of this window's build. The keeper removes its socket before
      * it stops anything, so nothing reaches it on its way out, and the next one waits for its lock. Returns once the keeper took
      * the request: a stop for an update answers once its host is gone.
