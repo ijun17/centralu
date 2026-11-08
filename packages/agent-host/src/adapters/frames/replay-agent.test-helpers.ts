@@ -1,6 +1,7 @@
 import type { ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, replayedClaudeAdapter } from '../claude/recorded.test-helpers.js'
+import { centraluAnswers } from '../claude/own-answers.test-helpers.js'
 import { CodexAdapter } from '../codex/index.js'
 import { CODEX_RECORDINGS, CODEX_REPLAY_SESSION, hasCentraluBridge, recordedSkillsList, wasProjectTrusted } from '../codex/recorded.test-helpers.js'
 import { codexCodec, loadRecording, newestVersion, recordedFolders, replaySpawner, streamJsonCodec, type FrameCodec, type Recording, type ReplayPeer } from './replay.test-helpers.js'
@@ -42,8 +43,12 @@ export const REPLAYED: readonly ReplayedTool[] = [
     recordings: CLAUDE_RECORDINGS,
     model: CLAUDE_REPLAY_SESSION.model,
     adapter: replayedClaudeAdapter,
-    // A recording made through a host holds the host's answers to the CLI's calls to Centralu's tools, which a replay host does not give the same words
-    codec: (cwd, recording) => streamJsonCodec(cwd, { hostAnswers: recording.header.host === true }),
+    // A recording made through a host holds the host's answers to the CLI's calls to Centralu's tools, which a replay host does not give the same words.
+    // One of the adapter alone holds Centralu's own server answers, which are checked against the code, as the adapter's replay checks them
+    codec: (cwd, recording) =>
+      recording.header.host === true
+        ? streamJsonCodec(cwd, { hostAnswers: true })
+        : streamJsonCodec(cwd, { own: centraluAnswers(scenariosFor('claude').find((s) => s.name === recording.header.scenario)?.session?.() ?? {}) }),
     session(opts, scenario, recording) {
       const named = scenariosFor('claude').find((s) => s.name === scenario)
       const session: CreateSessionOpts = { ...opts, ...CLAUDE_REPLAY_SESSION, model: named?.model ?? CLAUDE_REPLAY_SESSION.model }

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
-import { instructionsFor, toolDefsFor } from '../../sessions/centralu-tools.js'
-import type { AgentSpawnSpec, CreateSessionOpts } from '../contract.js'
-import { callOrder, differs, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type OwnAnswers, type Recording } from '../frames/replay.test-helpers.js'
+import type { AgentSpawnSpec } from '../contract.js'
+import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type Recording } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
-import { CLAUDE_SUBAGENT_TOOL, CENTRALU_MCP_NAME } from './centralu-mcp.js'
+import { centraluAnswers } from './own-answers.test-helpers.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
 
 /**
@@ -13,23 +12,6 @@ import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVer
  * the CLI. A replay checks what the adapter sends the CLI (each line by its kind and what it answers) and what it makes of
  * what the CLI answered, and the tests below read the events it emitted. A scenario's lines were never written by hand.
  */
-
-/**
- * What Centralu writes to the CLI itself, not the CLI: its server's answers to `initialize` and `tools/list`. They are made from the
- * tool definitions and instructions in this repository, so they are checked against those (the tools by name, words and parameters),
- * not against the copy a recording holds, which every change to a tool's words would outdate.
- */
-function centraluAnswers(session: Partial<CreateSessionOpts>): OwnAnswers {
-  const profile = session.toolProfile ?? 'assistant'
-  return {
-    server: CENTRALU_MCP_NAME,
-    check(method, result) {
-      if (method === 'initialize') return differs('the instructions', result.instructions, instructionsFor(profile, undefined, (session.apps?.current().length ?? 0) > 0, CLAUDE_SUBAGENT_TOOL), 'the code')
-      const listed = Array.isArray(result.tools) ? result.tools.map((t: { name: string; description: string; inputSchema?: { properties?: object } }) => ({ name: t.name, description: t.description, parameters: Object.keys(t.inputSchema?.properties ?? {}) })) : result.tools
-      return differs('the tools', listed, toolDefsFor(profile).map((t) => ({ name: t.name, description: t.description, parameters: Object.keys(t.schema.shape) })), 'the code')
-    },
-  }
-}
 
 type Replayed = { events: NormalizedEvent[]; problems: string[]; left: number; spawned: number; started: AgentSpawnSpec[] }
 
