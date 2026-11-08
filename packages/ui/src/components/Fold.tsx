@@ -5,7 +5,7 @@ import { LEAVE_MS, usePresence } from './presence.js'
 const FOLD_IN_MS = 200
 
 /**
- * A list that opens downward and closes back up (#1605, owner 2026-10-26): a project's rows, the orchestrator's children.
+ * A list that opens downward and closes back up (#1605, owner 2026-10-26): a project's rows, the Assistant's children.
  * One way for every fold of the sidebar, so none keeps its own timer or its own keyframes.
  *
  * It is a transition of the grid track (`0fr` to `1fr`, index.css `.cc-fold`), not a keyframe animation: a fold that is

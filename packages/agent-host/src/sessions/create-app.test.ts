@@ -10,13 +10,13 @@ import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
-import { DEFAULT_RARE_TIER, profileAllows, setRareTier } from './orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, profileAllows, setRareTier } from './centralu-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { CapturingAdapter } from './session-apps.test-helpers.js'
 import { linkDir } from '../link.test-helpers.js'
 
 /**
- * Creating a new app (M4 C-1b) — whether the `apps.create` RPC and the orchestrator's `create_app`
+ * Creating a new app (M4 C-1b) — whether the `apps.create` RPC and the Assistant's `create_app`
  * go through the same door, and what that door refuses. Checked with a real store, real trust, a
  * real runtime and a real template. Only the adapter is fake.
  */
@@ -69,7 +69,7 @@ afterEach(async () => {
 })
 
 /*
- * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * These call the Assistant's rare commands by their own names, as tools: the `resident` tier (#512). The
  * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
  */
 beforeAll(() => setRareTier('resident'))
@@ -166,11 +166,11 @@ describe('apps.create', () => {
   })
 })
 
-describe('create_app (the orchestrator)', () => {
+describe('create_app (the Assistant)', () => {
   it('names a project by its name to create through the same door, and a refusal returns its reason', async () => {
-    const orch = await mgr.orchestrator()
+    const orch = await mgr.assistant()
     const name = store.projects.listProjects()[0]!.name
-    const made = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
+    const made = await mgr.runCentraluTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(made.isError).toBeFalsy()
     expect(made.text).toContain(`Created the "Board" app (project, id board): ${join(appsDir(), 'board')}`)
     expect(existsSync(join(appsDir(), 'board', 'server.mjs'))).toBe(true)
@@ -180,32 +180,32 @@ describe('create_app (the orchestrator)', () => {
       const pending = mgr.listSessions().find((s) => s.id === orch.id)?.pendingApproval
       return pending?.detail.kind === 'project_create' ? pending : undefined
     }
-    const asked = mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock', name: 'Clock' })
+    const asked = mgr.runCentraluTool(orch.id, 'create_app', { id: 'clock', name: 'Clock' })
     await eventually(() => !!card())
     expect(card()!.detail).toEqual({ kind: 'project_create', name: 'clock', path: join(home, 'clock') })
     expect(existsSync(join(home, 'clock'))).toBe(false)
     mgr.inputs.respondApproval(orch.id, card()!.requestId, 'allow')
     const user = await asked
     expect(user.text).toContain(`Created the "Clock" app (a new project of its own, id clock): ${join(home, 'clock')}`)
-    const refused = mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'clock2', name: 'Clock' })
+    const refused = mgr.runCentraluTool(orch.id, 'create_app', { id: 'clock2', name: 'Clock' })
     await eventually(() => !!card())
     mgr.inputs.respondApproval(orch.id, card()!.requestId, 'deny')
     expect((await refused).text).toContain('The person did not approve it')
     expect(existsSync(join(home, 'clock2'))).toBe(false)
 
-    const again = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
+    const again = await mgr.runCentraluTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(again).toMatchObject({ isError: true })
     expect(again.text).toContain('Could not create it — An app "board" already exists')
-    const nowhere = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'x', name: 'X', project: 'no-such-project' })
+    const nowhere = await mgr.runCentraluTool(orch.id, 'create_app', { id: 'x', name: 'X', project: 'no-such-project' })
     expect(nowhere.text).toBe('Could not create it — No such project: no-such-project')
 
     await rpc('projects.setTrusted', { projectId, trusted: false })
-    const untrusted = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'later', name: 'Later', project: projectId })
+    const untrusted = await mgr.runCentraluTool(orch.id, 'create_app', { id: 'later', name: 'Later', project: projectId })
     expect(untrusted.text).toContain('does not make apps in a project it does not trust')
   })
 
-  it('only the orchestrator uses it — it is absent from the coordinating session\'s and the builder\'s profiles', () => {
-    expect(profileAllows('orchestrator', 'create_app')).toBe(true)
+  it('only the Assistant uses it — it is absent from the coordinating session\'s and the builder\'s profiles', () => {
+    expect(profileAllows('assistant', 'create_app')).toBe(true)
     expect(profileAllows('builder', 'create_app')).toBe(false)
     expect(profileAllows('scoped', 'create_app')).toBe(false)
   })

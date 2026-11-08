@@ -13,7 +13,7 @@ import type {
 import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
-import { newOrchestratorAgentFolder } from './orchestrator-home.js'
+import { newAssistantAgentFolder } from './assistant-home.js'
 import { AgentStartGates, agentStartGateError } from './agent-start-gates.js'
 import { AgentConsents } from './agent-consents.js'
 import { AgentChoices } from './agent-choices.js'
@@ -21,13 +21,13 @@ import { AgentStartRequests } from './agent-start-requests.js'
 import type { RemoteAgents } from './remote-agents.js'
 import {
   ASK_THE_PERSON,
-  ORCHESTRATOR_PLACE,
+  ASSISTANT_PLACE,
   START_AGENT_CALL_MS,
   START_AGENT_SETUP_MS,
   UNTRUSTED_START,
   agentStartPending,
   agentStartPersonText,
-  orchestratorPlace,
+  assistantPlace,
   type StartProgress,
 } from './start-agent-terms.js'
 
@@ -199,19 +199,19 @@ export class AgentStartFlow {
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
     const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.host.meta.get(callerId)
-    // The orchestrator starts children outside any project (#853); any other session in its own project
-    const fromOrchestrator = caller?.kind === 'orchestrator'
-    if (!caller || (!caller.projectId && !fromOrchestrator)) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
+    // The Assistant starts children outside any project (#853); any other session in its own project
+    const fromAssistant = caller?.kind === 'orchestrator'
+    if (!caller || (!caller.projectId && !fromAssistant)) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
     // How deep agents may start agents (#867): a setting, read now, that no preset opens
     const deep = agentDepthRefusal(this.host, callerId, 'start agents')
     if (deep) return done({ ok: false, error: deep })
-    const project = fromOrchestrator ? orchestratorPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
+    const project = fromAssistant ? assistantPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
     // §7.4: the mailbox decides before anything is asked or made (the child is made in `project`)
-    const refused = this.host.refusesDelegation(callerId, { projectId: fromOrchestrator ? null : project.id }, { tool: 'start_agent', target: project.name, text: opts.task })
+    const refused = this.host.refusesDelegation(callerId, { projectId: fromAssistant ? null : project.id }, { tool: 'start_agent', target: project.name, text: opts.task })
     if (refused) return done({ ok: false, error: refused })
-    if (fromOrchestrator && (opts.worktree || opts.branch)) {
-      return done({ ok: false, error: 'A session the orchestrator starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
+    if (fromAssistant && (opts.worktree || opts.branch)) {
+      return done({ ok: false, error: 'A session the Assistant starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
     }
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
       return done({ ok: false, error: UNTRUSTED_START })
@@ -231,7 +231,7 @@ export class AgentStartFlow {
     const full = this.agentCeilingError(callerId, project.id)
     if (full) return done({ ok: false, error: full })
     // The model named, else the person's for the difficulty named (#729), else the project's remembered one (#107)
-    const { model, effort, difficulty } = agentChoice(opts, fromOrchestrator ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
+    const { model, effort, difficulty } = agentChoice(opts, fromAssistant ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
     // A setting's choice is checked as a named one is: a model retired since it was picked is refused with the list.
     // The caller never named it, so the remedy it reads is to tell the person or name a model, not to leave it out
     const setting = difficulty ? `the person's choice for ${difficulty} work in Settings → Agents` : ''
@@ -445,8 +445,8 @@ export class AgentStartFlow {
 
     // The caller's own folder (a worktree session's is its worktree), so the two work on the same files; or a new
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
-    // The orchestrator's child: a folder of its own, never the orchestrator's (#994 review)
-    const scratch = project.id === ORCHESTRATOR_PLACE ? newOrchestratorAgentFolder() : null
+    // The Assistant's child: a folder of its own, never the Assistant's (#994 review)
+    const scratch = project.id === ASSISTANT_PLACE ? newAssistantAgentFolder() : null
     const cwd = scratch ?? (worktree ? project.path : (this.host.store.sessions.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path))
     let child: SessionInfo
     let setupProblems: string[] = []
@@ -456,8 +456,8 @@ export class AgentStartFlow {
       child = await this.host.createSession({
         onSetupProblems: (problems) => (setupProblems = problems),
         onWorktreeBase: (note) => (forkNote = note),
-        // The orchestrator's children have no project (#853)
-        projectId: project.id === ORCHESTRATOR_PLACE ? null : project.id,
+        // The Assistant's children have no project (#853)
+        projectId: project.id === ASSISTANT_PLACE ? null : project.id,
         cwd,
         tool,
         ...(model ? { model } : {}),
@@ -502,7 +502,7 @@ export class AgentStartFlow {
     progress.d = d
     try {
       // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
-      const instructions = project.id === ORCHESTRATOR_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
+      const instructions = project.id === ASSISTANT_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
       await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions, canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
     } catch (e) {
       this.host.children.dropDelegation(key, d)

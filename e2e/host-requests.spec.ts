@@ -29,9 +29,9 @@ test('a host request names what goes and who asked, and Allow answers it', async
 
 test('a host request from a session credential names the session it says it runs under', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
-  await raise(page, QUESTION, '"host-rpc"', '"Orchestrator"')
+  await raise(page, QUESTION, '"host-rpc"', '"Assistant"')
   await expect(page.getByTestId('host-request-from')).toHaveText(
-    'A program on this computer (it calls itself "host-rpc"), which says it runs under the session "Orchestrator", asks, and waits',
+    'A program on this computer (it calls itself "host-rpc"), which says it runs under the session "Assistant", asks, and waits',
   )
   await page.getByTestId('host-request-deny').click()
   await raise(page, QUESTION)

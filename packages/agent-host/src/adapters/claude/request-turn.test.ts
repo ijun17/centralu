@@ -4,7 +4,7 @@ import type { RequestTurn, RequestTurnAnswer, SessionApps } from '../contract.js
 import { requestTurnHooks } from './request-hook.js'
 
 /**
- * The orchestrator's turn that a session's request is (docs/plans/mailbox.md §9.7, #1447): every tool call of the CLI's own that is not a read is
+ * The Assistant's turn that a session's request is (docs/plans/mailbox.md §9.7, #1447): every tool call of the CLI's own that is not a read is
  * put to the person, naming who asked, whatever the session's preset. The adapter does it with a `PreToolUse` hook, which the CLI runs before every tool
  * call in every permission mode (measured with the real CLI: scripts/probe-pretooluse-hook.mts; a narrower permission mode alone left out the tools that
  * need no permission, such as Agent, CronCreate and ScheduleWakeup). The SDK is swapped for a fake that keeps the options the adapter passed.
@@ -57,7 +57,7 @@ function world(preset: 'auto' | 'normal' = 'auto') {
   }
   const events: NormalizedEvent[] = []
   const start = (sessionId: string) =>
-    new ClaudeAdapter().createSession({ sessionId, cwd: '/tmp', permissionPreset: preset, requestTurn, orchestratorTools: {} as never, toolProfile: 'orchestrator' }, (e) => events.push(e))
+    new ClaudeAdapter().createSession({ sessionId, cwd: '/tmp', permissionPreset: preset, requestTurn, centraluTools: {} as never, toolProfile: 'assistant' }, (e) => events.push(e))
   /** The hook as built for a session that has these apps attached (the adapter builds app proxies of its own from them, which the fake SDK has no server for) */
   const hookWithApps = (servers: string[]) => {
     const apps = { current: () => servers.map((server) => ({ server, appId: server.slice(4), tools: null })) } as unknown as SessionApps

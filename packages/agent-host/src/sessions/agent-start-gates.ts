@@ -1,7 +1,7 @@
 import { agentDepthRefusal } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AGENT_CEILING } from './start-agent.js'
-import { ASK_THE_PERSON, ORCHESTRATOR_PLACE } from './start-agent-terms.js'
+import { ASK_THE_PERSON, ASSISTANT_PLACE } from './start-agent-terms.js'
 import { FILL, namedCall } from './tool-seats.js'
 
 /**
@@ -59,13 +59,13 @@ export class AgentStartGates {
     const running =
       [...this.host.children.delegations.values()].filter((d) => {
         const child = this.host.meta.get(d.sessionId)
-        // A session gone is no one's (#994 review); one with no project is the orchestrator's place (#853)
-        return d.agent && !d.settled && !!child && (child.projectId ?? ORCHESTRATOR_PLACE) === projectId
+        // A session gone is no one's (#994 review); one with no project is the Assistant's place (#853)
+        return d.agent && !d.settled && !!child && (child.projectId ?? ASSISTANT_PLACE) === projectId
       }).length +
       (this.agentStartReserved.get(projectId) ?? 0) +
       this.remoteWorking(projectId)
     if (running < ceiling) return null
-    const whose = projectId === ORCHESTRATOR_PLACE ? 'you started' : "started by this project's sessions"
+    const whose = projectId === ASSISTANT_PLACE ? 'you started' : "started by this project's sessions"
     const wait = namedCall(this.host.toolProfileOf(callerId), 'agent_session', { sessionId: FILL, action: 'wait' })
     return `${running} agents ${whose} are already working, the most at once. Wait for one (${wait}) or stop one, then try again.`
   }
@@ -82,8 +82,8 @@ export class AgentStartGates {
 export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' | 'children' | 'uiPreferences'>, callerId: string, projectId: string | null): string | null {
   const caller = host.meta.get(callerId)
   if (!caller) return 'The session that asked is no longer here.'
-  // The orchestrator's place is no project (#853): nothing to be registered or trusted
-  if (projectId === ORCHESTRATOR_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(host, callerId, 'start agents')
+  // The Assistant's place is no project (#853): nothing to be registered or trusted
+  if (projectId === ASSISTANT_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(host, callerId, 'start agents')
   const now = host.store.projects.listProjects().find((p) => p.id === projectId)
   if (!now) return 'This session\'s project is no longer registered.'
   const auto = caller.permissionPreset === 'auto'

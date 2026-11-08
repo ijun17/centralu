@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 
 /**
- * The orchestrator's project cards (#515, #82): create_project and add_project raise a card in the approval slot, and
+ * The Assistant's project cards (#515, #82): create_project and add_project raise a card in the approval slot, and
  * the folder is made or added only on the answer. Neither has an "always": it is one folder. The dialogs that used to
  * be tested beside these (New folder on this computer, Create a new folder on a linked machine) are gone with the
  * sidebar's New folder button; the host still makes the folder, and a project it makes on its own joins the sidebar.
@@ -10,19 +10,19 @@ import { test, expect, type Page } from '@playwright/test'
 async function start(page: Page) {
   await page.goto('/?mock=1')
   await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await expect(page.getByTestId('assistant-suggestions')).toBeVisible()
 }
 
 
 /**
- * The orchestrator's create_project: the host raises a card in the orchestrator's own approval slot with the full path,
+ * The Assistant's create_project: the host raises a card in the Assistant's own approval slot with the full path,
  * and makes the folder only on Create. The card has no "always" — it is one folder — so `a` does nothing.
  */
-test('create_project: the card in the orchestrator names the folder and its full path, has no always, and Create answers allow', async ({ page }) => {
+test('create_project: the card in the Assistant names the folder and its full path, has no always, and Create answers allow', async ({ page }) => {
   await start(page)
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
-  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  const orc = await page.evaluate(() => (window as any).__store.getState().assistantId as string)
   await page.evaluate(
     (sid) => (window as any).__mock.requestApproval(sid, { kind: 'project_create', name: 'shop', path: '/Users/you/Centralu/shop' }, 'mk-1'),
     orc,
@@ -43,7 +43,7 @@ test('a new-project card takes y and n from the keyboard, and a does nothing —
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('orchestrator-pick-folder').click()
+  await page.getByTestId('assistant-pick-folder').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
@@ -72,7 +72,7 @@ test('create_project on a linked machine: the card names the machine whose disk 
   await start(page)
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
-  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  const orc = await page.evaluate(() => (window as any).__store.getState().assistantId as string)
   await page.evaluate(
     (sid) =>
       (window as any).__mock.requestApproval(sid, { kind: 'project_create', name: 'api', path: '/home/me/Centralu/api', machine: 'Ubuntu box' }, 'mk-4'),
@@ -91,7 +91,7 @@ test('create_project with git: the card names the repository, its branch and whe
   await start(page)
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
-  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  const orc = await page.evaluate(() => (window as any).__store.getState().assistantId as string)
   await page.evaluate(
     (sid) =>
       (window as any).__mock.requestApproval(
@@ -110,7 +110,7 @@ test('create_project with git: the card names the repository, its branch and whe
 })
 
 /**
- * The orchestrator's add_project (#1220): the card shows what the folder's machine found there (the machine, the full
+ * The Assistant's add_project (#1220): the card shows what the folder's machine found there (the machine, the full
  * path, that it is a folder, the git repository and its origin), has no "always", and a folder added this way is asked
  * about for trust in the sidebar as one the person added.
  */
@@ -118,7 +118,7 @@ test('add_project: the card shows the folder, its machine and its git facts, has
   await start(page)
   await page.getByTestId('suggest-create-project').click()
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
-  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  const orc = await page.evaluate(() => (window as any).__store.getState().assistantId as string)
   const here = {
     kind: 'project_add',
     name: 'site',
@@ -173,7 +173,7 @@ test('an add-folder card takes y and n from the keyboard, and a does nothing —
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('orchestrator-pick-folder').click()
+  await page.getByTestId('assistant-pick-folder').click()
   await page.getByTestId('create-session-confirm').click()
   await expect(page.getByTestId('session-view')).toBeVisible()
   const sid = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)

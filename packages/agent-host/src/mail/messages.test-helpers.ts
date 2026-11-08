@@ -13,7 +13,7 @@ const idOf = (address: string): string => {
   const party = parseAddress(address)
   return party?.kind === 'session' ? party.sessionId : ''
 }
-/** Two sessions of the trusted project p1, one of the trusted p2, two of the untrusted px, the orchestrator, and a child of A */
+/** Two sessions of the trusted project p1, one of the trusted p2, two of the untrusted px, the Assistant, and a child of A */
 export const A = addr('a')
 export const B = addr('b')
 export const C = addr('c')
@@ -34,7 +34,7 @@ export function world() {
     ['c', { projectId: 'p2', name: 'gamma' }],
     ['x', { projectId: 'px', name: 'xi' }],
     ['y', { projectId: 'px', name: 'upsilon' }],
-    ['orc', { projectId: null, name: 'orchestrator' }],
+    ['orc', { projectId: null, name: 'Assistant' }],
     ['w', { projectId: 'p1', askedBy: 'a', name: 'worker' }],
   ])
   const projects = new Map<string, { trusted: boolean; name?: string }>([
@@ -49,11 +49,11 @@ export function world() {
       const s = sessions.get(id)
       return s && { projectId: s.projectId, askedBy: s.askedBy ?? null, here: s.here ?? true, canReadMail: s.canReadMail ?? true, host: 'here', ...(s.name ? { name: s.name } : {}) }
     },
-    orchestratorId: () => 'orc',
-    orchestratorAsks: () => state.asks,
+    assistantId: () => 'orc',
+    assistantAsks: () => state.asks,
     appCalledBy: () => false,
     project: (id) => projects.get(id),
-    // The sessions of one project, and of the orchestrator's none, are one group
+    // The sessions of one project, and of the Assistant's none, are one group
     askGroupMembers: (a) => [...sessions].filter(([, s]) => s.projectId !== null && s.projectId === sessions.get(idOf(a))?.projectId).map(([id]) => addr(id)),
   }
   const clock = { t: NOW }

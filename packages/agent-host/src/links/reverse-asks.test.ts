@@ -172,7 +172,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'done', project: `${hub.id}/${hub.projectName}`, sessionId: `${hub.id}.h1`, readable: [] })
     expect(lastWords(r)).toContain('echo: [A session in the project "remote-project on Remote box" asks this project')
-    // On the hub it is recorded as that session on that machine, never as the person or an orchestrator
+    // On the hub it is recorded as that session on that machine, never as the person or an Assistant
     const there = hub.store.messages.loadMessages('h1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
     expect(there.payload).toMatchObject({ from: { sessionId: '_linked-machine-session', name: 'w1 on Remote box' } })
     expect(hub.store.machines.listMachineAskConsents()).toEqual([expect.objectContaining({ machineId: 'm1', sessionId: 'w1', projectId: 'p-hub' })])

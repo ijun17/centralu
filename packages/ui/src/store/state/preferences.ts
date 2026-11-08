@@ -90,7 +90,7 @@ export type PreferencesSlice = {
    */
   setPrefs(patch: UiPreferencesPatch): Promise<void>
   /**
-   * Reads the preferences again (#1306): on `prefs_changed`, when another window or the orchestrator changed one, and after a
+   * Reads the preferences again (#1306): on `prefs_changed`, when another window or the Assistant changed one, and after a
    * reconnect. Never throws. The notification switches come with them, except while this window's own change to them is on
    * its way (its answer would otherwise be overwritten by an older reading).
    */

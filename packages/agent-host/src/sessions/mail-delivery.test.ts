@@ -121,25 +121,25 @@ describe('a session at rest is woken by mail', () => {
 describe('the mail tool of an ordinary session', () => {
   it('answers through the real tool bundle the host gives the session, not a fake: its inbox, and a task it was given', async () => {
     const worker = await create()
-    const empty = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
+    const empty = await w.mgr.runCentraluTool(worker.id, 'mail', { action: 'inbox' })
     expect(empty).toEqual({ text: 'Your mailbox is empty.' })
     const task = personTask(worker.id, 'please')
-    const listed = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'inbox' })
+    const listed = await w.mgr.runCentraluTool(worker.id, 'mail', { action: 'inbox' })
     expect(listed.isError).toBeUndefined()
     expect(listed.text).toContain(task.id)
-    const opened = await w.mgr.runOrchestratorTool(worker.id, 'mail', { action: 'read', thread: task.id })
+    const opened = await w.mgr.runCentraluTool(worker.id, 'mail', { action: 'read', thread: task.id })
     expect(opened.text).toContain('> please')
   })
 })
 
-describe('the mail tool of the orchestrator', () => {
+describe('the mail tool of the Assistant', () => {
   it('is a command behind centralu_run, answered by the real tool bundle; called bare it is refused naming centralu_run', async () => {
     const orc = await w.mgr.createSession({ projectId: null, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
     const task = personTask(orc.id, 'tell me when it lands')
-    const run = (args: Record<string, unknown>) => w.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'mail', args })
+    const run = (args: Record<string, unknown>) => w.mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'mail', args })
     expect((await run({ action: 'inbox' })).text).toContain(task.id)
     expect((await run({ action: 'read', thread: task.id })).text).toContain('> tell me when it lands')
-    await expect(w.mgr.runOrchestratorTool(orc.id, 'mail', { action: 'inbox' })).rejects.toThrow('centralu_run(command="mail"')
+    await expect(w.mgr.runCentraluTool(orc.id, 'mail', { action: 'inbox' })).rejects.toThrow('centralu_run(command="mail"')
   })
 })
 

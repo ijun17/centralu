@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { PermissionPreset } from '@cc/protocol'
-import type { OrchestratorTools } from '../contract.js'
+import type { CentraluTools } from '../contract.js'
 import { removeTree } from '../../temp-dir.test-helpers.js'
 
 /**
@@ -103,10 +103,10 @@ describe('do files in the repository reach a Codex thread (#92)', () => {
     expect(configOf('thread/resume').projects).toBeUndefined()
   })
 
-  it('unknown trust means untrusted — even an orchestrator with no project starts that folder as "untrusted"', async () => {
+  it('unknown trust means untrusted — even an Assistant with no project starts that folder as "untrusted"', async () => {
     await start('normal', undefined, {
-      orchestratorTools: {} as OrchestratorTools,
-      orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' },
+      centraluTools: {} as CentraluTools,
+      centraluBridge: { url: 'ws://127.0.0.1:1', token: 't' },
     })
     const config = configOf('thread/start')
     expect(config.projects).toMatchObject({ [cwd]: { trust_level: 'untrusted' } })
@@ -114,9 +114,9 @@ describe('do files in the repository reach a Codex thread (#92)', () => {
     expect(config.mcp_servers).toBeDefined() // Merged into one block — neither overwrites the other
   })
 
-  const BRIDGE = { orchestratorTools: {} as OrchestratorTools, orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' } }
+  const BRIDGE = { centraluTools: {} as CentraluTools, centraluBridge: { url: 'ws://127.0.0.1:1', token: 't' } }
 
-  it('a session reading no files at all (noSettingFiles — orchestrator and coordination sessions) turns off the repository layer even when marked trusted — both start and resume', async () => {
+  it('a session reading no files at all (noSettingFiles — assistant and coordination sessions) turns off the repository layer even when marked trusted — both start and resume', async () => {
     await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'orchestrator' })
     await start('normal', true, { ...BRIDGE, noSettingFiles: true, toolProfile: 'scoped', resumeExternalId: 'ext-1' })
     for (const method of ['thread/start', 'thread/resume']) {
@@ -126,7 +126,7 @@ describe('do files in the repository reach a Codex thread (#92)', () => {
   })
 
   /*
-   * Merely receiving the bridge (orchestrator tools) does not turn off AGENTS.md (#152). It used
+   * Merely receiving the bridge (Centralu tools) does not turn off AGENTS.md (#152). It used
    * to load `project_doc_max_bytes: 0` whenever the bridge was present, so the manager and the
    * session that creates the worktree lost AGENTS.md even in a trusted project.
    */

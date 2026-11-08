@@ -6,7 +6,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { CrossAdapter, crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { answersFrom, decisionFrom } from './delegated-cards.js'
 import { SessionManager } from './manager.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 
 /**
  * Cards in a delegated turn (#676): when a session works on a turn another session gave it (start_agent,
@@ -129,7 +129,7 @@ describe('cards in a delegated turn (#676)', () => {
     // The question arrives as a tool result
     const status = await w.mgr.agentSession(parent, { sessionId: child, action: 'status' })
     expect(status).toMatchObject({ ok: true, state: 'asking', cards: [{ requestId: 'q-1', card: expect.stringMatching(/^q-1\./), kind: 'question', questions: [QUESTION] }] })
-    const shown = await runOrchestratorTool({ agentSession: async () => status } as never, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: parent, profile: 'reader' })
+    const shown = await runCentraluTool({ agentSession: async () => status } as never, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: parent, profile: 'reader' })
     expect(shown.text).toContain('Which database')
     expect(shown.text).toContain('as JSON')
 
@@ -215,15 +215,15 @@ describe('cards in a delegated turn (#676)', () => {
     expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'status' })).toMatchObject({ ok: false })
   })
 
-  it('routes a send_to_session turn\'s card to the orchestrator, which reads it with read_session and answers it', async () => {
-    const orch = await w.mgr.orchestrator()
+  it('routes a send_to_session turn\'s card to the Assistant, which reads it with read_session and answers it', async () => {
+    const orch = await w.mgr.assistant()
     const worker = await session()
     const cards = answering(handleOf(worker))
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): import('../adapters/contract.js').OrchestratorTools }).orchestratorToolsFor(orch.id)
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): import('../adapters/contract.js').CentraluTools }).centraluToolsFor(orch.id)
     expect(await tools.sendToSession(worker, 'build it', false)).toEqual({ ok: true })
     cards.ask('q-o')
     await w.until(() => notices(orch.id, worker).length === 1)
-    const read = await runOrchestratorTool(tools, 'read_session', { sessionId: worker }, { sessionId: orch.id, profile: 'orchestrator' })
+    const read = await runCentraluTool(tools, 'read_session', { sessionId: worker }, { sessionId: orch.id, profile: 'assistant' })
     expect(read.text).toContain('Which database')
     expect(read.text).toContain('answer_question')
     const read2 = await tools.readSession(worker)
@@ -231,12 +231,12 @@ describe('cards in a delegated turn (#676)', () => {
     expect(cards.answered).toHaveLength(1)
   })
 
-  it('does not give the orchestrator a turn the session was already running', async () => {
-    const orch = await w.mgr.orchestrator()
+  it('does not give the Assistant a turn the session was already running', async () => {
+    const orch = await w.mgr.assistant()
     const worker = await session()
     const cards = answering(handleOf(worker))
     await w.mgr.inputs.send(worker, 'the person\'s own work')
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): import('../adapters/contract.js').OrchestratorTools }).orchestratorToolsFor(orch.id)
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): import('../adapters/contract.js').CentraluTools }).centraluToolsFor(orch.id)
     await tools.sendToSession(worker, 'also this', false)
     cards.ask('q-p')
     await new Promise((r) => setTimeout(r, 30))
@@ -261,7 +261,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
     const r = await w.mgr.agentSession(caller, { sessionId: session, action: 'status' })
     return r.ok && r.state === 'asking' ? r.cards : []
   }
-  const orchestratorTools = (id: string) => (w.mgr as unknown as { orchestratorToolsFor(id: string): import('../adapters/contract.js').OrchestratorTools }).orchestratorToolsFor(id)
+  const centraluTools = (id: string) => (w.mgr as unknown as { centraluToolsFor(id: string): import('../adapters/contract.js').CentraluTools }).centraluToolsFor(id)
 
   describe('an auto caller never approves for a safe session, on every path', () => {
     it('ask_project', async () => {
@@ -288,9 +288,9 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
     })
 
     it('send_to_session and answer_question', async () => {
-      const orch = await w.mgr.orchestrator()
+      const orch = await w.mgr.assistant()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' })
-      const tools = orchestratorTools(orch.id)
+      const tools = centraluTools(orch.id)
       const run = async (preset: PermissionPreset) => {
         const worker = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: preset })).id
         const cards = answering(handleOf(worker))

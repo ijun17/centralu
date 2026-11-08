@@ -10,7 +10,7 @@ import type { Qualifier } from './qualifier.js'
  * hub one that names a remote session, would both be silent.
  *
  *   hub        Served by the hub's own host whatever its parameters say: the person's layout,
- *              preferences, themes, updates, the orchestrator, app imports, screen questions
+ *              preferences, themes, updates, the Assistant, app imports, screen questions
  *   internal   The callbacks of the hub's own agents (the Codex bridge). A remote's bridge talks
  *              to its own host; these never cross a link
  *   session    The machine named by `sessionId`'s prefix; the hub's own session when unprefixed
@@ -366,7 +366,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.hubOffer': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
-  // The hub's own sessions; the hub's orchestrator asks each machine's directly (links/linked-sessions.ts, plan §12)
+  // The hub's own sessions; the hub's Assistant asks each machine's directly (links/linked-sessions.ts, plan §12)
   'host.sessions': HUB,
   'host.readSession': HUB,
   'host.recall': HUB,

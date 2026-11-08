@@ -49,9 +49,9 @@ describe('launchRefusal', () => {
 
   it('refuses a session given role text or reading no setting files when the tool takes no role text', () => {
     const caps = { ...limited, presets: [...limited.presets] }
-    expect(launchRefusal(caps, 'Cursor', { ...ordinary, roleText: true })).toMatch(/Cursor.*orchestrator/)
+    expect(launchRefusal(caps, 'Cursor', { ...ordinary, roleText: true })).toMatch(/Cursor.*Assistant/)
     expect(launchRefusal(caps, 'Cursor', { ...ordinary, noSettingFiles: true })).toMatch(
-      /Cursor.*orchestrator/,
+      /Cursor.*Assistant/,
     )
   })
 })

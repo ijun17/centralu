@@ -249,7 +249,7 @@ test('Sidebar: clicking the name opens the project screen instead of folding (#2
 
 test('Sidebar: folding survives a restart (#205)', async ({ page }) => {
   /*
-   * Skip the intro with the grid button — not waking the orchestrator keeps the mock's id
+   * Skip the intro with the grid button — not waking the Assistant keeps the mock's id
    * counting the same across both runs. The real host keeps project ids in the DB, so they stay
    * the same across a restart; the mock forgets projects on reload, so this re-registers the
    * same folder in the same order to recover the same id (checked below).

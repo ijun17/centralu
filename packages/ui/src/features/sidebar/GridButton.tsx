@@ -20,7 +20,7 @@ import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
  * the mark existed to warn about the hour you might lose inside an unproven view. Weeks of
  * dogfooding later the grid is simply how sessions get watched side by side, and a warning
  * that no longer warns anyone is clutter on the one lane that is always on screen.
- * The orchestrator's badge stays — that surface still is what its mark says it is.
+ * The Assistant's badge stays — that surface still is what its mark says it is.
  */
 export function GridButton() {
   const view = useStore((s) => s.view)

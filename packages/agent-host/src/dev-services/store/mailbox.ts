@@ -64,7 +64,7 @@ export const MailFacts = z.looseObject({
   /** On Centralu's notice to a session whose work the person closed in the Inbox: the chain, how it was closed, and the person's requests in it that were withdrawn (at most ten) */
   chainClosed: z.object({ root: z.string(), outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']), withdrawn: z.array(z.string()).max(10) }).optional(),
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
-  /** On a request to the orchestrator: the person's message in the sender's conversation that Centralu checked it cites (docs/plans/cited-requests.md §3) */
+  /** On a request to the Assistant: the person's message in the sender's conversation that Centralu checked it cites (docs/plans/cited-requests.md §3) */
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
@@ -779,18 +779,18 @@ export class MailboxRecords {
   }
 
   /**
-   * Requests from `senders` to the orchestrator since `since` (§7.6): their messages and tasks with a row to it, leaving
-   * out a reply to a needsReply message or a task the orchestrator sent that sender, and a clarification (`facts.clarifies`)
+   * Requests from `senders` to the Assistant since `since` (§7.6): their messages and tasks with a row to it, leaving
+   * out a reply to a needsReply message or a task the Assistant sent that sender, and a clarification (`facts.clarifies`)
    */
-  requestsSince(senders: readonly string[], orchestrator: string, since: number): number {
+  requestsSince(senders: readonly string[], assistant: string, since: number): number {
     return this.count(
       `SELECT COUNT(*) AS n FROM mail m
         WHERE m.sender IN (SELECT value FROM json_each(@senders)) AND m.kind IN ('message', 'task') AND m.created_at >= @since
-          AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @orchestrator)
+          AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = @assistant)
           AND NOT (json_valid(m.facts) AND COALESCE(json_type(m.facts, '$.clarifies'), '') = 'text')
           AND NOT EXISTS (SELECT 1 FROM mail t JOIN mail_recipients tr ON tr.message_id = t.id AND tr.recipient = m.sender
-                           WHERE t.id = m.reply_to AND t.sender = @orchestrator AND (t.needs_reply = 1 OR t.kind = 'task'))`,
-      { senders: idList(senders), orchestrator, since },
+                           WHERE t.id = m.reply_to AND t.sender = @assistant AND (t.needs_reply = 1 OR t.kind = 'task'))`,
+      { senders: idList(senders), assistant, since },
     )
   }
 
@@ -867,7 +867,7 @@ export class MailboxRecords {
   }
 
   /**
-   * The orchestrator's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
+   * The Assistant's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
    * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
    * message ids moved
    */
@@ -1020,7 +1020,7 @@ export class MailboxRecords {
 
   /**
    * The parties of watched rows not settled, as recipients or senders: whom the delivery's sweep checks are still here (`partyGone`, §7.7). A row sent
-   * to the role waits for the next orchestrator (`moveRole`), not for the session that held it
+   * to the role waits for the next Assistant (`moveRole`), not for the session that held it
    */
   openParties(): string[] {
     return this.db

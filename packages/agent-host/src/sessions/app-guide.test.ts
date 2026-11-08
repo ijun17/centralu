@@ -1,27 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import type { OrchestratorTools } from '../adapters/contract.js'
+import type { CentraluTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { APP_GUIDE_TOPICS } from './app-guide.js'
 import {
   APP_ACCESS_TOOLS,
   COMMAND_TOOLS,
-  orchestratorInstructions,
-  ORCHESTRATOR_TOOLS,
+  assistantInstructions,
+  CENTRALU_TOOLS,
   COMPACT_TOOLS,
   AGENT_TOOLS,
   DELEGATE_TOOLS,
   SCOPED_INSTRUCTIONS,
-  orchestratorToolSchemas,
+  centraluToolSchemas,
   profileAllows,
-  runOrchestratorTool,
-} from './orchestrator-tools.js'
+  runCentraluTool,
+} from './centralu-tools.js'
 
 /**
  * The guide does not speak of a tool that does not exist (M4 P-4).
  *
- * The app guide is the text the orchestrator reads to explain the app to a person, and under M4 it
+ * The app guide is the text the Assistant reads to explain the app to a person, and under M4 it
  * also becomes the first thing an agent building an app reads. That text kept advertising
- * `archive_session` even after the archive feature was removed (58d2335) — if the orchestrator
+ * `archive_session` even after the archive feature was removed (58d2335) — if the Assistant
  * trusted it and called the tool, "unknown tool" would come back, and a person would end up being
  * told about a feature that does not exist. The control-rail app's (#81, removed in #97) tools had
  * the opposite problem: it knew about none of them.
@@ -32,10 +32,10 @@ import {
  */
 
 /** app_guide never calls the manager — an empty stub is enough */
-const noTools = {} as OrchestratorTools
+const noTools = {} as CentraluTools
 
 async function guide(topic?: string): Promise<string> {
-  const r = await runOrchestratorTool(noTools, 'app_guide', topic ? { topic } : {})
+  const r = await runCentraluTool(noTools, 'app_guide', topic ? { topic } : {})
   expect(r.isError).toBeFalsy()
   return r.text
 }
@@ -47,13 +47,13 @@ async function wholeGuide(): Promise<string> {
 }
 
 /** Every tool name in the registry, and the sets beside the reader set (#371: ask_project, and the app-access tools; #561: start_agent) */
-const KNOWN = new Set<string>([...ORCHESTRATOR_TOOLS.map((t) => t.name), ...COMMAND_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name), ...AGENT_TOOLS.map((t) => t.name), ...APP_ACCESS_TOOLS.map((t) => t.name), ...COMPACT_TOOLS.map((t) => t.name)])
+const KNOWN = new Set<string>([...CENTRALU_TOOLS.map((t) => t.name), ...COMMAND_TOOLS.map((t) => t.name), ...DELEGATE_TOOLS.map((t) => t.name), ...AGENT_TOOLS.map((t) => t.name), ...APP_ACCESS_TOOLS.map((t) => t.name), ...COMPACT_TOOLS.map((t) => t.name)])
 
 function toolLikeWords(text: string): string[] {
   return [...new Set(text.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])]
 }
 
-/** The list section for one seat, within the orchestrator topic */
+/** The list section for one seat, within the Assistant topic */
 function seatSection(text: string, heading: string): string {
   const start = text.indexOf(`## ${heading}`)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -62,7 +62,7 @@ function seatSection(text: string, heading: string): string {
 }
 
 const SEATS: { profile: ToolProfile; heading: string }[] = [
-  { profile: 'orchestrator', heading: 'Tools the orchestrator calls' },
+  { profile: 'assistant', heading: 'Tools the Assistant calls' },
   { profile: 'scoped', heading: 'Tools a coordinating session calls' },
   { profile: 'reader', heading: 'Tools every other session calls' },
 ]
@@ -74,15 +74,15 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
   })
 
   it('the same holds for the instructions given to the model', () => {
-    const text = [orchestratorInstructions(), SCOPED_INSTRUCTIONS].join('\n')
+    const text = [assistantInstructions(), SCOPED_INSTRUCTIONS].join('\n')
     expect(toolLikeWords(text).filter((w) => !KNOWN.has(w))).toEqual([])
   })
 
   it('every seat lists, without omission, every tool it can call', async () => {
-    const text = await guide('orchestrator')
+    const text = await guide('assistant')
     for (const { profile, heading } of SEATS) {
       const section = seatSection(text, heading)
-      const allowed = ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => t.name)
+      const allowed = CENTRALU_TOOLS.filter((t) => profileAllows(profile, t.name)).map((t) => t.name)
       expect(allowed.length).toBeGreaterThan(0)
       expect(allowed.filter((n) => !section.includes(`- ${n}:`))).toEqual([])
     }
@@ -101,11 +101,11 @@ describe('the app guide speaks only of tools that exist in the registry', () => 
  */
 describe("app_guide's topic", () => {
   it("is offered as exactly the guide's topics, on every seat that has the guide", () => {
-    const seats = (['orchestrator', 'scoped', 'reader'] as const).filter((p) => orchestratorToolSchemas(p).some((t) => t.name === 'app_guide'))
+    const seats = (['assistant', 'scoped', 'reader'] as const).filter((p) => centraluToolSchemas(p).some((t) => t.name === 'app_guide'))
     expect(seats).toContain('reader')
-    expect(seats).toContain('orchestrator')
+    expect(seats).toContain('assistant')
     for (const profile of seats) {
-      const schema = orchestratorToolSchemas(profile).find((t) => t.name === 'app_guide')!.inputSchema as {
+      const schema = centraluToolSchemas(profile).find((t) => t.name === 'app_guide')!.inputSchema as {
         properties: { topic: { enum?: string[] } }
         required?: string[]
       }
@@ -118,13 +118,13 @@ describe("app_guide's topic", () => {
   it('reads a topic named in other words as that topic, with the list, and refuses one that names none', async () => {
     const settings = await guide('settings')
     for (const [asked, topic] of [['Session settings', 'settings'], ['approval', 'approvals'], ['sharing apps between projects', 'apps']] as const) {
-      const r = await runOrchestratorTool(noTools, 'app_guide', { topic: asked })
+      const r = await runCentraluTool(noTools, 'app_guide', { topic: asked })
       expect(r.isError, asked).toBeFalsy()
       expect(r.text, asked).toContain(`Read as "${topic}"`)
       expect(r.text, asked).toContain(APP_GUIDE_TOPICS.join(', '))
     }
-    expect((await runOrchestratorTool(noTools, 'app_guide', { topic: 'Session settings' })).text).toContain(settings)
-    const none = await runOrchestratorTool(noTools, 'app_guide', { topic: 'keyboard' })
+    expect((await runCentraluTool(noTools, 'app_guide', { topic: 'Session settings' })).text).toContain(settings)
+    const none = await runCentraluTool(noTools, 'app_guide', { topic: 'keyboard' })
     expect(none.isError).toBe(true)
     expect(none.text).toContain(APP_GUIDE_TOPICS.join(', '))
   })

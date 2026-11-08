@@ -36,7 +36,7 @@
     "smoke:cursor": "node packages/agent-host/scripts/smoke-cursor.mjs",
     "smoke:opencode": "node packages/agent-host/scripts/smoke-opencode.mjs",
     "smoke:opencode:scripted": "node packages/agent-host/scripts/smoke-opencode-scripted.mjs",
-    "smoke:orchestrator": "tsx packages/agent-host/scripts/smoke-orchestrator.mts",
+    "smoke:assistant": "tsx packages/agent-host/scripts/smoke-assistant.mts",
     "smoke:schemas": "tsx packages/agent-host/scripts/smoke-schemas.mts",
     "app": "tsx scripts/app-build.mts",
     "app:open": "open \"apps/desktop/src-tauri/target/release/bundle/macos/Centralu.app\"",

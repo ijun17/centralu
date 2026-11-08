@@ -6,7 +6,7 @@ import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
 import type { AppRegistry } from './app-registry.js'
 import type { ToolsMock } from './tools.js'
-import type { OrchestratorMock } from './orchestrator.js'
+import type { AssistantMock } from './assistant.js'
 import type { Emit } from './event-bus.js'
 import { mockError } from './mock-error.js'
 import { mockSessionInfo } from './session-info.js'
@@ -116,7 +116,7 @@ export class AppBuilderMock {
     /**
      * The builder session (M4 C-2). Like the real thing: one per app (returns the existing one
      * if there is one), never created for an untrusted app, and if no tool is chosen, uses the
-     * project's default tool (the orchestrator's tool for a user-folder app). The session fails
+     * project's default tool (the Assistant's tool for a user-folder app). The session fails
      * to start if that tool is absent or not logged in. The name is a human-chosen "<app> ·
      * builder", and the session's app slot is that app. Broadcasts `session_created` on
      * creation.
@@ -132,7 +132,7 @@ export class AppBuilderMock {
         throw new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
       }
       const project = projectId ? this.projectStore.list.find((p) => p.id === projectId) : undefined
-      const chosen = tool ?? (project ? project.defaultTool : this.orchestratorMock.orchestratorTool) ?? this.toolsMock.firstRegisteredTool()
+      const chosen = tool ?? (project ? project.defaultTool : this.assistantMock.assistantTool) ?? this.toolsMock.firstRegisteredTool()
       const detected = this.toolsMock.detected.find((t) => t.name === chosen)
       if (!detected?.installed || !detected.loggedIn) {
         throw new Error(`Could not start ${chosen} session: ${detected?.detail ?? `${chosen} is not installed`}`)
@@ -252,6 +252,6 @@ export class AppBuilderMock {
     private readonly projectStore: ProjectStore,
     private readonly registry: AppRegistry,
     private readonly toolsMock: ToolsMock,
-    private readonly orchestratorMock: OrchestratorMock,
+    private readonly assistantMock: AssistantMock,
   ) {}
 }

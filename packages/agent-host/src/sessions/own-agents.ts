@@ -18,7 +18,7 @@ export type OwnAgentsHost = Pick<DelegationHost, 'children' | 'meta' | 'trashing
  */
 export function ownAgents(host: OwnAgentsHost, callerId: string): SessionInfo[] {
   const caller = host.meta.get(callerId)
-  // The orchestrator's children have no project (#853): its own place is none
+  // The Assistant's children have no project (#853): its own place is none
   const projectId = caller?.kind === 'orchestrator' ? null : caller?.projectId
   if (projectId === undefined || (projectId === null && caller?.kind !== 'orchestrator')) return []
   return [...host.meta.values()]

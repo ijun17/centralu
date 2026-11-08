@@ -41,7 +41,7 @@ centralu/
 │  │     ├─ events.ts           # the NormalizedEvent family
 │  │     ├─ commands.ts         # request/response RPC (RpcMethods), spread from commands/methods/; re-exports commands/
 │  │     ├─ commands/           # the shapes its methods carry: sessions (SessionInfo), projects, files; methods/
-│  │     │                      #   holds the methods by concept: sessions, orchestrator, projects, terminal, apps,
+│  │     │                      #   holds the methods by concept: sessions, assistant, projects, terminal, apps,
 │  │     │                      #   host, settings
 │  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus: re-exports entities/
 │  │     ├─ entities/           # one module per concept: ids, sessions, grid, apps, tools, approvals, usage,
@@ -90,7 +90,7 @@ centralu/
 │  │     ├─ features/           # vertical split by feature (§2 below)
 │  │     │  ├─ inbox/  session/  approval/  notices/  sidebar/  grid/  palette/
 │  │     │  ├─ git/  files/  viewer/  evidence/  project/
-│  │     │  ├─ orchestrator/     # the orchestrator's screen and proposals
+│  │     │  ├─ assistant/     # the Assistant's screen and proposals
 │  │     │  ├─ app-frame/  pinned-app/  app-share/   # external apps' views and their sharing
 │  │     │  ├─ machines/         # machine tags, adding a folder on a linked machine
 │  │     │  └─ usage/  settings/  onboarding/
@@ -98,7 +98,7 @@ centralu/
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     │                      #   store.ts가 아래 부분들로 스토어 하나를 만든다(#428):
 │  │     │  └─ state.ts(타입: `AppState`는 state/의 개념별 타입을 교차한 것이다)
-│  │     │     state/(개념별 타입 하나씩: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, orchestrator)
+│  │     │     state/(개념별 타입 하나씩: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, assistant)
 │  │     │     historyPages.ts(히스토리 페이지와 화면 병합)
 │  │     │     screens.ts(지금 보이는 화면)  appKeys.ts(앱과 그 뷰의 이름)
 │  │     │     sessionList.ts(스토어가 가진 세션: 호스트 목록 병합, 아직 등록되지 않은 세션의 이벤트 보관)
@@ -109,7 +109,7 @@ centralu/
 │  │     │     connection.ts(호스트에 붙기, 재연결 복구, 작업 공간 스냅숏)
 │  │     │     history.ts(대화 히스토리 페이지와 실행 카드의 단계 읽기)
 │  │     │     updates.ts(Centralu 업데이트와 에이전트 CLI 버전)  machines.ts(연결된 기기)
-│  │     │     orchestrator.ts(오케스트레이터와 그 제안)
+│  │     │     assistant.ts(어시스턴트와 그 제안)
 │  │     │     layout.ts(창 배치)  navigation.ts(보이는 화면, 뒤로·앞으로)
 │  │     │     selectors.ts(파생 상태)  transcript.ts(대화의 줄)  layers.ts(열린 레이어)
 │  │     │     navHistory.ts  panelLayout.ts  foldGroups.ts  reloadBudget.ts  viewReconnect.ts  app-catalog.ts
@@ -121,7 +121,7 @@ centralu/
 │        ├─ lifecycle/          # 시작의 단계, 준비 관문, 종료와 끝맺음
 │        ├─ transport/          # WS 서버, 세션 핸드셰이크, 이벤트 로그
 │        ├─ adapters/           # claude/, codex/ + 공통 어댑터 계약(contract.ts). 도구마다의 사용량 읽기(usage.ts)와
-│        │                      #   오케스트레이터의 MCP 서버(claude/orchestrator-mcp.ts, codex/orchestrator-bridge.mjs)
+│        │                      #   어시스턴트의 MCP 서버(claude/centralu-mcp.ts, codex/centralu-bridge.mjs)
 │        │                      #   도구마다 index.ts가 어댑터, session.ts가 세션이고, 세션에서 떼어 낸 부분이 옆에 있다
 │        │                      #   (#850): claude/ session-cards, session-servers, permissions, sdk-query, refresh-race,
 │        │                      #   tracked-input, schedule-look; codex/ server-requests,
@@ -129,11 +129,11 @@ centralu/
 │        │                      #   background-resume. codex/normalize.ts는 알림을
 │        │                      #   옮기고, 그것이 읽는 부분이 옆에 있다: items, approvals, thread-settings, token-readings,
 │        │                      #   child-tracker, known-notifications. claude/normalize.ts는 메시지를 옮기고, 종류마다 파일이
-│        │                      #   하나다: cli-messages, model-messages, turn-ending. contract.ts는 contract/의 orchestrator, session-apps,
+│        │                      #   하나다: cli-messages, model-messages, turn-ending. contract.ts는 contract/의 assistant, session-apps,
 │        │                      #   process를 다시 내보낸다. 두 도구가 함께 쓰는 것:
 │        │                      #   tool-result, file-changes, images, plan, token-usage, tool-titles, retry-activity, session-kit,
 │        │                      #   subagent-steps, history-events, background-events (#843)
-│        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow(start_agent는 start-agent-flow, 그 관문은 agent-start-gates, 동의 카드는 agent-consents, 모델·effort·워크트리 브랜치 확인은 agent-choices, 사람이나 메모리를 기다리는 요청은 agent-start-requests, 함께 쓰는 것은 start-agent-terms, agent_session은 agent-session-actions, 지켜보는 턴은 observed-turns, 포크는 delegation-forks, 기다림과 그 답은 delegation-waits, 자식의 백그라운드 작업 멈추기는 background-stops, 연결된 기계의 자식은 remote-agents, 매니저에서 닿는 것은 delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes, session-start, session-events, tool-registry, approval-rules, project-registry, launch-inputs, session-layout, orchestrator-slot, linked-host, session-settings(#1143); 세션 앱(session-apps, app-access, app-agents, app-builder, app-guide); 오케스트레이터 도구의 실행부(orchestrator-tools)와 거기서 떼어 낸 부분(#850): tool-definitions, tool-seats, tool-answers, tool-profiles
+│        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow(start_agent는 start-agent-flow, 그 관문은 agent-start-gates, 동의 카드는 agent-consents, 모델·effort·워크트리 브랜치 확인은 agent-choices, 사람이나 메모리를 기다리는 요청은 agent-start-requests, 함께 쓰는 것은 start-agent-terms, agent_session은 agent-session-actions, 지켜보는 턴은 observed-turns, 포크는 delegation-forks, 기다림과 그 답은 delegation-waits, 자식의 백그라운드 작업 멈추기는 background-stops, 연결된 기계의 자식은 remote-agents, 매니저에서 닿는 것은 delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, assistant-seat, restart-policy, worktree-sessions, transcript-view, assistant-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes, session-start, session-events, tool-registry, approval-rules, project-registry, launch-inputs, session-layout, assistant-slot, linked-host, session-settings(#1143); 세션 앱(session-apps, app-access, app-agents, app-builder, app-guide); 어시스턴트 도구의 실행부(centralu-tools)와 거기서 떼어 낸 부분(#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
 │        ├─ views/              # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지
 │        ├─ links/              # 링크된 기기(#82): links.ts가 문(다시 내보내기). 기기 하나의 연결과 작업, 링크 목록, 원격 클라이언트, ssh로 하는 설치와 업데이트
@@ -187,4 +187,4 @@ features/inbox/
 
 - ui와 agent-host는 protocol을 **같은 타입으로** 공유해야 한다 — 저장소를 나누는 순간 버전 표류가 시작된다.
 - 패키지 5개는 1인 개발에 과하지 않다: 각 경계가 tsconfig `references`로 빌드 격리를 얻고 lint 규칙의 단위가 된다. 같은 것을 하나의 src/ 아래 폴더로만 나누면 경계가 관례에 그치고, 관례는 마감 앞에서 무너진다.
-- Turborepo 같은 빌드 오케스트레이터는 **지금은 추가하지 않는다** — 이 규모에서는 pnpm 스크립트로 충분하다. 빌드가 느려지면 그때 추가한다(YAGNI).
+- Turborepo 같은 빌드 어시스턴트는 **지금은 추가하지 않는다** — 이 규모에서는 pnpm 스크립트로 충분하다. 빌드가 느려지면 그때 추가한다(YAGNI).

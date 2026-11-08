@@ -3,7 +3,7 @@ import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
-import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
+import type { CreateSessionOpts, CentraluTools, SessionHandle } from '../contract.js'
 import { bridgePath } from '../bridge-path.js'
 
 /**
@@ -80,7 +80,7 @@ async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) 
   events = []
   handle = await new CodexAdapter().createSession(
     // A project's app only attaches in a trusted project (decision 4) — matching what the manager passes, this session belongs to a trusted project
-    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), orchestratorBridge: BRIDGE, ...over },
+    { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), centraluBridge: BRIDGE, ...over },
     (e) => events.push(e),
   )
   return state.instances[0]!
@@ -123,7 +123,7 @@ describe('thread/start — one bridge per app', () => {
     })
     // A long-running call is returned with a run id before Codex's own 300-second ceiling (at 240 seconds) — the bridge carries this value to the host
     expect((servers['app-notes']!.env as Record<string, string>).CC_APP_WAIT_MS).toBe('240000')
-    // A worker in a trusted project — neither the orchestrator's bridge nor document blocking is present
+    // A worker in a trusted project — neither the Assistant's bridge nor document blocking is present
     expect(servers).not.toHaveProperty('centralu')
     expect(threadConfig(c, 'thread/start')).not.toHaveProperty('project_doc_max_bytes')
   })
@@ -215,7 +215,7 @@ describe("normal follows the person's own Codex policy for app tools (#382)", ()
    * `.codex/config.toml` is read only with a folder, and only Codex-trusted folders contribute it. A session whose
    * repository files are kept out must not let that file turn its app tools into `approve`.
    */
-  it("a trusted project's session reads from its folder; an untrusted one, and the orchestrator, read only the person's layers", async () => {
+  it("a trusted project's session reads from its folder; an untrusted one, and the Assistant, read only the person's layers", async () => {
     const trusted = await start(WORKER, { cwd: '/tmp/proj' })
     expect(configReads(trusted)).toEqual([{ cwd: '/tmp/proj' }])
     const untrusted = await start(WORKER, { cwd: '/tmp/proj', projectTrusted: false })
@@ -255,11 +255,11 @@ describe('thread/resume — servers are loaded again on resume too', () => {
   })
 
   // An approved MCP server arrives as a user-folder app (occupying the app-helper slot) — no server is ever loaded raw (A-7)
-  it("the orchestrator's resume loads both the centralu bridge and the user-folder app's bridge, plus document blocking", async () => {
+  it("the Assistant's resume loads both the centralu bridge and the user-folder app's bridge, plus document blocking", async () => {
     const c = await start(ORCH, {
       resumeExternalId: 'thread-o',
-      orchestratorTools: {} as OrchestratorTools,
-      toolProfile: 'orchestrator',
+      centraluTools: {} as CentraluTools,
+      toolProfile: 'assistant',
     })
     await (handle as unknown as { ready: Promise<void> }).ready
     const config = threadConfig(c, 'thread/resume')
@@ -279,7 +279,7 @@ describe('thread/resume — servers are loaded again on resume too', () => {
    */
   for (const preset of ['auto', 'normal', 'safe'] as const) {
     it(`Centralu's own tools are approved up front under ${preset}, for every profile that gets them`, async () => {
-      const c = await start(WORKER, { permissionPreset: preset, orchestratorTools: {} as OrchestratorTools, toolProfile: 'reader' })
+      const c = await start(WORKER, { permissionPreset: preset, centraluTools: {} as CentraluTools, toolProfile: 'reader' })
       expect(mcpServers(c)!['centralu']).toMatchObject({ default_tools_approval_mode: 'approve' })
     })
   }
@@ -359,7 +359,7 @@ describe('elicitation — app tool approval goes to our card, everything else st
   })
 
   it("accepts centralu's own elicitation as before (not conflated with an app)", async () => {
-    const c = await start(ORCH, { orchestratorTools: {} as OrchestratorTools, toolProfile: 'orchestrator' })
+    const c = await start(ORCH, { centraluTools: {} as CentraluTools, toolProfile: 'assistant' })
     c.trigger({ id: 41, method: 'mcpServer/elicitation/request', params: { serverName: 'centralu' } })
     expect(c.responses).toContainEqual({ id: 41, payload: { action: 'accept', content: null, _meta: null } })
   })

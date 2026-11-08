@@ -100,13 +100,13 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
-  orchestrator() {
+  assistant() {
     return this.rpc.call('orchestrator.get', {})
   }
-  orchestratorPeek() {
+  assistantPeek() {
     return this.rpc.call('orchestrator.peek', {})
   }
-  configureOrchestrator(tool: ToolName) {
+  configureAssistant(tool: ToolName) {
     return done(this.rpc.call('orchestrator.configure', { tool }))
   }
   switchTool(sessionId: string, tool: ToolName) {
@@ -173,10 +173,10 @@ class WebAgentPort implements AgentPort {
   resolveSkillProposal(name: string, approve: boolean) {
     return done(this.rpc.call('agents.resolveSkillProposal', { name, approve }))
   }
-  async orchestratorSkills() {
+  async assistantSkills() {
     return this.rpc.call('agents.orchestratorSkills', {})
   }
-  deleteOrchestratorSkill(name: string) {
+  deleteAssistantSkill(name: string) {
     return done(this.rpc.call('agents.deleteOrchestratorSkill', { name }))
   }
 

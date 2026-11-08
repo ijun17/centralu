@@ -23,7 +23,7 @@ import { notifyStateChange } from './notices.js'
  */
 
 /**
- * Calls of the orchestrator's proposal tools that have not returned yet, as `sessionId:callId` (a Codex call id may be
+ * Calls of the Assistant's proposal tools that have not returned yet, as `sessionId:callId` (a Codex call id may be
  * unique only within its thread): their `tool_result` re-reads the lists (#703)
  */
 const proposalCalls = new Set<string>()
@@ -131,7 +131,7 @@ export function conversationEvent(
    */
   const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
   let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
-  // A message sent by me (or by the orchestrator) also gets marked read by the host — the screen follows
+  // A message sent by me (or by the Assistant) also gets marked read by the host — the screen follows
   if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
   /*
    * A lock found after the session was already handed back (#168, item 5) — a slow background
@@ -148,7 +148,7 @@ export function conversationEvent(
     /*
      * An off-screen conversation is cut back to the window (OFFSCREEN_TRIM_AT), never while a page of history is
      * still on its way: that page is merged against the rows it was asked for. The focused session is never cut,
-     * even while the orchestrator, the grid or a pinned app covers it: it is the conversation the person returns
+     * even while the Assistant, the grid or a pinned app covers it: it is the conversation the person returns
      * to, with the pages they loaded and their reading position (docs/state-management.md §4).
      */
     const trimmed =
@@ -158,7 +158,7 @@ export function conversationEvent(
       !st.history[sessionId]?.loading &&
       !isOnScreen(st.view, sessionId, {
         focusedSessionId: st.focusedSessionId,
-        orchestratorId: st.orchestratorId,
+        assistantId: st.assistantId,
         gridSessions: gridSessionIds(st.gridPanels),
         builderPaneSessionId: st.builderPaneSessionId,
         projectScreen: projectScreenSessions(st),

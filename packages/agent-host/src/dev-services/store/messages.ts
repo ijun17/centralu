@@ -18,7 +18,7 @@ const OUT_OF_TRASH = `session_id NOT IN (SELECT id FROM sessions WHERE deleted_a
  *
  * Without `full` a tool message reads as its card: `summary` and nothing more. That is the default because every
  * reader today hands what it reads to someone else: the UI (a history page), another session's prompt
- * (`read_session`, `recall`, the orchestrator's memory), a successor (the handoff record). Full tool output reaching
+ * (`read_session`, `recall`, the Assistant's memory), a successor (the handoff record). Full tool output reaching
  * another session's prompt is the privilege path #73 closed, and an agent `cat`-ing a large file must not ride every
  * page load. A reader that needs the record asks for it by name here, where the question gets asked.
  */
@@ -117,7 +117,7 @@ export class MessageRecords {
    *
    * This used to trim with `snippet(..., 12)` here, but that 12 counted not characters but
    * **tokens**, and with the trigram tokenizer that cut off after roughly 15 real characters.
-   * The orchestrator would receive something like `"the policy list already said the…"` and
+   * The Assistant would receive something like `"the policy list already said the…"` and
    * **could not tell whether this was even the passage it was looking for.** How much
    * surrounding context is needed is something only the caller knows, so that judgment is
    * left to it.

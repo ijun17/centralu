@@ -111,7 +111,7 @@ function quoted(name: string): string {
  * notification: which agent, on what, and with which permissions (the caller's own, which is the most it can have).
  */
 export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
-  // The orchestrator's child (#853) works in no project: its card names no project id, and the place is said as such
+  // The Assistant's child (#853) works in no project: its card names no project id, and the place is said as such
   const place = d.project.id ? quoted(d.project.name) : d.project.name
   // On a linked machine (#1038) the project is that machine's checkout: the sentence says whose computer it runs on
   const on = d.machine ? `${place} on ${quoted(d.machine)}` : place

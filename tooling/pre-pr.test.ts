@@ -866,7 +866,7 @@ ${ns.map(step).join('')}    ]
     commit('feat: step 57 again')
     const r = run({}, fakeGh([]))
     expect(stepFiles(r)).toHaveLength(1)
-    expect(stepFiles(r)[0]).toContain('Store step 57 is already on main (v55.ts). The orchestrator assigns')
+    expect(stepFiles(r)[0]).toContain('Store step 57 is already on main (v55.ts). The Assistant assigns')
     expect(r.ok).toBe(false)
   })
 

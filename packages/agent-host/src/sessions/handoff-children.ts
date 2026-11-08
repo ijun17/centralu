@@ -143,8 +143,8 @@ export class HandoffChildren {
    * owed the report that wait had taken down), and a later agent_session or ask_project about one of them says so.
    *
    * **No permission check here.** The caller must have established that the new session may take over the original:
-   * the person's handoff (the window's RPC), and the orchestrator's handoff_session (#694), which reaches this through
-   * `createSession` only after `HandoffFlow` has checked its authority over the original (the central orchestrator, a
+   * the person's handoff (the window's RPC), and the Assistant's handoff_session (#694), which reaches this through
+   * `createSession` only after `HandoffFlow` has checked its authority over the original (the Assistant, a
    * project's ordinary session in its view, not mid-turn, the person's card unless `auto`). Any other agent-facing path
    * must check its own authority the same way before it does.
    */

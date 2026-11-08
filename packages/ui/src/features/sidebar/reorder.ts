@@ -28,7 +28,7 @@ export const APP_MIME = 'application/x-cc-app'
  * security, see GridView). So the project screen cannot ask a dragged row which project it is from
  * until the drop — too late to show that it will not take it. With the project in the type, the
  * screen refuses another project's session or app while it is still being dragged, with no drop
- * cursor. The orchestrator's row belongs to no project and carries none, so it is refused too.
+ * cursor. The Assistant's row belongs to no project and carries none, so it is refused too.
  *
  * The browser lowercases types. Project ids are UUIDs, lowercase already; the encoding only keeps
  * an unusual id from producing an odd type, and the drop checks the data anyway (project/drop.ts).

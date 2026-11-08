@@ -7,7 +7,7 @@ import type { HostCards } from './host-cards.js'
 import { plainQuoted, trustedJsonText } from './tool-answers.js'
 
 /**
- * What the orchestrator's machine commands reach of the hub's links (#1219), the same calls the window's `machines.*`
+ * What the Assistant's machine commands reach of the hub's links (#1219), the same calls the window's `machines.*`
  * make (`Links`, links/links-registry.ts). Wired by main.ts (`SessionManager.useMachineOps`); none on a host that links
  * nothing, where every command says so.
  */
@@ -110,7 +110,7 @@ function targetError(target: string): string | null {
 }
 
 /**
- * The orchestrator's commands for linked machines (#1219): add (probed first), install or update Centralu there,
+ * The Assistant's commands for linked machines (#1219): add (probed first), install or update Centralu there,
  * remove, reconnect, Auto reconnect, and whether it starts at boot. Each is the call the window's Machines screen
  * makes. What changes a machine or this computer's reach (add, install, update, remove, start at boot) waits for the
  * person's card, in every preset; reconnecting and Auto reconnect do not, as the row's buttons do not ask, except
@@ -207,7 +207,7 @@ export class MachineFlow {
           if (why) return { ok: false, error: why }
           const version = m.versions?.hub.version ? `Centralu ${m.versions.hub.version}` : "this computer's Centralu"
           /*
-           * An update never stops a turn that runs there on the orchestrator's say (#1399): with sessions in a turn the card says so
+           * An update never stops a turn that runs there on the Assistant's say (#1399): with sessions in a turn the card says so
            * and Allow means "update when idle". Forcing it is the person's, from Settings
            */
           /*
@@ -348,7 +348,7 @@ export class MachineFlow {
   }
 
   /** The hosts of the person's ssh config, each with the machines linked through it: what add_machine can be given (#1219) */
-  /** Tells the session that called, in its conversation (relayed, since an orchestrator only gets a pointer to a message that is not), how an update it was answered "still under way" for ended; never throws */
+  /** Tells the session that called, in its conversation (relayed, since an Assistant only gets a pointer to a message that is not), how an update it was answered "still under way" for ended; never throws */
   private async tellEnd(sessionId: string, text: string): Promise<void> {
     await this.host.tellSession(sessionId, text, { sessionId: HOST_SENDER, name: 'Centralu' }, true).catch(() => undefined)
   }
@@ -431,7 +431,7 @@ export class MachineFlow {
     return done(`Linked ${target} as ${name} (${osOf({ shell, wslDistro, autostart: null })}).`, ops.add({ name, sshTarget: target, shell, wslDistro }))
   }
 
-  /** The machine card, allow or deny only (`MACHINE_CHANGE`): the refusal the orchestrator reads, or null once allowed */
+  /** The machine card, allow or deny only (`MACHINE_CHANGE`): the refusal the Assistant reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal): Promise<string | null> {
     const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: MACHINE_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it, so nothing changed. Do not ask again unless they tell you to.'

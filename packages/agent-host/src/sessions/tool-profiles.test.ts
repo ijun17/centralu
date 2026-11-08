@@ -13,10 +13,10 @@ const facts = (over: Partial<ToolProfileFacts> = {}): ToolProfileFacts => ({
 })
 
 describe('toolProfileFor — which bundle a session gets (#69, #320)', () => {
-  it('the orchestrator gets everything, whatever else its row says', () => {
-    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null }))).toBe('orchestrator')
+  it('the Assistant gets everything, whatever else its row says', () => {
+    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null }))).toBe('assistant')
     // Its kind decides; an app stamp, a builder slot or the Settings switch change nothing
-    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null, appId: 'a', builder: true }))).toBe('orchestrator')
+    expect(toolProfileFor(facts({ kind: 'orchestrator', projectId: null, appId: 'a', builder: true }))).toBe('assistant')
   })
 
   it('a coordinator an older build left (#372) still wakes with the scoped bundle', () => {
@@ -82,14 +82,14 @@ describe('isAppAgent and readsOwnProject', () => {
 describe('toolBundleFor — the object behind each profile', () => {
   const calls: string[] = []
   const sources = {
-    orchestrator: () => (calls.push('orchestrator'), 'full' as const),
+    assistant: () => (calls.push('assistant'), 'full' as const),
     scoped: (ids: string[]) => (calls.push(`scoped:${ids.join(',')}`), 'members' as const),
     reader: () => (calls.push('reader'), 'own-project' as const),
   }
 
   it.each<[ToolProfile, string, string]>([
-    ['orchestrator', 'full', 'orchestrator'],
-    ['builder', 'full', 'orchestrator'],
+    ['assistant', 'full', 'assistant'],
+    ['builder', 'full', 'assistant'],
     ['scoped', 'members', 'scoped:s1,s2'],
     ['reader', 'own-project', 'reader'],
   ])('%s takes %s', (profile, bundle, source) => {
@@ -151,18 +151,18 @@ describe('through the manager: the same profile under either tool and any preset
       // An app's agent (M4 D-1) runs under safe (app-agents.test.ts); the preset is not what takes its tools away
       const agent = await mgr.createSession({ projectId: project.id, cwd: project.path, tool, permissionPreset, appId: 'app-notes' })
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBeUndefined()
-      expect(adapters[tool].handed.at(-1)?.orchestratorTools).toBeUndefined()
+      expect(adapters[tool].handed.at(-1)?.centraluTools).toBeUndefined()
       expect(mgr.tools.toolProfileOf(agent.id)).toBeNull()
     }
   })
 
-  it('the orchestrator is the orchestrator under either tool', async () => {
+  it('the Assistant is the Assistant under either tool', async () => {
     for (const tool of ['claude', 'codex'] as const) {
       const { mgr, adapters } = world()
-      mgr.orchestratorSlot.configureOrchestrator(tool)
-      const o = await mgr.orchestrator()
-      expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('orchestrator')
-      expect(mgr.tools.toolProfileOf(o.id)).toBe('orchestrator')
+      mgr.assistantSlot.configureAssistant(tool)
+      const o = await mgr.assistant()
+      expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('assistant')
+      expect(mgr.tools.toolProfileOf(o.id)).toBe('assistant')
     }
   })
 })
@@ -173,7 +173,7 @@ describe('codeIntelligenceOff — which sessions start without a language server
   it('a child starts without it: one start_agent started, a fork, an agent an app asked for', () => {
     expect(codeIntelligenceOff(ci({ askedBy: 'parent' }))).toBe(true)
     expect(codeIntelligenceOff(ci({ forkedFrom: 'busy', askedBy: 'requester' }))).toBe(true)
-    // The orchestrator's fork has no askedBy (no project of its own): the copy alone makes it a child
+    // The Assistant's fork has no askedBy (no project of its own): the copy alone makes it a child
     expect(codeIntelligenceOff(ci({ forkedFrom: 'busy' }))).toBe(true)
     expect(codeIntelligenceOff(ci({ appId: 'app-notes' }))).toBe(true)
   })

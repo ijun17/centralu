@@ -222,8 +222,8 @@ export const hostParams = {
   /** What would stop if this host stopped now (the `hostBusy` rule); for a hub's `machines.activity` */
   'host.activity': z.object({}),
   /**
-   * What a hub's orchestrator reads about this host's sessions (docs/plans/remote-hub.md §12): the sessions a hub's
-   * window shows (not this host's orchestrator or coordinators), one conversation, and a search over them. Asked of a
+   * What a hub's Assistant reads about this host's sessions (docs/plans/remote-hub.md §12): the sessions a hub's
+   * window shows (not this host's assistant or coordinators), one conversation, and a search over them. Asked of a
    * linked machine by the hub directly, never routed; this host's own window has no use for them. A read is capped at
    * 200 lines and a search at 50 hits
    */
@@ -292,9 +292,9 @@ export const hostParams = {
     since: z.number().int().optional(),
   }),
   /**
-   * An instruction from a hub's orchestrator to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
-   * step 2): delivered as the orchestrator's `send_to_session` is here, recorded as sent by `from.name`. Only a session
-   * a hub is shown (not this host's orchestrator or coordinators). Asked by the hub directly, never routed
+   * An instruction from a hub's Assistant to one of this host's sessions (docs/plans/remote-hub.md §12, phase 4
+   * step 2): delivered as the Assistant's `send_to_session` is here, recorded as sent by `from.name`. Only a session
+   * a hub is shown (not this host's assistant or coordinators). Asked by the hub directly, never routed
    */
   'host.send': z.object({
     sessionId: SessionId,
@@ -303,7 +303,7 @@ export const hostParams = {
     /**
      * The text is an ask_project task (#838 item 12), and the session works on it at this agent depth until the turn
      * that consumes it is recorded: the hub's caller's depth, plus one. Absent from an older hub, and from an
-     * orchestrator's instruction.
+     * Assistant's instruction.
      */
     ask: z.object({ depth: z.number().int().min(1).max(64) }).optional(),
   }),

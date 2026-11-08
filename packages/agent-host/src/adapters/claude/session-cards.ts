@@ -8,7 +8,7 @@ import { claudeEditPath } from '../edit-grant.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { newFile } from './new-file.js'
 import { approvalDetail } from './normalize.js'
-import { appToolOf, isOrchestratorTool, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
+import { appToolOf, isCentraluToolName, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
 import { asObj } from '../../json-value.js'
 
 const ALLOW: StepAnswer = { grant: 'allow' }
@@ -141,14 +141,14 @@ export class ClaudeCards {
       /*
        * **We vouch for our own tools ourselves.**
        *
-       * The orchestrator's centralu tools can never reach outside the sessions this app
+       * The Assistant's centralu tools can never reach outside the sessions this app
        * manages (only the manager ever sees them), and the actual dangerous part — what the
        * target session runs — **is already gated entirely by that session's own permission
        * settings.** Asking again here would double up approval, and the reason this feature
        * exists in the first place — issuing instructions from one window — would disappear.
        *
        * Measured: without this, even a single list read popped an approval window, and the
-       * orchestrator stalled on its very first tool call.
+       * assistant stalled on its very first tool call.
        *
        * Checked before auto's refusal, so it holds under every preset (#382): in auto a call reaches this
        * callback only when an `ask` rule matched, and a rule naming `mcp__centralu` (the person's, or a trusted
@@ -159,7 +159,7 @@ export class ClaudeCards {
        * off in Settings) a `centralu` server can still come from the person's own `~/.claude`, and its tools
        * are not ours to vouch for.
        */
-      ownTool: isOrchestratorTool(toolName) && this.host.ownServer(),
+      ownTool: isCentraluToolName(toolName) && this.host.ownServer(),
       before: [],
       auto: preset === 'auto',
       after: [() => this.appToolUnasked(preset, toolName, toolInput), () => this.readGranted(toolName, toolInput)],

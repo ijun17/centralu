@@ -2,7 +2,7 @@ import type { NormalizedEvent } from '@cc/protocol/client'
 import type { StoreGet, StoreSet } from '../state.js'
 
 /**
- * App-wide lists the host changed (themes, projects, cross-project consents, the orchestrator's
+ * App-wide lists the host changed (themes, projects, cross-project consents, the Assistant's
  * proposals): each is read again, or its version bumped for the screen that reads it. Handled before
  * the session guard (`dispatchEvent`). True when the event was one of these.
  */
@@ -12,16 +12,16 @@ export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
     return true
   }
 
-  // A setting changed (#1306): another window saved one, or the orchestrator did
+  // A setting changed (#1306): another window saved one, or the Assistant did
   if (e.type === 'prefs_changed') {
     void get().refreshPrefs()
     return true
   }
 
-  // The host made a project (#515): the orchestrator's, once approved, or another window's
+  // The host made a project (#515): the Assistant's, once approved, or another window's
   if (e.type === 'projects_changed') {
     const refreshed = get().refreshProjects()
-    // A folder the person allowed the orchestrator to add (#1220): asked about its trust once, as Add project asks
+    // A folder the person allowed the Assistant to add (#1220): asked about its trust once, as Add project asks
     const added = e.added
     if (added) {
       void refreshed.then(() => {

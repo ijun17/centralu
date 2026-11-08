@@ -1,4 +1,4 @@
-import type { OrchestratorTools, SessionApps } from '../contract.js'
+import type { CentraluTools, SessionApps } from '../contract.js'
 
 /**
  * What a recorded session is given in place of a host (#1498): Centralu's own tools and an attached app, answered with fixed words.
@@ -9,9 +9,9 @@ import type { OrchestratorTools, SessionApps } from '../contract.js'
 
 const SESSION = { sessionId: 'session-other', sessionName: 'Docs worker', tool: 'claude' } as const
 
-/** The slice of `OrchestratorTools` the scenarios call; the reader's tool set */
-export function fakeCentraluTools(): OrchestratorTools {
-  const tools: Partial<OrchestratorTools> = {
+/** The slice of `CentraluTools` the scenarios call; the reader's tool set */
+export function fakeCentraluTools(): CentraluTools {
+  const tools: Partial<CentraluTools> = {
     mail: (args) => {
       if (args.action === 'inbox') return { text: 'Inbox: 1 message.\n- m1 from Docs worker (question, needs reply): "Which license file should the readme link to?"' }
       if (args.action === 'read') return { text: 'm1 from Docs worker (question):\n> Which license file should the readme link to?' }
@@ -29,7 +29,7 @@ export function fakeCentraluTools(): OrchestratorTools {
     startAgent: async () => ({ ok: true, ...SESSION, state: 'done', answer: 'The notes file lists three open items.', readable: [], outside: [] }),
     compactSelf: (focus) => ({ text: `Compacting after this turn${focus ? `, keeping: ${focus}` : ''}.` }),
   }
-  return tools as OrchestratorTools
+  return tools as CentraluTools
 }
 
 /** What a stand-in tool was handed: its name and the arguments the call carried */
@@ -40,13 +40,13 @@ export type Handed = { tool: string; args: unknown }
  * (another agent, another project), each noting its arguments in `handed` and answering a minimal success. A call that never reached its
  * tool, or reached it with other arguments, shows in `handed`; the words of the answer are not the recording's, which a replay does not compare.
  */
-export function notingCentraluTools(handed: Handed[]): OrchestratorTools {
+export function notingCentraluTools(handed: Handed[]): CentraluTools {
   const note = <T,>(tool: string, answer: T) => async (...args: unknown[]): Promise<T> => (handed.push({ tool, args: args[0] }), answer)
   const child = { ok: true as const, sessionId: 'child-1', sessionName: 'child', tool: 'claude', state: 'done' as const, answer: 'noted', readable: [], outside: [] }
   const base = fakeCentraluTools()
   return {
     ...base,
-    readSession: async (...args: Parameters<OrchestratorTools['readSession']>) => (handed.push({ tool: 'read_session', args: args[0] }), base.readSession(...args)),
+    readSession: async (...args: Parameters<CentraluTools['readSession']>) => (handed.push({ tool: 'read_session', args: args[0] }), base.readSession(...args)),
     startAgent: note('start_agent', child),
     agentSession: note('agent_session', child),
     askProject: note('ask_project', { ok: true as const, state: 'done' as const, project: 'frames-record-other', sessionId: 'other-1', sessionName: 'other', answer: 'noted', readable: [], outside: [] }),

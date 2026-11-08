@@ -254,7 +254,7 @@ describe('codex approval cards close with their request', () => {
 
 /**
  * An interrupted turn is not a finished one (#698). A turn Codex ended with `interrupted` went out as `turn_complete`,
- * and the orchestrator that gave the work was told "The session ended its turn". Which interrupt it was is told apart
+ * and the Assistant that gave the work was told "The session ended its turn". Which interrupt it was is told apart
  * too: a Stop from Centralu, or one Codex sent by itself.
  */
 describe('codex: how an interrupted turn ends (#698)', () => {
@@ -302,7 +302,7 @@ describe('codex: how an interrupted turn ends (#698)', () => {
     log.mockRestore()
   })
 
-  it("a Stop of ours ends it as the person's stop, which the screen and the orchestrator already know", async () => {
+  it("a Stop of ours ends it as the person's stop, which the screen and the Assistant already know", async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const events: NormalizedEvent[] = []
     const h = await midTurn(events)

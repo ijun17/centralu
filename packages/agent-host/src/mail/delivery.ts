@@ -61,7 +61,7 @@ export type MailInput = {
   /** Asked right before the send, with the other waits' checks: false when everything in it was withdrawn since (the send is then `MailWithdrawn`) */
   wanted?: () => boolean
   /**
-   * The turn this starts is the work of a task this session gave, or of its request to the orchestrator (§7.6): the end of the turn is reported to it,
+   * The turn this starts is the work of a task this session gave, or of its request to the Assistant (§7.6): the end of the turn is reported to it,
    * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
    */
   reportTo?: string
@@ -521,7 +521,7 @@ export class MailDelivery {
 
   /**
    * The session whose work the turn this delivery starts is, if a session's: the sender of its task (an answer to a clarification included, §9.7),
-   * or for the orchestrator the session asking (§7.6). Its end is that session's to hear
+   * or for the Assistant the session asking (§7.6). Its end is that session's to hear
    */
   private reportTarget(recipient: string, drained: Pick<DrainResult, 'workMessage' | 'asker'>): string | undefined {
     const work = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)

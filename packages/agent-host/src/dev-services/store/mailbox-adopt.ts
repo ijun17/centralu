@@ -43,8 +43,8 @@ function kindOf(m: MessageRow, threadOrigin: string): { kind: MailKind; needsRep
  * a second run finds nothing, and marked read, so the older build's readers of unread mail (`hasMailInHand`, the review
  * clause of `openChildren`) do not count it as work in hand for good. Pending is: not handled, not dismissed by the person, sent within retention, and
  * not delivered, not read, or a `question` (read and not answered). Each message is copied once under its own id, its rows settled `legacy` (never
- * awaited). A row to the orchestrator in a session's request (the old thread's assignee, the central orchestrator or a trashed one) is sent to the role
- * (`via`), so the next orchestrator takes it (`moveRole`); a task to a trashed session is settled `gone` (its sender was told so). A row the person
+ * awaited). A row to the Assistant in a session's request (the old thread's assignee, the Assistant or a trashed one) is sent to the role
+ * (`via`), so the next Assistant takes it (`moveRole`); a task to a trashed session is settled `gone` (its sender was told so). A row the person
  * released is never held again (`releasedTo`). A session's message carries its sender's project (`projectOf`; the old tool left its threads' project empty), so the one hold judges it
  * at drain. Returns how many messages and rows were written
  */
@@ -71,8 +71,8 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         `INSERT OR IGNORE INTO mail_recipients (message_id, recipient, via, due_at, attempt_at, delivered_at, read_at, held, attempts, last_error, settled, settled_at)
          VALUES (@messageId, @recipient, @via, @dueAt, @attemptAt, @deliveredAt, @readAt, @held, @attempts, @lastError, @settled, @now)`,
       )
-      const sessionRow = db.prepare<[string], { orchestrator: number; trashed: number }>(
-        `SELECT is_orchestrator = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS orchestrator, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
+      const sessionRow = db.prepare<[string], { assistant: number; trashed: number }>(
+        `SELECT is_orchestrator = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS assistant, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
       )
       const sessionOf = (address: string) => {
         const party = parseAddress(address)
@@ -117,7 +117,7 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         recipients += insertRow.run({
           messageId: m.id,
           recipient: p.r_recipient,
-          via: p.r_recipient === p.t_assignee && to?.orchestrator === 1 && p.t_owner !== p.r_recipient ? 'orchestrator' : null,
+          via: p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? 'orchestrator' : null,
           settled: kind === 'task' && to?.trashed === 1 ? 'gone' : 'legacy',
           dueAt: p.r_due_at,
           attemptAt: p.r_attempt_at,

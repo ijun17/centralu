@@ -1,7 +1,7 @@
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { CreateSessionOpts } from '../contract.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
-import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
+import { CENTRALU_MCP_NAME, centraluMcp } from './centralu-mcp.js'
 import { appToolOf } from './permissions.js'
 
 /** What the server set reads of the session it belongs to */
@@ -16,7 +16,7 @@ export type ServersHost = {
 }
 
 /**
- * A Claude session's MCP servers (FR-11, M4 A-5): the orchestrator's in-process server and one proxy per attached
+ * A Claude session's MCP servers (FR-11, M4 A-5): the Assistant's in-process server and one proxy per attached
  * app, loaded at start and followed without a restart as apps come and go.
  */
 export class ClaudeServers {
@@ -27,8 +27,8 @@ export class ClaudeServers {
    * swapping in a different object requires detaching and reattaching.
    */
   private appProxies = new Map<string, { proxy: AppProxy; tools: string }>()
-  /** The orchestrator's in-process server — the same object passed initially is reloaded every time the server set changes. */
-  orchestratorServer: ReturnType<typeof orchestratorMcp> | null = null
+  /** The Assistant's in-process server — the same object passed initially is reloaded every time the server set changes. */
+  centraluToolsServer: ReturnType<typeof centraluMcp> | null = null
   /** Serializes server-set changes into one line — so a later change never interleaves with one that has not finished yet. */
   private serversSync: Promise<unknown> = Promise.resolve()
 
@@ -44,8 +44,8 @@ export class ClaudeServers {
   for (const a of this.host.opts.apps?.current() ?? []) {
     this.appProxies.set(a.server, { proxy: appProxy(this.host.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
   }
-  if (this.host.opts.orchestratorTools) {
-    this.orchestratorServer = orchestratorMcp(this.host.opts.orchestratorTools, this.host.opts.toolProfile, this.host.opts.sessionId, this.appProxies.size > 0)
+  if (this.host.opts.centraluTools) {
+    this.centraluToolsServer = centraluMcp(this.host.opts.centraluTools, this.host.opts.toolProfile, this.host.opts.sessionId, this.appProxies.size > 0)
   }
   }
 
@@ -54,13 +54,13 @@ export class ClaudeServers {
    * whenever the set changes.
    *
    * There are two, and both are in-process, so there is never a separate process:
-   *   1. The orchestrator's tools (FR-11) — everything these tools can see is exactly what the
+   *   1. The Centralu tools (FR-11) — everything these tools can see is exactly what the
    *      manager handed them.
    *   2. External apps' proxy servers (M4 A-5) — `app-<id>`. A server the person approved
    *      (`propose_mcp_server`) also becomes an app in the user's own folder and arrives here
    *      (A-7). This server used to be loaded raw, as a stdio entry — calls never went through
    *      mediation or recording, and a single server named `centralu` could replace the
-   *      in-process orchestrator outright (#93). No server is ever loaded raw anymore.
+   *      in-process assistant outright (#93). No server is ever loaded raw anymore.
    *
    * When the set changes (`setMcpServers`), leaving out #1 makes the SDK **detach it** — that
    * call replaces the entire set of dynamically attached servers with whatever was passed. So
@@ -68,7 +68,7 @@ export class ClaudeServers {
    */
   mcpServers(): Record<string, McpServerConfig> {
     return {
-      ...(this.orchestratorServer ? { [ORCHESTRATOR_MCP_NAME]: this.orchestratorServer } : {}),
+      ...(this.centraluToolsServer ? { [CENTRALU_MCP_NAME]: this.centraluToolsServer } : {}),
       ...Object.fromEntries([...this.appProxies].map(([name, { proxy }]) => [name, proxy.config])),
     }
   }

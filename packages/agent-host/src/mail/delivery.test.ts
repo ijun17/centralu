@@ -303,7 +303,7 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     expect(w.turns.current('w')).toMatchObject({ messageId: t2.id, starter: t2.id })
   })
 
-  it('the orchestrator takes one asker per wake: its turn records the asker, and its end is reported to that session', async () => {
+  it('the Assistant takes one asker per wake: its turn records the asker, and its end is reported to that session', async () => {
     const w = started()
     const r1 = w.send(A, { to: [ORC], text: 'please check CI' })
     w.send(C, { to: [ORC], text: 'and mine' })

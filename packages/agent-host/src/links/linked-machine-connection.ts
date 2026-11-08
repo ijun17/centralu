@@ -40,7 +40,7 @@ function autostartOf(a: RemoteAutostart | undefined): MachineInfo['autostart'] {
   return a ? { on: a.on, how: a.how, linger: a.linger } : null
 }
 
-/** A session the hub does not show: the remote's orchestrator and its coordinators (§3.4) */
+/** A session the hub does not show: the remote's Assistant and its coordinators (§3.4) */
 function hiddenKind(s: unknown): boolean {
   return isObj(s) && (s.kind === 'orchestrator' || s.kind === 'coordinator')
 }
@@ -192,7 +192,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /**
    * Why the link last declined to start a host there (`startRefusal`), until a host is found running, says hello, or a
    * start goes through (#1143 re-review). Kept across the openings that read the line again and across a machine that
-   * cannot be reached meanwhile: the row stays `stopped` through them, and the orchestrator's `reconnect_machine` asks
+   * cannot be reached meanwhile: the row stays `stopped` through them, and the Assistant's `reconnect_machine` asks
    * with a card whenever this is set, not only when the status happens to say `stopped`
    */
   private heldBack: string | null = null
@@ -201,7 +201,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /** Counts the retries set (`retryLater`), so `reconnect` can tell whether an opening under way set its own */
   private retriesSet = 0
   /**
-   * The person's Start (`connect`, the row's Connect/Start/Reconnect, or the orchestrator's card): the next start
+   * The person's Start (`connect`, the row's Connect/Start/Reconnect, or the Assistant's card): the next start
    * there goes ahead even when the person stopped it there or the link stopped starting them. Spent once a start went
    * through or a host is found running; a start that failed keeps it, so it is tried again on the backoff
    */
@@ -811,7 +811,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * The person's Connect (`machines.reconnect`, #1134): opens now, forgetting the backoff, also a disconnected link and
    * also with Auto reconnect off (#1341), where it is the only way to try again. It is also the person's Start
    * (#1143): a host is started there even where they stopped it or the link stopped starting them. `start: false` is
-   * the orchestrator's reconnect without its card, which opens the link and starts nothing the link would not.
+   * the Assistant's reconnect without its card, which opens the link and starts nothing the link would not.
    * `keepBackoff` is an agent's call that needs the machine (`reachForCall`, #1532): it opens now too, but the backoff
    * goes on from the step it was at instead of starting over, so calls cannot hold it at its short steps
    */

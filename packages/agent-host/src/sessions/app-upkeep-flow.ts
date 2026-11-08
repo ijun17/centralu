@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_CHANGE, errorMessage, type ExternalAppInfo } from '@cc/protocol'
+import { ASSISTANT_CHANGE, errorMessage, type ExternalAppInfo } from '@cc/protocol'
 import type { AppUpkeepRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, onMachine, readProjects, shown, type Projects } from './app-lookup.js'
@@ -28,7 +28,7 @@ const day = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T',
 const fromApp = (text: string, max = 300): string => plainQuoted(text, max)
 
 /**
- * The orchestrator's app upkeep commands (#1219, fourth slice): the calls the window's app screens make to look after an
+ * The Assistant's app upkeep commands (#1219, fourth slice): the calls the window's app screens make to look after an
  * app, each through the router (`apps.versions`, `apps.runs`, `apps.check`, ...), so the host checks them as it checks the
  * window and a linked machine's app is reached the way the window reaches it.
  *
@@ -91,7 +91,7 @@ export class AppUpkeepFlow {
   /**
    * Why the app cannot be restarted now, or null: another session, screen or app has a call in progress in it, and a restart (a
    * check restarts the app too) would end that call. The window's Restart does end it, but its person is looking at the
-   * app; an orchestrator restarting the project board while it drives the merge queue is not that. Read from the run history
+   * app; an Assistant restarting the project board while it drives the merge queue is not that. Read from the run history
    * (`apps.runs`), where a call in progress is a run that is still `running`
    */
   private async callsInProgress(rpc: WindowRpc, caller: string, label: string, ref: Ref): Promise<string | null> {
@@ -191,7 +191,7 @@ export class AppUpkeepFlow {
       `Its folder moves to app-trash/ ${where}, kept and not deleted, and the app is detached from every session it was attached to, so its tools vanish from them.`,
       'Anything that calls it stops working until it is put back. Moving the folder back from app-trash/ by hand restores it as an ordinary user-folder app: if it was imported and had not been reviewed, that waiting review is forgotten.',
     ].join('\n')
-    const decision = await this.host.hostCards.askHost(caller, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(caller, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return { ok: false, error: 'The person did not approve it, so the app was not removed. Do not ask again unless they tell you to.' }
     if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so the app was not removed.' }
     // Still the app the card named, and still a user-folder app

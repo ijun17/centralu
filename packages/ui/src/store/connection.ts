@@ -43,7 +43,7 @@ import { settleUnsureSends } from './sessions/send.js'
  * True while `attach` restores the workspace snapshot. `saveWorkspace` does nothing then.
  *
  * The restore goes through the same setters a person uses (`focusSession`, `setPanelWidth`,
- * `setSidebarWidth`, `openOrchestrator`), and each of them saves. A save in the middle of the restore writes
+ * `setSidebarWidth`, `openAssistant`), and each of them saves. A save in the middle of the restore writes
  * the half-restored state back over the snapshot being read, so every field restored after that save is
  * stored as its default, and the next launch reads the default. It hit the folded projects (#205) and
  * `introSeen` (#63), each fixed by restoring that one field earlier, and then the spinning-marker
@@ -270,12 +270,12 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
    * order would have the session restore quietly undo the view restore — the
    * exact bug being fixed, reintroduced by ordering.
    *
-   * The orchestrator goes through its own door (openOrchestrator) rather than a
-   * bare set: the view alone would be a "Waking the orchestrator…" screen that
+   * The Assistant goes through its own door (openAssistant) rather than a
+   * bare set: the view alone would be a "Waking the Assistant…" screen that
    * nothing is actually waking.
    */
   /*
-   * `introSeen` is restored **before** `view` (#63). `openOrchestrator` below calls
+   * `introSeen` is restored **before** `view` (#63). `openAssistant` below calls
    * `saveWorkspace`, and if `introSeen` is still its initial state (`false`) at that point, it
    * writes `false` back over the snapshot just read, erasing the stored value — the next launch
    * showed the intro screen again (measured: a partial save mid-restore clobbers whichever
@@ -284,7 +284,8 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   if ((snap as { introSeen?: boolean }).introSeen === true) set({ introSeen: true })
   const savedView = screen ? (snap as { view?: unknown }).view : undefined
   if (savedView === 'grid') set({ view: 'grid' })
-  else if (savedView === 'orchestrator') void get().openOrchestrator()
+  // 'orchestrator': a workspace a build before #2133 saved
+  else if (savedView === 'assistant' || savedView === 'orchestrator') void get().openAssistant()
   else if (savedView === 'app') {
     /*
      * The app that was being viewed as a pinned view (B-2). The list is already loaded from
@@ -701,7 +702,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // So is a proposal list change (#703): a missed `orchestrator_proposals_changed` leaves a card, the count and the badge stale
     void get().refreshMcpProposals()
     void get().refreshSkillProposals()
-    // So are the preferences (#1306): a missed `prefs_changed` leaves the orchestrator's change to a setting unseen
+    // So are the preferences (#1306): a missed `prefs_changed` leaves the Assistant's change to a setting unseen
     void get().refreshPrefs()
     // So are the links' states (#82): a machine that went away or came back during the gap
     const machinesRead = get().refreshMachines()

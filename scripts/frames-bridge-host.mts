@@ -1,11 +1,11 @@
 import { createRequire } from 'node:module'
 import type { ToolProfile } from '../packages/agent-host/src/apps/contract.js'
-import type { OrchestratorTools } from '../packages/agent-host/src/adapters/contract.js'
-import { orchestratorToolSchemas, runOrchestratorTool } from '../packages/agent-host/src/sessions/orchestrator-tools.js'
+import type { CentraluTools } from '../packages/agent-host/src/adapters/contract.js'
+import { centraluToolSchemas, runCentraluTool } from '../packages/agent-host/src/sessions/centralu-tools.js'
 
 /**
  * The host end of Centralu's stdio bridge, for a recording run (#1498): an ACP agent starts the real bridge script
- * (`codex/orchestrator-bridge.mjs`) from the `mcpServers` of `session/new`, and the script asks the host for the tool list and
+ * (`codex/centralu-bridge.mjs`) from the `mcpServers` of `session/new`, and the script asks the host for the tool list and
  * runs each call there. This answers both as the host does (`rpc.ts`: `orchestrator.tools`, `orchestrator.tool`) with the
  * tools the scenario gives (`adapters/frames/fakes.test-helpers.ts`), so the agent's list, its calls and what it reads back are
  * real and the data behind the tools is fixed. A script, not a test helper: `ws` is the OS layer's (tooling/os-layer.js).
@@ -24,7 +24,7 @@ type Frame = { kind?: string; token?: string; id?: string; method?: string; para
 
 const { WebSocketServer } = createRequire(new URL('../packages/agent-host/package.json', import.meta.url))('ws') as { WebSocketServer: new (options: { host: string; port: number }) => Server }
 
-export async function startBridgeHost(tools: OrchestratorTools, profile: ToolProfile): Promise<BridgeHost> {
+export async function startBridgeHost(tools: CentraluTools, profile: ToolProfile): Promise<BridgeHost> {
   const token = 'recording-bridge'
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   server.on('connection', (socket) => {
@@ -41,8 +41,8 @@ export async function startBridgeHost(tools: OrchestratorTools, profile: ToolPro
       }
       if (frame.kind !== 'rpc') return
       const answer = async (): Promise<unknown> => {
-        if (frame.method === 'orchestrator.tools') return orchestratorToolSchemas(profile)
-        if (frame.method === 'orchestrator.tool') return runOrchestratorTool(tools, String(frame.params?.name), frame.params?.args ?? {}, { sessionId: frame.params?.sessionId ?? null, profile })
+        if (frame.method === 'orchestrator.tools') return centraluToolSchemas(profile)
+        if (frame.method === 'orchestrator.tool') return runCentraluTool(tools, String(frame.params?.name), frame.params?.args ?? {}, { sessionId: frame.params?.sessionId ?? null, profile })
         throw new Error(`no such method: ${frame.method}`)
       }
       answer().then(

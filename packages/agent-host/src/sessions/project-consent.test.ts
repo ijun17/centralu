@@ -110,7 +110,7 @@ describe('consent from one project to another', () => {
     const s = await w.callerSession()
     expect(await w.mgr.consents.ensureProjectAccess(s, w.caller.id, 'delegate', what)).toEqual({ ok: true })
     expect(w.card(s)).toBeUndefined()
-    const orc = await w.mgr.orchestrator()
+    const orc = await w.mgr.assistant()
     expect((await w.mgr.consents.ensureProjectAccess(orc.id, w.target.id, 'delegate', what)).ok).toBe(false)
   })
 

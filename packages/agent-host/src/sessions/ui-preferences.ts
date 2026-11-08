@@ -103,7 +103,7 @@ export class UiPreferenceStore {
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
     const current = this.uiPreferences()
     // The switches are merged one by one (#1306): a patch carries only those that change, and two writers (the window, the
-    // orchestrator) changing different ones do not undo each other. `current` has the field once the read above carried it; a
+    // assistant) changing different ones do not undo each other. `current` has the field once the read above carried it; a
     // row that is not a JSON object has none, and the switches then start from the snapshot's, as the window shows them
     // The session tools switch is always on (2026-10-20): what an older window sends for it is not stored
     const { notifyPolicy: switches, autoCompact: compact, sessionTools: _alwaysOn, ...rest } = patch

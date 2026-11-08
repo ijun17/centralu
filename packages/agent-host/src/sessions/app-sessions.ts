@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs'
-import { orchestratorHome } from './orchestrator-home.js'
+import { assistantHome } from './assistant-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
 import { lowestPreset } from './start-agent.js'
@@ -101,7 +101,7 @@ export class AppSessions {
   constructor(private readonly host: AppSessionsHost) {}
 
   /**
-   * Creates a new app (M4 C-1b) — the single path both `apps.create` and the orchestrator's
+   * Creates a new app (M4 C-1b) — the single path both `apps.create` and the Assistant's
    * `create_app` go through.
    *
    *   With a project      an app inside it, `.centralu/apps/<id>/` (`ExternalApps.createApp`)
@@ -212,7 +212,7 @@ export class AppSessions {
    *                     made this kind of session possible).
    *
    * The caller picks the tool, and if it does not, the project's default tool is used (for a
-   * user-folder app, the orchestrator's own tool). The session's app slot (`appId`) is set to that
+   * user-folder app, the Assistant's own tool). The session's app slot (`appId`) is set to that
    * app — it stands under the app in the sidebar. The preset is `auto`, the default every new session
    * gets (owner decision 2026-11-05; it was `normal`, so a session that edits an app's code asked the person). No builder is stood up for an
    * app in an untrusted project — that app cannot even launch, so there is nothing to test even if a builder
@@ -320,7 +320,7 @@ export class AppSessions {
       case 'sessions.list': {
         const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
         // A project app only sees that project's sessions, a root app included (#1141: as its permission card says); a
-        // user-folder app sees all of them (a user-folder app is the orchestrator's own — decision 4)
+        // user-folder app sees all of them (a user-folder app is the Assistant's own — decision 4)
         const sessions = this.host.listSessions()
           .filter((s) => app.projectId === null || s.projectId === app.projectId)
           .map((s) => ({
@@ -359,7 +359,7 @@ export class AppSessions {
    * requests piled up in one session, an earlier request would bleed into a later answer.
    *
    *   Location  That project (cwd is the project root) for a project app; for a user-folder app, the
-   *             orchestrator's own empty folder with no project, the same as a coordinator session.
+   *             Assistant's own empty folder with no project, the same as a coordinator session.
    *             The session's app slot (`appId`) is set to that app.
    *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), but never
    *             above any session with a call open into the app (`appAgentPreset`); it was always
@@ -403,7 +403,7 @@ export class AppSessions {
       if (!p) throw new Error(`the project of ${req.appName} is gone`)
       cwd = p.path
     } else {
-      cwd = orchestratorHome()
+      cwd = assistantHome()
     }
     if (ctx.signal.aborted) throw new Error('the request was cancelled before the agent started')
     /*

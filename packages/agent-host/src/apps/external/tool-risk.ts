@@ -71,7 +71,7 @@ export const ANY_VALUE = '*'
 const matches = (given: unknown, named: unknown): boolean => (named === ANY_VALUE ? given !== undefined && given !== null && given !== '' : given === named)
 
 export type RiskScope = {
-  /** The app belongs to the session's own project (its project's session, not the orchestrator, not an app attached from elsewhere) */
+  /** The app belongs to the session's own project (its project's session, not the Assistant, not an app attached from elsewhere) */
   own: boolean
   preset: PermissionPreset
   /** The call's arguments; absent where they are not known yet (Codex fixes approval before the call) */

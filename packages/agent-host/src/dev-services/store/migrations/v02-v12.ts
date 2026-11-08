@@ -147,7 +147,7 @@ export class StepsV2ToV12 extends MigrationRange {
         ownTransaction: true,
         run: () => {
           /*
-           * The orchestrator **does not belong to a project.**
+           * The Assistant **does not belong to a project.**
            *
            * It is the single, project-crossing session in the app, so if project_id were
            * NOT NULL it would have to hang off some project, and deleting that project would

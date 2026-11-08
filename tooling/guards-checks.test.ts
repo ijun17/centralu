@@ -239,13 +239,13 @@ describe('guard/hidden-children', () => {
     const code = "import { spawn as start } from 'node:child_process'" + NL + "start('git')"
     const result = Object.fromEntries(
       await Promise.all(
-        ['packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs', 'packages/agent-host/src/x.test.ts', 'packages/agent-host/src/x.test-helpers.ts', 'packages/agent-host/src/apps/external/test-fixtures/app.mjs', 'packages/ui/src/x.ts'].map(
+        ['packages/agent-host/src/adapters/codex/centralu-bridge.mjs', 'packages/agent-host/src/x.test.ts', 'packages/agent-host/src/x.test-helpers.ts', 'packages/agent-host/src/apps/external/test-fixtures/app.mjs', 'packages/ui/src/x.ts'].map(
           async (f) => [f, await lines(f, code, 'hidden-children')] as const,
         ),
       ),
     )
     expect(result).toEqual({
-      'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs': [2],
+      'packages/agent-host/src/adapters/codex/centralu-bridge.mjs': [2],
       'packages/agent-host/src/x.test.ts': [],
       'packages/agent-host/src/x.test-helpers.ts': [],
       'packages/agent-host/src/apps/external/test-fixtures/app.mjs': [],

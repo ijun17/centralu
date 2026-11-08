@@ -42,7 +42,7 @@ const PARENT_MAIL = 'To write to it before you finish, call mail with `to: "pare
 
 /**
  * Whether `child` can mail the session `senderId` as its `parent` (#1984): it was started by that session (`askedBy`) and has the mail tool, which a
- * session outside a project (the orchestrator's) does not. A fork of the orchestrator's has no `askedBy`; a child on a linked machine is not asked at all.
+ * session outside a project (the Assistant's) does not. A fork of the Assistant's has no `askedBy`; a child on a linked machine is not asked at all.
  */
 export function canMailParent(child: { askedBy?: string | null; projectId?: string | null }, senderId: string): boolean {
   return child.askedBy === senderId && !!child.projectId

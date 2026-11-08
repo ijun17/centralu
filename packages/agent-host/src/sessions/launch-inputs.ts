@@ -2,9 +2,9 @@ import type { SessionInfo } from '@cc/protocol'
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import { underGrant } from './ask-project.js'
 import type { DelegationHost } from './delegation-flow.js'
-import type { OrchestratorProposals } from './orchestrator-proposals.js'
+import type { AssistantProposals } from './assistant-proposals.js'
 import type { RoutedCardsHost } from './routed-cards.js'
-import { orchestratorMemory } from './transcript-view.js'
+import { assistantMemory } from './transcript-view.js'
 import type { WorktreeHost } from './worktree-sessions.js'
 
 /**
@@ -14,13 +14,13 @@ import type { WorktreeHost } from './worktree-sessions.js'
 export type LaunchInputsHost = Pick<DelegationHost, 'store' | 'builderRefOf' | 'readGrants'> &
   Pick<RoutedCardsHost, 'apps'> &
   Pick<WorktreeHost, 'projectTrusted'> & {
-    /** The orchestrator's approved skills (#71), read for its prompt */
-    readonly proposals: Pick<OrchestratorProposals, 'skillsPrompt'>
+    /** The Assistant's approved skills (#71), read for its prompt */
+    readonly proposals: Pick<AssistantProposals, 'skillsPrompt'>
   }
 
 /**
  * What a session's process is launched with beyond its own settings: the setting files it may read, the paths
- * another project handed back to it, and the orchestrator's memory and skills for its system prompt. Read on every
+ * another project handed back to it, and the Assistant's memory and skills for its system prompt. Read on every
  * start and wake (session-start.ts). Moved out of the session manager as it was (#1143); what it reaches of the
  * manager is `LaunchInputsHost`.
  */
@@ -31,8 +31,8 @@ export class LaunchInputs {
    * The settings files reachable from this session (M4 decision 3, #92, #152) — decided by **what
    * the session is**. Both creating and waking a session go through this one place.
    *
-   *   Orchestrator / coordinator session          No files at all — it has no project, and that
-   *                                                folder (orchestratorHome) is one a worker can
+   *   Assistant / coordinator session          No files at all — it has no project, and that
+   *                                                folder (assistantHome) is one a worker can
    *                                                write to. An instruction arriving through a file
    *                                                is exactly a privilege-escalation path.
    *   Builder session of a user-folder app         Trusted — that folder belongs to the user
@@ -42,8 +42,8 @@ export class LaunchInputs {
    *   project app; agent the project app          worker under #152)
    *   asked for (D-1)
    *
-   * **This is not split by whether the session has orchestrator tools.** It used to be: the adapter
-   * split "if it has orchestrator tools, no files at all", but the worktree manager (#69) and
+   * **This is not split by whether the session has Centralu tools.** It used to be: the adapter
+   * split "if it has Centralu tools, no files at all", but the worktree manager (#69) and
    * builder sessions (C-3) also receive those tools. That meant a builder session of a trusted
    * project could read neither CLAUDE.md nor the user's own ~/.claude (global bypass), so it kept
    * raising an approval card the person had already turned off everywhere else.
@@ -63,7 +63,7 @@ export class LaunchInputs {
      * (~/.claude, ~/.codex), not files from the folder.
      *
      * That session's text was written by the app, not the person. Its slot, like a coordinator
-     * session, is the orchestrator's empty folder (orchestratorHome), which a worker can write to —
+     * session, is the Assistant's empty folder (assistantHome), which a worker can write to —
      * if it received the CLAUDE.md and settings placed there, an agent running on the app's text
      * would take instructions someone else wrote as if they carried authority. The reason a builder
      * session is trusted (that folder belongs to the person building the app) does not apply here:
@@ -84,13 +84,13 @@ export class LaunchInputs {
     return !!grants && grants.size > 0 && underGrant(path, grants, cwd)
   }
 
-  /** The approved skills as a system prompt section (OrchestratorProposals.skillsPrompt) */
+  /** The approved skills as a system prompt section (AssistantProposals.skillsPrompt) */
   skillsPrompt(): string {
     return this.host.proposals.skillsPrompt()
   }
 
-  /** A summary of the orchestrator's past conversation for its next system prompt (transcript-view.ts) */
-  orchestratorMemory(sessionId: string): string {
-    return orchestratorMemory(this.host.store.messages, sessionId)
+  /** A summary of the Assistant's past conversation for its next system prompt (transcript-view.ts) */
+  assistantMemory(sessionId: string): string {
+    return assistantMemory(this.host.store.messages, sessionId)
   }
 }

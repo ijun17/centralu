@@ -36,10 +36,10 @@ Use only these types:
 Examples:
 
 ```
-feat(ui): let the orchestrator join grid
-fix(ui): keep grid focus on the orchestrator
+feat(ui): let the Assistant join grid
+fix(ui): keep grid focus on the Assistant
 docs: define conventional commit messages
-refactor(ui): share the orchestrator crown icon
+refactor(ui): share the Assistant crown icon
 ```
 
 ## Body and footer

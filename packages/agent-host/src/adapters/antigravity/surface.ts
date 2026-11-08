@@ -70,7 +70,7 @@ export const AGY_SURFACE: AdapterSurface = {
       treatment: 'blocked',
       measured: `${SPIKE}: offered at initialize, not tried`,
       offeredWhenMeasured: true,
-      note: "Centralu's role text is not passed yet (roleText: false), so Antigravity is not the orchestrator, a coordinator or an app's agent.",
+      note: "Centralu's role text is not passed yet (roleText: false), so Antigravity is not the Assistant, a coordinator or an app's agent.",
     },
     {
       kind: 'capability',

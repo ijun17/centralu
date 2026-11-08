@@ -5,24 +5,24 @@ import { useLoad } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
-import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
+import { ASSISTANT_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 
 /**
- * The intro screen (#63) — exactly once, on the very first run: "meet your orchestrator."
+ * The intro screen (#63) — exactly once, on the very first run: "meet your assistant."
  *
  * Replaces FirstRun (folder first). The reason is not efficiency but **habit**: someone who
- * never goes through the experience of asking the orchestrator something on the first run does
+ * never goes through the experience of asking the Assistant something on the first run does
  * not click it later either — a person only uses what they have already tried. This app's
- * question-answering channel is the orchestrator, not the people who built it.
+ * question-answering channel is the Assistant, not the people who built it.
  *
  * **The card doubles as the detection display.** There is no separate tool-detection screen — a
  * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
  * and the prescription (an install or login command) standing right there together. A tool Centralu
- * installs itself shows its setup line instead, without the "Not connected" line, and is dimmed only before install; one the orchestrator
+ * installs itself shows its setup line instead, without the "Not connected" line, and is dimmed only before install; one the Assistant
  * cannot take (Antigravity, until it takes role text) is a plain refused card, reason and all, with no action. Where the
  * state is shown and where the action happens are the same spot.
  *
- * **Clicking a card only records the choice; no process starts** (lazy start). The orchestrator
+ * **Clicking a card only records the choice; no process starts** (lazy start). The Assistant
  * is not actually born until the first question is asked on the next screen.
  */
 export function Intro() {
@@ -37,8 +37,8 @@ export function Intro() {
   useReloadOnReconnect(detected.reload)
   const detect = detected.reload
 
-  // A tool that cannot take the orchestrator's role is shown with the reason, as one not connected is
-  const refusal = useRefusals(tools, ORCHESTRATOR_DEMANDS)
+  // A tool that cannot take the Assistant's role is shown with the reason, as one not connected is
+  const refusal = useRefusals(tools, ASSISTANT_DEMANDS)
   const ready = (t: ToolStatus) => t.installed && t.loggedIn && refusal(t.name) === null
   const anyReady = (tools ?? []).some(ready)
   // detect returns **every** tool along with its status — the reason even an uninstalled tool gets a card
@@ -55,7 +55,7 @@ export function Intro() {
           Everything else is left to the suggested-question cards on the next screen.
         */}
         <h1 className="text-display font-medium tracking-tight text-ink" data-testid="intro-role">
-          Meet your <span className="text-ink">orchestrator</span>.
+          Meet your <span className="text-ink">Assistant</span>.
         </h1>
         <p className="mt-2 text-md leading-body text-ink-muted">
           It watches every session and answers whatever you ask about this app.
@@ -66,7 +66,7 @@ export function Intro() {
           {cards.map((t) => {
             const ok = ready(t)
             // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run, as before.
-            // One the orchestrator cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
+            // One the Assistant cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
             const managed = (t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu') && refusal(t.name) === null
             // A card whose line holds buttons of its own (Install, Sign in) is not a <button>, which may not hold one: it acts as one once it can be picked
             const Card = managed ? 'div' : 'button'

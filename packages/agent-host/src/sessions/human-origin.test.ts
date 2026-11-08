@@ -56,7 +56,7 @@ describe('nothing else is stamped', () => {
     expect(adapter.last!.origins).toEqual([undefined])
   })
 
-  it("a person's message with a line of Centralu's in front of it (the orchestrator's one-time root apps notice)", async () => {
+  it("a person's message with a line of Centralu's in front of it (the Assistant's one-time root apps notice)", async () => {
     const s = await session()
     const apps = (mgr as unknown as { apps: { rootAppsNotice(id: string): string | null } }).apps
     const notice = vi.spyOn(apps, 'rootAppsNotice').mockReturnValueOnce('Your root apps are gone.')

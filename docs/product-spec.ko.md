@@ -7,7 +7,7 @@
 - 버전: v0.5 (**구현과 동기화, 2026-08-26** — M2가 끝나고 앱이 도그푸딩에 들어갔으므로, 이 문서는 이제 계획이 아니라 실제로 존재하는 것을 기술한다)
 - 작성: 2026-08-15 (v0.4), 2026-08-26 재정렬 (v0.5)
 - 상태: M2까지 출시 완료; M2.5(도그푸딩) 진행 중
-- v0.4 → v0.5 주요 변경: §2의 M0 전제 조건이 검증 완료로 기록됨; FR-4를 근거 패널 탭 레이아웃으로 갱신(History를 git 패널에서 분리); FR-9를 실제 출시된 내용으로 다시 씀(비용 대시보드가 아니라 한도 윈도우); FR-11을 구현된 오케스트레이터 설계로 다시 씀(kind 마커, 중앙/프로젝트별 계층, 선별된 도구, 왕관 표시); 터미널 non-goal 철회(§1.5); 그리드는 여전히 실험적이며 살아 있는 반론 두 가지를 유지(§5.4); 아키텍처(§6)를 Node 호스트 현실에 맞게 수정; §7.1에 측정 수치 추가; 로드맵(§8) 최신화 완료 표시
+- v0.4 → v0.5 주요 변경: §2의 M0 전제 조건이 검증 완료로 기록됨; FR-4를 근거 패널 탭 레이아웃으로 갱신(History를 git 패널에서 분리); FR-9를 실제 출시된 내용으로 다시 씀(비용 대시보드가 아니라 한도 윈도우); FR-11을 구현된 어시스턴트 설계로 다시 씀(kind 마커, 중앙/프로젝트별 계층, 선별된 도구, 왕관 표시); 터미널 non-goal 철회(§1.5); 그리드는 여전히 실험적이며 살아 있는 반론 두 가지를 유지(§5.4); 아키텍처(§6)를 Node 호스트 현실에 맞게 수정; §7.1에 측정 수치 추가; 로드맵(§8) 최신화 완료 표시
 - v0.3 → v0.4 주요 변경: 제품 철학을 명문화(§1.2), 배너에서 그 자리에서 승인 허용(맥락이 필요할 때만 점프), 동시 세션 경고를 인라인 + 복구 경로로 완화, 세션 숨기기(아카이브, FR-20, 뒤에 폐기)·대화 검색(FR-21)·카드 접기 정책 추가, 인박스를 M1로 승격, 프런트엔드를 React로 확정, 미결 질문 4개 종결
 
 ---
@@ -39,8 +39,8 @@
 
 ~~에이전트의 자율성이나 사용자의 워크플로를 제한하지 않는다~~ — **2026-10-12 철회(#564).** 이 문장은 위 단락의 첫
 두 문장 사이에 있었고, "Centralu는 사람의 세션에 도구를 내줄 뿐 그 세션을 지휘하지 않는다"로 읽혔다: 일반 세션은
-Centralu의 도구를 지시문 없이 받았고(#320), Centralu를 먼저 보라는 말은 오케스트레이터만 들었다(#512). 소유자가
-이것을 위의 규칙으로 바꾸었고, 이제 일반 세션과 오케스트레이터 모두 그 규칙을 지시문으로 받는다([agent-host.md](agent-host.md)
+Centralu의 도구를 지시문 없이 받았고(#320), Centralu를 먼저 보라는 말은 어시스턴트만 들었다(#512). 소유자가
+이것을 위의 규칙으로 바꾸었고, 이제 일반 세션과 어시스턴트 모두 그 규칙을 지시문으로 받는다([agent-host.md](agent-host.md)
 §1.1; 요청마다 드는 값과 바뀌는 것: [tool-cost.md](tool-cost.md) §11, 영어만). §1.5처럼 지우지 않고 기록해 둔다.
 
 기능을 추가하거나 바꿀 때마다 이 기준에 비추어 묻는다: 이것은 사람을 막는가 보이게 하는가, 인간의 주의력을 아끼는가 낭비하는가?
@@ -122,7 +122,7 @@ come back to the desk
 | 프로젝트 | 등록된 로컬 디렉터리 하나. git 저장소일 수도, 아닐 수도 있다 |
 | 세션 | 에이전트 대화 인스턴스 하나. 프로젝트에 속하며 도구(Claude Code/Codex), 모델, 권한 설정을 가진다 |
 | 어댑터 | 특정 에이전트 도구를 공통 인터페이스로 감싸는 모듈 |
-| 오케스트레이터 세션 | `kind: 'orchestrator'`인 세션 — 앱의 모든 세션을 조회하고 지시할 수 있다. 정확히 하나이며 어느 프로젝트에도 속하지 않는다. 프로젝트에는 따로 지휘석이 없다: 워크트리 매니저(#69)는 평범한 세션에 접혀 들어갔고(#561 part 3), 평범한 세션이라면 누구나 `start_agent`로 자기 프로젝트에 에이전트를 띄우고 그것을 소유한다 (FR-11) |
+| 어시스턴트 세션 | `kind: 'orchestrator'`인 세션 — 앱의 모든 세션을 조회하고 지시할 수 있다. 정확히 하나이며 어느 프로젝트에도 속하지 않는다. 프로젝트에는 따로 지휘석이 없다: 워크트리 매니저(#69)는 평범한 세션에 접혀 들어갔고(#561 part 3), 평범한 세션이라면 누구나 `start_agent`로 자기 프로젝트에 에이전트를 띄우고 그것을 소유한다 (FR-11) |
 | 워크스페이스 | 등록된 프로젝트 목록 + 레이아웃 + 열린 세션들의 전체 상태 (복원의 단위) |
 | 인박스 | 프로젝트 구조를 무시하고 "지금 내 개입을 기다리는 항목"만 보여주는 트리아지 뷰 |
 | 읽음/안읽음 | 세션 상태와 독립: 마지막으로 본 이후 새 내용이 있는가 |
@@ -274,23 +274,23 @@ come back to the desk
   대화는 resume으로 이어지고, 대화 안의 한 줄이 세션이 옮겨졌다고 말한다. 설치된 버전은 10분마다, 그리고 창이 포커스를
   얻을 때 읽는다([agent-host.ko.md](agent-host.ko.md) §4.6).
 
-#### FR-11. 오케스트레이터 세션 (2026-08-25 구현, issues #13 · #30 — 이 절은 실제로 만들어진 것을 기술한다)
+#### FR-11. 어시스턴트 세션 (2026-08-25 구현, issues #13 · #30 — 이 절은 실제로 만들어진 것을 기술한다)
 
 - **Kind는 null 체크가 아니라 명시적 마커다**: 세션은 `kind: 'orchestrator'`이거나 일반 세션이다.
-  오케스트레이터는 **정확히 하나**이고 어느 프로젝트에도 속하지 않는다 — 앱의 모든 세션에 닿는다
+  어시스턴트는 **정확히 하나**이고 어느 프로젝트에도 속하지 않는다 — 앱의 모든 세션에 닿는다
   (모든 도구 호출을 `inScope` 술어가 지킨다).
-- 오케스트레이터는 사이드바 버튼의 **왕관 아이콘**으로 표시한다 (무채색 규칙 유지: kind는 형태로, 긴급도는 밝기로).
-- **폐기 (2026-09-01): 프로젝트 오케스트레이터, 그리고 승격·강등(`sessions.setKind`).** #13은 대화 하나가 모든
+- 어시스턴트는 사이드바 버튼의 **왕관 아이콘**으로 표시한다 (무채색 규칙 유지: kind는 형태로, 긴급도는 밝기로).
+- **폐기 (2026-09-01): 프로젝트 어시스턴트, 그리고 승격·강등(`sessions.setKind`).** #13은 대화 하나가 모든
   프로젝트의 컨텍스트를 담을 수 없다는 이유로 3단 계층(중앙 > 프로젝트 > 세션)을 만들었다. 그 뒤 워크트리
   매니저(#69)가 다른 방향에서 같은 자리를 가져갔다 — 프로젝트의 세션들을 지휘하는 세션. 그런 자리가 둘인 것은
   개념이 하나 많았다: 만든 사람조차 도그푸딩에서 둘을 헷갈렸고, 승격 줄은 한 번도 쓰이지 않았다. 남는 것은 값을
-  하는 한 쌍이다 — 전부를 가로지르는 오케스트레이터 하나, 그리고 프로젝트마다 **관계에서 나오는**(워크트리 자식이
+  하는 한 쌍이다 — 전부를 가로지르는 어시스턴트 하나, 그리고 프로젝트마다 **관계에서 나오는**(워크트리 자식이
   있으면 매니저다) 매니저. #561 part 3 이후로는 매니저 자리도 없어졌다: 평범한 세션이라면 누구나 `start_agent`로 자기
   프로젝트에 에이전트를 띄우고 그것을 소유하며, 예전 매니저의 워크트리 세션들은 그 매니저의 자식이 되었다(스토어 v48).
   스키마 v26은 프로젝트를 가진 채 표식이 남은 세션에서 그 표식을 지운다 — 이 단계가
   없으면 프로젝트 단계를 걷어내는 것이 그 세션들을 조용히 중앙 범위로 **넓히는** 일이 된다.
-- 호스트는 오케스트레이터 세션에 **선별된 도구**(세션 조회, 대화 읽기, 지시 전송,
-  `create_session`, `update_session_settings`)와 **컴파일 시점에 내장된 앱 가이드**(overview/sessions/orchestrator/approvals/
+- 호스트는 어시스턴트 세션에 **선별된 도구**(세션 조회, 대화 읽기, 지시 전송,
+  `create_session`, `update_session_settings`)와 **컴파일 시점에 내장된 앱 가이드**(overview/sessions/assistant/approvals/
   settings/updates)를 노출한다 — 런타임에 `docs/`를 읽지 않고 컴파일 시점에 내장하는데, 런타임 문서 읽기는
   한 단계 옆의 AGENTS.md류 인젝션 표면이기 때문이다.
 - **평범한 세션도 가벼운 읽기 전용 묶음을 받는다**(#320, 2026-10-05 소유자 결정, 기본 켜짐): 다른 세션
@@ -298,13 +298,13 @@ come back to the desk
   소유자 결정) 전에는 자기 프로젝트만 읽었다. 이제 **신뢰한** 프로젝트의 세션은 이 컴퓨터와 연결된 기계의 모든
   프로젝트를 읽는다. 나중에 말을 걸 세션을 찾을 수 있게 하려는 것이다. 신뢰하지 않은 프로젝트의 세션은 `ask_project`와
   `attach_app`이 거절되는 것과 같은 이유로(#382) 자기 프로젝트 안에 머문다: 신뢰하지 않은 클론에 심어진 글이 모든 대화를
-  검색하게 두면 안 된다. 오케스트레이터의 세션만 빼고 모두 읽는다(#1941): 코디네이터, 앱의 세션(빌더나 앱이 띄운
-  에이전트), 프로젝트 없는 세션도 읽는다. 오케스트레이터의 대화는 사람이 그와 나눈 대화다. 각 행은 프로젝트와 기계를 밝히고, 아무도 신뢰하지 않은 프로젝트에는 "(not trusted)"를
+  검색하게 두면 안 된다. 어시스턴트의 세션만 빼고 모두 읽는다(#1941): 코디네이터, 앱의 세션(빌더나 앱이 띄운
+  에이전트), 프로젝트 없는 세션도 읽는다. 어시스턴트의 대화는 사람이 그와 나눈 대화다. 각 행은 프로젝트와 기계를 밝히고, 아무도 신뢰하지 않은 프로젝트에는 "(not trusted)"를
   붙이며, 글은 남의 글로 감싼다. 목록은 40행까지 보이고 나머지는 개수로 알린다. `project`로 좁힐 수 있고, 자기 프로젝트의
   세션과 검색 결과가 먼저 나온다. 4초 안에 답하지 않는 연결된 기계는 허브가 마지막으로 안 내용으로 목록에 싣거나 "Not
-  searched"에 이름을 올리므로, 느린 연결 하나가 모든 세션의 호출을 붙잡지 않는다. 보내기·만들기·제안은 오케스트레이터에 남고,
+  searched"에 이름을 올리므로, 느린 연결 하나가 모든 세션의 호출을 붙잡지 않는다. 보내기·만들기·제안은 어시스턴트에 남고,
   다른 프로젝트에 손대는 일은 `ask_project`와 그 동의를 거치며, 역할도 함께 가지 않는다. #564(2026-10-12)부터는 짧은 지시문 하나가 함께 간다: §1.2의 규칙을 어떤 필요에 어떤 도구인지로
-  쓴 것이다. 모든 세션의 모든 턴에 실리므로 크기를 재서 줄였다: 후보 넷을 오케스트레이터 문구 그대로
+  쓴 것이다. 모든 세션의 모든 턴에 실리므로 크기를 재서 줄였다: 후보 넷을 어시스턴트 문구 그대로
   붙이면 요청마다 입력 +672토큰, 출시본은 +192토큰(측정과 근거는 agent-host.md §1.1). 항상 켜져 있다(2026-10-20
   소유자 결정): 설정의 "Let sessions look at other sessions" 스위치는 없어졌다.
 - **평범한 세션이 다른 프로젝트에 일을 맡길 수 있다**(#371 B, 2026-10-05 소유자 결정): `ask_project({ project, session?, task })`가
@@ -324,15 +324,15 @@ come back to the desk
   `detach_app`). 그래서 그 도구는 그 밖에는 문맥을 차지하지 않는다. 나누기는 프로젝트 앱마다 사람이 고르고(설정 →
   앱, 또는 앱 머리. 기본은 꺼짐), 다른 프로젝트의 앱을 쓰는 것은 프로젝트 쌍마다 한 번 묻는다(이번만, 늘, 거절.
   "늘"은 설정에서 거둔다). Claude는 같은 턴에 도구를 받고, Codex 세션은 다음 턴부터 받는다. 자세한 것은 apps.md §9.4.
-- **권한 프리셋은 오케스트레이터의 settings 도구 스키마에서 의도적으로 표현할 수 없다** — 오케스트레이터가
+- **권한 프리셋은 어시스턴트의 settings 도구 스키마에서 의도적으로 표현할 수 없다** — 어시스턴트가
   다른 세션의 승인 뒷문을 조용히 넓힐 수 있어서는 안 된다.
 - 설정 변경은 `settings_changed` 이벤트 + 토스트로 드러나서,
-  오케스트레이터가 무엇을 바꾸는 순간 인간이 그것을 본다.
-- 오케스트레이터가 보낸 지시는 대상 세션의 대화에 표시된다 (2026-08-26 구현): 말풍선 위의 출처 라벨과
-  에이전트 말풍선의 바탕과 실선 테두리(`surface-raised`) — 팔레트 규칙에 따라 색 없이. 오케스트레이터 자신의 채팅에 오는 워커 완료 보고에도
+  어시스턴트가 무엇을 바꾸는 순간 인간이 그것을 본다.
+- 어시스턴트가 보낸 지시는 대상 세션의 대화에 표시된다 (2026-08-26 구현): 말풍선 위의 출처 라벨과
+  에이전트 말풍선의 바탕과 실선 테두리(`surface-raised`) — 팔레트 규칙에 따라 색 없이. 어시스턴트 자신의 채팅에 오는 워커 완료 보고에도
   같은 마커가 붙는다. 스티키 배너에는 출처 이름이 접두로 붙는다.
-- **폐기 (2026-08-27): 세션별 "오케스트레이터 지시 거부" 토글.** v0.4에서 안전장치 한 문장의 나머지 반쪽으로 적혔을
-  뿐, 요청된 적도 아쉬웠던 적도 없다. 오케스트레이터를 만들고 그 범위를 정하는 사람과 이 스위치를 내릴 사람이 같은
+- **폐기 (2026-08-27): 세션별 "어시스턴트 지시 거부" 토글.** v0.4에서 안전장치 한 문장의 나머지 반쪽으로 적혔을
+  뿐, 요청된 적도 아쉬웠던 적도 없다. 어시스턴트를 만들고 그 범위를 정하는 사람과 이 스위치를 내릴 사람이 같은
   사람이라, 자기 관제탑의 지시를 거부하는 상황이 뒤에 없다. 어댑터에 적용한 규칙과 같다 — 설계 문장이 한때 다른
   것과 짝지어 놓았다는 이유가 아니라, 실제 사례가 관찰될 때 만든다. (여러 사람이 함께 쓰는 구성이라면 달라지지만,
   이 앱은 그런 앱이 아니다.)
@@ -443,26 +443,26 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 #### FR-19. 첫 실행 경험 (온보딩)
 
-**오케스트레이터 먼저** (#63, 2026-08-27 — 폴더 먼저 흐름을 대체한다). 목표는 효율이
-아니라 습관 형성이다: 첫 실행에서 오케스트레이터에게 물어보는 경험을 겪지 않은 사람은
-나중에도 누르지 않고, 앱에 대한 질문은 제작자가 아니라 오케스트레이터에게 가야 한다.
+**어시스턴트 먼저** (#63, 2026-08-27 — 폴더 먼저 흐름을 대체한다). 목표는 효율이
+아니라 습관 형성이다: 첫 실행에서 어시스턴트에게 물어보는 경험을 겪지 않은 사람은
+나중에도 누르지 않고, 앱에 대한 질문은 제작자가 아니라 어시스턴트에게 가야 한다.
 정확히 두 정거장, 위저드 없음:
 
 1. **소개 화면** (정말 처음인 설치본 — 프로젝트도 세션도 0개 — 에 딱 한 번): 앱이
-   무엇인지 한 줄, 오케스트레이터의 역할 설명 한두 문장(눈에 띄게), 큰 에이전트 카드
+   무엇인지 한 줄, 어시스턴트의 역할 설명 한두 문장(눈에 띄게), 큰 에이전트 카드
    두 장 (Claude Code / Codex). **카드가 곧 도구 감지 표시다**: 준비된 도구는 활성
    카드, 안 된 도구는 어둡게 비활성 + "Not connected" + 상태별 처방(설치 명령 vs
-   로그인 명령. 터미널 도구의 경우. Antigravity의 카드는 아직 오케스트레이터가 될 수 없는 이유를 거절된 카드로 보여 주며 Install과 Sign in은 없다. 그 둘은 새 세션 창에 있다) + 재감지 버튼. 준비된 카드를
-   클릭하면 오케스트레이터가 돌 도구를 저장하고("나중에 바꿀 수 있다"를 화면에 적는다)
+   로그인 명령. 터미널 도구의 경우. Antigravity의 카드는 아직 어시스턴트가 될 수 없는 이유를 거절된 카드로 보여 주며 Install과 Sign in은 없다. 그 둘은 새 세션 창에 있다) + 재감지 버튼. 준비된 카드를
+   클릭하면 어시스턴트가 돌 도구를 저장하고("나중에 바꿀 수 있다"를 화면에 적는다)
    통과한다. 프로세스는 **뜨지 않는다**.
-2. **보통의 오케스트레이터 세션 화면**, 빈 상태. 대화 메시지가 0개인 동안 행동 지향
-   추천 질문 3개(프로젝트 만들기 / 오케스트레이터의 능력 / 다중 세션 관제)를 큰
+2. **보통의 어시스턴트 세션 화면**, 빈 상태. 대화 메시지가 0개인 동안 행동 지향
+   추천 질문 3개(프로젝트 만들기 / 어시스턴트의 능력 / 다중 세션 관제)를 큰
    카드로 보여주고, 탈출구("그냥 폴더 고르기" → 네이티브 피커 → 세션 생성 창)를 항상
    함께 둔다. 질문 클릭은 **즉시 전송**이고, 그 클릭(또는 입력창의 첫 마디)이 비로소
-   오케스트레이터 프로세스를 띄운다 (지연 기동). 추천 질문은 온보딩 상태 머신이 아니라
+   어시스턴트 프로세스를 띄운다 (지연 기동). 추천 질문은 온보딩 상태 머신이 아니라
    메시지 수의 함수이며, 입력창·사이드바·그리드는 내내 전부 쓸 수 있다.
 
-프로젝트 생성 질문의 답은 행동으로 끝난다: 오케스트레이터의 `create_project` 도구(#515,
+프로젝트 생성 질문의 답은 행동으로 끝난다: 어시스턴트의 `create_project` 도구(#515,
 `propose_project`를 대체)는 자기 대화에 승인 카드를 띄우고, 카드에는 새 빈 폴더의 전체
 경로(다른 위치를 주지 않으면 처음 쓸 때 만드는 `~/Centralu`)가 적힌다. 사람이 만들기를 누르기 전에는 아무것도
 만들지 않고, 이미 있는 것은 다시 쓰지 않는다. 있는 폴더를 추가하는 일은 여전히 사람의
@@ -471,7 +471,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 #### FR-20. 세션 숨기기(아카이브) — **폐기 (2026-09-02)**
 
-세션을 목록에서 숨기던 옛 기능, 당시 이름으로 아카이브를 걷어냈다: 플래그도, RPC도, 오케스트레이터의 `archive_session` 도구도, `d` 키도.
+세션을 목록에서 숨기던 옛 기능, 당시 이름으로 아카이브를 걷어냈다: 플래그도, RPC도, 어시스턴트의 `archive_session` 도구도, `d` 키도.
 스키마 v28이 컬럼을 지운다 — 이제 숨겨진 세션은 없다. 이것은 FR-22의 세션 보관함과 다른 것이다. 보관함은 여기서 폐기한 생각을, 이 기능에 없던 나오는 길을 갖춰 다시 만든 것이다.
 
 실제로 만들어진 것은 아래 설계의 **절반**이었다: 들어가는 문(인박스의 `d`)만 있고
@@ -517,7 +517,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 세션을 보관하면(사이드바의 **Archive session…**) 세션 보관함으로 간다. 대화가 이 기계를 떠나는 것은 사람이 **설정 → Archive**에서
 영구 삭제할 때뿐이다(하나씩은 **Delete for good**, 한 번에는 **Delete all archived sessions…**). 이유는 소유자의 것이다: 대화는 중요한 데이터이고,
-예전에는 삭제 창의 클릭 한 번이 되돌릴 길 없이 대화를 없앴다. 보관함은 #1404 전까지 휴지통이라 불렀다. 오케스트레이터가 "휴지통 비우기"를 운영체제의 휴지통으로 읽고 세션 108개를 영구 삭제한 일 때문에 이름을 바꿨다. 프로토콜의 메서드(`trash.*`), `sessions.trash` 열, `Trashed*` 타입은 프로토콜이 늘기만 하므로 옛 이름을 그대로 둔다. 보관한 뒤 토스트는 "Archived: <name> — Settings → Archive restores it"이다. 앱 에이전트 세션의 남긴 기록과 보관한 서브에이전트 단계도 같은 보관함에 든다(아래).
+예전에는 삭제 창의 클릭 한 번이 되돌릴 길 없이 대화를 없앴다. 보관함은 #1404 전까지 휴지통이라 불렀다. 어시스턴트가 "휴지통 비우기"를 운영체제의 휴지통으로 읽고 세션 108개를 영구 삭제한 일 때문에 이름을 바꿨다. 프로토콜의 메서드(`trash.*`), `sessions.trash` 열, `Trashed*` 타입은 프로토콜이 늘기만 하므로 옛 이름을 그대로 둔다. 보관한 뒤 토스트는 "Archived: <name> — Settings → Archive restores it"이다. 앱 에이전트 세션의 남긴 기록과 보관한 서브에이전트 단계도 같은 보관함에 든다(아래).
 
 - **보관함에 가는 것**은 예전 삭제가 없애던 전부다: 세션 행, 메시지, 승인 규칙, 커밋 연결
   (`commit_sessions`), 그 세션을 가리키는 앱 실행 기록(토큰 수 포함), 첨부, 인수인계 노트
@@ -532,7 +532,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
     가리키지 않게 되고(`git worktree list`가 prunable이라 부르고, `prune`이나 `gc`가 기록을 지운다),
     Claude는 대화를 작업 디렉토리로 찾으므로 되살린 세션이 자기 기록도 잃는다.
 - **보관함에 있는 동안 닿지 않는 곳**: 사이드바, 인박스, 팔레트, 그리드, 프로젝트 화면(§5.5), 대화 검색(FR-21),
-  오케스트레이터의 `list_sessions` / `recall` / `read_session`, 앱의 `host_data` `sessions.list`,
+  어시스턴트의 `list_sessions` / `recall` / `read_session`, 앱의 `host_data` `sessions.list`,
   설정의 승인 규칙 목록. 세션을 읽는 저장소의 모든 질의는 보관함을 어떻게 하는지 말해야 하고,
   말하지 않는 질의가 생기면 host 시험이 실패한다.
 - **나오는 길**은 설정 → Archive다: 세션마다 이름, 프로젝트, 보관한 시각, 크기, 함께 갈 것을
@@ -603,15 +603,15 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 └────────────────┴─────────────────────────────────────────────────┘
 ```
 
-- 사이드바: 프로젝트/세션 트리, 네 가지 모습(기다리는 중, 멈춘, 답하는 중, 쉬는 중; 위의 상태 표, #736) 가운데 하나를 한 세션 표시와 오케스트레이터의 왕관, 안읽음 점, 브랜치와 변경 수 요약. 접을 수 있다.
+- 사이드바: 프로젝트/세션 트리, 네 가지 모습(기다리는 중, 멈춘, 답하는 중, 쉬는 중; 위의 상태 표, #736) 가운데 하나를 한 세션 표시와 어시스턴트의 왕관, 안읽음 점, 브랜치와 변경 수 요약. 접을 수 있다.
   - **어떤 프로젝트가 열려 있는지** (2026-10-01). 프로젝트 묶음(이름 줄, 세션, 앱)과 다음 묶음 사이를 가는
     구분선이 나눈다. 포커스 뷰가 어떤 프로젝트의 화면(§5.5)이나 그 프로젝트의 세션을 보여 주거나, 앱 화면이 그 프로젝트의 앱을 보여 주는 동안(2026-10-03), 그 프로젝트의
-    묶음 전체에 선택된 Grid·Orchestrator 버튼의 surface-hover가 더 옅게 깔리고, 그 안에서 열린 줄은 더 강한 자기 표시(ink-muted
+    묶음 전체에 선택된 Grid·Assistant 버튼의 surface-hover가 더 옅게 깔리고, 그 안에서 열린 줄은 더 강한 자기 표시(ink-muted
     막대)를 유지한다 — 프로젝트 화면이면 이름 줄, 세션이면 그 세션의 줄, 앱이면 그 앱의 줄. 줄 표시만으로는 "이 줄"만 말한다. 색조는 누구의
-    줄인지를 말하고, 접힌 프로젝트(#205)에는 이것 말고 표시할 자리가 없다. 그리드, 오케스트레이터, 프로젝트가 없는 세션, 사용자 폴더의 앱은
+    줄인지를 말하고, 접힌 프로젝트(#205)에는 이것 말고 표시할 자리가 없다. 그리드, 어시스턴트, 프로젝트가 없는 세션, 사용자 폴더의 앱은
     아무것도 칠하지 않는다 — 어느 것도 프로젝트가 아니다. 두 겹 모두 색만 바꾸므로, 선택해도 어떤 줄도 움직이지 않는다.
   - **접힌 프로젝트는 포인터 아래에서 열린다** (사장님, 2026-10-26, [#1578](https://github.com/ijun17/centralu/issues/1578)). 마우스 포인터를 접힌 프로젝트의 이름 줄 어디든(이름 옆 빈 곳도, [#1605](https://github.com/ijun17/centralu/issues/1605)) 0.1초 머무르면 세션 줄이 보이고, 스쳐 지나가기만 하면 아무 일도 없으므로 목록을 훑어 내려가도 줄이 움직이지 않는다. 포인터가 프로젝트 블록 전체(이름과 세션 줄)를 벗어나면 다시 접힌다. 저장된 접기 위에 얹힌 일시적 상태이며 저장 값은 바뀌지 않는다: 사람이 화살표로 펼친 프로젝트는 포인터가 어떻게 움직여도 펼쳐진 채이고, 호버로 열린 프로젝트의 화살표나 이름을 누르면 그대로 남는다(그때 저장된 접기가 펼침으로 바뀐다). 세션 줄로 들어가거나 그 줄을 열어도 열린 채이다. 키보드 포커스는 이를 일으키지 않고, 터치에는 호버가 없으며, 열린 메뉴·이름 바꾸기·끌기는 끝날 때까지 프로젝트를 그대로 둔다. 새로 그려지는 것은 없고 화살표와 그 레이블은 저장된 접기를 말한다.
-  - **오케스트레이터의 자식은 그 버튼 아래에 접혀 있다가 포인터 아래에서 열린다** (사장님, 2026-10-26, [#1591](https://github.com/ijun17/centralu/issues/1591)). 오케스트레이터가 `start_agent`로 시작한 세션("Started by an earlier orchestrator" 묶음 포함)은 가만히 둘 때는 그려지지 않는다. 마우스 포인터를 오케스트레이터 버튼 위에 0.1초 머무르면 접힌 프로젝트 이름과 같은 규칙과 시간(#1578)으로 보이고, 스쳐 지나가기만 하면 아무 일도 없으며, 포인터가 블록 전체(버튼과 그 목록)를 벗어나면 다시 접힌다. 저장되는 것은 없다: 버튼을 눌러도 오케스트레이터 화면이 열릴 뿐 목록이 고정되지 않는다. 자식 중 하나가 열린 세션인 동안에는 그 세션의 줄이 사라지지 않도록 목록이 보인 채로 있다. 키보드 포커스는 열지 않고, 터치에는 호버가 없으며, 열린 줄 메뉴·보관 대화상자·줄에서 시작한 끌기는 끝날 때까지 목록을 그대로 둔다. 접힌 버튼에는 당분간 자식이 몇인지 알려 주는 것이 없다: 숫자도 표시도 없다. 승인을 기다리거나 오류가 난 자식은 여전히 수신함에 보인다.
+  - **어시스턴트의 자식은 그 버튼 아래에 접혀 있다가 포인터 아래에서 열린다** (사장님, 2026-10-26, [#1591](https://github.com/ijun17/centralu/issues/1591)). 어시스턴트가 `start_agent`로 시작한 세션("Started by an earlier assistant" 묶음 포함)은 가만히 둘 때는 그려지지 않는다. 마우스 포인터를 어시스턴트 버튼 위에 0.1초 머무르면 접힌 프로젝트 이름과 같은 규칙과 시간(#1578)으로 보이고, 스쳐 지나가기만 하면 아무 일도 없으며, 포인터가 블록 전체(버튼과 그 목록)를 벗어나면 다시 접힌다. 저장되는 것은 없다: 버튼을 눌러도 어시스턴트 화면이 열릴 뿐 목록이 고정되지 않는다. 자식 중 하나가 열린 세션인 동안에는 그 세션의 줄이 사라지지 않도록 목록이 보인 채로 있다. 키보드 포커스는 열지 않고, 터치에는 호버가 없으며, 열린 줄 메뉴·보관 대화상자·줄에서 시작한 끌기는 끝날 때까지 목록을 그대로 둔다. 접힌 버튼에는 당분간 자식이 몇인지 알려 주는 것이 없다: 숫자도 표시도 없다. 승인을 기다리거나 오류가 난 자식은 여전히 수신함에 보인다.
 - 포커스 뷰: 세션 하나가 전체 폭. 하단 탭으로 파일 트리/git/뷰어 전환 — 전체 폭에서는 각 탭이 실제로 쓸 만한 크기가 된다.
   - **백그라운드 작업** ([#290](https://github.com/ijun17/centralu/issues/290)). 에이전트가 턴 뒤에서 작업을 돌리면 —
     서브에이전트, 백그라운드 셸, MCP 작업 — 세션 헤더가 실행 중인 것을 세고("2 background", 도구가 ambient라고 하는
@@ -664,7 +664,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
   한 번에 하나를 처리하는 루프와 여러 개를 동시에 보여주는 화면은 아직 화해하지 못했다.
 - **3** — 여전히 참이다. FR-1을 충족하는 것은 사이드바이고, 그리드는 그 위에 얹힌 **또 하나의 보는 방식**이다.
 
-그래서 표시는 화면 안이 아니라 **사이드바의 Grid 버튼**에 붙는다 (#1의 오케스트레이터와 같은
+그래서 표시는 화면 안이 아니라 **사이드바의 Grid 버튼**에 붙는다 (#1의 어시스턴트와 같은
 처방: ink-faint 텍스트 + 점선 테두리, 색도 밝기도 쓰지 않는다). 다만 이유는 다르다 — #1은
 모르고 누르는 것을 막으려던 것이지만, 그리드는 자유롭게 누를 수 있고 되돌릴 수 있다. 비싼 것은
 그 안에서 보내는 시간이며, 그리드가 열려 있는 동안에도 사이드바는 가려지지 않으므로 표시 하나가 **누르기 전과
@@ -714,7 +714,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | **Start empty; add only the panels the person chooses** | A project may contain many sessions and apps, but the screen should show only what the person puts there, as the global grid does (owner, 2026-10-13, #604). Creating a session does not add a panel. |
 | × **removes** a panel from the list; the session keeps running, and an app view closes with teardown first | This removes a way of looking, not the session or app. There is no hidden set or show-again header; the sidebar remains the place to add a panel. |
 | **Drag this project's sidebar sessions and apps onto the screen** | An absent panel is added where it lands (before or after the target, or at the end on padding); a visible one moves there and stays put on padding. This is the grid's existing gesture. |
-| **Only this project's**: another project's session or app, and the orchestrator, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
+| **Only this project's**: another project's session or app, and the Assistant, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
 | Remember the **explicit ordered `panels` list per project across restarts**, in the workspace snapshot beside the sidebar fold | Availability filters drawing, not saved membership. Reordering preserves unavailable ids in their saved slots; adding appends one id, and removing takes only the chosen id off the list. Explicit session deletion removes its membership. Project apps have no explicit removal event, so catalog omission never removes their panels. Deleting a project drops its entry. |
 | A session in the session archive (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
 | **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first. While anything is dragged, the panel covers its view with a transparent layer and the view stays in sight, as on the grid (§5.4) | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. In WebKit a drag goes into a frame whatever the frame's pointer-events say (measured in Playwright's WebKit): a row dropped on an app's view would land in the app instead of beside it, and a session's panel carried into an app's view from the side, not through its header, never reached the screen at all (#288). The cover above the frame catches both on the page; hiding the view did too, at the cost of a blank screen for the whole drag (#296). |
@@ -756,7 +756,7 @@ offers New session; creating one leaves the panel list empty until the person ad
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │
 │  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │
-│  · common event normalisation         · orchestrator tools (FR-11)    │
+│  · common event normalisation         · Centralu tools (FR-11)    │
 │  · git CLI wrapper (FR-4)             · file tree IO + dir watchers   │
 │  · SQLite (~/.centralu/store.db — sessions, messages, workspace)      │
 └──────┬──────────────────────────┬─────────────────────────────────────┘
@@ -789,9 +789,9 @@ interface AgentAdapter {
 ### 6.3 데이터 모델 (SQLite)
 
 - `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
-- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 보관함에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 어시스턴트만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 보관함에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
 - `messages(session_id, seq, role, kind, payload, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 보관함이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다. `trashed_at`(v58, #418)은 단계가 세션 없이 보관함에 있는 동안 정해진다: 카드가 더는 읽지 않고, 그 단계의 영구 삭제가 지운다.
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 어시스턴트의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 보관함이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다. `trashed_at`(v58, #418)은 단계가 세션 없이 보관함에 있는 동안 정해진다: 카드가 더는 읽지 않고, 그 단계의 영구 삭제가 지운다.
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 보관함으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
 - `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
@@ -837,9 +837,9 @@ transform으로 회전시키며, 컴포지터가 소유한다. #736(2026-10-16) 
 
 **2026-08-26 상태: M0 ✓ · M1 ✓ · M1.5 ✓ · M2 ✓ — 현재 위치는 M2.5 (도그푸딩).** 아래 마일스톤
 내용은 작성 당시 그대로 유지한다 (무엇이, 무엇을 근거로 결정되었는지의 기록이다); ✓는 완료 표시다.
-M2.5 동안 실사용에 이끌려 지금까지 출시된 것: 오케스트레이터 재설계 (FR-11 — #13, #30), codex verbosity
+M2.5 동안 실사용에 이끌려 지금까지 출시된 것: 어시스턴트 재설계 (FR-11 — #13, #30), codex verbosity
 (#54), 파일 트리 외부 변경 감지 (#34), History의 독립 탭화 (FR-4), 5단계 텍스트 스케일, 스티키
-사용자 메시지 배너, §7.1에서 측정된 상시 렌더 수정. 원래 M3 목록 중 오케스트레이터와
+사용자 메시지 배너, §7.1에서 측정된 상시 렌더 수정. 원래 M3 목록 중 어시스턴트와
 워크트리 옵션은 완료; 주간 비용 대시보드는 미결로 남는다 (FR-9).
 
 **2026-09-25: M4 (앱)이 M2.5와 나란히 진행 중이다** — 아래 M4 참조.
@@ -890,7 +890,7 @@ M2까지 만든 뒤, 실제 프로젝트에서 며칠 돌려 보고 거기서 �
 ### M3 — 지능화
 
 - 주간 사용량 **비용** 대시보드 (FR-9 — 한도 윈도우 뷰는 먼저 출시됨; 남은 것은 비용 뷰)
-- ~~오케스트레이터 세션~~ (M2.5 중이던 2026-08-25 완료, 재설계됨 — FR-11 참조)
+- ~~어시스턴트 세션~~ (M2.5 중이던 2026-08-25 완료, 재설계됨 — FR-11 참조)
 - ~~워크트리 옵션~~ (2026-08-19 완료 — FR-2의 낮은 우선순위 옵션), 프로젝트별 기본 프리셋, ~~성능 튜닝~~ (§7.1 2026-08-26 측정)
 
 ### M4 (진행 중) — 앱: 도구를 만든 자리가 곧 쓰는 자리 (상세는 [plans/apps-plan.md](plans/apps-plan.md))
@@ -922,9 +922,9 @@ M3 뒤의 독립된 마일스톤이고, M3는 그대로 둔다 (2026-09-25 결�
 빠지는 것: 팀 서버(권한, 배포, 중앙 실행 기록 — 유료 경계), 앱 마켓, 앱이 스스로 깨어나는 일(타이머, 감시 — 중개는 실행이
 시작하지 않은 호출을 거절한다). 그 밖에 앱 서버 자체의 프로세스 샌드박스, 화면을 찍어 만드는 세션에 넘기기.
 
-내장 컨트롤 앱(오케스트레이터 화면의 레일과 그 작업·반장, #80/#81)은 새 형식으로 옮기지 않고, 그 밑의 컴파일된 앱 틀과 함께
+내장 컨트롤 앱(어시스턴트 화면의 레일과 그 작업·반장, #80/#81)은 새 형식으로 옮기지 않고, 그 밑의 컴파일된 앱 틀과 함께
 걷어냈다([#372](https://github.com/ijun17/centralu/pull/372), [#97](https://github.com/ijun17/centralu/issues/97)에서 정했다. 2026-10-05 소유자 결정: 레일은 거의 보지 않고 세션은 그리드에서
-돌린다. 오케스트레이터의 세션을 보여 주는 화면이 필요하면 외부 앱으로 만든다). 인박스(FR-15)는 상단 바에 남는다.
+돌린다. 어시스턴트의 세션을 보여 주는 화면이 필요하면 외부 앱으로 만든다). 인박스(FR-15)는 상단 바에 남는다.
 
 ---
 
@@ -937,7 +937,7 @@ M3 뒤의 독립된 마일스톤이고, M3는 그대로 둔다 (2026-09-25 결�
 | SDK가 충분한 컨텍스트/사용량 상세를 주지 않을 수 있음 | FR-14 정확도 | capability로 'estimate'로 강등하고 툴팁에 표시(수치에 ≈ 없음, #1572), 로그 파싱을 백업으로 |
 | 같은 디렉터리 동시 세션 간 파일 충돌 | **데이터 손실** | 생성 시 명시적 경고 대화 + 같은 파일 수정 감지 배지 (FR-2), 워크트리 옵션은 이후에 |
 | resume이 불가능한 상황 (도구 업데이트, 로그 유실) | FR-10 저하 | "기록 보기 + 새 세션" 폴백을 일급 경로로 설계 |
-| 오케스트레이터 폭주 (과도한 지시) | 비용과 혼란 | 지시의 가시화(출처 표식, 구현됨) + `create_session` 제안 카드 + 승인 프리셋 존중. 세션별 거부는 폐기 — FR-11 참고 |
+| 어시스턴트 폭주 (과도한 지시) | 비용과 혼란 | 지시의 가시화(출처 표식, 구현됨) + `create_session` 제안 카드 + 승인 프리셋 존중. 세션별 거부는 폐기 — FR-11 참고 |
 
 ---
 
@@ -951,7 +951,7 @@ M3 뒤의 독립된 마일스톤이고, M3는 그대로 둔다 (2026-09-25 결�
 - 주간 사용량 데이터 소스 → **로그 파싱 유지** (SDK는 자기 세션의 턴별 사용량만 주고, 주간 집계나 plan limit API가 없음을 확인 — FR-9 참조).
 
 - 프런트엔드 → **React**. 유휴 에너지는 렌더 정책(§7.1)이 결정하므로 프레임워크의 가벼움은 결정 요인이 아니다; 생태계와 에이전트 주도 개발 친화성이 우선.
-- 오케스트레이터 `create_session` → **제안 카드 + 인간 확인** (조회/읽기/전송 세 도구는 자동).
+- 어시스턴트 `create_session` → **제안 카드 + 인간 확인** (조회/읽기/전송 세 도구는 자동).
 - "항상 허용" 규칙 → **패턴 허용 + 등록 시 매칭 미리보기 + 설정의 규칙 관리**. 표현력을 제한하는 대신 결과를 보이게 한다.
 - `waiting_input` 알림 → **기본은 무음(배지만)**; "all done" 알림은 2026-10-20에 폐기했다 (#1429).
 

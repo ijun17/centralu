@@ -2,7 +2,7 @@
  * Back and forward between screens, like a web browser (#374).
  *
  * An entry is what a person would call "a screen": one session, one project's screen, one app's page, the grid, the
- * orchestrator, or Settings. Nothing finer: a keystroke, a scroll, a panel moved on the grid or a session picked
+ * assistant, or Settings. Nothing finer: a keystroke, a scroll, a panel moved on the grid or a session picked
  * inside the grid does not make a new entry, because going back to it would look like nothing happened. The grid is
  * one entry whatever stands on it; going back to it shows the grid as it is now, as a browser shows a page.
  *
@@ -15,7 +15,7 @@ export type Screen =
   | { kind: 'project'; id: string }
   | { kind: 'app'; projectId: string | null; appId: string; machine?: string | null }
   | { kind: 'grid' }
-  | { kind: 'orchestrator' }
+  | { kind: 'assistant' }
   | { kind: 'settings' }
   /*
    * A file and the git screen are pages of their own (owner, 2026-10-18): they open over the screen they were opened

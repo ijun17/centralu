@@ -64,14 +64,14 @@ export type SendInput = {
   needsReply?: boolean
   replyTo?: string
   urgent?: boolean
-  /** Per recipient: `orchestrator` when the sender named the role (D15) */
+  /** Per recipient: `assistant` when the sender named the role (D15) */
   via?: readonly (string | null)[]
-  /** A request to the orchestrator cites the person's newest message in the sender's conversation as their word for it (docs/plans/cited-requests.md) */
+  /** A request to the Assistant cites the person's newest message in the sender's conversation as their word for it (docs/plans/cited-requests.md) */
   cite?: boolean
 }
 /**
- * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the orchestrator cites, checked.
- * `notCited`: why a citation the request asked for did not pass the check, so the orchestrator reads the request as the session's own words
+ * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the Assistant cites, checked.
+ * `notCited`: why a citation the request asked for did not pass the check, so the Assistant reads the request as the session's own words
  */
 export type SendResult = {
   message: MailRow
@@ -106,7 +106,7 @@ export type TurnReport = {
 }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
-/** `withheld`: a request to the orchestrator whose words are shown only in the turn it starts (§7.6); the body is left out */
+/** `withheld`: a request to the Assistant whose words are shown only in the turn it starts (§7.6); the body is left out */
 export type ReadItem = { message: MailRow; row: RecipientRow | null; relation: string; phantom?: 'not_sent' | 'gone' | 'held'; withheld?: true }
 export type ReadView = { items: ReadItem[]; older: string | null; marked: number }
 export type InboxView = {
@@ -138,9 +138,9 @@ export type DrainResult = {
   needsReply: boolean
   line: string
   heldBack: { messageId: string; reason: HoldReason }[]
-  /** The task (or, for the orchestrator, the first request of its asker) a turn this delivery starts is the work of, or null */
+  /** The task (or, for the Assistant, the first request of its asker) a turn this delivery starts is the work of, or null */
   workMessage: string | null
-  /** For the orchestrator, the session whose requests this delivery carries */
+  /** For the Assistant, the session whose requests this delivery carries */
   asker: string | null
 }
 
@@ -270,7 +270,7 @@ export class MessageService {
 
     return this.run(() => {
       const now = this.now()
-      // The person's message a request cites, checked here, in the send's transaction: evidence for the orchestrator's judgement (docs/plans/cited-requests.md §3)
+      // The person's message a request cites, checked here, in the send's transaction: evidence for the Assistant's judgement (docs/plans/cited-requests.md §3)
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
       this.guards(sender, cls, to, text, requests, now)
@@ -358,7 +358,7 @@ export class MessageService {
   report(taskId: string, input: TurnReport): ReportWritten {
     return this.run(() => {
       const task = this.records.message(taskId)
-      // A task, or for the orchestrator's request turn the request it was for (§9.2): Centralu reports either to its sender
+      // A task, or for the Assistant's request turn the request it was for (§9.2): Centralu reports either to its sender
       const row = task && (task.kind === 'task' || task.kind === 'message') ? this.records.recipients(taskId).find((r) => task.kind === 'task' || this.isRequest(task, r.recipient)) : undefined
       if (!task || !row) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(taskId))
       // A request's turn is reported whatever its row says: a moved request is settled `legacy`, and its asker is told all the same (§6.3)
@@ -450,7 +450,7 @@ export class MessageService {
   /**
    * `mail read` (§8.4): with no id the reader's unread mail, oldest first, at most 10 messages and about 20,000 characters, never half a message, marked
    * read; with an id that message and its chain back, at most 9 ancestors oldest first, phantoms for what the reader may not read (§5.5), and the
-   * message itself marked read. `before` is the older half of a chain. A request to the orchestrator is read only in the turn it was delivered in (§7.6)
+   * message itself marked read. `before` is the older half of a chain. A request to the Assistant is read only in the turn it was delivered in (§7.6)
    */
   read(reader: string, opts: { id?: string; before?: string } = {}): ReadView {
     return this.run(() => {
@@ -527,11 +527,11 @@ export class MessageService {
   /**
    * What a delivery to `recipient` would send now, and which messages it covers (§8.2). It reads the rows as they are: what was read since is not in it,
    * nor a reminder whose messages are settled, nor mail whose sender may no longer write. The one hold holds a row (`heldBack`, which the
-   * delivery writes); a task is the work of the turn it starts, one to a wake, and for the orchestrator one asker's requests; everything else rides along
+   * delivery writes); a task is the work of the turn it starts, one to a wake, and for the Assistant one asker's requests; everything else rides along
    */
   drain(recipient: string, opts: DrainOptions = {}): DrainResult {
     const now = this.now()
-    const toOrchestrator = this.reach.isOrchestrator(recipient)
+    const toAssistant = this.reach.isAssistant(recipient)
     const parent = this.reach.parentOf(recipient)
     type Candidate = { row: RecipientRow; message: MailRow; down: boolean; request: boolean }
     const candidates: Candidate[] = []
@@ -555,24 +555,24 @@ export class MessageService {
         row,
         message,
         request,
-        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toOrchestrator, fromParent: parent === message.sender }),
+        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender }),
       })
     }
 
-    // One turn, one task (D17): a delivery that starts a turn carries at most one task, or for the orchestrator one asker's requests
+    // One turn, one task (D17): a delivery that starts a turn carries at most one task, or for the Assistant one asker's requests
     const wakesIt = (c: Candidate) => wakesMessage(c.message)
-    const isWork = (c: Candidate) => (toOrchestrator ? c.request : c.message.kind === 'task')
-    const groupOf = (c: Candidate) => (toOrchestrator ? c.message.sender : c.message.id)
+    const isWork = (c: Candidate) => (toAssistant ? c.request : c.message.kind === 'task')
+    const groupOf = (c: Candidate) => (toAssistant ? c.message.sender : c.message.id)
     const picked = pickWork(
       candidates
         .filter((c) => wakesIt(c) && isWork(c))
-        .map((c) => ({ key: groupOf(c), decides: c.message.urgent || c.message.sender === PERSON, needsReply: toOrchestrator && c.message.needsReply, dueAt: c.row.dueAt })),
+        .map((c) => ({ key: groupOf(c), decides: c.message.urgent || c.message.sender === PERSON, needsReply: toAssistant && c.message.needsReply, dueAt: c.row.dueAt })),
       now,
     )
     const turnStarts = candidates.some(wakesIt)
     const handedOn = turnStarts && picked === null ? candidates.map((c) => (wakesIt(c) ? this.handedOnFrom(c.message, recipient) : undefined)).find((id) => id !== undefined) : undefined
     const kept = turnStarts ? candidates.filter((c) => !isWork(c) || groupOf(c) === picked) : candidates
-    const workMessage = !turnStarts ? null : handedOn ?? (toOrchestrator ? (kept.find((c) => c.request)?.message.id ?? null) : picked)
+    const workMessage = !turnStarts ? null : handedOn ?? (toAssistant ? (kept.find((c) => c.request)?.message.id ?? null) : picked)
 
     const items: MessageFrameItem[] = []
     const relations = new Set<string>()
@@ -600,7 +600,7 @@ export class MessageService {
       line: items.length === 0 ? '' : deliveryLine(items.length, relations),
       heldBack,
       workMessage,
-      asker: turnStarts && toOrchestrator ? picked : null,
+      asker: turnStarts && toAssistant ? picked : null,
     }
   }
 
@@ -733,31 +733,31 @@ export class MessageService {
     })
   }
 
-  /** The orchestrator's turn on `asker`'s requests ended (§7.6): the requests that turn carried are settled `reported`. Returns how many */
-  requestTurnEnded(orchestrator: string, asker: string, turnSeq: number): number {
+  /** The Assistant's turn on `asker`'s requests ended (§7.6): the requests that turn carried are settled `reported`. Returns how many */
+  requestTurnEnded(assistant: string, asker: string, turnSeq: number): number {
     return this.run(() => {
       let n = 0
-      for (const row of this.records.watchedTo(orchestrator)) {
+      for (const row of this.records.watchedTo(assistant)) {
         const m = row.turnSeq === turnSeq && this.records.message(row.messageId)
-        if (m && m.sender === asker && this.isRequest(m, orchestrator)) n += this.records.settle(m.id, orchestrator, 'reported', this.now())
+        if (m && m.sender === asker && this.isRequest(m, assistant)) n += this.records.settle(m.id, assistant, 'reported', this.now())
       }
       return n
     })
   }
 
   /**
-   * The sessions whose requests are in `orchestrator`'s turn `turn` (docs/plans/turn-owned-by-no-one.md §4.2), oldest first, each with its oldest request there, read
+   * The sessions whose requests are in `assistant`'s turn `turn` (docs/plans/turn-owned-by-no-one.md §4.2), oldest first, each with its oldest request there, read
    * from the rows the turn was given (`inOpenTurn`), settled or not: a request delivered into the turn makes the whole turn its asker's, and a
    * restart or a swap keeps it, since the store holds the rows. A reminder for an asker (`facts.asker`) counts as its request
    */
-  requestsIn(orchestrator: string, turn: TurnRead): { asker: string; messageId: string }[] {
-    if (!this.reach.isOrchestrator(orchestrator)) return []
+  requestsIn(assistant: string, turn: TurnRead): { asker: string; messageId: string }[] {
+    if (!this.reach.isAssistant(assistant)) return []
     const work = turn.messageId === null ? undefined : this.records.message(turn.messageId)
-    const given = [...(work ? [{ message: work, row: this.records.recipient(work.id, orchestrator) }] : []), ...this.records.inTurn(orchestrator, turn.turnSeq)]
+    const given = [...(work ? [{ message: work, row: this.records.recipient(work.id, assistant) }] : []), ...this.records.inTurn(assistant, turn.turnSeq)]
     const found = new Map<string, string>()
     for (const { message: m, row } of given) {
       if (!this.inOpenTurn(m, row, turn)) continue
-      const asker = this.isRequest(m, orchestrator) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
+      const asker = this.isRequest(m, assistant) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
       if (asker !== undefined && parseAddress(asker)?.kind === 'session' && !found.has(asker)) found.set(asker, m.id)
     }
     return [...found].map(([asker, messageId]) => ({ asker, messageId }))
@@ -789,7 +789,7 @@ export class MessageService {
   partyGone(address: string): void {
     this.releaseAndTell((now, senders) => {
       for (const row of this.records.watchedTo(address)) {
-        // Mail sent to the orchestrator's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
+        // Mail sent to the Assistant's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
         if (row.via === 'orchestrator') continue
         const m = this.records.message(row.messageId)
         this.records.settle(row.messageId, address, 'gone', now)
@@ -805,7 +805,7 @@ export class MessageService {
    * `needsReply` message, the person's too) is released with the cause, and each sender is told once, in one notice. The rows stay open, so a reply that
    * comes after the person continues the session still answers them. A question delivered in an earlier turn is not this stop's: it was read, and the
    * session may have answered it in conversation. A task is not released here: the old report path tells its owner until requests decide reports.
-   * A request to the orchestrator is (owner: its sender always learns it will not be answered, #1186): the turn's report tells the asker it was owed to,
+   * A request to the Assistant is (owner: its sender always learns it will not be answered, #1186): the turn's report tells the asker it was owed to,
    * which the caller passes as `held`, and every other asker, or one that report misses (an asker the same quit cut), gets the stop notice.
    * `turnSeq` is the cut turn (none: nothing is released, as for a turn the mailbox never recorded)
    *
@@ -921,7 +921,7 @@ export class MessageService {
 
   /**
    * The questions `address` left unanswered in its turn `turnSeq`, the rows a stop (`sessionsStopped`) or a lost turn (`turnsLost`) releases: each
-   * `needsReply` message delivered into that turn and not answered, settled or released, a request to the orchestrator included. Not a task (the old
+   * `needsReply` message delivered into that turn and not answered, settled or released, a request to the Assistant included. Not a task (the old
    * report path tells its owner, #698), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
    */
   private cutQuestions(address: string, turnSeq: number): { row: RecipientRow; message: MailRow }[] {
@@ -962,7 +962,7 @@ export class MessageService {
     })
   }
 
-  /** The orchestrator's role is `to`'s (D15): rows sent to the role that another session held are delivered afresh, read or not, and the new orchestrator is told of each. Returns how many */
+  /** The Assistant's role is `to`'s (D15): rows sent to the role that another session held are delivered afresh, read or not, and the new Assistant is told of each. Returns how many */
   roleMoved(to: string): number {
     return this.run(() => {
       const ids = this.records.moveRole(to)
@@ -1044,11 +1044,11 @@ export class MessageService {
   }
 
   /**
-   * Whether a message is a request to the orchestrator (§7.6): from a session to the orchestrator, unless it answers a `needsReply` message or a task the
-   * orchestrator sent that session, or is a clarification. Only requests are counted by `ask_rate` and raise the person's cards
+   * Whether a message is a request to the Assistant (§7.6): from a session to the Assistant, unless it answers a `needsReply` message or a task the
+   * assistant sent that session, or is a clarification. Only requests are counted by `ask_rate` and raise the person's cards
    */
   private isRequest(m: Pick<MailRow, 'sender' | 'kind' | 'replyTo' | 'facts'>, recipient: string): boolean {
-    if ((m.kind !== 'message' && m.kind !== 'task') || m.sender === recipient || !this.reach.isOrchestrator(recipient)) return false
+    if ((m.kind !== 'message' && m.kind !== 'task') || m.sender === recipient || !this.reach.isAssistant(recipient)) return false
     if (parseAddress(m.sender)?.kind !== 'session' || typeof m.facts.clarifies === 'string') return false
     const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
     return !(target && target.sender === recipient && (target.needsReply || target.kind === 'task'))
@@ -1191,7 +1191,7 @@ export class MessageService {
     if (this.reach.parentOf(m.sender) === recipient) return 'your child session'
     const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
     if (target?.kind === 'task' && target.sender === recipient) return 'the session you gave this work to'
-    if (this.reach.isOrchestrator(m.sender)) return 'the orchestrator'
+    if (this.reach.isAssistant(m.sender)) return 'the Assistant'
     const mine = this.reach.projectOf(recipient)
     return mine !== null && mine === this.reach.projectOf(m.sender) ? 'a session of your project' : 'a session of another project'
   }

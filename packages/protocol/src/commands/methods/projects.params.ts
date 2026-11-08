@@ -100,7 +100,7 @@ export const projectsParams = {
   }),
   'projects.add': z.object({ path: z.string(), ...machineParam }),
   /**
-   * What a folder is, read on the machine it is on and nothing changed (#1220): the orchestrator's add_project shows
+   * What a folder is, read on the machine it is on and nothing changed (#1220): the Assistant's add_project shows
    * it on the person's card before `projects.add` registers the folder. `path` comes back absolute, in that machine's
    * own terms (a leading `~` is that machine's home); a path that is not absolute is refused. `git`: the folder is in
    * a git repository, and `origin` is that repository's `origin` remote as its config has it (no program of the

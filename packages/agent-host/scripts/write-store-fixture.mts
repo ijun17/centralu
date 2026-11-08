@@ -31,7 +31,7 @@ const version: number = s.schemaVersion
 s.addProject({ id: 'p1', path: '/tmp/p1', name: 'alpha' })
 const session = (id: string, name: string, lastReadSeq: number) => ({
   id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: `ext-${id}`, name, autoNamed: false, state: 'idle',
-  archived: false, isOrchestrator: false, lastReadSeq, lastSeq: 0, createdAt: 1_700_000_000_000, waitingSince: null,
+  archived: false, isAssistant: false, lastReadSeq, lastSeq: 0, createdAt: 1_700_000_000_000, waitingSince: null,
   live: false, model: 'opus', effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal',
   importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
   goal: null, forkedFrom: null, askedBy: null, pendingQuestions: [], activity: null,

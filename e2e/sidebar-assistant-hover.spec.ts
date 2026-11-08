@@ -1,0 +1,188 @@
+import { test, expect, type Page } from '@playwright/test'
+import { assistantWithChildren as withChildren } from './fixtures/sidebar-fold.js'
+
+/**
+ * The Assistant's children fold under its button and open on a mouse rest (#1591, owner 2026-10-26), by the rule of a
+ * folded project's name (#1578). The 0.1 s rest (#1605) and the exit (150 ms) run on Playwright's clock: the clock is paused after setup and moved by hand.
+ */
+const list = (page: Page) => page.getByTestId('assistant-children')
+const button = (page: Page) => page.getByTestId('assistant-button')
+const away = (page: Page) => page.mouse.move(900, 600)
+
+/** A list that folds stays 150 ms (usePresence) on the same fake clock: wait until it is leaving, then let the exit end */
+async function exitEnds(page: Page) {
+  await expect(page.getByTestId('assistant-fold')).toHaveAttribute('data-fold', 'closing')
+  await page.clock.runFor(151)
+}
+
+const row = (page: Page, name: string) => page.getByTestId(`assistant-child-row-orc-child-${name}`)
+
+test('Assistant children: folded at rest, open after a mouse rest on the button, folded when the pointer leaves the block', async ({ page }) => {
+  await withChildren(page)
+  await expect(button(page)).toBeVisible()
+  await expect(list(page)).toHaveCount(0)
+  await button(page).hover()
+  await page.clock.runFor(99)
+  await expect(list(page)).toHaveCount(0)
+  await page.clock.runFor(2)
+  await expect(list(page)).toBeVisible()
+  await expect(row(page, 'alpha')).toBeVisible()
+  await expect(row(page, 'beta')).toBeVisible()
+  // Into the list (still the block): it stays
+  await row(page, 'beta').hover()
+  await page.clock.runFor(1000)
+  await expect(list(page)).toBeVisible()
+  // Out of the whole block: it folds
+  await away(page)
+  await exitEnds(page)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: nothing on the folded button says how many there are', async ({ page }) => {
+  await withChildren(page)
+  await expect(list(page)).toHaveCount(0)
+  await expect(button(page)).toHaveText('Assistant')
+  await expect(button(page).locator('[data-testid]')).toHaveCount(0)
+})
+
+test('Assistant children: passing over the button does not open them', async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(60)
+  await expect(list(page)).toHaveCount(0)
+  await away(page)
+  await page.clock.runFor(1000)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: clicking the button opens the screen and pins nothing', async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await expect(list(page)).toBeVisible()
+  await button(page).click()
+  await expect(button(page)).toHaveAttribute('aria-pressed', 'true')
+  await away(page)
+  await page.clock.runFor(1000)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: an open child keeps the list shown, and the pointer leaving does not fold it', async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('orc-child-alpha')
+  await away(page)
+  await page.clock.runFor(1000)
+  await expect(list(page)).toBeVisible()
+  await expect(row(page, 'alpha')).toHaveAttribute('aria-current', 'page')
+  // Another sibling is hidden no more than the list as a whole: it is one list
+  await expect(row(page, 'beta')).toBeVisible()
+})
+
+test('Assistant children: the earlier assistant group folds and opens with the rest', async ({ page }) => {
+  await withChildren(page, { current: [], earlier: ['gamma'] })
+  await expect(page.getByTestId('assistant-children-earlier')).toHaveCount(0)
+  await expect(row(page, 'gamma')).toHaveCount(0)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await expect(page.getByTestId('assistant-children-earlier')).toHaveText('Started by an earlier assistant')
+  await expect(row(page, 'gamma')).toBeVisible()
+  await away(page)
+  await exitEnds(page)
+  await expect(row(page, 'gamma')).toHaveCount(0)
+})
+
+test("Assistant children: an open row menu holds the list until it closes", async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').hover()
+  await page.getByTestId('session-menu-orc-child-alpha').click()
+  await expect(page.getByTestId('session-menu-open-orc-child-alpha')).toBeVisible()
+  await away(page)
+  await page.clock.runFor(500)
+  await expect(list(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await exitEnds(page)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: keyboard focus on the button does not open them', async ({ page }) => {
+  await withChildren(page)
+  await button(page).focus()
+  await page.clock.runFor(1000)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: a child that starts while the pointer rests on the button is shown at once', async ({ page }) => {
+  const orc = await withChildren(page, { current: ['alpha'] })
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await expect(row(page, 'alpha')).toBeVisible()
+  await page.evaluate((o) => {
+    const child = { ...o, id: 'orc-child-late', kind: 'worker', name: 'late', askedBy: o.id }
+    ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
+  }, orc)
+  await expect(row(page, 'late')).toBeVisible()
+  await away(page)
+  await exitEnds(page)
+  await expect(list(page)).toHaveCount(0)
+})
+
+test('Assistant children: archiving a child of a hover-opened list that asks first shows its dialog even when the list folds under it', async ({ page }) => {
+  await withChildren(page)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').hover()
+  await page.getByTestId('session-menu-orc-child-alpha').click()
+  await page.getByTestId('delete-session-orc-child-alpha').click()
+  // Archiving always asks first (#1589)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await page.clock.runFor(500)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+})
+
+test('Assistant children: the dialog of a hover-opened list stays through the losses step, and the second Archive moves the child', async ({ page }) => {
+  await withChildren(page)
+  // The mock host holds no such child; say what a real host would list for one that owes its starter a report
+  await page.evaluate(() => {
+    ;(window as any).__mock.agents.archiveIfAtRest = async () => ({ archived: false, asks: ['It owes the Assistant a report; it will not be told, and the report is dropped.'] })
+  })
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await row(page, 'alpha').hover()
+  await page.getByTestId('session-menu-orc-child-alpha').click()
+  await page.getByTestId('delete-session-orc-child-alpha').click()
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toHaveCount(0)
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('delete-losses')).toContainText('owes the Assistant a report')
+  // The pointer is away: the dialog and what it lists stay
+  await away(page)
+  await page.clock.runFor(500)
+  await expect(page.getByTestId('confirm-delete')).toBeVisible()
+  await expect(page.getByTestId('delete-losses')).toBeVisible()
+  // The open dialog holds the list, as it does for the first step
+  await expect(list(page)).toBeVisible()
+  // The second Archive moves it, and the list can fold at last
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId('confirm-delete')).toHaveCount(0)
+  // The hold is gone, so the list is leaving (not held, not reopened); its exit runs on the fake clock like the rest
+  await exitEnds(page)
+  await expect(list(page)).toHaveCount(0)
+  await button(page).hover()
+  await page.clock.runFor(250)
+  await expect(row(page, 'alpha')).toHaveCount(0)
+  await expect(row(page, 'beta')).toBeVisible()
+})
+
+test('Assistant children: pressing the button before the rest is over leaves them folded', async ({ page }) => {
+  await withChildren(page)
+  await button(page).click()
+  await page.clock.runFor(1000)
+  await expect(list(page)).toHaveCount(0)
+})

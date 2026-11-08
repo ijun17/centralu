@@ -153,7 +153,7 @@ async function hubHost(line: () => ConnectionLine, store = new Store(), add = tr
   mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
   mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
   mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), 'Hub mac'))
-  // As main.ts wires it: the orchestrator's list_machines reads what machines.list answers (#1220)
+  // As main.ts wires it: the Assistant's list_machines reads what machines.list answers (#1220)
   mgr.useMachineList(() => links.list())
   mgr.useMachineOps(links)
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
@@ -287,7 +287,7 @@ describe('a hub linked to another host (#82)', () => {
     }
   })
 
-  it('shows neither the remote orchestrator nor its coordinators, nor passes their events on', async () => {
+  it('shows neither the remote assistant nor its coordinators, nor passes their events on', async () => {
     const { store } = seeded([
       ['orch', 'orchestrator', false],
       ['coord', 'coordinator', true],
@@ -301,8 +301,8 @@ describe('a hub linked to another host (#82)', () => {
     remote.server.broadcast({ type: 'session_title', sessionId: 'orch', title: 'secret plan', auto: true })
     remote.server.broadcast({ type: 'session_title', sessionId: 'worker1', title: 'visible', auto: true })
     /*
-     * The orchestrator's title went out first, and a link relays a machine's events in order, as they come (#845):
-     * once the worker's has arrived, the orchestrator's would have before it
+     * The Assistant's title went out first, and a link relays a machine's events in order, as they come (#845):
+     * once the worker's has arrived, the Assistant's would have before it
      */
     await eventually(() => u.events().some((e) => e.type === 'session_title' && e.sessionId === 'm1.worker1'))
     expect(u.events().filter((e) => e.type === 'session_title').map((e) => e.sessionId)).toEqual(['m1.worker1'])
@@ -905,9 +905,9 @@ describe('a hub linked to another host (#82)', () => {
 
     /*
      * #1293 re-review: the row flipped to `connecting` at every reading of the line, and to `unreachable` while the
-     * machine slept, and the orchestrator's card was gated on that status: it could start what the person stopped
+     * machine slept, and the Assistant's card was gated on that status: it could start what the person stopped
      */
-    it('stays stopped while it reads the line again and while the machine sleeps, and the orchestrator’s plain reconnect starts nothing', async () => {
+    it('stays stopped while it reads the line again and while the machine sleeps, and the Assistant’s plain reconnect starts nothing', async () => {
       let asleep = false
       const l = await restartable({ stopped: () => ({ by: 'stop', at: 1 }), asleep: () => asleep })
       await eventually(() => l.row().status === 'stopped')
@@ -918,7 +918,7 @@ describe('a hub linked to another host (#82)', () => {
       asleep = true
       await eventually(() => l.row().status === 'away')
       expect(l.links.startHeldBack('m1')).toMatch(/^Centralu was stopped on Remote box with `centralu serve --stop`/)
-      // The orchestrator's reconnect without its card, then the machine wakes: still held back, nothing started
+      // The Assistant's reconnect without its card, then the machine wakes: still held back, nothing started
       l.links.reconnect('m1', { start: false })
       asleep = false
       await eventually(() => l.row().status === 'stopped')
@@ -2076,7 +2076,7 @@ process.exit(127)
   }, 30_000 * SLOW)
 })
 
-describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () => {
+describe("the hub's Assistant reads the linked machines (#82 phase 4)", () => {
   /** A conversation in the store: the person's line, then the agent's, `n` exchanges, seq from 1 */
   function talk(store: Store, sessionId: string, lines: [user: string, agent: string][]) {
     store.messages.appendMessages(
@@ -2087,7 +2087,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     )
   }
 
-  /** A remote with a worker, its orchestrator and a coordinator, each with something said; a hub with its own orchestrator and worker */
+  /** A remote with a worker, its Assistant and a coordinator, each with something said; a hub with its own assistant and worker */
   async function rig(o: { worktreeChild?: boolean; wide?: boolean } = {}) {
     const { store: remoteStore } = seeded([
       ['w1', 'worker', true],
@@ -2100,7 +2100,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
       ['set up the nightly backup', 'The zebracrossing job now runs at 02:00.'],
       ...Array.from({ length: 30 }, (_, i): [string, string] => [`step ${i}`, `done ${i}`]),
     ])
-    talk(remoteStore, 'orch', [['plan', 'zebracrossing is the remote orchestrator’s own note']])
+    talk(remoteStore, 'orch', [['plan', 'zebracrossing is the remote assistant’s own note']])
     talk(remoteStore, 'coord', [['lead', 'zebracrossing from a coordinator']])
     // A child under w1 makes it a worktree manager there: a seat that directs, whose input the injection gate guards (#120)
     if (o.worktreeChild) seedSession(remoteStore, 'p-remote', 'kid', 'worker')
@@ -2127,17 +2127,17 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
       seedSession(hubStore, hubProject, 'hcoord', 'coordinator')
       seedSession(hubStore, null, 'happ', 'worker', null, { appId: 'notes' })
       seedSession(hubStore, null, 'hloose', 'worker')
-      talk(hubStore, 'hub-orch', [['mine', 'zebracrossing in the talk with the orchestrator']])
+      talk(hubStore, 'hub-orch', [['mine', 'zebracrossing in the talk with the Assistant']])
       talk(hubStore, 'hcoord', [['lead', 'zebracrossing from the local coordinator']])
     }
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     await eventually(() => status(hub) === 'connected')
     const tool = async (name: string, args: Record<string, unknown> = {}) =>
-      (await hub.mgr.runOrchestratorTool('hub-orch', name, args)) as { text: string; isError?: boolean }
+      (await hub.mgr.runCentraluTool('hub-orch', name, args)) as { text: string; isError?: boolean }
     return { remote, hub, tool }
   }
 
-  it('lists a linked machine’s sessions beside this computer’s, named by the machine, with its coordinators but never its orchestrator (#1941)', async () => {
+  it('lists a linked machine’s sessions beside this computer’s, named by the machine, with its coordinators but never its Assistant (#1941)', async () => {
     const { tool } = await rig()
     const lines = (await tool('list_sessions')).text.split('\n').filter((l) => l.startsWith('- '))
     expect(lines).toEqual([
@@ -2155,20 +2155,20 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(end.text).not.toContain('zebracrossing')
 
     const found = await tool('recall', { query: 'zebracrossing' })
-    // This computer's hit and the machine's, taken in turns; its coordinator's too, never its orchestrator's (#1941)
+    // This computer's hit and the machine's, taken in turns; its coordinator's too, never its Assistant's (#1941)
     expect(found.text).toContain('[hub-project] h1')
     expect(found.text).toContain('[remote-project on Remote box] w1')
     expect(found.text).toContain('m1.coord')
-    expect(found.text).not.toMatch(/remote orchestrator/)
+    expect(found.text).not.toMatch(/remote assistant/)
     const around = /read_session\(sessionId="m1\.w1", around=(\d+)\)/.exec(found.text)
     expect(around).not.toBeNull()
     const there = await tool('read_session', { sessionId: 'm1.w1', around: Number(around![1]), limit: 4 })
     expect(there.text).toContain('The zebracrossing job now runs at 02:00.')
   })
 
-  it("a trusted project's session reads every session but an orchestrator's, here and on the machine; an untrusted project's reads its own project only (#1941)", async () => {
+  it("a trusted project's session reads every session but an Assistant's, here and on the machine; an untrusted project's reads its own project only (#1941)", async () => {
     const { hub } = await rig({ wide: true })
-    const as = (sessionId: string, name: string, args: Record<string, unknown> = {}) => hub.mgr.runOrchestratorTool(sessionId, name, args)
+    const as = (sessionId: string, name: string, args: Record<string, unknown> = {}) => hub.mgr.runCentraluTool(sessionId, name, args)
     const readable = ['hcoord', 'happ', 'hloose', 'm1.coord', 'm1.app1', 'm1.loose']
     for (const id of readable) expect((await as('h2', 'read_session', { sessionId: id })).isError, id).toBeFalsy()
     for (const id of ['hub-orch', 'm1.orch']) expect(await as('h2', 'read_session', { sessionId: id }), id).toMatchObject({ isError: true })
@@ -2177,14 +2177,14 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(listed).not.toMatch(/\[(hub-orch|m1\.orch)\]/)
     const found = (await as('h2', 'recall', { query: 'zebracrossing' })).text
     for (const id of ['hcoord', 'm1.coord', 'm1.app1', 'm1.loose']) expect(found, id).toContain(`sessionId="${id}"`)
-    expect(found).not.toMatch(/remote orchestrator|talk with the orchestrator/)
+    expect(found).not.toMatch(/remote assistant|talk with the Assistant/)
     // From the untrusted project: its own project's sessions only, here or there
     expect((await as('h1', 'read_session', { sessionId: 'hcoord' })).isError).toBeFalsy()
     for (const id of ['happ', 'hloose', 'h2', 'm1.coord', 'm1.w1', 'hub-orch']) expect(await as('h1', 'read_session', { sessionId: id }), id).toMatchObject({ isError: true })
-    expect((await as('h1', 'recall', { query: 'zebracrossing' })).text).not.toMatch(/m1\.|orchestrator/)
+    expect((await as('h1', 'recall', { query: 'zebracrossing' })).text).not.toMatch(/m1\.|assistant/)
   })
 
-  it('neither reads nor directs the machine’s orchestrator', async () => {
+  it('neither reads nor directs the machine’s assistant', async () => {
     const { tool, remote } = await rig()
     const hidden = await tool('read_session', { sessionId: 'm1.orch' })
     expect(hidden).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
@@ -2193,7 +2193,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
   })
 
-  it("changes no setting of the machine's orchestrator nor its coordinator, on the hub nor there (#1941 review)", async () => {
+  it("changes no setting of the machine's assistant nor its coordinator, on the hub nor there (#1941 review)", async () => {
     const { tool, remote } = await rig()
     for (const id of ['orch', 'coord']) {
       expect(await tool('update_session_settings', { sessionId: `m1.${id}`, model: 'scripted-1' })).toMatchObject({ isError: true, text: expect.stringContaining('shares') })
@@ -2206,10 +2206,10 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(remote.mgr.listSessions().filter((s) => s.model === 'scripted-1')).toEqual([])
   })
 
-  /** What the hub's orchestrator was told: the text of each message in its own session */
+  /** What the hub's Assistant was told: the text of each message in its own session */
   const told = (hub: Hub) => hub.store.messages.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
 
-  it('sends to a machine’s session as the hub’s orchestrator, and reports the end of that turn once (step 2)', async () => {
+  it('sends to a machine’s session as the hub’s assistant, and reports the end of that turn once (step 2)', async () => {
     const { tool, remote, hub } = await rig()
     // What the hub relayed: an event reaches its windows in the same call that hands it to the manager's reports
     const u = await ui(hub.port)
@@ -2217,7 +2217,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(await tool('send_to_session', { sessionId: 'm1.w1', text: 'run the backup', reportBack: true })).toMatchObject({
       text: 'Sent: m1.w1 (I will let you know once it is done)',
     })
-    // Recorded there as an instruction from this orchestrator, named with this computer
+    // Recorded there as an instruction from this Assistant, named with this computer
     await eventually(() => remote.store.messages.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'run the backup'))
     const there = remote.store.messages.loadMessages('w1', 5).find((m) => (m.payload as { text?: string }).text === 'run the backup')!
     expect(there.payload).toMatchObject({ from: { name: 'hub-orch on Hub mac' } })
@@ -2302,7 +2302,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
   })
 
   // #1233: the first message's turn is reported there too, unless reportBack is false
-  it('tells the hub’s orchestrator when the first turn of a session it made on a machine ends, unless it opted out', async () => {
+  it('tells the hub’s assistant when the first turn of a session it made on a machine ends, unless it opted out', async () => {
     const { tool, remote, hub } = await rig()
     const u = await ui(hub.port)
     const quiet = await tool('create_session', { project: 'm1.p-remote', name: 'Quiet', firstMessage: 'keep it quiet', reportBack: false })
@@ -2449,7 +2449,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const read = /read_session\(sessionId="([^"]+)", around=(\d+), offset=(\d+)\)/.exec(r.answer)
     expect(read?.[1]).toBe('m1.w1')
     // The caller's own read_session, as the model calls it, read on that machine from the cut
-    const shown = await hub.mgr.runOrchestratorTool('h1', 'read_session', { sessionId: read![1], around: Number(read![2]), offset: Number(read![3]) })
+    const shown = await hub.mgr.runCentraluTool('h1', 'read_session', { sessionId: read![1], around: Number(read![2]), offset: Number(read![3]) })
     expect(shown.isError).not.toBe(true)
     const line = JSON.parse(shown.text.trim().split('\n').at(-1)!) as { text: string }
     expect(line.text).toContain('MIDDLE-START')
@@ -3173,7 +3173,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(r.notice).toContain(there!.base!.slice(0, 9))
   })
 
-  // #1161 item 3: the orchestrator removed these over SSH by hand
+  // #1161 item 3: the Assistant removed these over SSH by hand
   it('delete removes the worktree made for it there when nothing would be lost, and otherwise leaves it and says why', async () => {
     const { remote, remoteStore, answer, start, agent } = await rig()
     await remote.mgr.setProjectTrusted('p-app', true)
@@ -3722,23 +3722,23 @@ describe('a link to a host that can prove it holds the token', () => {
 })
 
 /**
- * The orchestrator's add_project on a linked machine, and list_machines (#1220): the folder's facts are read by that
+ * The Assistant's add_project on a linked machine, and list_machines (#1220): the folder's facts are read by that
  * machine's host, the card names the machine, and Allow registers the folder through that machine's `projects.add`, the
  * call its group's Add project makes.
  */
 describe('add_project and list_machines on a linked machine (#1220)', () => {
-  /** The hub's orchestrator's add-folder card, if one stands */
+  /** The hub's Assistant's add-folder card, if one stands */
   const addCard = (hub: Hub, orcId: string) => {
     const pending = hub.mgr.listSessions().find((s) => s.id === orcId)?.pendingApproval
     return pending?.detail.kind === 'project_add' ? { requestId: pending.requestId, detail: pending.detail } : undefined
   }
-  const addProject = (hub: Hub, orcId: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command: 'add_project', args })
+  const addProject = (hub: Hub, orcId: string, args: Record<string, unknown>) => hub.mgr.runCentraluTool(orcId, 'centralu_run', { command: 'add_project', args })
 
   async function linked(o: { without?: readonly string[] } = {}) {
     const remote = await remoteHost(0, new Store(), o.without ? { without: o.without } : {})
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     return { remote, hub, orc, u: await ui(hub.port) }
   }
 
@@ -3827,7 +3827,7 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
   it('lists the machines machines.list answers, one line each', async () => {
     const { hub, orc, u } = await linked()
     const listed: MachineInfo[] = await u.call('machines.list')
-    const r = await hub.mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
+    const r = await hub.mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
     const lines = r.text.split('\n').filter((l) => l.startsWith('- '))
     expect(lines).toEqual(listed.map((m) => `- ${JSON.stringify(m.name)} [${m.id}]: ${m.status}; macOS or Linux, Unix shell; auto reconnect on`))
     expect(lines).toEqual(['- "Remote box" [m1]: connected; macOS or Linux, Unix shell; auto reconnect on'])
@@ -3835,7 +3835,7 @@ describe('add_project and list_machines on a linked machine (#1220)', () => {
 })
 
 /**
- * The orchestrator's machine commands against a real hub (#1219): the same calls on the links as the Machines screen's,
+ * The Assistant's machine commands against a real hub (#1219): the same calls on the links as the Machines screen's,
  * a card where the change is the person's, none for reconnecting or Auto reconnect.
  */
 describe('the machine commands on a real hub (#1219)', () => {
@@ -3843,13 +3843,13 @@ describe('the machine commands on a real hub (#1219)', () => {
     const pending = hub.mgr.listSessions().find((s) => s.id === orcId)?.pendingApproval
     return pending?.detail.kind === 'other' && pending.detail.about === 'machine_change' ? pending : undefined
   }
-  const run = (hub: Hub, orcId: string, command: string, args: Record<string, unknown>) => hub.mgr.runOrchestratorTool(orcId, 'centralu_run', { command, args })
+  const run = (hub: Hub, orcId: string, command: string, args: Record<string, unknown>) => hub.mgr.runCentraluTool(orcId, 'centralu_run', { command, args })
 
   it('reconnects a machine whose switch is on, and turns the switch off, with no card, as the row does', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     expect((await run(hub, orc.id, 'reconnect_machine', { machine: 'm1' })).isError).toBeFalsy()
     const r = await run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: false })
     expect(r.isError).toBeFalsy()
@@ -3862,7 +3862,7 @@ describe('the machine commands on a real hub (#1219)', () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     await run(hub, orc.id, 'set_machine_auto_reconnect', { machine: 'remote box', on: false })
     await hub.links.disconnect('m1')
     expect(status(hub)).toBe('disconnected')
@@ -3898,7 +3898,7 @@ describe('the machine commands on a real hub (#1219)', () => {
     const here = await hub.mgr.projectCreation.addProject(folder())
     hub.store.machines.setLinkedMachineAsks('m1', true)
     expect(hub.store.machines.setMachineAskConsent({ machineId: 'm1', sessionId: 's-there', sessionName: 'worker', projectId: here.id })).toBe(true)
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     const call = run(hub, orc.id, 'remove_machine', { machine: 'Remote box' })
     await eventually(() => !!machineCard(hub, orc.id))
     expect(hub.links.list().length).toBe(1)
@@ -3917,7 +3917,7 @@ describe('the machine commands on a real hub (#1219)', () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     const activity = await run(hub, orc.id, 'machine_activity', { machine: 'Remote box' })
     expect(activity.isError).toBeFalsy()
     expect(activity.text).toMatch(/^(Nothing is running on Remote box|On Remote box, an update or a restart would stop|Remote box cannot say what is running)/)
@@ -3943,7 +3943,7 @@ describe('the machine commands on a real hub (#1219)', () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
     await eventually(() => status(hub) === 'connected')
-    const orc = await hub.mgr.orchestrator()
+    const orc = await hub.mgr.assistant()
     const r = await run(hub, orc.id, 'install_machine', { machine: 'Remote box', action: 'update' })
     expect(r).toEqual({ text: 'Nothing changed: This computer cannot install on Remote box', isError: true })
     expect(machineCard(hub, orc.id)).toBeUndefined()

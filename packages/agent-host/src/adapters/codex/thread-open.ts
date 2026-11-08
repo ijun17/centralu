@@ -1,5 +1,5 @@
 import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
-import { codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
+import { codexToolInstructionsFor } from '../../sessions/centralu-tools.js'
 import { rpcError } from '../../rpc-error.js'
 import type { CreateSessionOpts, EventSink } from '../contract.js'
 import type { CodexClient } from './client.js'
@@ -97,7 +97,7 @@ export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<stri
        * MCP servers are loaded **on resume too** (M4 A-5, plan "to confirm separately" 1).
        *
        * The old resume sent no servers at all — if the initial settings do not survive on
-       * the thread, a Codex orchestrator that wakes back up loses the centralu tools.
+       * the thread, a Codex assistant that wakes back up loses the centralu tools.
        * Whether they actually survive can only be known by running it (S-7), and we could
        * not re-check because Codex was logged out. So we load them again without waiting
        * for that confirmation: resume's `config` is a settings override (generated type
@@ -147,7 +147,7 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
     ...permissionOptionsFor(opts.permissionPreset),
     model: opts.model,
     /*
-     * The following two are attached only for the orchestrator.
+     * The following two are attached only for the Assistant.
      *
      * The role is given directly through developerInstructions — the same slot as Claude's
      * systemPrompt append. The reason we avoid a file (AGENTS.md) is the same: if a
@@ -162,9 +162,9 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
     ...developerInstructions(opts),
     /*
      * config is **assembled in this one place only.** There used to be a trap where the
-     * verbosity spread and the orchestrator spread each built their own config keys, and one
+     * verbosity spread and the Assistant spread each built their own config keys, and one
      * would silently overwrite the other entirely — once there were three contributors
-     * (summary, verbosity, orchestrator), it became cheaper to remove the trap than to keep
+     * (summary, verbosity, assistant), it became cheaper to remove the trap than to keep
      * remembering it.
      */
     config: {
@@ -174,7 +174,7 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
       // Response speed (measured: priority = "Fast, 1.5x speed, increased usage")
       ...(opts.serviceTier ? { service_tier: opts.serviceTier } : {}),
       ...autoCompactConfig(opts),
-      // MCP servers — the orchestrator's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
+      // MCP servers — the Assistant's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
       ...servers,
       // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)
       ...repoFilesConfig(opts),
@@ -197,7 +197,7 @@ export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
 /**
  * The thread's developer instructions: the session's role, then the instructions of the Centralu tools it gets
  * (#525), which Claude receives from the in-process server and Codex would never show from the bridge's
- * `initialize` (measured: sessions/orchestrator-tools.ts, codexToolInstructionsFor). Sent at thread/start only.
+ * `initialize` (measured: sessions/centralu-tools.ts, codexToolInstructionsFor). Sent at thread/start only.
  * `thread/resume` takes the same field and ignores it: resumed with other developer instructions, the model still
  * named the phrase from the first ones and the rollout gained no developer message (codex-cli 0.160.0,
  * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). So a thread keeps what it was started with; a session
@@ -207,7 +207,7 @@ export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
 export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
   // An app attached as the thread starts adds the line on repository work (#957, #992 review)
   const apps = (opts.apps?.current().length ?? 0) > 0
-  const tools = opts.orchestratorTools && opts.orchestratorBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'orchestrator', undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
+  const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'assistant', undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
   const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
   return text ? { developerInstructions: text } : {}
 }

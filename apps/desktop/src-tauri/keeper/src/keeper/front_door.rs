@@ -1,6 +1,6 @@
 //! The front door (#280, option C step 3): one address every client uses, whichever host is current.
 //!
-//! The app's webview, a browser pointed at the keeper's host, and every Codex orchestrator bridge
+//! The app's webview, a browser pointed at the keeper's host, and every Codex Centralu tools bridge
 //! connect here instead of to a host. The keeper forwards each connection, byte for byte, to the
 //! current host's own port. When the host restarts (a crash), its connections end, clients reconnect to
 //! the same address, and the door hands them to the new host run.

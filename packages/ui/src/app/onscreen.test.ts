@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isOnScreen } from './onscreen.js'
 
-const ctx = { focusedSessionId: 'a', orchestratorId: 'orc', gridSessions: ['b', 'c'] }
+const ctx = { focusedSessionId: 'a', assistantId: 'orc', gridSessions: ['b', 'c'] }
 
 describe('the gust only blows when a session on screen finishes', () => {
   it('focus view — the session being looked at', () => {
@@ -9,9 +9,9 @@ describe('the gust only blows when a session on screen finishes', () => {
     expect(isOnScreen('focus', 'b', ctx)).toBe(false)
   })
 
-  it('orchestrator screen — that session', () => {
-    expect(isOnScreen('orchestrator', 'orc', ctx)).toBe(true)
-    expect(isOnScreen('orchestrator', 'a', ctx)).toBe(false)
+  it('assistant screen — that session', () => {
+    expect(isOnScreen('assistant', 'orc', ctx)).toBe(true)
+    expect(isOnScreen('assistant', 'a', ctx)).toBe(false)
   })
 
   it('grid — one of the panels that is up', () => {
@@ -41,6 +41,6 @@ describe('the gust only blows when a session on screen finishes', () => {
   it('does not blow for something that finished off screen', () => {
     expect(isOnScreen('focus', 'zzz', ctx)).toBe(false)
     expect(isOnScreen('grid', 'zzz', ctx)).toBe(false)
-    expect(isOnScreen('orchestrator', 'zzz', ctx)).toBe(false)
+    expect(isOnScreen('assistant', 'zzz', ctx)).toBe(false)
   })
 })

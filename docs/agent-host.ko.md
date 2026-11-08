@@ -21,11 +21,11 @@ agent-host/src/
 │  └─ json-lines.ts     # 줄 단위 JSON: \n에서만 나눈다(U+2028에서도 끊는 readline은 쓰지 않는다), 대기 중인 요청 (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
-│  ├─ contract/         # 계약의 큰 부분: 오케스트레이터 도구, 세션 앱, 도구의 프로세스
+│  ├─ contract/         # 계약의 큰 부분: 어시스턴트 도구, 세션 앱, 도구의 프로세스
 │  ├─ registry.ts       # 도구 → 어댑터 지도
-│  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)
+│  ├─ claude/           # Claude Agent SDK 기반 (centralu-mcp.ts 포함)
 │  └─ codex/            # app-server JSON-RPC 클라이언트 (직접 작성. stdio 다리 포함)
-├─ sessions/            # SessionManager와 거기서 떼어 낸 부분: 위임, 인계, 세션 보관함(`session-trash.ts`), 오케스트레이터 도구,
+├─ sessions/            # SessionManager와 거기서 떼어 낸 부분: 위임, 인계, 세션 보관함(`session-trash.ts`), 어시스턴트 도구,
 │                       #   세션 앱 (folder-structure.ko.md §1)
 ├─ apps/external/       # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
 ├─ views/               # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지, 끌기 중계
@@ -47,9 +47,9 @@ agent-host/src/
 └─ themes.ts            # 테마 폴더 (#312)
 ```
 
-사용량 파싱과 오케스트레이터의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
-도구마다 다른 질문이라 `adapters/<tool>/usage.ts`에 있고, 오케스트레이터 도구는
-`sessions/tool-definitions.ts`에 한 번 정의되고 `sessions/orchestrator-tools.ts`가 실행하며(이 파일이 모든
+사용량 파싱과 어시스턴트의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
+도구마다 다른 질문이라 `adapters/<tool>/usage.ts`에 있고, 어시스턴트 도구는
+`sessions/tool-definitions.ts`에 한 번 정의되고 `sessions/centralu-tools.ts`가 실행하며(이 파일이 모든
 이름을 다시 내보내므로 대부분의 모듈은 여기서 가져온다) 어댑터마다 다른 길로 노출된다 — claude는 인프로세스, codex는 stdio 다리. 어느 자리가
 어떤 도구를 보고 실행하는지는 `sessions/tool-seats.ts`, 답의 문구는 `sessions/tool-answers.ts`에 있다.
 
@@ -59,18 +59,18 @@ agent-host/src/
 순수한 규칙 하나가 정한다(`sessions/tool-profiles.ts`의 `toolProfileFor`: 행의 종류, 앱과 빌더
 자리, 설정 스위치로부터. `toolBundleFor`는 프로필마다 뒤에 서는 객체를 댄다). 매니저는 그 규칙에 한
 곳에서 묻는다(`toolChoice`: 프로필, 그리고 어댑터 옵션을 만들 때 함께 만드는 묶음). 생성, 깨울 때마다,
-다리 호출마다, `toolProfileOf`가 모두 이것을 쓴다. 그래서 서로 어긋날 수 없다. 오케스트레이터, 코디네이터,
-읽기 세션의 객체는 함수 하나(`sessions/orchestrator-seat.ts`의 `orchestratorToolsFor`)가 만들고, 이 함수는
-매니저를 좁게 보여 주는 `OrchestratorSeatHost`만 받는다. 묶음이
+다리 호출마다, `toolProfileOf`가 모두 이것을 쓴다. 그래서 서로 어긋날 수 없다. 어시스턴트, 코디네이터,
+읽기 세션의 객체는 함수 하나(`sessions/assistant-seat.ts`의 `centraluToolsFor`)가 만들고, 이 함수는
+매니저를 좁게 보여 주는 `AssistantSeatHost`만 받는다. 묶음이
 무엇을 노출하는지와 그 호출이 무엇을 실행할 수 있는지는 둘 다 `profileAllows`가 정하므로,
 묶음에 없는 이름은 Codex 다리를 거쳐도 거절된다.
 
 | 프로필 | 누구 | 시야 | 도구 | 지침 |
 |---|---|---|---|---|
-| `orchestrator` | 하나뿐인 오케스트레이터 | 모든 세션 | 빌더 전용을 뺀 전부 | 역할과 사용법 |
+| `assistant` | 하나뿐인 어시스턴트 | 모든 세션 | 빌더 전용을 뺀 전부 | 역할과 사용법 |
 | `scoped` | 코디네이터(#80). 관제 앱의 작업만 만들었고, 그것은 만들던 RPC와 함께 #372에서 걷어냈다. 저장소에 있는 것은 이 프로필로 깨어난다 | 자기 멤버 | 목록, 읽기, 보내기 | 자기 경계 |
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
-| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 신뢰한 프로젝트에서는 이 컴퓨터와 연결된 기계에서 오케스트레이터의 것을 뺀 모든 세션을 읽는다 (#984, #1941). 신뢰하지 않은 프로젝트에서는 자기 프로젝트만 읽는다. 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 사람이 달리 말하지 않는 한 Centralu의 도구를 먼저 (#564) |
+| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 신뢰한 프로젝트에서는 이 컴퓨터와 연결된 기계에서 어시스턴트의 것을 뺀 모든 세션을 읽는다 (#984, #1941). 신뢰하지 않은 프로젝트에서는 자기 프로젝트만 읽는다. 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 사람이 달리 말하지 않는 한 Centralu의 도구를 먼저 (#564) |
 
 지침은 두 CLI 모두에서 모델에 닿지만, 들어가는 문이 다르다. Claude는 프로세스 안 서버의 `instructions`로
 받는다. codex-cli 0.160.0은 서버의 지침을 어떤 모델에게도 보여 주지 않으므로(#525,
@@ -85,8 +85,8 @@ agent-host/src/
 `worktree`, §1.2.1), 다루고(`agent_session`), 병합되고 깨끗한 것을 같은 관문 뒤에서 `agent_session` `delete`로
 치운다(`sessions/worktree-sessions.ts`의 `cleanUpWorktreeChild`). 남은 것: 사람이 만드는 워크트리 세션(새 세션 창의 선택. 이제 매니저 밑이 아니라
 홀로 선다), 모든 워크트리 세션의 병합·PR 감지, 프로젝트의 줄기(`worktrees.setTrunk`, 프로젝트 메뉴의 "Worktree
-trunk", 예전 자리의 줄에 보관). 오케스트레이터에는 `propose_worktree_session`을 대신할 것을 주지 않는다: 사람의
-저장소에 가지와 폴더를 만드는 일은 이제 프로젝트 세션의 동의 카드를 거치고, 오케스트레이터는 `send_to_session`으로 그
+trunk", 예전 자리의 줄에 보관). 어시스턴트에는 `propose_worktree_session`을 대신할 것을 주지 않는다: 사람의
+저장소에 가지와 폴더를 만드는 일은 이제 프로젝트 세션의 동의 카드를 거치고, 어시스턴트는 `send_to_session`으로 그
 세션에 닿는다. 기존 데이터: 스토어 v48이 예전 매니저의 워크트리 세션에 `askedBy` = 부모를 주어, 매니저가 그것들을
 자기가 띄운 에이전트로 가진다. 자리의 열은 나중의 축소 단계까지 남는다.
 
@@ -102,7 +102,7 @@ claude.ai 커넥터 끔):
 
 | 모양 | 문자 | 토큰 |
 |---|---|---|
-| `list_sessions`, `read_session`, `recall`, `app_guide`를 오케스트레이터 문구로 | 2,493 | +672 |
+| `list_sessions`, `read_session`, `recall`, `app_guide`를 어시스턴트 문구로 | 2,493 | +672 |
 | 같은 넷, 문구만 다듬음 | 1,138 | +338 |
 | 목록을 `read_session`에 합침(도구 셋, 모두 로드) | 897 | +267 |
 | **출시본**: `app_guide`만 도구 검색 뒤로 미룸 | 897 | **+192** |
@@ -111,18 +111,18 @@ claude.ai 커넥터 끔):
 로드된 도구 하나씩: `read_session` 239 → 98, `recall` 182 → 84, `app_guide` 148 → 85, 합쳐서
 없어진 `list_sessions` 103 → 75. 도구 하나가 첫 단어 전에 약 55토큰(이름과 스키마 틀)을 먹으므로
 다듬기보다 합치기가 이겼다. 전부 미루기는 기각했다: 예전 대화를 물어도 모델이 `recall`을 한 번도
-부르지 않았다(오케스트레이터가 `send_to_session`에서 잰 것과 같은 실패이고, 그래서 그 도구들은
+부르지 않았다(어시스턴트가 `send_to_session`에서 잰 것과 같은 실패이고, 그래서 그 도구들은
 `alwaysLoad`다). 미룬 `app_guide`는 도구 검색으로 5번 중 4번 찾았다(로드하면 5번 중 5번). 놓친
-한 번은 앱에 대한 추측 답이고, 오케스트레이터는 안내서를 로드해 둔다. Codex에는 미루기가 없어
-셋 다 받는다. `orchestrator-tools.test.ts`는 직렬화한 묶음과 지침이 `READER_BUDGET_CHARS`
+한 번은 앱에 대한 추측 답이고, 어시스턴트는 안내서를 로드해 둔다. Codex에는 미루기가 없어
+셋 다 받는다. `centralu-tools.test.ts`는 직렬화한 묶음과 지침이 `READER_BUDGET_CHARS`
 (#564가 이 묶음에 392자의 지시문을 주기 전까지 1,000, 그 뒤로 1,400. 묶음은 1,375자)를 넘으면 실패한다.
 
 #1480은 `read_session`에 `tools`(세 단어 또는 불리언), `maxChars`, 그리고 예산 메모가 이름 붙이는 `before`, `from`, `offset`을 주었다. 설명 없이
 +204자로, 묶음은 1,913자이고 한도는 1,950으로 올렸다(읽기 전용 세션의 상주 합도 200만큼 오른다. Claude 2,396 + 지시문 413, 미룬 것 2,562,
 Codex는 전부 로드해 4,958 + 465 = 5,423, 한도 5,500). 정의에 모두 넣은 이유는 Claude의 프로세스 내 서버가 스키마에 없는 인자를 도구가 돌기
-전에 지우기 때문이다(SDK의 `tool()`로 확인). 오케스트레이터와 scoped 좌석에는 178자이고(`tools`와 `maxChars`에 짧은 설명), 한도는
+전에 지우기 때문이다(SDK의 `tool()`로 확인). 어시스턴트와 scoped 좌석에는 178자이고(`tools`와 `maxChars`에 짧은 설명), 한도는
 9,500 → 9,700(Codex 9,663), 2,400 → 2,600(Codex 2,560)으로 올렸다.
-#1487은 #1489에서 빠진 `offset`의 `.int().min(0)`을 되돌렸다: 읽기 전용 묶음과 오케스트레이터 정의에 각각 +12자이고, 한도는 10씩 올라 1,960과 9,710이 되었으며 읽기 전용 세션의 상주 합은 2,850이다.
+#1487은 #1489에서 빠진 `offset`의 `.int().min(0)`을 되돌렸다: 읽기 전용 묶음과 어시스턴트 정의에 각각 +12자이고, 한도는 10씩 올라 1,960과 9,710이 되었으며 읽기 전용 세션의 상주 합은 2,850이다.
 한 번의 읽기에는 이제 합계 한도가 있다: 메모까지 합쳐 `maxChars`(기본 12,000, 2,000~40,000으로 맞춘다)를 넘지 않고 첫 줄은 언제나 온다.
 기본 읽기는 가장 최근 줄부터 뒤로, `around`는 그 자리에서 바깥으로, `from`은 앞으로 채운다. 한 줄은 기본에서 2,000자, 그 위로는
 `maxChars`의 6분의 1(최대 8,000)까지 보인다. 일찍 멈추면 멈춘 곳에서 이어 읽는 호출을 메모가 말한다: 보인 가장 오래된 줄 앞은 `before=`,
@@ -147,14 +147,14 @@ Claude는 셋 다 미루며, 그 값은 요청마다 +31 토큰이다(같은 측
 **다시 재기**(#513). `pnpm measure:tools`가 모든 프로필을 두 CLI에서 같은 방식으로, 되풀이할 수 있게
 잰다: 상주 토큰(API의 사용량, 그리고 Centralu 도구를 넣고 뺀 `count_tokens`), 요청마다의 캐시 읽기·쓰기와
 재구축을 일으킨 사건, 고정 프롬프트 묶음에서의 도구 선택과 첫 시도 인자 유효성, 긴 세션에서 도구 결과가
-더하는 양. `orchestrator-tools.test.ts`는 프로필마다 상주 문자 수(`RESIDENT_BUDGET_CHARS`)를,
+더하는 양. `centralu-tools.test.ts`는 프로필마다 상주 문자 수(`RESIDENT_BUDGET_CHARS`)를,
 `adapters/claude/tool-prefix.test.ts`는 앱을 붙이고 떼도 Claude 세션의 도구 목록이 바뀌지 않음을 고정한다.
 돌리는 법·읽는 법과 기준선: [tool-cost.md](tool-cost.md)(영어만). 그 기준선(2026-10-12)에서 Codex는 더 이상
 MCP 도구를 요청에 미리 싣지 않았다: codex-cli 0.160.0은 자기 `exec` 도구 안에서 그 도구들에 닿는다. 그래서
 위의 "Codex에는 미루기가 없다"는 위 숫자를 잰 CLI의 이야기다.
 
-**오케스트레이터의 드문 명령**(#512, 2026-10-12부터 명령 층). `create_app`,
-`propose_skill`, `propose_mcp_server`는 오케스트레이터가 싣는 것의 3분의 1이면서 가장 적게 부르는 것이다. 호스트는 이들을 도구 목록에서 빼고 그 자리에 고정 도구 셋을 준다: `centralu_commands`(한 줄씩), `centralu_help`(명령 하나의 스키마), `centralu_run`(호스트가 그 스키마로
+**어시스턴트의 드문 명령**(#512, 2026-10-12부터 명령 층). `create_app`,
+`propose_skill`, `propose_mcp_server`는 어시스턴트가 싣는 것의 3분의 1이면서 가장 적게 부르는 것이다. 호스트는 이들을 도구 목록에서 빼고 그 자리에 고정 도구 셋을 준다: `centralu_commands`(한 줄씩), `centralu_help`(명령 하나의 스키마), `centralu_run`(호스트가 그 스키마로
 엄격하게 확인하고, 틀린 호출에는 스키마로 답한다). 지시문에는 이들이 있다는 한 줄이 붙는다. 프로필 규칙은
 같다(`commandsFor`는 `profileAllows`가 그 자리에 준 것만 보여 주고 실행한다). 실행은 같은 실행기를 지나므로
 명령마다 결과와 카드가 그대로다. `propose_worktree_session`은 처음에 이 층에 있다가 빠졌다: 지시문 어디에도
@@ -163,12 +163,12 @@ MCP 도구를 요청에 미리 싣지 않았다: codex-cli 0.160.0은 자기 `ex
 앞부분이기 때문이다. 이를 정하는 설정은 없다(`resident`와 `deferred` 갈래는 측정용 스위치였고 #1143에서 없앴다). 세 갈래의 비교는 [tool-cost.md](tool-cost.md) §9(영어만)에 있다. Sonnet에서 이 층은 잃은 것이
 없었고(드문 명령에 모두 닿았고, 첫 인자가 모두 맞았으며, 영어와 한국어 모두) 요청마다 835토큰을 아꼈다.
 haiku에서는 709토큰을 아꼈고 드문 명령에 덜 닿았다(24번 중 15번, 상주는 23번). 소유자는 Sonnet의 숫자와,
-명령이 늘어도 오케스트레이터의 상주 앞부분이 자라지 않는다는 점을 보고 이 층을 기본으로 정했다(2026-10-12 결정,
-#512): 오케스트레이터가 싣는 것은 11,862자에서 9,317자가 되었고, 그 상한(`RESIDENT_BUDGET_CHARS`)은 12,000에서
+명령이 늘어도 어시스턴트의 상주 앞부분이 자라지 않는다는 점을 보고 이 층을 기본으로 정했다(2026-10-12 결정,
+#512): 어시스턴트가 싣는 것은 11,862자에서 9,317자가 되었고, 그 상한(`RESIDENT_BUDGET_CHARS`)은 12,000에서
 9,500이 되었다.
 **Centralu의 기능을 먼저**(#564, 2026-10-12 소유자 결정, product-spec.md §1.2): 사람이 달리 말하지 않는 한,
-Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. 두 자리가 이것을 싣는다. 오케스트레이터의 역할은 그렇게
-말하는 머리말로 시작한다(`orchestratorRole`. 명령 층이 있는 자리에서는 `centralu_commands`를 이름으로 부른다). 이
+Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. 두 자리가 이것을 싣는다. 어시스턴트의 역할은 그렇게
+말하는 머리말로 시작한다(`assistantRole`. 명령 층이 있는 자리에서는 `centralu_commands`를 이름으로 부른다). 이
 머리말은 tool-cost.md §9의 2차 측정에서 요청마다 33~55토큰이 들었고 퇴행도, 유지된 이득도 없었으며, #564부터
 켜져 있다. 역할이 없는 일반 세션은 같은 규칙을 도구의 지시문으로 받는다(`READER_INSTRUCTIONS`): 어떤 필요에 어떤 도구인지를
 말하는 한 문장이다(`READER_FIRST`: 예전 대화는 `recall`, 다른 세션은 `read_session`, 다른 프로젝트의 일은
@@ -176,7 +176,7 @@ Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. �
 지켜보거나 이어 갈 일은 CLI 자신의 Agent 도구가 아니라 `start_agent`. 턴 안의 짧은 보조 일은 CLI 자신의 서브에이전트가
 맡는다: 2026-10-12 소유자 결정). 일반 세션 묶음에 들어오면서 사람이 말로 하는 필요에 답하는 도구는
 거기에 한 줄을 더한다. #564 전에는 일반 세션 묶음에 지시문이 없었다: Centralu는 사람의 세션에 도구를 내줄 뿐 그
-세션을 지휘하지 않는다는 원칙 때문이었고, 소유자가 그 원칙을 거두었다. 각각을 끄던 스위치(`CC_ORCHESTRATOR_PREAMBLE`,
+세션을 지휘하지 않는다는 원칙 때문이었고, 소유자가 그 원칙을 거두었다. 각각을 끄던 스위치(`CC_ASSISTANT_PREAMBLE`,
 `CC_READER_INSTRUCTIONS`)는 측정용이었고 없앴다. 드는 값과
 바뀌는 것: [tool-cost.md](tool-cost.md) §11(영어만).
 
@@ -194,7 +194,7 @@ The one reach an ordinary session has outside its project. `ask_project({ projec
 gives a task to an **existing ordinary session** in another registered project and returns its answer.
 It never creates a session in another project (#614, owner decision 2026-10-13). Creation remains the
 person's action in that project; `start_agent` creates only within its caller's own project. The global
-orchestrator, which belongs to no project, retains its own create-session tool.
+assistant, which belongs to no project, retains its own create-session tool.
 
 호출 한 번이 하는 일(`SessionManager.askProject`, 실제로는 `sessions/ask-project-flow.ts`의 `AskProjectFlow`, #428):
 
@@ -203,7 +203,7 @@ orchestrator, which belongs to no project, retains its own create-session tool.
    caller's own preset opens and logs that boundary. Under every preset, a session at the agent depth cannot delegate
    (#867): at the default of 1, a child started by another session or a session currently handling a cross-project
    task.
-2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
+2. **The session.** `session` names an ordinary session by name or id. Assistants, builders and
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
@@ -297,7 +297,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    (#867): 설정 → Agents → How deep agents may start agents(1~3, 기본 1, `prefs.agentDepth`). 사람이 시작한
    세션이 깊이 0이고, `askedBy`나 끝나지 않은 위임(ask_project, fork, agent_session)으로 이어진 세션은 그보다 하나
    깊다. 그 깊이 이상인 세션은 `auto`를 포함한 모든 프리셋에서 거절되고, 오류가 설정 이름과 위치를 말한다.
-   오케스트레이터가 만든 포크(`askedBy` 없이 `forkedFrom`만 있음)는 계속 1로 세고, `auto` 호출자가 agent_session으로
+   어시스턴트가 만든 포크(`askedBy` 없이 `forkedFrom`만 있음)는 계속 1로 세고, `auto` 호출자가 agent_session으로
    일을 준 세션은 그 위임이 끝날 때까지 한 단계 깊다. 다른 세션이 시작한 세션은 시작할 때의 깊이를
    `app_settings`의 `agent_depth:<id>`에 기록하고(영구 삭제 때 함께 지움) 그보다 얕아지지 않는다. 그래서 사슬의
    가운데를 지워도 아래 세션이 에이전트를 시작할 수 있게 되지 않는다.
@@ -368,12 +368,12 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    붙는다. 부모가 지시문마다 되풀이하던 규칙(자기 작업 트리, 쌓은 풀 리퀘스트, `git stash` 금지)을 프로젝트 메뉴의
    "Instructions for agents…" 대화상자에서 한 번 적은 것으로, 틀은 그것이 그 컴퓨터의 프로젝트 설정에서 온 사람의
    지침이라고 말한다. 할 일을 건넬 때 읽으므로 오래 서 있던 카드나 메모리를 기다린 시작도 그때의 지침을 싣는다.
-   오케스트레이터의 자식(프로젝트 없음)은 받지 않고, 다른 것(`agent_session send`, ask_project)은 싣지 않는다. 열이 아니라
+   어시스턴트의 자식(프로젝트 없음)은 받지 않고, 다른 것(`agent_session send`, ask_project)은 싣지 않는다. 열이 아니라
    프로젝트의 앱 설정(`agent_instructions:<projectId>`, 최대 8,000자, 프로젝트와 함께 지워짐)으로 두어 스토어 단계가 없다.
    교체 중 같은 스토어를 쓰는 이전 빌드는 그 키를 모르고, 그 빌드의 자식은 지침 없이 시작한다. 연결된 기계에 띄운
    자식(#1038)은 허브의 것이 아니라 **그 기계** 프로젝트 사본의 지침을 받는다(그 기계의 경로와 셸).
 6. **답.** ask_project와 같은 기다림(`DelegationWaits.awaitTurn`, #428. 결과의 문장은 각자 쓰고, 답에 적힌 경로는 `grantReads`가 열어 준다)으로 240초까지 기다린다. 넘기거나 `wait: false`면 곧바로 `working`이고, 턴이 끝나면
-   오케스트레이터의 `reportBack`이 쓰는 보고 길로 알린다. 그때 기다리는 호출이 있으면 그 호출이 답을 가져가고
+   어시스턴트의 `reportBack`이 쓰는 보고 길로 알린다. 그때 기다리는 호출이 있으면 그 호출이 답을 가져가고
    보고는 가지 않는다. 이 표지는 메모리와 함께 `report_marks`(스토어 v49, #646)에도 적어 두므로 업데이트를 위한 멈춤(#1618)에
    잃지 않는다: 다음 호스트는 자기가 이어 가는 끊긴 턴의 세션 표지만 되살린다(그 턴은 다음 호스트 밑에서 끝난다).
    나머지 표지는 이전 호스트와 함께 죽은 턴의 것이므로 버린다. 그래야 사람이 나중에 그 세션에서 시작한 턴이 맡긴
@@ -386,7 +386,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    이전 에이전트의 맥락 없이 시작하고, 이전 자식의 이름과 역할은 첫 일에서 정해졌기 때문이다(#747: 부모가 `status`를 열 번 넘게 잇달아
    불렀고, 읽기 전용 조사로 띄운 자식에게 파일 수정까지 맡겼다). 설명이 아니라 답에 둔다. 답은 보이기 전까지 비용이 없다.
 
-   허브의 오케스트레이터가 `reportBack`으로 연결된 머신의 세션에 일을 보냈을 때도 같다(#723, `sessions/linked-reports.ts`).
+   허브의 어시스턴트가 `reportBack`으로 연결된 머신의 세션에 일을 보냈을 때도 같다(#723, `sessions/linked-reports.ts`).
    머신의 턴이 끝났는지는 그 머신에 맡긴 ask_project와 같은 함수로 읽는다(`linkedTurnEnd`, `sessions/linked-turn-end.ts`, #428):
    그곳의 승인이나 질문은 도는 턴이고(작업 중 상태도 `isInTurn`으로 같다), 오류와 사용량 한도는 끝나지 못한 턴이다. 중단은 턴이 도는 것을 본 뒤에만 끝나지 못한 턴으로 친다(로컬의 `AgentRunWait`와 같다, #698). 그 전의 중단은 맡긴 일이 아니라 그 앞의 턴을 끝낸 것이다.
    허브의 기다림은 그 머신이 지시를 기록한 `user_message`가 전달된 뒤부터 읽는다(#1082). 한 링크는 한 머신의 이벤트를 순서대로 전하므로, 그보다 먼저 온 턴 끝은 지시가 들어가기 전에 끝난 앞 턴의 것이다. 기록이 전달되기 전에 사라졌다면(그쪽 호스트 교체) 보내기의 답이 온 뒤로는 기다리지 않는다. 답은 같은 링크에서 기록 뒤에 오므로, 그 뒤의 턴 끝이 보고다.
@@ -397,7 +397,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    세션이 자기 백그라운드 작업(타이머는 빼고)이 도는 채로 턴을 마치면 "멈춤" 알림을 한 번 보내고 보고를 남겨 둔다
    (`LinkedReport.paused`). 그 작업이 하나도 남지 않은 턴이 끝나면 최종 보고가 가고, 턴 없이 작업만 끝나면
    `PAUSED_REPORT_SETTLE_MS` 뒤에 작업이 어떻게 끝났는지와 함께 보고한다. 실패한 턴은 끝난 대로 보고한다.
-   오케스트레이터에는 `agent_session`이 없으므로 알림은 멈추는 길을 말하지 않고, 새 `send_to_session`이 보고를 바꾼다.
+   어시스턴트에는 `agent_session`이 없으므로 알림은 멈추는 길을 말하지 않고, 새 `send_to_session`이 보고를 바꾼다.
    보고가 멈춰 있는 동안 머신 연결이 끊기면 허브는 작업의 끝을 볼 수 없으므로, 연결이 끊겼다고 말하는 보고를 곧바로
    보낸다. 그 보고에는 허브가 그 머신에서 마지막으로 읽은 마지막 응답이 "머신이 닿지 않게 되기 전에 읽은 것"이라는 표시와 함께 실린다(#1186). 작업이 이미 끝나 정산 대기만 남았다면 정산된 보고로 보낸다. 끊긴 머신의 작업 목록은 다시 연결될 때까지 잊는다.
    그 머신에 맡긴 ask_project의 턴이 자기 백그라운드 작업이 도는 채로 끝나도 같다(#1457). 호출은 그때까지의 말과 `paused`("작업이 끝나고 그곳의
@@ -503,13 +503,13 @@ Node 래퍼다. codex-cli 0.160(macOS arm64)에서 측정: 래퍼로 띄운 유�
   카드의 글은 넣지 않는다. 질문과 선택지, 승인의 내용은 대상 세션의 말이므로, 맡긴 세션은 사람 자리에서가 아니라
   **도구 결과**로 읽는다(`agent_session` status, 지휘 좌석은 `read_session`). JSON으로 감싼다(`cardsText`).
 - **답하기**(`answerRoutedCard`). 질문: `agent_session` `answer`(평범한 세션. `ask_project` 대상이면 프로젝트를
-  넘어서도 되지만 status와 answer만 된다) 또는 `answer_question`(오케스트레이터. 드문 명령이라 기본 계층에서는
+  넘어서도 되지만 status와 answer만 된다) 또는 `answer_question`(어시스턴트. 드문 명령이라 기본 계층에서는
   `centralu_run`으로 부른다. 코디네이터는 읽기만 한다). `text`가 답이다: 질문마다 한 줄, 여러 개를 고르는 질문은
   `;`로 나누거나 JSON 배열. 선택지 이름과 같은 답은 그 선택지의 이름이 된다(`answersFrom`). 카드는 사람을 위해
   세션에 남고, 먼저 온 답이 들어가며 늦은 답은 카드가 이미 없다는 결과를 받는다. 승인: 맡긴 세션은 알림을 받고,
   답하는 시점에 **두 조건이 모두** 맞을 때만 허용이나 거부를 할 수 있다(`answersApproval`, #603/#606의 규칙):
   맡긴 세션의 프리셋이 `auto`이고 앱의 에이전트가 아니어야 하며, 턴을 돌고 있는 세션이 `normal`이나 `auto`이고 앱의
-  에이전트가 아니어야 한다(사장님 결정: `auto` 오케스트레이터는 `normal` 세션 대신 승인할 수 있다). `safe` 세션의
+  에이전트가 아니어야 한다(사장님 결정: `auto` 어시스턴트는 `normal` 세션 대신 승인할 수 있다). `safe` 세션의
   승인은 누가 일을 맡겼든 사람의 것이다: 맡긴 세션의 `auto`가 대상의 권한을 올리지 않는다. 호스트가 그 세션에 띄운
   카드도 못 하고, "항상"은 사람의 것이다.
 - **어느 카드인가**(#679 리뷰). 맡긴 세션은 카드를 `<요청 id>.<요약값>` 핸들로 읽고, 답할 때 그 핸들을 대야 한다.
@@ -531,7 +531,7 @@ B 자신의 턴이 돌고 있으면 B에게는 바쁜 것이 아니다: 자기 �
 |---|---|
 | `note` | 지금까지의 턴 중간 메모(#594/#606/#653): B 자신의 프리셋이 `auto`일 때만, 턴 중간 입력을 받는 CLI에서만(`send_to_session`은 예전처럼 보낸다). 턴의 답은 턴 주인의 것이고, B는 자기 메모에 대한 답을 자기 리더에서 읽는다. 다른 호출자의 `ask_project` 일에는 넣지 않는다. |
 | `queue` | 붙잡아 두었다가(`queued`, `enqueue`) A의 턴이 끝나면 B가 소유한 새 턴으로 전한다(`drainQueue`, 턴의 끝과 세션을 비우는 다른 경계에서): `agent_session`과 `ask_project`는 B의 위임으로, `send_to_session`은 B의 턴으로, 각 도구의 틀에 담아 보내고, 끝나면 보고하며 그 턴의 카드도 간다(§1.2.2). 한 번에 하나씩, 먼저 온 것부터. 답은 핸들(`qr-…`)과 대기 순서이고, `agent_session` status(또는 task 없는 `ask_project`)가 어디쯤인지 말하며 `stop`은 거둬들인다. `queued_requests`(스토어 v52)에 적는다: 떠나는 호스트는 아무것도 전하지 않고(`disposing`), 다음 호스트가 세션의 턴이 거기서 끝날 때(이어 가는 끊긴 턴), 쉬고 있는 세션이면 시작 직후에 전한다. 그래서 그 입력이 두 번째 프로세스를 띄우지 않는다. 세션이나 요청한 세션이 없어진 요청은 버리고, 보관함에 간 세션의 요청도 버린다. 들어가기 전에 요청한 세션의 그때 프리셋으로 요청한 도구의 문을 다시 읽는다(`queuedGateError`). ask_project는 신뢰, 깊이, 대상 프로젝트, 그리고 `auto`만으로 통과한 요청이면 프로젝트 쌍의 기억된 동의를 본다(`openedByAuto`, `queued_requests.opened_by_auto`에 저장한다, 스토어 v54. 그래서 교체해도 표시가 남는다. 이전 빌드가 쓴 줄은 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다). agent_session은 `auto`가 아닌 요청자에게 필요한 소유권과 프리셋 규칙을 본다. 통과하지 못한 요청은 버리면서 요청한 세션에 알린다. 요청한 세션이 `auto`에서 내려가거나, `auto`가 아닌 세션에 일을 넘길 때(`moveChildren`, 원래 세션에 알린다) `auto`만으로 통과한 요청을 바로 버린다(`dropOpenedByAuto`: 표시가 있고 쌍의 기억된 동의가 아직 없는 ask, 자기가 시작하지 않은 세션으로 보낸 send). 그 순간 전달 중인 요청은 전달할 때의 문에 맡긴다. 교체 뒤 다시 전달하게 되면 그 문이 저장된 표시를 읽는다. 요청한 세션의 프로젝트가 신뢰를 잃거나 지워질 때, 그리고 사람이 프로젝트 쌍의 동의를 거둘 때도 대기 중인 `ask_project` 요청을 같은 방식으로 거둔다(`withdrawReaches`). 신뢰 상실과 동의 철회는 `auto` 요청자의 요청을 남겨 두고, 전달할 때 문이 다시 읽는다. **전달**(#684 리뷰): 세션마다 drain은 한 번에 하나만 돈다(`delivering`). 첫 대기 전에 세션을 예약하므로, 잠든 세션을 깨우는 동안도 바쁜 것으로 보이고 두 번째 요청은 들어가지 않는다. 요청은 세션의 턴이 실제로 시작될 때까지 큐의 맨 앞에 남고, 저장소 줄도 `delivering_at` 표시와 함께 남는다. 턴이 시작된 뒤에야 지운다. 그 사이 교체나 충돌이 나면 줄이 남아 다음 호스트가 다시 전한다: 적어도 한 번이고, 예전 프로세스가 아무 신호 없이 입력을 받은 채 교체되면 한 번 중복될 수 있다. drain은 미뤄 둔 재시작을 기다리지 않는다(`deliver`가 기다린다). 재시작이 끝나면 drain을 다시 예약한다. 전하는 중인 줄은 `withdrawReaches`와 `dropOpenedByAuto`에서 빠지므로, 그 줄의 문(`queuedGateError`, 모든 도구)은 그 대기와 깨우기가 끝난 뒤 작업을 쓰기 전에 한 번 더 읽는다(`stillAllowed`). 그 사이 기억된 쌍의 동의를 거두어도 멈추지 않는다: 전하는 중인 것은 돌고 있는 것으로 보고, 이미 돌고 있는 위임처럼 끝까지 둔다(`revokeProjectConsent`). 같은 요청(요청한 세션, 도구, 내용)을 다시 보내면 두 번째 항목을 만들지 않고 이미 잡아 둔 핸들을 돌려준다. |
-| `fork`, `fork_read` | 지금 A의 대화를 복사한 하위 세션(`forkFor`): 어댑터의 `forkConversation`(Claude: 원본 대화 기록 옆에 복사본을 쓰는 SDK `forkSession`, Codex: `thread/fork`)으로 만들고, 기록을 화면에 가져와 이어간다(`importHistory`). 이것이 없는 어댑터, 아직 대화가 없는 세션, 그리고 `ask_project`(다른 프로젝트에 세션을 만들지 않는다)에는 포크를 내놓지 않는다. start_agent의 문을 그대로 거친다: 깊이 하나, 프로젝트 신뢰(#382, 동의 규칙은 `ensureAgentConsent`가 가진 대로 #673), 프로젝트당 상한. 카드에 답이 나면 문을 다시 읽고, 복사하기 전에 자리를 잡는다(`reservePlace`). 프로젝트가 신뢰를 잃으면 아직 떠 있는 카드를 거둔다. 포크의 세션이 만들어지면 위임을 등록하기 전에, 기다림 없이 문과 두 프리셋 중 낮은 쪽을 그때 값으로 한 번 더 읽는다. 통과하지 못한 포크는 일을 받지 않고 세션 보관함으로 간다. 프리셋은 B와 A 중 낮은 쪽이다. `fork`는 자기 워크트리를 받고(`agentWorktreeBranch`, A가 워크트리 세션이면 A의 브랜치에서 갈라진다. git 저장소가 아닌 프로젝트는 거절하고 `fork_read`를 가리킨다), `fork_read`는 A의 폴더에서 하는 읽기 일로 많아야 `safe`다: 두 에이전트가 한 폴더에 쓰지 않는다. B와 연결된다: 같은 프로젝트의 평범한 세션이면 `askedBy` B(오케스트레이터는 위임으로만), 그 턴은 B의 위임(보고, 카드), 그리고 `forkedFrom` A(`sessions.forked_from_session_id`, 스토어 v52). 사이드바는 이것으로 포크를 A 아래에 둔다. `parentSessionId`와 `askedBy`보다 먼저 본다(`orderAsTree`, `foldGroupsHiding`). |
+| `fork`, `fork_read` | 지금 A의 대화를 복사한 하위 세션(`forkFor`): 어댑터의 `forkConversation`(Claude: 원본 대화 기록 옆에 복사본을 쓰는 SDK `forkSession`, Codex: `thread/fork`)으로 만들고, 기록을 화면에 가져와 이어간다(`importHistory`). 이것이 없는 어댑터, 아직 대화가 없는 세션, 그리고 `ask_project`(다른 프로젝트에 세션을 만들지 않는다)에는 포크를 내놓지 않는다. start_agent의 문을 그대로 거친다: 깊이 하나, 프로젝트 신뢰(#382, 동의 규칙은 `ensureAgentConsent`가 가진 대로 #673), 프로젝트당 상한. 카드에 답이 나면 문을 다시 읽고, 복사하기 전에 자리를 잡는다(`reservePlace`). 프로젝트가 신뢰를 잃으면 아직 떠 있는 카드를 거둔다. 포크의 세션이 만들어지면 위임을 등록하기 전에, 기다림 없이 문과 두 프리셋 중 낮은 쪽을 그때 값으로 한 번 더 읽는다. 통과하지 못한 포크는 일을 받지 않고 세션 보관함으로 간다. 프리셋은 B와 A 중 낮은 쪽이다. `fork`는 자기 워크트리를 받고(`agentWorktreeBranch`, A가 워크트리 세션이면 A의 브랜치에서 갈라진다. git 저장소가 아닌 프로젝트는 거절하고 `fork_read`를 가리킨다), `fork_read`는 A의 폴더에서 하는 읽기 일로 많아야 `safe`다: 두 에이전트가 한 폴더에 쓰지 않는다. B와 연결된다: 같은 프로젝트의 평범한 세션이면 `askedBy` B(어시스턴트는 위임으로만), 그 턴은 B의 위임(보고, 카드), 그리고 `forkedFrom` A(`sessions.forked_from_session_id`, 스토어 v52). 사이드바는 이것으로 포크를 A 아래에 둔다. `parentSessionId`와 `askedBy`보다 먼저 본다(`orderAsTree`, `foldGroupsHiding`). |
 
 **크기.** `ifBusy`는 어느 스키마에도 설명을 싣지 않는다: `busy` 답이 이름과 값을 알려 준다. `ask_project`의 것은 그냥
 문자열이다(열거형이면 reader의 Claude 요청이 2,300자를 넘는다). 다른 값은 실행기가 거절한다. `DELEGATE_BUDGET_CHARS`는
@@ -546,7 +546,7 @@ scoped 좌석은 `send_to_session`의 것 때문에 2,350에서 2,400으로 올�
 
 **자식의 코드 인텔리전스는 부른 쪽이 요청하지 않으면 꺼진다.** 규칙은 `codeIntelligenceOff`(tool-profiles.ts)다. 자식
 (`isChildSession`: `start_agent`의 자식, 포크, 앱의 에이전트)은 `start_agent`가 `lsp: true`를 넘기지 않는 한 코드
-인텔리전스 없이 시작한다. 사람이 시작한 세션, 오케스트레이터, 빌더 세션은 사람의 설정을 그대로 따른다. 부른 쪽이 작업마다
+인텔리전스 없이 시작한다. 사람이 시작한 세션, 어시스턴트, 빌더 세션은 사람의 설정을 그대로 따른다. 부른 쪽이 작업마다
 고른다(리팩터링과 여러 파일에 걸친 변경에는 켜고, 조사·문서·작은 수정·테스트는 검색과 마지막 typecheck로 충분하다).
 Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `createSession`에서 한 번 내려지고 앱 설정
 `code_intelligence:<id>` = `off`로 기록된다(열이 아니므로 마이그레이션이 없다). 그래서 깨울 때, 재시작할 때, 호스트가 이어받을
@@ -603,7 +603,7 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
   start_agent 요청(카드가 서 있거나(#673), 이미 허용되어 메모리가 풀리기를 기다리는 것(§1.2.4, #686))이 그렇게 말한다.
   남은 일이 없는 자식(끝났고 보고했거나 읽은 자식)은 "finished; waiting for more work"이다. 같은 프로젝트의
   자식(`askedBy`나 `parentSessionId`가 원래 세션을 가리키는 세션)과 다른 프로젝트에 맡긴 위임을 모두 센다. 끝난 자식도
-  아직 쓰이는 경우가 많다(끝내고 보고한 뒤 오케스트레이터의 다음 지시를 기다리는 자식). 없어지는 원래 세션에 남기면
+  아직 쓰이는 경우가 많다(끝내고 보고한 뒤 어시스턴트의 다음 지시를 기다리는 자식). 없어지는 원래 세션에 남기면
   그 자식은 주인이 없어졌고(#738), 남는 원래 세션에 남기면 일을 이어가는 세션이 그 자식을 목록에 올리거나 보관할 수
   없었다(#1475). 그래서 원래 세션이 없어지든 남든 옮긴다.
 - **옮기는 것**: 원래 세션을 가리키는 `askedBy`와 `parentSessionId`(다른 프로젝트의 세션은 자기 줄을 그대로 둔다),
@@ -673,7 +673,7 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
   호출자와 함께 옮겨 간다(`moveCaller`). 원본이 사라지는 인계(`goes`)는 task도 나머지와 함께 넘기며, 거기서는 받은 task의 답도 끝나지 않는다(별도의 틈).
 - **누가 인계할 수 있는지**는 여기서 검사하지 않는다. `moveChildren`은 호출자를 믿는다. `createSession`을 거쳐
   이 함수에 닿는 호출자는 둘이다. 사람의 인계(창의 RPC)와, `HandoffFlow`가 원본에 대한 권한을 확인한 뒤의
-  오케스트레이터 `handoff_session`이다(§1.2.6). 에이전트가 부르는 다른 경로가 생기면 같은 방식으로 먼저 권한을
+  어시스턴트 `handoff_session`이다(§1.2.6). 에이전트가 부르는 다른 경로가 생기면 같은 방식으로 먼저 권한을
   확인해야 한다.
 - **원자성**: 저장된 것은 모두 한 트랜잭션으로 옮기고(`Store.moveChildren`), 호스트의 메모리는 커밋한 뒤에 그 사이
   await 없이 따라간다. 커밋 전에 충돌하면 모든 연결이 원래 세션에 남고, 커밋 뒤에 충돌하면 모든 연결이 새 세션에
@@ -690,9 +690,9 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
 - **창**은 `session_owner`(그 세션의 지금 `askedBy`와 `parentSessionId`)를 듣고 자식을 새 소유자 아래에 둔다. 연결된
   머신의 이벤트는 `Qualifier.event`가 이름을 붙이고, 허브의 미러에도 반영한다.
 
-### 1.2.6 오케스트레이터가 세션을 인계한다 (`handoff_session`, #694)
+### 1.2.6 어시스턴트가 세션을 인계한다 (`handoff_session`, #694)
 
-인계는 세션 메뉴(⋯ → Hand off to a fresh session…)에만 있었다. 이제 중앙 오케스트레이터도 도구로 인계할 수 있어서,
+인계는 세션 메뉴(⋯ → Hand off to a fresh session…)에만 있었다. 이제 중앙 어시스턴트도 도구로 인계할 수 있어서,
 엇나간 세션을 새 세션으로 바꾸거나 일을 다른 CLI로 옮기는 일을 사람과 같은 방식으로 한다. 노트는 도구와 창 모두
 **기본으로 기록에서 만든다**(#694의 소유자 결정. 창은 #1477부터 원본을 기본으로 보관함에 넣는다(#694부터 그때까지는 남겼다)). 교체되는 세션은 스스로를 가장 정확하게 요약하기 어려운 세션이다.
 압축이 반복되어 기억이 틀어지고, 상태가 낡고, 요약에 주입된 문구가 섞일 수 있다. 기록 모드는 그 세션에 아무것도
@@ -700,40 +700,40 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
 (`mode: "agent"`)은 양쪽 모두 선택지로 남는다.
 
 - **인자**: 대상 세션, 받는 도구(기본은 같은 도구), 노트 모드(기본 `record`), 새 세션에게 줄 추가 지시. 추가 지시는
-  새 세션의 첫 메시지에서 노트 미리보기 뒤에 오케스트레이터의 말로 붙는다(`packages/protocol/src/handoff.ts`의
+  새 세션의 첫 메시지에서 노트 미리보기 뒤에 어시스턴트의 말로 붙는다(`packages/protocol/src/handoff.ts`의
   `handoffOpening`. 창의 첫 메시지를 그대로 함께 쓴다).
 - **누가 무엇을 인계할 수 있는지**(`sessions/handoff-flow.ts`의 `HandoffFlow`, 좌석 쪽 검사는
-  `sessions/orchestrator-seat.ts`):
-  - 도구는 중앙 오케스트레이터에게만 있다(`profileAllows`). 리드(`scoped`), 일반 세션(`reader`), 빌더, 앱의
+  `sessions/assistant-seat.ts`):
+  - 도구는 중앙 어시스턴트에게만 있다(`profileAllows`). 리드(`scoped`), 일반 세션(`reader`), 빌더, 앱의
     에이전트에게는 없고, 좌석도 중앙 시야가 아니면 거절한다.
-  - 대상은 오케스트레이터가 보는 이 컴퓨터의 세션 가운데 프로젝트의 일반 세션뿐이다. 오케스트레이터 자신,
-    오케스트레이터나 코디네이터, 앱의 세션(빌더나 앱이 시작한 에이전트. 후임은 앱과의 연결을 이어받지 못한다),
+  - 대상은 어시스턴트가 보는 이 컴퓨터의 세션 가운데 프로젝트의 일반 세션뿐이다. 어시스턴트 자신,
+    어시스턴트나 코디네이터, 앱의 세션(빌더나 앱이 시작한 에이전트. 후임은 앱과의 연결을 이어받지 못한다),
     연결된 머신의 세션(그 머신에서 인계한다), 워크트리 세션(창과 같은 이유로 거절)은 대상이 아니다.
   - 턴 도중인 대상(일하는 중, 승인이나 질문을 기다리는 중)은 카드 없이 거절한다. 인계는 진행 중인 턴을 끊지 않는다.
     오류 상태인 대상은 노트를 쓸 수 없으므로 `agent` 모드를 거절하고 기록 모드를 안내한다.
   - 받는 도구를 먼저 검사한다(`toolProblem`: 어댑터가 있고, 설치되어 있고, 로그인되어 있는지). 세션을 시작할 수
     없는 도구는 카드를 띄우기 전에 거절하므로, 모델이 지어낸 이름이 사람 눈에 닿지 않는다.
   - 아무것도 지키지 않는 인계는 아무에게도 묻지 않는다(#1509, 소유자 결정 2026-10-24). 대상이 쉬고 있고(위의 검사), 후임이 받는
-    프리셋(원본의 것)이 오케스트레이터 자신의 프리셋 이내이면 된다(`HandoffFlow.covered`). 원본은 남고, 오케스트레이터는 자기에게 없는
-    권한을 넘기지 않는다. 후임을 시작하기 직전에 다시 읽는다. 오케스트레이터의 프리셋보다 높은 대상은 아래 카드를 거친다.
-  - 그 밖에는 사람의 동의가 인계마다 오케스트레이터 자신의 세션에 뜨는 카드다(`askHost`, `about: "session_handoff"`인
+    프리셋(원본의 것)이 어시스턴트 자신의 프리셋 이내이면 된다(`HandoffFlow.covered`). 원본은 남고, 어시스턴트는 자기에게 없는
+    권한을 넘기지 않는다. 후임을 시작하기 직전에 다시 읽는다. 어시스턴트의 프리셋보다 높은 대상은 아래 카드를 거친다.
+  - 그 밖에는 사람의 동의가 인계마다 어시스턴트 자신의 세션에 뜨는 카드다(`askHost`, `about: "session_handoff"`인
     `other` 카드). 카드에는 대상, 받는 도구, 노트를 어디서 만드는지, 새 세션이 받는 프리셋, 추가 지시가 적힌다.
     이름은 모두 다른 쪽이 정한 글이므로 JSON으로 따옴표를 친다. 추가 지시는 400자에서 자르고, 잘랐다는 사실과 전체
-    길이를 카드에 적는다. 오케스트레이터 자신이 `auto`이면 이 경계가 열리고(#603) `session_handoff of <대상>`으로
-    로그가 남는다. "항상"은 이 호스트가 그 오케스트레이터를 서비스하는 동안만 유효하고 프로젝트 단위가 아니다
+    길이를 카드에 적는다. 어시스턴트 자신이 `auto`이면 이 경계가 열리고(#603) `session_handoff of <대상>`으로
+    로그가 남는다. "항상"은 이 호스트가 그 어시스턴트를 서비스하는 동안만 유효하고 프로젝트 단위가 아니다
     (`sessionOnlyAlways`, 업데이트 카드와 같다). 또한 카드 뒤의 검사를 모두 통과한 호출에서만 기록한다. 카드 뒤에
     모든 검사를 다시 하므로, 카드가 떠 있는 사이 시작된 턴도 끊지 않는다. 거절은 모두 호출자와 대상을 적어 로그로
     남긴다.
 - **하는 일**은 삭제를 뺀 창의 인계와 같다. 노트는 같은 파일(`<data>/handoff/<project>/<session>.md`)에 쓰고, 후임은
   원본의 설정(도구가 바뀌면 도구 전용 설정은 빼고), 원본의 프리셋과 이름, 노트 마커를 갖고 만들어진다. 이때 원본의
   자식이 옮겨진다(§1.2.5, 범위 `kept`). **원본은 항상 남고**, 누가 이어받았는지가 원본 대화에 알려진다.
-  원본을 지우는 것은 사람이 한다. 후임의 첫 메시지는 사람이 아니라 오케스트레이터의 메시지로 저장되고 표시된다
+  원본을 지우는 것은 사람이 한다. 후임의 첫 메시지는 사람이 아니라 어시스턴트의 메시지로 저장되고 표시된다
   (`from`, `createSession`의 내부 인자 `initialFrom`). 기록 노트는 다른 세션이나 앱이 보낸 행에 출처를 적고 그
   글을 JSON 문자열 하나로 담는다(read_session과 같다). `[user]`는 사람의 행뿐이므로, 자식의 보고가 후임의 노트에서
   사람의 지시처럼 읽히지 않는다. 행은 줄의 맨 앞에서만 시작하고 둘째 줄부터는 들여쓴다. 도구 제목과 경로는 한 줄로
   두고, 전임의 이름은 JSON으로 따옴표를 친다(#797). 그래서 세션 자신이 쓴 여러 줄 텍스트도 새 행을 시작하는 줄을
   만들 수 없다.
-- **agent 모드**는 창의 프롬프트(`handoffPrompt`, 이제 protocol에 있다)를 오케스트레이터의 메시지로 보내고, 턴이
+- **agent 모드**는 창의 프롬프트(`handoffPrompt`, 이제 protocol에 있다)를 어시스턴트의 메시지로 보내고, 턴이
   끝나기를 기다린 뒤 노트를 저장소에서 읽는다(`exportHandoffNote`). 턴이 끝났는지는 start_agent가 자식의 턴을 읽듯이
   읽는다(`turnObservers`의 `AgentRunWait`, #428): 실패하거나, 한도에 닿거나, 멈추거나, 노트 없이 끝난 턴은 곧바로 그 까닭을
   답한다. 제한 시간까지 기다렸다가 "노트를 쓰지 않았다"고 답하지 않는다. 호출은 Codex 브리지의 280초보다 짧은 240초까지
@@ -791,15 +791,15 @@ https로 서비스하는 로컬 bare 저장소를 상대로 끝까지 시험한�
 믿게 한 자체 서명 인증서, 사람의 git 설정은 빼고). 로그인이 필요한 저장소로 401을 답하는 경로도 포함한다
 (`sessions/clone-project.test.ts`).
 
-**오케스트레이터의 `create_project { name?, parent?, git?, branch? }`**는 사이드바의 Add project 버튼에 불만 켜던
-`propose_project`를 대체했다. 오케스트레이터 자신의 승인 자리에 카드를 띄우고(`project_create`: 이름, 전체
+**어시스턴트의 `create_project { name?, parent?, git?, branch? }`**는 사이드바의 Add project 버튼에 불만 켜던
+`propose_project`를 대체했다. 어시스턴트 자신의 승인 자리에 카드를 띄우고(`project_create`: 이름, 전체
 경로, 클론이면 저장소와 브랜치), 호출은 `ask_project`의 동의 카드처럼 답을 기다린다(`askHost`). 사람이 만들기를 누르기 전에는 아무것도
 만들지 않는다. "항상"은 허용으로 읽고 아무것도 기억하지 않으며, 거절하거나 호출이 멈추면 아무것도 만들지 않는다.
 대상은 카드 전에(거절은 사람에게 아무 비용이 없다) 그리고 카드 뒤에 다시 확인한다. 이렇게 만든 프로젝트는
-`projects_changed`로 알리고, 모든 창이 프로젝트 목록을 다시 읽는다. 오케스트레이터만 가진 도구이고
-(security-boundaries.md) 이 컴퓨터에만 만든다: 허브의 오케스트레이터는 연결된 머신을 보지 못하므로 그 머신의
-프로젝트는 Add project에서 그 머신을 골라 만든다. 클론이면 만들기를 누른 뒤 호출이 도는 동안 오케스트레이터 대화에 "Cloning … into …"라고 알린다.
-이 교체로 오케스트레이터가 늘 싣는 정의는 전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자, 클론 인자까지
+`projects_changed`로 알리고, 모든 창이 프로젝트 목록을 다시 읽는다. 어시스턴트만 가진 도구이고
+(security-boundaries.md) 이 컴퓨터에만 만든다: 허브의 어시스턴트는 연결된 머신을 보지 못하므로 그 머신의
+프로젝트는 Add project에서 그 머신을 골라 만든다. 클론이면 만들기를 누른 뒤 호출이 도는 동안 어시스턴트 대화에 "Cloning … into …"라고 알린다.
+이 교체로 어시스턴트가 늘 싣는 정의는 전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자, 클론 인자까지
 11,770자; docs/tool-cost.md).
 
 ## 2. AgentAdapter 계약 (product spec §6.2의 구현 명세)
@@ -936,7 +936,7 @@ interface AdapterCapabilities {
   | 그 밖의 `configWarning` | Codex의 글 | `you` |
   | 전체 기록 불러오기 (`deprecationNotice`, 0.160.0 바이너리의 두 문구 모두) | "Codex says Centralu loads thread history in an outdated way", "Nothing to do on your side; Centralu will switch to the paginated API (#342)." | `centralu` |
   | 그 밖의 `deprecationNotice` | Codex의 글 | app-server 메서드(`thread/…`, `turn/…`, `review/…`)를 말하면 `centralu`, `config.toml`이나 `[features…]`를 말하면 `you`, 아니면 말하지 않는다 |
-  | MCP 시작 실패 | Codex의 글 | Centralu의 오케스트레이터 브리지는 `centralu`, 앱의 브리지(`app-<id>`, 앱 자체 이유로 실패할 수 있다)는 말하지 않고, 그 밖의 서버는 `you` |
+  | MCP 시작 실패 | Codex의 글 | Centralu의 어시스턴트 브리지는 `centralu`, 앱의 브리지(`app-<id>`, 앱 자체 이유로 실패할 수 있다)는 말하지 않고, 그 밖의 서버는 `you` |
   | `warning`, `guardianWarning`, `model/rerouted`, 스레드 설정 변경 | Codex의 글(뒤의 둘은 우리 글) | 말하지 않는다 |
 
   Claude Code의 알림은 `from: 'Claude Code'`와 라벨(`hook` — `for you`, `notice`, `model switch`, `refusal`)을 싣는다.
@@ -1004,7 +1004,7 @@ interface AdapterCapabilities {
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - **도구가 지킬 수 없다고 밝힌 시작은 프로세스가 뜨기 전에 거절된다** (`presets`, `keepsRepoFilesOut`, `roleText`.
   protocol의 `launchRefusal`을 `sessions/session-start.ts`의 `startFit`이 모든 시작과 깨우기에서, 도구 전환·실행 중인
-  세션의 preset 변경·오케스트레이터의 도구에는 `sessionDemands`(`sessions/tool-fit.ts`)로 읽은 세션을 `ToolRegistry.refusal`이
+  세션의 preset 변경·어시스턴트의 도구에는 `sessionDemands`(`sessions/tool-fit.ts`)로 읽은 세션을 `ToolRegistry.refusal`이
   적용한다). 어느 경로로
   요청했든 호스트가 관문이고, 선택기들은 같은 규칙에 물어 같은 문장으로 그 도구를 흐리게 보인다. Claude와 Codex는 셋 다
   밝히지 않으므로 그들에겐 바뀌는 것이 없다 ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
@@ -1269,7 +1269,7 @@ ubuntu-24.04에서 돌린다. #1895 4단계 PR 7이 Linux를 직접 경로로 �
 청할 때만 생긴다: 키퍼는 그 확인 뒤에야 `drain`을 쓰고, 이 저장소보다 오래된 빌드는 거기서 거절해 드레인 전에 교체가
 실패한다. Centralu를 완전히 종료하면 끝난다.
 
-**드레인** (`drain.ts`). 모든 WebSocket RPC와 모든 프로세스 안 MCP 도구 호출(오케스트레이터 도구, 앱 도구
+**드레인** (`drain.ts`). 모든 WebSocket RPC와 모든 프로세스 안 MCP 도구 호출(어시스턴트 도구, 앱 도구
 프록시)이 추적기 하나를 지난다. 교체의 드레인을 위해 만들었지만 지금은 `host.stop {ifIdle}`만
 (`lifecycle/stop-gate.ts`, #1224) 시작한다: 호스트가 쉬는 것을 확인하면 새 호출은 거절하고 "호스트가 다시 시작하는
 중이니 다시 부르라"는 오류로 답하며(RPC 오류는 `retryable: true`), 한도가 지나도 도는 호출은 끝났을 수도 아닐 수도
@@ -1603,8 +1603,8 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 `waiting_input`에 머물러 있을 뿐이다. 2026-10-15에 하위 세션 여러 개가 일하는 동안 인터넷이 두 번 끊겼다. Claude
 하위 세션들은 `error`로 끝났고(CLI가 `api_retry`를 열 번, 약 3분 동안 시도한 뒤 `ECONNREFUSED`와 `ENOTFOUND`로
 실패했다), 사람이 직접 "continue"를 보낼 때까지 그대로 있었다. 그 턴들은 CLI가 스스로 연 턴(Monitor 발동)이어서
-빚진 보고가 없었고, 그들을 시작한 오케스트레이터는 아무것도 듣지 못했다. Codex 하위 세션의 중단된 턴은
-오케스트레이터에게 "The assigned work finished"로 보고되었고, "완전히 종료"는 턴 도중의 세션을 대화에 아무 줄도
+빚진 보고가 없었고, 그들을 시작한 어시스턴트는 아무것도 듣지 못했다. Codex 하위 세션의 중단된 턴은
+어시스턴트에게 "The assigned work finished"로 보고되었고, "완전히 종료"는 턴 도중의 세션을 대화에 아무 줄도
 남기지 않은 채 `idle`로 되돌렸다.
 
 이제 호스트는 **마지막 턴이 끝나지 못한 이유**를 세션에 둔다(`SessionInfo.interruption`, 저장은
@@ -1623,15 +1623,15 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 |---|---|
 | 턴 도중 취소된 앱 요청은 세션을 중단하기 전에 기다림을 실패로 끝낸다 | Claude 어댑터는 CLI가 중단을 확인하는 즉시, 턴의 결과보다 먼저 턴을 끝내므로, 기다림이 취소를 "끝나기 전에 멈춤"으로 읽었다 |
 | 분류해서 보여 주고, 스스로 다시 보내지 않는다. 연결된 허브의 업데이트가 끊은 턴만은 예외로, 다음 호스트가 같은 문장으로 한 번 이어 간다(2026-10-26 소유자 결정, #1618) | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나이고, 두 쪽 모두 같은 문장이다: "Continue where you stopped. Check what already happened before repeating a step." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
-| Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 오케스트레이터는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
+| Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 어시스턴트는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
 | Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). 메모의 `turn/start`가 오가는 사이에 누른 Stop은 답이 알려 준 턴을 중단하고, 이것도 우리 것으로 센다(`takeInputTurn`) | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |
-| 사람의 Stop과 오케스트레이터의 `agent_session stop`은 아무것도 정하지 않는다 | 본인이 알고 있다. 자기 행동을 표시하면 소음이 된다 |
+| 사람의 Stop과 어시스턴트의 `agent_session stop`은 아무것도 정하지 않는다 | 본인이 알고 있다. 자기 행동을 표시하면 소음이 된다 |
 | `reconnecting` 시계는 `retrying`만 시작하고, 조용함은 시작하지 않는다 | 15–40초씩 쉬며 CI를 기다리던 세션은 멈춘 것처럼 보였지만 멈추지 않았다. 긴 빌드도 똑같이 보인다 |
 | 그 턴에 빚진 보고는 이유를 먼저 말하고("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") 이어 가는 방법을 덧붙인다 | "The assigned work failed"를 들은 쪽은 "continue" 한 번이면 될 일을 다시 하거나 버렸다 |
 | 빚진 보고가 없으면(보고 표시도, 지금 그 턴을 기다리는 호출도 없음), 턴을 맡긴 세션이 `network`, `interrupted`, `quit` 중단을 한 번 듣는다(`tellAskerOfInterruption`): 지금 아무도 기다리지 않는 위임의 호출자(한도를 넘긴 `ask_project`나 `start_agent`), 없으면 그 세션을 시작한 세션(`askedBy`). 아직 기다리는 호출은 자기 답에서 중단을 읽는다 | 2026-10-15 사례, 그리고 `askedBy`가 없는 `ask_project` 턴. 멈춘 턴마다 보고는 하나이고, 다음 보고에는 다음 턴이 필요하므로 두 세션이 서로를 깨우는 고리가 생기지 않는다 |
 | 모든 보고와, 요청에 대해 Centralu가 세션에 하는 말(시작하지 못한 요청, 전하지 못한 메모나 대기열 요청)은 `tellSession`을 지난다(#428): 호스트가 넘겨주거나 종료하는 동안에는 말하지 않고, 사라진 세션에도 말하지 않는다 | 예전에는 종료가 돌던 자식마다 부르는 세션에 "failed: Centralu is shutting down"이라고 보고했고, 다음 시작이 그것을 `quit` 중단으로 다시 알렸다. 나가는 길에 보고가 잠든 세션을 깨울 수도 있었다 |
-| `quit`은 다음 시작 때 하위 세션마다 한 번 알린다. 대상은 보고를 받을 세션, 턴을 맡긴 세션(`delegated_turns`), `askedBy` 가운데 아직 있는 첫 세션이다(`quitNotices`). **스스로 종료로 멈춘 요청 세션에는** 시작 때든 그 뒤든 알리지 않는다: 그 세션은 사람의 Continue를 기다린다 | 기다리지 않고 위임한 세션은 잘린 것이 아니라 쉬고 있었고, 그 보고 표시는 버려졌다: 아무것도 듣지 못했다. 한 번 깨우는 비용은 턴 하나이고, 듣지 못하는 비용은 그 일 전체다. 같은 종료로 잘린 오케스트레이터를 깨우면 아무도 없는 시작 시점에 턴이 돌고, 그 턴이 사람이 보기 전에 자기 "멈춤" 표시를 지운다. 사람이 그 세션을 이어 가면 하위 세션들의 줄이 멈췄다고 말한다 |
-| 오케스트레이터의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session list`(#690)는 그런 자식을 `stopped`라고만 하고 이유는 `status`에 맡긴다. 정리하려고 보는 목록이라, 자식의 일이 끝나지 않았다는 것이 중요하다 |
+| `quit`은 다음 시작 때 하위 세션마다 한 번 알린다. 대상은 보고를 받을 세션, 턴을 맡긴 세션(`delegated_turns`), `askedBy` 가운데 아직 있는 첫 세션이다(`quitNotices`). **스스로 종료로 멈춘 요청 세션에는** 시작 때든 그 뒤든 알리지 않는다: 그 세션은 사람의 Continue를 기다린다 | 기다리지 않고 위임한 세션은 잘린 것이 아니라 쉬고 있었고, 그 보고 표시는 버려졌다: 아무것도 듣지 못했다. 한 번 깨우는 비용은 턴 하나이고, 듣지 못하는 비용은 그 일 전체다. 같은 종료로 잘린 어시스턴트를 깨우면 아무도 없는 시작 시점에 턴이 돌고, 그 턴이 사람이 보기 전에 자기 "멈춤" 표시를 지운다. 사람이 그 세션을 이어 가면 하위 세션들의 줄이 멈췄다고 말한다 |
+| 어시스턴트의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session list`(#690)는 그런 자식을 `stopped`라고만 하고 이유는 `status`에 맡긴다. 정리하려고 보는 목록이라, 자식의 일이 끝나지 않았다는 것이 중요하다 |
 | 화면은 상태 옆에 그것을 보여 준다: 인박스 행의 말과 **Continue**, 사이드바 표시의 테두리(멈춘 턴의 답을 아직 안 읽은 동안만, #1549)와 툴팁, 입력창 위의 줄(product-spec FR-15) | 상태만으로는 멈춘 턴과 끝난 턴이 똑같이 보인다. Continue는 일을 이어 가는 메시지 하나다 |
 | `CLAUDE_CODE_MAX_RETRIES`는 CLI가 정한 대로 둔다 | 3분이면 대부분의 끊김을 넘긴다. 예산을 늘리면 긴 장애 동안 턴을 붙잡아 둔다 |
 
@@ -1816,11 +1816,11 @@ ssh가 거절한 키·호스트 키·연결, 끊긴 링크, 포워드나 소켓.
   `timeout`이라고 하는 것, 부팅 중에 죽는 호스트)도 센다. 아무것도 띄우지 못한 시작(ssh, 그쪽에 Centralu 없음, WMI 거부)은 세지
   않는다: 예전처럼 까닭과 함께 `not_running`이고 backoff대로 다시 한다. hello에 답하고 곧바로 다시 멈추는 호스트는 hello마다 backoff를 되돌려서 약 10초마다 끝없이 다시 띄워졌다.
   이제 backoff와 한도는 호스트가 60초 버틴 뒤에만 처음부터 다시 센다(`STABLE_MS`).
-- **어느 쪽이든 행은 `stopped`이고** `error`가 어느 쪽인지 말한다. 사람의 Start(행의 버튼, `machines.reconnect`)나 오케스트레이터의
+- **어느 쪽이든 행은 `stopped`이고** `error`가 어느 쪽인지 말한다. 사람의 Start(행의 버튼, `machines.reconnect`)나 어시스턴트의
   `reconnect_machine`(사람의 카드를 거친 것) 전에는 아무것도 띄우지 않는다. 연결 줄은 backoff대로 계속 읽으므로 사람이
   그쪽에서 띄운 호스트에는 붙는다. 그동안 행은 `stopped`로 남고, 기기에 닿지 못하는 동안에도 까닭은 기억해 둔다
   (`startHeldBack`, 그쪽에서 호스트가 돌거나 시작이 이루어질 때까지). 카드는 그 순간 행의 상태가 아니라 이 까닭을 보고 묻고,
-  카드 없이 오케스트레이터가 다시 연결하면 링크만 연다(`reconnect { start: false }`). 기기에 닿지 못할 때 누른 Start는 그때
+  카드 없이 어시스턴트가 다시 연결하면 링크만 연다(`reconnect { start: false }`). 기기에 닿지 못할 때 누른 Start는 그때
   쓰고 끝나며, 기기가 돌아올 때까지 남겨 두지 않는다. 한도에 닿은 뒤의 `stopped` 문장은 마지막 시작이 호스트가 답하지 않았을
   때 한 말로 끝난다. 표시를 모르는 이전 Centralu는 `stopped`를 말하지 않고, 같은 한도 안에서 예전처럼 띄워진다.
 
@@ -1830,7 +1830,7 @@ null이 켬, `when_needed`가 끔이다. 예전 연결 방식이 선택을 두�
 기기마다 스위치 하나, 기본은 켬이다; 연결 방식(`at_start` / `when_needed`, #1134)을 대신한다.
 
 *켬*은 예전부터 모든 기기가 하던 대로다: 허브가 시작할 때 연결하고 끊길 때마다 백오프(2초에서 두 배씩 5분까지)로 다시 시도해, 그
-기기로 일하는 오케스트레이터가 보고와 카드를 바로 듣는다.
+기기로 일하는 어시스턴트가 보고와 카드를 바로 듣는다.
 
 *끔*은 자주 닫혀 있는 노트북이나 일주일에 한 번 쓰는 서버를 위한 것이다: 허브는 시작할 때 **한 번** 시도한다. 시도가 실패하거나 빠른 redial로 되돌려지지 않는
 끊김이 생긴 뒤에는 사람이 Connect(`machines.reconnect`: 설정 → 기기, 또는 사이드바의 기기 배지 메뉴)를 누를 때까지 아무것도 시도하지 않는다.
@@ -1848,7 +1848,7 @@ null이 켬, `when_needed`가 끔이다. 예전 연결 방식이 선택을 두�
 전송과 읽기는 "연결되어 있지 않고 여기서 스스로 연결하지 않는다; 사람에게 연결해 달라고 하라(설정, 기기, Connect)"라고 말하고(`NOT_CONNECTED` /
 `awayPhrase`), 그 기기의 프로젝트는 그 이유로 떨어진 것으로 나열된다. 스위치가 켜져 있고 시도 사이에 떨어진 기기도 백오프를 기다리지
 않는다(#1532): 그 기기가 필요한 호출은 곧바로 시도를 하나 시작한다(`LinkedMachineConnection.reachForCall`. 행의 Connect, 배지 메뉴, 프로젝트
-메뉴의 Reconnect, 오케스트레이터의 `reconnect_machine`이 쓰는 같은 `connect`를 쓴다. `keepBackoff`: 백오프는 처음부터 다시 세지 않고 있던 단계에서
+메뉴의 Reconnect, 어시스턴트의 `reconnect_machine`이 쓰는 같은 `connect`를 쓴다. `keepBackoff`: 백오프는 처음부터 다시 세지 않고 있던 단계에서
 이어지며, 호출은 링크가 스스로 띄우지 않을 호스트를 띄우지 않는다). 그 시도(또는 이미 진행 중인 시도)를 호출이 묻는 순간부터 최대 `CALL_WAIT_MS`(10초) 동안 기다린다. 제때 연결되면 호출이
 통과하고, 아니면 "지금 닿지 않는다; 방금 연결 시도가 실패했다: <ssh의 말>"(또는 "연결 시도가 아직 진행 중이다")이라고 답하며 백오프는 그대로다. 기기마다 시도는
 한 번에 하나다: 이미 진행 중인 시도(백오프의 것, 사람이 누른 것, 다른 호출의 것)를 만난 호출은 그것을 기다릴 뿐 새로 시작하지 않으므로, 누름과
@@ -1871,11 +1871,11 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 
 **원격 업데이트는 턴이 끝나길 기다린다**(#1399). 원격에는 키퍼가 없어 에이전트를 새 호스트로 넘길 수 없다. 그래서 업데이트는 새 버전을 옆에 설치한 뒤,
 그쪽에서 턴이 도는 세션(working, 승인·질문 대기, 백그라운드 작업)이 없어질 때까지 15초마다 `host.activity`를 읽으며 기다리고(행의 작업은 `wait_idle`),
-그다음에야 호스트를 멈춘다. 터미널과 프로젝트 명령은 몇 시간씩 열려 있으므로 기다리지 않는다. `machines.cancelUpdate`(또는 취소된 오케스트레이터 호출)가
+그다음에야 호스트를 멈춘다. 터미널과 프로젝트 명령은 몇 시간씩 열려 있으므로 기다리지 않는다. `machines.cancelUpdate`(또는 취소된 어시스턴트 호출)가
 기다림을 끝내며 아무것도 바꾸지 않은 채 실패한다. `machines.update { when: 'now' }`(사람의 선택)는 기다리지 않고 멈추며, 몇 세션의 턴이 끝났는지(닫힌 터미널·프로젝트 명령 수와 함께) `note`에 적고, 끊긴 턴은 다음 호스트가 이어 간다(아래, #1618).
 읽기가 한 번이라도 성공한 뒤에는 실패한 읽기가 아무것도 증명하지 않으므로(바쁘거나 끊긴 원격도 실패한다) 실패한 읽기를 지나서도 계속 기다리고(행의 작업은 `wait_unread`),
 성공한 읽기가 "턴 없음"을 보일 때만(두 번째 읽기도) 멈춘다. 한 번도 읽지 못한 기기는 기다리지 않는다. `MachineInfo.updateWaits`가 없는 이전 허브는 바로 멈추므로 창은 그 허브에 "한가할 때"를 약속하지 않는다.
-`when`이 없으면 `idle`이다(이전 창의 뜻). 오케스트레이터의 `install_machine`(update)은 턴이 도는 세션이 있으면 카드에 그렇게 적고 허용은 "한가할 때 업데이트"를 뜻한다.
+`when`이 없으면 `idle`이다(이전 창의 뜻). 어시스턴트의 `install_machine`(update)은 턴이 도는 세션이 있으면 카드에 그렇게 적고 허용은 "한가할 때 업데이트"를 뜻한다.
 
 **연결된 기기는 허브의 버전을 따른다**(#1508, 2026-10-24 소유자 결정). 허브의 "Automatic updates"(`updates.autoApply`)가 켜져 있으면,
 허브와 같은 채널의 더 오래된 릴리스를 돌리는 연결된 기기는 누구의 클릭 없이 허브의 버전으로 올라간다. 조건은 `LinkedMachine.followsHub` 한 곳에만 있다:
@@ -1889,7 +1889,7 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 허브 버전마다 한 번, 실패하면 10분 뒤 한 번 더 시도한다(#1618 이전 허브의 이 업데이트는 기다리는 동안 취소할 수 있었고, 취소하면 그 버전은 끝났다).
 그렇게 끝난 버전에서는 `followsHub`가 거짓이라 에이전트도 카드 없이 다시 시작할 수 없다. 실패는 행에 `MachineInfo.followHub`로
 보인다. 에이전트(제한된 자격)의 `machines.update`도 `when`이 `idle`이거나 없고 `followsHub`가 참이면 카드 없이 돌고(`transport/method-rights.ts`의 `RightsHost`),
-오케스트레이터의 `install_machine`(update)도 같은 확인으로 카드를 건너뛴다. `now`, 롤백, 제거, 설치, `acceptVersions`는 계속 묻는다.
+어시스턴트의 `install_machine`(update)도 같은 확인으로 카드를 건너뛴다. `now`, 롤백, 제거, 설치, `acceptVersions`는 계속 묻는다.
 
 **데스크톱 사본은 호스트를 따른다**(#1736). 허브의 업데이트는 데스크톱 실행 파일이 없는 호스트 전용 패키지를 가져오므로, 기기의 `centralu serve`
 호스트로 도는 Windows 창(`start_plan.rs`, `Host::Serve`)은 설치될 때의 실행 파일에 머물렀다(아이콘, 셸, 키퍼 모두). 그래서 허브가 설치한
@@ -1979,7 +1979,7 @@ Windows 패키지를 실패시킨다.
 dev 빌드에는 더 오래된 쪽이 없고 프로토콜이 같으면 이어진다. 업데이트 자체는 다음 단계다: 허브는 자기 업데이트로,
 원격은 1단계에서 손으로(`npm i -g centralu`), 3단계에서 ssh로.
 
-**연결한 뒤** 링크는 원격의 `sessions.list`와 `projects.list`를 미러로 읽고, 숨길 세션(원격의 오케스트레이터와
+**연결한 뒤** 링크는 원격의 `sessions.list`와 `projects.list`를 미러로 읽고, 숨길 세션(원격의 어시스턴트와
 코디네이터, 계획 문서 §3.4)을 적어 두고, `machine_resync`를 보낸다. 창은 그 기기를 다시 읽고 죽은 것을 깨운다.
 링크는 원격마다 커서와 에포크를 하나씩 쥐므로, 끊긴 소켓은 빈틈을 재전송받고, 재시작한 원격은 새 수명이라 다시
 동기화한다. 허브가 보여 주지 않는 세션의 이벤트는 버리고, 세션 이벤트로 읽기 사이의 미러 이름과 상태를 따라간다.
@@ -2227,7 +2227,7 @@ change · 1 compaction · 1 unknown")과, 이름을 올린 세션마다 그 아�
 | `model_change` 모델 변경 | 모델이 바뀌었다: 사람의 설정(`updateSettings`), 또는 도구 스스로의 전환(거절 뒤 대체 모델, `recordToolSettings`). 어긋난 설정이 모델인 설정 재시작도 그렇게 적는다. #513의 기준선에서 잰 바로는 세션 안에서 Claude의 캐시를 다시 만든 유일한 일이다 |
 | `compaction` 압축 | `compaction` 이벤트, 또는 `conversation_reset`(Claude Code의 /clear): 다음 요청은 캐시가 본 적 없는 요약이나 빈 대화로 시작한다 |
 | `thread_restart` 스레드 재시작 | 붙이거나 뗀 앱을 받으려고 Codex의 스레드가 다시 시작했다(`sessionAppsChanged`, 바로 또는 턴이 끝날 때) |
-| `instructions` 도구 변경 | Claude가 붙이거나 뗀 앱을 바로 받았다(도구 목록은 프롬프트의 일부다), 또는 스킬이나 MCP 변경으로 오케스트레이터가 다시 시작했다 |
+| `instructions` 도구 변경 | Claude가 붙이거나 뗀 앱을 바로 받았다(도구 목록은 프롬프트의 일부다), 또는 스킬이나 MCP 변경으로 어시스턴트가 다시 시작했다 |
 | `launch_settings` 시작 설정 변경 | 살아 있는 프로세스의 어댑터 시작 지문이 바뀌었거나 이전 빌드가 지문을 기록하지 않아 다시 띄웠다(#589). 유휴 프로세스는 바로, 작업 중인 프로세스는 턴이 끝난 뒤 다시 띄운다. 프로젝트 신뢰를 바꾸면 그 프로젝트의 실행 중인 세션도 같은 경로로 다시 뜨고, 대화에 그 이유가 남는다(#663) |
 | `expired` 캐시 만료 | 이 줄의 마지막 쓰기에 대해 API가 알린 수명보다 오래 쉬었다(Claude의 `cache_creation` 내역: `ephemeral_1h_input_tokens` 또는 `ephemeral_5m_input_tokens`) |
 | `probably_expired` 아마 만료 | 알린 수명이 없을 때 5분 넘게 쉬었다(Codex는 알리지 않는다. 아직 쓴 적 없는 Claude 줄도) |
@@ -2270,12 +2270,12 @@ sonnet으로 바꾸자 0을 읽고 23,268 중 23,266을 썼고 `model_change`로
 | 영구 삭제한 세션의 버킷은 함께 간다(영구 삭제의 마지막 트랜잭션, `TrashRecords.purgeSession`). 휴지통이나 보관함에 있는 세션의 것은 남는다 | 영구 삭제만이 되돌릴 수 없다: 휴지통의 세션은 돌아올 수 있고 보관한 것은 여전히 사람의 것이다. 아직 쓰지 않은 것도 버리므로(`UsageRecorder.forget`) 뒤늦은 flush가 행을 되살릴 수 없다. 지워진 *프로젝트*의 행은 남고 id로 불린다 |
 | 이 컴퓨터에만, 동기화하지 않음. 연결된 기기는 자기 것을 기록 | 세션별 개수는 사람이 언제 무엇을 했는지 말한다. 여기 있는 것은 사람 자신의 창 말고는 어디로도 가지 않는다. 허브는 기존 라우팅으로 기기에 묻는다(`usage.history { machine }`, `machine` 경로, 답의 세션·프로젝트 id는 다른 id처럼 한정) |
 | 시간 버킷, 질문할 때 호스트의 현지 시간 일로 합산 | 한 모양이 일 축과 시간 축을 모두 낸다. 시간 안에서 시작하는 범위는 그 시간을 통째로 취한다. UTC와 정수 시간만큼 떨어지지 않은 시간대(인도 +5:30)에서는 버킷이 현지 자정에 걸치며 시작한 날로 간다 |
-| 답마다 키는 최대 50개, 나머지는 `*`("Others")로 접는다 | 세션이 많은 범위도 작은 답 하나로 남고, 가장 큰 것은 접히지 않는다. 프로젝트 없는 세션은 `none`("Orchestrator") |
+| 답마다 키는 최대 50개, 나머지는 `*`("Others")로 접는다 | 세션이 많은 범위도 작은 답 하나로 남고, 가장 큰 것은 접히지 않는다. 프로젝트 없는 세션은 `none`("Assistant") |
 | 아직 경고 줄은 없다("이 속도면 주간 창이 초기화 전에 바닥난다") | 이슈가 질문으로 남겼다. 측정값이 그런 줄에 필요한 것이고, 속도의 규칙은 따로 정할 일이며 이름 붙인 후속이다 |
 | 영구 삭제한 세션은 아무것도 남기지 않는다 | 시작할 때 호스트는 세션이 더는 없는 버킷도 지운다(`UsageRecords.sweepOrphans`): 이 빌드보다 오래된 빌드가 교체 중에 세션을 영구 삭제하면 남는다. 휴지통의 세션은 행이 있으므로 버킷이 남는다. 영구 삭제는 세션을 메모리의 캐시 수치에서도 빼므로(`CacheLedger.forget`) 어떤 창도 빈 이름으로 부르지 않는다 |
 | 허브와 같은 계정의 연결된 기기(`sameAccountAsHub`) | 허브의 한도가 그 기기의 것을 대신하므로 허브의 측정값이 곧 그 기기의 것이다. 토큰 버킷은 기기가 따로 가지며 허브가 `machine`으로 읽는다. 여러 기기의 행을 한 목록으로 합치는 것은 이름 붙인 후속이다: 드롭다운은 게이지처럼 한 번에 한 기기에 묻는다 |
 
-**묻기.** `usage.history { from, to, groupBy: 'day' | 'hour', by: 'session' | 'project' | 'model' | 'tool', tool?, machine? }`는 읽기 전용(`agents.usage`처럼 `machine`으로 라우팅)이고 `{ by, readings, rows, recordedSince? }`를 답한다: 범위 안의 측정값(과 계열마다 그 직전의 마지막 값: 측정값은 바뀔 때만 저장하므로)은 도구·계정·창마다 한 계열이고, 행은 기간과 키마다의 토큰이다(`UsageHistoryRow`: 위의 합과 `rebuildCauses`). `recordedSince`는 보관 중인 가장 오래된 시간이라 화면이 그 전 날들은 모른다고 말할 수 있다. 같은 답이 오케스트레이터에는 드문 명령 `usage_history { days?, by? }`로 간다(`centralu_run` 뒤라서 매 요청에 비용이 없다. 오케스트레이터만 가지며 상위 15개 키와 각 창의 움직임을 몇 줄로 답한다). 에이전트가 자기 일의 비용을 확인하는 방법이다. 일반 세션은 받지 않는다: 그 상주 도구는 요청마다 예산이 정해져 있다(§1.1).
+**묻기.** `usage.history { from, to, groupBy: 'day' | 'hour', by: 'session' | 'project' | 'model' | 'tool', tool?, machine? }`는 읽기 전용(`agents.usage`처럼 `machine`으로 라우팅)이고 `{ by, readings, rows, recordedSince? }`를 답한다: 범위 안의 측정값(과 계열마다 그 직전의 마지막 값: 측정값은 바뀔 때만 저장하므로)은 도구·계정·창마다 한 계열이고, 행은 기간과 키마다의 토큰이다(`UsageHistoryRow`: 위의 합과 `rebuildCauses`). `recordedSince`는 보관 중인 가장 오래된 시간이라 화면이 그 전 날들은 모른다고 말할 수 있다. 같은 답이 어시스턴트에는 드문 명령 `usage_history { days?, by? }`로 간다(`centralu_run` 뒤라서 매 요청에 비용이 없다. 어시스턴트만 가지며 상위 15개 키와 각 창의 움직임을 몇 줄로 답한다). 에이전트가 자기 일의 비용을 확인하는 방법이다. 일반 세션은 받지 않는다: 그 상주 도구는 요청마다 예산이 정해져 있다(§1.1).
 
 **화면.** 사용량 드롭다운은 "Last 7 days"(`features/usage/HistorySection.tsx`)로 끝난다: 측정값에서 그린 주간 창 퍼센트의 계단선(하루치 이상의 측정값부터 그린다. 그보다 적으면 가장자리의 점일 뿐이라 수치만 보인다)(`weeklyWindow`가 그릴 창, 가장 최근에 읽은 계정의 것)과, 토큰을 가장 많이 쓴 세션 또는 프로젝트 다섯(스위치), 각각의 캐시 적중률(`@cc/core`의 `topUsage`). 이 질문 이전의 호스트는 이 구역을 뺀다.
 

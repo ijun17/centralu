@@ -82,7 +82,7 @@ const switchedOn = (key: string) => (params: unknown): boolean => fields(params)
 
 /**
  * The preferences that widen what agents may do, or hide the person's own notice of a card
- * (as the orchestrator's `set_preferences` cards them): a ceiling or depth set at all (raising or
+ * (as the Assistant's `set_preferences` cards them): a ceiling or depth set at all (raising or
  * removing it), approval notifications or their sound turned off. The hub-auto switch is not among them: turning it on
  * or off runs unasked (owner decision 2026-11-05)
  */
@@ -187,7 +187,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'trash.purgeSubagentSteps': 'asks',
   'trash.empty': 'asks',
 
-  // The orchestrator
+  // The Assistant
   'orchestrator.get': 'everyday',
   'orchestrator.peek': 'everyday',
   'orchestrator.configure': 'everyday',

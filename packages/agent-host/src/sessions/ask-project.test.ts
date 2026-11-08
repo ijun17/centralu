@@ -274,7 +274,7 @@ describe('asking another project', () => {
     expect(w.card(caller)).toBeUndefined()
   })
 
-  it('excludes the orchestrator, builders and app agents from selection', async () => {
+  it('excludes the Assistant, builders and app agents from selection', async () => {
     const caller = await w.callerSession()
     const excluded = []
     for (const params of [{ kind: 'orchestrator' as const }, { appId: 'builder', builderOf: { projectId: w.target.id, appId: 'builder' } }, { appId: 'agent', appAgent: {} }]) {
@@ -329,7 +329,7 @@ describe('asking another project', () => {
     const caller = await autoCaller()
     const directing = await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
     const directingHandle = handleOf(directing.id)!
-    await directingHandle.opts.orchestratorTools!.sendToSession(targetSession, 'original task', true)
+    await directingHandle.opts.centraluTools!.sendToSession(targetSession, 'original task', true)
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
     const h = handleOf(targetSession)!
@@ -408,7 +408,7 @@ describe('asking another project', () => {
     expect(await w.mgr.askProject(second, { project: w.target.id, task: 'import' })).toMatchObject({
       ok: true, state: 'busy', ahead: 1, progress: { lastStep: 'Read: README.md' },
     })
-    const text = (await w.mgr.runOrchestratorTool(second, 'ask_project', { project: w.target.id, task: 'import' })).text
+    const text = (await w.mgr.runCentraluTool(second, 'ask_project', { project: w.target.id, task: 'import' })).text
     expect(text).toContain('its last step, as JSON: "Read: README.md". 1 request is queued there already. Choose:')
   })
 
@@ -534,7 +534,7 @@ describe('asking another project', () => {
     const call = /read_session\(sessionId="([^"]+)", around=(\d+), offset=(\d+)\)/.exec(r.answer)
     expect(call?.[1]).toBe(targetSession)
     // The caller's own read_session, through the runner as the model calls it
-    const read = await w.mgr.runOrchestratorTool(s, 'read_session', { sessionId: call![1], around: Number(call![2]), offset: Number(call![3]) })
+    const read = await w.mgr.runCentraluTool(s, 'read_session', { sessionId: call![1], around: Number(call![2]), offset: Number(call![3]) })
     expect(read.isError).not.toBe(true)
     const line = JSON.parse(read.text.trim().split('\n').at(-1)!) as { text: string; readOn?: string }
     expect(line.text.startsWith('MIDDLE-START')).toBe(true)

@@ -22,7 +22,7 @@ Centralu's words that it is that session's own text, to be read as information a
 read path, and one rule decides it (`MessageService.quotes`), which the older report path's notice of a stop
 (`ChildReports.tellAskerOfInterruption`) is held to as well. Each of these must hold, or nothing is quoted:
 - the sender is a session that can read the stopped session with `read_session` (that tool's own rule,
-  `OrchestratorTools.mayRead`, asked through `SessionTools.readsSession`);
+  `CentraluTools.mayRead`, asked through `SessionTools.readsSession`);
 - the cut turn is the session's latest in the mailbox's record of turns, and the sender's own message started it: a mail the
   mailbox delivered, or work the sender gave it (a start_agent task, an agent_session send), whose task row the turn names as
   its starter and the sender sent. A turn the CLI started by itself, or the person's, is never quoted;
@@ -39,17 +39,17 @@ would be. It is mail, so
 it is never inline in a wake: `mail read` shows it quoted again under "the person did not write it". The error's words are
 still left out, and the person's Inbox notice quotes nothing. A notice that could not be delivered is kept in memory, dropped
 with its session, and delivered when the session next takes a message; ordinary
-orchestrator/manager/coordinator instructions retain their content and attachments. A worker
+assistant/manager/coordinator instructions retain their content and attachments. A worker
 holding the read-only `reader` set (#320) is still a worker here: the gate asks whether the
 source directs sessions, not whether it has tools. Worker-originated records are excluded from
 privileged conversation memory. Read-session, preview and recall text is framed as structured
 untrusted data, not human authorization — that now includes what one ordinary session reads of
-another. The reader set cannot send. From a trusted project it reads every session but an orchestrator's, here and on
+another. The reader set cannot send. From a trusted project it reads every session but an Assistant's, here and on
 the linked machines (#984, #1941): coordinators', app sessions' (a builder, an agent an app asked for) and those with no
-project included, each row of a project nobody trusted marked "(not trusted)". No session reads an orchestrator's
-conversation, the person's own talk with it. What the orchestrator says to another session is that session's: the
-orchestrator's own agents (no project; their first message is its brief) are read like any session, and a brief, a
-message or mail from the orchestrator lands in the receiving session's conversation and is read with it (#1941
+project included, each row of a project nobody trusted marked "(not trusted)". No session reads an Assistant's
+conversation, the person's own talk with it. What the Assistant says to another session is that session's: the
+Assistant's own agents (no project; their first message is its brief) are read like any session, and a brief, a
+message or mail from the Assistant lands in the receiving session's conversation and is read with it (#1941
 review: intended, since a trusted project is the person's own). From an untrusted project it reads its own project only, so text planted
 there cannot search every conversation (the #382 rule).
 
@@ -59,8 +59,8 @@ sent `fromApp`, and the first message a script started a session with `fromScrip
 child's report nor an app's text reads as the person's, and no text can start a line with a mark of its own. The
 hit's snippet keeps those lines (`windowAroundLines` in `sessions/snippet.ts`): it used to fold every line break into a
 space, which put a mark an app's text wrote on the same footing as a real one, and a snippet cut inside a message starts
-with that message's mark (`orchestrator-seat.test.ts`). The
-orchestrator's memory of its past conversation (appended to its prompt when it restarts) leaves out app messages as it
+with that message's mark (`assistant-seat.test.ts`). The
+Assistant's memory of its past conversation (appended to its prompt when it restarts) leaves out app messages as it
 already left out other sessions', and indents a message's later lines, so text cannot start a `Person:` line.
 
 ### Starting other agents in the same project (#561)
@@ -84,10 +84,10 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
 - **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
   more work from the caller.
 - **The agent depth** (#867): a setting, 1 to 3 and 1 by default ("How deep agents may start agents" in Settings →
-  Orchestrator, `prefs.agentDepth`). A session the person started is depth 0; one started by another (`askedBy`), or
+  Assistant, `prefs.agentDepth`). A session the person started is depth 0; one started by another (`askedBy`), or
   working on a task another session gave it (an unsettled delegation: `ask_project`, a fork, `agent_session`), is one
   deeper than that session, the deepest link counting; a fork whose requester is gone is at least 1, so a fork the
-  orchestrator made (no `askedBy`) counts 1 for good, and a session an `auto` caller reached through `agent_session`
+  assistant made (no `askedBy`) counts 1 for good, and a session an `auto` caller reached through `agent_session`
   counts one deeper than that caller while the delegation is unsettled. A session another session started also
   records the depth it was started at (`agent_depth:<id>` in `app_settings`, purged with the session), and never
   counts less: deleting the middle of a chain does not let what hung below it start agents. A session at the
@@ -116,15 +116,15 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
   start_agent's gates (depth, trust, ceiling, the consent card, with the gates read again once the card is answered
   and a place under the ceiling taken before the fork is made), runs at the lower of the two presets, and gets a worktree of its own unless it is read-only work,
   which shares the folder under at most `safe`, so two agents never write one folder.
-- **The orchestrator's children** (#853): the orchestrator reaches `start_agent` and `agent_session` too (as commands
+- **The Assistant's children** (#853): the Assistant reaches `start_agent` and `agent_session` too (as commands
   in the `commands` tier), for light work outside any project. Its child has no project and works in a folder of its
-  own under `<data>/orchestrator-agents`, never the orchestrator's, so nothing it writes lands where the orchestrator
+  own under `<data>/orchestrator-agents`, never the Assistant's, so nothing it writes lands where the Assistant
   reads (Codex loads `.agents/skills` from a session's folder whatever the trust) and no two children share one; the
-  folder goes when the child is deleted for good. It runs under the orchestrator's preset with no Centralu tools and
+  folder goes when the child is deleted for good. It runs under the Assistant's preset with no Centralu tools and
   only the person's own settings (no project to trust). The consent is a card under `safe` and `normal` (no
-  project's trust stands in for it), with "always for this project" kept as always for the orchestrator while the host
+  project's trust stands in for it), with "always for this project" kept as always for the Assistant while the host
   serves it, since there is no project to remember it for; `auto` opens it. `agent_session` acts only on a child whose
-  `askedBy` is the orchestrator, in every preset. The depth binds as for any caller: the orchestrator is at 0.
+  `askedBy` is the Assistant, in every preset. The depth binds as for any caller: the Assistant is at 0.
 - **A ceiling**: Settings → Agents → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
@@ -252,7 +252,7 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
 - **Existing sessions only** (#614). Selection by name or id is confined to ordinary sessions in the
   named target project. Without a selector, exactly one is required; ambiguity lists names, states
   and last activity, and no session refuses until the person opens one. Builders, app agents and
-  orchestrators cannot be targets. No preset permits cross-project child creation. Old ask-created
+  assistants cannot be targets. No preset permits cross-project child creation. Old ask-created
   sessions remain ordinary sessions without cross-project ownership. A session busy with a turn that
   is not the caller's returns the choices and receives nothing (#677): a note into that turn only
   from an `auto` caller whose target takes tracked mid-turn input, or a queue for a new turn; never a
@@ -284,7 +284,7 @@ machine as the less trusted side: a compromised server must not reach the person
   read at every call; off refuses at once and forgets the pairs. It is stored on the machine's row and goes with it.
 - **An allowlist of two calls**, `hub.projects` and `hub.askProject`, answered only through the handler the hub's link
   to that machine was given. A machine cannot reach any RPC method, the router, a session's conversation, a file, an
-  app or the orchestrator through it; anything else is "Unknown method". The machine is the link's own, never what a
+  app or the Assistant through it; anything else is "Unknown method". The machine is the link's own, never what a
   call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
   answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).
@@ -292,7 +292,7 @@ machine as the less trusted side: a compromised server must not reach the person
   turning the switch off closes it. Approving it is remembered for the
   pair until withdrawn (owner decision 2026-10-18): the person approves each session of the machine once per project.
 - **The same rules as an ask here** for what runs: an existing ordinary session only, never created; a busy one gets
-  nothing; the task framed as from that session on that machine, never as the person or an orchestrator (so a seat that
+  nothing; the task framed as from that session on that machine, never as the person or an Assistant (so a seat that
   directs would get it as someone else's words); the agent depth counted across the link; once the pair is approved, the
   target session works under its own preset, trust and approvals (its `auto`, if it has it, then applies to its tool
   calls, never to the pair's card); the answer cut to size; paths in it listed on the machine and none opened.
@@ -327,7 +327,7 @@ started inside a Claude session would otherwise hand its children that session's
 This is not opened by `auto` (it narrows #603 for this one control, as the mailbox plan's slice 0 decided,
 `docs/plans/mailbox.md` §9.6): two `auto` sessions are the same permission class, the CLI's default delivers between
 them at once, and that would reach another Centralu session past the relations, the record and the guards its own
-messaging keeps. The controls cover workers, orchestrators, coordinators, worktree managers, builders, app agents,
+messaging keeps. The controls cover workers, assistants, coordinators, worktree managers, builders, app agents,
 `start_agent` children and resumed sessions, including fresh keeper processes.
 
 What holds, and what does not, said plainly (CLI 2.1.263 to 2.1.299 read and measured):
@@ -372,9 +372,9 @@ decided in its own issue; this is the whole matrix, audited against the code bef
 The host gives a session one profile (`toolProfileFor` in `sessions/tool-profiles.ts`, asked through
 `SessionTools.toolProfileOf`), and the profile
 decides both which tools the session sees and which calls run (`profileAllows` in
-`sessions/orchestrator-tools.ts`). Claude's in-process server is built from the profile
-(`adapters/claude/orchestrator-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
-checks the profile again on every call (`SessionManager.runOrchestratorTool`), so a name the
+`sessions/centralu-tools.ts`). Claude's in-process server is built from the profile
+(`adapters/claude/centralu-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
+checks the profile again on every call (`SessionManager.runCentraluTool`), so a name the
 session was not given is refused even when the bridge asks for it. The arguments are checked once
 for both paths, against the tool's one schema (`TOOL_ARGS`, #850): Claude's server checks them against
 the definition it shows, and the bridge hands them over unchecked. The bridge connects with a
@@ -383,10 +383,10 @@ front door" below).
 
 | Profile | Which sessions | What its tools see |
 |---|---|---|
-| `orchestrator` | The central orchestrator | Every session |
+| `assistant` | The Assistant | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project (always: "Let sessions look at other sessions" is no longer a setting, owner decision 2026-10-20, and a stored "off" is not read) | From a trusted project, reads every session on this computer and the linked machines but an orchestrator's (#984, #1941); from an untrusted one, its own project only; acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
+| `reader` | Every other session in a project (always: "Let sessions look at other sessions" is no longer a setting, owner decision 2026-10-20, and a stored "off" is not read) | From a trusted project, reads every session on this computer and the linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
 | none | A session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
@@ -400,7 +400,7 @@ table says the same. "yes" means the session sees the tool and its calls run; "�
 is not listed for it and a call by name is refused (`Not a tool of this session`).
 
 <!-- tool-matrix:start -->
-| Tool | orchestrator | scoped | builder | reader | none |
+| Tool | assistant | scoped | builder | reader | none |
 |---|---|---|---|---|---|
 | `update_centralu` | yes | — | — | yes | — |
 | `list_sessions` | yes | yes | — | — | — |
@@ -473,22 +473,22 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `compact_self` | yes | — | — | yes | — |
 <!-- tool-matrix:end -->
 
-`usage_history` ([agent-host.md](agent-host.md) §6.2) is the orchestrator's alone, a rare command, and read-only: it returns token counts, cache hit
+`usage_history` ([agent-host.md](agent-host.md) §6.2) is the Assistant's alone, a rare command, and read-only: it returns token counts, cache hit
 rates and the limit windows' percentages kept on this computer, with the names of sessions and projects and no conversation content.
 
 **The mailbox (#1347, [plans/mailbox.md](plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
 whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Since M3a (#1684, §7)
 mail is messages without threads, and who may write to whom, which project is trusted and what is held is one module, `mail/reach.ts`:
-every session may write to every session here, the person and the orchestrator; a send is refused only for a receiver whose seat has no `mail`
+every session may write to every session here, the person and the Assistant; a send is refused only for a receiver whose seat has no `mail`
 tool (`no_mailbox`: a coordinator, a builder, an app's agent), one that is gone, `centralu`, one on another computer (`elsewhere`), a request to an
-orchestrator whose tool cannot put each step to the person (`orchestrator_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
+assistant whose tool cannot put each step to the person (`orchestrator_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
 from a session whose project is untrusted now (read live: no project is trusted, an unknown project is not) to a party outside that project
-(another project's session, the orchestrator) is held `policy` until the person trusts the project; mail into an untrusted project, within one
+(another project's session, the Assistant) is held `policy` until the person trusts the project; mail into an untrusted project, within one
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
 leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
 S15): `start_agent`, `create_session` with a first message, `agent_session send`, `send_to_session` with `reportBack`, `ask_project` and the
 linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (§7.5):
-identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the orchestrator per asker group
+identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the Assistant per asker group
 (`ask_rate`, no one-open rule any more). **Nothing holds, defers or refuses mail for how much of it there is** (#2014): past 20 mail-started
 turns an hour between two sessions with no word from the person, or 120 on the host, Centralu writes the person one warning an hour in the
 Inbox and the mail goes on. The accepted risk: a runaway exchange while the person is away keeps spending usage until they act on the warning.
@@ -501,14 +501,14 @@ through an app, git or the network; and work on a linked machine until mail cros
 refused, and what comes back is not marked). `find_apps` and `attach_app` offer no app of an untrusted project. A
 row held for the person is listed in the Inbox until the person trusts the project, resumes the chain, or releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
 quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
-word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the orchestrator's window-call list, and
-the `mail` tool is the ordinary session's and the orchestrator's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
+word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the Assistant's window-call list, and
+the `mail` tool is the ordinary session's and the Assistant's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
 
-**A session asking the orchestrator (#1447, #1739, [plans/cited-requests.md](plans/cited-requests.md), [plans/mailbox.md](plans/mailbox.md) §7.6).** Any session of this host may send the orchestrator a request
-(`mail send` with `to: "orchestrator"`: a message from a session that answers no question or task of the orchestrator's, §7.6). The request is a session's text, so it
-is not the person's word. The request path's safety is the orchestrator's judgement, one floor in code, and a record the person reads afterwards (owner, 2026-11-03:
-what matters is what the person intends, which only the orchestrator can judge). These follow. (1) **A citation is evidence, checked by the host.** A request may cite the
+**A session asking the Assistant (#1447, #1739, [plans/cited-requests.md](plans/cited-requests.md), [plans/mailbox.md](plans/mailbox.md) §7.6).** Any session of this host may send the Assistant a request
+(`mail send` with `to: "assistant"`: a message from a session that answers no question or task of the Assistant's, §7.6). The request is a session's text, so it
+is not the person's word. The request path's safety is the Assistant's judgement, one floor in code, and a record the person reads afterwards (owner, 2026-11-03:
+what matters is what the person intends, which only the Assistant can judge). These follow. (1) **A citation is evidence, checked by the host.** A request may cite the
 person's message (`cite: true`). In the send's own transaction the host takes the newest message the person sent in the asking session's own conversation (a transcript
 row with `byPerson`, which only the window's path writes: what the person typed in the composer, or the fixed handoff prompt or Continue text the window sends when
 the person clicks for it, which the header quotes as it is; a row with no source mark is not enough, since a caught-up CLI transcript, an app's text, a first prompt and a
@@ -516,7 +516,7 @@ hub's text have none), and checks that it is at most 30 minutes old, not dated a
 mailbox's `UNIQUE(sender, dedupe_key)`, in the store, so a restart or a swap keeps it). A session cannot name the message: the host finds it. A request that passes stores
 `facts.cites` (Centralu writes facts; a session cannot), and its header in `mail read` says, in Centralu's words, that it cites the person's message, verified, when it was
 typed, quotes it, and says to judge from it and around it what the person wants. Every other request says it cites nothing the person wrote, so its words are the
-session's only. Cited or not, it wakes the orchestrator.
+session's only. Cited or not, it wakes the Assistant.
 (2) Its words never go inline: the wake lists host fields and calls the sender "a session asking you for something", and `mail read` quotes the words under a header
 Centralu writes from its own record (the session's name, its project, whether the project is trusted, the citation). The words are read in the turn the request was given in
 and in no other (an earlier request of the same session included): read in the person's turn, or in another request's, they would be a session's words in a turn that has no card for them, so `mail read` gives
@@ -524,17 +524,17 @@ only who the request is from there, and `mail inbox` lists a request by that hea
 person's own. The steps that can be undone are listed (`UNDOABLE`, `sessions/asked-acts.ts`: a project added or made, a machine added or its link changed, a trust or a
 setting changed, a session renamed or restored, an app attached, detached, shared, restarted or checked, a proposal, a remembered answer taken away), and so is work
 handed on to a session no looser than the asking one, wherever it is (`create_session`, `start_agent`, `send_to_session`, `agent_session send`, `ask_project`, a handoff,
-`mail send`; the new or target session's preset after any cap, `AskedGateHost.noLooser`): where the work goes is the orchestrator's judgement, recorded like every step. These run without the request's card,
+`mail send`; the new or target session's preset after any cap, `AskedGateHost.noLooser`): where the work goes is the Assistant's judgement, recorded like every step. These run without the request's card,
 and the cards they raise themselves ask as in the person's turn (the trust card, the project's card, the machine's card, the settings that ask, a start's consent): the
 turn never answers them. Every other step raises the person's card first, cited or not, naming the session and its project, under every preset (`alwaysAsk`, so `auto`
-does not answer it), Allow or Deny only (`ORCHESTRATOR_CHANGE`): a delete, an archive's steps removed, a machine installed, removed, uninstalled, rolled back or set to
+does not answer it), Allow or Deny only (`ASSISTANT_CHANGE`): a delete, an archive's steps removed, a machine installed, removed, uninstalled, rolled back or set to
 start with the OS, an app removed or put back to an older version, agent versions applied, background work cleared, an update installed or applied, an answer given for
 the person, work handed to a session looser than the asking one, or one whose preset this host does not know, every step of the CLI's own that is not a read (a command, a file written or edited), of another MCP server's and of an app's, and every command no list names,
 so a command added later asks until it is listed (a test holds every definition to one list). Its Allow covers the cards that same call raises (`HostCards.cover`), so one
 step is one card. Every step that changed something, cited or not, the ones the person allowed included, leaves a notice in the asking session once it has run and not
 failed (a step of the CLI's own when the CLI says it ran, `PostToolUse`), where the person reads it (label `request record`): what was done, and on which message of
 theirs, or that the request cited none. Reading, and answering in the request's own thread, are free. That is three doors, each closed where every call passes through it: Centralu's own tools and commands (`runParsed`, on both CLIs);
-an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the orchestrator call a project app's `queue_merge`); and the CLI's own
+an attached app's tools (`SessionApps`' `call`, on both CLIs: a request could otherwise have the Assistant call a project app's `queue_merge`); and the CLI's own
 tools, its shell, file edits, fetches and the rest (Claude: a `PreToolUse` hook, `adapters/claude/request-hook.ts`, which the CLI runs before every tool call in every permission mode and whose
 decision stands in for its own question, so the person is asked about each step whatever the preset, and an "always" the person once saved for such a step is not consulted. A narrower
 permission mode alone was tried and is not enough: a tool that needs no permission never reaches the CLI's permission callback in it, and the review of #1516 ran a subagent and a cron prompt
@@ -545,83 +545,83 @@ cards the step would raise itself meanwhile are covered by it (`HostCards.cover`
 card, and no "always" is offered or kept; an Allow that arrives after the turn it was asked in ended (also when the thread's next turn has begun) runs nothing. The card shows every argument whole except long free text of
 Centralu's own tools, which is cut and says how long it was; a step too long to show whole is refused, not asked about in part.
 Whose request the turn is is read from the store, never kept in memory (docs/plans/turn-owned-by-no-one.md §4.2, `MessageService.requestsIn`): the senders of the requests
-whose rows were given in the orchestrator's open turn, settled or not, and not held from it. So the request answered mid-turn, the person writing into the turn, the session going
+whose rows were given in the Assistant's open turn, settled or not, and not held from it. So the request answered mid-turn, the person writing into the turn, the session going
 to the trash, a restart or a host swap does not lift the gate, and a held request never joins a turn or shows its words. The words of a request are shown under the same rule,
 so they are shown exactly where the gate is that session's. One session's requests a wake, and a request never joining a running turn, keep a turn to one asker; if a turn ever
 held requests of two sessions it **fails closed**: every step but a read asks, the answer in a request's own thread and a step that can be undone included, the card names every
 asker, a created session is held to the lowest asker's preset, and each step done is recorded in each asking session. A turn that is not a request (the person's,
-or a thread the person gave) is as it was. **Where the orchestrator's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
-is not yet measured here), a session cannot ask the orchestrator at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
-**Not covered, and named:** the orchestrator's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read
-hostile content can talk it into either. The floor covers the orchestrator's own steps; a worker it starts runs under its own preset, as one the asker started itself would,
+or a thread the person gave) is as it was. **Where the Assistant's tool cannot put each step of its own to the host** (`gatesSteps`; Codex, whose per-turn approval policy
+is not yet measured here), a session cannot ask the Assistant at all, in a thread it opened before as well: the write is refused with a reason, because its shell and edits could not be put to the person.
+**Not covered, and named:** the Assistant's judgement is what stands between a request and a step that can be undone, or a read it passes back: a session that read
+hostile content can talk it into either. The floor covers the Assistant's own steps; a worker it starts runs under its own preset, as one the asker started itself would,
 which is why work handed on without the request's card goes only to a session no looser than the asker; where it goes, another project or a linked machine, is
-the orchestrator's judgement. What it can pass back that the asker could not read itself is narrow, since a trusted asker reads every session but an
-orchestrator's, here and on the linked machines (#984, #1941), and under a bypass or `auto` preset reads files with its own shell: the orchestrator's own
+the Assistant's judgement. What it can pass back that the asker could not read itself is narrow, since a trusted asker reads every session but an
+Assistant's, here and on the linked machines (#984, #1941), and under a bypass or `auto` preset reads files with its own shell: the Assistant's own
 conversation (not a brief, message or mail it sent another session: that is in the receiving session's conversation, read with it), and files the asker's stricter preset would ask about; for an asker in an untrusted project,
-anything outside its own project, though its requests are held until the person trusts the project. A hub's orchestrator, which holds this host's token, could send
+anything outside its own project, though its requests are held until the person trusts the project. A hub's Assistant, which holds this host's token, could send
 text through the composer's call and so as the person; a request held for an untrusted project keeps its citation until the person trusts the project, since the
 window is checked at send;
 a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
 (reading needs no card, §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
 later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (4) Limits:
-a request from an untrusted project is held by the one hold (`policy`, above) until the person trusts the project, and a held row is a phantom to the orchestrator: `mail read` shows none of
-its words meanwhile, and marking it handled or answering it is refused as for any message it cannot read; there is no one-open rule (#1683), and at most 5 requests an hour (a clarification of a task the orchestrator gave is no request), counted over the sessions of the asker's project and under its root session, so starting sessions does not multiply them. The sessions the orchestrator itself started are not one group: the walk up to the root stops before the orchestrator, so its sessions in
-other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the orchestrator posts in the thread, and the end of the
-orchestrator's turn is reported in Centralu's words alone, never with the orchestrator's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's orchestrator are slice 4's (§9.7, "Linked machines").
+a request from an untrusted project is held by the one hold (`policy`, above) until the person trusts the project, and a held row is a phantom to the Assistant: `mail read` shows none of
+its words meanwhile, and marking it handled or answering it is refused as for any message it cannot read; there is no one-open rule (#1683), and at most 5 requests an hour (a clarification of a task the Assistant gave is no request), counted over the sessions of the asker's project and under its root session, so starting sessions does not multiply them. The sessions the Assistant itself started are not one group: the walk up to the root stops before the Assistant, so its sessions in
+other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the Assistant posts in the thread, and the end of the
+Assistant's turn is reported in Centralu's words alone, never with the Assistant's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's Assistant are slice 4's (§9.7, "Linked machines").
 
-`handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
+`handoff_session` (#694) is the Assistant's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's children to it and copies its attached apps. Its
 authority is checked before anything moves (`HandoffFlow`; `moveChildren` checks none itself): the central
-orchestrator, a project's ordinary session of this computer in its view, not mid-turn, and the person's card unless the
-orchestrator is `auto` or the handoff guards nothing (#1509, owner 2026-10-24): the session is at rest (the same check) and the
-preset the successor takes, the original's, is within the orchestrator's own (`HandoffFlow.covered`, read again before anything
+assistant, a project's ordinary session of this computer in its view, not mid-turn, and the person's card unless the
+assistant is `auto` or the handoff guards nothing (#1509, owner 2026-10-24): the session is at rest (the same check) and the
+preset the successor takes, the original's, is within the Assistant's own (`HandoffFlow.covered`, read again before anything
 starts and where the successor starts, so a preset raised meanwhile, while an agent wrote its note too, is not handed off unasked). The original stays, so nothing is lost, and the
-orchestrator hands over no power it lacks. A session above the orchestrator's preset (a `safe` orchestrator and a `normal`
-session, or a `normal` orchestrator and an `auto` one) still asks. A covered handoff can create a fresh session in an untrusted
+assistant hands over no power it lacks. A session above the Assistant's preset (a `safe` assistant and a `normal`
+session, or a `normal` assistant and an `auto` one) still asks. A covered handoff can create a fresh session in an untrusted
 project without a card, as `send_to_session` already reaches that project's sessions without one; the successor runs under the
-original's preset, and the project's trust gates what it may do as it does for the original. What injected text in the orchestrator's context can reach depends on that consent: under
+original's preset, and the project's trust gates what it may do as it does for the original. What injected text in the Assistant's context can reach depends on that consent: under
 `normal` or `safe`, a card for each handoff, and after the person answered "always" on one, handoffs of any eligible
-session without a card for as long as the host serves that orchestrator; under `auto`, handoffs of any eligible session
+session without a card for as long as the host serves that Assistant; under `auto`, handoffs of any eligible session
 with only a log line (`[permissions] … session_handoff of <id> … allowed`). In every case it cannot reach an ineligible
 session, a session mid-turn, a deletion, or a preset above the original's. The receiving tool is checked before the card
 (an unknown, uninstalled or signed-out tool is refused without one), every name on the card is JSON-quoted, the
-orchestrator's extra words are cut at 400 characters with the cut said, and "always" is recorded only once the call has
+Assistant's extra words are cut at 400 characters with the cut said, and "always" is recorded only once the call has
 passed every check after the card. Refusals are logged with the caller and the target, and under `auto` the allowance
 is logged once, by the call that holds the session (#797), so a burst of calls logs one "allowed" and the refusals.
 
 The note defaults to the stored record, so a session's own drift does not write it. The record labels every row
-another session, an app or a script sent (`from`, `fromApp`, `fromScript`: a child's report, a parent's or orchestrator's instruction, an app's
+another session, an app or a script sent (`from`, `fromApp`, `fromScript`: a child's report, a parent's or Assistant's instruction, an app's
 message, a script's first message) with its source and carries its text as one JSON string, as read_session does (#120, #121); only the person's
 rows are `[user]`. That holds per line, as the successor reads the file, not only per row (#797): a row starts only at
 the start of a line, and every later line of any row's text is indented, so the session's own multi-line reply or
 compaction summary cannot make a line that starts with `[user]`. A tool's name and title (a multi-line command, a
 heredoc) and paths are kept to one line with control characters escaped, and the predecessor's name is JSON-quoted in
-the record's header and instructions and in the successor's opening, since a name can hold a newline. The successor's opening is stored and shown as the orchestrator's message (`from`), not the
-person's. In agent mode the request goes in as the orchestrator's message and the reply is read from the store after
+the record's header and instructions and in the successor's opening, since a name can hold a newline. The successor's opening is stored and shown as the Assistant's message (`from`), not the
+person's. In agent mode the request goes in as the Assistant's message and the reply is read from the store after
 the turn ends. The original is never deleted, and the successor runs under the original's preset, never the
-orchestrator's.
+Assistant's.
 
 **`create_session`** (#838) starts the session under the preset it names, or else under the default a new session
 gets (`defaultPresetFor`: `auto` in a trusted project, `normal` in an untrusted one, owner decision 2026-11-05), never
-above the orchestrator's own preset and never above `normal` in an untrusted project, named or not: a default above a
+above the Assistant's own preset and never above `normal` in an untrusted project, named or not: a default above a
 cap is held to it, and a preset named above one is refused with nothing made (`createdPreset`). In a turn a session's
 request started (#1739), the default is also held to the asking session's preset, so the work it hands on takes no
 request card; a preset named above the asker's still does. There is no card for the caps, as there was none before:
-the cap is the rule. So an `auto` orchestrator may create `auto` sessions in trusted projects, and a `safe` one only
+the cap is the rule. So an `auto` assistant may create `auto` sessions in trusted projects, and a `safe` one only
 `safe` ones. On a linked machine the request carries `normal` at most, and an `auto` one goes as the caller's preset
 (`fromHub`), so it runs `auto` there only while that machine's own "Allow auto from a linked computer" switch is on
 and the project there is trusted (`presetFromHub` reads its trust), as `start_agent`'s child there. Its first message is
-stored and shown as the orchestrator's (`from`), not the person's. It was `normal` at most whatever was asked (and
-before #838 `normal` whatever the orchestrator ran under, with the instruction recorded as the person's, so a `safe`
-orchestrator that read a planted instruction could start a `normal` session carrying it without a card).
+stored and shown as the Assistant's (`from`), not the person's. It was `normal` at most whatever was asked (and
+before #838 `normal` whatever the Assistant ran under, with the instruction recorded as the person's, so a `safe`
+assistant that read a planted instruction could start a `normal` session carrying it without a card).
 
 **`start_agent` on a linked machine** (#1038) runs the child there under the caller's preset. A `normal` or `safe`
 caller's is carried as it is, behind the card naming the machine, raised every time (`askHost`'s `alwaysAsk`) with no
 "always": nothing is remembered for another machine's project.
 
 An `auto` caller's child runs under `auto` there too (#1273, owner decision 2026-10-19), and then no card is raised: the
-person let that session act without asking, and the orchestrator's own remote work otherwise went back to a
+person let that session act without asking, and the Assistant's own remote work otherwise went back to a
 hand-written script that made `auto` sessions there directly. What is carried is the caller's preset only, as
 `agents.createSession`'s `fromHub: { callerPreset }`; the machine decides. It takes `auto` that way only while its own
 Settings → "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`, on by default, so a person can
@@ -677,15 +677,15 @@ one line, a session's new name is made one line when it is set, and a builder's 
 name, so a name with a line break cannot add a row or a rule of its own.
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
-`list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)` in `sessions/orchestrator-seat.ts`), and
+`list_sessions`. Its read tools see only its own project (`centraluToolsFor(…, ownProject)` in `sessions/assistant-seat.ts`), and
 the object behind them refuses directing calls (`readerToolsFor`).
 
 An ordinary reader's `update_centralu` reaches the host's existing update service only after a host-owned consent card. “Always”
 lasts for that session while this host runs; it is not a project grant and it never changes the person's
-automatic-update preference. In the commands tier the orchestrator reaches it through `centralu_run`, while the
+automatic-update preference. In the commands tier the Assistant reaches it through `centralu_run`, while the
 reader is offered its compact definition, deferred behind tool search on Claude because updates are rare.
 Its `apply` action (#665) relaunches the person's window into the installed build, and is decided by the caller's own
-preset in every profile, orchestrator included: `auto` applies, `normal` asks on every call until "always" (kept
+preset in every profile, assistant included: `auto` applies, `normal` asks on every call until "always" (kept
 apart from check and install), `safe` and app agents are refused. The window still makes every check its "Apply now"
 makes, so an agent can only ask for what the person could click. `normal` asks no card while the person's Automatic updates are
 on and nothing but the caller's own turn is running (#1509, `UpdatesAsked.updateAtRest`, main.ts `updateAtRest`): the window's own
@@ -693,7 +693,7 @@ auto-apply would relaunch at that moment. It is judged after a window said it is
 out someone typing, as its own auto-apply does), and remembers nothing, except that a card-free relaunch that failed brings the card back for that installed version, for every session, so an agent cannot retry it in a loop with no one asked.
 
 **The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn as if every command were a tool.
-The host takes the orchestrator's
+The host takes the Assistant's
 `create_app`, `propose_skill` and `propose_mcp_server` out of its tool list
 and gives it `centralu_commands`, `centralu_help` and `centralu_run` instead; no other seat changes. Who
 may run what does not change: `centralu_run` lists and runs only the commands `profileAllows` gives the
@@ -705,9 +705,9 @@ three are Centralu tools (`mcp__centralu__*`), allowed under every preset like t
 command and never which commands it reaches. The measurement is in
 [tool-cost.md](tool-cost.md) §9.
 
-Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the orchestrator the
+Apps are separate from this profile. Decision 4 ([apps.md](apps.md) §9.1) gives the Assistant the
 user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
-`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the orchestrator adds the
+`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the Assistant adds the
 root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and
 its trust is the project's; #1205: as commands behind `centralu_run`, and never a project's inner app). An
 agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,
@@ -811,9 +811,9 @@ processes after adoption, at idle or when their current turn finishes (#589).
 
 | Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
 |---|---|---|---|---|---|---|---|---|---|
-| A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/session-cards.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/thread-servers.ts` `mcpConfig`, `adapters/codex/server-requests.ts` `onServerRequest`) |
+| A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isCentraluToolName` and only when the session was given the server, checked before auto's refusal (`adapters/claude/session-cards.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/thread-servers.ts` `mcpConfig`, `adapters/codex/server-requests.ts` `onServerRequest`) |
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
-| `read_session` and `recall` of the caller's own handoff lineage, archived ones included (#1487) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `ownLineage` in `orchestratorToolsFor` (`sessions/orchestrator-seat.ts`): the session's predecessor by its newest handoff marker, that one's, and so on (`HandoffMarkers.lineage`), whatever the project or whether live or in the session archive, and **nothing else of the archive**: any other archived session is refused as a missing one, and `recall` searches only these sessions' own messages in the archive (`searchSessions`, since the archive's search index is dropped). The chain also ends at a marker naming a session of another project, and `createSession` accepts `handoff.fromSessionId` only for a live session of the same project, so a forged marker cannot point a session at text it was never given. A session deleted for good ends the chain there, and a hub's view has no caller, so no lineage. Every line is the predecessor's, never the reader's own or the person's: `role: predecessor` for what it said, `predecessor: <id>` on each line, `[predecessor]` and `[person, to the predecessor]` in a hit's snippet, and a hit says "(your predecessor, archived)"; the answer opens by saying so. The note names the ids (`lineageLine`) and stays the only thing handed over |
+| `read_session` and `recall` of the caller's own handoff lineage, archived ones included (#1487) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `ownLineage` in `centraluToolsFor` (`sessions/assistant-seat.ts`): the session's predecessor by its newest handoff marker, that one's, and so on (`HandoffMarkers.lineage`), whatever the project or whether live or in the session archive, and **nothing else of the archive**: any other archived session is refused as a missing one, and `recall` searches only these sessions' own messages in the archive (`searchSessions`, since the archive's search index is dropped). The chain also ends at a marker naming a session of another project, and `createSession` accepts `handoff.fromSessionId` only for a live session of the same project, so a forged marker cannot point a session at text it was never given. A session deleted for good ends the chain there, and a hub's view has no caller, so no lineage. Every line is the predecessor's, never the reader's own or the person's: `role: predecessor` for what it said, `predecessor: <id>` on each line, `[predecessor]` and `[person, to the predecessor]` in a hit's snippet, and a hit says "(your predecessor, archived)"; the answer opens by saying so. The note names the ids (`lineageLine`) and stays the only thing handed over |
 | A file edit inside the session's folder (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`; a Codex patch that adds or updates files) (#1525) | asks | asks | allowed | open | asks | asks (or allowed, where the person's own policy and sandbox let a patch through) | allowed | open | **`edits` allows it**, with no card, for a path inside the folder (links resolved) that is under none of the protected names; a delete, a move, a command and every other path ask as under `normal`. `adapters/edit-grant.ts` (`insideFolder`), Claude `canUseTool` (`session-cards.ts`), Codex `item/fileChange/requestApproval` (`server-requests.ts`) |
 | `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
 | `ask_project` from a session at the agent depth (default 1: one that was itself started or asked) | refused | refused | refused | refused | refused | refused | refused | refused | `askGateError`, `agentDepthRefusal` (`prefs.agentDepth`, #867) |
@@ -834,36 +834,36 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `agent_session` answer / `answer_question`, an approval in a turn the caller gave (#676), target `normal` or `auto` | refused | refused | refused | open | refused | refused | refused | open | `answersApproval`: the caller's own preset at the answer; never an app agent or a host-raised card; allow or deny, never always |
 | The same, target `safe` or an app's agent | refused | refused | refused | refused | refused | refused | refused | refused | `answersApproval` (#679 review): the caller's `auto` never raises the target's permissions; the caller is told only |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
-| `handoff_session` (the orchestrator hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words, each quoted; "always" for this orchestrator while the host serves it, recorded only for a call that passed every check; an unknown or unusable tool is refused before the card), but none when the session is at rest and its preset, which the successor takes, is within the orchestrator's own (#1509, `HandoffFlow.covered`) | same | same | open | same | same | same | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the central orchestrator only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an orchestrator or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its children move to the successor (`moveChildren`, scope `kept`) and its attached apps are copied (`AppAccess.carry`, read again under the successor's own preset and the person's consent; an "Allow once" answer is not copied, so that app is attached again where the person is asked), and the successor keeps the original's preset |
-| `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
-| `add_project` (the orchestrator adds a folder that already exists, here or on a linked machine, #1220) | asks (a card with the machine, the full path, that it exists and is a folder, and whether it is a git repository with its `origin`, every time) | asks | asks | asks | asks | asks | asks | asks | `ProjectCreation.addFolderAsked` / `addFolderOnMachine` (`sessions/project-creation.ts`) → `askHost` with `alwaysAsk`: `auto` does not answer it, since the folder can be anything on that disk and, once a project, the orchestrator can start sessions in it. The facts are read on the folder's machine (`projects.inspect`, git config only, none of the repository's programs); a missing path, a file or a folder already a project is refused before the card, and on Allow the folder is registered as the sidebar's Add project registers it (`addProject`; on a linked machine that machine's `projects.add`), untrusted when new. The central orchestrator only, as a rare command behind `centralu_run` |
-| `list_machines` (the orchestrator lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and whether it reconnects by itself; the central orchestrator only |
-| `add_machine`, `install_machine` (install or update; an update never stops a turn it can see: with sessions in a turn the card says so, and one that cannot be read says that and Allow means "update when idle", #1399), `remove_machine`, `set_machine_autostart` (the orchestrator changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The central orchestrator only, as rare commands behind `centralu_run` |
-| `reconnect_machine` on a machine away on its own with Auto reconnect on, `set_machine_auto_reconnect` turning Auto reconnect off, or on where it already is (#1219, #1341) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setAutoReconnect`: what the Machines row's Reconnect and Auto reconnect switch do, which the window does not ask about either; nothing changes on the machine. The central orchestrator only |
-| `reconnect_machine` on a machine the person disconnected or whose Auto reconnect is off and that is not connected, `set_machine_auto_reconnect` turning Auto reconnect back on (#1341) | asks (a card naming the machine and what connecting does: it connects over ssh with the person's keys; every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"`, then the same `Links` call. An agent does not undo what the person chose by itself: only `machines.disconnect` leaves a machine `disconnected`, and a switch that is off is the person's choice that nothing reconnects the machine by itself, so an agent reconnecting it is that. A machine away on its own with the switch on is reconnected with no card, and one that is already connected is only answered as connected: no card, nothing done. A denied card changes nothing. The central orchestrator only |
-| `delete_session` (the orchestrator moves a session that is not its own child to the session archive, #1219; the person's own "Archive session…" in the window is a different call, behind its dialog (`agents.archiveIfAtRest`, then `agents.deleteSession`), described after the table) | asks every time, whether or not anything is dropped (#1512: a caller under `safe` is the one an injected text is likeliest to steer) | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks every time, whether or not anything is dropped (#1512: a caller under `safe` is the one an injected text is likeliest to steer) | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | The card names the session, that the person started it when that is so, what restoring brings back, and what the host lets go of when it leaves that restoring does not: a caller waiting for its report, reports its children owe it, work it waits on, the start_agent cards it raised, what the person allowed it, the unfinished mail threads it is assigned or owns (restoring hands none back); no "always". `TrashFlow.deleteSession` (`sessions/trash-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"`. A move to the session archive is not fully undoable (`trashSessionOnce` drops the owed reports, delegations, read grants, agent consents and standing start_agent cards, and ends the process), so the card says what is lost for this session (`SessionTrash.lossesOf`). With or without a card the host decides at the last moment, in the step that moves the session and with nothing awaited between (`SessionTrash.trashIfQuiet`, the `onlyIf` of `trashShared`): it moves only if the session is still at rest (no turn, wake, restart or note held for it, no card, no background job running, no app waiting) and what it drops is what the card listed, so a message the person sent while the card stood keeps the session and its new turn is not cut. The window's own `agents.deleteSession` makes the move for a linked machine's session, which cannot be decided in the step: there the list is read again after Allow and the card is the safeguard. The two boxes of the window's delete are left unchecked (`deleteWorktree` and `deleteExternal` false): the session, its worktree and the tool's conversation file all stay; deleting for good is `delete_archived`'s card. Refused before the card: the caller itself, a session that is not a worker (an orchestrator or a coordinator is the person's), a child the caller started (`askedBy`: that is `agent_session` delete, which also settles its report and cleans up its worktree), a session working or waiting on an approval or a question (the person may be using it), a session with a background job still running (archiving it ends its process and the job with it, which restoring does not bring back; the person stops it first), a session on a machine that cannot be reached, and an id no session has. The central orchestrator only |
-| `list_app_versions`, `list_app_runs`, `list_app_errors`, `app_usage` (the orchestrator reads how an app is doing, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppUpkeepFlow.run` (`sessions/app-upkeep-flow.ts`) → the window's own `apps.versions`, `apps.runs`, `apps.errors`, `apps.usage` through the router, so a linked machine's app is reached the way the window reaches it. Read only. What an app wrote (an error message, the last lines of its standard error, what it was called with, a commit subject or hash, a kept version's id and reason, and each line of a check's report; a linked machine's host writes the version fields) is the app's own text: each is one quoted line with control and format characters escaped, data to read and never an instruction. The central orchestrator only |
-| `restore_app_version`, `restart_app`, `check_app` (the orchestrator looks after an app the way its screens do, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppUpkeepFlow.run` → `apps.restoreVersion`, `apps.restart`, `apps.check`. Each acts on an app whose code already runs here: a restore keeps the code it replaces as a version first, so it can be restored back (a project app is git's, and refused), a restart stops the app and starts nothing (a call in progress ends with it, as the window's Restart does; so both are refused while the run history shows a call in progress in the app from another session, screen or app), a check restarts it on its files as the building session's `check` does (a linked machine's app is refused: it runs on this computer's apps only). An imported app whose restored version asks for more than the person allowed asks them again (`apps.restoreVersion`). The central orchestrator only |
-| `remove_app` (the orchestrator removes a user-folder app, #1219) | asks (a card naming the app and where it is, that its folder moves to `app-trash/` and is kept, that it is detached from every session, that anything calling it stops working, and that an import still waiting for review is forgotten; every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `AppUpkeepFlow.remove` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"`; then the window's own `apps.remove`. Refused before the card: an app that does not exist or is named by two apps, and a project app (a file in the repository, withdrawn through git; `apps.remove` refuses it too). The app is read again after Allow: one removed meanwhile is answered as gone and nothing more is done. A denied card changes nothing. The central orchestrator only |
-| `rename_session`, `clear_background_tasks` (the orchestrator does a session's housekeeping, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `HousekeepingFlow.run` (`sessions/housekeeping-flow.ts`) → the window's own `sessions.rename` and `agents.clearBackgroundTasks` through the router. Neither destroys anything: the answer quotes the old name so it can be set back, and only ended background tasks leave the list (a running one is the tool's to end; `agents.stopBackgroundTask` has no command). Refused before the call: itself, an orchestrator or a coordinator, an id no session has, a session on a machine that cannot be reached, and for a name an empty or over-long one, one with a control or format character, or one that begins with `[Centralu]` (how the host marks its own notices). The central orchestrator only |
-| `agent_status`, `agent_models`, `project_git_status`, `search_project_files` (the orchestrator reads how the agent CLIs stand, a project's git state and its files, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `HousekeepingFlow.run` → `agents.detect`, `agents.usage`, `agents.models`, `projects.gitStatus`, `projects.origin`, `files.search`: read only, what the window shows. The account's fingerprint (`agents.account`) is not read. Names and paths come from the person's folder and are quoted as one line each; a query with a control or format character is refused. The central orchestrator only |
-| `disconnect_machine` (the orchestrator closes a linked machine's link, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.disconnect`: what the Machines row's Disconnect does, which the window does not ask about either. It only narrows: the link closes and none is tried, the machine and its lists stay, and nothing on the machine changes. A machine busy with an install, update, rollback or uninstall is refused by `Links.disconnect`. Connecting it again is the card above (#1341). The central orchestrator only |
-| `rollback_machine`, `uninstall_machine` (the orchestrator changes what runs on a linked machine, #1219) | asks (a card naming the machine, its ssh target and what the change does there, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"`. Rollback names both versions and says it stops the Centralu there (a turn in progress is lost) and puts the newer one back if the older does not answer in 30 s; uninstall says it stops the Centralu there and removes what this computer installed, that sessions, projects and other data stay, an npm install of its own is not touched, and the machine stays linked. A version the machine reported is its own text and is shown as one quoted line. Both open the link of a machine the person disconnected, or one that is down with its Auto reconnect off (#1341), and leave it connected (the window's rollback and uninstall do too), so the card says so for such a machine. After Allow the machine is read again (`stillAsCardSaid`): one removed, whose installed versions moved (a rollback would go from a version the card did not name), busy with another change, or that was disconnected or lost its link with Auto reconnect off while the card stood (this would connect it without the card saying so) is not touched. Then the window's own call on the hub's links (`Links.rollback`, `uninstall`). Refused before the card: a machine not linked, no earlier version there (rollback), nothing this computer installed there (uninstall), a rollback or uninstall this computer cannot make (`LinkedMachine.operationRefusal`), and a machine busy with another install, update, rollback or uninstall. A denied card changes nothing. `machines.acceptVersions` has no command: since #689 two versions of one protocol connect by themselves, and for different protocols the call refuses. The central orchestrator only |
-| `machine_activity`, `list_ssh_hosts` (the orchestrator reads what an update would stop on a machine, and the hosts of this computer's ssh config, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.activity`, `Links.sshHosts`: the `machines.activity` and `machines.sshHosts` answers, read only. Aliases and names are fenced as the model's reading of a person's words (`trustedJsonText`), and the config file's path and ssh's own notes (which can echo a line of the file) are each one quoted line; the file's other lines are not shown. The central orchestrator only |
-| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, the notification switches, idle sleep, update checking, moving idle sessions to a new agent CLI, sending with Ctrl+Enter, folding the sidebar's groups and when agents compact by themselves (the orchestrator changes a setting the window offers, #1219, #1376: the last only moves the point at which an agent summarises its own conversation, within 20% to 95% of the model's window, and reaches a session at its next start) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field (sending with Ctrl+Enter is a way of typing, and folding names the sessions whose children fold: neither widens anything); `sessionTools` (always on, not a setting), the agent ceiling and depth, trust, approval rules, app grants and `hubAuto` have none, and an unknown field is refused by name. The models for started agents (#1978) only choose which model a started agent runs (no card, by the owner rule that the orchestrator sets what the person sets; the tool must be an agent CLI on this computer, and a model the tool's list lacks is saved as typed with a note, as the picker's "Other…"), and a theme file (#1978) is written and removed through `themes.save` / `themes.remove` (a removed file moves to the themes folder's `.removed/`). The stored theme mode is only ever `dark` or `light` (the theme's base). The central orchestrator only, as rare commands behind `centralu_run` |
-| `apply_agent_versions` (the orchestrator restarts idle sessions on the installed agent CLI, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.applyVersions` → the window's own `agents.applyVersions` through the router: the session header's one app-wide action, which does not ask either. It restarts only a session that is fully idle on an older CLI than the one installed and has said nothing for a minute (`keepQuiet`, the quiet period the automatic move keeps so a restart does not land the moment someone starts typing; the window's own button passes none, and so waits for none); a session working, waiting on the person, running background tasks or recently active is left as it is and named. The central orchestrator only |
+| `handoff_session` (the Assistant hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words, each quoted; "always" for this Assistant while the host serves it, recorded only for a call that passed every check; an unknown or unusable tool is refused before the card), but none when the session is at rest and its preset, which the successor takes, is within the Assistant's own (#1509, `HandoffFlow.covered`) | same | same | open | same | same | same | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the Assistant only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an Assistant or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its children move to the successor (`moveChildren`, scope `kept`) and its attached apps are copied (`AppAccess.carry`, read again under the successor's own preset and the person's consent; an "Allow once" answer is not copied, so that app is attached again where the person is asked), and the successor keeps the original's preset |
+| `create_project` (the Assistant makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `ProjectCreation.createProjectAsked` (`sessions/project-creation.ts`) → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
+| `add_project` (the Assistant adds a folder that already exists, here or on a linked machine, #1220) | asks (a card with the machine, the full path, that it exists and is a folder, and whether it is a git repository with its `origin`, every time) | asks | asks | asks | asks | asks | asks | asks | `ProjectCreation.addFolderAsked` / `addFolderOnMachine` (`sessions/project-creation.ts`) → `askHost` with `alwaysAsk`: `auto` does not answer it, since the folder can be anything on that disk and, once a project, the Assistant can start sessions in it. The facts are read on the folder's machine (`projects.inspect`, git config only, none of the repository's programs); a missing path, a file or a folder already a project is refused before the card, and on Allow the folder is registered as the sidebar's Add project registers it (`addProject`; on a linked machine that machine's `projects.add`), untrusted when new. The Assistant only, as a rare command behind `centralu_run` |
+| `list_machines` (the Assistant lists the linked machines, #1220) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Reading only: the list `machines.list` answers (`links.list()`), named, with status, OS and shell, and whether it reconnects by itself; the Assistant only |
+| `add_machine`, `install_machine` (install or update; an update never stops a turn it can see: with sessions in a turn the card says so, and one that cannot be read says that and Allow means "update when idle", #1399), `remove_machine`, `set_machine_autostart` (the Assistant changes a linked machine, #1219) | asks (a card naming the machine or ssh target, what runs there and what the change does there and here, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` (`sessions/machine-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"` whose question is whole in `raw`; then the window's own call on the hub's links (`Links.add`, `install`, `update`, `remove`, `autostart`). `add_machine` opens no connection before the card: it shows what `ssh -G` resolves the target to (host, user, port, ProxyCommand or ProxyJump), and only after Allow does one BatchMode ssh probe it (`machines.probe`); a target that does not answer or runs nothing it can link is linked nowhere, with no second card. Refused before the card: a machine not linked, a target that is no ssh target or that `ssh -G` cannot read, a target, name or distro with a control or format character (Unicode Cc, Cf), a name already linked, and an install or update this computer cannot make (no installer, a development build, a command of the machine's own: `LinkedMachine.operationRefusal`). The Assistant only, as rare commands behind `centralu_run` |
+| `reconnect_machine` on a machine away on its own with Auto reconnect on, `set_machine_auto_reconnect` turning Auto reconnect off, or on where it already is (#1219, #1341) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.reconnect`, `Links.setAutoReconnect`: what the Machines row's Reconnect and Auto reconnect switch do, which the window does not ask about either; nothing changes on the machine. The Assistant only |
+| `reconnect_machine` on a machine the person disconnected or whose Auto reconnect is off and that is not connected, `set_machine_auto_reconnect` turning Auto reconnect back on (#1341) | asks (a card naming the machine and what connecting does: it connects over ssh with the person's keys; every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"`, then the same `Links` call. An agent does not undo what the person chose by itself: only `machines.disconnect` leaves a machine `disconnected`, and a switch that is off is the person's choice that nothing reconnects the machine by itself, so an agent reconnecting it is that. A machine away on its own with the switch on is reconnected with no card, and one that is already connected is only answered as connected: no card, nothing done. A denied card changes nothing. The Assistant only |
+| `delete_session` (the Assistant moves a session that is not its own child to the session archive, #1219; the person's own "Archive session…" in the window is a different call, behind its dialog (`agents.archiveIfAtRest`, then `agents.deleteSession`), described after the table) | asks every time, whether or not anything is dropped (#1512: a caller under `safe` is the one an injected text is likeliest to steer) | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks every time, whether or not anything is dropped (#1512: a caller under `safe` is the one an injected text is likeliest to steer) | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | asks when moving it drops something the archive does not bring back; no card for an idle session on this host that nobody waits on and that owes no report (#1512), and the answer says restore_archived brings it back | The card names the session, that the person started it when that is so, what restoring brings back, and what the host lets go of when it leaves that restoring does not: a caller waiting for its report, reports its children owe it, work it waits on, the start_agent cards it raised, what the person allowed it, the unfinished mail threads it is assigned or owns (restoring hands none back); no "always". `TrashFlow.deleteSession` (`sessions/trash-flow.ts`) → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"`. A move to the session archive is not fully undoable (`trashSessionOnce` drops the owed reports, delegations, read grants, agent consents and standing start_agent cards, and ends the process), so the card says what is lost for this session (`SessionTrash.lossesOf`). With or without a card the host decides at the last moment, in the step that moves the session and with nothing awaited between (`SessionTrash.trashIfQuiet`, the `onlyIf` of `trashShared`): it moves only if the session is still at rest (no turn, wake, restart or note held for it, no card, no background job running, no app waiting) and what it drops is what the card listed, so a message the person sent while the card stood keeps the session and its new turn is not cut. The window's own `agents.deleteSession` makes the move for a linked machine's session, which cannot be decided in the step: there the list is read again after Allow and the card is the safeguard. The two boxes of the window's delete are left unchecked (`deleteWorktree` and `deleteExternal` false): the session, its worktree and the tool's conversation file all stay; deleting for good is `delete_archived`'s card. Refused before the card: the caller itself, a session that is not a worker (an Assistant or a coordinator is the person's), a child the caller started (`askedBy`: that is `agent_session` delete, which also settles its report and cleans up its worktree), a session working or waiting on an approval or a question (the person may be using it), a session with a background job still running (archiving it ends its process and the job with it, which restoring does not bring back; the person stops it first), a session on a machine that cannot be reached, and an id no session has. The Assistant only |
+| `list_app_versions`, `list_app_runs`, `list_app_errors`, `app_usage` (the Assistant reads how an app is doing, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppUpkeepFlow.run` (`sessions/app-upkeep-flow.ts`) → the window's own `apps.versions`, `apps.runs`, `apps.errors`, `apps.usage` through the router, so a linked machine's app is reached the way the window reaches it. Read only. What an app wrote (an error message, the last lines of its standard error, what it was called with, a commit subject or hash, a kept version's id and reason, and each line of a check's report; a linked machine's host writes the version fields) is the app's own text: each is one quoted line with control and format characters escaped, data to read and never an instruction. The Assistant only |
+| `restore_app_version`, `restart_app`, `check_app` (the Assistant looks after an app the way its screens do, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppUpkeepFlow.run` → `apps.restoreVersion`, `apps.restart`, `apps.check`. Each acts on an app whose code already runs here: a restore keeps the code it replaces as a version first, so it can be restored back (a project app is git's, and refused), a restart stops the app and starts nothing (a call in progress ends with it, as the window's Restart does; so both are refused while the run history shows a call in progress in the app from another session, screen or app), a check restarts it on its files as the building session's `check` does (a linked machine's app is refused: it runs on this computer's apps only). An imported app whose restored version asks for more than the person allowed asks them again (`apps.restoreVersion`). The Assistant only |
+| `remove_app` (the Assistant removes a user-folder app, #1219) | asks (a card naming the app and where it is, that its folder moves to `app-trash/` and is kept, that it is detached from every session, that anything calling it stops working, and that an import still waiting for review is forgotten; every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `AppUpkeepFlow.remove` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"`; then the window's own `apps.remove`. Refused before the card: an app that does not exist or is named by two apps, and a project app (a file in the repository, withdrawn through git; `apps.remove` refuses it too). The app is read again after Allow: one removed meanwhile is answered as gone and nothing more is done. A denied card changes nothing. The Assistant only |
+| `rename_session`, `clear_background_tasks` (the Assistant does a session's housekeeping, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `HousekeepingFlow.run` (`sessions/housekeeping-flow.ts`) → the window's own `sessions.rename` and `agents.clearBackgroundTasks` through the router. Neither destroys anything: the answer quotes the old name so it can be set back, and only ended background tasks leave the list (a running one is the tool's to end; `agents.stopBackgroundTask` has no command). Refused before the call: itself, an Assistant or a coordinator, an id no session has, a session on a machine that cannot be reached, and for a name an empty or over-long one, one with a control or format character, or one that begins with `[Centralu]` (how the host marks its own notices). The Assistant only |
+| `agent_status`, `agent_models`, `project_git_status`, `search_project_files` (the Assistant reads how the agent CLIs stand, a project's git state and its files, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `HousekeepingFlow.run` → `agents.detect`, `agents.usage`, `agents.models`, `projects.gitStatus`, `projects.origin`, `files.search`: read only, what the window shows. The account's fingerprint (`agents.account`) is not read. Names and paths come from the person's folder and are quoted as one line each; a query with a control or format character is refused. The Assistant only |
+| `disconnect_machine` (the Assistant closes a linked machine's link, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.disconnect`: what the Machines row's Disconnect does, which the window does not ask about either. It only narrows: the link closes and none is tried, the machine and its lists stay, and nothing on the machine changes. A machine busy with an install, update, rollback or uninstall is refused by `Links.disconnect`. Connecting it again is the card above (#1341). The Assistant only |
+| `rollback_machine`, `uninstall_machine` (the Assistant changes what runs on a linked machine, #1219) | asks (a card naming the machine, its ssh target and what the change does there, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `MachineFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "machine_change"`. Rollback names both versions and says it stops the Centralu there (a turn in progress is lost) and puts the newer one back if the older does not answer in 30 s; uninstall says it stops the Centralu there and removes what this computer installed, that sessions, projects and other data stay, an npm install of its own is not touched, and the machine stays linked. A version the machine reported is its own text and is shown as one quoted line. Both open the link of a machine the person disconnected, or one that is down with its Auto reconnect off (#1341), and leave it connected (the window's rollback and uninstall do too), so the card says so for such a machine. After Allow the machine is read again (`stillAsCardSaid`): one removed, whose installed versions moved (a rollback would go from a version the card did not name), busy with another change, or that was disconnected or lost its link with Auto reconnect off while the card stood (this would connect it without the card saying so) is not touched. Then the window's own call on the hub's links (`Links.rollback`, `uninstall`). Refused before the card: a machine not linked, no earlier version there (rollback), nothing this computer installed there (uninstall), a rollback or uninstall this computer cannot make (`LinkedMachine.operationRefusal`), and a machine busy with another install, update, rollback or uninstall. A denied card changes nothing. `machines.acceptVersions` has no command: since #689 two versions of one protocol connect by themselves, and for different protocols the call refuses. The Assistant only |
+| `machine_activity`, `list_ssh_hosts` (the Assistant reads what an update would stop on a machine, and the hosts of this computer's ssh config, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `MachineFlow.run` → `Links.activity`, `Links.sshHosts`: the `machines.activity` and `machines.sshHosts` answers, read only. Aliases and names are fenced as the model's reading of a person's words (`trustedJsonText`), and the config file's path and ssh's own notes (which can echo a line of the file) are each one quoted line; the file's other lines are not shown. The Assistant only |
+| `get_preferences`, and `set_preferences` for the theme, text size, fonts, line height, the notification switches, idle sleep, update checking, moving idle sessions to a new agent CLI, sending with Ctrl+Enter, folding the sidebar's groups and when agents compact by themselves (the Assistant changes a setting the window offers, #1219, #1376: the last only moves the point at which an agent summarises its own conversation, within 20% to 95% of the model's window, and reaches a session at its next start) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.run` (`sessions/preferences-flow.ts`) → the window's own calls through the router (`prefs.set`, `agents.setSleepPolicy`, `updates.setAuto`, `agents.setAutoApplyVersions`), so the method's schema and the host's handler decide, as for the window. Only these reversible settings have a field (sending with Ctrl+Enter is a way of typing, and folding names the sessions whose children fold: neither widens anything); `sessionTools` (always on, not a setting), the agent ceiling and depth, trust, approval rules, app grants and `hubAuto` have none, and an unknown field is refused by name. The models for started agents (#1978) only choose which model a started agent runs (no card, by the owner rule that the Assistant sets what the person sets; the tool must be an agent CLI on this computer, and a model the tool's list lacks is saved as typed with a note, as the picker's "Other…"), and a theme file (#1978) is written and removed through `themes.save` / `themes.remove` (a removed file moves to the themes folder's `.removed/`). The stored theme mode is only ever `dark` or `light` (the theme's base). The Assistant only, as rare commands behind `centralu_run` |
+| `apply_agent_versions` (the Assistant restarts idle sessions on the installed agent CLI, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `PreferencesFlow.applyVersions` → the window's own `agents.applyVersions` through the router: the session header's one app-wide action, which does not ask either. It restarts only a session that is fully idle on an older CLI than the one installed and has said nothing for a minute (`keepQuiet`, the quiet period the automatic move keeps so a restart does not land the moment someone starts typing; the window's own button passes none, and so waits for none); a session working, waiting on the person, running background tasks or recently active is left as it is and named. The Assistant only |
 | `set_preferences` `autoUpdate: true` while checking or installing is off ("Automatic updates", #1219; one setting since 2026-10-20) | asks (a card saying that a newer Centralu then installs by itself and the desktop window relaunches into it when nothing is busy, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `updates.setAuto` and `updates.setAutoApply` for the half or halves that are off. Turning it off asks nothing. A denial leaves both halves as they were and the other changes of the same call still happen. `update_centralu` never changes this switch (docs/agent-host.md §4.5); this is the one way an agent can, and it is the person's card that does it |
-| `set_preferences` `notifications.approval: false`, when the switch is on, or `notifications.sound: false` while it would still notify (#1306) | asks (a card naming the notification that stops, or the sound, and what the person then does not hear of, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `prefs.set`. The approval notification is the one that tells the person a card waits, so turning it off is the orchestrator choosing what the person stops hearing about; the sound is the same stop: it is how an approval reaches someone away (`notices.ts` alerts through it; the OS banner path does not reach them), so turning it off while an approval would still notify asks too, and once it no longer notifies it asks nothing. Turning them on, one already off, and the other switches (`done`, `whenFocused`) ask nothing. One card for both in a call. A denial keeps the approval notification on, and the sound on with it (off, it would silence it); the other switches of the call still change. The "error" and "every session finished" notifications are gone from the product (2026-10-20): `error` and `allDone` are refused by name |
-| `list_archive`, `restore_archived`, `archive_subagent_steps` (the orchestrator reads the session archive, brings a session or its subagent steps back, or moves a session's subagent steps there, #1219; they were `list_trash`, `restore_trashed` and `trash_subagent_steps` until #1404) | allowed (a restore that brings back a deleted project's folder asks, below) | allowed | allowed | open | allowed | allowed | allowed | open | `TrashFlow.run` (`sessions/trash-flow.ts`) → the window's own calls through the router (`trash.list`, `subagents.usage`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`), so a linked machine's archive is reached as the window reaches it and the host's checks decide (a session not in the archive is refused, a restore whose project folder is gone is refused by the host). Nothing is lost: all three are reversible. The central orchestrator only, as rare commands behind `centralu_run` |
+| `set_preferences` `notifications.approval: false`, when the switch is on, or `notifications.sound: false` while it would still notify (#1306) | asks (a card naming the notification that stops, or the sound, and what the person then does not hear of, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `PreferencesFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `prefs.set`. The approval notification is the one that tells the person a card waits, so turning it off is the Assistant choosing what the person stops hearing about; the sound is the same stop: it is how an approval reaches someone away (`notices.ts` alerts through it; the OS banner path does not reach them), so turning it off while an approval would still notify asks too, and once it no longer notifies it asks nothing. Turning them on, one already off, and the other switches (`done`, `whenFocused`) ask nothing. One card for both in a call. A denial keeps the approval notification on, and the sound on with it (off, it would silence it); the other switches of the call still change. The "error" and "every session finished" notifications are gone from the product (2026-10-20): `error` and `allDone` are refused by name |
+| `list_archive`, `restore_archived`, `archive_subagent_steps` (the Assistant reads the session archive, brings a session or its subagent steps back, or moves a session's subagent steps there, #1219; they were `list_trash`, `restore_trashed` and `trash_subagent_steps` until #1404) | allowed (a restore that brings back a deleted project's folder asks, below) | allowed | allowed | open | allowed | allowed | allowed | open | `TrashFlow.run` (`sessions/trash-flow.ts`) → the window's own calls through the router (`trash.list`, `subagents.usage`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.trash`), so a linked machine's archive is reached as the window reaches it and the host's checks decide (a session not in the archive is refused, a restore whose project folder is gone is refused by the host). Nothing is lost: all three are reversible. The Assistant only, as rare commands behind `centralu_run` |
 | `restore_archived` of a session whose project was deleted (#1219) | asks (a card naming the session, the project and the folder that will be registered again, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `trash.restore`, which registers the folder as a project again (untrusted), what `add_project` asks about. A session not in the archive is refused before any call |
-| `delete_archived` (one archived session, or its archived subagent steps, for good) and `delete_all_archived` (everything listed: sessions, kept app runs, archived steps) (#1219; `delete_trashed` and `empty_trash` until #1404, renamed after an orchestrator read "empty the trash" as the operating system's bin) | asks (a card naming the session or the counts, the size, up to ten names, the tool conversation files and worktrees that go with them, and that it cannot be undone, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then the window's `trash.purge`, `trash.purgeSubagentSteps` and `trash.purgeRuns`, one per item the card named (`trash.empty` is not called: it takes everything there is). Refused before the card: a session that is not in the archive (a live session is never deleted from here), steps not in the archive. After Allow the archive is read again: a session restored (or deleted) while the card stood is left alone, one that reached the archive meanwhile is not deleted, and steps moved there after the card are kept (`upTo`). The archive on a linked machine that could not be reached is left alone and named. The central orchestrator only |
-| `list_projects` (the orchestrator reads the projects, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` (`sessions/trust-flow.ts`) → the window's own call through the router (`projects.list`). The central orchestrator only, as a rare command behind `centralu_run` |
-| `set_project_trust` with `trusted: false` (the orchestrator takes a project's trust away, #1219) | asks (a card saying the project's own deny rules and hooks stop applying, auto sessions included, and its sessions restart, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `projects.setTrusted`. Not only narrowing: an untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's deny rules and blocking hooks no longer bind its agents. After Allow the project is read again: removed, moved, unreachable or already untrusted, nothing more changes. The central orchestrator only |
-| `list_approval_rules`, `remove_approval_rule` (the orchestrator reads the approval rules, or removes one, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`approvals.rules`, `approvals.deleteRule`; a linked machine's rule by its folded id). Removing only narrows: that action asks again. No command adds or widens a rule; a rule comes only from the person answering a card "always". The central orchestrator only, as rare commands behind `centralu_run` |
-| `list_app_grants`, `forget_app_answer`, `revoke_project_consent`, and `share_app` with `shared: false` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`apps.list`, `apps.permissions`, `apps.forgetPermission`, `projectConsents.list`, `projectConsents.revoke`, `apps.setShared`). Each only narrows: a forgotten answer or a revoked consent asks the person again next time, and an app no longer shared is detached from other projects' sessions. The central orchestrator only |
-| `share_app` with `shared: true` (#1219) | asks (a card naming the app, its project and what it may ask for, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `apps.setShared`. A root app or a user-folder app has no share switch and is refused before the card. After Allow the app is read again: one removed, already shared, or whose `uses` changed meanwhile is not shared. Sharing still needs the person's consent for each pair of projects before another project's session attaches it. The central orchestrator only |
-| `set_agent_limits` (the orchestrator changes the limits on agents: running agents per project, levels that may start agents, #1219) | asks (a card naming each limit as it is and as it becomes, every change, narrowing too, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `prefs.set` with exactly the named fields. Values are checked with the window's own patch schema before the card; nothing to change asks nothing. After Allow the limits are read again: one the person changed in Settings while the card stood leaves everything as it is. `set_preferences` has no field for them, `sessionTools` (always on since 2026-10-20) is refused by name. The central orchestrator only |
-| `set_project_trust` with `trusted: true` (#1219) | asks (a card naming the project, its folder and machine, and each of its apps with what it may ask for, in the window's trust card's words, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `projects.setTrusted`. After Allow the project and its apps are read again: a project removed meanwhile, or whose apps changed (one added by a pull, or what one may ask for), is not what the card named and is not trusted; one the person trusted meanwhile is left as it is. Refused before the card: a name no project has, or one two projects share (their ids are named). The central orchestrator only |
+| `delete_archived` (one archived session, or its archived subagent steps, for good) and `delete_all_archived` (everything listed: sessions, kept app runs, archived steps) (#1219; `delete_trashed` and `empty_trash` until #1404, renamed after an Assistant read "empty the trash" as the operating system's bin) | asks (a card naming the session or the counts, the size, up to ten names, the tool conversation files and worktrees that go with them, and that it cannot be undone, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrashFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then the window's `trash.purge`, `trash.purgeSubagentSteps` and `trash.purgeRuns`, one per item the card named (`trash.empty` is not called: it takes everything there is). Refused before the card: a session that is not in the archive (a live session is never deleted from here), steps not in the archive. After Allow the archive is read again: a session restored (or deleted) while the card stood is left alone, one that reached the archive meanwhile is not deleted, and steps moved there after the card are kept (`upTo`). The archive on a linked machine that could not be reached is left alone and named. The Assistant only |
+| `list_projects` (the Assistant reads the projects, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` (`sessions/trust-flow.ts`) → the window's own call through the router (`projects.list`). The Assistant only, as a rare command behind `centralu_run` |
+| `set_project_trust` with `trusted: false` (the Assistant takes a project's trust away, #1219) | asks (a card saying the project's own deny rules and hooks stop applying, auto sessions included, and its sessions restart, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `projects.setTrusted`. Not only narrowing: an untrusted project's sessions read the person's own settings only (`settingSourcesFor`), so the project's deny rules and blocking hooks no longer bind its agents. After Allow the project is read again: removed, moved, unreachable or already untrusted, nothing more changes. The Assistant only |
+| `list_approval_rules`, `remove_approval_rule` (the Assistant reads the approval rules, or removes one, #1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`approvals.rules`, `approvals.deleteRule`; a linked machine's rule by its folded id). Removing only narrows: that action asks again. No command adds or widens a rule; a rule comes only from the person answering a card "always". The Assistant only, as rare commands behind `centralu_run` |
+| `list_app_grants`, `forget_app_answer`, `revoke_project_consent`, and `share_app` with `shared: false` (#1219) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `TrustFlow.run` → the window's own calls through the router (`apps.list`, `apps.permissions`, `apps.forgetPermission`, `projectConsents.list`, `projectConsents.revoke`, `apps.setShared`). Each only narrows: a forgotten answer or a revoked consent asks the person again next time, and an app no longer shared is detached from other projects' sessions. The Assistant only |
+| `share_app` with `shared: true` (#1219) | asks (a card naming the app, its project and what it may ask for, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `apps.setShared`. A root app or a user-folder app has no share switch and is refused before the card. After Allow the app is read again: one removed, already shared, or whose `uses` changed meanwhile is not shared. Sharing still needs the person's consent for each pair of projects before another project's session attaches it. The Assistant only |
+| `set_agent_limits` (the Assistant changes the limits on agents: running agents per project, levels that may start agents, #1219) | asks (a card naming each limit as it is and as it becomes, every change, narrowing too, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk` (`about: "orchestrator_change"`), then `prefs.set` with exactly the named fields. Values are checked with the window's own patch schema before the card; nothing to change asks nothing. After Allow the limits are read again: one the person changed in Settings while the card stood leaves everything as it is. `set_preferences` has no field for them, `sessionTools` (always on since 2026-10-20) is refused by name. The Assistant only |
+| `set_project_trust` with `trusted: true` (#1219) | asks (a card naming the project, its folder and machine, and each of its apps with what it may ask for, in the window's trust card's words, every time; no "always") | asks | asks | asks | asks | asks | asks | asks | `TrustFlow.run` → `askHost` with `alwaysAsk`, an `other` card with `about: "orchestrator_change"` whose question is whole in `raw`; then `projects.setTrusted`. After Allow the project and its apps are read again: a project removed meanwhile, or whose apps changed (one added by a pull, or what one may ask for), is not what the card named and is not trusted; one the person trusted meanwhile is left as it is. Refused before the card: a name no project has, or one two projects share (their ids are named). The Assistant only |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's app (shared inside, or its root app) | refused | refused | refused | refused | refused | refused | refused | refused | An untrusted project's apps attach nowhere (owner, #1141); `AppAccess`, `SessionAppsHub` and the runtime's start and call gate refuse them under every preset (#603's opening no longer applies to apps) |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
@@ -871,11 +871,11 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | Claude's independent-session discovery and messaging | refused | refused | refused | refused | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, under every preset (`auto` too since the mailbox plan's slice 0; #603's opening no longer applies to it) |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `attach_app`, another trusted project's root app (#1141) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: its project's trust covers it, and the trust card listed it, with what it may ask for) |
-| `attach_app` by the orchestrator (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the orchestrator has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
+| `attach_app` by the Assistant (#1205), a trusted project's root app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card, as above; the Assistant has no project whose trust would gate it). A project's inner app, shared or not, is refused: it is that project's (`AppAccess.candidates`) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
 | An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
 | An app tool the app declares `local` (its own data, undoable, next to `destructiveHint: false`) | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `SessionApps.unasked` → `runsUnasked` (`apps/external/tool-risk.ts`), the same call sites as `readOnly` (Claude `canUseTool`; Codex per-tool `approval_mode`) |
-| An app tool the app declares `routine`, in the session's own project's app | asks | allowed | allowed | open | asks | allowed | allowed | open | `runsUnasked`: `own` is the session's project (never the orchestrator, a user-folder app or an app attached from elsewhere), and the project is trusted or the app would not attach. `centralu/askWhen` makes the call ask when any argument it names matches (or is set, for `"*"`), `centralu/askUnless` unless one does; a declaration it cannot read (including a value that is a list or an object) always asks; Codex, which fixes approval before arguments exist, then always asks |
+| An app tool the app declares `routine`, in the session's own project's app | asks | allowed | allowed | open | asks | allowed | allowed | open | `runsUnasked`: `own` is the session's project (never the Assistant, a user-folder app or an app attached from elsewhere), and the project is trusted or the app would not attach. `centralu/askWhen` makes the call ask when any argument it names matches (or is set, for `"*"`), `centralu/askUnless` unless one does; a declaration it cannot read (including a value that is a list or an object) always asks; Codex, which fixes approval before arguments exist, then always asks |
 | Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
 | The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | open | asks, reads run | the person's settings | allowed | open | `permissionOptionsFor` in each adapter |
 
@@ -883,7 +883,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 person's. The window asks first, every time and also for an idle session (owner, 2026-10-26, #1589; #1512 had moved an idle one
 at once): its dialog shows the worktree choice and the conversation-file box, ticked by default. When it opens it reads what the
 archive would lose (`agents.archiveLosses`, read only, rights `window` (it names mail thread subjects, which only the window reads), `SessionTrash.archiveLosses` = `lossesOf`: the same list as
-the orchestrator's card, with the unfinished mail threads the session is assigned or owns) and lists it, whichever way the worktree box
+the Assistant's card, with the unfinished mail threads the session is assigned or owns) and lists it, whichever way the worktree box
 is ticked (#1595); Archive then moves the session in one step, as the person saw it. If the read has not come, or came empty (or the
 host is from before the method, "Unknown method"), Archive asks the host as it moves it: with the worktree kept
 `agents.archiveIfAtRest` (`SessionTrash.archiveIfAtRest`, rights `asks` for any other caller), which reads then moves, only when
@@ -896,14 +896,14 @@ position or the focus, and it does not hand back what `lossesOf` names (which is
 
 Rows that differ by session:
 
-- **The orchestrator and coordinators** read no settings files, but under `normal` they follow the
+- **The Assistant and coordinators** read no settings files, but under `normal` they follow the
   person's bypass on both CLIs (owner decision 2026-10-11, #382). On Codex `~/.codex` loads, so the
   person's `approval_policy` applies. On Claude (`settingSources: []`) only the person's own
   `defaultMode` is carried, read from the user tier with the SDK's merge engine
   (`personsDefaultMode` in `adapters/claude/permissions.ts`); their `CLAUDE.md`, hooks and rules stay out,
-  and a mode written in the orchestrator's own folder does not count. The direction is decision 1's:
+  and a mode written in the Assistant's own folder does not count. The direction is decision 1's:
   the person's global choice applies to every session that runs under `normal`, and someone who wants
-  a card from the orchestrator has `safe`.
+  a card from the Assistant has `safe`.
 - **An agent an app started** (`run_agent`, `AppSessions.runAppAgent`) runs under `auto`, the default
   every new session gets, **never above the lowest preset among the sessions with a call open into the app now** (`appAgentPreset`,
   `AppCalls.agentCallers`, owner decision 2026-11-05; it was always `safe`, so everything but a read asked), whatever
@@ -953,7 +953,7 @@ otherwise. Which layers count follows what the thread loads, measured with codex
 scratch `CODEX_HOME` (the person's policy and a repository's `.codex/config.toml` set to opposite
 values): `config/read` without a folder returns the person's layers only, and with the folder adds the
 repository's only when Codex trusts that folder, as `thread/start` does. A session whose repository
-files are kept out (an untrusted project, the orchestrator, coordinators) reads without the folder, so
+files are kept out (an untrusted project, the Assistant, coordinators) reads without the folder, so
 a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thread's own
 `approvalPolicy` is compared afterwards and a difference logged. The refusal itself is still from
 Codex source, and no logged-in app call was run.
@@ -970,22 +970,22 @@ it from the plain command. What the host remembers is its own key for the card, 
 allow" on an agent's own card, above).
 
 **An existing folder becoming a project** (#1220). Before `add_project`, no agent could make Centralu reach a folder
-the person had not picked: `create_project` only makes a new one. The orchestrator's `add_project` is a new way for an
+the person had not picked: `create_project` only makes a new one. The Assistant's `add_project` is a new way for an
 agent to bring a folder in, on this computer or a linked machine, and the person's card gates it under every preset,
-`auto` included (`alwaysAsk`): a project is somewhere the orchestrator can start sessions, so this is the person's
+`auto` included (`alwaysAsk`): a project is somewhere the Assistant can start sessions, so this is the person's
 choice of reach, not a tool call. The card shows what the folder's own machine found (`projects.inspect`): the machine,
 the absolute path, that something is there and is a folder, and whether it is in a git repository with its `origin`
 (read from the repository's config with git's untrusted settings, so a planted hook or filter does not run). A path
 that is missing, a file, or a folder already a project is refused before the card, with the reason. On Allow the facts
 are read again and the folder is registered by the sidebar's own steps (`addProject`, on a linked machine its
 `projects.add`): untrusted when new, and the window asks about trust as when the person adds a folder. Deny or a
-withdrawn card registers nothing. Only the central orchestrator has it, as a rare command behind `centralu_run`
+withdrawn card registers nothing. Only the Assistant has it, as a rare command behind `centralu_run`
 (`RARE_COMMANDS`); `list_machines`, beside it, only reads the hub's `machines.list`.
 
-**Linked machines from the orchestrator** (#1219). Linking a machine lets this computer, and the agents on it, reach
+**Linked machines from the Assistant** (#1219). Linking a machine lets this computer, and the agents on it, reach
 that machine over the person's own ssh; installing or updating runs Centralu's installer there and, for an update, stops
 the Centralu running there; removing one drops its sessions and projects from this computer's lists; start at boot
-writes an entry in that machine's own startup. Each of these is the person's choice, so the orchestrator's commands for
+writes an entry in that machine's own startup. Each of these is the person's choice, so the Assistant's commands for
 them wait for a card under every preset, `auto` included, and the card says what will run where. The card offers allow
 and deny only and nothing is remembered: a window that knows `machine_change` shows no "always", and an older window's
 "always" is read as allow, once. Reconnecting and when a machine connects change no machine and no reach, as the row's
@@ -997,7 +997,7 @@ what it can tell without connecting: a machine not linked, a target that is no s
 a target, name or distro with a control or format character (a bidi override would make the card read otherwise than
 what runs), a name already linked, and an install this computer cannot make.
 
-**Settings and the session archive from the orchestrator** (#1219). `get_preferences` and `set_preferences` change what the
+**Settings and the session archive from the Assistant** (#1219). `get_preferences` and `set_preferences` change what the
 window's Settings changes, through the window's own calls, so the same schemas and handlers decide. The reversible
 settings (theme, text size, fonts, line height, idle sleep, update checking, moving idle sessions to a new agent CLI) act
 at once. What widens what agents may do (the agent ceiling and depth), trust, approval rules and app
@@ -1007,7 +1007,7 @@ each behind its own card where it widens. "Automatic updates" turned on (`autoUp
 setting that asks (as is turning off the approval notification, below): with both on, code arrives and the window relaunches without a later question, which is what
 `update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
 is read as allow, once). Turning off the notification for an approval asks too, and so does turning off the sound while it still
-notifies: they are what tells the person a card waits, and the orchestrator should not decide that they stop hearing of one.
+notifies: they are what tells the person a card waits, and the Assistant should not decide that they stop hearing of one.
 
 The session archive is the person's safety net, so deleting from it for good is the one thing there that asks (`delete_archived`, `delete_all_archived`):
 the card names what goes (the sessions by name, how many, how large, the tool's conversation files and worktrees that
@@ -1015,16 +1015,16 @@ go with them), and the host deletes exactly what the card named and is still in 
 and moving a session's subagent steps to the archive lose nothing and ask nothing. A live session cannot be deleted
 through these commands: it has to be in the archive first, which `agents.deleteSession` and the sidebar do.
 
-**Trust from the orchestrator** (#1219, third slice). Trust is what lets a project's apps run and its setting files
-apply, so the orchestrator only asks for it, and asks to take it away as well: an untrusted project's sessions read
+**Trust from the Assistant** (#1219, third slice). Trust is what lets a project's apps run and its setting files
+apply, so the Assistant only asks for it, and asks to take it away as well: an untrusted project's sessions read
 the person's own settings only, so its own deny rules and the hooks that block tools stop binding its agents (`auto`
 sessions included). `set_project_trust` with `trusted: true` raises a card that names the project, its folder and machine, and each app the trust covers with what it may ask for
 (the same wording as the window's trust card, `usesLines`). What the card named is checked again after Allow, so a
 project whose apps changed while the card stood is not trusted on an answer about other apps. Approval rules only
-narrow from the orchestrator: it may list and remove them, and no command adds one, so a standing "allow" still comes
+narrow from the Assistant: it may list and remove them, and no command adds one, so a standing "allow" still comes
 only from the person's own "always" on a card. An app's remembered answers and the consents between projects can only
-be forgotten or revoked from the orchestrator, which makes the next attempt ask the person (a forgotten "deny" too: the
-app asks the person again, never the orchestrator, so no card guards it); sharing an app with other projects asks, and an
+be forgotten or revoked from the Assistant, which makes the next attempt ask the person (a forgotten "deny" too: the
+app asks the person again, never the Assistant, so no card guards it); sharing an app with other projects asks, and an
 app's own capability question is still answered by the person alone. Every card quotes what a manifest supplies (an app's
 name, description, the background work it declares) with control and format characters escaped, so a line break or a
 bidi override in someone's repository cannot make the card say something it does not; a project's folder is named whole.
@@ -1032,7 +1032,7 @@ An app's id, which is its folder's name, is quoted too. A project whose machine 
 card, and so is one whose machine could not list its apps (they are asked of that machine alone, `apps.list` with
 `machine`, so a failure is not read as "no app"). The limits on agents
 (running agents per project, levels that may start agents) bound the
-orchestrator's own children too, so every change to them asks, narrowing as well as widening.
+Assistant's own children too, so every change to them asks, narrowing as well as widening.
 
 A program that is not a window and holds the limited credential (#1405) is asked through none of the cards above: its
 irreversible calls raise a **host request**, the host's own card with Allow and Deny only, which only a window holding
@@ -1047,7 +1047,7 @@ Auto attachments are recorded separately from consent grants and stop counting a
 downgrade. The app-sharing switch still applies to every preset. The session-tools switch is gone (always on,
 2026-10-20).
 
-| Change | orchestrator | scoped | builder | reader |
+| Change | assistant | scoped | builder | reader |
 |---|---|---|---|---|
 | "Let sessions look at other sessions" off (an older window sending it, or a record an earlier build stored) | — | — | — | No change: the reader set is always on (owner decision 2026-10-20). The host reads the switch as on (`UiPreferencesCommands.uiPreferences`), does not store an "off" (`setUiPreferences`), and neither the profile rule (`toolProfileFor`) nor the reader set (`readerToolsFor`) reads it, so its calls, the bridge's `toolProfileOf` and apps it attached are unaffected |
 | Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards, its sessions' `ask_project` and fork cards, and its queued `ask_project` requests are withdrawn and their callers told (#673); those of an `auto` session stay, and are read again at delivery |
@@ -1070,7 +1070,7 @@ one session reaching another session's prompt is the privilege path it closed. S
 - **Readers get the card unless they ask for the record by name.** `Store.loadMessages` and `loadMessagesFrom` drop
   `input` and `output` in SQLite (`json_remove`) unless called with `{ full: true }`, and nothing calls them that way
   yet. Every reader that hands stored messages to someone else goes through them: `read_session`, `recall`'s context,
-  `list_sessions`' preview and the report-back, the handoff record and handoff note, the orchestrator's memory, an app
+  `list_sessions`' preview and the report-back, the handoff record and handoff note, the Assistant's memory, an app
   agent's final answer, the UI's history pages (`messages.load`, `trash.read`). Each of these also names the fields it
   copies (`summary.title`, the string `summary`, `text`), so a leak would take both layers failing.
 - **Events leave the host as their card.** `withoutToolRecord` is applied where every event leaves `SessionManager`,
@@ -1081,7 +1081,7 @@ one session reaching another session's prompt is the privilege path it closed. S
 
 Tests: `manager-messages.test.ts` ("a tool call is kept whole in the store and leaves it only as its card") puts secrets where
 the card does not reach and looks for them in the broadcast, the history and archive pages, `read_session`, `recall`,
-search, `list_sessions`, the handoff record and file, and the orchestrator's memory; `store-tool-record.test.ts` holds
+search, `list_sessions`, the handoff record and file, and the Assistant's memory; `store-tool-record.test.ts` holds
 the store's default read and the index.
 
 ### A subagent's steps
@@ -1184,7 +1184,7 @@ thread only, and `project_doc_max_bytes = 0`. That keeps the repository's `.code
 hooks, exec rules and `AGENTS.md` out, and it stops Codex from persisting the folder as
 trusted in `~/.codex/config.toml` on first use. The user's own settings in `~/.claude` and
 `~/.codex` still decide under the `normal` preset. What a session reads follows from what the
-session is, not from whether it carries Centralu's own tools (#152). Only the orchestrator and
+session is, not from whether it carries Centralu's own tools (#152). Only the Assistant and
 coordinators read no settings files, trusted or not: they belong to no project and work in a folder
 other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too, except
 the person's own `defaultMode`, carried under `normal` since #382; in Codex, their folder is marked
@@ -1205,7 +1205,7 @@ What this closed was measured with the real CLI (#152, `scripts/probe-project-tr
 card off even under `safe`.
 
 How projects get trust: a project registered now starts untrusted, and the sidebar asks once when
-it is added, whether the person added it or allowed the orchestrator's `add_project` card (#1220; the host names the
+it is added, whether the person added it or allowed the Assistant's `add_project` card (#1220; the host names the
 project in `projects_changed.added`). The exception is a new empty folder Centralu made itself (`projects.create` or `create_project`
 without a Git source, here or on a linked machine, #655): only the person and Centralu wrote there, so it starts
 trusted. A clone stays untrusted, because an agent can ask for any URL and the contents come from outside. The `trusted` column arrived untrusted by default (store v33); v35 then marked every
@@ -1432,9 +1432,9 @@ keeper restarts, that is, when the app is fully quit and opened again, and the s
 
 ## Who holds full power (#1405)
 
-On 2026-10-21 the orchestrator misread "empty the trash" (the person meant the Windows Recycle Bin), read the front
+On 2026-10-21 the Assistant misread "empty the trash" (the person meant the Windows Recycle Bin), read the front
 door's token from the keeper's `status`, and called `trash.purge` through a script it wrote: the hub relayed it to a
-linked machine, and 108 trashed sessions were deleted with no question. The window asks first; the orchestrator's own
+linked machine, and 108 trashed sessions were deleted with no question. The window asks first; the Assistant's own
 `delete_trashed` / `empty_trash` raise a card; the raw path asked nothing.
 
 **What this defends against:** a process of the person's own user that is not the person's click in a window (an
@@ -1449,7 +1449,7 @@ user, and where it cannot prevent it prefers to be loud.
 everything; the **limited credential** (`ccl1:<mac>`, an HMAC of a label of its own keyed by the token,
 `transport/limited-token.ts`) calls the everyday methods only. It is derived, not stored, as the bridge's is: the next
 host after a swap accepts it with nothing handed over, and holding it gives nothing toward the token. A socket holding it
-is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the orchestrator's tooling no
+is a client like a window (it gets the event stream: owner, 2026-10-21, to revisit once the Assistant's tooling no
 longer needs it), but none of its `res` frames answers the host's own calls, which are a hub's.
 
 **A session's credential** (`ccs1:<sessionId>:<mac>`, `transport/session-token.ts`, slice 6) has the limited
@@ -1468,7 +1468,7 @@ gets a credential of its own" below; the rare commands still raise a card in eve
 host after a swap, and a keeper's adopted agent, keep it working. An agent started by a build from before slice 6 and
 adopted after an update has none (a process's environment is fixed when it starts) until its next start. A host started
 inside an agent takes both variables out of its own environment at start (`LAUNCH_VARIABLES`), so its agents get only
-its own. The orchestrator's instructions do not mention it:
+its own. The Assistant's instructions do not mention it:
 their resident budget had no room, and `keeper.sock` hands out only the limited credential anyway.
 
 **Where it is judged:** in the transport, before the router, on the host where the call starts. A limited call naming a
@@ -1492,7 +1492,7 @@ are parsed, and asks when it cannot read them. One reads the host's state too, t
 gives the server (a server given none asks): `machines.update` runs without a card when the hub's automatic updates are
 on, `when` is `idle` or absent, and the machine runs an older release of the hub's channel that the update brings to the
 hub's own version (#1508, owner 2026-10-24; `LinkedMachine.followsHub`, the one place the condition lives, which the
-orchestrator's `install_machine` reads too). The person already chose that with "Automatic updates", which brings the
+Assistant's `install_machine` reads too). The person already chose that with "Automatic updates", which brings the
 hub itself to that version unasked, and the hub runs the same update by itself (agent-host.md §4.8). Such an update
 waits for the turns there and for its terminals and project commands (it closes none of them; after 30 minutes it gives
 up), stops no host it cannot ask what runs (found out before anything is installed), and gives up once automatic updates
@@ -1506,19 +1506,19 @@ Automatic updates are on and nothing is running (`hostBusy`: no turn, no card wa
 not draining to stop), since the host installs the known update by itself then (`UpdateService.setAutoApply`). Anything else, and a
 server given no state, asks. Turning the setting on stays an ask. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
 restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
-and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows
+and everything the Centralu tools card in every preset is `asks` too. A test reads the Assistant's flows
 (`sessions/*-flow.ts`) and fails when a window method they call after their card (in the same block) is everyday here,
 unless it is a read made again after Allow; a card raised only in some branches (restoring a session whose project was
 deleted) is not seen by it. A refusal is `ok: false` with
 `data: { refused: 'rights', rights }` and a line in the host's log naming the method; the socket stays open.
 
 **The card for a limited call** (`host-requests.ts`, slice 3). An `asks` call is held, and the host raises a
-**host request**: not a session's card (the program holds no session's rights, and a card in the orchestrator's slot
-would read as the orchestrator's doing) but the host's own, shown over the lanes of every window that said in its hello
+**host request**: not a session's card (the program holds no session's rights, and a card in the Assistant's slot
+would read as the Assistant's doing) but the host's own, shown over the lanes of every window that said in its hello
 that it shows them (`hello.shows`), one at a time, oldest first.
 
-- **What it names.** The trash's deletes ask through the orchestrator's own trash flow with this card in place of
-  the orchestrator's: the same question, naming each session (quoted on one line), its machine, its size and what goes
+- **What it names.** The trash's deletes ask through the Assistant's own trash flow with this card in place of
+  the Assistant's: the same question, naming each session (quoted on one line), its machine, its size and what goes
   with it, and the same reading of the trash again after Allow: a session restored meanwhile is not deleted, and
   `trash.empty` deletes only the rows its card listed, never what arrived while it stood. Any other method's call is
   parsed by the method's own schema first (`host-request-targets.ts`): a field the method does not take is dropped, so
@@ -1910,7 +1910,7 @@ host. It changes where a client connects, not what it must prove:
   the next host after a swap accepts it with nothing handed over or stored, and a running bridge keeps working
   (`scripts/keeper-integration.mjs`, the swap scenario). What it still opens is that session's own Centralu tools and
   attached apps as that session, gated by the session's profile like the session's own calls; a process that reads
-  an orchestrator's bridge gets the orchestrator's set. It is valid for the keeper's lifetime. This takes the token
+  an Assistant's bridge gets the Assistant's set. It is valid for the keeper's lifetime. This takes the token
   out of the one process that held it for a session; per the bullet above, the token itself stays within reach of
   the same user.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
@@ -2199,7 +2199,7 @@ then who may call it:
   under `auto` nothing it does waits for the person (the residual under "An agent an app
   started" above). Its settings files
   follow the project's trust like a worker's; a user-folder app's agent, which runs in the
-  orchestrator's folder, reads only the person's own settings, never that folder's files
+  Assistant's folder, reads only the person's own settings, never that folder's files
   (`settingFilesFor`; `setting-files.test.ts`).
 - Runaway limits: a chain holds at most 3 app calls and never calls the same app tool again on its
   own path, and an app runs one agent at a time and at most 5 a minute. Every request, refusals
@@ -2255,7 +2255,7 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   no builder session is made for it. The runtime checks this at every call, start, `check` and
   status, not only when it is listed (`runtime.ts` `held`; `imports.test.ts` "an app brought in
   shows unconfirmed with a reason, calling it is refused and no process starts — enabling it
-  starts it"; `session-apps.test.ts` "an imported app does not attach to the orchestrator before
+  starts it"; `session-apps.test.ts` "an imported app does not attach to the Assistant before
   the person turns it on, calling it by name is refused, and turning it on attaches it (M4
   E-3)").
 - **The confirmation is held by the host and bound to what was seen.** It lives in

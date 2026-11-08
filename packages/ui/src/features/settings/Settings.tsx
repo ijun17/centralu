@@ -21,7 +21,7 @@ import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.
 import { AppSecrets, missingSecrets } from '../pinned-app/AppSecrets.jsx'
 import { SpanButton } from '../../components/SpanPicker.jsx'
 import { Segmented } from '../../components/Segmented.jsx'
-import { ORCHESTRATOR_DEMANDS, useRefusals } from '../project/useToolChoice.js'
+import { ASSISTANT_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 import { Switch } from '../../components/Switch.jsx'
 import {
   AppIcon,
@@ -102,23 +102,23 @@ function RuleOwner({ rule }: { rule: Rule }) {
  */
 const CATEGORIES = [
   /*
-   * The orchestrator belongs here because it is **the one thing the installation has only one
+   * The Assistant belongs here because it is **the one thing the installation has only one
    * of**.
    *
    * Switching agents used to live in the session settings menu, and was removed from there —
    * because the conversation does not carry over, "switching" there meant the same thing as
    * "starting a new conversation," which creating a new session already does more honestly.
-   * The orchestrator is the one exception, for a single reason: since the app has only one,
+   * The Assistant is the one exception, for a single reason: since the app has only one,
    * "create a new one with a different tool" does not make sense.
    *
    * And the intro screen was already pointing here ("You can change this later in Settings") —
    * a promise that had gone unkept until now.
    */
-  { id: 'orchestrator', label: 'Orchestrator', Icon: CrownIcon },
+  { id: 'assistant', label: 'Assistant', Icon: CrownIcon },
   /*
    * How the agents any session starts behave: how many run per project, how deep they may start their own, which model
-   * each difficulty runs. Its own category (owner, 2026-10-20): these apply to every session, not to the orchestrator,
-   * and folded under the orchestrator they read as its settings.
+   * each difficulty runs. Its own category (owner, 2026-10-20): these apply to every session, not to the Assistant,
+   * and folded under the Assistant they read as its settings.
    */
   { id: 'agents', label: 'Agents', Icon: BranchIcon },
   // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
@@ -259,7 +259,7 @@ export function Settings() {
             is one a test can pass on and a screen reader can walk into.
           */}
           <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-6" data-testid="settings-pane">
-            {category === 'orchestrator' && <OrchestratorSettings />}
+            {category === 'assistant' && <AssistantSettings />}
             {category === 'agents' && <AgentLimits />}
             {category === 'apps' && <AppsSettings />}
             {/* E-5 notification policy */}
@@ -630,15 +630,15 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * Approved orchestrator skills (#71). Why this exists here: "a skill that can only be added,
+ * Approved assistant skills (#71). Why this exists here: "a skill that can only be added,
  * with no way to view or delete it, is worse than not having it at all" — approval happens in
  * the card next to the conversation, management happens in Settings. Deleting one restarts the
- * orchestrator through the host, so it drops out of the prompt immediately too.
+ * assistant through the host, so it drops out of the prompt immediately too.
  */
-export function OrchestratorSkills() {
+export function AssistantSkills() {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
-  const loaded = useLoad(() => platform.agents.orchestratorSkills(), [platform])
+  const loaded = useLoad(() => platform.agents.assistantSkills(), [platform])
   const skills = loaded.data?.skills ?? []
   const load = () => void loaded.reload()
 
@@ -646,14 +646,14 @@ export function OrchestratorSkills() {
   // could no longer be found to delete
   if (skills.length === 0 && loaded.error === null) return null
   return (
-    <SettingsGroup testId="orchestrator-skills" title="Approved skills" hint="Deleting one takes it out of the orchestrator's prompt at once.">
+    <SettingsGroup testId="assistant-skills" title="Approved skills" hint="Deleting one takes it out of the Assistant's prompt at once.">
       {loaded.error !== null && (
         <div className="px-4 py-3">
-          <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} testId="orchestrator-skills-failed" />
+          <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} testId="assistant-skills-failed" />
         </div>
       )}
       {skills.map((s) => (
-        <div key={s.name} className="px-4 py-3" data-testid={`orchestrator-skill-${s.name}`}>
+        <div key={s.name} className="px-4 py-3" data-testid={`assistant-skill-${s.name}`}>
           <div className="flex items-center gap-2">
             <span className="readout min-w-0 truncate text-sm text-ink">{s.name}</span>
             <Button
@@ -663,7 +663,7 @@ export function OrchestratorSkills() {
               data-testid={`delete-skill-${s.name}`}
               onClick={() => {
                 void platform.agents
-                  .deleteOrchestratorSkill(s.name)
+                  .deleteAssistantSkill(s.name)
                   .then(load)
                   .catch((e: Error) => setToast(e.message))
               }}
@@ -681,12 +681,12 @@ export function OrchestratorSkills() {
 }
 
 /**
- * Which tool the orchestrator runs on.
+ * Which tool the Assistant runs on.
  *
  * **This is the only place in the app where an agent can be switched.** The same control used
  * to live in the session settings menu, and was removed from there: because the conversation
  * does not carry over, "switching" there meant the same thing as "starting a new conversation,"
- * which creating a new session already does more honestly. The orchestrator is the one that
+ * which creating a new session already does more honestly. The Assistant is the one that
  * remains, because the app has only one, so "create a new one with a different tool" does not
  * make sense.
  *
@@ -696,24 +696,24 @@ export function OrchestratorSkills() {
  * changes, that tool's context is gone. (The transcript stays, and the new process is handed a
  * summary of the past conversation.)
  */
-function OrchestratorSettings() {
+function AssistantSettings() {
   const platform = usePlatform()
-  const orchestratorId = useStore((s) => s.orchestratorId)
-  const live = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
-  const chosen = useStore((s) => s.orchestratorTool)
-  const chooseTool = useStore((s) => s.chooseOrchestratorTool)
+  const assistantId = useStore((s) => s.assistantId)
+  const live = useStore((s) => (s.assistantId ? s.sessions[s.assistantId]?.tool : undefined))
+  const chosen = useStore((s) => s.assistantTool)
+  const chooseTool = useStore((s) => s.chooseAssistantTool)
   /*
    * The session itself, from the host: this run may not have opened it, and the tool it runs on is the truth once it
-   * exists. Read again when this run learns of it (`orchestratorId`) and after a switch, since a switch of a session
+   * exists. Read again when this run learns of it (`assistantId`) and after a switch, since a switch of a session
    * this run has not opened changes nothing that `live` follows. A failed read says so beside the list rather than
    * showing the first tool as the current one.
    */
-  const peek = useLoad(() => platform.agents.orchestratorPeek(), [platform], [orchestratorId])
+  const peek = useLoad(() => platform.agents.assistantPeek(), [platform], [assistantId])
   // Holds onto the whole thing that was picked, not just its name — the confirmation dialog never has to hunt for the name again
   const [asking, setAsking] = useState<ToolStatus | null>(null)
   const tools = useTools()
-  // A tool that cannot take the orchestrator's role stays in the list, greyed, with the reason on hover
-  const refusal = useRefusals(tools, ORCHESTRATOR_DEMANDS)
+  // A tool that cannot take the Assistant's role stays in the list, greyed, with the reason on hover
+  const refusal = useRefusals(tools, ASSISTANT_DEMANDS)
 
   // With a session, its tool; before one, the choice made this run (the host keeps what it was told, but does not say it)
   const current = live ?? peek.data?.tool ?? chosen ?? (tools[0]?.name ?? null)
@@ -725,12 +725,12 @@ function OrchestratorSettings() {
 
   return (
     <SettingsPage
-      testId="settings-orchestrator"
-      title="Orchestrator"
+      testId="settings-assistant"
+      title="Assistant"
       lead="The one session that belongs to the app rather than a project."
     >
-      {peek.error && !orchestratorId && (
-        <LoadFailed what="the orchestrator" error={peek.error} onRetry={() => void peek.reload()} testId="orchestrator-peek-failed" />
+      {peek.error && !assistantId && (
+        <LoadFailed what="the Assistant" error={peek.error} onRetry={() => void peek.reload()} testId="assistant-peek-failed" />
       )}
       <SettingsGroup title="Agent">
         <SettingsRow
@@ -738,7 +738,7 @@ function OrchestratorSettings() {
           hint="Pick which agent it runs on. Switching asks first."
           control={
             <Segmented
-              label="Orchestrator agent"
+              label="Assistant agent"
               value={current}
               size="sm"
               onChange={(name) => {
@@ -747,20 +747,20 @@ function OrchestratorSettings() {
               }}
               options={tools.map((t) => {
                 const refused = refusal(t.name)
-                return { value: t.name, label: t.label, testId: `orchestrator-tool-${t.name}`, disabled: refused !== null, ...(refused ? { title: refused } : {}) }
+                return { value: t.name, label: t.label, testId: `assistant-tool-${t.name}`, disabled: refused !== null, ...(refused ? { title: refused } : {}) }
               })}
             />
           }
         />
       </SettingsGroup>
 
-      <OrchestratorSkills />
+      <AssistantSkills />
 
       {asking && (
-        <Modal onClose={() => setAsking(null)} testId="orchestrator-switch-confirm">
+        <Modal onClose={() => setAsking(null)} testId="assistant-switch-confirm">
           <div className="w-[380px] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4">
             <h2 className="text-md font-medium text-ink">
-              Run the orchestrator on {asking.label}?
+              Run the Assistant on {asking.label}?
             </h2>
             {/*
               **States plainly that a summary is a loss.**
@@ -782,7 +782,7 @@ function OrchestratorSettings() {
               <button
                 className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
                 onClick={() => setAsking(null)}
-                data-testid="orchestrator-switch-cancel"
+                data-testid="assistant-switch-cancel"
               >
                 Cancel
               </button>
@@ -793,7 +793,7 @@ function OrchestratorSettings() {
                   void apply(asking.name)
                   setAsking(null)
                 }}
-                data-testid="orchestrator-switch-confirm-btn"
+                data-testid="assistant-switch-confirm-btn"
               >
                 Switch
               </Button>
@@ -806,7 +806,7 @@ function OrchestratorSettings() {
 }
 
 /**
- * Settings → Agents: how the agents a session starts behave, for every session (the orchestrator's included): how many
+ * Settings → Agents: how the agents a session starts behave, for every session (the Assistant's included): how many
  * may run per project, how deep they may start agents of their own, and which model each difficulty runs (#867, #729).
  *
  * "Let sessions look at other sessions" (#320) used to stand here too. It is always on now and the host holds it so,
@@ -820,7 +820,7 @@ function AgentLimits() {
   return (
     <SettingsPage
       title="Agents"
-      lead="How the agents a session starts behave, for every session, the orchestrator's included."
+      lead="How the agents a session starts behave, for every session, the Assistant's included."
     >
       <SettingsGroup title="Limits">
         <SettingsRow

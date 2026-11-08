@@ -38,7 +38,7 @@ function bridgeToken(hostToken, sessionId) {
 /** The Codex bridge from a host copy, spoken to the way codex speaks to it */
 function startBridge(copyDir, url, hostToken) {
   const sessionId = 'integration-no-such-session'
-  const child = spawn(process.execPath, [join(copyDir, 'codex-orchestrator-bridge.mjs')], {
+  const child = spawn(process.execPath, [join(copyDir, 'codex-centralu-bridge.mjs')], {
     env: { ...process.env, CC_HOST_URL: url, CC_BRIDGE_TOKEN: bridgeToken(hostToken, sessionId), CC_SESSION_ID: sessionId },
     stdio: ['pipe', 'pipe', 'ignore'],
   })

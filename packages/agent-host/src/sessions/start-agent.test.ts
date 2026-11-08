@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
-import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
+import { AGENT_TOOLS, runCentraluTool } from './centralu-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
@@ -12,7 +12,7 @@ import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import type { ModelOption } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { orchestratorAgentsRoot } from './orchestrator-home.js'
+import { assistantAgentsRoot } from './assistant-home.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -63,7 +63,7 @@ describe('the frame a child gets (#729)', () => {
     expect(agentFrame('parent', 'run the tests')).toContain('Wait for your own background work that ends (a test run, a build) inside your turn before you answer.')
   })
 
-  // #1984: a child told to share checkpoints with "the parent" mailed the orchestrator; nothing it saw named the address
+  // #1984: a child told to share checkpoints with "the parent" mailed the Assistant; nothing it saw named the address
   it('names the address that reaches the parent, in the task and in a later note, when the child can mail it', () => {
     expect(agentFrame('parent', 'run the tests', [], '', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
     expect(agentNoteFrame('parent', 'use Chromium', true).split('\n')[0]).toContain('call mail with `to: "parent"`')
@@ -75,7 +75,7 @@ describe('the frame a child gets (#729)', () => {
     expect(remoteAgentFrame('parent', 'run the tests').split('\n')[0]).toContain('Mail does not reach it from here yet: the answer is how it hears from you.')
   })
 
-  it('can mail its parent only when that session started it and it is in a project (a fork of the orchestrator has no parent, an orchestrator child no mail tool)', () => {
+  it('can mail its parent only when that session started it and it is in a project (a fork of the Assistant has no parent, an Assistant child no mail tool)', () => {
     expect(canMailParent({ askedBy: 'p', projectId: 'proj' }, 'p')).toBe(true)
     expect(canMailParent({ askedBy: null, projectId: 'proj' }, 'p')).toBe(false)
     expect(canMailParent({ askedBy: 'other', projectId: 'proj' }, 'p')).toBe(false)
@@ -184,13 +184,13 @@ describe('starting another agent in the same project', () => {
     allowProject()
     const args = AGENT_TOOLS[0].schema.parse({ task: 'check', tool: third.tool, wait: false })
     const startAgent = (opts: Parameters<typeof w.mgr.startAgent>[1]) => w.mgr.startAgent(s, opts)
-    const result = await runOrchestratorTool({ startAgent } as import('../adapters/contract.js').OrchestratorTools, 'start_agent', args, { sessionId: s, profile: 'reader' })
+    const result = await runCentraluTool({ startAgent } as import('../adapters/contract.js').CentraluTools, 'start_agent', args, { sessionId: s, profile: 'reader' })
     expect(result.isError).not.toBe(true)
     expect(childrenOf(s)).toEqual([expect.objectContaining({ tool: third.tool })])
     expect(third.handles.size).toBe(1)
 
     const bad = AGENT_TOOLS[0].schema.parse({ task: 'check', tool: 'missing-cli' })
-    expect(await runOrchestratorTool({ startAgent } as import('../adapters/contract.js').OrchestratorTools, 'start_agent', bad, { sessionId: s, profile: 'reader' })).toMatchObject({
+    expect(await runCentraluTool({ startAgent } as import('../adapters/contract.js').CentraluTools, 'start_agent', bad, { sessionId: s, profile: 'reader' })).toMatchObject({
       isError: true, text: 'No agent named "missing-cli" here. Installed tools: claude, codex, fixture-agent.',
     })
     expect(childrenOf(s)).toHaveLength(1)
@@ -385,11 +385,11 @@ describe('starting another agent in the same project', () => {
       const s = await session()
       const args = AGENT_TOOLS[0].schema.parse({ task: 'check it', tool: 'codex', difficulty: 'light', wait: false })
       const startAgent = (opts: Parameters<typeof w.mgr.startAgent>[1]) => w.mgr.startAgent(s, opts)
-      const tools = { startAgent } as import('../adapters/contract.js').OrchestratorTools
-      expect((await runOrchestratorTool(tools, 'start_agent', args, { sessionId: s, profile: 'reader' })).isError).not.toBe(true)
+      const tools = { startAgent } as import('../adapters/contract.js').CentraluTools
+      expect((await runCentraluTool(tools, 'start_agent', args, { sessionId: s, profile: 'reader' })).isError).not.toBe(true)
       await w.until(() => childrenOf(s).length === 1)
       expect(handleOf(childrenOf(s)[0]!.id)!.opts).toMatchObject({ model: 'gpt-small' })
-      const bad = await runOrchestratorTool(tools, 'start_agent', { task: 'x', difficulty: 'hard' }, { sessionId: s, profile: 'reader' })
+      const bad = await runCentraluTool(tools, 'start_agent', { task: 'x', difficulty: 'hard' }, { sessionId: s, profile: 'reader' })
       expect(bad).toEqual({ text: 'Wrong arguments for start_agent: difficulty: Invalid option: expected one of "light"|"standard"|"heavy".', isError: true })
     })
   })
@@ -1298,7 +1298,7 @@ describe('starting another agent in the same project', () => {
       await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
       expect(childrenOf(s)[0]).toMatchObject({ worktree: null, parentSessionId: null, askedBy: s })
 
-      const result = await w.mgr.runOrchestratorTool(s, 'agent_session', { sessionId: c, action: 'delete' })
+      const result = await w.mgr.runCentraluTool(s, 'agent_session', { sessionId: c, action: 'delete' })
       expect(result).toEqual({ text: expect.stringContaining('to the session archive. Tell the person in one line.') })
       expect(result.text).not.toMatch(/worktree|branch|undefined/)
       expect(w.mgr.listSessions().some((child) => child.id === c)).toBe(false)
@@ -1431,18 +1431,18 @@ describe('starting another agent in the same project', () => {
   })
 
   /*
-   * #853: the orchestrator handed light work outside any project to its CLI's own subagent, which never shows in
+   * #853: the Assistant handed light work outside any project to its CLI's own subagent, which never shows in
    * Centralu. It starts a child the person can watch instead, through the same flow: the card (or auto), the finish
    * notice, agent_session on it, and nothing on sessions it did not start.
    */
-  describe('started by the orchestrator, outside any project (#853)', () => {
-    const orchestratorTools = async () => {
-      const orch = await w.mgr.orchestrator()
-      return { orch, tools: handleOf(orch.id)!.opts.orchestratorTools! }
+  describe('started by the Assistant, outside any project (#853)', () => {
+    const centraluTools = async () => {
+      const orch = await w.mgr.assistant()
+      return { orch, tools: handleOf(orch.id)!.opts.centraluTools! }
     }
 
     it('asks the person on a card that names no project, and the child works in a folder of its own with no project', async () => {
-      const { orch, tools } = await orchestratorTools()
+      const { orch, tools } = await centraluTools()
       const p = tools.startAgent({ task: 'Look up the release notes', wait: false })
       await w.until(() => !!agentCard(orch.id))
       const card = agentCard(orch.id)!
@@ -1453,16 +1453,16 @@ describe('starting another agent in the same project', () => {
       expect(c).toMatchObject({ projectId: null, kind: 'worker', askedBy: orch.id, permissionPreset: orch.permissionPreset })
       expect(handleOf(c.id)!.sent[0]).toContain('Look up the release notes')
       // No Centralu tools, and only the person's own settings: no project's trust to read the folder's by (#994 review)
-      expect(handleOf(c.id)!.opts.orchestratorTools).toBeUndefined()
+      expect(handleOf(c.id)!.opts.centraluTools).toBeUndefined()
       expect(handleOf(c.id)!.opts.projectTrusted).toBeFalsy()
     })
 
     /*
-     * #994 review: children worked in the orchestrator's own folder, where one could leave `.agents/skills` that Codex
+     * #994 review: children worked in the Assistant's own folder, where one could leave `.agents/skills` that Codex
      * loads into the session directing every other one, and several wrote over each other there.
      */
-    it("gives each child a folder of its own, never the orchestrator's, gone when the child is deleted for good", async () => {
-      const { orch, tools } = await orchestratorTools()
+    it("gives each child a folder of its own, never the Assistant's, gone when the child is deleted for good", async () => {
+      const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       await tools.startAgent({ task: 'first lookup', wait: false })
       await tools.startAgent({ task: 'second lookup', wait: false })
@@ -1471,7 +1471,7 @@ describe('starting another agent in the same project', () => {
       expect(a).not.toBe(home)
       expect(b).not.toBe(home)
       expect(a).not.toBe(b)
-      expect(dirname(a!)).toBe(orchestratorAgentsRoot())
+      expect(dirname(a!)).toBe(assistantAgentsRoot())
       expect(existsSync(a!)).toBe(true)
       const first = childrenOf(orch.id)[0]!.id
       writeFileSync(join(a!, 'notes.md'), 'what it found')
@@ -1484,13 +1484,13 @@ describe('starting another agent in the same project', () => {
 
     // #994 review: a fork of such a child was refused as "its project is no longer registered"
     it('refuses to fork a child busy with the person\'s turn, saying it works outside any project', async () => {
-      const { orch, tools } = await orchestratorTools()
+      const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       await tools.startAgent({ task: 'a long lookup', wait: false })
       const c = childrenOf(orch.id)[0]!.id
       handleOf(c)!.answer('found it')
       await w.until(() => w.mgr.listSessions().find((x) => x.id === c)?.state !== 'working')
-      // The person asks it more: a turn that is not the orchestrator's
+      // The person asks it more: a turn that is not the Assistant's
       await w.mgr.inputs.send(c, 'and look at this too')
       await w.until(() => w.mgr.listSessions().find((x) => x.id === c)?.state === 'working')
       const r = await tools.sendToSession(c, 'and this', false, 'fork')
@@ -1498,15 +1498,15 @@ describe('starting another agent in the same project', () => {
     })
 
     it('counts its own children against the ceiling and says so in its words', async () => {
-      const { orch, tools } = await orchestratorTools()
+      const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       w.mgr.prefs.setUiPreferences({ agentCeiling: 1 })
       await tools.startAgent({ task: 'first lookup', wait: false })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('1 agents you started are already working') })
     })
 
-    it('starts without a card under auto, tells the orchestrator when the turn ends, and works with the child after', async () => {
-      const { orch, tools } = await orchestratorTools()
+    it('starts without a card under auto, tells the Assistant when the turn ends, and works with the child after', async () => {
+      const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       expect(await tools.startAgent({ task: 'Find the changelog', wait: false })).toMatchObject({ ok: true, state: 'working' })
       expect(agentCard(orch.id)).toBeUndefined()
@@ -1522,7 +1522,7 @@ describe('starting another agent in the same project', () => {
     })
 
     it('stops a running child', async () => {
-      const { orch, tools } = await orchestratorTools()
+      const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       await tools.startAgent({ task: 'Read a long page', wait: false })
       const c = childrenOf(orch.id)[0]!.id
@@ -1531,15 +1531,15 @@ describe('starting another agent in the same project', () => {
     })
 
     it('works on no session it did not start, and has no worktree to give', async () => {
-      const { orch, tools } = await orchestratorTools()
+      const { orch, tools } = await centraluTools()
       const other = await session()
       expect(await tools.agentSession({ sessionId: other, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('is not a session this session started') })
       expect(await tools.startAgent({ task: 'x', worktree: true })).toMatchObject({ ok: false, error: expect.stringContaining("with send_to_session") })
       expect(childrenOf(orch.id)).toEqual([])
     })
 
-    it('"always for the project" on its card is always for the orchestrator, remembered for no project', async () => {
-      const { orch, tools } = await orchestratorTools()
+    it('"always for the project" on its card is always for the Assistant, remembered for no project', async () => {
+      const { orch, tools } = await centraluTools()
       const p = tools.startAgent({ task: 'first lookup', wait: false })
       await w.until(() => !!agentCard(orch.id))
       w.mgr.inputs.respondApproval(orch.id, agentCard(orch.id)!.requestId, 'always', 'project')

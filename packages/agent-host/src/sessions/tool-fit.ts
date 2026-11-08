@@ -4,7 +4,7 @@ import { rpcError } from '../rpc-error.js'
 
 /**
  * What a session asks of its tool (`launchRefusal`'s demands), as its next launch will: its preset, the setting files its
- * kind gets (`LaunchInputs.settingFilesFor`), and whether it carries role text (the orchestrator's, or a coordinator's or
+ * kind gets (`LaunchInputs.settingFilesFor`), and whether it carries role text (the Assistant's, or a coordinator's or
  * builder's fixed `roleAppend`). The one reading of a session for every path that puts a tool and a preset on it: a
  * start or wake (from the launch options themselves, `startFit`), a tool switch, a preset change (#1562 review).
  */

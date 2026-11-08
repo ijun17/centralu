@@ -25,8 +25,8 @@ import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
 
-/** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the orchestrator, or a linked machine's session */
-export type DelegationTarget = { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }
+/** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the Assistant, or a linked machine's session */
+export type DelegationTarget = { sessionId?: string; projectId?: string | null; assistant?: boolean; linked?: boolean }
 /** The delegation call as S15 names it: the tool, the target as the sentence names it, and the words given */
 export type DelegationCall = { tool: 'start_agent' | 'create_session' | 'agent_session' | 'send_to_session' | 'ask_project'; target: string; text: string }
 

@@ -75,7 +75,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(name).toMatch(/^App notes · agent \d\d:\d\d$/)
     const opts = claude.opened.find((o) => o.sessionId === agent!.id)!
     // At the project root, with no tool profile and no apps — an app's agent only works through the one piece of text the app assigned it
-    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.orchestratorTools, opts.outputSchema]).toEqual([repo, 'auto', undefined, undefined, undefined])
+    expect([opts.cwd, opts.permissionPreset, opts.apps, opts.centraluTools, opts.outputSchema]).toEqual([repo, 'auto', undefined, undefined, undefined])
     // The text the agent received = the text left in the conversation. It is recorded as the app's request, not as something the person said
     const h = claude.handles.get(agent!.id)!
     expect(h.sent).toHaveLength(1)
@@ -310,18 +310,18 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(agentSessions()).toEqual([])
   })
 
-  it('a user-folder app\'s agent stands up with no project, in the orchestrator\'s empty folder, like a coordinating session', async () => {
+  it('a user-folder app\'s agent stands up with no project, in the Assistant\'s empty folder, like a coordinating session', async () => {
     plant('user', 'timer', { agent: true })
     rt.refresh()
-    const orchestrator = await mgr.orchestrator()
+    const assistant = await mgr.assistant()
     claude.onSend = (h) => {
       h.say('Done.')
       h.done()
     }
-    const r = brokerSaid(await callFromSession(orchestrator, 'app-timer', { args: { prompt: 'x' } }))
+    const r = brokerSaid(await callFromSession(assistant, 'app-timer', { args: { prompt: 'x' } }))
     expect(r).toEqual({ isError: false, text: 'Done.', structured: null })
     const agent = agentsMade()[0]!
-    // Never above the orchestrator whose call started it, which runs under normal
+    // Never above the Assistant whose call started it, which runs under normal
     expect(agent).toMatchObject({ projectId: null, appId: 'timer', kind: 'worker', permissionPreset: 'normal' })
     expect(claude.opened.find((o) => o.sessionId === agent.id)!.cwd).toBe(join(dataRoot, 'orchestrator'))
   })
@@ -627,7 +627,7 @@ describe('run_agent — a finished session goes, its record stays in the session
     const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     const sessions = (mgr as unknown as { appSessions: { agentRunEnded: (run: { sessionId: string }) => Promise<void> } }).appSessions
     const verdict = sessions.agentRunEnded.bind(sessions)
-    // Not the person: a message from another session (an orchestrator's send_to_session) is not "taking part"
+    // Not the person: a message from another session (an Assistant's send_to_session) is not "taking part"
     vi.spyOn(sessions, 'agentRunEnded').mockImplementation(async (run) => {
       await mgr.inputs.send(run.sessionId, 'one more thing', undefined, { sessionId: caller.id, name: caller.name })
       return verdict(run as Parameters<typeof verdict>[0])

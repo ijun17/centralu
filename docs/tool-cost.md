@@ -28,8 +28,8 @@ pnpm measure:tools --compare before.json after.json
 | `--kinds` | all five | The session kinds the resident phase starts |
 | `--only` | every prompt | Run only these prompt ids of the set |
 
-A prompt file may set `preset` (the permission preset of every selection session) and, per orchestrator
-prompt, `fresh` (a new orchestrator every repetition, and what the run made is removed before the next:
+A prompt file may set `preset` (the permission preset of every selection session) and, per assistant
+prompt, `fresh` (a new Assistant every repetition, and what the run made is removed before the next:
 sessions, apps, proposals). `prompts-512.json` and its Korean twin `prompts-512-ko.json` do both (§9).
 
 What a run starts: per CLI, one host on a fresh temporary data folder (`CC_DATA_DIR` and `--db` both
@@ -69,7 +69,7 @@ key (dry); nothing about them is written down. Three things the recorder changes
   varies run to run, and they moved #320's baseline by a hundred tokens.
 
 **Centralu's own tokens** (Claude, live). A directing seat runs on another system prompt than an
-ordinary session (the orchestrator on Claude Code's preset with its role, the builder with its role), so
+ordinary session (the Assistant on Claude Code's preset with its role, the builder with its role), so
 the difference from a session with no tools mixes the two. The recorder therefore counts each session's
 first request twice with `count_tokens`, which costs nothing: as sent, and with every trace of Centralu
 taken out (its definitions, its names in the deferred list, its server instructions). The difference is
@@ -86,8 +86,8 @@ request is the difference from the previous report, and a report that repeats th
 when their prefixes match: the account's cache is shared, which is why the baseline's model change read
 17,322 tokens of a sonnet prefix written by an earlier run within Claude Code's one-hour cache.
 
-**Tool selection.** Each prompt runs in a fresh ordinary session (the orchestrator's in the one
-orchestrator, which keeps its conversation across repetitions). The verdict is from the first Centralu or
+**Tool selection.** Each prompt runs in a fresh ordinary session (the Assistant's in the one
+assistant, which keeps its conversation across repetitions). The verdict is from the first Centralu or
 app tool the model calls: one of the expected tools is *right*, another is *wrong*, none is *none*; for
 the prompt that expects no tool, any call is *wrong*. *Steps* is the position of the first expected call
 among all the turn's tool calls, tool search and Codex's `exec` included. *Args ok* is that call's
@@ -128,7 +128,7 @@ sessions read them, so the absolute sizes are this machine's; the differences ar
 
 | Profile | Tools | Claude resident | Claude deferred | Instructions (Claude) | Codex, all loaded |
 |---|---|---|---|---|---|
-| orchestrator | 12 | 9,954 | 0 | 1,844 | 9,954 |
+| assistant | 12 | 9,954 | 0 | 1,844 | 9,954 |
 | manager | 5 | 3,479 | 0 | 2,785 | 3,479 |
 | scoped | 3 | 1,888 | 0 | 379 | 1,888 |
 | builder | 1 | 610 | 0 | 822 | 610 |
@@ -143,11 +143,11 @@ the same text rides in a Codex thread's developer instructions, 52 characters lo
 |---|---|---|---|---|---|
 | none (tools off; an app's agent) | 16,143 | — | 0 | 17,872 | — |
 | ordinary (reader) | 16,469 | +326 | **326** | 17,872 | **+0** |
-| orchestrator | 25,661 | +9,518 | **3,223** | 18,146 | +274 |
+| assistant | 25,661 | +9,518 | **3,223** | 18,146 | +274 |
 | worktree manager | 17,617 | +1,474 | **1,476** | 18,652 | +780 |
 | builder | 23,623 | +7,480 | **462** | 18,486 | +614 |
 
-Repetitions agreed to within 150 tokens (the orchestrator's one run of 25,513 against 25,661).
+Repetitions agreed to within 150 tokens (the Assistant's one run of 25,513 against 25,661).
 
 ### Cache per event (live)
 
@@ -177,8 +177,8 @@ table says when, not why.
 | have another project do it | `ask_project` | 3/3, 1 step | 2/2, 2 steps |
 | another project's app | `find_apps` / `attach_app` (deferred on Claude) | **0/3**: it read sessions and recalled, then (2 of 3) called `ask_project` | 2/2, 2 steps |
 | no tool needed | none | 3/3 | 2/2 |
-| orchestrator: overview | `list_sessions` / `read_session` | 2/3 (1 none: it remembered the previous repetition) | 2/2 |
-| orchestrator: delegate | `send_to_session` | 3/3 | 1/2 (read first) |
+| assistant: overview | `list_sessions` / `read_session` | 2/3 (1 none: it remembered the previous repetition) | 2/2 |
+| assistant: delegate | `send_to_session` | 3/3 | 1/2 (read first) |
 
 Claude's first-try arguments validated against the schema every time (16 of 16). Validating is not
 working: `app_guide`'s first call failed in every run on both CLIs. On Claude the model asked for a topic
@@ -198,7 +198,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 
 ## 5. What guards the numbers without a model
 
-- `sessions/orchestrator-tools.test.ts`, *the resident cost of each profile*: each profile's resident
+- `sessions/centralu-tools.test.ts`, *the resident cost of each profile*: each profile's resident
   definitions plus instructions stay within `RESIDENT_BUDGET_CHARS` on both CLIs (the reader's is the sum
   of its four sets' ceilings). It reuses the reader set's own budget tests rather than repeating them.
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
@@ -219,7 +219,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
    asked to). The cost moved into the conversation: the first `exec` step of the scripted session added
    7,411 tokens. "Codex has no
    deferral" in agent-host.md §1.1 and apps.md §9.4 describes an earlier Codex.
-3. **The orchestrator is the expensive seat**: 3,223 tokens of its own in every request on Claude, ten
+3. **The Assistant is the expensive seat**: 3,223 tokens of its own in every request on Claude, ten
    times an ordinary session's 326.
 4. **A deferred tool can lose to a loaded one.** Asked about another project's app, haiku never searched
    for `find_apps` and reached for the loaded `ask_project` instead (0 of 3); #371's own measurement, with a
@@ -255,7 +255,7 @@ the adapter sends them on a start alone. (Cache read of the four turns: 12,288 o
 19,200 of 19,485, 19,328 of 19,551; one run, so the first resume's shortfall is not attributed here.)
 
 **Dry** (`pnpm measure:tools`, compared with the dry baseline): every Claude number and prefix is unchanged. Codex's
-resident characters (definitions plus instructions) grow by the instructions and their header: orchestrator
+resident characters (definitions plus instructions) grow by the instructions and their header: assistant
 9,954 → 11,850, manager 3,479 → 6,316, scoped 1,888 → 2,319, builder 610 → 1,484; the reader, which has no
 instructions, stays at 2,121.
 
@@ -267,7 +267,7 @@ the first request's input tokens; the baseline's Codex repetitions agreed to the
 |---|---|---|---|---|
 | none | 0 | 17,872 | 17,868 | (−4) |
 | ordinary (reader) | 0 | 17,872 | 17,868 | (−4) |
-| orchestrator | 1,898 | 18,146 | 18,551 | **+405** |
+| assistant | 1,898 | 18,146 | 18,551 | **+405** |
 | worktree manager | 2,837 | 18,652 | 18,485 | **+617** against `none` of the same run |
 | builder | 876 | 18,486 | 18,678 | **+192** |
 
@@ -277,7 +277,7 @@ others (3,279 characters more in the baseline's manager thread, which is all of 
 thread of this run had the shorter list). Against `none` of the same run its instructions cost 617 tokens.
 
 **A model set before the first turn.** The measurement now sets the model on every seat before its first turn, as
-it does on Claude; the orchestrator and the builder, which are running when the change arrives, restart, and every
+it does on Claude; the Assistant and the builder, which are running when the change arrives, restart, and every
 seat's first turn ran. A started Codex thread names itself to the host only at its first turn, so a restart before
 then starts a thread again rather than resuming one Codex has nothing written for (`CodexSession.externalId`;
 `sessions/codex-seats.test.ts`). Sessions an older build started and never messaged keep the id they were given
@@ -295,7 +295,7 @@ same prompts (Claude 5 repetitions, Codex 3); the prompt set gained three prompt
 `baselines/2026-10-12-selection-522-523-live.json`. The runs cost about $4 of Claude usage at list prices.
 
 **The guide's topic** is now an enum of the seven topics in both schemas that offer it (the reader's, and the
-orchestrator's, where the topic list moves from the description into the enum: +3 characters). A topic sent in
+Assistant's, where the topic list moves from the description into the enum: +3 characters). A topic sent in
 other words that names one of them ("session settings", "approval") is answered with that topic and the list,
 for a caller that does not check the schema; one that names none is still refused with the list.
 
@@ -360,9 +360,9 @@ session runs on the `normal` preset, which follows the person's own Claude Code 
 stopped and discarded; nothing outside the scratch folder changed. Selection prompts ask questions, not for
 changes.
 
-## 9. The orchestrator's rare commands: resident, deferred, or discovered (#512, 2026-10-12)
+## 9. The Assistant's rare commands: resident, deferred, or discovered (#512, 2026-10-12)
 
-The orchestrator carries about 3,200 tokens of its own in every request, and three tools it rarely calls
+The Assistant carries about 3,200 tokens of its own in every request, and three tools it rarely calls
 (`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
 should discover such commands like a CLI rather than carry them. A prototype behind a switch (since removed)
 (agent-host.md §1.1, security-boundaries.md; C became the default, see the decision at the end of this section)
@@ -378,20 +378,20 @@ gives three arms on the same prompts:
 
 Claude Code 2.1.289 on haiku 4.5 (3 repetitions), codex-cli 0.160.0 on gpt-6.1-sol (2 repetitions), macOS, base
 commit 81d17084 with this change. `pnpm measure:tools --live --rare <arm> --phases resident,selection --kinds
-none,orchestrator --prompts packages/agent-host/scripts/measure-tools/prompts-512.json` (`--rare` is a flag since removed). The nine prompts name no
+none,assistant --prompts packages/agent-host/scripts/measure-tools/prompts-512.json` (`--rare` is a flag since removed). The nine prompts name no
 tool: four need a rare command (an app for a project, an app of the person's own, a weekly procedure to keep, a
 browser), one needs `propose_worktree_session`, four need a core one (`list_sessions`/`read_session`,
-`send_to_session`, `recall`, `create_session`). Every repetition runs in a new orchestrator and what the run made
+`send_to_session`, `recall`, `create_session`). Every repetition runs in a new Assistant and what the run made
 (sessions, apps, proposals) is removed before the next. The prompts ask for things to be done, so the sessions run
 under `safe`: the agent's own tools and the person's skills raise a card the measurement declines, Centralu's run as
 under every preset. Claude Code's auto memory is off (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`): in a trial the
-orchestrator kept the weekly procedure in its memory folder, where every later orchestrator of the run would read it.
+assistant kept the weekly procedure in its memory folder, where every later assistant of the run would read it.
 Claude was run twice: a first run with `propose_worktree_session` in the tier too, and, after the findings below,
 the run the tables report. Every run's summary is kept in `baselines/2026-10-12-rare-commands-512-live.json`. The
 runs cost about $3.90 of Claude usage at haiku's list prices (883 requests, the builder sessions `create_app` started
 included, which run on the CLI's default model; see round 2's spend) and about 45 Codex turns.
 
-### Resident cost (the orchestrator's first request)
+### Resident cost (the Assistant's first request)
 
 | | A resident | B deferred | C commands |
 |---|---|---|---|
@@ -408,7 +408,7 @@ the differences between the arms unchanged. With
 
 ### Selection (Claude; both runs, 6 per prompt)
 
-*Reached*: the expected command was called (or run through `centralu_run`) anywhere in the turn. The orchestrator
+*Reached*: the expected command was called (or run through `centralu_run`) anywhere in the turn. The Assistant
 often lists sessions first, which §4's first-call verdict counts as wrong; that happened equally in every arm.
 
 | Prompt needs | A resident | B deferred | C commands |
@@ -445,7 +445,7 @@ sessions first in every arm), 1 step, 2 requests.
   run was right.
 - **A discovery costs whole requests**, each one the full context again, mostly read from cache: B about one more
   (+44k tokens per turn, median), C two to three more (+56k). Against C's 709 tokens saved on every request, one use
-  of a rare command costs what about 80 orchestrator requests save.
+  of a rare command costs what about 80 assistant requests save.
 - **The cache held** in every arm: no request in a turn rebuilt, a tool-search load included (as in §4), and C's
   tool list never changes.
 
@@ -469,29 +469,29 @@ in the record, so a taken id is the likely cause, not a confirmed one.
 
 ### What else the runs showed
 
-- **A hidden `propose_skill` loses to the person's own skills.** Asked to keep a weekly procedure, the orchestrator
+- **A hidden `propose_skill` loses to the person's own skills.** Asked to keep a weekly procedure, the Assistant
   in B and C invoked Claude Code's `Skill` with the person's `schedule` skill (recurring remote agents) instead,
   in 3 of 6 runs each; most other misses answered in text. Under `safe` nothing was created: no tool past the
   skill's text was called.
 - **Claude Code's own tool search competes with `centralu_commands`.** In C the model once searched tool search
   for `propose_mcp_server`, found nothing and stopped; once it made a project with `create_project` for an app.
 - **A command the instructions do not name is not found.** `propose_worktree_session` was reached 3 of 3 as a tool
-  and 0 of 3 deferred or behind `centralu_run` on Claude; the orchestrator's instructions never mention it. It is
+  and 0 of 3 deferred or behind `centralu_run` on Claude; the Assistant's instructions never mention it. It is
   out of the tier (`RARE_COMMANDS`). On Codex the listing found it where the tool did not.
 - **The measurement had to change** to be fair: a turn's requests are now only the measured session's (the
-  builder `create_app` stands up made requests in the orchestrator's window, which the first run counted), each
-  prompt starts a new orchestrator and removes what the last one made, and the sessions run under `safe` with auto
+  builder `create_app` stands up made requests in the Assistant's window, which the first run counted), each
+  prompt starts a new Assistant and removes what the last one made, and the sessions run under `safe` with auto
   memory off.
 
 ### Round 2: Sonnet, Korean, and a preamble (2026-10-12)
 
 The owner asked for the same comparison on a stronger model, in Korean, and with a preamble at the head of the
-orchestrator's role, along the owner's words: "You are an agent running inside Centralu. Before doing something
+Assistant's role, along the owner's words: "You are an agent running inside Centralu. Before doing something
 yourself or using another tool, look for what Centralu's MCP tools and commands can do (centralu_commands)."
 (where the seat has no commands the last words are "MCP tools can do."
-without the name). It goes in the orchestrator's role only: Centralu offers its tools to the person's own sessions
+without the name). It goes in the Assistant's role only: Centralu offers its tools to the person's own sessions
 and does not direct them (product-spec.md §1.2, a principle withdrawn later the same day, §11), so no ordinary session
-gets it (`orchestratorRole`, tested in `manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
+gets it (`assistantRole`, tested in `manager.test.ts`). Arms: **A** resident, **A'** resident + preamble, **C** commands, **D** commands + preamble.
 
 Claude Code 2.1.289 on `claude-sonnet-5-5` (the CLI's `sonnet`), 3 repetitions, the Korean set
 (`prompts-512-ko.json`: the same nine asks as a Korean speaker would type them, no tool named) and the English set;
@@ -500,7 +500,7 @@ tool ("What is 17 times 23?"), to catch a preamble that sends the model looking 
 that predate it ran it alone (`--only core-no-tool`). Same harness and rules as above. Summaries:
 `baselines/2026-10-12-rare-commands-512-round2-live.json`.
 
-**What the preamble costs**, every orchestrator request: 143 characters in A', 176 in D (it names
+**What the preamble costs**, every Assistant request: 143 characters in A', 176 in D (it names
 `centralu_commands`). First request, same model and language: Sonnet A → A' +47 tokens (English) / +44 (Korean),
 C → D +55 / +54; haiku A → A' +33, C → D +40.
 
@@ -549,7 +549,7 @@ What round 2 shows:
 
 **Spend.** Round 2 cost $14.52 at list prices (1,609 requests): $7.27 on Sonnet, $1.12 on haiku, and $6.13 on
 `claude-opus-5-5`, the CLI's default model, which the builder sessions `create_app` stands up run on (the
-measurement stops and deletes them after each turn; a builder handed work by the orchestrator spends while the turn
+measurement stops and deletes them after each turn; a builder handed work by the Assistant spends while the turn
 lasts). Round 1's $3.90 above priced every request at haiku's rates, its builders included, so it was likely higher by
 about the same share (roughly $0.5 a run that made an app); pinning the builder's model is a harness change for a
 next round.
@@ -561,7 +561,7 @@ own, 3% of the request) and reaches a rare command in 15 of 24 runs against 23 o
 loses less (21 of 24), but its losses fall on `propose_skill` and its first calls often fail before the tool is
 loaded. On Sonnet the tier loses nothing (24 of 24 in each arm, both languages) and saves 835 tokens a request, but
 every use of a rare command costs two more requests, about 42k more input tokens, so it pays only when the
-orchestrator makes some fifty requests per rare command it runs; on haiku it also loses selection. The preamble
+assistant makes some fifty requests per rare command it runs; on haiku it also loses selection. The preamble
 costs 33 to 55 tokens a request, regressed nothing, and moved nothing that was measured beyond one run, so it has
 not earned its place either. On Codex C saves nothing resident, since Codex's first request carries no MCP
 definitions, and costs a step each time. The case #512 still makes for C, a tool list that stays fixed while apps
@@ -571,24 +571,24 @@ reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches sta
 
 ### Decision (owner, 2026-10-12)
 
-**The commands tier (C) is the orchestrator's default**, without the preamble (#564 later turned it on as a product
+**The commands tier (C) is the Assistant's default**, without the preamble (#564 later turned it on as a product
 rule, §11). Round 2 on Sonnet found no loss in selection or arguments (12 of 12 in every row, English and Korean)
 and 835 fewer tokens a request, and the tier keeps the resident prefix from growing as commands are added: the
-orchestrator was at 11,862 of its 12,000 characters resident, and is at 9,317 in the tier (Codex 9,369 with the
+assistant was at 11,862 of its 12,000 characters resident, and is at 9,317 in the tier (Codex 9,369 with the
 header over its instructions).
-`RESIDENT_BUDGET_CHARS.orchestrator` follows it down to 9,500, so a command that wants to be resident again is a
+`RESIDENT_BUDGET_CHARS.assistant` follows it down to 9,500, so a command that wants to be resident again is a
 decision rather than headroom. The haiku numbers above stand: a seat on haiku reaches a rare command less often
 through the tier. The `resident` and `deferred` arms and the `--rare`, `--preamble` and `--reader-instructions` flags were removed
 under #1143; a run made before this date with no `--rare` measured `resident`.
 
 **`handoff_session` (#694)** joined the rare commands: its definition rides in no request, only its line in
-`centralu_commands`. What it adds to every orchestrator request is one instruction line naming it (107 characters and
+`centralu_commands`. What it adds to every Assistant request is one instruction line naming it (107 characters and
 its newline), since the instructions are what a model that cannot see a rare command goes looking with. Measured
 2026-10-16 with `residentCost`: 6,642 resident definition characters and 2,102 of instructions on Claude (8,744), 2,154
 on Codex (8,796), under the 9,500 ceiling. Its selection through the tier was not measured live.
 
-**Not measured.** Opus as the orchestrator's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
-Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`
+**Not measured.** Opus as the Assistant's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
+Codex in round 2; a command used late in a long assistant conversation; app tools behind `app_tools`/`app_call`
 (#512's app tier); B with `propose_skill` loaded; the proposal cards on screen in the real app (the unit tests cover
 the events the screen reacts to); Windows and the packaged app.
 
@@ -631,7 +631,7 @@ serves it like every reader tool); the cost of a running child's reports to its 
 **Part 3: the worktree manager folded into ordinary sessions.** The `manager` seat is gone, so its row in the tables
 above is history (3,479 characters of tools and 2,785 of instructions in every manager request). `agent_session` gained
 `delete` (the manager's hard-gated clean-up): the agent set is 992 characters (budget 1,000), the reader seat 3,242 on
-Codex. The orchestrator lost `propose_worktree_session`: 10,029 → 9,278 resident characters on both CLIs (counted with
+Codex. The Assistant lost `propose_worktree_session`: 10,029 → 9,278 resident characters on both CLIs (counted with
 `residentCost`, not measured live).
 
 **#729: `difficulty`, and when to use a worktree (2026-10-16).** `start_agent` gained `difficulty` (light, standard,
@@ -671,11 +671,11 @@ missing (no such machine, no checkout there, unreachable), so no words ride in t
 grows by the argument's name and type, as `name`'s did (`AGENT_BUDGET_CHARS` 1,375 → 1,400; the reader resident
 ceiling 2,600 → 2,625). Not measured live.
 
-## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
+## 11. Centralu's features first: instructions for ordinary sessions, and the Assistant's preamble (#564, 2026-10-12)
 
 The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person
 directly says otherwise, agents running in Centralu use Centralu's own features first (product-spec.md §1.2). Ordinary
-sessions, which had Centralu's tools and no instructions (#320), now get one sentence, and the orchestrator's preamble
+sessions, which had Centralu's tools and no instructions (#320), now get one sentence, and the Assistant's preamble
 (§9, round 2) is on by default, worded as the rule:
 
 - Ordinary sessions (`readerInstructions`, 392 characters; Codex: 444 with the header over it): "You are running inside
@@ -685,14 +685,14 @@ sessions, which had Centralu's tools and no instructions (#320), now get one sen
   person will follow." The last entry came
   after #561's tools (§10) joined the seat; it was measured on its own (below), the rest of this section without it.
   Each CLI is given the name of its own subagent tool in place of "Agent" (#1587): Codex's reads "not your spawn_agent tool"
-  (6 characters longer), in the orchestrator's light-work line (#853) as well, which uses the same phrase. That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
-- The orchestrator (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
+  (6 characters longer), in the Assistant's light-work line (#853) as well, which uses the same phrase. That wording was not measured on Codex; it is the one the §11 probe on `prompts-564-agent.json` still owes.
+- The Assistant (188 characters, at the head of its role): "You are an agent running inside Centralu. Unless the
   person says otherwise, use Centralu's MCP tools and commands (centralu_commands) before doing something yourself or
   using another tool."
 
 Claude Code 2.1.289 on haiku 4.5 and `claude-sonnet-5-5` (3 repetitions), codex-cli 0.160.0 on its default
 gpt-6.1-sol (2 repetitions), macOS, base commit 96267a44 (the commands tier default, #512) with this change.
-`pnpm measure:tools --live --phases resident,selection --kinds none,reader,orchestrator --prompts
+`pnpm measure:tools --live --phases resident,selection --kinds none,reader,assistant --prompts
 packages/agent-host/scripts/measure-tools/prompts-564.json` (with flags since removed), and the
 Korean twin `prompts-564-ko.json`. Every selection session is an ordinary one under `safe` (the agent's own tools and
 skills raise a card the measurement declines; Centralu's run, and `ask_project`'s and `attach_app`'s consent cards are
@@ -711,7 +711,7 @@ session with no Centralu tools in the same run on Codex (whose first request car
 | Ordinary session, Claude haiku | 412 | 511 | **+99** |
 | Ordinary session, Claude Sonnet | 527 | 648 | **+121** |
 | Ordinary session, Codex | +0 | +70 | **+70** (+62 to +78 on the no-tool prompts' requests) |
-| Orchestrator preamble, haiku / Sonnet / Codex (first request against `none`) | | | +42 / +60 / +37 |
+| Assistant preamble, haiku / Sonnet / Codex (first request against `none`) | | | +42 / +60 / +37 |
 
 Under 0.7% of an ordinary session's first request on every model. These runs predate #561's agent set (§10), so the
 "without" is the seat of §8. `READER_BUDGET_CHARS` goes from 1,000 to 1,400 (the set is 1,375: 983 of tools, 392 of
@@ -739,7 +739,7 @@ character counts, not a new live token or tool-selection measurement.
 
 **The count had to be fixed first.** Claude Code put the servers' instructions on Sonnet in the same block as the
 agent list, the skill list and the date, and the recorder took Centralu's section out up to the block's end: the
-ordinary session read 7,349 tokens of its own on Sonnet with instructions, and the orchestrator 6,582. The recorder now
+ordinary session read 7,349 tokens of its own on Sonnet with instructions, and the Assistant 6,582. The recorder now
 takes our section out by its exact text (`setOurInstructions`) and the frame only when no other server's section is
 left; the figures above are from runs after the fix, and agree with the difference from `none` in the same run. Earlier
 counted Sonnet figures in this document (§9 reports first-request totals there) are not affected; a counted figure of a
@@ -824,8 +824,8 @@ The short ambiguous hand-off splits on haiku and goes to `start_agent` on Sonnet
 on both, and the helper search stays with the built-in subagent on both. `Agent` is Claude Code's name; on Codex, whose
 own sub-agents §10 also saw, the line was not measured.
 
-**The orchestrator's preamble** was measured in §9 round 2 (no regression, no gain that held); its new wording was not
-measured on the orchestrator's prompts here, only its cost above.
+**The Assistant's preamble** was measured in §9 round 2 (no regression, no gain that held); its new wording was not
+measured on the Assistant's prompts here, only its cost above.
 
 **Spend.** $10.40 at list prices for 1,901 Claude requests ($6.24 on Sonnet, $4.16 on haiku; the `start_agent` line
 $2.20 of it, option B $1.17; cache writes priced at the one-hour rate, so an upper bound), no builder session (no prompt made an app),
@@ -835,7 +835,7 @@ and about 140 Codex turns on the account's plan.
 (a Claude session picks the instructions up when its process next starts, at a one-time cost to its cache; a Codex
 thread keeps what it was started with, agent-host.md §1.1); prompts deep in a long conversation, where the instructions
 are far from the question; the consent cards allowed, so what `ask_project` or `attach_app` would then have answered;
-the orchestrator's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
+the Assistant's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
 card allowed (whether the child then does the long job); Windows and the packaged app.
 
 **#957: repository work through an app's guide (2026-10-17).** Owner decision: no task-to-tool table in these
@@ -844,21 +844,21 @@ project board serves its own table on demand from its `help` tool. One line, the
 an agent there first (`REPO_WORK_FIRST`): "an attached app's help tool before repository work by hand (PRs, CI,
 merges, releases)". Only in an ordinary session that has an app attached when it starts
 (`READER_INSTRUCTIONS_WITH_APPS`): without one there is no help to read. Decided at the start, so a session's prefix
-never changes under it. Not in the orchestrator's instructions: it does no repository work itself. Characters: +88 in
+never changes under it. Not in the Assistant's instructions: it does no repository work itself. Characters: +88 in
 such a session's instructions (`residentCost` counts a session with no app, so the reader stays 2,585 on Claude and
 4,422 on Codex, and `READER_BUDGET_CHARS` stays 1,750). Not measured live: whether agents then call an app's `help`
 before `gh`.
 
-**#853: the orchestrator's children (2026-10-17).** `start_agent` and `agent_session` joined the orchestrator's rare
+**#853: the Assistant's children (2026-10-17).** `start_agent` and `agent_session` joined the Assistant's rare
 commands (`RARE_COMMANDS`), so their 1,357 characters ride in none of its requests in the default tier; one line of
-its instructions names `start_agent` for light work outside any project. Orchestrator (`residentCost`): 8,744 →
+its instructions names `start_agent` for light work outside any project. Assistant (`residentCost`): 8,744 →
 8,893 on Claude, 8,796 → 8,945 on Codex. Not measured live.
 
-## 12. The orchestrator's tool list and the projects that are apps (#1205, 2026-10-19)
+## 12. The Assistant's tool list and the projects that are apps (#1205, 2026-10-19)
 
-Since #1141 the orchestrator was given the root app of every trusted project as its own MCP server, so its tool list
+Since #1141 the Assistant was given the root app of every trusted project as its own MCP server, so its tool list
 grew with each project the person trusted, whether it called the app or not. Measured without a model
-(`sessions/orchestrator-app-cost.test.ts`): the orchestrator's served list, Centralu's definitions plus every attached
+(`sessions/assistant-app-cost.test.ts`): the Assistant's served list, Centralu's definitions plus every attached
 app's tools as `mcp__<server>__<tool>` with description and schema (`definitionChars`), in the default `commands` tier.
 Each root app is the one `create_app` makes: `show` and `increment` for the agent (`reset` is the screen's alone), and
 the host's `run_status`, about 793 characters per app. On Claude app tools wait behind tool search, so only their names
@@ -873,8 +873,8 @@ ride in a request; Codex loads them.
 | After: characters, Codex and Claude | 6,800 | 6,800 | 6,800 |
 
 Characters are of the definitions alone; about four make a token (§8: `find_apps`, 294 characters, measured 75
-tokens), so ten such apps cost a Codex orchestrator about 2,000 tokens in every request before, and none after. The
-orchestrator now attaches a root app when it needs one: `find_apps`, `attach_app` and `detach_app` joined its rare
+tokens), so ten such apps cost a Codex assistant about 2,000 tokens in every request before, and none after. The
+assistant now attaches a root app when it needs one: `find_apps`, `attach_app` and `detach_app` joined its rare
 commands, so their 874 characters ride in none of its requests; one line of its instructions (+75 characters) names
 "the find_apps command", as the others name theirs, so the first call is not a refused bare name. Its resident cost
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
@@ -883,22 +883,22 @@ commands, so their 874 characters ride in none of its requests; one line of its 
 The preferences and archive commands (#1219: `get_preferences`, `set_preferences` and five commands for the session archive, all rare; the archive was called the trash until #1404, and `list_trash` became `list_archive`) came with
 almost no more resident cost. The machine line, which named six commands, now names one and says to look for the rest with
 `centralu_commands` and the query "machine"; the same line names `get_preferences`, `set_preferences` and `list_archive`. Claude
-9,443 → 9,438, Codex 9,495 → 9,490, against the ceiling of 9,500; the eight definitions ride in none of the orchestrator's
+9,443 → 9,438, Codex 9,495 → 9,490, against the ceiling of 9,500; the eight definitions ride in none of the Assistant's
 requests (`centralu_commands` lists them).
 
-An orchestrator that had root apps attached before this build reads one line before its first turn by it ("Project
+An Assistant that had root apps attached before this build reads one line before its first turn by it ("Project
 apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you
 need."), once, in the turn's input only: never stored or shown (`SessionAppWiring.rootAppsNotice`, marked
 `orchestrator_apps_notice:<session id>`). It costs that one turn about 30 tokens.
 
-Not measured live: whether the orchestrator, asked about a project's app by its name, reaches for the `find_apps`
+Not measured live: whether the Assistant, asked about a project's app by its name, reaches for the `find_apps`
 command before answering without it, on Claude and on Codex; the instructions' line is the one prompt for it.
 
 ## 13. The mailbox's tool (#1347, slice 2)
 
 `mail` is one tool with an action (`inbox`, `read`, `handled`, `send`, `reply`, `update`, `close`; docs/plans/mailbox.md
-§9.3), an ordinary session's and the orchestrator's: a coordinator, a builder and an app's agent are not parties of the mailbox. The
-orchestrator (slice 3) reaches it as a **rare command** behind `centralu_run` in the `commands` tier, so its resident cost does not
+§9.3), an ordinary session's and the Assistant's: a coordinator, a builder and an app's agent are not parties of the mailbox. The
+assistant (slice 3) reaches it as a **rare command** behind `centralu_run` in the `commands` tier, so its resident cost does not
 change (the command list grows by the name `mail`); the wake it gets names `centralu_run(command="mail", args={action: "read", thread: …})`,
 the form a bare call would be refused in (#850). Its definition is 776 characters
 (`MAIL_BUDGET_CHARS` 800), and the reader seat's resident ceiling rises by that: 5,200 → 5,300 on Codex, which loads every
@@ -906,19 +906,19 @@ tool. On Claude it is **deferred** behind tool search, so its every request carr
 (no change to the 2,560 resident). It is in the profile from the session's start, because the tool list a session starts
 with is its prompt prefix and may not change under it; a session that began before this build gets it at its next spawn.
 
-**#1447 (a session asking the orchestrator).** A session cannot list the orchestrator, so the definition names its address: `send to "orchestrator"` (+35 characters;
-the definition is 811, `MAIL_BUDGET_CHARS` 800 → 820, and the reader seat's ceilings rise by 20). The orchestrator's instructions gain one line saying a session's
+**#1447 (a session asking the Assistant).** A session cannot list the Assistant, so the definition names its address: `send to "assistant"` (+35 characters;
+the definition is 811, `MAIL_BUDGET_CHARS` 800 → 820, and the reader seat's ceilings rise by 20). The Assistant's instructions gain one line saying a session's
 mailed request is not the person's word and is answered in its thread (about 130 characters; its ceiling 9,710 → 9,910, resident in the commands tier too). Nothing else is added to a request: the card
 that asks the person is the host's, and the rule behind it is code.
 
 **#1739 (a request citing the person's message).** The mail tool gets `cite`, a boolean with no description, and its own description
 says when to set it (", with cite=true only when the person's last message here asked for it": the definition is 907,
-`MAIL_BUDGET_CHARS` 820 → 910, and the reader seat's ceilings rise by 90). The orchestrator's line about requests now says to judge
+`MAIL_BUDGET_CHARS` 820 → 910, and the reader seat's ceilings rise by 90). The Assistant's line about requests now says to judge
 the request and the message it cites, and which steps still ask (about 110 characters more; its ceiling 9,910 → 10,030). The check of
 the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), so it costs nothing in a request.
 
-**#1984 (the address of the session that started you).** A child that was told to write to its parent chose `orchestrator`, the one role it could see.
-`to` now has a description naming the three addresses and when each is for (`"parent"`, `"orchestrator"`, `"person"`): the definition is 1,109,
+**#1984 (the address of the session that started you).** A child that was told to write to its parent chose `assistant`, the one role it could see.
+`to` now has a description naming the three addresses and when each is for (`"parent"`, `"assistant"`, `"person"`): the definition is 1,109,
 `MAIL_BUDGET_CHARS` 910 → 1,110, and the reader seat's ceilings rise by 200. The frames that start a child (`start_agent`, `agent_session`) and
 `ask_project`'s name the address in a line of their own, which rides in that task and not in every request, and only to a child that can use it (one the sender started, in a project).
 
@@ -931,7 +931,7 @@ it through tool search by "mail".
 
 Not measured live: whether a Claude session that has to send a message by itself (with no wake to name the call) finds the
 deferred tool by searching, and the first-call argument errors on each CLI. The numbers above are counted from the
-definitions (`orchestrator-tools.test.ts` holds them to the ceilings).
+definitions (`centralu-tools.test.ts` holds them to the ceilings).
 
 ## 14. read_session's total and its arguments (#1480)
 
@@ -939,7 +939,7 @@ A `read_session` call had no total: 40 lines of up to 2,000 characters came back
 again on every later request of the reader. It now returns at most `maxChars` (12,000 by default, 2,000 to 40,000, notes included;
 [agent-host.md](agent-host.md) §1.2), `tools` is `none`, `titles` or `full` (or the boolean it was), and the notes of a read that
 stopped early name `before` or `from`, which read on without showing anything twice. All five arguments, with `offset` (#1186), are in
-the orchestrator's and the reader's definitions. The reader's carry **no description**; the orchestrator's and the scoped seat's keep a
+the Assistant's and the reader's definitions. The reader's carry **no description**; the Assistant's and the scoped seat's keep a
 short one for `tools` and `maxChars`. They have to be listed: Claude's in-process server strips an argument its schema does not list
 before the tool runs (checked on the SDK's `tool()`), so an argument that was only in `TOOL_ARGS` (`offset` until this change) never
 reached the host on Claude.
@@ -951,15 +951,15 @@ Measured in characters (`residentCost`, the budget tests), not live in tokens:
 | reader set (`READER_BUDGET_CHARS`) | 1,709 | 1,913 (+204) | 1,750 → 1,950 |
 | reader, Claude resident (definitions + instructions) | 2,605 | 2,809 | sum of the sets' ceilings |
 | reader, Codex (all loaded) | 5,219 | 5,423 | 5,300 → 5,500 |
-| orchestrator, Codex (developer instructions) | 9,485 | 9,663 (+178) | 9,500 → 9,700 |
+| assistant, Codex (developer instructions) | 9,485 | 9,663 (+178) | 9,500 → 9,700 |
 | scoped, Codex | 2,382 | 2,560 (+178) | 2,400 → 2,600 |
 
-#1487 restored `.int().min(0)` on `offset`, which #1489 had lost: +12 characters in the reader set and the orchestrator's definition. The
+#1487 restored `.int().min(0)` on `offset`, which #1489 had lost: +12 characters in the reader set and the Assistant's definition. The
 reader set with its instructions is 1,953 against a ceiling now 1,960, the reader on Claude 2,849 against a sum now 2,850, and the
-orchestrator 9,703 against a ceiling now 9,710 (Codex's figures move with them by the same 12).
+assistant 9,703 against a ceiling now 9,710 (Codex's figures move with them by the same 12).
 
 A live run of the first version of this change (`tools` and `maxChars` only) measured +44 tokens per request for an ordinary session and
-+34 for the orchestrator, against about 3,900 tokens saved by one default read of a long session; the arguments added since (`before`,
++34 for the Assistant, against about 3,900 tokens saved by one default read of a long session; the arguments added since (`before`,
 `from`, `offset`, the boolean) cost about 110 characters more and were not measured live.
 
 Not measured live: tokens through `pnpm measure:tools --live` for the final definitions, and whether a reader with these arguments and
@@ -968,11 +968,11 @@ no description picks `maxChars` by itself when a note says a read stopped early.
 ## 15. compact_self (#1451, `then` #2024)
 
 `compact_self({ focus?, then? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host.md "Compacting at a break"). An
-ordinary session's and the orchestrator's; a coordinator and a builder do not have it. It is **loaded** on Claude, not deferred: its description is the
+ordinary session's and the Assistant's; a coordinator and a builder do not have it. It is **loaded** on Claude, not deferred: its description is the
 instruction on when to use it (work finished and reported; before waiting over a few minutes on a child, CI or the person; switching to an
 unrelated task), and a deferred tool is not read until something searches for it. Counted from the definition: 453 characters
 (`COMPACT_BUDGET_CHARS` 460), which raises the reader seat's Claude resident ceiling 2,850 → 3,310, its Codex ceiling by the same, and the
-orchestrator's 9,710 → 10,170 (its tool list is resident in the commands tier too). The saving it is for is measured in #1451 (cache reads of
+Assistant's 9,710 → 10,170 (its tool list is resident in the commands tier too). The saving it is for is measured in #1451 (cache reads of
 contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request.
 
 **`then` (#2024, owner decision 2026-11-06).** A new optional argument, the agent's own next step, sent as its next turn once the compaction is
@@ -981,9 +981,9 @@ description and the schema as the tool sends them): **453 → 606 characters, +1
 characters because its words are the instruction: the call carries the next step, the turn must end after it, and a refusal still brings the step with
 the reason ("or with the reason if not", 27 of them, added by the review of the first version, where a refused request left the session stalled). The
 description of the tool itself did not change. The ceilings move by the same 150, which they take from `COMPACT_BUDGET_CHARS`: the reader seat's Claude
-resident ceiling 3,310 → 3,460, its Codex ceiling the same, and the orchestrator's 10,170 → 10,790 (the first version measured 3,428 and 6,381 on Claude and
-Codex for the reader and 10,693 and 10,751 for the orchestrator at +126; these move by +27, computed, not measured again). At the section's
-estimate of about 4 characters a token that is **about 38 more tokens in every request of an ordinary session and of the orchestrator** (computed from
+resident ceiling 3,310 → 3,460, its Codex ceiling the same, and the Assistant's 10,170 → 10,790 (the first version measured 3,428 and 6,381 on Claude and
+Codex for the reader and 10,693 and 10,751 for the Assistant at +126; these move by +27, computed, not measured again). At the section's
+estimate of about 4 characters a token that is **about 38 more tokens in every request of an ordinary session and of the Assistant** (computed from
 the characters, not measured live). The context notice (`context-nudges.ts`) gained about 60 characters, sent once per share per compaction cycle,
 not per request. Not measured live: tokens through `pnpm measure:tools --live`, and how often a model sets `then` and ends its turn after the notice; the
 one live run of the whole path is in the pull request.

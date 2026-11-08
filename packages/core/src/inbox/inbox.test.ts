@@ -145,7 +145,7 @@ describe('stopped turns in the inbox (#698)', () => {
   })
 })
 
-/** A pending orchestrator proposal waits on the person like an approval (#703) */
+/** A pending assistant proposal waits on the person like an approval (#703) */
 describe('pending proposals', () => {
   const proposals = proposalCandidates(pendingProposals({ mcpProposals: [{ name: 'playwright' }], skillProposals: [{ name: 'weekly' }] }))
 

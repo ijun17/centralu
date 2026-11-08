@@ -100,8 +100,8 @@ async function main(): Promise<number> {
         const run: { preset?: string } = runAs(tool, scenario.drive)
         // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
         const given = ACP_TOOLS.includes(tool) ? scenario.drive.session?.() : undefined
-        if (given?.orchestratorTools) bridge = await startBridgeHost(given.orchestratorTools, given.toolProfile ?? 'reader')
-        const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { orchestratorBridge: { url: bridge.url, token: bridge.token } } : {}) }
+        if (given?.centraluTools) bridge = await startBridgeHost(given.centraluTools, given.toolProfile ?? 'reader')
+        const session = { ...sessionFor(tool, spawn).session, ...(bridge ? { centraluBridge: { url: bridge.url, token: bridge.token } } : {}) }
         const events = await drive(adapter, run as Scenario, cwd, sessionId, 300_000, () => last?.kill('SIGKILL'), { seed: (files: Record<string, string | Buffer>) => outside.push(...seedFiles(cwd, files)), tool, session })
         // One file per process, in the order they started (`recorder.ts`)
         const files = readdirSync(raw)

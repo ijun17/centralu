@@ -189,69 +189,69 @@ describe('ask_project', () => {
   })
 })
 
-describe("the orchestrator's send_to_session and create_session", () => {
-  async function setup(): Promise<{ worker: string; orchestrator: string }> {
+describe("the Assistant's send_to_session and create_session", () => {
+  async function setup(): Promise<{ worker: string; assistant: string }> {
     const worker = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
-    return { worker, orchestrator: (await w.mgr.orchestrator()).id }
+    return { worker, assistant: (await w.mgr.assistant()).id }
   }
 
   it('send_to_session with reportBack, refused: nothing reaches the session, and the answer carries the refusal', async () => {
-    const { worker, orchestrator } = await setup()
+    const { worker, assistant } = await setup()
     refusal = S15
-    const r = await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: worker, text: 'fix the test', reportBack: true })
+    const r = await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: worker, text: 'fix the test', reportBack: true })
     expect(textOf(r)).toContain(S15)
     expect(handleOf(worker)?.sent ?? []).toEqual([])
     const name = w.mgr.sessionInfo(worker)!.name
-    expect(asked).toEqual([{ callerId: orchestrator, target: { sessionId: worker, projectId: w.caller.id }, call: { tool: 'send_to_session', target: name, text: 'fix the test' } }])
+    expect(asked).toEqual([{ callerId: assistant, target: { sessionId: worker, projectId: w.caller.id }, call: { tool: 'send_to_session', target: name, text: 'fix the test' } }])
   })
 
   it('send_to_session let go, or without reportBack (not a delegation, never asked): delivered as before', async () => {
-    const { worker, orchestrator } = await setup()
-    await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: worker, text: 'fix the test', reportBack: true })
+    const { worker, assistant } = await setup()
+    await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: worker, text: 'fix the test', reportBack: true })
     expect(handleOf(worker)!.sent).toHaveLength(1)
     expect(asked).toHaveLength(1)
     handleOf(worker)!.answer('fixed')
     await w.until(() => w.mgr.sessionInfo(worker)?.state !== 'working')
     refusal = S15
-    await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: worker, text: 'just a note' })
+    await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: worker, text: 'just a note' })
     expect(handleOf(worker)!.sent).toHaveLength(2)
     expect(asked).toHaveLength(1)
   })
 
   it('create_session with a first message, refused: no session is made, and the answer carries the refusal', async () => {
-    const { orchestrator } = await setup()
+    const { assistant } = await setup()
     const before = sessionCount()
     refusal = S15
-    const r = await w.mgr.runOrchestratorTool(orchestrator, 'create_session', { project: w.target.id, firstMessage: 'start on the docs' })
+    const r = await w.mgr.runCentraluTool(assistant, 'create_session', { project: w.target.id, firstMessage: 'start on the docs' })
     expect(textOf(r)).toContain(S15)
     expect(sessionCount()).toBe(before)
-    expect(asked).toEqual([{ callerId: orchestrator, target: { projectId: w.target.id }, call: { tool: 'create_session', target: w.target.name, text: 'start on the docs' } }])
+    expect(asked).toEqual([{ callerId: assistant, target: { projectId: w.target.id }, call: { tool: 'create_session', target: w.target.name, text: 'start on the docs' } }])
   })
 
   it('create_session let go, or with no first message (never asked): made as before', async () => {
-    const { orchestrator } = await setup()
+    const { assistant } = await setup()
     const before = sessionCount()
-    await w.mgr.runOrchestratorTool(orchestrator, 'create_session', { project: w.target.id, firstMessage: 'start on the docs' })
+    await w.mgr.runCentraluTool(assistant, 'create_session', { project: w.target.id, firstMessage: 'start on the docs' })
     expect(sessionCount()).toBe(before + 1)
     refusal = S15
-    await w.mgr.runOrchestratorTool(orchestrator, 'create_session', { project: w.target.id })
+    await w.mgr.runCentraluTool(assistant, 'create_session', { project: w.target.id })
     expect(sessionCount()).toBe(before + 2)
     expect(asked).toHaveLength(1)
   })
 
   it('on a linked machine (sendLinked): refused before anything goes over the link; let go, it goes', async () => {
     linkMachine()
-    const { orchestrator } = await setup()
+    const { assistant } = await setup()
     refusal = S15
-    expect(textOf(await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: 'm1.w1', text: 'build it' }))).toContain(S15)
-    expect(textOf(await w.mgr.runOrchestratorTool(orchestrator, 'create_session', { project: 'm1/api', firstMessage: 'start there' }))).toContain(S15)
+    expect(textOf(await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: 'm1.w1', text: 'build it' }))).toContain(S15)
+    expect(textOf(await w.mgr.runCentraluTool(assistant, 'create_session', { project: 'm1/api', firstMessage: 'start there' }))).toContain(S15)
     expect(overLink).toEqual([])
     expect(asked.map((a) => [a.target, a.call])).toEqual([
       [{ sessionId: 'm1.w1', linked: true }, { tool: 'send_to_session', target: 'a session on Box', text: 'build it' }],
       [{ linked: true }, { tool: 'create_session', target: 'a session on Box', text: 'start there' }],
     ])
     refusal = null
-    await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: 'm1.w1', text: 'build it' })
+    await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: 'm1.w1', text: 'build it' })
     expect(overLink).toEqual(['send m1.w1: build it'])
   })
 })

@@ -2,7 +2,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { setup, newSession } from './control.js'
 
 /**
- * The folds of the sidebar: a folded project opens from its whole name row, and a project's rows and the orchestrator's
+ * The folds of the sidebar: a folded project opens from its whole name row, and a project's rows and the Assistant's
  * children slide open and closed (#1605). Run in Chromium (sidebar-fold.spec.ts) and in WebKit (sidebar-fold-webkit.spec.ts):
  * the desktop app is WKWebView, and a height animation has to be smooth there too.
  *
@@ -270,11 +270,11 @@ export function sidebarFoldTests() {
   })
 }
 
-/** An orchestrator with children (`current`, started by it) and `earlier` ones; the clock is paused after setup and moved by hand */
-export async function orchestratorWithChildren(page: Page, opts: { current?: string[]; earlier?: string[] } = { current: ['alpha', 'beta'] }): Promise<Record<string, unknown> & { id: string }> {
+/** An Assistant with children (`current`, started by it) and `earlier` ones; the clock is paused after setup and moved by hand */
+export async function assistantWithChildren(page: Page, opts: { current?: string[]; earlier?: string[] } = { current: ['alpha', 'beta'] }): Promise<Record<string, unknown> & { id: string }> {
   await page.clock.install()
   await setup(page, { projects: ['/tmp/consumer'] })
-  const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
+  const orc = await page.evaluate(async () => (await (window as any).__mock.agents.assistant()) as Record<string, unknown>)
   await page.evaluate(
     ([o, current, earlier]) => {
       const add = (name: string, askedBy: string) => {
@@ -291,13 +291,13 @@ export async function orchestratorWithChildren(page: Page, opts: { current?: str
   return orc as Record<string, unknown> & { id: string }
 }
 
-export function orchestratorFoldTests() {
-  const fold = (page: Page) => page.getByTestId('orchestrator-fold')
-  const button = (page: Page) => page.getByTestId('orchestrator-button')
-  const row = (page: Page, name: string) => page.getByTestId(`orchestrator-child-row-orc-child-${name}`)
+export function assistantFoldTests() {
+  const fold = (page: Page) => page.getByTestId('assistant-fold')
+  const button = (page: Page) => page.getByTestId('assistant-button')
+  const row = (page: Page, name: string) => page.getByTestId(`assistant-child-row-orc-child-${name}`)
 
-  test('Fold: the orchestrator children grow in steps, never jumping', async ({ page }) => {
-    await orchestratorWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
+  test('Fold: the Assistant children grow in steps, never jumping', async ({ page }) => {
+    await assistantWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
     await slowFolds(page)
     await button(page).hover()
     await page.clock.runFor(REST_MS)
@@ -308,8 +308,8 @@ export function orchestratorFoldTests() {
     expect(smooth(opening.heights)).toBe(true)
   })
 
-  test('Fold: a press on an orchestrator child while the list is still opening lands', async ({ page }) => {
-    await orchestratorWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
+  test('Fold: a press on an Assistant child while the list is still opening lands', async ({ page }) => {
+    await assistantWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
     await slowFolds(page)
     await button(page).hover()
     await page.clock.runFor(REST_MS)
@@ -319,8 +319,8 @@ export function orchestratorFoldTests() {
     await expect(row(page, 'alpha')).toHaveAttribute('aria-current', 'page')
   })
 
-  test('Fold: the orchestrator children stay in the page until their exit ends', async ({ page }) => {
-    await orchestratorWithChildren(page)
+  test('Fold: the Assistant children stay in the page until their exit ends', async ({ page }) => {
+    await assistantWithChildren(page)
     await button(page).hover()
     await page.clock.runFor(REST_MS)
     await expect(row(page, 'alpha')).toBeVisible()
@@ -334,9 +334,9 @@ export function orchestratorFoldTests() {
     await expect(fold(page)).toHaveCount(0)
   })
 
-  test('Fold: the orchestrator children fade in place with reduced motion', async ({ page }) => {
+  test('Fold: the Assistant children fade in place with reduced motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await orchestratorWithChildren(page)
+    await assistantWithChildren(page)
     await button(page).hover()
     await page.clock.runFor(REST_MS)
     await expect(row(page, 'alpha')).toBeVisible()

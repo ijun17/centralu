@@ -126,7 +126,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       text: 'run an agent (Claude Code) in a new session',
     },
   },
-  // The orchestrator's create_project card (#515)
+  // The Assistant's create_project card (#515)
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -144,7 +144,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       source: { git: 'git@github.com:me/app.git', branch: 'dev' },
     },
   },
-  // The orchestrator's add_project card (#1220): a folder here, and one on a linked machine
+  // The Assistant's add_project card (#1220): a folder here, and one on a linked machine
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -295,7 +295,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // A name a person set (issue #5). auto=false means an automatic name never overwrites it again
   { type: 'session_title', sessionId: 's1', title: 'Guard MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
-  { type: 'user_message', sessionId: 's1', seq: 12, text: 'text the orchestrator inserted' },
+  { type: 'user_message', sessionId: 's1', seq: 12, text: 'text the Assistant inserted' },
   // The origin of a message that arrived via instruction (FR-11)
   {
     type: 'user_message',
@@ -520,11 +520,11 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
   { type: 'host_request_resolved', requestId: 'r1', outcome: 'allowed' },
   { type: 'external_app_questions_changed' },
-  // An orchestrator proposal list changed (#703): carries nothing, the screen refetches both lists
+  // An Assistant proposal list changed (#703): carries nothing, the screen refetches both lists
   { type: 'orchestrator_proposals_changed' },
   { type: 'project_consents_changed' },
   { type: 'projects_changed' },
-  // A project the orchestrator added once the person allowed it (#1220)
+  // A project the Assistant added once the person allowed it (#1220)
   { type: 'projects_changed', added: 'p9' },
   // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)
   {
@@ -1200,7 +1200,7 @@ describe('sessionOnlyAlways (#581, #665, #694)', () => {
     expect(
       sessionOnlyAlways({
         kind: 'other',
-        raw: 'Allow the orchestrator to hand off?',
+        raw: 'Allow the Assistant to hand off?',
         about: SESSION_HANDOFF,
       }),
     ).toBe(true)

@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
-import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
 import { CURSOR_SURFACE } from './surface.js'
@@ -18,7 +18,7 @@ const exec = promisify(execFile)
  * `fs/*` method and sends no `session/request_permission` for a write, measured on Windows and macOS), and asks only for
  * commands and deletes: so Safe, Normal and Edits, which ask before a change, cannot be kept, and it runs under Auto only
  * (owner to decide whether Cursor stays offered so); nothing keeps it from reading `.cursor/rules` and `AGENTS.md`, so trusted
- * projects only; ACP has no field for Centralu's role text, so it cannot be the orchestrator, a coordinator or an app's
+ * projects only; ACP has no field for Centralu's role text, so it cannot be the Assistant, a coordinator or an app's
  * agent yet.
  */
 const CAPABILITIES: AdapterCapabilities = {
@@ -42,7 +42,7 @@ const DESCRIPTOR: ToolDescriptor = {
 export function centraluToolOfCall(call: { title?: string | null; kind?: string | null }): string | null {
   if (call.kind !== 'other') return null
   const m = /^([\w-]+): ([\w-]+)$/.exec(call.title ?? '')
-  return m?.[2] && m[1] === `${ORCHESTRATOR_MCP_NAME}-${m[2]}` ? m[2] : null
+  return m?.[2] && m[1] === `${CENTRALU_MCP_NAME}-${m[2]}` ? m[2] : null
 }
 
 /**

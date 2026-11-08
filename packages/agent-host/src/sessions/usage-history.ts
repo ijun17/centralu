@@ -10,7 +10,7 @@ import { mergeCauses, type StoredReading, type UsageBucket, type UsageRecords } 
 export const OTHERS_KEY = '*'
 /** At most this many keys per answer, most tokens first */
 export const MAX_KEYS = 50
-/** The key of the sessions that belong to no project (the orchestrator) */
+/** The key of the sessions that belong to no project (the Assistant) */
 export const NO_PROJECT_KEY = 'none'
 
 export type HistoryNames = {
@@ -35,7 +35,7 @@ const keyOf = (b: UsageBucket, by: UsageHistoryBy): string =>
 function nameOf(key: string, by: UsageHistoryBy, names: HistoryNames): string {
   if (key === OTHERS_KEY) return 'Others'
   if (by === 'session') return names.session(key) ?? key
-  if (by === 'project') return key === NO_PROJECT_KEY ? 'Orchestrator' : (names.project(key) ?? key)
+  if (by === 'project') return key === NO_PROJECT_KEY ? 'Assistant' : (names.project(key) ?? key)
   return key || 'Default model'
 }
 
@@ -148,7 +148,7 @@ export function usageHistory(usage: UsageRecords, p: HistoryParams, names: Histo
 const num = (n: number): string => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n))
 
 /**
- * The orchestrator's `usage_history` (docs/agent-host.md §6.2): the top keys by tokens with their cache hit rate and
+ * The Assistant's `usage_history` (docs/agent-host.md §6.2): the top keys by tokens with their cache hit rate and
  * rebuilds, then how each limit window moved. A few lines: it is read to pace work, so it stays short.
  */
 export function usageHistoryText(h: UsageHistory, days: number): string {

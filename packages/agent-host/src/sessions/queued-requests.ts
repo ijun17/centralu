@@ -75,7 +75,7 @@ export class QueuedRequests {
             : undefined
     const forkWhy = from === 'ask_project'
       ? 'ask_project never creates a session in another project'
-      // Said first, whatever its CLI can do (#994 review): a session with no project (the orchestrator's child) has no repository to fork from
+      // Said first, whatever its CLI can do (#994 review): a session with no project (the Assistant's child) has no repository to fork from
       : !target.projectId
         ? 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
       : !adapter?.forkConversation
@@ -216,7 +216,7 @@ export class QueuedRequests {
    * only the caller's `auto` let the request pass without it (`QueuedRequest.openedByAuto`, stored with the row); a consent the person gave once on a
    * card covers the request, and revoking a remembered one drops the queue (`withdrawReaches`). agent_session: the
    * ownership a caller that is not `auto` needs (a session it started) and the preset rule (never work for a session
-   * now above the caller). send_to_session queues behind the orchestrator's scope, which no card stands for.
+   * now above the caller). send_to_session queues behind the Assistant's scope, which no card stands for.
    * `quiet`: an earlier read already logged the `auto` boundary an ask_project row opens (`askGateError`).
    */
   private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo, quiet = false): string | null {

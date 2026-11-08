@@ -23,12 +23,12 @@ import { MailTurns } from './turns.js'
 export type HostMailSessions = {
   sessionInfo(id: string): SessionInfo | undefined
   listSessions(): SessionInfo[]
-  /** Whether the session's seat has the `mail` tool (`reader` or `orchestrator`) */
+  /** Whether the session's seat has the `mail` tool (`reader` or `assistant`) */
   canReadMail(id: string): boolean
-  orchestratorId(): string | null
-  /** Why sessions may not ask the orchestrator now, or null when they may (§7.6) */
-  orchestratorAsks(): string | null
-  /** Whether the session reaches `mail` as a command behind `centralu_run` (the orchestrator) */
+  assistantId(): string | null
+  /** Why sessions may not ask the Assistant now, or null when they may (§7.6) */
+  assistantAsks(): string | null
+  /** Whether the session reaches `mail` as a command behind `centralu_run` (the Assistant) */
   mailCommand(id: string): boolean
   /** Whether the session's turn goes on from the host before (kept, or continued after an update): its mail turn row is read back */
   keptInTurn(id: string): boolean
@@ -51,16 +51,16 @@ export type HostMailSessions = {
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'orchestratorId' | 'tenure' | 'mail' | 'processes'>,
-  orchestratorHasMailCommand: () => boolean,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes'>,
+  assistantHasMailCommand: () => boolean,
 ): HostMailSessions {
-  const seats = mgr.mail.mailSeats(orchestratorHasMailCommand)
+  const seats = mgr.mail.mailSeats(assistantHasMailCommand)
   return {
     sessionInfo: (id) => mgr.sessionInfo(id),
     listSessions: () => mgr.listSessions(),
     canReadMail: (id) => seats.mailTool(id),
-    orchestratorId: () => mgr.orchestratorId(),
-    orchestratorAsks: () => mgr.mail.orchestratorAsks(),
+    assistantId: () => mgr.assistantId(),
+    assistantAsks: () => mgr.mail.assistantAsks(),
     mailCommand: (id) => seats.mailCommand(id),
     keptInTurn: (id) => mgr.tenure.keptInTurn(id),
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
@@ -112,8 +112,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link
       return sessions.onLinkedMachine?.(id) ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere' } : undefined
     },
-    orchestratorId: () => sessions.orchestratorId(),
-    orchestratorAsks: () => sessions.orchestratorAsks() === null,
+    assistantId: () => sessions.assistantId(),
+    assistantAsks: () => sessions.assistantAsks() === null,
     // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session
     appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
     project: (projectId) => {
@@ -197,7 +197,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const s = sessions.sessionInfo(id)
       return s && { address: addressOf(id), askedBy: s.askedBy ?? null, ...(s.startedFromHub ? { fromHub: true } : {}) }
     },
-    orchestratorId: () => sessions.orchestratorId(),
+    assistantId: () => sessions.assistantId(),
     sessions: () => sessions.listSessions().map((s) => ({ id: s.id, name: s.name, project: s.projectId ?? null, state: s.state })),
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
@@ -286,7 +286,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   }
 }
 
-/** The session addresses whose requests to the orchestrator are counted together (§7.5): one project and one root of who started whom */
+/** The session addresses whose requests to the Assistant are counted together (§7.5): one project and one root of who started whom */
 function askGroupMembers(sessions: HostMailSessions, hostId: string, address: string): string[] {
   const party = parseAddress(address)
   const all = sessions.listSessions()
@@ -295,7 +295,7 @@ function askGroupMembers(sessions: HostMailSessions, hostId: string, address: st
     for (let i = 0; i < 16; i++) {
       const up = all.find((s) => s.id === at)?.askedBy
       const upper = up ? all.find((s) => s.id === up) : undefined
-      // The walk stops before the orchestrator: it starts sessions in every project, so they are not one group (only their project is)
+      // The walk stops before the Assistant: it starts sessions in every project, so they are not one group (only their project is)
       if (!upper || upper.kind === 'orchestrator') break
       at = upper.id
     }

@@ -23,7 +23,7 @@ async function two() {
     await world.rpc('sessions.rename', { sessionId: s.id, name }).catch(() => {})
     return s.id
   }
-  return { caller: await make('Orchestrator'), child: await make('Worker') }
+  return { caller: await make('Assistant'), child: await make('Worker') }
 }
 
 describe('who waits for a session\'s work (#1377)', () => {
@@ -39,7 +39,7 @@ describe('who waits for a session\'s work (#1377)', () => {
   it('also for a linked machine\'s session whose report this hub holds', async () => {
     const { caller } = await two()
     expect(await world.rpc('agents.reportOwed', { sessionId: 'm1.w1' })).toEqual({ owed: null })
-    children.setLinkedReport('m1.w1', { orchestratorId: caller, busy: false })
+    children.setLinkedReport('m1.w1', { assistantId: caller, busy: false })
     expect(await world.rpc('agents.reportOwed', { sessionId: 'm1.w1' })).toMatchObject({ owed: { callerId: caller } })
   })
 

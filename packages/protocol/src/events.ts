@@ -170,7 +170,7 @@ const ReasoningDelta = z.object({
  * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
  * pages) and from every stored message it reads back unless the reader asks for them by name
  * (`Store.loadMessages`). Full tool output reaching another session's prompt is the privilege path #73 closed:
- * `read_session`, `recall`, the handoff record and the orchestrator's memory read `summary` and nothing else. And
+ * `read_session`, `recall`, the handoff record and the Assistant's memory read `summary` and nothing else. And
  * an agent `cat`-ing a large file would otherwise ride every page load. Neither field is in the search index.
  */
 const ToolCall = z.object({
@@ -277,7 +277,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * A person's message was added to the conversation.
    *
    * **This was unnecessary back when the UI only ever needed to draw what it itself sent.** But
-   * once the orchestrator started talking to other sessions via send_to_session, there came to
+   * once the Assistant started talking to other sessions via send_to_session, there came to
    * be two producers of user messages — from that point on, a message that never passed through
    * the UI had no way to appear on screen at all (it was still saved, though).
    *
@@ -292,7 +292,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /*
      * The origin (FR-11). Absent means the person typed it directly — which is why it is
      * optional and stays compatible with old frames. Only two places fill it in: the
-     * orchestrator's send_to_session, and a worker's completion report (reportBack).
+     * Assistant's send_to_session, and a worker's completion report (reportBack).
      * The screen uses this value to draw "a message that arrived via instruction" differently
      * from the person's own words.
      */
@@ -452,7 +452,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
    * the next message resumes it), or a resume brought it back (`live: true`), whoever asked for it. Before this, `live`
    * only came in lists and in answers to the window that woke a session, so another window, or a session woken by the
-   * orchestrator or an app, kept showing the old value.
+   * assistant or an app, kept showing the old value.
    */
   z.object({
     ...base,
@@ -640,7 +640,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   }),
   /** Caught up on a conversation continued from outside — the signal for the UI to reread the record */
   /**
-   * The orchestrator changed this session's settings (#30).
+   * The Assistant changed this session's settings (#30).
    *
    * A change a person made on screen returns as the RPC response, so no event is needed for
    * that — this path exists for a change made by **a hand other than the person's own**. A
@@ -663,7 +663,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      */
     permissionPreset: PermissionPreset.optional(),
     /**
-     * Whose hand it was (#304). Absent means the orchestrator, the only author this event had before.
+     * Whose hand it was (#304). Absent means the Assistant, the only author this event had before.
      *
      * `tool` means the agent tool switched by itself, mid-session: Claude Code falling back to another model after a
      * refusal (`model_refusal_fallback`), another Codex client changing the thread's settings
@@ -676,7 +676,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /**
      * A client changed it through `agents.updateSettings` (#659). The caller already has the answer, but every other
      * window, linked machine and the person's own window (when an agent made the call) only learns it from this event.
-     * It updates the values shown without the "Orchestrator changed" toast: nobody else's hand was involved, and the
+     * It updates the values shown without the "Assistant changed" toast: nobody else's hand was involved, and the
      * caller's own toast states what it did.
      *
      * **A separate flag, not a third `by` word**: a build from before it parses this frame against a `by` enum without
@@ -693,7 +693,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    *
    * A session the UI creates directly is known through the RPC response, but there was no way to
    * know about a session the host creates on its own — the manager a worktree-orphan adoption
-   * stands up, or the orchestrator's create_session. An event for an unknown session goes into
+   * stands up, or the Assistant's create_session. An event for an unknown session goes into
    * a holding area (pendingEvents), and the condition for draining that area is "once the
    * session is registered," so without a registration event it stayed there forever. A session
    * that only ever appeared via listSessions after a reconnect contradicted the create_session
@@ -881,7 +881,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('themes_changed') }),
   /**
-   * The screen preferences changed (#1306): a window saved a setting, or the orchestrator did. As coarse as the others:
+   * The screen preferences changed (#1306): a window saved a setting, or the Assistant did. As coarse as the others:
    * it carries nothing, and the receiving side reads `prefs.get` again. A window from before it keeps what it loaded
    * until it reloads.
    */
@@ -907,10 +907,10 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
   /**
-   * The orchestrator's MCP-server or skill proposal list changed (#703): a proposal was saved, approved or dismissed.
+   * The Assistant's MCP-server or skill proposal list changed (#703): a proposal was saved, approved or dismissed.
    * Sent by the place that writes the list, after the write. The same coarseness: this carries nothing, and the
    * receiving side refetches `agents.mcpProposals` and `agents.skillProposals`. A screen must not guess the moment
-   * from the orchestrator's `tool_call`, which arrives before the host has saved anything.
+   * from the Assistant's `tool_call`, which arrives before the host has saved anything.
    */
   z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
   /**
@@ -920,12 +920,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
   /**
    * A project changed on the host without this window asking (#515, #719): the host made one of its own accord (the
-   * orchestrator's create_project, once the person approved it, or `projects.create` from another window), or a
+   * Assistant's create_project, once the person approved it, or `projects.create` from another window), or a
    * setting of a project was saved: trust, saved commands, worktree setup, worktree trunk, the default tool, or the
    * model and effort last chosen for a tool. Carries nothing; the list is re-read, new projects join it and a listed
    * project takes the host's value of those settings. Sent when the saved value changed, not on every write.
    *
-   * `added` (#1220, additive): a folder the person just allowed the orchestrator to add as a project (add_project). A
+   * `added` (#1220, additive): a folder the person just allowed the Assistant to add as a project (add_project). A
    * window asks about its trust once, as when the person adds a folder from the sidebar; an older window re-reads the
    * list only.
    */

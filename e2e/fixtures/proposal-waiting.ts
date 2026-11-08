@@ -2,11 +2,11 @@ import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './project-screen.js'
 
 /**
- * An orchestrator proposal (an MCP server or a skill) waits on the person like an approval does (#703).
+ * An Assistant proposal (an MCP server or a skill) waits on the person like an approval does (#703).
  *
- * The card stands on the orchestrator's own screen, so the scenarios put the person on another session and check that
- * the wait is still seen: the orchestrator's sidebar row, the count, the waiting list, and the jump to the card. The
- * first one is the race the owner met: the orchestrator's `tool_call` reaches the screen **before** the host saves the
+ * The card stands on the Assistant's own screen, so the scenarios put the person on another session and check that
+ * the wait is still seen: the Assistant's sidebar row, the count, the waiting list, and the jump to the card. The
+ * first one is the race the owner met: the Assistant's `tool_call` reaches the screen **before** the host saves the
  * proposal, and the card must still appear without a reload.
  *
  * A function, like the other fixtures, because it runs in Chromium and in WebKit (the desktop app is WKWebView).
@@ -18,14 +18,14 @@ type Mock = {
   proposalReads: number
 }
 
-/** The orchestrator has a conversation, and the person is looking at another session */
-async function orchestratorAndElsewhere(page: Page) {
+/** The Assistant has a conversation, and the person is looking at another session */
+async function assistantAndElsewhere(page: Page) {
   await setup(page, ['/tmp/alpha'])
-  await page.getByTestId('orchestrator-button').click()
-  await page.getByTestId('orchestrator-input').fill('hello')
-  await page.getByTestId('orchestrator-input').press('Enter')
+  await page.getByTestId('assistant-button').click()
+  await page.getByTestId('assistant-input').fill('hello')
+  await page.getByTestId('assistant-input').press('Enter')
   await expect(page.getByTestId('msg-user').first()).toBeVisible()
-  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  const orc = await page.evaluate(() => (window as any).__store.getState().assistantId as string)
   const other = await newSession(page, 'alpha')
   expect(other).not.toBe(orc)
   return { orc, other }
@@ -59,7 +59,7 @@ async function proposeAfterToolCall(page: Page, orc: string, spec: Record<string
 
 export function proposalWaitingTests() {
   test('a proposal saved after its tool_call shows the card without a reload', async ({ page }) => {
-    const { orc } = await orchestratorAndElsewhere(page)
+    const { orc } = await assistantAndElsewhere(page)
     const reads = await proposeAfterToolCall(
       page, orc, { mcp: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'drive a browser' } },
       'mcp__centralu__propose_mcp_server',
@@ -67,25 +67,25 @@ export function proposalWaitingTests() {
     // The screen does not read on the call's start: the host's announcement after the save is what it waits for
     expect(reads).toBe(0)
 
-    await page.getByTestId('orchestrator-button').click()
+    await page.getByTestId('assistant-button').click()
     await expect(page.getByTestId('mcp-proposal-playwright')).toBeVisible()
     await expect(page.getByTestId('mcp-proposal-playwright')).toContainText('drive a browser')
   })
 
   test('a skill proposal saved after its tool_call shows the card without a reload', async ({ page }) => {
-    const { orc } = await orchestratorAndElsewhere(page)
+    const { orc } = await assistantAndElsewhere(page)
     await proposeAfterToolCall(
       page, orc, { skill: { name: 'weekly-report', content: 'Every Friday, write the summary.' } },
       'mcp__centralu__propose_skill',
     )
 
-    await page.getByTestId('orchestrator-button').click()
+    await page.getByTestId('assistant-button').click()
     await expect(page.getByTestId('skill-proposal-weekly-report')).toBeVisible()
   })
 
   test('from another session the wait is seen in the count and in the waiting list, and the list leads to the card', async ({ page }) => {
-    const { orc, other } = await orchestratorAndElsewhere(page)
-    await expect(page.getByTestId('orchestrator-proposal-waiting')).toHaveCount(0)
+    const { orc, other } = await assistantAndElsewhere(page)
+    await expect(page.getByTestId('assistant-proposal-waiting')).toHaveCount(0)
     await expect(page.getByTestId('count-waiting')).toContainText('0')
 
     await proposeAfterToolCall(
@@ -93,9 +93,9 @@ export function proposalWaitingTests() {
       'mcp__centralu__propose_mcp_server',
     )
 
-    // Still on the other session: the count says something waits (the orchestrator's row carries no dot since 2026-10-17)
+    // Still on the other session: the count says something waits (the Assistant's row carries no dot since 2026-10-17)
     expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(other)
-    await expect(page.getByTestId('orchestrator-proposal-waiting')).toHaveCount(0)
+    await expect(page.getByTestId('assistant-proposal-waiting')).toHaveCount(0)
     await expect(page.getByTestId('count-waiting')).toContainText('1')
 
     await page.getByTestId('counter').click()
@@ -105,25 +105,25 @@ export function proposalWaitingTests() {
     await expect(row).toContainText('Needs your answer')
     await row.click()
 
-    // The jump lands on the orchestrator's screen, where the card stands
+    // The jump lands on the Assistant's screen, where the card stands
     await expect(page.getByTestId('inbox')).toBeHidden()
     await expect(page.getByTestId('mcp-proposal-playwright')).toBeVisible()
-    await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('assistant-button')).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('answering the card takes the wait off the count and the list', async ({ page }) => {
-    const { orc } = await orchestratorAndElsewhere(page)
+    const { orc } = await assistantAndElsewhere(page)
     await proposeAfterToolCall(
       page, orc, { skill: { name: 'weekly-report', content: 'Every Friday, write the summary.' } },
       'mcp__centralu__propose_skill',
     )
     await expect(page.getByTestId('count-waiting')).toContainText('1')
 
-    await page.getByTestId('orchestrator-button').click()
+    await page.getByTestId('assistant-button').click()
     await page.getByTestId('skill-dismiss-weekly-report').click()
 
     await expect(page.getByTestId('skill-proposal-weekly-report')).toHaveCount(0)
-    await expect(page.getByTestId('orchestrator-proposal-waiting')).toHaveCount(0)
+    await expect(page.getByTestId('assistant-proposal-waiting')).toHaveCount(0)
     await expect(page.getByTestId('count-waiting')).toContainText('0')
     await page.getByTestId('counter').click()
     await expect(page.getByTestId('inbox-empty')).toBeVisible()

@@ -322,8 +322,8 @@ describe('how long an attachment lasts', () => {
 })
 
 /**
- * A project that is an app (#1141) takes the user-folder app's place: the orchestrator and another project's session
- * find and attach it without a share switch or a card (the orchestrator since #1205; it was given every one before), and
+ * A project that is an app (#1141) takes the user-folder app's place: the Assistant and another project's session
+ * find and attach it without a share switch or a card (the Assistant since #1205; it was given every one before), and
  * its own project's sessions get it with the rest of their project's apps.
  */
 describe('a project that is an app (#1141)', () => {
@@ -341,7 +341,7 @@ describe('a project that is an app (#1141)', () => {
     expect(asks).toEqual([])
   })
 
-  it("an untrusted project's apps, root and inner alike, attach nowhere, not even under auto: no other session, not the orchestrator, not its own project's session", async () => {
+  it("an untrusted project's apps, root and inner alike, attach nowhere, not even under auto: no other session, not the Assistant, not its own project's session", async () => {
     w.trust.p2 = false
     w.plantRoot('p2', 'kanban')
     w.rt.refresh()
@@ -357,35 +357,35 @@ describe('a project that is an app (#1141)', () => {
     session('w1', 'p1')
     expect(refs('w1')).toEqual(['helper'])
     expect(await access.attach('w1', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
-    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
-    sessions.set('o', orchestrator)
+    const assistant: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', assistant)
     expect(refs('o')).toEqual([])
     expect(await access.attach('o', 'Beta/kanban')).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
-    expect(hub.refsFor(orchestrator).map((h) => h.server)).toEqual(['app-helper'])
-    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
+    expect(hub.refsFor(assistant).map((h) => h.server)).toEqual(['app-helper'])
+    expect(hub.reach(assistant, { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
     expect(hub.refsFor(session('w2', 'p2')).map((h) => h.server)).toEqual([])
     expect(hub.reach(session('w2', 'p2'), { projectId: 'p2', appId: 'kanban' })).toMatchObject({ reachable: false, reason: 'untrusted' })
   })
 
-  it("the orchestrator is given the user-folder apps and attaches a root app itself, never a project's inner app; its own project's sessions get it; two of one id are named apart", async () => {
+  it("the Assistant is given the user-folder apps and attaches a root app itself, never a project's inner app; its own project's sessions get it; two of one id are named apart", async () => {
     w.plant('user', 'kit')
     w.plantRoot('p1', 'kit')
     w.plantRoot('p2', 'kit')
     w.rt.refresh()
-    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
-    sessions.set('o', orchestrator)
+    const assistant: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', assistant)
     // No root app until it attaches one (#1205): its tool list does not grow with every project that is an app
-    expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
+    expect(hub.refsFor(assistant).map((h) => [h.server, h.ref.projectId])).toEqual([
       ['app-helper', null],
       ['app-kit', null],
     ])
     // Its agent attaches one itself, with nothing for the person to do
-    expect(hub.reach(orchestrator, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
+    expect(hub.reach(assistant, { projectId: 'p2', appId: 'kit' })).toEqual({ reachable: true })
     expect(refs('o')).toEqual(['Alpha/kit', 'Beta/kit'])
     expect(await access.attach('o', 'Alpha/kit')).toMatchObject({ ok: true, server: 'app-kit-2' })
     expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit-3' })
     expect(asks).toEqual([])
-    expect(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId])).toEqual([
+    expect(hub.refsFor(assistant).map((h) => [h.server, h.ref.projectId])).toEqual([
       ['app-helper', null],
       ['app-kit', null],
       ['app-kit-2', 'p1'],
@@ -418,8 +418,8 @@ describe('stable app names (#1141)', () => {
       onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) },
     })
     access = newAccess()
-    const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
-    sessions.set('o', orchestrator)
+    const assistant: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+    sessions.set('o', assistant)
     w.plantRoot('p2', 'kit')
     w.rt.refresh()
     expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit' })
@@ -427,11 +427,11 @@ describe('stable app names (#1141)', () => {
     expect(access.detach('o', 'Beta/kit')).toMatchObject({ ok: true })
     w.plant('user', 'kit')
     w.rt.refresh()
-    expect(Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit-user': null })
+    expect(Object.fromEntries(hub.refsFor(assistant).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit-user': null })
     expect(await access.attach('o', 'Beta/kit')).toMatchObject({ ok: true, server: 'app-kit' })
     // A new hub (a host restart, a swap) reads the same names back
     const next = new SessionAppsHub(w.rt, { names, projectName, onDemand: { attached: (id) => access.attached(id), allowed: (s, a) => access.allowed(s, a) } })
-    expect(Object.fromEntries(next.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit': 'p2', 'app-kit-user': null })
+    expect(Object.fromEntries(next.refsFor(assistant).map((h) => [h.server, h.ref.projectId]))).toEqual({ 'app-helper': null, 'app-kit': 'p2', 'app-kit-user': null })
     next.dispose()
   })
 
@@ -451,16 +451,16 @@ describe('stable app names (#1141)', () => {
     })
     access = newAccess()
     try {
-      // The longest id: a user-folder app holds the plain name, and each root app the orchestrator attaches is numbered within the cap
+      // The longest id: a user-folder app holds the plain name, and each root app the Assistant attaches is numbered within the cap
       w.plant('user', id)
       w.plantRoot('p1', id)
       w.plantRoot('p2', id)
       w.rt.refresh()
-      const orchestrator: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
-      sessions.set('o', orchestrator)
+      const assistant: AppSessionKey = { id: 'o', kind: 'orchestrator', projectId: null }
+      sessions.set('o', assistant)
       expect(await access.attach('o', `Alpha/${id}`)).toMatchObject({ ok: true })
       expect(await access.attach('o', `A project whose name goes on and on/${id}`)).toMatchObject({ ok: true })
-      const longest = Object.fromEntries(hub.refsFor(orchestrator).map((h) => [h.server, h.ref.projectId]))
+      const longest = Object.fromEntries(hub.refsFor(assistant).map((h) => [h.server, h.ref.projectId]))
       expect(longest).toEqual({ 'app-helper': null, [`app-${id}`]: null, [`app-${id.slice(0, 30)}-2`]: 'p1', [`app-${id.slice(0, 30)}-3`]: 'p2' })
       // A shorter id, given by the rule to a session that already holds its plain name: a long project name is cut
       const shorter = 'kit-for-team'

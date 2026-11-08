@@ -12,13 +12,13 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { CapturingAdapter, FIXTURE_APP } from './session-apps.test-helpers.js'
-import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, setRareTier } from './centralu-tools.js'
 
 /**
  * An MCP server a person approved becomes a headless app in the user folder (M4 A-7, decision 8).
  *
  * It used to be that, once approved, a server was written to app_settings
- * (`orchestrator_mcp_servers`) and loaded raw into the orchestrator's MCP configuration — a call
+ * (`orchestrator_mcp_servers`) and loaded raw into the Assistant's MCP configuration — a call
  * passed through neither an intermediary nor a record, and there was no listing and no removal.
  * This is checked here with a real store, a real runtime and a real app process (a fixture); only
  * the adapter is fake — it records the options it received, and an attached app is called through
@@ -79,32 +79,32 @@ const attached = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server
 const tick = () => new Promise((r) => setTimeout(r, 20))
 
 async function proposeAndApprove(name: string, server = SERVER, why?: string) {
-  const orc = await mgr.orchestrator()
-  const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name, ...server, ...(why ? { why } : {}) })
+  const orc = await mgr.assistant()
+  const r = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name, ...server, ...(why ? { why } : {}) })
   expect(r.isError).toBeFalsy()
-  return { orc, resolved: await mgr.orchestratorSlot.resolveMcpProposal(name, true) }
+  return { orc, resolved: await mgr.assistantSlot.resolveMcpProposal(name, true) }
 }
 
 /*
- * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * These call the Assistant's rare commands by their own names, as tools: the `resident` tier (#512). The
  * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
  */
 beforeAll(() => setRareTier('resident'))
 afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
 describe('an approved MCP server becomes a user-folder app (A-7)', () => {
-  it('a proposal creates nothing; approval creates the app and restarts the orchestrator, and the tool is recorded going through the intermediary', async () => {
+  it('a proposal creates nothing; approval creates the app and restarts the Assistant, and the tool is recorded going through the intermediary', async () => {
     connect()
-    const orc = await mgr.orchestrator()
-    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: 'test server' })
-    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
+    const orc = await mgr.assistant()
+    await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER, why: 'test server' })
+    expect(mgr.assistantSlot.mcpProposals().map((p) => p.name)).toEqual(['echoer'])
     // Nothing exists yet at the proposal stage
     expect(existsSync(join(dataRoot, 'apps', 'echoer'))).toBe(false)
     expect(userApps()).toEqual([])
 
     const before = adapter.seen.length
-    expect(await mgr.orchestratorSlot.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(await mgr.assistantSlot.resolveMcpProposal('echoer', true)).toEqual({ ok: true })
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
 
     // A headless app: only a server command, no home. The app stands without starting (it starts the first time it is needed)
     const m = readManifest('echoer')
@@ -114,14 +114,14 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
     // It is not written to the legacy registry
     expect(store.settings.appSetting(LEGACY_KEY)).toBeNull()
 
-    // The orchestrator has restarted, and that server is attached as an app proxy server — no server is loaded raw
+    // The Assistant has restarted, and that server is attached as an app proxy server — no server is loaded raw
     expect(adapter.seen.length).toBe(before + 1)
     const o = adapter.last()
     expect(o.sessionId).toBe(orc.id)
     expect(attached(o)).toEqual(['app-echoer'])
     expect(o).not.toHaveProperty('extraMcpServers')
 
-    // Calling that tool goes through the intermediary and is recorded with the caller (this orchestrator)
+    // Calling that tool goes through the intermediary and is recorded with the caller (this Assistant)
     const out = await o.apps!.call('app-echoer', 'poke', { to: 3 })
     expect(out.isError).toBeFalsy()
     expect(out.content).toEqual([{ type: 'text', text: 'poked 3' }])
@@ -132,11 +132,11 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
 
   it('a rejection only clears the proposal — no app, no restart', async () => {
     connect()
-    const orc = await mgr.orchestrator()
-    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
+    const orc = await mgr.assistant()
+    await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'figma', command: 'npx', args: [] })
     const before = adapter.seen.length
-    await mgr.orchestratorSlot.resolveMcpProposal('figma', false)
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    await mgr.assistantSlot.resolveMcpProposal('figma', false)
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
     expect(userApps()).toEqual([])
     expect(adapter.seen.length).toBe(before)
   })
@@ -144,25 +144,25 @@ describe('an approved MCP server becomes a user-folder app (A-7)', () => {
   it('cannot be proposed under the name of an existing app or a reserved id — overwriting would be swapping out the command', async () => {
     connect()
     const { orc } = await proposeAndApprove('dup')
-    const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'evil', args: [] })
+    const again = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'dup', command: 'evil', args: [] })
     expect(again.isError).toBe(true)
     expect(readManifest('dup').server).toEqual(SERVER)
 
-    const builtin = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'control', command: 'npx', args: [] })
+    const builtin = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'control', command: 'npx', args: [] })
     expect(builtin.isError).toBe(true)
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
   })
 
   it('if a different app with the same id appeared while it was awaiting approval, it fails instead of overwriting, and the proposal stays', async () => {
     connect()
-    const orc = await mgr.orchestrator()
-    await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'taken', command: 'npx', args: ['-y', 'x'] })
+    const orc = await mgr.assistant()
+    await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'taken', command: 'npx', args: ['-y', 'x'] })
     plantApp(join(dataRoot, 'apps'), 'taken', { server: SERVER })
-    const r = await mgr.orchestratorSlot.resolveMcpProposal('taken', true)
+    const r = await mgr.assistantSlot.resolveMcpProposal('taken', true)
     expect(r.ok).toBe(false)
     expect(r.error).toContain('taken')
     expect(readManifest('taken').server).toEqual(SERVER)
-    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['taken'])
+    expect(mgr.assistantSlot.mcpProposals().map((p) => p.name)).toEqual(['taken'])
   })
 })
 
@@ -195,8 +195,8 @@ describe('migrates an approved server from the legacy registry (A-7)', () => {
     expect(readdirSync(join(dataRoot, 'apps'))).toEqual(['echoer'])
     expect(JSON.parse(store.settings.appSetting(LEGACY_KEY)!)).toEqual([{ name: 'centralu', command: 'npx', args: ['-y', 'whatever'] }])
 
-    // The orchestrator receives the migrated app, and the legacy entry is loaded raw nowhere
-    await mgr.orchestrator()
+    // The Assistant receives the migrated app, and the legacy entry is loaded raw nowhere
+    await mgr.assistant()
     expect(attached(adapter.last())).toEqual(['app-echoer'])
     expect(adapter.last()).not.toHaveProperty('extraMcpServers')
   })
@@ -220,7 +220,7 @@ describe('migrates an approved server from the legacy registry (A-7)', () => {
 })
 
 describe('removal (apps.remove, A-7)', () => {
-  it('removing a user-folder app drops it from the list and the orchestrator, and its folder goes to app-trash', async () => {
+  it('removing a user-folder app drops it from the list and the Assistant, and its folder goes to app-trash', async () => {
     connect()
     const { orc } = await proposeAndApprove('echoer')
     const apps = adapter.last().apps!
@@ -244,7 +244,7 @@ describe('removal (apps.remove, A-7)', () => {
     // The removed app's run record stays
     expect(rt.runs({ projectId: null, appId: 'echoer' })).toEqual([expect.objectContaining({ tool: 'peek', callerSessionId: orc.id })])
     // The same name can be proposed again
-    const again = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER })
+    const again = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', { name: 'echoer', ...SERVER })
     expect(again.isError).toBeFalsy()
   })
 

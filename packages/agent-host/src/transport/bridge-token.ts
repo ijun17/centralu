@@ -6,7 +6,7 @@ import { sameSecret } from './http.js'
  * The Codex bridge's credential: good for one session's bridge calls, and nothing else (#382, owner
  * question 4).
  *
- * The bridge (`adapters/codex/orchestrator-bridge.mjs`) is a process Codex starts, and it gets its
+ * The bridge (`adapters/codex/centralu-bridge.mjs`) is a process Codex starts, and it gets its
  * credential in its environment. The environment a process started with stays readable by every
  * other process of the same user: on macOS 27.0.1 `ps eww -p <pid>` and `sysctl kern.procargs2`
  * printed a marker variable of another process, also after that process had deleted it from
@@ -47,7 +47,7 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 }
 
 /**
- * Every RPC the bridge sends (orchestrator-bridge.mjs), and nothing more. Each one names its session
+ * Every RPC the bridge sends (centralu-bridge.mjs), and nothing more. Each one names its session
  * in `sessionId`, and the host already judges what that session may do from it: these four only carry
  * a session's own tool calls.
  */
@@ -61,7 +61,7 @@ export const BRIDGE_METHODS: ReadonlySet<string> = new Set([
 /**
  * Why a connection holding the bridge credential of `boundSession` may not make this call, or null
  * if it may. The session has to be named and has to be the bound one: `orchestrator.tools` without
- * a session lists the full orchestrator set, which is not this session's to read.
+ * a session lists the full assistant set, which is not this session's to read.
  */
 export function bridgeRefusal(boundSession: string, method: string, params: unknown): string | null {
   if (!BRIDGE_METHODS.has(method)) return `A Codex bridge's credential cannot call ${method}`

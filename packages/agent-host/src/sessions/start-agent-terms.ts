@@ -1,6 +1,6 @@
 /*
  * What start_agent's modules share (#428): the bounds its setup and call run within, the line that tells a refused
- * model to ask the person, the answers a standing request gives, and the place of the orchestrator's children. Moved
+ * model to ask the person, the answers a standing request gives, and the place of the Assistant's children. Moved
  * out of start-agent-flow.ts as they were, so no module that start_agent is split into imports the flow; the flow
  * still exports them.
  */
@@ -20,7 +20,7 @@ export const START_AGENT_SETUP_MS = 200_000
 
 /**
  * How long one start_agent call may take in all, setup and wait together: the Codex bridge's 280 seconds
- * (`APP_CALL_TIMEOUT_MS`, orchestrator-bridge.mjs) less a margin. What the setup used is taken off the wait.
+ * (`APP_CALL_TIMEOUT_MS`, centralu-bridge.mjs) less a margin. What the setup used is taken off the wait.
  */
 export const START_AGENT_CALL_MS = 270_000
 
@@ -63,18 +63,18 @@ export function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how
 }
 
 /**
- * The place of the orchestrator's children (#853): outside any project, each child in a folder of its own, never the
- * orchestrator's (`newOrchestratorAgentFolder`, #994 review). A child has no project, so the place's id is empty: it
+ * The place of the Assistant's children (#853): outside any project, each child in a folder of its own, never the
+ * Assistant's (`newAssistantAgentFolder`, #994 review). A child has no project, so the place's id is empty: it
  * keys the per-place ceiling and names no project on the card, and a stored request carries it as its `projectId`.
  */
-export const ORCHESTRATOR_PLACE = ''
+export const ASSISTANT_PLACE = ''
 
 /**
- * The orchestrator's place as a start reads a project, with the orchestrator's own tool as the default. It has no
- * folder: each child gets one of its own when it is made (`newOrchestratorAgentFolder`, #994 review)
+ * The Assistant's place as a start reads a project, with the Assistant's own tool as the default. It has no
+ * folder: each child gets one of its own when it is made (`newAssistantAgentFolder`, #994 review)
  */
-export function orchestratorPlace(caller: SessionInfo): { id: string; name: string; path: string; trusted: true; defaultTool: ToolName } {
-  return { id: ORCHESTRATOR_PLACE, name: 'a folder of its own, outside any project', path: '', trusted: true, defaultTool: caller.tool }
+export function assistantPlace(caller: SessionInfo): { id: string; name: string; path: string; trusted: true; defaultTool: ToolName } {
+  return { id: ASSISTANT_PLACE, name: 'a folder of its own, outside any project', path: '', trusted: true, defaultTool: caller.tool }
 }
 
 /** How far start_agent's setup had come when its bound passed (#660) */

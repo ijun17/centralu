@@ -3,10 +3,10 @@ import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } from './asked-acts.js'
 
 /**
- * The orchestrator's steps in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md §2).
+ * The Assistant's steps in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md §2).
  *
- * Every tool and command of the orchestrator runs through `when`, and every step of its CLI through `askCli`. In any turn that is not a request
- * they run at once, as before. In a request's turn the orchestrator judges, from the request and the person's message it may cite (checked by the
+ * Every tool and command of the Assistant runs through `when`, and every step of its CLI through `askCli`. In any turn that is not a request
+ * they run at once, as before. In a request's turn the Assistant judges, from the request and the person's message it may cite (checked by the
  * host at send), what to do, and these hold whatever it judges:
  *
  * - **A step that can be undone** (`stepKind` `undoable`: a project added, a session renamed, a setting changed), and work handed on to a session
@@ -28,12 +28,12 @@ import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } fr
  */
 
 export type AskedGateHost = {
-  /** Who asked for the turn the orchestrator is in, or null when the turn is not a session's request (the person's, or one the orchestrator was given by another route) */
-  askedBy(orchestratorId: string): Asker | null
+  /** Who asked for the turn the Assistant is in, or null when the turn is not a session's request (the person's, or one the Assistant was given by another route) */
+  askedBy(assistantId: string): Asker | null
   /** The person's card with the question, Allow or Deny only; not covered by a step's own Allow */
-  ask(orchestratorId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
-  /** Runs `run` while the cards the orchestrator raises are covered by the Allow just given */
-  cover<T>(orchestratorId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
+  ask(assistantId: string, question: string, signal?: AbortSignal): Promise<'allow' | 'deny' | null>
+  /** Runs `run` while the cards the Assistant raises are covered by the Allow just given */
+  cover<T>(assistantId: string, run: () => Promise<T>, signal?: AbortSignal): Promise<T>
   /**
    * Whether work handed on (`handsOn`: a session made or started, a session handed off, a message or mail to a session's turn) goes to a session
    * under no looser preset than the asking session's own, once any cap is applied. False when that preset is not known here
@@ -50,25 +50,25 @@ export type WhenAsked = <T>(
   call: { name: string; args: Record<string, unknown>; readOnly?: boolean },
   signal: AbortSignal | undefined,
   run: () => Promise<T>,
-  /** The refusal in the shape the step gives back: a tool's result for the orchestrator's own tools, an app tool's for an attached app's */
+  /** The refusal in the shape the step gives back: a tool's result for the Assistant's own tools, an app tool's for an attached app's */
   refused: (text: string) => T,
 ) => Promise<T>
 
 export class AskedGate {
   constructor(private readonly host: AskedGateHost) {}
 
-  /** Whether the orchestrator's turn that is going is a session's request */
-  active(orchestratorId: string): boolean {
-    return this.host.askedBy(orchestratorId) !== null
+  /** Whether the Assistant's turn that is going is a session's request */
+  active(assistantId: string): boolean {
+    return this.host.askedBy(assistantId) !== null
   }
 
   /**
-   * The orchestrator's CLI is about to run a step of its own (a command, a file written, a page fetched): a read is left to the CLI's own flow
+   * The Assistant's CLI is about to run a step of its own (a command, a file written, a page fetched): a read is left to the CLI's own flow
    * (`asked: false`), a step that would outlive the turn is refused without a question, and every other one is put to the person. Its record is
    * `cliDone`'s, once the CLI has run it
    */
-  async askCli(orchestratorId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
-    const asker = this.host.askedBy(orchestratorId)
+  async askCli(assistantId: string, tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<RequestTurnAnswer> {
+    const asker = this.host.askedBy(assistantId)
     if (!asker || askedAct(tool, input, threadOf(asker)) === null) return { allowed: true, asked: false }
     if (outlivesTheTurn(tool, input)) {
       return {
@@ -78,24 +78,24 @@ export class AskedGate {
     }
     const step = askedAct(tool, input, threadOf(asker))
     if (step === null) return { allowed: true, asked: false }
-    return this.put<RequestTurnAnswer>(orchestratorId, asker, step, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
+    return this.put<RequestTurnAnswer>(assistantId, asker, step, signal, async () => ({ allowed: true, asked: true }), (message) => ({ allowed: false, message }))
   }
 
   /** The CLI ran a step of its own that `askCli` let through as asked, and it did not fail: its record, in the asking session */
-  cliDone(orchestratorId: string, tool: string, input: Record<string, unknown>): void {
-    const asker = this.host.askedBy(orchestratorId)
+  cliDone(assistantId: string, tool: string, input: Record<string, unknown>): void {
+    const asker = this.host.askedBy(assistantId)
     const step = asker ? askedAct(tool, input, threadOf(asker)) : null
     if (asker && step) this.record(asker, 'act' in step ? step.act : `run ${tool}`)
   }
 
   async when<T>(
-    orchestratorId: string,
+    assistantId: string,
     call: { name: string; args: Record<string, unknown>; readOnly?: boolean },
     signal: AbortSignal | undefined,
     run: () => Promise<T>,
     refused: (text: string) => T,
   ): Promise<T> {
-    const asker = this.host.askedBy(orchestratorId)
+    const asker = this.host.askedBy(assistantId)
     if (!asker || call.readOnly === true) return run()
     const step = askedAct(call.name, call.args, threadOf(asker))
     if (step === null) return run()
@@ -109,7 +109,7 @@ export class AskedGate {
     const kind = stepKind(call.name, call.args)
     // Not covered: the cards the step raises itself ask as they would in the person's own turn
     if (!asker.also && (kind === 'undoable' || (kind === 'handsOn' && this.host.noLooser(asker, call)))) return recorded()
-    return this.put(orchestratorId, asker, step, signal, recorded, refused)
+    return this.put(assistantId, asker, step, signal, recorded, refused)
   }
 
   /** A step done for the turn's request is recorded in each asking session */
@@ -119,17 +119,17 @@ export class AskedGate {
   }
 
   /** Puts a step to the person and runs it on Allow; Deny, no answer and a turn that has ended run nothing */
-  private async put<T>(orchestratorId: string, asker: Asker, step: AskedStep, signal: AbortSignal | undefined, run: () => Promise<T>, refused: (text: string) => T): Promise<T> {
+  private async put<T>(assistantId: string, asker: Asker, step: AskedStep, signal: AbortSignal | undefined, run: () => Promise<T>, refused: (text: string) => T): Promise<T> {
     if ('tooLong' in step) {
       return refused('Nothing was done: this step is too long to show the person in a card whole, and a card that hid part of it would not be a fair question. Ask for it in smaller parts, or leave it for the person.')
     }
-    const answer = await this.host.ask(orchestratorId, askedQuestion(asker, step.act), signal)
+    const answer = await this.host.ask(assistantId, askedQuestion(asker, step.act), signal)
     // The person may answer long after the turn the card was raised in: an Allow for a request's step is for that request's turn, not a later one
-    const now = this.host.askedBy(orchestratorId)
+    const now = this.host.askedBy(assistantId)
     if (answer === 'allow' && (!now || askersKey(now) !== askersKey(asker))) {
       return refused('Nothing was done: the turn this was asked in has ended. Ask again in the thread if it is still wanted.')
     }
-    if (answer === 'allow') return this.host.cover(orchestratorId, run, signal)
+    if (answer === 'allow') return this.host.cover(assistantId, run, signal)
     return refused(
       answer === null
         ? 'Nothing was done: the person did not answer the card, which asked whether to do this for the session. Say so in the thread, and leave it for the person.'

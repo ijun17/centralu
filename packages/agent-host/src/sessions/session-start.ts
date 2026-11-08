@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { CreateSessionParams, SessionInfo, ToolName } from '@cc/protocol'
 import { autoCompactPlan } from './auto-compact.js'
 import { autoCompactOf, launchRefusal, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, CentraluTools, RequestTurn, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
@@ -23,7 +23,7 @@ import { commandsSentence } from './tool-seats.js'
 import type { HandoffNotes } from './handoff-notes.js'
 import type { HostCardsHost } from './host-cards.js'
 import type { LaunchRecords, LaunchRecordsHost } from './launch-records.js'
-import { orchestratorRole } from './orchestrator-home.js'
+import { assistantRole } from './assistant-home.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
@@ -52,7 +52,7 @@ export const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
  * This used to read "This conversation was deleted in Claude Code". Nobody ever observed a
  * deletion. The tool only answered "not in this directory" — and it keys its session store
  * **by working directory**, so it says that whenever the folder moves too. That is what
- * happened (issue #28): renaming the data directory moved the orchestrator's cwd, the tool
+ * happened (issue #28): renaming the data directory moved the Assistant's cwd, the tool
  * looked under a slug that had never existed, and the app told its owner that 924 messages
  * and an 821KB transcript — both still sitting on disk — had been deleted.
  *
@@ -95,15 +95,15 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
     listCommands: ToolQueries['listCommands']
     /** Whether another project handed this path back to the session (#371 part B) */
     mayRead: (sessionId: string, path: string, cwd: string) => boolean
-    /** The orchestrator's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
+    /** The Assistant's turn being a session's request, and the person's card for the CLI's own steps in it (§9.7, #1447) */
     requestTurn: (sessionId: string) => RequestTurn
     /** A session's row that is not being removed, or `session_not_found` */
     openSession: (sessionId: string) => SessionInfo
-    /** The orchestrator's memory handoff for a new process */
-    orchestratorMemory: (sessionId: string) => string
+    /** The Assistant's memory handoff for a new process */
+    assistantMemory: (sessionId: string) => string
     /** The remembered approval rules for a session's process */
     readonly approvalRules: Pick<ApprovalRules, 'rulesFor'>
-    /** The orchestrator's approved skills, as its role text names them (#71) */
+    /** The Assistant's approved skills, as its role text names them (#71) */
     skillsPrompt: () => string
     toolLabel: (tool: ToolName) => string
     readonly tools: SessionTools
@@ -123,9 +123,9 @@ export class SessionStarts {
   /**
    * Creates a session.
    *
-   * Why projectId is `string | null`: the orchestrator does not belong to a project. The RPC
+   * Why projectId is `string | null`: the Assistant does not belong to a project. The RPC
    * contract (CreateSessionParams) still requires a project, so outside callers can never send
-   * null — the only place that can create a session with no project is `orchestrator()` below.
+   * null — the only place that can create a session with no project is `assistant()` below.
    */
   async createSession(
     params: Omit<CreateSessionParams, 'projectId' | 'tool'> & {
@@ -133,13 +133,13 @@ export class SessionStarts {
       /** Internal default resolution can find no tool; reject that only when creating a session. */
       tool: ToolName | null
       /**
-       * Role (#13). Not in the RPC contract — an outside caller can never "create" an orchestrator
-       * (orchestrator() is the only path), and this field exists so orchestrator() has something to
+       * Role (#13). Not in the RPC contract — an outside caller can never "create" an Assistant
+       * (assistant() is the only path), and this field exists so assistant() has something to
        * fill when creating its own session.
        */
       kind?: Exclude<SessionInfo['kind'], 'coordinator'>
       /**
-       * Who sent `initialPrompt`, when it is not the person (#694: the orchestrator's handoff_session). Not in the RPC
+       * Who sent `initialPrompt`, when it is not the person (#694: the Assistant's handoff_session). Not in the RPC
        * contract: a window's first message is the person's. Stored and broadcast as that sender's, as `send`'s `from`.
        */
       initialFrom?: { sessionId: string; name: string }
@@ -388,7 +388,7 @@ export class SessionStarts {
      * Lets the UI learn about this session **through an event too** (#69).
      *
      * Whichever side created it via RPC already knows from the response, but for a session the host
-     * itself creates (the orchestrator's create_session, a manager created by worktree adoption),
+     * itself creates (the Assistant's create_session, a manager created by worktree adoption),
      * this event is the only notification. Before this existed, that kind of session's event sat in
      * the pendingEvents holding area waiting for something to register it, and there was never
      * anything to register it — it only ever surfaced through listSessions after a reconnect. The
@@ -401,7 +401,7 @@ export class SessionStarts {
      * default_tool was hardcoded to 'claude' at project creation and had no place that ever updated
      * it — someone using codex had to click the picker again for every single new session, forever.
      * Why this lives here instead of a settings screen: "what to use as the default" is **already
-     * told to us by the act of creating a session.** So the UI and the orchestrator's create_session
+     * told to us by the act of creating a session.** So the UI and the Assistant's create_session
      * both go through this same rule.
      */
     // The tool of an agent an app asked for (M4 D-1) is the app's choice — it never moves the person's
@@ -561,7 +561,7 @@ export class SessionStarts {
   /**
    * The options a session's process starts with (#428), the same for a new session (`createSession`) and a wake
    * (`doResumeSession`): what differs between the two is passed in, and the rest is read here, in the order both
-   * used to read it. `memory`: the orchestrator's memory handoff rides along (a genuinely new process on a wake).
+   * used to read it. `memory`: the Assistant's memory handoff rides along (a genuinely new process on a wake).
    */
   private launchOptions(
     m: SessionInfo,
@@ -570,14 +570,14 @@ export class SessionStarts {
       cwd: string
       noCodeIntelligence: boolean
       inheritsHandoff: boolean
-      choice: { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined }
+      choice: { profile: ToolProfile | null; tools: () => CentraluTools | undefined }
       apps: SessionApps | undefined
       memory: boolean
     },
   ): CreateSessionOpts {
     const { profile, tools } = o.choice
-    // The past conversation handed over in the prompt when the tool changed (the person's words and the orchestrator's own answers)
-    const past = m.kind === 'orchestrator' && o.memory ? this.host.orchestratorMemory(m.id) : ''
+    // The past conversation handed over in the prompt when the tool changed (the person's words and the Assistant's own answers)
+    const past = m.kind === 'orchestrator' && o.memory ? this.host.assistantMemory(m.id) : ''
     return {
       sessionId: m.id,
       cwd: o.cwd,
@@ -611,12 +611,12 @@ export class SessionStarts {
       // Paths another project handed back to this session (#371), asked on every read
       mayRead: (path: string) => this.host.mayRead(m.id, path, o.cwd),
       ...(m.kind === 'orchestrator' ? { requestTurn: this.host.requestTurn(m.id) } : {}),
-      // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
+      // An Assistant gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
       // the rest), an ordinary session its own project, read-only (#320, #561)
       /*
        * **Tool and role must carry over on resume too.**
        *
-       * Attaching them only at creation would mean a freshly woken orchestrator becomes an
+       * Attaching them only at creation would mean a freshly woken assistant becomes an
        * ordinary session with neither tools nor a role — sitting in an empty folder able to do
        * nothing, while looking perfectly fine on the outside, which is the worst possible state.
        *
@@ -624,7 +624,7 @@ export class SessionStarts {
        * has just been attached passes this check the next time it wakes and receives the
        * child-only tools and role.
        */
-      orchestratorTools: tools(),
+      centraluTools: tools(),
       toolProfile: profile ?? undefined,
       /*
        * This is **where memory is handed over.** Switching tools breaks externalId, which routes
@@ -636,18 +636,18 @@ export class SessionStarts {
         m.kind === 'orchestrator'
           ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
             // (unchanged rule)
-            orchestratorRole() + this.host.skillsPrompt() + past
+            assistantRole() + this.host.skillsPrompt() + past
           : // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
             // for a builder session (C-2) even if the app is broken
             (m.roleAppend ?? undefined),
-      // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
+      // The path back to the host — used by the Centralu tools' bridge and an external app's bridge
       // (M4 A-5)
-      orchestratorBridge: profile || o.apps ? bridgeOf(this.host.endpoint?.(m.id)) : undefined,
+      centraluBridge: profile || o.apps ? bridgeOf(this.host.endpoint?.(m.id)) : undefined,
       // Every session's agent finds the host and its own credential in its environment (#1405, session-token.ts)
       hostAccess: hostAccessOf(this.host.endpoint?.(m.id)),
       // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
-      // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
+      // An approved MCP server is a user-folder app — an Assistant receives those apps right here (M4
       // A-7)
       apps: o.apps,
       ...(o.outputSchema ? { outputSchema: o.outputSchema } : {}),
@@ -701,9 +701,9 @@ export class SessionStarts {
     }
 
     /*
-     * **An orchestrator has no project.**
+     * **An Assistant has no project.**
      *
-     * Requiring a project here meant an orchestrator died forever every time the app was restarted
+     * Requiring a project here meant an Assistant died forever every time the app was restarted
      * ("Could not resume the conversation: Project not found" — measured). It was, in effect, a
      * session that could only be created but never resumed.
      */
@@ -878,9 +878,9 @@ export class SessionStarts {
       void this.host.listCommands(sessionId).catch(() => {})
 
       // Catches up on conversation continued outside (in a terminal's tool).
-      // An orchestrator is a session the app manages, so there is nothing for it to catch up on
+      // An Assistant is a session the app manages, so there is nothing for it to catch up on
       // outside — since it has no project, this branch never fires for it in the first place
-      // (an orchestrator with a project no longer exists).
+      // (an Assistant with a project no longer exists).
       let tCatchup = 0
       let added = 0
       if (project) {

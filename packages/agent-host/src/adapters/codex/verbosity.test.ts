@@ -95,12 +95,12 @@ describe('carrying codex response verbosity through', () => {
   })
 
   /*
-   * config is also used by the orchestrator block. When two spreads produce the same key, **the
+   * config is also used by the Assistant block. When two spreads produce the same key, **the
    * later one overwrites the earlier one entirely** — they do not merge. Without this test,
    * neither the person who added verbosity nor whoever adds a third thing to config later would be
    * able to read that fact from the code.
    */
-  it("merges into one block with the orchestrator's config — neither overwrites the other", async () => {
+  it("merges into one block with the Assistant's config — neither overwrites the other", async () => {
     const adapter = new CodexAdapter()
     await adapter.createSession(
       {
@@ -108,8 +108,8 @@ describe('carrying codex response verbosity through', () => {
         cwd: '/tmp',
         permissionPreset: 'normal',
         verbosity: 'medium',
-        orchestratorTools: {} as never,
-        orchestratorBridge: { url: 'http://127.0.0.1:1', token: 't' },
+        centraluTools: {} as never,
+        centraluBridge: { url: 'http://127.0.0.1:1', token: 't' },
       },
       () => {},
     )

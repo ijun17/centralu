@@ -29,7 +29,7 @@ import type { StopGate } from './lifecycle/stop-gate.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
-import { orchestratorToolSchemas } from './sessions/orchestrator-tools.js'
+import { centraluToolSchemas } from './sessions/centralu-tools.js'
 import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
@@ -325,21 +325,21 @@ export function createRpcHandler(
     'agents.autoCompact': async (p) => mgr.autoCompactFor(p.sessionId),
     'agents.worktreeStatus': async (p) =>
       mgr.worktreeStatus(p.sessionId),
-    'agents.mcpProposals': async () => ({ proposals: mgr.orchestratorSlot.mcpProposals() }),
+    'agents.mcpProposals': async () => ({ proposals: mgr.assistantSlot.mcpProposals() }),
     'agents.resolveMcpProposal': async ({ name, approve }) => {
-      const r = await mgr.orchestratorSlot.resolveMcpProposal(name, approve)
+      const r = await mgr.assistantSlot.resolveMcpProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
-    'agents.skillProposals': async () => ({ proposals: mgr.orchestratorSlot.skillProposals() }),
+    'agents.skillProposals': async () => ({ proposals: mgr.assistantSlot.skillProposals() }),
     'agents.resolveSkillProposal': async ({ name, approve }) => {
-      const r = await mgr.orchestratorSlot.resolveSkillProposal(name, approve)
+      const r = await mgr.assistantSlot.resolveSkillProposal(name, approve)
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
-    'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSlot.orchestratorSkills() }),
+    'agents.orchestratorSkills': async () => ({ skills: mgr.assistantSlot.assistantSkills() }),
     'agents.deleteOrchestratorSkill': async ({ name }) => {
-      const r = await mgr.orchestratorSlot.deleteOrchestratorSkill(name)
+      const r = await mgr.assistantSlot.deleteAssistantSkill(name)
       if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
       return { ok: true as const }
     },
@@ -361,7 +361,7 @@ export function createRpcHandler(
        * through whole means this spot never needs fixing again as more settings are added.
        */
       const { sessionId, by, ...settings } = p
-      // `by` comes only from a hub's orchestrator, which directs no orchestrator nor coordinator here (#1941 review)
+      // `by` comes only from a hub's Assistant, which directs no Assistant nor coordinator here (#1941 review)
       if (by) mgr.linkedHost.directedFromHub(sessionId)
       return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
@@ -447,7 +447,7 @@ export function createRpcHandler(
     'approvals.deleteRule': async (p) => ack(mgr.approvalRules.deleteApprovalRule(p.id)),
     'workspace.save': async (p) => ack(mgr.prefs.saveWorkspace(p.layout)),
     'workspace.load': async () => mgr.prefs.loadWorkspace(),
-    // The orchestrator's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
+    // The Assistant's add_project registers through the same `addProject` and apps refresh (#1220, `registerFolder`)
     'projects.add': async (p) => {
       const info = await mgr.projectCreation.addProject(p.path)
       externalApps?.refresh()
@@ -462,9 +462,9 @@ export function createRpcHandler(
     'projects.createPreview': async ({ name, parent, source }) => {
       return mgr.projectCreation.projectCreatePreview(name, parent, source)
     },
-    'orchestrator.get': async () => mgr.orchestrator(),
-    'orchestrator.peek': async () => mgr.orchestratorSlot.orchestratorPeek(),
-    'orchestrator.configure': async (p) => ack(mgr.orchestratorSlot.configureOrchestrator(p.tool)),
+    'orchestrator.get': async () => mgr.assistant(),
+    'orchestrator.peek': async () => mgr.assistantSlot.assistantPeek(),
+    'orchestrator.configure': async (p) => ack(mgr.assistantSlot.configureAssistant(p.tool)),
     'apps.viewFrame': async ({ appId, projectId, instanceId, hostOrigin }) => {
       return requireViews().frame({ app: { appId, projectId }, instanceId, hostOrigin })
     },
@@ -632,13 +632,13 @@ export function createRpcHandler(
     },
     'orchestrator.tools': async ({ sessionId }) => {
       // The full list when no session is given (for compatibility) — only that session's bundle when one is known (#69: the manager takes a subset)
-      if (!sessionId) return orchestratorToolSchemas('orchestrator')
+      if (!sessionId) return centraluToolSchemas('assistant')
       // A session with no bundle is offered nothing — the full list here would advertise tools its calls are refused
       const profile = mgr.tools.toolProfileOf(sessionId)
-      return profile ? orchestratorToolSchemas(profile) : []
+      return profile ? centraluToolSchemas(profile) : []
     },
     'orchestrator.tool': async ({ sessionId, name, args }) => {
-      return mgr.runOrchestratorTool(sessionId, name, args)
+      return mgr.runCentraluTool(sessionId, name, args)
     },
     'apps.sessionTools': async ({ sessionId, server }) => {
       return { tools: await mgr.apps.appSessionTools(sessionId, server) }
@@ -786,8 +786,8 @@ export function createRpcHandler(
     /*
      * The session archive (#204; "trash" until #1404, kept in the method names because the protocol only grows).
      * These are the person's: this handler is reached over the UI's socket and, for the central
-     * orchestrator's trash commands (#1219, `trash-flow.ts`), through the router; its deletes for good wait for the
-     * person's card. The other agents' tools (`orchestrator-tools.ts`) and the apps' broker (`broker.ts`, `host_data`)
+     * Assistant's trash commands (#1219, `trash-flow.ts`), through the router; its deletes for good wait for the
+     * person's card. The other agents' tools (`centralu-tools.ts`) and the apps' broker (`broker.ts`, `host_data`)
      * have no verb for any of it.
      */
     'trash.list': async () => mgr.trash.listTrash(),
@@ -870,7 +870,7 @@ export function createRpcHandler(
       if (!activity) throw rpcError('This host does not report its activity')
       return activity()
     },
-    // What a hub's orchestrator reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
+    // What a hub's Assistant reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
     'host.sessions': async () => mgr.linkedHost.hostReader().sessions(),
     'host.readSession': async ({ sessionId, limit, around, tools, offset, toolLines, maxChars, before, from }) => {
       return mgr.linkedHost.hostReader().read(sessionId, limit, {

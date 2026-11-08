@@ -7,19 +7,19 @@ import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWor
 import { HUB_SENDER } from './hub-sender.js'
 
 /*
- * The orchestrator's reports from a linked machine's sessions on their own (#82 phase 4, #723): which wait a machine's
+ * The Assistant's reports from a linked machine's sessions on their own (#82 phase 4, #723): which wait a machine's
  * event ends, whom the report goes to, and what a link that drops, a machine that is removed or a host that closes
  * does to a report still owed. The reports' wording, and the same paths through the real manager and the seat's
  * `send_to_session`, are in links/linked-sessions.test.ts. Linked reports live in the hub's memory only, so there is
  * no store side to check here.
  */
 
-type Delivered = { orchestratorId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: { wrote?: true; added?: true; cut?: true } }
+type Delivered = { assistantId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: { wrote?: true; added?: true; cut?: true } }
 
 let store: Store
 let children: ChildOwnership
 let delivered: Delivered[]
-let orchestrators: Set<string>
+let assistants: Set<string>
 let linked: Set<string>
 let mirror: Map<string, { name: string; project: string }>
 let listing: (machineId: string) => Promise<{ sessionId: string; tasks: BackgroundTask[] }[] | null>
@@ -37,7 +37,7 @@ beforeEach(() => {
   store = new Store()
   children = new ChildOwnership(store)
   delivered = []
-  orchestrators = new Set(['o1', 'o2'])
+  assistants = new Set(['o1', 'o2'])
   linked = new Set(['m1', 'm10', 'm2'])
   mirror = new Map([
     ['m1.w1', { name: 'Worker', project: 'Site' }],
@@ -65,13 +65,13 @@ beforeEach(() => {
   const host: LinkedReportsHost = {
     children,
     linkedReader: reader,
-    hasSession: (id) => orchestrators.has(id),
+    hasSession: (id) => assistants.has(id),
     get closing() {
       return closing
     },
     reportGate: () => gateAnswer,
-    deliverReport: async (orchestratorId, sessionId, name, project, preview, ending, work, _seq, part) => {
-      delivered.push({ orchestratorId, sessionId, name, project, preview, ending: ending.type, ...(ending.error?.message ? { error: ending.error.message } : {}), ...(work ? { work } : {}), ...(part ? { part } : {}) })
+    deliverReport: async (assistantId, sessionId, name, project, preview, ending, work, _seq, part) => {
+      delivered.push({ assistantId, sessionId, name, project, preview, ending: ending.type, ...(ending.error?.message ? { error: ending.error.message } : {}), ...(work ? { work } : {}), ...(part ? { part } : {}) })
     },
   }
   reports = new LinkedReports(host)
@@ -88,8 +88,8 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
 const build: BackgroundTask = { id: 'bg-build', kind: 'shell', description: 'pnpm build', status: 'running' }
 const tasks = (sessionId: string, live: BackgroundTask[], ended?: BackgroundTask[]): LinkedEvent => ({ type: 'background_tasks', sessionId, live, ...(ended ? { ended } : {}) })
-/** The orchestrator asks to hear about the session's turn (`send_to_session` with `reportBack`) */
-const ask = (sessionId: string, orchestratorId = 'o1') => children.setLinkedReport(sessionId, { orchestratorId, busy: false })
+/** The Assistant asks to hear about the session's turn (`send_to_session` with `reportBack`) */
+const ask = (sessionId: string, assistantId = 'o1') => children.setLinkedReport(sessionId, { assistantId, busy: false })
 /** A turn of the session there: it works, and ends */
 const turn = (sessionId: string) => {
   reports.observe({ type: 'message_delta', sessionId })
@@ -98,7 +98,7 @@ const turn = (sessionId: string) => {
 const status = (id: string, s: string, name = 'Box') => reports.observe({ type: 'machine_status', machine: { id, name, status: s } })
 
 describe('whom a turn end is reported to', () => {
-  it('each waited session reports to the orchestrator that asked, once, with its name and last words', async () => {
+  it('each waited session reports to the Assistant that asked, once, with its name and last words', async () => {
     ask('m1.w1', 'o1')
     ask('m1.w2', 'o2')
     turn('m1.w2')
@@ -108,8 +108,8 @@ describe('whom a turn end is reported to', () => {
     turn('m2.x')
     await flush()
     expect(delivered).toEqual([
-      { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: 'last words of m1.w2', ending: 'turn_complete' },
-      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete' },
+      { assistantId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: 'last words of m1.w2', ending: 'turn_complete' },
+      { assistantId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete' },
     ])
     expect(children.linkedReports.size).toBe(0)
   })
@@ -151,9 +151,9 @@ describe('whom a turn end is reported to', () => {
     expect(delivered).toMatchObject([{ sessionId: 'm1.w1', ending: 'state_change' }])
   })
 
-  it('an orchestrator deleted meanwhile is owed nothing, and the wait does not linger', async () => {
+  it('an Assistant deleted meanwhile is owed nothing, and the wait does not linger', async () => {
     ask('m1.w1', 'o1')
-    orchestrators.delete('o1')
+    assistants.delete('o1')
     turn('m1.w1')
     await flush()
     expect(delivered).toEqual([])
@@ -190,7 +190,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     await flush()
     expect(delivered).toHaveLength(2)
     expect(delivered[1]).toMatchObject({
-      orchestratorId: 'o1',
+      assistantId: 'o1',
       ending: 'turn_complete',
       work: { settled: [{ id: 'bg-verify', status: 'failed' }, { id: 'bg-build', status: 'completed' }] },
     })
@@ -265,7 +265,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
  * closed it at the first message): the person's own turn is reported to nobody, and "Take it over" is their choice.
  */
 describe('a turn belongs to whoever started it, on a linked machine (#1377)', () => {
-  /** The session ends a turn with its verify running: the orchestrator is told it paused */
+  /** The session ends a turn with its verify running: the Assistant is told it paused */
   async function paused() {
     ask('m1.w1')
     reports.observe(tasks('m1.w1', [verify]))
@@ -322,7 +322,7 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
 
   it("row 2: the hub's instruction starts the turn: the work's, reported", async () => {
     ask('m1.w1')
-    reports.observe({ ...person({ from: { sessionId: `m1.${HUB_SENDER}`, name: 'Orchestrator' } }, 'go'), seq: 1 })
+    reports.observe({ ...person({ from: { sessionId: `m1.${HUB_SENDER}`, name: 'Assistant' } }, 'go'), seq: 1 })
     turn('m1.w1')
     await flush()
     expect(delivered).toHaveLength(1)
@@ -479,12 +479,12 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     })
   })
 
-  it('"Take it over": closes the report and tells the orchestrator once; none of their later turns is reported', async () => {
+  it('"Take it over": closes the report and tells the Assistant once; none of their later turns is reported', async () => {
     await paused()
     reports.observe(person({ intent: 'takeover' }))
     await flush()
     expect(delivered).toHaveLength(2)
-    expect(delivered[1]).toMatchObject({ orchestratorId: 'o1', sessionId: 'm1.w1', work: { tookOver: true, paused: [{ id: 'bg-verify' }] } })
+    expect(delivered[1]).toMatchObject({ assistantId: 'o1', sessionId: 'm1.w1', work: { tookOver: true, paused: [{ id: 'bg-verify' }] } })
     // Not the machine's last words: what is there now is not the assigned work's
     expect(delivered[1]?.preview).toContain("the person's now")
     expect(children.linkedReports.has('m1.w1')).toBe(false)
@@ -540,7 +540,7 @@ describe('a machine whose link drops or comes back', () => {
     expect(delivered).toHaveLength(3)
     // A machine that cannot be reached cannot be read: the report keeps the words the pause was written with, marked as read then
     expect(delivered[2]).toEqual({
-      orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site',
+      assistantId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site',
       preview: 'last words of m1.w1', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify], asRead: true },
     })
     // m10 kept its wait and what the hub knew of its work: its next turn end, with that work still running, is no report
@@ -555,12 +555,12 @@ describe('a machine whose link drops or comes back', () => {
     reports.observe(tasks('m1.w1', [verify]))
     turn('m1.w1')
     await flush()
-    // The session's wait passes to another orchestrator, whose own pause stands over the same work
-    children.setLinkedReport('m1.w1', { orchestratorId: 'o2', busy: false, paused: [verify] })
+    // The session's wait passes to another assistant, whose own pause stands over the same work
+    children.setLinkedReport('m1.w1', { assistantId: 'o2', busy: false, paused: [verify] })
     status('m1', 'unreachable')
     await flush()
     const lost = delivered.at(-1)
-    expect(lost).toMatchObject({ orchestratorId: 'o2', preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
+    expect(lost).toMatchObject({ assistantId: 'o2', preview: '(in the paused report before this one)', work: { linkLost: 'Box' } })
     expect(lost?.work).not.toHaveProperty('asRead')
   })
 
@@ -649,7 +649,7 @@ describe('a machine whose link drops or comes back', () => {
     expect(delivered).toEqual([])
     reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
     await flush()
-    expect(delivered).toMatchObject([{ orchestratorId: 'o1', sessionId: 'm1.w1', ending: 'turn_complete' }])
+    expect(delivered).toMatchObject([{ assistantId: 'o1', sessionId: 'm1.w1', ending: 'turn_complete' }])
     expect(delivered[0]?.work).toBeUndefined()
   })
 
@@ -694,7 +694,7 @@ describe('a machine whose link drops or comes back', () => {
 })
 
 describe('a machine removed from Centralu', () => {
-  it('reports every wait on it, paused or mid-turn, to its own orchestrator, under the name it last had', async () => {
+  it('reports every wait on it, paused or mid-turn, to its own assistant, under the name it last had', async () => {
     status('m1', 'connected', 'Box')
     ask('m1.w1', 'o1')
     ask('m1.w2', 'o2')
@@ -712,9 +712,9 @@ describe('a machine removed from Centralu', () => {
     reports.observe({ type: 'machine_resync', machineId: 'm1' })
     await flush()
     expect(delivered.slice(1)).toEqual([
-      { orchestratorId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify], asRead: true } },
+      { assistantId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site', preview: 'last words of m1.w1', ending: 'turn_complete', work: { machineRemoved: 'Box', paused: [verify], asRead: true } },
       // Not an empty last response (#1186): nothing could be read, and it says why
-      { orchestratorId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '(not read: its machine could not be reached)', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
+      { assistantId: 'o2', sessionId: 'm1.w2', name: 'Builder', project: 'Site', preview: '(not read: its machine could not be reached)', ending: 'turn_complete', work: { machineRemoved: 'Box' } },
     ])
     expect([...children.linkedReports.keys()]).toEqual(['m10.w1'])
   })
@@ -738,7 +738,7 @@ describe('an ask_project turn that ended on the session\'s own background work (
   it('owes the asker the work\'s last turn end, and the turn end that told the call says nothing besides', async () => {
     reports.observe(tasks('m1.w1', [verify]))
     expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([verify])
-    expect(children.linkedReports.get('m1.w1')).toMatchObject({ orchestratorId: 'o1', busy: false, paused: [verify] })
+    expect(children.linkedReports.get('m1.w1')).toMatchObject({ assistantId: 'o1', busy: false, paused: [verify] })
     // The same event, read by the reports after the ask: paused already, so no notice
     reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
     reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
@@ -747,7 +747,7 @@ describe('an ask_project turn that ended on the session\'s own background work (
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
     turn('m1.w1')
     await flush()
-    expect(delivered).toMatchObject([{ orchestratorId: 'o1', sessionId: 'm1.w1', preview: 'last words of m1.w1' }])
+    expect(delivered).toMatchObject([{ assistantId: 'o1', sessionId: 'm1.w1', preview: 'last words of m1.w1' }])
     expect(delivered[0]!.work).toBeUndefined()
   })
 
@@ -765,7 +765,7 @@ describe('an ask_project turn that ended on the session\'s own background work (
     reports.observe(tasks('m1.w1', [verify]))
     ask('m1.w1', 'o2')
     expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
-    expect(children.linkedReports.get('m1.w1')?.orchestratorId).toBe('o2')
+    expect(children.linkedReports.get('m1.w1')?.assistantId).toBe('o2')
     children.dropLinkedReport('m1.w1')
     gateAnswer = 'withhold'
     expect(reports.oweAsker('m1.w1', 'o1', { type: 'turn_complete' })).toEqual([])
@@ -784,13 +784,13 @@ describe('an ask_project turn that ended on the session\'s own background work (
     const undo = reports.releaseAsker('m1.w1', 'o1')!
     expect(children.linkedReports.size).toBe(0)
     undo()
-    expect(children.linkedReports.get('m1.w1')).toMatchObject({ orchestratorId: 'o1', paused: [verify] })
+    expect(children.linkedReports.get('m1.w1')).toMatchObject({ assistantId: 'o1', paused: [verify] })
     // Something else owed meanwhile stays
     reports.releaseAsker('m1.w1', 'o1')!()
     expect(children.linkedReports.get('m1.w1')?.paused).toEqual([verify])
     const again = reports.releaseAsker('m1.w1', 'o1')!
     ask('m1.w1', 'o2')
     again()
-    expect(children.linkedReports.get('m1.w1')?.orchestratorId).toBe('o2')
+    expect(children.linkedReports.get('m1.w1')?.assistantId).toBe('o2')
   })
 })

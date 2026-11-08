@@ -19,7 +19,7 @@ export class SessionRecords {
     this.db
       .prepare(
         `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness, interruption)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isAssistant, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -45,7 +45,7 @@ export class SessionRecords {
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
         // The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed
-        isOrchestrator: s.kind === 'orchestrator' ? 1 : 0,
+        isAssistant: s.kind === 'orchestrator' ? 1 : 0,
         effort: s.effort ?? null,
         verbosity: s.verbosity ?? null,
         serviceTier: s.serviceTier ?? null,
@@ -80,20 +80,20 @@ export class SessionRecords {
   }
 
   /**
-   * The id of the **central** orchestrator (null if there is none).
+   * The id of the **central** assistant (null if there is none).
    *
-   * There used to be only one orchestrator per app, so this query was the whole answer. Once
-   * project orchestrators existed (#13), the marker (is_orchestrator=1) could be set on more
+   * There used to be only one Assistant per app, so this query was the whole answer. Once
+   * project assistants existed (#13), the marker (is_orchestrator=1) could be set on more
    * than one row, and the central one is whichever of those has no project. The marker itself
    * rides SessionInfo.kind through the ordinary upsert — at one point this was the only place
    * that answered, on the reasoning that "keeping it in two places lets one drift out of sync,"
-   * but the project orchestrator broke the premise that reasoning relied on (that projectId
+   * but the project assistant broke the premise that reasoning relied on (that projectId
    * being null was the same fact as the marker), so kind is now the single source of truth and
    * this query just reads it.
    */
-  orchestratorId(): string | null {
+  assistantId(): string | null {
     /*
-     * A trashed session has no project (see `trashSession`), so without the filter a trashed project orchestrator
+     * A trashed session has no project (see `trashSession`), so without the filter a trashed project assistant
      * would answer here as the central one.
      */
     const row = this.db
@@ -112,7 +112,7 @@ export class SessionRecords {
     const rows = this.db
       .prepare<unknown[], (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
       autoNamed: number
-      isOrchestrator: number
+      isAssistant: number
       worktreePath: string | null
       worktreeBranch: string | null
       worktreeBase: string | null
@@ -123,7 +123,7 @@ export class SessionRecords {
       interruptionJson: string | null
     })>(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
-                s.auto_named as autoNamed, s.state, s.is_orchestrator as isOrchestrator,
+                s.auto_named as autoNamed, s.state, s.is_orchestrator as isAssistant,
                 s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
@@ -149,7 +149,7 @@ export class SessionRecords {
         contextUsed,
         contextWindow,
         contextExactness,
-        isOrchestrator,
+        isAssistant,
         scopeSessionIdsJson,
         interruptionJson,
         ...r
@@ -166,7 +166,7 @@ export class SessionRecords {
          * makes it a coordinating session — a separate marker column would eventually drift out
          * of sync with the relationship it is meant to reflect (the lesson of #13).
          */
-        kind: isOrchestrator
+        kind: isAssistant
           ? ('orchestrator' as const)
           : scopeSessionIdsJson
             ? ('coordinator' as const)
@@ -224,7 +224,7 @@ export class SessionRecords {
    * states would let any later save quietly replace it with whatever the caller happened to
    * hold. `touched_paths` lives on the same terms.
    *
-   * null means "we do not know yet" — an orchestrator row that predates v14. The manager
+   * null means "we do not know yet" — an Assistant row that predates v14. The manager
    * resolves it the first time it needs the path and writes it back.
    */
   sessionCwd(sessionId: string): string | null {

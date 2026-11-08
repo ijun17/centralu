@@ -7,7 +7,7 @@ import { PROJECTS_DIR, folderNameError } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * Making a project's folder (#515): an **empty** folder, named by the person or the orchestrator, by default in the
+ * Making a project's folder (#515): an **empty** folder, named by the person or the Assistant, by default in the
  * `Centralu` folder of the home of the machine the project lives on. No `git init`, no template: what goes in it is
  * the agent's first job.
  *
@@ -53,7 +53,7 @@ function refuse(message: string): never {
 /**
  * Where a project named `name` would be made, checked, without making anything: the name is one segment, the parent
  * is a full path to a folder (or the default `~/Centralu`, missing or not), and nothing of that name is there yet.
- * Refuses with one sentence; the sentence is what the dialog shows as the person types and what the orchestrator
+ * Refuses with one sentence; the sentence is what the dialog shows as the person types and what the Assistant
  * reads back.
  */
 export function projectFolderTarget(

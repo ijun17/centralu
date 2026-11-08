@@ -260,8 +260,8 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
     wakeError: keep(s.wakeError),
     wakeLocked: keep(s.wakeLocked),
     focusedSessionId: s.focusedSessionId && gone.has(s.focusedSessionId) ? null : s.focusedSessionId,
-    // The orchestrator screen shows its start state again, and a first question starts a fresh session (#1653)
-    orchestratorId: s.orchestratorId && gone.has(s.orchestratorId) ? null : s.orchestratorId,
+    // The Assistant screen shows its start state again, and a first question starts a fresh session (#1653)
+    assistantId: s.assistantId && gone.has(s.assistantId) ? null : s.assistantId,
   }
 }
 

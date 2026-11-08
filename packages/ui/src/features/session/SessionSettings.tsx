@@ -434,7 +434,7 @@ export function SessionSettings({
 
           {/*
             **There is no role group here** (removed on 2026-09-01). There used to be a row
-            that promoted a session to "project orchestrator", but once the seat that directs
+            that promoted a session to "project assistant", but once the seat that directs
             sessions within a project also became the worktree manager (#69), even the person
             who built it confused the two, and the promotion was never actually used. The
             director's seat comes from the relationship (having children makes it a manager) —
@@ -468,8 +468,8 @@ export function SessionSettings({
             under a different name, and every time, a confirmation dialog had to explain what
             would be kept and what would be lost. A half feature gets removed.
 
-            The one remaining exception is the orchestrator, and that lives in app settings
-            (Cmd+,) under Orchestrator — because it is the only session that exists exactly once
+            The one remaining exception is the Assistant, and that lives in app settings
+            (Cmd+,) under Assistant — because it is the only session that exists exactly once
             per app, so "create a new one with a different tool" does not make sense for it.
             It is a value scoped to the install, so app settings is the right place for it too.
           */}

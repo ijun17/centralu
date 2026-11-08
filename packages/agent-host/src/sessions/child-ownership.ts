@@ -206,13 +206,13 @@ function readTurn(raw: string | null): TurnStarter | null {
 export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }
 
 /**
- * A linked machine's session an orchestrator asked to hear about (#82 phase 4). `paused`: the session's own background
+ * A linked machine's session an Assistant asked to hear about (#82 phase 4). `paused`: the session's own background
  * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left.
  * `instruction`: the text of the instruction the wait was set for, while the machine has not yet been heard recording it
  * (#1082); until then nothing it relays is about that instruction's turn
  */
 export type LinkedReport = {
-  orchestratorId: string
+  assistantId: string
   busy: boolean
   paused?: BackgroundTask[]
   instruction?: string
@@ -256,7 +256,7 @@ export type PersonReportDraft = { outcome: string; body: string; answer?: string
  */
 export class ChildOwnership {
   /**
-   * Session asked to be reported on completion -> orchestrator to notify (removed once notified). Mirrored in the
+   * Session asked to be reported on completion -> assistant to notify (removed once notified). Mirrored in the
    * store's `report_marks` (v49, #646) through `markReport` / `clearReport`, so an update's stop (#1618) does not lose
    * "you will be told when it ends": the constructor reads the marks back for the turns an update cut.
    */
@@ -349,7 +349,7 @@ export class ChildOwnership {
   private readonly given = new Map<string, { from: string; to: string }>()
   readonly handedOver: ReadonlyMap<string, { from: string; to: string }> = this.given
   /**
-   * A linked machine's sessions whose turn the orchestrator asked to hear about (`reportBack`, #82 phase 4), by
+   * A linked machine's sessions whose turn the Assistant asked to hear about (`reportBack`, #82 phase 4), by
    * qualified id. `busy` is whether that turn was seen working yet, so a state the machine reports before the turn
    * starts (the session waking) is not taken for its end.
    */
@@ -408,7 +408,7 @@ export class ChildOwnership {
     if ([...this.runs.values()].some((d) => d.callerId === ownerId && d.sessionId === childId && !d.settled)) return true
     if (this.reports.get(childId) === ownerId) return true
     if ((this.queues.get(childId) ?? []).some((q) => q.callerSessionId === ownerId)) return true
-    return this.linked.get(childId)?.orchestratorId === ownerId
+    return this.linked.get(childId)?.assistantId === ownerId
   }
 
   /**
@@ -1198,8 +1198,8 @@ export class ChildOwnership {
     }
     if (move.queued) for (const list of this.queues.values()) for (const r of list) if (r.callerSessionId === from && moving.has(r.sessionId)) r.callerSessionId = to
     for (const [id, wait] of this.linked) {
-      if (wait.orchestratorId !== from || !moving.has(id)) continue
-      wait.orchestratorId = to
+      if (wait.assistantId !== from || !moving.has(id)) continue
+      wait.assistantId = to
       this.linkedChanged?.(id)
     }
     // A start that already made its child: its handle follows the child

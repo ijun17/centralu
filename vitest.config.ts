@@ -40,7 +40,7 @@ export default defineConfig({
     /*
      * **Tests do not write to the person's home directory.**
      *
-     * Without this set, the orchestrator home and attachments folder would land under the
+     * Without this set, the Assistant home and attachments folder would land under the
      * real `~/.centralu`. This actually happened: a single `pnpm verify` run created an empty
      * folder there, and that folder then blocked the data migration
      * (see `packages/agent-host/src/data-dir.ts`).

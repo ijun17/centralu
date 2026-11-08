@@ -4,4 +4,4 @@ apps/desktop/src/dialog-layer.tsx @typescript-eslint/no-non-null-assertion 1
 apps/desktop/src/dialog-layer.tsx @typescript-eslint/no-unsafe-type-assertion 1
 apps/desktop/src/main.tsx @typescript-eslint/no-misused-promises 1
 apps/desktop/src/main.tsx @typescript-eslint/no-non-null-assertion 2
-apps/desktop/src/main.tsx @typescript-eslint/no-unsafe-type-assertion 3
+apps/desktop/src/main.tsx @typescript-eslint/no-unsafe-type-assertion 2

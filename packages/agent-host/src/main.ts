@@ -21,7 +21,7 @@ import { SessionManager } from './sessions/manager.js'
 import { MailPerson } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
 import { MemoryGate } from './sessions/memory-gate.js'
-import { commandsFor } from './sessions/orchestrator-tools.js'
+import { commandsFor } from './sessions/centralu-tools.js'
 import { readShared } from './sessions/app-access.js'
 import { Store, StoreTooNewError } from './dev-services/store.js'
 import { createAdapters } from './adapters/registry.js'
@@ -195,7 +195,7 @@ function defaultDbPath(): string {
   const { dir, legacy } = chooseDataDir()
   movedNote = legacy && migrateLegacyDataDir(legacy, dir) ? `[agent-host] data folder moved: ${legacy} -> ${dir}` : null
   mkdirSync(dir, { recursive: true })
-  // Pins attachments, the orchestrator home, and worktrees to all live under here (dev and prod diverge)
+  // Pins attachments, the Assistant home, and worktrees to all live under here (dev and prod diverge)
   process.env.CC_DATA_DIR = dir
   return join(dir, 'store.db')
 }
@@ -426,7 +426,7 @@ const userAppAdoption = new UserAppAdoption({
  * The mailbox (docs/plans/mailbox.md, M3a): messages addressed to parties, the reach and the one hold, the turns and guards, the delivery that
  * wakes a receiver with its mail and the version-1 tool mapped onto the message service. Delivery starts once the host is ready (below).
  */
-const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('orchestrator').includes('mail')), { hostId: hubSelfId(store) })
+const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('assistant').includes('mail')), { hostId: hubSelfId(store) })
 const mailDelivery = hostMailbox.delivery
 hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
 mgr.mail.useMail(hostMailbox.hooks)
@@ -654,7 +654,7 @@ control?.on('system-ending', (m) => systemEndingTold(m.cancelled === true))
 const hubName = (): string => hostname().replace(/\.local$/i, '') || 'a linked computer'
 const links = new Links(linkDepsFor(store, {
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
-  // The orchestrator also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
+  // The Assistant also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
   broadcast: (e) => {
     events.push(e)
     mgr.linkedHost.observeLinked(e)
@@ -690,9 +690,9 @@ mgr.useHubName(hubName)
 mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
 mgr.layout.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
-// The orchestrator reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
+// The Assistant reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
 mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
-// The orchestrator's list_machines reads the list Settings shows (#1220)
+// The Assistant's list_machines reads the list Settings shows (#1220)
 mgr.useMachineList(() => links.list())
 // And changes them, behind the person's card where it matters (#1219)
 mgr.useMachineOps(links)

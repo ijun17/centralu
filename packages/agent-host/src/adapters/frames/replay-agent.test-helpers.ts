@@ -48,9 +48,9 @@ export const REPLAYED: readonly ReplayedTool[] = [
       const named = scenariosFor('claude').find((s) => s.name === scenario)
       const session: CreateSessionOpts = { ...opts, ...CLAUDE_REPLAY_SESSION, model: named?.model ?? CLAUDE_REPLAY_SESSION.model }
       // The host gives every session Centralu's own tools and the attached apps; the recorded run had what its scenario adds (fakes answering in the host's place), or, of a host's, tools it served
-      delete session.orchestratorTools
+      delete session.centraluTools
       delete session.apps
-      return { ...session, ...named?.session?.(), ...(recording.header.host === true ? { orchestratorTools: notingCentraluTools([]), toolProfile: 'reader' as const } : {}) }
+      return { ...session, ...named?.session?.(), ...(recording.header.host === true ? { centraluTools: notingCentraluTools([]), toolProfile: 'reader' as const } : {}) }
     },
   },
   {
@@ -73,8 +73,8 @@ export const REPLAYED: readonly ReplayedTool[] = [
       delete session.autoCompactCeiling
       // The host gives every session Centralu's own tools and the attached apps; the recorded run had them only if its thread offers the bridge
       if (!hasCentraluBridge(recording)) {
-        delete session.orchestratorTools
-        delete session.orchestratorBridge
+        delete session.centraluTools
+        delete session.centraluBridge
         delete session.apps
       }
       return session

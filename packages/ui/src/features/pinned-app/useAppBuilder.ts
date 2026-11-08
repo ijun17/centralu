@@ -12,7 +12,7 @@ import { useStore } from '../../store/store.js'
  * registry (`apps.builder`).
  *
  * When it asks again: whenever a session appears or disappears (the count changes). The builder
- * session may have been deleted, or one may have been started somewhere else (the orchestrator's
+ * session may have been deleted, or one may have been started somewhere else (the Assistant's
  * create_app, another dialog). Each ask is one lightweight round trip.
  */
 export type AppBuilder = {

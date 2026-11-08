@@ -28,7 +28,7 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   }
 
 /**
- * What the person (or the orchestrator for them) changes on a session: its model, effort and permission preset, its
+ * What the person (or the Assistant for them) changes on a session: its model, effort and permission preset, its
  * name and read mark, its background tasks; and the notices of a move to a newer CLI. Moved out of the session manager
  * as it was (#1143); what it reaches of the manager is `SessionSettingsHost`.
  */
@@ -129,7 +129,7 @@ export class SessionSettings {
        * **A running turn is never interrupted** (#164) — the change is only saved, and the swap
        * happens when the turn ends (completed, error, canceled — in onEvent). This keeps what the
        * person is told ("starting next turn") consistent with what actually happens. The
-       * orchestrator's own settings tool goes through this same path too.
+       * Assistant's own settings tool goes through this same path too.
        */
       if (inTurn(m.state)) {
         this.host.restartPolicy.restartAfterTurn.add(sessionId)

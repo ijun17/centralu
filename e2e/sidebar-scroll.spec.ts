@@ -15,13 +15,13 @@ test('scrolled to the bottom of a long project list, the top doors and the botto
   const list = page.getByTestId('sidebar-projects')
   await expect.poll(() => list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100)
 
-  const orchestratorBefore = (await page.getByTestId('orchestrator-button').boundingBox())!
+  const assistantBefore = (await page.getByTestId('assistant-button').boundingBox())!
   const addBefore = (await page.getByTestId('add-project').boundingBox())!
   // The aside itself never scrolls: only the list does
   await list.evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
   await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBeGreaterThan(100)
   expect(await sidebar.evaluate((el) => el.scrollTop)).toBe(0)
-  expect((await page.getByTestId('orchestrator-button').boundingBox())!.y).toBe(orchestratorBefore.y)
+  expect((await page.getByTestId('assistant-button').boundingBox())!.y).toBe(assistantBefore.y)
   expect((await page.getByTestId('add-project').boundingBox())!.y).toBe(addBefore.y)
 
   // The handle spans the sidebar's full height after the scroll, so its lowest part is still there to drag

@@ -38,7 +38,7 @@ describe('parseFileRef — what an agent said that we are willing to open', () =
     expect(parseFileRef('/Users/me/other/src/a.ts', ROOT)).toBeNull()
   })
 
-  it('refuses everything when the session has no project (the orchestrator)', () => {
+  it('refuses everything when the session has no project (the Assistant)', () => {
     expect(parseFileRef('src/a.ts', null)).toBeNull()
     expect(parseFileRef('/Users/me/proj/src/a.ts', null)).toBeNull()
   })

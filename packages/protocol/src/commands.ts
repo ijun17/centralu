@@ -2,7 +2,7 @@ import type { z } from 'zod'
 import { appMethods } from './commands/methods/apps.js'
 import { hostMethods } from './commands/methods/host.js'
 import { mailMethods } from './commands/methods/mail.js'
-import { orchestratorMethods } from './commands/methods/orchestrator.js'
+import { assistantMethods } from './commands/methods/assistant.js'
 import { projectMethods } from './commands/methods/projects.js'
 import { sessionMethods } from './commands/methods/sessions.js'
 import { settingsMethods } from './commands/methods/settings.js'
@@ -22,7 +22,7 @@ export * from './commands/session-params.js'
  */
 export const RpcMethods = {
   ...sessionMethods,
-  ...orchestratorMethods,
+  ...assistantMethods,
   ...projectMethods,
   ...terminalMethods,
   ...appMethods,

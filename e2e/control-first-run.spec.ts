@@ -28,24 +28,24 @@ test('Canceling the folder picker registers nothing', async ({ page }) => {
 })
 
 /**
- * First run (#63): **the person meets the orchestrator first.**
+ * First run (#63): **the person meets the Assistant first.**
  *
  * The goal is a habit, not efficiency — someone who never has the experience of asking the
- * orchestrator a question on first run will not click it later either. The cards on the intro
+ * assistant a question on first run will not click it later either. The cards on the intro
  * screen double as the tool-detection display, and clicking a card only records the setting
  * (the process only starts at the first question — lazy startup).
  */
-test('First run: intro screen -> pick a card -> empty orchestrator conversation (no session yet)', async ({
+test('First run: intro screen -> pick a card -> empty assistant conversation (no session yet)', async ({
   page,
 }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
-  // What the app is remains the first sentence, and the orchestrator's role stands out clearly
+  // What the app is remains the first sentence, and the Assistant's role stands out clearly
   // One line is all there is — what this screen sells is just "there is someone to talk to"
-  await expect(page.getByTestId('intro-role')).toContainText('orchestrator')
+  await expect(page.getByTestId('intro-role')).toContainText('Assistant')
   // The sidebar stays fully live even while reading the intro — it does not force the flow
   await expect(page.getByTestId('add-project')).toBeVisible()
-  await expect(page.getByTestId('orchestrator-button')).toBeVisible()
+  await expect(page.getByTestId('assistant-button')).toBeVisible()
   await expect(page.getByTestId('grid-button')).toBeVisible()
   // Telling the person they can change this later lowers the weight of the choice
   await expect(page.getByTestId('intro')).toContainText('You can change this later')
@@ -54,29 +54,29 @@ test('First run: intro screen -> pick a card -> empty orchestrator conversation 
 
   // An empty conversation + three suggested questions + the escape hatch — and **no session has
   // been created yet**
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await expect(page.getByTestId('assistant-suggestions')).toBeVisible()
   await expect(page.getByTestId('suggest-create-project')).toBeVisible()
-  await expect(page.getByTestId('orchestrator-pick-folder')).toBeVisible()
+  await expect(page.getByTestId('assistant-pick-folder')).toBeVisible()
   const sessionCount = await page.evaluate(() => (window as any).__mock.sessions.size)
   expect(sessionCount).toBe(0)
 })
 
-test('Clicking a suggested question sends it immediately — only then is the orchestrator born (#63 lazy startup)', async ({
+test('Clicking a suggested question sends it immediately — only then is the Assistant born (#63 lazy startup)', async ({
   page,
 }) => {
   await page.goto('/?mock=1')
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-codex').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await expect(page.getByTestId('assistant-suggestions')).toBeVisible()
 
   await page.getByTestId('suggest-capabilities').click()
 
   // The question lands in the conversation as a user message (no intermediate step like filling
   // the composer)
-  await expect(page.getByTestId('msg-user').first()).toContainText('What can you do as the orchestrator?')
+  await expect(page.getByTestId('msg-user').first()).toContainText('What can you do as the Assistant?')
   // The card is a function of the message count — now that a first message exists, it disappears
-  await expect(page.getByTestId('orchestrator-suggestions')).toHaveCount(0)
-  // The tool picked on the intro screen is the orchestrator's tool
+  await expect(page.getByTestId('assistant-suggestions')).toHaveCount(0)
+  // The tool picked on the intro screen is the Assistant's tool
   const tool = await page.evaluate(() => {
     const m = (window as any).__mock
     return [...m.sessions.values()].find((s: any) => s.projectId === null)?.tool
@@ -100,7 +100,7 @@ test('A project can be created from the intro screen too — the sidebar appears
   // ordinary app appears
   await expect(page.getByTestId('project-alpha')).toBeVisible()
   await expect(page.getByTestId('intro')).toHaveCount(0)
-  await expect(page.getByTestId('orchestrator-button')).toBeVisible()
+  await expect(page.getByTestId('assistant-button')).toBeVisible()
 })
 
 /**
@@ -135,7 +135,7 @@ test('First-run escape hatch: does not force a conversation — picking a folder
   await page.evaluate(() => {
     ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
   })
-  await page.getByTestId('orchestrator-pick-folder').click()
+  await page.getByTestId('assistant-pick-folder').click()
 
   // It does not stop at registration — the next step (creating a session) opens right there for
   // that project
@@ -192,7 +192,7 @@ test('Intro screen: does not block when only one tool is ready — proceed throu
   await expect(page.getByTestId('intro-blocked')).toHaveCount(0)
   // The ready card stays active — clicking it enters the app
   await page.getByTestId('intro-card-codex').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  await expect(page.getByTestId('assistant-suggestions')).toBeVisible()
 })
 
 test('When a tool cannot be used, the reason is shown (M2.5: the start button used to do nothing)', async ({

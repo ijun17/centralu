@@ -31,20 +31,20 @@ export type MailToolArgs = {
 
 export type MailToolResult = { text: string; isError?: boolean }
 
-/** What the host knows of a session that asked the orchestrator (§7.6): the facts the person decides on, which the session cannot write */
+/** What the host knows of a session that asked the Assistant (§7.6): the facts the person decides on, which the session cannot write */
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
 
 /** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
-  /** The orchestrator's session id, or null while there is none */
-  orchestratorId(): string | null
+  /** The Assistant's session id, or null while there is none */
+  assistantId(): string | null
   /** The sessions of this host a name or id can mean: the ones that are here (not archived or deleted) */
   sessions(): { id: string; name: string; project: string | null; state: string }[]
-  /** How the session makes the calls an answer names: the tool, or `centralu_run` for the orchestrator */
+  /** How the session makes the calls an answer names: the tool, or `centralu_run` for the Assistant */
   form(sessionId: string): 'plain' | 'command'
-  /** Who a session is, for the line over its request to the orchestrator (§7.6) */
+  /** Who a session is, for the line over its request to the Assistant (§7.6) */
   askerOf(sessionId: string): AskerFacts | undefined
   /** The words of a message the person typed in a session (a request's checked citation, docs/plans/cited-requests.md §3), or null when it is gone */
   personMessage(sessionId: string, seq: number): string | null
@@ -63,7 +63,7 @@ export type MailToolHost = {
  */
 export class MailTool {
   private readonly now: () => number
-  /** The sessions told once that `orchestrator` is not their parent (#1984) */
+  /** The sessions told once that `assistant` is not their parent (#1984) */
   private readonly hinted = new Set<string>()
 
   constructor(
@@ -128,22 +128,24 @@ export class MailTool {
   }
 
   /**
-   * A party the call names: `person`, `orchestrator` (the role, D15), `parent` (the session that started the caller, D16), an absolute address, or a
+   * A party the call names: `person`, `assistant` (the role, D15), `parent` (the session that started the caller, D16), an absolute address, or a
    * session of this host by its id or its exact name (any case; `session:<this host>/<name>` too, which is what an agent gets back when it writes a name).
    * Several sessions of one name are refused with their addresses: a guess could send the words to the wrong one
    */
   private party(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, to: string): { address: string; via?: string } {
     const t = to.trim()
     if (t.toLowerCase() === PERSON) return { address: PERSON }
-    if (t.toLowerCase() === 'orchestrator') {
-      const id = this.host.orchestratorId()
-      if (!id) throw refuse('no_mailbox', 'there is no orchestrator to ask yet: write to the person instead')
+    // #2133: the address is `assistant`, with no alias for the old `orchestrator`; the stored `via` keeps its old value until the store's rename
+    // (docs/plans/assistant-rename.md, step 4), so the previous release still reads these rows
+    if (t.toLowerCase() === 'assistant') {
+      const id = this.host.assistantId()
+      if (!id) throw refuse('no_mailbox', 'there is no Assistant to ask yet: write to the person instead')
       return { address: this.service.sessionAddress(id), via: 'orchestrator' }
     }
     if (t.toLowerCase() === 'parent') {
       // #1987: started from a linked computer, its parent is a session of that computer's hub, which mail does not reach yet; "person" would stay unseen here too
       if (!me.askedBy && me.fromHub) throw refuse('unknown', 'your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
-      if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "orchestrator" or "person".')
+      if (!me.askedBy) throw refuse('unknown', 'this session was not started by another session; write to "assistant" or "person".')
       return { address: this.service.sessionAddress(me.askedBy) }
     }
     // An address of an app, of Centralu or of another computer is the service's to judge (it refuses all three, each in its own words)
@@ -168,18 +170,18 @@ export class MailTool {
     }
     throw refuse(
       'unknown',
-      `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>. Mail does not reach sessions on other computers yet.`,
+      `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Mail does not reach sessions on other computers yet.`,
     )
   }
 
   /**
-   * #1984: a session that has a parent and mails `orchestrator` may have meant the parent, which nothing it sees named. The answer says so once per session
-   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the orchestrator itself.
+   * #1984: a session that has a parent and mails `assistant` may have meant the parent, which nothing it sees named. The answer says so once per session
+   * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the Assistant itself.
    */
   private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
-    if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.orchestratorId() || this.hinted.has(sessionId)) return ''
+    if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.assistantId() || this.hinted.has(sessionId)) return ''
     this.hinted.add(sessionId)
-    return ` It went to the orchestrator, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
+    return ` It went to the Assistant, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }
 
   /** `send`'s and `reply`'s answer (S4's lines, in this tool's calls) */
@@ -190,8 +192,8 @@ export class MailTool {
     const name = this.reach.labelOf(to)
     const answered = r.answered === null ? undefined : this.records.message(r.answered)
     const lines = [`Sent ${m.id} to ${name}${name === to ? '' : ` (${to})`}.`]
-    if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the orchestrator reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
-    if (r.cited) lines.push(`Centralu checked the citation: the orchestrator reads the person's message ${r.cited.seq} of this session with your request.`)
+    if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the Assistant reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
+    if (r.cited) lines.push(`Centralu checked the citation: the Assistant reads the person's message ${r.cited.seq} of this session with your request.`)
     if (answered) {
       // A request its sender withdrew (the person closed the chain) is answered anyway, and the answer says so
       const withdrawn = this.records.recipient(answered.id, m.sender)?.settled === 'withdrawn'
@@ -281,7 +283,7 @@ export class MailTool {
     return `${head}${reply}${who}${asker}\n${quoted(escapeFrameTags(m.body))}`
   }
 
-  /** Under a request to the orchestrator, who asks, from the host's record and not from the words (§7.6) */
+  /** Under a request to the Assistant, who asks, from the host's record and not from the words (§7.6) */
   private askerLine(i: ReadItem): string {
     if (i.relation !== 'a session asking you for something') return ''
     const party = parseAddress(i.message.sender)

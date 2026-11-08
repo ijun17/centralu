@@ -38,7 +38,7 @@ describe('what one wake carries', () => {
     expect(next).toMatchObject({ workMessage: t2.id, messageIds: [t2.id] })
   })
 
-  it('drain for the orchestrator carries one asker’s requests; needsReply requests come before the rest, and urgent or long-passed-over ones first', () => {
+  it('drain for the Assistant carries one asker’s requests; needsReply requests come before the rest, and urgent or long-passed-over ones first', () => {
     const w = world()
     const a1 = w.send(A, { to: [ORC], text: 'a asks', needsReply: false }).message
     const b1 = w.send(B, { to: [ORC], text: 'b asks' }).message
@@ -79,15 +79,15 @@ describe('what one wake carries', () => {
     expect(w.mail.drain(B).workMessage).toBeNull()
   })
 
-  it('drain inlines the person’s words, a task to a non-orchestrator, a parent’s message; pulls the rest', () => {
+  it('drain inlines the person’s words, a task to a non-assistant, a parent’s message; pulls the rest', () => {
     const w = world()
     const fromParent = w.send(A, { to: [W], text: 'from your parent', needsReply: false }).message
     const fromPeer = w.send(C, { to: [W], text: 'from a peer', needsReply: false }).message
     const task = w.mail.task(A, W, { text: 'work', origin: 'start_agent', delivered: false })
     const person = w.mail.send(PERSON, { to: [W], text: 'from the person' }).message
     const up = w.send(W, { to: [A], text: 'from the child', needsReply: false }).message
-    const toOrchestrator = w.mail.task(W, ORC, { text: 'a task to the orchestrator', origin: 'ask_project', delivered: false })
-    const personToOrchestrator = w.mail.send(PERSON, { to: [ORC], text: 'person to the orchestrator' }).message
+    const toAssistant = w.mail.task(W, ORC, { text: 'a task to the Assistant', origin: 'ask_project', delivered: false })
+    const personToAssistant = w.mail.send(PERSON, { to: [ORC], text: 'person to the Assistant' }).message
     due(w)
     const d = w.mail.drain(W)
     expect(d.inline.sort()).toEqual([fromParent.id, task.id, person.id].sort())
@@ -97,8 +97,8 @@ describe('what one wake carries', () => {
     expect(w.mail.drain(A).inline).toEqual([])
     expect(w.mail.drain(A).pointed).toEqual([up.id])
     const o = w.mail.drain(ORC)
-    expect(o.inline).toEqual([personToOrchestrator.id])
-    expect(o.pointed).toEqual([toOrchestrator.id])
+    expect(o.inline).toEqual([personToAssistant.id])
+    expect(o.pointed).toEqual([toAssistant.id])
   })
 
   it('names id, kind, sender, needsReply, answers and clarifies in the frame, with the sender’s relation in Centralu’s words', () => {
@@ -274,7 +274,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     const w = world()
     w.sessions.set('orc2', { projectId: null, name: 'next' })
     const ORC2 = addr('orc2')
-    const viaRole = w.send(A, { to: [ORC], via: ['orchestrator'], text: 'to the orchestrator' }).message
+    const viaRole = w.send(A, { to: [ORC], via: ['orchestrator'], text: 'to the Assistant' }).message
     const direct = w.send(B, { to: [ORC], text: 'to this session by name' }).message
     due(w)
     w.records.markDelivered(ORC, [viaRole.id, direct.id], w.clock.t, 2)

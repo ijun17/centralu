@@ -170,7 +170,7 @@ const ManifestSchema = z.object({
     .object({
       /**
        * Can it ask for an agent (D-1)? `true` means "the person's default agent" — the project's
-       * default tool for a project app, or the orchestrator's tool for a user-folder app. To request
+       * default tool for a project app, or the Assistant's tool for a user-folder app. To request
        * a specific tool, list it explicitly (`["codex"]`): a tool not in the list is refused. The
        * narrower the declaration, the narrower what the person is asked to allow (D-4 asks per tool).
        */

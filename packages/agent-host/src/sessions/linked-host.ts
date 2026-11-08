@@ -14,7 +14,7 @@ import type { SessionToolsHost } from './session-tools.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
 
 /**
- * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
+ * The most a hub's Assistant reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
  * and hits of one search. Five times the tools' defaults (40 and 12), so no read a model makes is cut, while one call
  * cannot ask for a whole store over the link
  */
@@ -30,10 +30,10 @@ const HOST_RECALL_MAX_HITS = 50
 export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' | 'deliver'> &
   Pick<SessionTrashHost, 'delegationFlow'> &
   Pick<HandoffFlowHost, 'send'> &
-  Pick<SessionToolsHost, 'orchestratorToolsFor'> & {
+  Pick<SessionToolsHost, 'centraluToolsFor'> & {
     /** ask_project, here or on a linked machine (ask-project-flow.ts) */
     readonly askProjectFlow: AskProjectFlow
-    /** The orchestrator's reports from linked machines' sessions (linked-reports.ts) */
+    /** The Assistant's reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (overload-retry.ts) */
     readonly overloadRetry: Pick<OverloadRetry, 'stands'>
@@ -41,7 +41,7 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
 
 /**
  * This host as a linked machine's hub and as a hub's linked machine (#82, #1038): the events a linked machine's
- * sessions send, and what a hub's orchestrator reads of and sends to this host's sessions.
+ * sessions send, and what a hub's Assistant reads of and sends to this host's sessions.
  * Moved out of the session manager as it was (#1143); what it reaches of the manager is `LinkedHostHost`.
  */
 export class LinkedHost {
@@ -57,7 +57,7 @@ export class LinkedHost {
 
   /**
    * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the orchestrator is waiting on becomes its report, as
+   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, as
    * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work
    * (#723, `LinkedReports`).
    */
@@ -83,8 +83,8 @@ export class LinkedHost {
   }
 
   /**
-   * Refuses a session a hub's orchestrator may not direct (`sendFromHub`, a settings change `by: 'orchestrator'`): this
-   * host's orchestrator or a coordinator, which a hub is not shown (remote-hub.md §3.4), or none at all
+   * Refuses a session a hub's Assistant may not direct (`sendFromHub`, a settings change `by: 'orchestrator'`): this
+   * host's assistant or a coordinator, which a hub is not shown (remote-hub.md §3.4), or none at all
    */
   directedFromHub(sessionId: string): void {
     const target = this.host.meta.get(sessionId)
@@ -94,7 +94,7 @@ export class LinkedHost {
   }
 
   /**
-   * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
+   * A hub's Assistant's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
    * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
    *
    * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
@@ -102,7 +102,7 @@ export class LinkedHost {
    */
   async sendFromHub(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<void> {
     this.directedFromHub(sessionId)
-    const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
+    const name = oneLineText(fromName, 120) || 'Assistant on a linked computer'
     /*
      * An ask_project task from the hub (#838 item 12): the session works on it at the depth the hub counts, until the
      * turn that consumes it is recorded (`hubAskDepthKey`), so its start_agent and ask_project read the same depth as a
@@ -145,9 +145,9 @@ export class LinkedHost {
   readonly hubAskTurns = new Set<string>()
 
   /**
-   * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
-   * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
-   * host: no calling session, and this host's orchestrator left out (§3.4, #1941): its coordinators are read, though the
+   * What this host answers a hub's Assistant about its own sessions (`host.sessions`, `host.readSession`,
+   * `host.recall`; docs/plans/remote-hub.md §12). The Assistant's own code, over the view a hub's window has of this
+   * host: no calling session, and this host's assistant left out (§3.4, #1941): its coordinators are read, though the
    * hub's window does not show them. Bounded per call, since the caller is another machine.
    */
   hostReader(): {
@@ -156,7 +156,7 @@ export class LinkedHost {
     recall(query: string, limit?: number): Promise<RecallHit[]>
     lastAnswer(sessionId: string, maxChars?: number, turn?: boolean, since?: number): Promise<{ text: string; length: number; seq: number | null }>
   } {
-    const view = this.host.orchestratorToolsFor('', undefined, undefined, true)
+    const view = this.host.centraluToolsFor('', undefined, undefined, true)
     return {
       /*
        * A session's last response, whole (#1186): the hub read it from read's lines, which are cut at 2,000 characters,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ORCHESTRATOR_CHANGE, type AgentVersions, type SleepPolicy, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { ASSISTANT_CHANGE, type AgentVersions, type SleepPolicy, type ToolName, type UpdateStatus } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -10,12 +10,12 @@ import { ThemeFiles } from '../themes.js'
 import type { UpdateService } from '../updates.js'
 import type { AgentVersionService } from '../agent-versions.js'
 import { SessionManager } from './manager.js'
-import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
+import { commandRig, expectOnlyAssistantRuns } from './assistant-commands.test-helpers.js'
 import type { SessionSleeper } from './sleep.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 
 /**
- * The orchestrator's preference commands (#1219, second slice): `get_preferences` reads what Settings shows,
+ * The Assistant's preference commands (#1219, second slice): `get_preferences` reads what Settings shows,
  * `set_preferences` changes the reversible settings the window offers through the window's own calls (here the real
  * RPC handler, so the validation is the window's), and "apply updates when idle" turned on waits for the person's card.
  * The update, sleep and agent-version services are stand-ins that record what they were asked.
@@ -113,7 +113,7 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const { card, run, answered: answeredAny } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered: answeredAny } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ASSISTANT_CHANGE)
 
 /** Runs set_preferences, whose card the person answers with `decision`; the card's question and the answer */
 const answered = (orcId: string, args: Record<string, unknown>, decision: 'allow' | 'deny' | 'always', whileStanding?: () => Promise<void>) =>
@@ -123,7 +123,7 @@ const prefs = () => rpc('prefs.get', {}) as Promise<Record<string, unknown>>
 
 describe('get_preferences', () => {
   it('reads what Settings shows: the theme and the themes to choose from, the type settings, idle sleep, the update switches', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('- Theme mode: dark; dark theme "Dark" [dark]; light theme "Light" [light]')
@@ -143,7 +143,7 @@ describe('get_preferences', () => {
   })
 
   it('says what stays with the person', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('Interface')
     expect(r.text).toContain('- Send with Ctrl+Enter instead of Enter: off (set_preferences sendWithModifierEnter)')
@@ -158,7 +158,7 @@ describe('get_preferences', () => {
 
   it('lists a theme file that reads cleanly, quoted, and leaves out a broken one', async () => {
     await rpc('themes.save', { id: null, content: { name: 'Evening "blue"', base: 'dark', tokens: {} } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('"Evening \\"blue\\"" [evening-blue] (dark, a theme file)')
   })
@@ -166,7 +166,7 @@ describe('get_preferences', () => {
   it('still answers when a part cannot be read (no update service on this host)', async () => {
     const agents = new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude') as unknown as AgentAdapter]])
     mgr.useWindowRpc(createRpcHandler(mgr, agents, { sleeper: sleeper.service }))
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('- Updates: not available on this host')
@@ -176,7 +176,7 @@ describe('get_preferences', () => {
 
 describe('auto compact (#1376)', () => {
   it('get_preferences says where agents compact, and set_preferences changes the share and the control, no card', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'get_preferences')).text).toContain("- agents compact at 60% of the model's window, set by Centralu")
 
     const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
@@ -192,7 +192,7 @@ describe('auto compact (#1376)', () => {
   })
 
   it('sets the notices that tell a growing session to call compact_self, and refuses a second share at or above the share agents compact at (#1492)', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'get_preferences')).text).toContain('a session is told quietly to call compact_self at 30% and 50%')
     const set = await run(orc.id, 'set_preferences', { autoCompact: { nudgeFirst: 0.4, nudgeSecond: 0.55 } })
     expect(set.isError).toBeFalsy()
@@ -208,7 +208,7 @@ describe('auto compact (#1376)', () => {
   })
 
   it('refuses a share outside what the setting takes, and changes nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 1.5 } })
     expect(r.text).toContain('Auto compact')
     expect(await prefs()).not.toHaveProperty('autoCompact')
@@ -217,7 +217,7 @@ describe('auto compact (#1376)', () => {
 
 describe('set_preferences: appearance', () => {
   it('picks a theme by id or by name, setting the side of its base and showing that side', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const byId = await run(orc.id, 'set_preferences', { theme: 'hc-light' })
     expect(byId.isError).toBeFalsy()
     expect(byId.text).toBe('Now: theme "High contrast light" [hc-light] (the light theme, shown now; mode light).')
@@ -230,21 +230,21 @@ describe('set_preferences: appearance', () => {
 
   it('picks a theme file the person or an agent saved, by its name', async () => {
     await rpc('themes.save', { id: null, content: { name: 'Paper', base: 'light', tokens: {} } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { theme: 'paper' })
     expect(r.text).toContain('"Paper" [paper] (the light theme')
     expect(await prefs()).toMatchObject({ themeMode: 'light', themeLight: 'paper' })
   })
 
   it('never stores a mode the window does not offer: only dark or light, whatever the theme', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await rpc('prefs.set', { patch: { themeMode: 'system' } })
     await run(orc.id, 'set_preferences', { theme: 'light' })
     expect(((await prefs()) as { themeMode: string }).themeMode).toBe('light')
   })
 
   it('names the themes to choose from when the theme is not one, and changes nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const before = await prefs()
     const r = await run(orc.id, 'set_preferences', { theme: 'solarized', textSize: 1.25 })
     expect(r.isError).toBe(true)
@@ -256,7 +256,7 @@ describe('set_preferences: appearance', () => {
   it('refuses a theme name that hides characters, and two themes of one name', async () => {
     await rpc('themes.save', { id: null, content: { name: 'Twin Peaks', base: 'dark', tokens: {} } })
     await rpc('themes.save', { id: null, content: { name: 'Twin Peaks', base: 'light', tokens: {} } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const hidden = await run(orc.id, 'set_preferences', { theme: 'dark‮' })
     expect(hidden.text).toMatch(/theme has a control or formatting character/)
     const twice = await run(orc.id, 'set_preferences', { theme: 'twin peaks' })
@@ -264,14 +264,14 @@ describe('set_preferences: appearance', () => {
   })
 
   it('sets the text size to the nearest step, as the window does', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { textSize: 1.2 })
     expect(r.text).toBe('Now: text size 1.25.')
     expect(((await prefs()) as { textSize: number }).textSize).toBe(1.25)
   })
 
   it('sets and clears the fonts and the line height', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const set = await run(orc.id, 'set_preferences', { bodyFont: ' Inter ', codeFont: 'JetBrains Mono', lineHeight: 'relaxed' })
     expect(set.text).toBe('Now: body font "Inter"; code font "JetBrains Mono"; line height relaxed.')
     expect(await prefs()).toMatchObject({ bodyFont: 'Inter', codeFont: 'JetBrains Mono', lineHeight: 'relaxed' })
@@ -281,7 +281,7 @@ describe('set_preferences: appearance', () => {
   })
 
   it("refuses a font the window's own schema refuses (too long), and one with a hidden character, changing nothing", async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const before = await prefs()
     const long = await run(orc.id, 'set_preferences', { bodyFont: 'x'.repeat(201) })
     expect(long.isError).toBe(true)
@@ -296,7 +296,7 @@ describe('set_preferences: appearance', () => {
 
 describe('the notification switches (#1306)', () => {
   it('are read with the other settings, without the "error" and "every session finished" ones the product dropped', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('Notifications (set_preferences notifications)')
     expect(r.text).toContain(
@@ -307,7 +307,7 @@ describe('the notification switches (#1306)', () => {
 
   it("start from the window's workspace snapshot, which the host reads once", async () => {
     await rpc('workspace.save', { layout: { notifyPolicy: { approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: false } } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'get_preferences')
     expect(r.text).toContain('- Approval needed: off; a session finishes out of sight: on; even while the app is focused: off; sound: off')
     // The snapshot is read once: a window of an older build writing it again changes nothing
@@ -316,7 +316,7 @@ describe('the notification switches (#1306)', () => {
   })
 
   it('change one switch at once with no card, the others staying, and every window is told', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     announced.length = 0
     const r = await run(orc.id, 'set_preferences', { notifications: { done: false, whenFocused: true } })
     expect(r.isError).toBeFalsy()
@@ -332,7 +332,7 @@ describe('the notification switches (#1306)', () => {
 
   // Owner decision 2026-10-20: the window no longer raises the "error" and "every session finished" notifications
   it('refuse the "error" and "every session finished" switches by name, changing nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const before = await prefs()
     for (const args of [{ notifications: { error: false } }, { notifications: { allDone: false } }, { notifications: { error: true, done: false } }]) {
       const r = await run(orc.id, 'set_preferences', args)
@@ -343,10 +343,10 @@ describe('the notification switches (#1306)', () => {
     expect(await prefs()).toEqual(before)
   })
 
-  // Turning off what says a card waits is the orchestrator choosing what the person stops hearing about
+  // Turning off what says a card waits is the Assistant choosing what the person stops hearing about
   describe('the approval notification', () => {
     it('asks before it is turned off, naming what stops notifying, and turns it off on Allow', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, { notifications: { approval: false } }, 'allow')
       expect(question).toContain('Stop the "awaiting approval" notification?')
       expect(question).toContain('no longer show a notice or play a sound when an agent waits for your approval')
@@ -357,7 +357,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('keeps notifying when the person denies, the other switches of the call still changing', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, { notifications: { approval: false, done: false } }, 'deny')
       expect(r.isError).toBeFalsy()
       expect(r.text).toContain('a session finishes out of sight off')
@@ -366,7 +366,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks under auto too, and "always" remembers nothing', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
       await answered(orc.id, { notifications: { approval: false } }, 'always')
       await run(orc.id, 'set_preferences', { notifications: { approval: true } })
@@ -376,7 +376,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks nothing for one already off, and writes nothing the card did not name', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await rpc('prefs.set', { patch: { notifyPolicy: { approval: false } } })
       const off = await run(orc.id, 'set_preferences', { notifications: { approval: false, done: false } })
       expect(off.isError).toBeFalsy()
@@ -390,7 +390,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks when the switches cannot be read, as if it were on', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       mgr.useWindowRpc((method, params) => (method === 'prefs.get' ? Promise.reject(new Error('unreadable')) : rpc(method, params)))
       await rpc('prefs.set', { patch: { notifyPolicy: { approval: false } } })
       const { question } = await answered(orc.id, { notifications: { approval: false } }, 'deny')
@@ -398,7 +398,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks nothing for turning it on, or for any other switch', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await rpc('prefs.set', { patch: { notifyPolicy: { approval: false } } })
       const on = await run(orc.id, 'set_preferences', { notifications: { approval: true, done: false, whenFocused: true } })
       expect(on.isError).toBeFalsy()
@@ -409,7 +409,7 @@ describe('the notification switches (#1306)', () => {
   // The sound is how an approval reaches someone away: muting it while an approval would still notify is the same stop
   describe('the sound', () => {
     it('asks to be turned off while an approval would still notify, saying that it is how an approval reaches the person', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, { notifications: { sound: false } }, 'allow')
       expect(question).toContain('Turn off the notification sound?')
       expect(question).toContain('The sound is how an approval reaches you when you are away')
@@ -419,7 +419,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('stays on when the person denies, and the other switches of the call still change', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, { notifications: { sound: false, done: false } }, 'deny')
       expect(r.isError).toBeFalsy()
       expect(r.text).toContain('Not changed: Notifications: The person did not approve it, so the sound stays on.')
@@ -427,7 +427,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks under auto too, and "always" remembers nothing', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
       await answered(orc.id, { notifications: { sound: false } }, 'always')
       await run(orc.id, 'set_preferences', { notifications: { sound: true } })
@@ -436,7 +436,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('is one card with the approval notification, and a denial keeps both on', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, { notifications: { approval: false, sound: false } }, 'deny')
       expect(question).toContain('Stop the "awaiting approval" notification?')
       expect(question).toContain('The sound is also turned off')
@@ -446,7 +446,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('goes off with the approval notification on one Allow, and with no card once it no longer notifies, whatever "error" holds', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const both = await answered(orc.id, { notifications: { approval: false, sound: false } }, 'allow')
       expect(both.question).not.toContain('Turn off the notification sound?')
       expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toMatchObject({ approval: false, sound: false })
@@ -459,7 +459,7 @@ describe('the notification switches (#1306)', () => {
     })
 
     it('asks when the switches cannot be read, and nothing for turning it on or for one already off', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await rpc('prefs.set', { patch: { notifyPolicy: { sound: false } } })
       const already = await run(orc.id, 'set_preferences', { notifications: { sound: false, whenFocused: true } })
       expect(already.isError).toBeFalsy()
@@ -473,14 +473,14 @@ describe('the notification switches (#1306)', () => {
   })
 
   it('merge into what the window saved meanwhile: a patch carrying one switch does not undo another', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await rpc('prefs.set', { patch: { notifyPolicy: { whenFocused: true } } })
     await run(orc.id, 'set_preferences', { notifications: { done: false } })
     expect(((await prefs()) as { notifyPolicy: unknown }).notifyPolicy).toEqual({ approval: true, error: true, done: false, allDone: true, whenFocused: true, sound: true })
   })
 
   it('refuse a switch that does not exist, one that is not a boolean, and an empty list, changing nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const before = await prefs()
     for (const args of [{ notifications: { volume: true } }, { notifications: { sound: 'loud' } }, { notifications: { sound: 1 } }]) {
       const r = await run(orc.id, 'set_preferences', args)
@@ -493,7 +493,7 @@ describe('the notification switches (#1306)', () => {
   })
 
   it('go with the other changes of one call, and a switch the window would refuse is refused as the window refuses it', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { textSize: 1.1, notifications: { done: false } })
     expect(r.text).toContain('Now: text size 1.1.')
     expect(r.text).toContain('a session finishes out of sight off')
@@ -504,14 +504,14 @@ describe('the notification switches (#1306)', () => {
 
 describe('set_preferences: idle sleep and the update switches', () => {
   it('sets when idle sessions sleep, or never', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'set_preferences', { idleSleepMinutes: 30 })).text).toBe('Idle sessions sleep after 30 minutes.')
     expect((await run(orc.id, 'set_preferences', { idleSleepMinutes: 'never' })).text).toBe('Idle sessions sleep after never.')
     expect(sleeper.calls).toEqual([30, null])
   })
 
   it('refuses a sleep time that is no whole number of minutes, before any call', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     for (const value of [0, -5, 1.5, 'soon']) {
       const r = await run(orc.id, 'set_preferences', { idleSleepMinutes: value })
       expect(r.isError, String(value)).toBe(true)
@@ -520,7 +520,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
   })
 
   it('moves idle sessions to a new agent CLI on and off at once, with no card', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { moveIdleSessionsToNewAgentCli: false })
     expect(r.text).toContain('Moving idle sessions to a newly installed agent CLI is off.')
     expect(versions.calls).toEqual([false])
@@ -534,7 +534,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
   describe('autoUpdate', () => {
     it('asks before turning it on, saying that code then arrives unasked, and turns both halves on only on Allow', async () => {
       updates.set({ auto: false, autoApply: false })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, { autoUpdate: true }, 'allow')
       expect(question).toContain('Turn on "Automatic updates"?')
       expect(question).toContain('installs it by itself')
@@ -545,7 +545,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
 
     it('asks when only one half is off, and ends with both on', async () => {
       // Checking on, installing off: what every host had before 2026-10-20 unless the person turned apply on
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, { autoUpdate: true }, 'allow')
       expect(question).toContain('Turn on "Automatic updates"?')
       expect(r.text).toBe('Automatic updates are on.')
@@ -554,7 +554,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
 
     it('asks when the switches cannot be read, as if off', async () => {
       updates.set({ auto: true, autoApply: true })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       mgr.useWindowRpc((method, params) => (method === 'updates.status' ? Promise.reject(new Error('unreadable')) : rpc(method, params)))
       const { question } = await answered(orc.id, { autoUpdate: true }, 'deny')
       expect(question).toContain('Turn on "Automatic updates"?')
@@ -562,7 +562,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
 
     it('turns off without reading the switches first, and says which half is on when it stops halfway', async () => {
       updates.set({ auto: true, autoApply: true })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       mgr.useWindowRpc((method, params) =>
         method === 'updates.setAuto' ? Promise.reject(new Error('the store is busy')) : rpc(method, params),
       )
@@ -573,7 +573,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
     })
 
     it('leaves both halves as they were when the person denies, and still makes the other changes of the call', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, { autoUpdate: true, textSize: 1.1 }, 'deny')
       expect(r.isError).toBeFalsy()
       expect(r.text).toContain('Now: text size 1.1.')
@@ -582,14 +582,14 @@ describe('set_preferences: idle sleep and the update switches', () => {
     })
 
     it('answers nothing changed when the one change asked for is denied', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, { autoUpdate: true }, 'deny')
       expect(r.isError).toBe(true)
       expect(r.text).toMatch(/Nothing changed: Automatic updates: The person did not approve it/)
     })
 
     it('asks under auto too, and "always" is read as allow, once: the next turn-on asks again', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
       await answered(orc.id, { autoUpdate: true }, 'always')
       expect(updates.calls).toContain('setAutoApply:true')
@@ -601,7 +601,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
 
     it('turns off with no card, installing first, and asks nothing when it is already on', async () => {
       updates.set({ auto: true, autoApply: true })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const already = await run(orc.id, 'set_preferences', { autoUpdate: true })
       expect(already.text).toBe('Automatic updates are on.')
       expect(card(orc.id)).toBeUndefined()
@@ -612,14 +612,14 @@ describe('set_preferences: idle sleep and the update switches', () => {
     })
 
     it('is read as one setting, saying which half is on when they differ', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       expect((await run(orc.id, 'get_preferences')).text).toContain('- Automatic updates (check, install, and apply when idle): off (checking is on, installing is off) (autoUpdate')
       updates.set({ auto: true, autoApply: true })
       expect((await run(orc.id, 'get_preferences')).text).toContain('- Automatic updates (check, install, and apply when idle): on (autoUpdate, asks the person to turn on)')
     })
 
     it('refuses the separate switches it replaced, by name', async () => {
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       for (const args of [{ checkForUpdates: true }, { applyUpdatesWhenIdle: true }, { checkForUpdates: false }]) {
         const r = await run(orc.id, 'set_preferences', args)
         expect(r.isError, JSON.stringify(args)).toBe(true)
@@ -633,7 +633,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
   it('reports a part that could not be changed and still makes the rest (no update service on this host)', async () => {
     const agents = new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude') as unknown as AgentAdapter]])
     mgr.useWindowRpc(createRpcHandler(mgr, agents, { sleeper: sleeper.service }))
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { idleSleepMinutes: 5, autoUpdate: false })
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain('Idle sessions sleep after 5 minutes.')
@@ -643,7 +643,7 @@ describe('set_preferences: idle sleep and the update switches', () => {
 
 describe('set_preferences: the way of typing and the folded groups (#1219, fourth slice)', () => {
   it('sets sending with Ctrl+Enter on and off at once, with no card, and says how a message is sent now', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const on = await run(orc.id, 'set_preferences', { sendWithModifierEnter: true })
     expect(on.isError).toBeFalsy()
     expect(on.text).toContain('send with Ctrl+Enter (Enter breaks the line)')
@@ -654,7 +654,7 @@ describe('set_preferences: the way of typing and the folded groups (#1219, fourt
   })
 
   it("folds and unfolds a session's children, keeping the groups the person folded and the order of the rest", async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await rpc('prefs.set', { patch: { foldedGroups: ['session:s-person', 'app:notes'] } })
     const folded = await run(orc.id, 'set_preferences', { foldedGroups: { fold: ['s-one', 's-two'] } })
     expect(folded.isError).toBeFalsy()
@@ -667,7 +667,7 @@ describe('set_preferences: the way of typing and the folded groups (#1219, fourt
   })
 
   it('refuses an id that is no session id, changing nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await rpc('prefs.set', { patch: { foldedGroups: ['session:s-person'] } })
     const r = await run(orc.id, 'set_preferences', { foldedGroups: { fold: ['s-ok', '../x'] }, sendWithModifierEnter: true })
     expect(r.isError).toBe(true)
@@ -679,7 +679,7 @@ describe('set_preferences: the way of typing and the folded groups (#1219, fourt
 
 describe('apply_agent_versions', () => {
   it('restarts the idle sessions on the installed agent CLI at once and names the busy ones that stay', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const none = await run(orc.id, 'apply_agent_versions')
     expect(none.text).toBe('No session that has been quiet for a minute runs an older agent CLI than the one installed; nothing was restarted.')
     versions.answer({ restarted: ['s-a', 's-b'], busy: ['s-c'] })
@@ -695,7 +695,7 @@ describe('apply_agent_versions', () => {
 
 describe('what set_preferences does not reach', () => {
   it('has no field for what stays with the person: an unknown or trust-changing setting is refused by name', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const before = await prefs()
     for (const args of [{ sessionTools: false }, { agentCeiling: 0 }, { agentDepth: 3 }, { themeMode: 'system' }, { fontSize: 14 }, { accent: '#ff0000' }]) {
       const r = await run(orc.id, 'set_preferences', args)
@@ -706,7 +706,7 @@ describe('what set_preferences does not reach', () => {
   })
 
   it('says what it can change when there is nothing to change', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', {})
     expect(r.isError).toBe(true)
     expect(r.text).toMatch(/Nothing to change: give at least one of theme, textSize/)
@@ -715,18 +715,18 @@ describe('what set_preferences does not reach', () => {
 
 describe('who may run them', () => {
   it('are found through centralu_commands, as the instructions say: "machine" lists the machine commands, and the settings and archive ones are named', async () => {
-    const orc = await mgr.orchestrator()
-    const machines = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'machine' })).text
+    const orc = await mgr.assistant()
+    const machines = (await mgr.runCentraluTool(orc.id, 'centralu_commands', { query: 'machine' })).text
     for (const name of ['add_machine', 'install_machine', 'remove_machine', 'reconnect_machine', 'set_machine_auto_reconnect', 'set_machine_autostart']) expect(machines, name).toContain(`- ${name}:`)
-    const trash = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'archive' })).text
+    const trash = (await mgr.runCentraluTool(orc.id, 'centralu_commands', { query: 'archive' })).text
     for (const name of ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_archived', 'delete_all_archived']) expect(trash, name).toContain(`- ${name}:`)
-    const prefs = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query: 'preferences' })).text
+    const prefs = (await mgr.runCentraluTool(orc.id, 'centralu_commands', { query: 'preferences' })).text
     expect(prefs).toContain('- get_preferences:')
     expect(prefs).toContain('- set_preferences:')
   })
 
-  it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    expectOnlyOrchestratorRuns(COMMANDS)
+  it('only the Assistant, as rare commands in the default tier; no other seat in any tier', () => {
+    expectOnlyAssistantRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and changes nothing", async () => {
@@ -737,8 +737,8 @@ describe('who may run them', () => {
     const s = (await rpc('agents.createSession', { projectId: project.id, cwd: dir, tool: 'claude' })) as { id: string }
     const before = await prefs()
     for (const name of COMMANDS) {
-      await expect(mgr.runOrchestratorTool(s.id, name, { textSize: 1.25 }), name).rejects.toThrow(`Not a tool of this session: ${name}`)
-      await expect(mgr.runOrchestratorTool(s.id, 'centralu_run', { command: name, args: { textSize: 1.25 } }), name).rejects.toThrow(/Not a tool of this session/)
+      await expect(mgr.runCentraluTool(s.id, name, { textSize: 1.25 }), name).rejects.toThrow(`Not a tool of this session: ${name}`)
+      await expect(mgr.runCentraluTool(s.id, 'centralu_run', { command: name, args: { textSize: 1.25 } }), name).rejects.toThrow(/Not a tool of this session/)
     }
     expect(await prefs()).toEqual(before)
     expect(updates.calls).toEqual([])
@@ -749,7 +749,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   const themesDir = () => join(root, 'themes')
 
   it('writes a theme file as Settings does, and picks it in the same call', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', {
       themeFile: { name: 'Dark Cool', base: 'dark', tokens: { 'surface-floor': '#101820', ink: '#dde6ee' } },
       theme: 'Dark Cool',
@@ -763,7 +763,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('applies the rules of themes.save: a name that is empty, an id that is not one, plain text; nothing is written', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'set_preferences', { themeFile: { name: ' ', base: 'dark', tokens: {} } })).isError).toBe(true)
     expect((await run(orc.id, 'set_preferences', { themeFile: { id: '../x', name: 'X', base: 'dark', tokens: {} } })).text).toMatch(/is not a theme id/)
     expect((await run(orc.id, 'set_preferences', { themeFile: { name: 'X', base: 'dark', tokens: { ink: 'red‮' } } })).text).toMatch(/control or formatting character/)
@@ -771,13 +771,13 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('says what the reader will skip: an unknown token is written and reported', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Odd', base: 'light', tokens: { 'no-such-token': 'red' } } })
     expect(r.text).toMatch(/Unknown token .*no-such-token.* is ignored/)
   })
 
   it('replaces the file of an id, and lists files with get_preferences, one in full on request', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await run(orc.id, 'set_preferences', { themeFile: { name: 'Mist', base: 'light', tokens: { ink: '#111111' } } })
     await run(orc.id, 'set_preferences', { themeFile: { id: 'mist', name: 'Mist', base: 'light', tokens: { ink: '#222222' } } })
     const all = await run(orc.id, 'get_preferences')
@@ -788,7 +788,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('deletes a theme file without losing it, and puts a side that showed it back on its preset', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await run(orc.id, 'set_preferences', { themeFile: { name: 'Gone', base: 'dark', tokens: {} }, theme: 'gone' })
     const r = await run(orc.id, 'set_preferences', { deleteThemeFile: 'gone' })
     expect(r.text).toMatch(/Removed the theme file \[gone\]; it is kept at .*\.removed/)
@@ -801,7 +801,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('sets the model for a difficulty, merges with what is saved, and clears one with null', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await run(orc.id, 'set_preferences', { agentModels: { claude: { heavy: { model: 'opus', effort: 'high' } } } })
     const r = await run(orc.id, 'set_preferences', { agentModels: { claude: { light: { model: 'haiku' } } } })
     expect(r.text).toContain('"claude" heavy: "opus" ("high")')
@@ -811,7 +811,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('refuses a tool that is not on this computer; a model or effort outside the tool\'s list is saved as typed, with a note; clearing what was never set leaves no entry', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const unknown = await run(orc.id, 'set_preferences', { agentModels: { codex: { standard: { model: 'gpt-5' } } } })
     expect(unknown.isError).toBe(true)
     expect(unknown.text).toContain('"codex" is not an agent CLI on this computer')
@@ -837,7 +837,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('a theme named by the id the new file will get is picked in the same call, also when the id carries a number', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const first = await run(orc.id, 'set_preferences', { themeFile: { name: 'My theme', base: 'dark', tokens: {} }, theme: 'my-theme' })
     expect(first.isError).toBeFalsy()
     expect(await prefs()).toMatchObject({ themeDark: 'my-theme' })
@@ -847,14 +847,14 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('a full failure carries one "Nothing changed" prefix', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_preferences', { autoCompact: { share: 5 } })
     expect(r.isError).toBe(true)
     expect(r.text.match(/Nothing changed/g)).toHaveLength(1)
   })
 
   it('a refused call leaves no theme file behind, whichever check refuses it', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const file = { name: 'Kept out', base: 'dark', tokens: {} }
     expect((await run(orc.id, 'set_preferences', { themeFile: file, bodyFont: 'x‮' })).isError).toBe(true)
     expect((await run(orc.id, 'set_preferences', { themeFile: file, foldedGroups: { fold: ['../x'] } })).isError).toBe(true)
@@ -866,7 +866,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('a theme that cannot be found after the file is written is a partial success, said so', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'dark', tokens: {} } })
     const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Twin Peaks', base: 'light', tokens: {} }, theme: 'twin peaks', textSize: 1.1 })
     expect(r.isError).toBeFalsy()
@@ -876,7 +876,7 @@ describe('theme files and the models for started agents (#1978)', () => {
   })
 
   it('refuses a theme file the reader would not read (too large) before writing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const tokens = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => ['t' + i, 'x'.repeat(390)]))
     const r = await run(orc.id, 'set_preferences', { themeFile: { name: 'Huge', base: 'dark', tokens } })
     expect(r.isError).toBe(true)

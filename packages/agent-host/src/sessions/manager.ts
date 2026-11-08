@@ -1,7 +1,7 @@
 import { ModelWindows, autoCompactPlan } from './auto-compact.js'
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { windowAround } from './snippet.js'
-import { createdPreset, orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { createdPreset, centraluToolsFor, type AssistantSeatHost } from './assistant-seat.js'
 import { parseAddress } from '../mail/address.js'
 import { presetWithin } from './start-agent.js'
 import { matchProjects } from './ask-project.js'
@@ -45,7 +45,7 @@ import { LaunchInputs, type LaunchInputsHost } from './launch-inputs.js'
 import { SessionLayout, type SessionLayoutHost } from './session-layout.js'
 import { ChildOwnership } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
-import { OrchestratorSlot, type OrchestratorSlotHost } from './orchestrator-slot.js'
+import { AssistantSlot, type AssistantSlotHost } from './assistant-slot.js'
 import { LinkedHost, type LinkedHostHost } from './linked-host.js'
 import { SessionSettings, type SessionSettingsHost } from './session-settings.js'
 import { CacheLedger } from './cache-ledger.js'
@@ -68,11 +68,11 @@ import {
   DATA_DIR,
   withoutToolRecord,
   errorMessage,
-  ORCHESTRATOR_CHANGE,
+  ASSISTANT_CHANGE,
   oneLineText,
   PermissionPreset as PresetSchema,
 } from '@cc/protocol'
-import type { AgentAdapter, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, LinkedSessions, CentraluTools, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 
 import { Store } from '../dev-services/store.js'
@@ -105,7 +105,7 @@ import type { HubsReader } from './ask-project-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & OrchestratorSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & AssistantSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
 
 /** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
 function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
@@ -134,7 +134,7 @@ export class SessionManager {
   readonly approvalRules: ApprovalRules
   /** The registered projects: rows, folders, trust, `ProjectInfo` and the settings kept on them (project-registry.ts) */
   readonly projectRegistry: ProjectRegistry
-  /** What a session's process is launched with: setting files, read grants, the orchestrator's memory and skills (launch-inputs.ts) */
+  /** What a session's process is launched with: setting files, read grants, the Assistant's memory and skills (launch-inputs.ts) */
   private readonly launchInputs: LaunchInputs
   /** The sidebar order of sessions and the grid's panels (session-layout.ts) */
   readonly layout: SessionLayout
@@ -146,7 +146,7 @@ export class SessionManager {
   private readonly children: ChildOwnership
   /** The work one session gives another: ask_project, start_agent, agent_session (delegation-flow.ts) */
   private readonly delegationFlow: DelegationFlow
-  /** The orchestrator's handoff_session (#694): who may hand off what, and the handoff itself */
+  /** The Assistant's handoff_session (#694): who may hand off what, and the handoff itself */
   private readonly handoffFlow: HandoffFlow
   /** Requests for a session busy with another's turn: the choices, the queue and its delivery (queued-requests.ts) */
   private readonly queue: QueuedRequests
@@ -164,18 +164,18 @@ export class SessionManager {
   readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
   readonly merges: MergeChecks
-  /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
+  /** A project added or made here, and the Assistant's create_project (project-creation.ts) */
   readonly projectCreation: ProjectCreation
   private readonly machineFlow: MachineFlow
-  /** The orchestrator's get_preferences and set_preferences (preferences-flow.ts) */
+  /** The Assistant's get_preferences and set_preferences (preferences-flow.ts) */
   private readonly preferencesFlow: PreferencesFlow
-  /** The orchestrator's session archive commands (trash-flow.ts) */
+  /** The Assistant's session archive commands (trash-flow.ts) */
   private readonly trashFlow: TrashFlow
-  /** The orchestrator's trust commands (trust-flow.ts) */
+  /** The Assistant's trust commands (trust-flow.ts) */
   private readonly trustFlow: TrustFlow
-  /** The orchestrator's app upkeep commands (app-upkeep-flow.ts) */
+  /** The Assistant's app upkeep commands (app-upkeep-flow.ts) */
   private readonly appUpkeepFlow: AppUpkeepFlow
-  /** The orchestrator's housekeeping and read commands (housekeeping-flow.ts) */
+  /** The Assistant's housekeeping and read commands (housekeeping-flow.ts) */
   private readonly housekeepingFlow = new HousekeepingFlow()
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
@@ -215,9 +215,9 @@ export class SessionManager {
   readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
   readonly hostCards: HostCards
-  /** The orchestrator's steps that ask the person when a session asked for the turn (#1447) */
+  /** The Assistant's steps that ask the person when a session asked for the turn (#1447) */
   private readonly askedGate: AskedGate
-  /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
+  /** The Assistant's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
   private readonly linkedReports: LinkedReports
   /** A session's process brought up, for a new session or a wake, and what it launches with (session-start.ts) */
   private readonly starts: SessionStarts
@@ -231,8 +231,8 @@ export class SessionManager {
   readonly processes: SessionProcesses
   /** What this host takes over at its start and how it lets the sessions go: a quit, a handover, an update's stop (host-tenure.ts) */
   readonly tenure: HostTenure
-  /** The central orchestrator: its making, its proposals and skills, the bridge's door to its tools (orchestrator-slot.ts) */
-  readonly orchestratorSlot: OrchestratorSlot
+  /** The Assistant: its making, its proposals and skills, the bridge's door to its tools (assistant-slot.ts) */
+  readonly assistantSlot: AssistantSlot
   /**
    * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
    * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
@@ -335,15 +335,15 @@ export class SessionManager {
       askedBy: (id) => this.mail.hooks?.askedBy?.(id) ?? null,
       // Allow or deny only, under every preset: `auto` does not answer a session's request for the person (§9.7)
       ask: async (id, question, signal) => {
-        const answer = await this.hostCards.askHost(id, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
+        const answer = await this.hostCards.askHost(id, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true, uncovered: true })
         return answer === null ? null : answer === 'deny' ? 'deny' : 'allow'
       },
       cover: (id, run, signal) => this.hostCards.cover(id, run, signal),
-      // Work handed on to a session no looser than the asking one, the one check about power (docs/plans/cited-requests.md §4); where it goes is the orchestrator's judgement
+      // Work handed on to a session no looser than the asking one, the one check about power (docs/plans/cited-requests.md §4); where it goes is the Assistant's judgement
       noLooser: (asker, call) => {
         const me = this.meta.get(asker.sessionId)
         if (!me) return false
-        const seatId = this.orchestratorId()
+        const seatId = this.assistantId()
         const seat = (seatId === null ? undefined : this.meta.get(seatId))?.permissionPreset ?? 'safe'
         // A session of this host by id or mail address; one on a linked machine is not known here, so its preset is not either
         const of = (v: unknown): PermissionPreset | undefined => {
@@ -366,8 +366,8 @@ export class SessionManager {
         const cited = cites ? this.store.messages.loadMessagesFrom(asker.sessionId, cites.seq - 1, 1).find((r) => r.seq === cites.seq) : undefined
         const words = cited && typeof cited.payload === 'object' && cited.payload !== null && 'text' in cited.payload ? String(cited.payload.text) : ''
         const why = cites
-          ? `On your message from ${Math.max(1, Math.round((Date.now() - cites.at) / 60_000))} min ago (${JSON.stringify(oneLineText(words, 60))}), the orchestrator did this for this session's request`
-          : "For this session's request, which cites no message of yours, the orchestrator did this"
+          ? `On your message from ${Math.max(1, Math.round((Date.now() - cites.at) / 60_000))} min ago (${JSON.stringify(oneLineText(words, 60))}), the Assistant did this for this session's request`
+          : "For this session's request, which cites no message of yours, the Assistant did this"
         this.events.onEvent({ type: 'notice', sessionId: asker.sessionId, level: 'info', from: 'Centralu', label: 'request record', text: `${why}: ${oneLineText(act, 300)}` })
       },
     })
@@ -434,12 +434,12 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
-      // The two seats that have the tool (tool-seats.ts): an ordinary session and the orchestrator
+      // The two seats that have the tool (tool-seats.ts): an ordinary session and the Assistant
       hasCompactTool: (id) => this.mail.canReadMail(id),
       nudge: (id, text) => this.handles.get(id)?.nudge?.(text) ?? false,
       notice: compactNotice,
     })
-    this.orchestratorSlot = new OrchestratorSlot(this.parts())
+    this.assistantSlot = new AssistantSlot(this.parts())
     const rawEmit = this.emit
     this.emit = (full) => {
       /*
@@ -450,6 +450,7 @@ export class SessionManager {
       rawEmit(withoutToolRecord(full))
     }
     this.tenure.restoreAtStart()
+    this.assistantSlot.renameFromOldName()
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
      * in progress right now — a note being read mid-flight cannot be cleaned up out from under
@@ -474,19 +475,19 @@ export class SessionManager {
     }
   }
 
-  /** The linked machines as `machines.list` answers (#1220), for the orchestrator's list_machines; none until wired */
+  /** The linked machines as `machines.list` answers (#1220), for the Assistant's list_machines; none until wired */
   private machineList: () => MachineInfo[] = () => []
 
   useMachineList(list: () => MachineInfo[]): void {
     this.machineList = list
   }
 
-  /** The hub's links, for the orchestrator's machine commands (#1219); main.ts wires them */
+  /** The hub's links, for the Assistant's machine commands (#1219); main.ts wires them */
   useMachineOps(ops: MachineOps): void {
     this.machineFlow.useOps(ops)
   }
 
-  /** The window's RPC as the router answers it, for the orchestrator's settings commands (#1219); main.ts wires it */
+  /** The window's RPC as the router answers it, for the Assistant's settings commands (#1219); main.ts wires it */
   useWindowRpc(rpc: WindowRpc): void {
     this.preferencesFlow.useRpc(rpc)
     this.trashFlow.useRpc(rpc)
@@ -616,7 +617,7 @@ export class SessionManager {
     return this.launches.refreshLaunchSettings(projectId, true)
   }
 
-  /** The linked machines' sessions, for the central orchestrator's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
+  /** The linked machines' sessions, for the Assistant's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
   private linkedReader: LinkedSessions | null = null
 
   useLinkedReader(reader: LinkedSessions): void {
@@ -770,8 +771,8 @@ export class SessionManager {
   /**
    * Where this session actually runs. **The stored path beats the recomputed one** (issue #28).
    *
-   * Recomputing this on every start is what orphaned the orchestrator. The data directory was
-   * renamed, `orchestratorHome()` dutifully answered with the new path, and Claude Code — which
+   * Recomputing this on every start is what orphaned the Assistant. The data directory was
+   * renamed, `assistantHome()` dutifully answered with the new path, and Claude Code — which
    * files conversations **by working directory** — went looking somewhere this session's history
    * had never been written. The tool said "not found"; the app called it a deletion. A session's
    * history lives where the session started, so that is the path we read back, not one we
@@ -783,7 +784,7 @@ export class SessionManager {
    * the rule itself.
    *
    * Rows written before v14 have no stored path — the migration deliberately leaves the
-   * orchestrator NULL rather than touching the user's home (see step 14 in store/migrations/v13-v27.ts). Derive
+   * assistant NULL rather than touching the user's home (see step 14 in store/migrations/v13-v27.ts). Derive
    * theirs once, here, and write it down; from then on the next rename cannot move them either.
    */
   private cwdFor(m: SessionInfo): string {
@@ -817,7 +818,7 @@ export class SessionManager {
 
   /**
    * Search for the command palette. The store now returns the whole body, so **it is cut down to one
-   * line right here** (the palette only ever shows one line). The orchestrator's recall cuts a much
+   * line right here** (the palette only ever shows one line). The Assistant's recall cuts a much
    * wider window from that same body — how much is needed is up to whoever is using it.
    */
   searchMessages(query: string, limit?: number) {
@@ -1074,7 +1075,7 @@ export class SessionManager {
       },
       listCommands: (...a) => self.toolQueries.listCommands(...a),
       listSessions: (...a) => self.listSessions(...a),
-      migrateApprovedMcpServers: (...a) => self.orchestratorSlot.proposals.migrateApprovedMcpServers(...a),
+      migrateApprovedMcpServers: (...a) => self.assistantSlot.proposals.migrateApprovedMcpServers(...a),
       mayRead: (...a) => self.launchInputs.mayRead(...a),
       get memoryGate() {
         return self.memoryGate
@@ -1087,14 +1088,14 @@ export class SessionManager {
       notBeingRemoved: (...a) => self.notBeingRemoved(...a),
       observeCommit: (...a) => self.events.observeCommit(...a),
       openSession: (...a) => self.openSession(...a),
-      orchestratorMemory: (...a) => self.launchInputs.orchestratorMemory(...a),
-      orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
+      assistantMemory: (...a) => self.launchInputs.assistantMemory(...a),
+      centraluToolsFor: (...a) => self.centraluToolsFor(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.events.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
       pauseReport: (...a) => self.reports.pauseReport(...a),
       pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
       get proposals() {
-        return self.orchestratorSlot.proposals
+        return self.assistantSlot.proposals
       },
       get prLookup() {
         return self.prLookup
@@ -1212,19 +1213,19 @@ export class SessionManager {
     })
   }
 
-  private seatHost: OrchestratorSeatHost | undefined
+  private seatHost: AssistantSeatHost | undefined
   /**
-   * What the orchestrator tools reach of this manager (#428), made once on first use. Its fields are read when a tool
+   * What the Centralu tools reach of this manager (#428), made once on first use. Its fields are read when a tool
    * runs, never kept: a kept value would leave the tools on an old one (#757 review, when `reorderSessions` still replaced
    * `meta`; it sorts it in place since #1143).
    */
-  private seat(): OrchestratorSeatHost {
+  private seat(): AssistantSeatHost {
     // What `parts()` already says (its getters still run when read through the prototype) plus what only the tools need
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getter below reads this manager's field when used
     const self = this
-    const own: Pick<OrchestratorSeatHost, 'linkedReader' | 'proposals'> & Omit<OrchestratorSeatHost, keyof ManagerParts> = {
+    const own: Pick<AssistantSeatHost, 'linkedReader' | 'proposals'> & Omit<AssistantSeatHost, keyof ManagerParts> = {
       get proposals() {
-        return self.orchestratorSlot.proposals
+        return self.assistantSlot.proposals
       },
       linkedReader: () => this.linkedReader,
       linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
@@ -1248,23 +1249,23 @@ export class SessionManager {
       usageHistory: (p) => this.usageHistory(p),
       checkApp: (ref) => this.appSessions.checkApp(ref),
       createApp: (params) => this.appSessions.createApp(params),
-      askedBy: (orchestratorId) => this.mail.hooks?.askedBy?.(orchestratorId) ?? null,
+      askedBy: (assistantId) => this.mail.hooks?.askedBy?.(assistantId) ?? null,
     }
     // `own` stands on `parts()` (not copied from it: `Object.assign` would read the `proposals` getter once and keep the value)
     const parts: Omit<ManagerParts, 'linkedReader' | 'proposals'> = this.parts()
     Object.setPrototypeOf(own, parts)
-    if (!stands(own, parts)) throw new Error('The orchestrator seat could not be set on the module parts')
+    if (!stands(own, parts)) throw new Error('The Assistant seat could not be set on the module parts')
     return (this.seatHost ??= own)
   }
 
-  /** The central orchestrator's session id, or none while it has not been made (#1447: `mail send to "orchestrator"`) */
-  orchestratorId(): string | null {
+  /** The Assistant's session id, or none while it has not been made (#1447: `mail send to "assistant"`) */
+  assistantId(): string | null {
     return [...this.meta.values()].find((m) => m.kind === 'orchestrator')?.id ?? null
   }
 
-  /** The tools given to an orchestrator (FR-11), built over this manager (`orchestrator-seat.ts`) */
-  private orchestratorToolsFor(orchestratorId: string, scopeIds?: string[], ownProject?: boolean, hubView?: boolean): OrchestratorTools {
-    return orchestratorToolsFor(this.seat(), orchestratorId, scopeIds, ownProject, hubView)
+  /** The tools given to an Assistant (FR-11), built over this manager (`assistant-seat.ts`) */
+  private centraluToolsFor(assistantId: string, scopeIds?: string[], ownProject?: boolean, hubView?: boolean): CentraluTools {
+    return centraluToolsFor(this.seat(), assistantId, scopeIds, ownProject, hubView)
   }
 
   /** The caller's own preset, read at the boundary, never its project's or parent's preset. */
@@ -1305,9 +1306,9 @@ export class SessionManager {
     })
   }
 
-  /** `OrchestratorSlot.runOrchestratorTool` (orchestrator-slot.ts), kept on the manager for its callers */
-  runOrchestratorTool(...a: Parameters<OrchestratorSlot['runOrchestratorTool']>): ReturnType<OrchestratorSlot['runOrchestratorTool']> {
-    return this.orchestratorSlot.runOrchestratorTool(...a)
+  /** `AssistantSlot.runCentraluTool` (assistant-slot.ts), kept on the manager for its callers */
+  runCentraluTool(...a: Parameters<AssistantSlot['runCentraluTool']>): ReturnType<AssistantSlot['runCentraluTool']> {
+    return this.assistantSlot.runCentraluTool(...a)
   }
 
   /** Where the installed CLI versions come from (#297) — wired by the host, like the app runtime */
@@ -1338,9 +1339,9 @@ export class SessionManager {
   prLookup: (projectCwd: string, branch: string, signal?: AbortSignal) => Promise<BranchPr | 'unavailable' | null> = gitBranchPr
   prPollMs = 120_000
 
-  /** `OrchestratorSlot.orchestrator` (orchestrator-slot.ts), kept on the manager for its callers */
-  orchestrator(...a: Parameters<OrchestratorSlot['orchestrator']>): ReturnType<OrchestratorSlot['orchestrator']> {
-    return this.orchestratorSlot.orchestrator(...a)
+  /** `AssistantSlot.assistant` (assistant-slot.ts), kept on the manager for its callers */
+  assistant(...a: Parameters<AssistantSlot['assistant']>): ReturnType<AssistantSlot['assistant']> {
+    return this.assistantSlot.assistant(...a)
   }
 
   /** `SessionSettings.rename` (session-settings.ts), kept on the manager for its callers */

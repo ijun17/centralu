@@ -550,7 +550,7 @@ export class ExternalApps {
   }
 
   /**
-   * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the orchestrator's
+   * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the Assistant's
    * `create_app` use the same door. **This never starts it.** The body and what it refuses:
    * `createApp` in `app-folders.ts`.
    */
@@ -915,7 +915,7 @@ export class ExternalApps {
       ...(e.ref.projectId !== null && !e.found.root && this.deps.shared?.(e.ref) ? { shared: true } : {}),
       ...(e.found.root ? { root: true } : {}),
       // What it declares it will ask for, for the project's trust card (#1141). Always, once the manifest is read, an empty
-      // one too: absent then means it could not be read (or an older host said nothing), which the orchestrator's trust
+      // one too: absent then means it could not be read (or an older host said nothing), which the Assistant's trust
       // card tells apart from asking for nothing (#1219)
       ...(m ? { uses: m.uses } : {}),
       // Holding its process for background work now (#1236): the row says so, in the app's words

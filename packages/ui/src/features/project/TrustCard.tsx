@@ -8,7 +8,7 @@ import { useStore } from '../../store/store.js'
  * The question "Trust this project?", with what trusting covers (#1141).
  *
  * Trust follows the project, with no switch per app (owner, 2026-10-18): trusting it lets its apps run, lets them reach
- * the orchestrator and the person's other projects where an app may (the project's own root app), and lets its settings
+ * the Assistant and the person's other projects where an app may (the project's own root app), and lets its settings
  * apply. So the card lists each of the project's apps, its root app and those in `.centralu/apps` alike: its name, its
  * whole description, and what its manifest declares it may ask for, in plain words. A long list scrolls inside the card.
  *
@@ -61,7 +61,7 @@ export function TrustCard({ project, onAnswer, ids }: { project: ProjectInfo; on
                   {description && <p className="whitespace-pre-wrap break-words text-ink-muted" data-testid="trust-card-app-description">{description}</p>}
                   {a.info.root && (
                     <p className="text-ink-muted" data-testid="trust-ask-app-reach">
-                      This project is this app: the orchestrator and your other projects can use it.
+                      This project is this app: the Assistant and your other projects can use it.
                     </p>
                   )}
                   {asks.length > 0 ? (

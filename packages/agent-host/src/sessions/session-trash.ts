@@ -5,7 +5,7 @@ import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
 import { rm } from 'node:fs/promises'
-import { isOrchestratorAgentFolder } from './orchestrator-home.js'
+import { isAssistantAgentFolder } from './assistant-home.js'
 import { plainQuoted } from './tool-answers.js'
 import { existsSync, statSync } from 'node:fs'
 import {
@@ -223,7 +223,7 @@ export class SessionTrash {
   }
 
   /**
-   * A delete the orchestrator asked for (#1219), decided here at the last moment, as `trashIf`'s is: the session moves only if
+   * A delete the Assistant asked for (#1219), decided here at the last moment, as `trashIf`'s is: the session moves only if
    * it is still at rest in the very step that moves it, nothing awaited between (`isQuiet`). Unlike `trashIf` it is the
    * person's kind of delete: it never purges, and a delete already under way is the one that stands. False: it stayed where it was
    */
@@ -592,9 +592,9 @@ export class SessionTrash {
         } else {
           throw rpcError(`Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`)
         }
-      } else if (t.session.kind === 'orchestrator' && this.host.store.sessions.orchestratorId()) {
-        // Two central orchestrators would answer the same questions; the app has one (FR-11)
-        throw rpcError('Another orchestrator is in place — the app runs one at a time')
+      } else if (t.session.kind === 'orchestrator' && this.host.store.sessions.assistantId()) {
+        // Two central Assistants would answer the same questions; the app has one (FR-11)
+        throw rpcError('Another assistant is in place — the app runs one at a time')
       }
       let recovered: { branch: string; notice: string } | undefined
       if (record.recovery && t.session.worktree && projectId) {
@@ -692,8 +692,8 @@ export class SessionTrash {
       }
       await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
-      // An orchestrator's child worked in a folder of its own (#853, #994 review), which goes with it
-      if (cwd && isOrchestratorAgentFolder(cwd)) {
+      // An Assistant's child worked in a folder of its own (#853, #994 review), which goes with it
+      if (cwd && isAssistantAgentFolder(cwd)) {
         await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[archive] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
       }
       /*

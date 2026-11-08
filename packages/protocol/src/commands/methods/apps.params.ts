@@ -5,7 +5,7 @@ import { machineParam } from '../machine-fields.js'
 /** The parameters of the `apps` methods, which the host validates (docs/protocol.md §3). Their results: ./apps.results.ts */
 export const appsParams = {
   /**
-   * The orchestrator tool — **the path a separate process (the bridge) uses to call back into
+   * The Assistant tool — **the path a separate process (the bridge) uses to call back into
    * the host**.
    *
    * Claude attaches in-process, so it does not need this door. Codex can only attach a stdio
@@ -202,7 +202,7 @@ export const appsParams = {
   'apps.remove': z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam }),
   /**
    * Creates a new app from a template (M4 C-1b) — called by the "new app" button. The same door
-   * as the orchestrator's `create_app`. If `projectId` is given, it is created at
+   * as the Assistant's `create_app`. If `projectId` is given, it is created at
    * `.centralu/apps/<id>/` in that project (only if trusted); if null, it becomes a new project of
    * its own (#1141): a new folder `<parent>/<id>` (`~/Centralu` without `parent`, as for a new
    * project), registered trusted, whose root is the app (`root: true`). An older host given null
@@ -216,7 +216,7 @@ export const appsParams = {
     id: z.string(),
     name: z.string(),
     description: z.string().optional(),
-    /** The tool for the building session (C-2). If omitted, the project's default tool (for a user-folder app, the orchestrator's tool) */
+    /** The tool for the building session (C-2). If omitted, the project's default tool (for a user-folder app, the Assistant's tool) */
     tool: ToolName.optional(),
     /** With `projectId` null (#1141): the full path of the folder the new app project's folder goes in. Absent: `~/Centralu` */
     parent: z.string().max(4096).optional(),

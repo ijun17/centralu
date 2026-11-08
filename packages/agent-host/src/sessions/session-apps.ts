@@ -142,13 +142,13 @@ export type OnDemandApps = {
 
 /**
  * Decision 4's scope, apart from the app's state: whether this session is ever given this app. The
- * orchestrator gets the user-folder apps, a project's sessions that project's apps (its root app included),
+ * assistant gets the user-folder apps, a project's sessions that project's apps (its root app included),
  * and a building session its own app as well (see `refsFor`).
  *
- * Not the root apps for the orchestrator (#1205): each one was its own MCP server in every orchestrator
+ * Not the root apps for the Assistant (#1205): each one was its own MCP server in every Assistant
  * request, so the list grew with every project the person trusted (#1141 had given them all). It finds and
  * attaches the one it needs (`find_apps` / `attach_app`, sessions/app-access.ts), as a project's session does.
- * The user-folder apps stay: an MCP server the person approved for the orchestrator is one (A-7), and it is
+ * The user-folder apps stay: an MCP server the person approved for the Assistant is one (A-7), and it is
  * promised from the start.
  */
 function givesApp(session: AppSessionKey, app: Pick<ExternalAppInfo, 'appId' | 'projectId'>): boolean {
@@ -343,7 +343,7 @@ export class SessionAppsHub {
   /**
    * The apps this session receives (decision 4).
    *
-   *   orchestrator                the user-folder apps — it belongs to no project, so it gets no project's inner apps,
+   *   assistant                the user-folder apps — it belongs to no project, so it gets no project's inner apps,
    *                               and it attaches a root app when it needs one (#1205, `givesApp`)
    *   a project's session         that project's apps — only if the project is trusted. A worktree session
    *                               carries the same project id, so it receives the root's apps too
@@ -456,7 +456,7 @@ export class SessionAppsHub {
    * (trust, then the app's own state), and then what the live agent has (`live.appAttachment`: a Codex
    * thread keeps the servers it started with). `session` is null for a session that gets no apps at
    * all (one stood up by an app, manager `appsFor`). With no live agent the session attaches what the
-   * rule gives it when it wakes, so the rule's answer stands. A root app the orchestrator may attach and
+   * rule gives it when it wakes, so the rule's answer stands. A root app the Assistant may attach and
    * has not is reachable (#1205): its agent attaches it with `attach_app`, and the person has nothing to do.
    */
   reach(session: AppSessionKey | null, ref: AppRef, live?: Pick<SessionHandle, 'appAttachment'>): AppReach {
@@ -465,7 +465,7 @@ export class SessionAppsHub {
     // An app the session attached itself (#371 part A) counts like one the rule gives, under the name it was given
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
-    // A root app the orchestrator has not attached (#1205): it attaches it itself, with nothing for the person to do
+    // A root app the Assistant has not attached (#1205): it attaches it itself, with nothing for the person to do
     const selfServed = !!session && !own && session.kind === 'orchestrator' && app.root === true && !!this.opts.onDemand
     // One it attached whose project has since lost trust: the person is told to trust the project, not that it is another's
     const lostTrust = !!own && app.status === 'untrusted'
@@ -575,7 +575,7 @@ class Attachment implements SessionApps {
     const gate = this.hub.opts.whenAsked
     if (!gate || this.closed || !this.find(server)) return this.callNow(server, tool, args, opts)
     // A tool that only reads is not asked about, as for the CLI's own card (`readOnly`). Anything else of an app asks when a session's request is the
-    // turn, and is recorded once it ran. Named with a dot so no app tool can pass for one of the orchestrator's own reading tools or undoable commands
+    // turn, and is recorded once it ran. Named with a dot so no app tool can pass for one of the Assistant's own reading tools or undoable commands
     const call = { name: `${server}.${tool}`, args, ...(this.readOnly(server, tool) ? { readOnly: true as const } : {}) }
     return gate(this.session.id, call, opts.signal, () => this.callNow(server, tool, args, opts), failure)
   }
@@ -724,7 +724,7 @@ class Attachment implements SessionApps {
     if (!found) return false
     /*
      * "Own" is read from the session, not from the app: the app is a project's own when the session belongs to that
-     * project (`givesApp`), and `find` only finds an app whose project is trusted. The orchestrator has no project,
+     * project (`givesApp`), and `find` only finds an app whose project is trusted. The Assistant has no project,
      * and an app the session attached itself (`attach_app`) belongs to another project or to the user: neither is
      * covered by this project's trust, so their tools keep asking.
      */

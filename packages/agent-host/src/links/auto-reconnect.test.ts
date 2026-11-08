@@ -1021,7 +1021,7 @@ describe("an agent's call that needs a machine whose link is down makes it conne
     await drop(r, { sshAnswers: true })
     await pause(80)
     // The link is brought up for the send; the session is not live there, so the machine itself refuses it: not for reachability
-    const sent = await r.reader.send('m1.w1', 'hello', 'Orchestrator')
+    const sent = await r.reader.send('m1.w1', 'hello', 'Assistant')
     expect(JSON.stringify(sent)).not.toContain('not reachable')
     expect(r.hub.row().status).toBe('connected')
     expect(r.tunnel.opens).toBe(opens + 2)
@@ -1319,7 +1319,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
 
   it('create_session by the bare name tries it too', async () => {
     const { hub, opens, remote } = await rig()
-    const r = await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'newproj' })
+    const r = await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'newproj' })
     expect(r).toMatchObject({ isError: false })
     expect(hub.tunnel().opens).toBe(opens + 1)
     expect(remote.mgr.listSessions().filter((s) => s.projectId === 'p-new')).toHaveLength(1)
@@ -1344,7 +1344,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Dead') })
     expect(Date.now() - at).toBeLessThan(250 * SLOW)
     const create = Date.now()
-    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'typo3' })).toMatchObject({ isError: true, text: expect.stringContaining('Dead') })
+    expect(await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'typo3' })).toMatchObject({ isError: true, text: expect.stringContaining('Dead') })
     expect(Date.now() - create).toBeLessThan(250 * SLOW)
   })
 
@@ -1353,14 +1353,14 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     await hub.mgr.askProject('h1', { project: 'typo', task: 'say hello' })
     expect(deskLists.count).toBe(1)
     deskLists.count = 0
-    await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'typo' })
+    await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'typo' })
     expect(deskLists.count).toBe(1)
   })
 
   it('create_session names the machine it could not ask, as ask_project does', async () => {
     const { hub } = await rig()
     hub.tunnel().unreachable = true
-    const r = await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'newproj' })
+    const r = await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'newproj' })
     expect(r).toMatchObject({ isError: true, text: expect.stringMatching(/Laptop.*not reachable right now/) })
     expect(r.text).toContain('may be missing')
   })
@@ -1369,7 +1369,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     const { hub, opens } = await rig()
     hub.tunnel().openMs = 5_000 * SLOW
     const at = Date.now()
-    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'Site' })).toMatchObject({ isError: false })
+    expect(await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'Site' })).toMatchObject({ isError: false })
     expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
     expect(hub.tunnel().opens).toBe(opens)
   })
@@ -1388,7 +1388,7 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
     const { hub, opens } = await rig()
     hub.tunnel().openMs = 5_000 * SLOW
     const at = Date.now()
-    expect(await hub.mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
+    expect(await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
     expect(Date.now() - at).toBeLessThan(2_000 * SLOW)
     expect(hub.tunnel().opens).toBe(opens)
   })

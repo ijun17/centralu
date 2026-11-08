@@ -9,7 +9,7 @@ import type {
 export type WorkspaceSnapshot = {
   focusedSessionId?: string | null
   /**
-   * Which of the three views was showing — focus, grid, or orchestrator. Restoring the
+   * Which of the three views was showing — focus, grid, or assistant. Restoring the
    * focused session without this landed a person who quit from the grid back in the focus
    * view: the *session* came back but the *way of looking* did not, which reads as the app
    * forgetting. Loosely typed like panelLayout: a snapshot is a file, the UI validates.

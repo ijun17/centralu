@@ -706,11 +706,11 @@ describe('newSessionProjectOf (#529)', () => {
 
   it("on the grid, the focused panel's project; with a coordinator open, the project looked at last", () => {
     expect(newSessionProjectOf({ ...base, view: 'grid', focusedSessionId: 'a', focusedProjectId: 'p3' })).toBe('p2')
-    expect(newSessionProjectOf({ ...base, view: 'orchestrator', focusedSessionId: 'orch', focusedProjectId: 'p3' })).toBe('p3')
+    expect(newSessionProjectOf({ ...base, view: 'assistant', focusedSessionId: 'orch', focusedProjectId: 'p3' })).toBe('p3')
   })
 
   it('falls back to the first project, and is null only with none', () => {
-    expect(newSessionProjectOf({ ...base, view: 'orchestrator', focusedSessionId: 'orch' })).toBe('p1')
+    expect(newSessionProjectOf({ ...base, view: 'assistant', focusedSessionId: 'orch' })).toBe('p1')
     expect(newSessionProjectOf({ ...base, focusedProjectId: 'gone' })).toBe('p1')
     expect(newSessionProjectOf({ ...base, projects: {} })).toBeNull()
   })
@@ -753,42 +753,42 @@ describe('the preset a new session starts with (#1525)', () => {
 })
 
 /*
- * #1647: a pick that reaches the orchestrator without the sidebar's button (a mail's Open, a notice, the waiting list) has to
- * bring up the same screen: the one that shows the conversation of the session `orchestratorId` names.
+ * #1647: a pick that reaches the Assistant without the sidebar's button (a mail's Open, a notice, the waiting list) has to
+ * bring up the same screen: the one that shows the conversation of the session `assistantId` names.
  */
-describe('focusing the orchestrator', () => {
-  it('names it as the orchestrator the screen shows, in the change that moves to its screen', async () => {
+describe('focusing the Assistant', () => {
+  it('names it as the Assistant the screen shows, in the change that moves to its screen', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('orc-1647', sessionInfo('orc-1647', { projectId: null, kind: 'orchestrator' }))
     mock.sessions.set('w-1647', sessionInfo('w-1647'))
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('w-1647')
-    expect(useStore.getState().orchestratorId).toBeNull()
+    expect(useStore.getState().assistantId).toBeNull()
 
     useStore.getState().focusSession('orc-1647')
 
     const s = useStore.getState()
-    expect(s.view).toBe('orchestrator')
-    expect(s.orchestratorId).toBe('orc-1647')
+    expect(s.view).toBe('assistant')
+    expect(s.assistantId).toBe('orc-1647')
     expect(s.introSeen).toBe(true)
   })
 })
 
 /*
- * #1653: the orchestrator's session is deleted. The screen goes back to its start state instead of drawing a pane for a
+ * #1653: the Assistant's session is deleted. The screen goes back to its start state instead of drawing a pane for a
  * session the store no longer holds, and the next first question starts a new one.
  */
-describe('the orchestrator session being deleted', () => {
-  it('forgets which session is the orchestrator, so its screen shows the start state again', async () => {
+describe('the Assistant session being deleted', () => {
+  it('forgets which session is the Assistant, so its screen shows the start state again', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('orc-1653', sessionInfo('orc-1653', { projectId: null, kind: 'orchestrator' }))
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('orc-1653')
-    expect(useStore.getState().orchestratorId).toBe('orc-1653')
+    expect(useStore.getState().assistantId).toBe('orc-1653')
 
     mock.sessions.delete('orc-1653')
     mock.emit({ type: 'session_deleted', sessionId: 'orc-1653' })
 
-    expect(useStore.getState().orchestratorId).toBeNull()
+    expect(useStore.getState().assistantId).toBeNull()
   })
 })

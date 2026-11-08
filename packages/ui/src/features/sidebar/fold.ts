@@ -70,7 +70,7 @@ export function groupAttention(
   return found
 }
 
-/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26: 200 ms in #1578, 100 ms in #1605). The orchestrator's button shares it (#1591) */
+/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26: 200 ms in #1578, 100 ms in #1605). The Assistant's button shares it (#1591) */
 export const HOVER_EXPAND_MS = 100
 
 /**
@@ -95,7 +95,7 @@ export class HoverExpander {
     },
   ) {}
 
-  /** The pointer came onto a folded project's name row (or the orchestrator's button) */
+  /** The pointer came onto a folded project's name row (or the Assistant's button) */
   enterRow(folded: boolean): void {
     this.clearTimer()
     if (!folded || this.open) return

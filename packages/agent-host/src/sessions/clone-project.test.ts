@@ -175,10 +175,10 @@ describe('projects.create with a git source', () => {
   })
 })
 
-describe('create_project with git (the orchestrator)', () => {
+describe('create_project with git (the Assistant)', () => {
   it('the card names the repository and where it goes; the clone runs only after Create, said in the conversation', async () => {
-    const orc = await mgr.orchestrator()
-    const call = mgr.runOrchestratorTool(orc.id, 'create_project', { git: `${base}/game.git`, branch: 'dev' })
+    const orc = await mgr.assistant()
+    const call = mgr.runCentraluTool(orc.id, 'create_project', { git: `${base}/game.git`, branch: 'dev' })
     await eventually(() => mgr.listSessions().find((s) => s.id === orc.id)?.pendingApproval?.detail.kind === 'project_create')
     const pending = mgr.listSessions().find((s) => s.id === orc.id)!.pendingApproval!
     expect(pending.detail).toEqual({ kind: 'project_create', name: 'game', path: join(centralu, 'game'), source: { git: `${base}/game.git`, branch: 'dev' } })

@@ -1,0 +1,57 @@
+import { describe, expect, it } from 'vitest'
+import type { SessionSummary } from '@cc/core'
+import { assistantChildren, assistantListShown } from './AssistantButton.jsx'
+
+// #853: the Assistant's children have no project to hang in, so they hang under its row
+describe("the Assistant's children in the sidebar", () => {
+  const row = (id: string, over: Partial<SessionSummary> = {}) => ({ id, kind: 'worker', projectId: null, appId: null, askedBy: null, ...over }) as SessionSummary
+  const sessions = Object.fromEntries(
+    [
+      row('orc', { kind: 'orchestrator' }),
+      row('child', { askedBy: 'orc' }),
+      row('in-project', { askedBy: 'orc', projectId: 'p1' }),
+      row('app-agent', { askedBy: 'orc', appId: 'notes' }),
+      row('elsewhere', { askedBy: 'orc', machine: 'm1' }),
+      row('stray'),
+      row('someone', { projectId: 'p1' }),
+      row('other-child', { askedBy: 'someone' }),
+    ].map((s) => [s.id, s]),
+  )
+
+  const ids = (r: { current: SessionSummary[]; earlier: SessionSummary[] }) => ({ current: r.current.map((s) => s.id), earlier: r.earlier.map((s) => s.id) })
+
+  it('are the sessions with no project and no app the Assistant started on this machine', () => {
+    expect(ids(assistantChildren(sessions, null))).toEqual({ current: ['child'], earlier: [] })
+    expect(ids(assistantChildren(sessions, 'orc'))).toEqual({ current: ['child'], earlier: [] })
+  })
+
+  it('are found by the id the store holds when the listed row is not there yet', () => {
+    const { orc: _, ...without } = sessions
+    expect(ids(assistantChildren(without, 'orc'))).toEqual({ current: ['child'], earlier: [] })
+  })
+
+  // #994 review: a child whose assistant was replaced had no row at all
+  it('keep a row for a child whose assistant is gone, among the earlier ones', () => {
+    const { orc: _, ...without } = sessions
+    const withNew = { ...without, orc2: row('orc2', { kind: 'orchestrator' }) }
+    expect(ids(assistantChildren(withNew, 'orc2'))).toEqual({ current: [], earlier: ['child'] })
+    // A child of a session still here is that session's, not an earlier Assistant's
+    expect(assistantChildren(withNew, 'orc2').earlier.map((s) => s.id)).not.toContain('other-child')
+  })
+})
+
+// #1591: the children fold under the button; a mouse rest opens them, and an open child keeps them shown
+describe("when the Assistant's children's list is drawn", () => {
+  const kids = { current: [{ id: 'a' }, { id: 'b' }], earlier: [{ id: 'old' }] }
+  it('is folded at rest, with children and nothing open', () => {
+    expect(assistantListShown(false, null, kids)).toBe(false)
+    expect(assistantListShown(false, 'someone-else', kids)).toBe(false)
+  })
+  it('is open while the mouse rests on the button', () => {
+    expect(assistantListShown(true, null, kids)).toBe(true)
+  })
+  it('stays shown while one of the children, an earlier one too, is the open session', () => {
+    expect(assistantListShown(false, 'b', kids)).toBe(true)
+    expect(assistantListShown(false, 'old', kids)).toBe(true)
+  })
+})

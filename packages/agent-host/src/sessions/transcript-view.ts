@@ -6,13 +6,13 @@ import { clipPreview, lastResponse } from './turn-answer.js'
 
 /**
  * The read side of a session's transcript that the manager turns into labels, previews,
- * recall context and orchestrator memory. Only reads stored messages, so it needs no more of
+ * recall context and assistant memory. Only reads stored messages, so it needs no more of
  * the store than this.
  */
 export type MessageReader = Pick<MessageRecords, 'loadMessages' | 'loadMessagesFrom'>
 
 /**
- * How much past conversation to hand a new orchestrator (line count and line length).
+ * How much past conversation to hand a new Assistant (line count and line length).
  *
  * This text is appended to the system prompt, so it has a budget. Include everything and
  * regaining context spends all of it; include too little and "what were we talking about" is
@@ -27,7 +27,7 @@ const MEMORY_LINE_CHARS = 600
  *
  * When a row was a delta, 120 rows were a sentence or two, but once a row is a message, 120 rows
  * can be hundreds of thousands of characters — a single recall could burn through the
- * orchestrator's whole context. So it fills starting from the messages nearest the target point,
+ * Assistant's whole context. So it fills starting from the messages nearest the target point,
  * with a per-message cap and an overall budget.
  */
 const CONTEXT_SPAN_MSGS = 8
@@ -73,7 +73,7 @@ function payloadText(payload: unknown): string {
  * is being continued from a previous…" (the compaction summary becomes the first user message, and
  * the auto-name just picks that up). During dogfooding, four sessions in list_sessions all shared
  * the same title — it is barely disambiguated today by the project name, but **two sessions in the
- * same project still cannot be told apart.** The orchestrator must never guess in that case, so it
+ * same project still cannot be told apart.** The Assistant must never guess in that case, so it
  * would have had to keep asking the person every single time.
  *
  * In that case, **the first real instruction** is used as the name instead of the title. It says
@@ -99,7 +99,7 @@ export function labelOf(reader: MessageReader, s: SessionInfo): string {
  *
  * The budget is measured in **characters**, not count (#66). When a row was a delta, 120 rows was a
  * sentence or two, plenty — but once a row is a message, the same count can be hundreds of thousands
- * of characters, and a single recall could burn through the orchestrator's whole context. So it
+ * of characters, and a single recall could burn through the Assistant's whole context. So it
  * alternates (before, after), filling from the messages nearest the target point, and stops at a
  * per-message cap and an overall budget.
  */
@@ -200,12 +200,12 @@ export function previewOf(reader: MessageReader, sessionId: string, maxChars = 1
 }
 
 /**
- * **Hands past memory over** to a freshly born orchestrator.
+ * **Hands past memory over** to a freshly born assistant.
  *
  * Switching tools splits off a new process, and that tool's context disappears with it — the screen
  * still shows the conversation from yesterday exactly as it was, while the party on the other end
  * knows none of it. For a worker session, "started a new conversation" is an honest description, but
- * the orchestrator is the app's one and only **standing counterpart.** Losing its memory is losing
+ * the Assistant is the app's one and only **standing counterpart.** Losing its memory is losing
  * the relationship itself, so this has to be handled differently.
  *
  * Since that conversation still exists in our own store, a summary of it is appended to the new
@@ -216,9 +216,9 @@ export function previewOf(reader: MessageReader, sessionId: string, maxChars = 1
  * each message's own line breaks are indented, so its text cannot start a line that reads as the person's. Tool results (the body of another
  * session pulled in through read_session or recall) are excluded: opening a path where text a worker
  * wrote gets promoted into a system prompt would recreate exactly the channel from lower privilege
- * to higher privilege (the same reason orchestrator-home.ts turns off folder documents).
+ * to higher privilege (the same reason assistant-home.ts turns off folder documents).
  */
-export function orchestratorMemory(reader: MessageReader, sessionId: string): string {
+export function assistantMemory(reader: MessageReader, sessionId: string): string {
   const rows = reader.loadMessages(sessionId, MEMORY_MESSAGES)
   const lines: string[] = []
   for (const m of rows) {

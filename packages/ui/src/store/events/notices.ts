@@ -11,7 +11,7 @@ import { projectScreenSessions } from '../screens.js'
 
 /**
  * Tells the system the number of things that need an answer (the dock badge): approvals and errors among the sessions,
- * and the orchestrator's pending proposals (#703), which wait like an approval. Called whenever either changes.
+ * and the Assistant's pending proposals (#703), which wait like an approval. Called whenever either changes.
  */
 export function syncBadge(get: () => AppState): void {
   const st = get()
@@ -95,7 +95,7 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
       s.appFocused &&
       isOnScreen(s.view, sessionId, {
         focusedSessionId: s.focusedSessionId,
-        orchestratorId: s.orchestratorId,
+        assistantId: s.assistantId,
         gridSessions: gridSessionIds(s.gridPanels),
         builderPaneSessionId: s.builderPaneSessionId,
         projectScreen: projectScreenSessions(s),

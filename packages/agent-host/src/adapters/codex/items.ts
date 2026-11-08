@@ -97,7 +97,7 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
     /*
      * The name lives in **the top-level server and tool** (generated/v2/ThreadItem.ts). We used
      * to read invocation.tool, which made every one of Codex's MCP calls collapse into a single
-     * 'MCP' — this surfaced while running the orchestrator on Codex.
+     * 'MCP' — this surfaced while running the Assistant on Codex.
      */
     const tool = str(item.tool) || str(asObj(item.invocation).tool)
     const server = str(item.server)

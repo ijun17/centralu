@@ -14,7 +14,7 @@ describe('what the limited credential may call, written down (#1405)', () => {
 })
 
 /**
- * A call the orchestrator makes through the window's RPC (`callWindow`, sessions/window-rpc.ts) after a card the person
+ * A call the Assistant makes through the window's RPC (`callWindow`, sessions/window-rpc.ts) after a card the person
  * answers (`this.ask(`, which raises it under every preset), as the flow files write it: the method, the file and line,
  * and whether the enclosing class method raised the card before that line.
  */
@@ -57,8 +57,8 @@ function cardedBefore(lines: string[], start: number, at: number): boolean {
 }
 
 /**
- * Calls the orchestrator cards in some cases that the limited credential runs, each with why. Anything else the
- * orchestrator cards and the limited credential would run fails the test below: decide its class, or add it here.
+ * Calls the Assistant cards in some cases that the limited credential runs, each with why. Anything else the
+ * assistant cards and the limited credential would run fails the test below: decide its class, or add it here.
  */
 const REREAD = 'a read, made again after Allow to check that what the card named has not changed'
 const CARDED_YET_EVERYDAY: Record<string, string> = {
@@ -77,10 +77,10 @@ const NAMED_IN_A_VARIABLE: Record<string, { file: string; params: unknown }> = {
   'updates.setAutoApply': { file: 'preferences-flow.ts', params: { enabled: true } },
 }
 
-describe('the limited credential never runs what the orchestrator asks the person for (#1405)', () => {
+describe('the limited credential never runs what the Assistant asks the person for (#1405)', () => {
   const calls = windowCalls()
 
-  it("finds the orchestrator's window calls and the cards before them (the scan reads the flows)", () => {
+  it("finds the Assistant's window calls and the cards before them (the scan reads the flows)", () => {
     // Known carded calls (docs/agent-host.md §1.4): if the scan stops seeing them, it is the scan that broke
     const carded = new Set(calls.filter((c) => c.carded).map((c) => c.method))
     for (const m of ['trash.purge', 'trash.purgeSubagentSteps', 'trash.purgeRuns', 'projects.setTrusted', 'apps.setShared', 'prefs.set']) expect(carded, m).toContain(m)
@@ -96,7 +96,7 @@ describe('the limited credential never runs what the orchestrator asks the perso
         const rights = table[c.method]
         return rights === 'everyday' || rights === undefined
       })
-    expect(wrong.map((c) => `${c.method} (${c.at})`), 'carded by the orchestrator yet everyday for the limited credential').toEqual([])
+    expect(wrong.map((c) => `${c.method} (${c.at})`), 'carded by the Assistant yet everyday for the limited credential').toEqual([])
   })
 
   it('keeps every excuse current: each is still carded somewhere and still everyday', () => {
@@ -106,7 +106,7 @@ describe('the limited credential never runs what the orchestrator asks the perso
     }
   })
 
-  it('accounts for every method the orchestrator may reach through the window', () => {
+  it('accounts for every method the Assistant may reach through the window', () => {
     // A method added to WINDOW_METHODS without a call the scan can see would escape the check above
     const seen = new Set([...calls.map((c) => c.method), ...Object.keys(NAMED_IN_A_VARIABLE)])
     expect(WINDOW_METHODS.filter((m) => !seen.has(m))).toEqual([])

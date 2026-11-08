@@ -261,7 +261,7 @@ describe('codex approval requests', () => {
   })
 
   it('accepts our own management MCP elicitation only through an elicitation response, not by bypassing approval', async () => {
-    const { client } = await createLiveSession({ orchestratorTools: {} as never, toolProfile: 'reader', orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 't' } })
+    const { client } = await createLiveSession({ centraluTools: {} as never, toolProfile: 'reader', centraluBridge: { url: 'ws://127.0.0.1:1', token: 't' } })
 
     client.trigger({ id: 13, method: 'mcp/elicitation/create', params: { serverName: 'centralu' } })
 

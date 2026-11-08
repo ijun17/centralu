@@ -6,7 +6,7 @@ import { rpcError, sessionNotFound } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { LaunchRecordsHost } from './launch-records.js'
 import type { MailSessionsHost } from './mail-sessions.js'
-import type { OrchestratorSlotHost } from './orchestrator-slot.js'
+import type { AssistantSlotHost } from './assistant-slot.js'
 import type { SessionEventsHost } from './session-events.js'
 import type { SessionRecordHost } from './session-record.js'
 import { freshStartKey, type SessionStarts, type SessionStartsHost } from './session-start.js'
@@ -26,7 +26,7 @@ export type SessionProcessesHost = Pick<DelegationHost, 'adapters' | 'children' 
   Pick<SessionEventsHost, 'notBeingRemoved'> &
   Pick<MailSessionsHost, 'events'> &
   Pick<LaunchRecordsHost, 'settingFilesFor'> &
-  Pick<OrchestratorSlotHost, 'refusal'> &
+  Pick<AssistantSlotHost, 'refusal'> &
   Pick<WorktreeHost, 'projectTrusted'> & {
     /** A session's process brought up, for a new session or a wake (session-start.ts) */
     readonly starts: Pick<SessionStarts, 'doResumeSession'>
@@ -294,7 +294,7 @@ export class SessionProcesses {
     this.host.store.settings.setAppSetting(freshStartKey(m.id), String(this.host.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
     /*
      * The broadcast state is also written into meta (#163). It used to only broadcast idle while
-     * saving meta as working, so a screen that reconnected and the orchestrator's list_sessions both
+     * saving meta as working, so a screen that reconnected and the Assistant's list_sessions both
      * saw an interrupted turn as "still working" (the settings tool refused that session outright).
      */
     this.host.events.settleState(m, { type: 'state_change', sessionId, state: 'idle', reason: 'tool_changed' })

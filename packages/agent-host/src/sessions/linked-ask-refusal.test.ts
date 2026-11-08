@@ -32,7 +32,7 @@ async function hub(away?: string) {
       roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
   session({ id: 'h1', projectId: 'p-hub', kind: 'worker', name: 'Asker' })
-  session({ id: 'orch', projectId: null, kind: 'orchestrator', name: 'Orchestrator' })
+  session({ id: 'orch', projectId: null, kind: 'orchestrator', name: 'Assistant' })
   const mgr = new SessionManager(store, scriptedAdapters(), () => {})
   await mgr.setProjectTrusted('p-hub', true)
   // A checkout, whose origin start_agent with a machine looks for there
@@ -73,7 +73,7 @@ describe('ask_project to a linked machine, when the session is not named', () =>
 })
 
 describe('a refusal for a machine that is down says when to try again (#1143)', () => {
-  /** ask_project of a project named nowhere and of a hub's project, start_agent with the machine, and the orchestrator's create_session */
+  /** ask_project of a project named nowhere and of a hub's project, start_agent with the machine, and the Assistant's create_session */
   const refusals = async (away: string) => {
     const { mgr } = await hub(away)
     const error = (r: unknown) => (r as { error?: string }).error ?? (r as { text: string }).text
@@ -81,8 +81,8 @@ describe('a refusal for a machine that is down says when to try again (#1143)', 
       error(await mgr.askProject('h1', { project: 'm1/never-seen', task: 'x' })),
       error(await mgr.askProject('h1', { project: 'h9/web', task: 'x' })),
       error(await mgr.startAgent('h1', { task: 'x', machine: 'Box' })),
-      error(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'm1/api' })),
-      error(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'm1/never-seen' })),
+      error(await mgr.runCentraluTool('orch', 'create_session', { project: 'm1/api' })),
+      error(await mgr.runCentraluTool('orch', 'create_session', { project: 'm1/never-seen' })),
     ]
   }
 

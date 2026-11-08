@@ -44,13 +44,13 @@ const ran = () => {
   return { calls, run: async (): Promise<Out> => (calls.push(1), { text: 'did it' }) }
 }
 
-describe('the gate around the orchestrator’s steps (§9.7)', () => {
+describe('the gate around the Assistant’s steps (§9.7)', () => {
   it('a step that changes something asks first, and runs once the person allows it', async () => {
     const w = world()
     const r = ran()
     expect(await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, r.run, refused)).toEqual({ text: 'did it' })
     expect(w.asked).toHaveLength(1)
-    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the orchestrator to run delete_session')
+    expect(w.asked[0]).toContain('Session "Fix login" in project "Acme" asked the Assistant to run delete_session')
     expect(r.calls).toHaveLength(1)
     expect(w.covered).toEqual([true])
   })
@@ -108,7 +108,7 @@ describe('the gate around the orchestrator’s steps (§9.7)', () => {
   it('the CLI’s own steps ask the same way: a command is asked about, a read is not', async () => {
     const w = world({ answer: 'deny' })
     expect(await w.gate.askCli('orc', 'Bash', { command: 'echo pwned > file' })).toMatchObject({ allowed: false })
-    expect(w.asked[0]).toContain('asked the orchestrator to run Bash {"command":"echo pwned > file"}')
+    expect(w.asked[0]).toContain('asked the Assistant to run Bash {"command":"echo pwned > file"}')
     expect(await w.gate.askCli('orc', 'Read', { file_path: 'a' })).toEqual({ allowed: true, asked: false })
     expect(w.asked).toHaveLength(1)
     // Allowed on the card: it runs, and the CLI is told the person was asked

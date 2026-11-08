@@ -328,7 +328,7 @@ describe('guards and counts', () => {
     expect(box.sameBody(A, B, 'old', NOW - 1000)).toBe(false)
   })
 
-  it('requestsSince leaves out replies to the orchestrator’s needsReply messages and tasks, and clarifications', () => {
+  it('requestsSince leaves out replies to the Assistant’s needsReply messages and tasks, and clarifications', () => {
     const { box, send } = world()
     const since = NOW - 1000
     const ask = send({ sender: ORC, needsReply: true }, A)

@@ -157,7 +157,7 @@ describe('projects', () => {
    * default_tool was hardcoded to 'claude' when a project was created, and there was **no place**
    * that ever updated it afterward — a person using codex had to reselect it forever, on every new
    * session. The fact that matters here is not the settings screen but the act of creating a
-   * session, so both the UI and the orchestrator get the same rule.
+   * session, so both the UI and the Assistant get the same rule.
    */
   it('creating a session makes that tool the project default', async () => {
     const p = await addProject()
@@ -202,8 +202,8 @@ describe('project trust → session (#92)', () => {
     expect(adapter.lastOpts?.projectTrusted).toBe(false)
   })
 
-  it('a session with no project (the orchestrator) starts untrusted — that folder is a place workers can write to', async () => {
-    await mgr.orchestrator()
+  it('a session with no project (the Assistant) starts untrusted — that folder is a place workers can write to', async () => {
+    await mgr.assistant()
     expect(adapter.lastOpts?.projectTrusted).toBe(false)
   })
 })

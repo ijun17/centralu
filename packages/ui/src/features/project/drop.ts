@@ -16,7 +16,7 @@ import { APP_MIME, PANEL_MIME, SESSION_MIME, moveTo, projectItemMime } from '../
  *
  *   panel   one of the screen's own panels, being reordered
  *   add     a session or app of this project: shown, or moved, where it is dropped
- *   refuse  a session or app from anywhere else — another project, the orchestrator, a session
+ *   refuse  a session or app from anywhere else — another project, the Assistant, a session
  *           with no project. No drop cursor, anywhere on the screen
  *   ignore  anything else (a file, a path, a project row, a panel tab) — another owner's business
  */

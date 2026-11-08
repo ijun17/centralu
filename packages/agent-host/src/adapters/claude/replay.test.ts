@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
-import { instructionsFor, toolDefsFor } from '../../sessions/orchestrator-tools.js'
+import { instructionsFor, toolDefsFor } from '../../sessions/centralu-tools.js'
 import type { AgentSpawnSpec, CreateSessionOpts } from '../contract.js'
 import { callOrder, differs, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type OwnAnswers, type Recording } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
-import { CLAUDE_SUBAGENT_TOOL, ORCHESTRATOR_MCP_NAME } from './orchestrator-mcp.js'
+import { CLAUDE_SUBAGENT_TOOL, CENTRALU_MCP_NAME } from './centralu-mcp.js'
 import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVersion, replayedClaudeAdapter } from './recorded.test-helpers.js'
 
 /**
@@ -20,9 +20,9 @@ import { CLAUDE_RECORDINGS, CLAUDE_REPLAY_SESSION, recordedMessages, recordedVer
  * not against the copy a recording holds, which every change to a tool's words would outdate.
  */
 function centraluAnswers(session: Partial<CreateSessionOpts>): OwnAnswers {
-  const profile = session.toolProfile ?? 'orchestrator'
+  const profile = session.toolProfile ?? 'assistant'
   return {
-    server: ORCHESTRATOR_MCP_NAME,
+    server: CENTRALU_MCP_NAME,
     check(method, result) {
       if (method === 'initialize') return differs('the instructions', result.instructions, instructionsFor(profile, undefined, (session.apps?.current().length ?? 0) > 0, CLAUDE_SUBAGENT_TOOL), 'the code')
       const listed = Array.isArray(result.tools) ? result.tools.map((t: { name: string; description: string; inputSchema?: { properties?: object } }) => ({ name: t.name, description: t.description, parameters: Object.keys(t.inputSchema?.properties ?? {}) })) : result.tools

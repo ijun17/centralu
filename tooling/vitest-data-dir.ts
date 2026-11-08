@@ -39,7 +39,7 @@ const dir = join(own, 'data')
 mkdirSync(dir)
 process.env.CC_DATA_DIR = dir
 /*
- * **Nor do tests read the person's Claude settings** (#382). The orchestrator and coordinators take the person's own
+ * **Nor do tests read the person's Claude settings** (#382). The Assistant and coordinators take the person's own
  * `defaultMode` under `normal` (`personsDefaultMode`), so a machine with a global bypass in `~/.claude` started them
  * differently from CI. A folder that does not exist reads as no settings; a test that plants settings sets its own.
  */

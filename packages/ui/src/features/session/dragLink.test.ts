@@ -81,7 +81,7 @@ describe('the line under a link from an app the session cannot reach', () => {
     expect(say({ reachable: false, reason: 'other-project' })).toBe(
       "This session can't use Project board's tools: the app belongs to alpha. Ask in a session of alpha to use them.",
     )
-    expect(say({ reachable: false, reason: 'other-project' }, null)).toMatch(/one of your apps, which only the orchestrator can use/)
+    expect(say({ reachable: false, reason: 'other-project' }, null)).toMatch(/one of your apps, which only the Assistant can use/)
     expect(say({ reachable: false, reason: 'untrusted' })).toMatch(/alpha is not trusted\. Trust the project/)
     expect(say({ reachable: false, reason: 'app-unusable', status: 'failed' })).toMatch(/Restart it from its view/)
     expect(say({ reachable: false, reason: 'app-unusable', status: 'unconfirmed' })).toMatch(/not turned on yet/)

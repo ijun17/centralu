@@ -28,12 +28,12 @@ export type ReportWork =
 export type LinkedReportsHost = {
   readonly children: ChildOwnership
   readonly linkedReader: LinkedSessions | null
-  /** Whether the session is still this host's: the orchestrator a report goes to may have been deleted */
+  /** Whether the session is still this host's: the Assistant a report goes to may have been deleted */
   hasSession(sessionId: string): boolean
   /** Shutting down or handing over: a report a wait would send now is the next host's, or nobody's */
   readonly closing: boolean
   deliverReport(
-    orchestratorId: string,
+    assistantId: string,
     sessionId: string,
     name: string,
     project: string,
@@ -72,7 +72,7 @@ function saidTurn(raw: unknown): TurnStarter | undefined {
   return { by: raw.by, ...('wrote' in raw && raw.wrote === true ? { wrote: true as const } : {}), ...('added' in raw && raw.added === true ? { added: true as const } : {}), ...('cut' in raw && raw.cut === true ? { cut: true as const } : {}) }
 }
 
-/** Whether a relayed message was sent by this hub's orchestrator: the machine records it as from `HUB_SENDER`, qualified */
+/** Whether a relayed message was sent by this hub's Assistant: the machine records it as from `HUB_SENDER`, qualified */
 function fromHub(from: unknown): boolean {
   const id = (from as { sessionId?: unknown } | null)?.sessionId
   return typeof id === 'string' && id.endsWith(`.${HUB_SENDER}`)
@@ -107,12 +107,12 @@ export type LinkedEvent = {
 }
 
 /**
- * The orchestrator's reports from a linked machine's sessions (#82 phase 4, `reportBack` on `send_to_session`), and
+ * The Assistant's reports from a linked machine's sessions (#82 phase 4, `reportBack` on `send_to_session`), and
  * the work a session there ends its turn with (#723).
  *
- * The end of a turn the orchestrator waits on is its report, once, as `reportBackIfAwaited` does for this host's own
+ * The end of a turn the Assistant waits on is its report, once, as `reportBackIfAwaited` does for this host's own
  * sessions. A turn that **completes** while the session's own background work still runs there (the machine's
- * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the orchestrator is told once that
+ * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the Assistant is told once that
  * the work paused, and the report stays owed until a turn ends with none of that work left. If the work ends and no turn
  * follows within `PAUSED_REPORT_SETTLE_MS`, the report goes out with how each task ended; if the machine's link drops
  * or the machine is removed first, it goes out saying so, since the hub would not see the work's end.
@@ -121,7 +121,7 @@ export class LinkedReports {
   /**
    * Each linked session's background work, as its machine last listed it: read whole from `sessions.list` each time the
    * link comes up (`machine_resync`), and changed by the relayed `background_tasks` (which replace the live set). Kept
-   * for every session a machine relays, so work started before the orchestrator asked is known
+   * for every session a machine relays, so work started before the Assistant asked is known
    */
   private readonly tasks = new Map<string, BackgroundTask[]>()
   /** When each session's list last changed, on `clock`: a machine's list read before that change does not undo it */
@@ -174,7 +174,7 @@ export class LinkedReports {
      * events in order, so what comes before the instruction's own `user_message` happened there before it, and is the
      * end of an earlier turn. From that message on, as before: a turn running there then takes the instruction as
      * mid-turn input and its end is the report, as a local session's is. A record that never comes (lost before it was
-     * relayed) is not waited for past the send's answer (`sendToSession`, orchestrator-seat.ts).
+     * relayed) is not waited for past the send's answer (`sendToSession`, assistant-seat.ts).
      */
     if (wait.instruction !== undefined) {
       if (e.type === 'user_message' && e.text === wait.instruction && fromHub(e.from)) {
@@ -224,16 +224,16 @@ export class LinkedReports {
       wait.busy = false
       // Changed in place: set again, so what keeps it stored reads the pause (#1038)
       this.host.children.setLinkedReport(sessionId, wait)
-      if (!told) void this.report(sessionId, wait.orchestratorId, e, { paused: running, stoppable: false }, undefined, partOf(turn), false, wait)
+      if (!told) void this.report(sessionId, wait.assistantId, e, { paused: running, stoppable: false }, undefined, partOf(turn), false, wait)
       return
     }
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, e, undefined, undefined, partOf(turn))
+    void this.report(sessionId, wait.assistantId, e, undefined, undefined, partOf(turn))
   }
 
   /**
    * An ask_project task's turn there ended (#1457) with the session's own background work still running: the asker is
-   * owed the work's last turn end, as the orchestrator is for a `reportBack` send (#723). The call that asked answers with
+   * owed the work's last turn end, as the Assistant is for a `reportBack` send (#723). The call that asked answers with
    * this turn's words and says the work is paused, so this is the report kept for what follows, with no notice of its own
    * (`observe` finds it paused already and tells nobody). Returns the work it paused on, none when the turn is not one
    * to pause on (it did not complete, was the person's, the machine lists no such work, or an older machine does not list
@@ -244,10 +244,10 @@ export class LinkedReports {
     const running = this.ownTasksRunning(sessionId)
     if (!running.length) return []
     const held = this.host.children.linkedReports.get(sessionId)
-    if ((held && held.orchestratorId !== callerId) || this.gate(sessionId) !== 'deliver') return []
+    if ((held && held.assistantId !== callerId) || this.gate(sessionId) !== 'deliver') return []
     this.stopSettling(sessionId)
     this.remember(sessionId)
-    this.host.children.setLinkedReport(sessionId, { orchestratorId: callerId, busy: false, paused: [...running] })
+    this.host.children.setLinkedReport(sessionId, { assistantId: callerId, busy: false, paused: [...running] })
     return running
   }
 
@@ -258,7 +258,7 @@ export class LinkedReports {
    */
   releaseAsker(sessionId: string, callerId: string): (() => void) | undefined {
     const held = this.host.children.linkedReports.get(sessionId)
-    if (!held?.paused || held.orchestratorId !== callerId) return undefined
+    if (!held?.paused || held.assistantId !== callerId) return undefined
     this.drop(sessionId)
     return () => {
       if (this.host.children.linkedReports.has(sessionId)) return
@@ -293,7 +293,7 @@ export class LinkedReports {
   }
 
   /**
-   * A report `send_to_session` put back after its send failed (orchestrator-seat.ts): the events of the send's moment
+   * A report `send_to_session` put back after its send failed (assistant-seat.ts): the events of the send's moment
    * went to the wait that send had set, so a paused report's settle wait starts again from what the hub knows now
    */
   restored(sessionId: string): void {
@@ -303,7 +303,7 @@ export class LinkedReports {
 
   /**
    * Every settle wait ends with the host. The next host settles only what a child start_agent started on a linked
-   * machine is still owed (`RemoteAgents.restore`, #1038); the orchestrator's linked reports live in memory
+   * machine is still owed (`RemoteAgents.restore`, #1038); the Assistant's linked reports live in memory
    */
   dispose(): void {
     for (const timer of this.settling.values()) clearTimeout(timer)
@@ -345,7 +345,7 @@ export class LinkedReports {
   }
 
   /**
-   * The person wrote to the session there while its report was paused (#1342): the wait ends, the orchestrator is told
+   * The person wrote to the session there while its report was paused (#1342): the wait ends, the Assistant is told
    * once, and none of the session's later turns is reported to it. Only where the report may go now (`gate`): a child
    * start_agent started has its own rule for the person's turns (`RemoteAgents`, which reads the event first)
    */
@@ -354,7 +354,7 @@ export class LinkedReports {
     const paused = this.pausedTasksNow(sessionId, wait)
     const known = this.about.get(sessionId)
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { tookOver: true, paused }, known)
+    void this.report(sessionId, wait.assistantId, { type: 'turn_complete' }, { tookOver: true, paused }, known)
     return true
   }
 
@@ -388,7 +388,7 @@ export class LinkedReports {
     if (gate === 'withhold') return this.drop(sessionId)
     const settled = this.pausedTasksNow(sessionId, wait)
     this.drop(sessionId)
-    void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { settled }, undefined, undefined, wait.lastBy === 'person')
+    void this.report(sessionId, wait.assistantId, { type: 'turn_complete' }, { settled }, undefined, undefined, wait.lastBy === 'person')
   }
 
   private stopSettling(sessionId: string): void {
@@ -440,7 +440,7 @@ export class LinkedReports {
         continue
       }
       this.drop(sessionId)
-      void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { linkLost: name, paused: wait.paused }, undefined, undefined, false, wait)
+      void this.report(sessionId, wait.assistantId, { type: 'turn_complete' }, { linkLost: name, paused: wait.paused }, undefined, undefined, false, wait)
     }
     for (const sessionId of [...this.tasks.keys()]) if (sessionId.startsWith(prefix)) this.forget(sessionId)
   }
@@ -477,7 +477,7 @@ export class LinkedReports {
       if (!sessionId.startsWith(prefix)) continue
       const about = this.about.get(sessionId)
       this.drop(sessionId)
-      void this.report(sessionId, wait.orchestratorId, { type: 'turn_complete' }, { machineRemoved: name, ...(wait.paused ? { paused: wait.paused } : {}) }, about, undefined, false, wait)
+      void this.report(sessionId, wait.assistantId, { type: 'turn_complete' }, { machineRemoved: name, ...(wait.paused ? { paused: wait.paused } : {}) }, about, undefined, false, wait)
     }
     for (const sessionId of [...this.tasks.keys()]) if (sessionId.startsWith(prefix)) this.forget(sessionId)
     this.machineNames.delete(machineId)
@@ -485,7 +485,7 @@ export class LinkedReports {
 
   private async report(
     sessionId: string,
-    orchestratorId: string,
+    assistantId: string,
     ending: { type: string; error?: { message?: string }; turn?: unknown },
     work?: ReportWork,
     known?: { name: string; project: string },
@@ -500,7 +500,7 @@ export class LinkedReports {
     wait?: LinkedReport,
   ): Promise<void> {
     const reader = this.host.linkedReader
-    if (!reader || !this.host.hasSession(orchestratorId)) return
+    if (!reader || !this.host.hasSession(assistantId)) return
     const about = reader.describe(sessionId) ?? known ?? this.about.get(sessionId) ?? { name: sessionId, project: '(unknown)' }
     // A machine that cannot be reached cannot be read: its last answer went with the paused report, which says so
     const unreachable = work && ('linkLost' in work || 'machineRemoved' in work)
@@ -525,6 +525,6 @@ export class LinkedReports {
       : `(its last response could not be read there: ${words.error})`
     if (wait && words?.ok && words.text !== '' && work && 'paused' in work && 'stoppable' in work) wait.read = { preview: words.text, seq: words.seq ?? undefined }
     const seq = words?.ok ? (words.seq ?? undefined) : kept?.seq
-    await this.host.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, kept && unreachable ? { ...work, asRead: true } : work, seq, part)
+    await this.host.deliverReport(assistantId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>, kept && unreachable ? { ...work, asRead: true } : work, seq, part)
   }
 }

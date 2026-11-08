@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
-import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
 import { fakeCentraluTools } from '../frames/fakes.test-helpers.js'
 import { callOrder, of, replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
@@ -162,7 +162,7 @@ describe('Antigravity 1.4.3, replayed', () => {
   it("mcp: a call to Centralu's own tools (`_meta.mcp.server`) is answered without a card, as Cursor's and OpenCode's are", async () => {
     // The recording with its stdio server named as Centralu's bridge: the frames are the agent's, the name is the bridge's
     const rec = recording('mcp')
-    const renamed: Recording = JSON.parse(JSON.stringify(rec).replaceAll('"server":"spikestdio"', `"server":"${ORCHESTRATOR_MCP_NAME}"`)) as Recording
+    const renamed: Recording = JSON.parse(JSON.stringify(rec).replaceAll('"server":"spikestdio"', `"server":"${CENTRALU_MCP_NAME}"`)) as Recording
     const w = world(renamed)
     const handle = await open(w)
     await turn(w, handle, 'Call the MCP tools', 'allow')
@@ -274,13 +274,13 @@ describe("Antigravity's agent as `agy acp` 1.5.2 runs it, replayed", () => {
 
   it("centralu-mail: Centralu's bridge named as the agent names it (`mcp_centralu_mail`) is a tool row, not a Centralu call, and its result is not in the frames (#2048)", async () => {
     const w = world(recording15('centralu-mail'))
-    const handle = await open(w, 'normal', undefined, { orchestratorTools: fakeCentraluTools(), orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' }, toolProfile: 'reader' })
+    const handle = await open(w, 'normal', undefined, { centraluTools: fakeCentraluTools(), centraluBridge: { url: 'ws://127.0.0.1:0', token: 'replay' }, toolProfile: 'reader' })
     await turn(w, handle, 'Use the mail tool', 'allow')
     await handle.dispose()
     expect(w.state.problems).toEqual([])
     expect(w.state.left()).toBe(0)
     const created = w.sent[0]!.find((f) => f.method === 'session/new') as { params: { mcpServers: { name: string }[] } }
-    expect(created.params.mcpServers.map((m) => m.name)).toEqual([ORCHESTRATOR_MCP_NAME])
+    expect(created.params.mcpServers.map((m) => m.name)).toEqual([CENTRALU_MCP_NAME])
     const mail = of(w.events, 'tool_call').filter((c) => c.summary.tool === 'Run mcp_centralu_mail')
     expect(mail.map((c) => (c.input as { action?: string }).action)).toEqual(['inbox', 'send'])
     expect(of(w.events, 'approval_request')).toEqual([])
@@ -289,7 +289,7 @@ describe("Antigravity's agent as `agy acp` 1.5.2 runs it, replayed", () => {
 
   it("centralu-agents: recall, read_session and start_agent are three tool rows named as the agent names them, each ended ok and asked about nothing (#2048)", async () => {
     const w = world(recording15('centralu-agents'))
-    const handle = await open(w, 'normal', undefined, { orchestratorTools: fakeCentraluTools(), orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' }, toolProfile: 'reader' })
+    const handle = await open(w, 'normal', undefined, { centraluTools: fakeCentraluTools(), centraluBridge: { url: 'ws://127.0.0.1:0', token: 'replay' }, toolProfile: 'reader' })
     await turn(w, handle, 'Use the recall tool, then read_session, then start_agent', 'allow')
     await handle.dispose()
     expect(w.state.problems).toEqual([])

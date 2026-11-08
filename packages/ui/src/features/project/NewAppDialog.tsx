@@ -43,18 +43,18 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const platform = usePlatform()
   const openImport = useStore((s) => s.openImport)
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
-  const orchestratorTool = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
+  const assistantTool = useStore((s) => (s.assistantId ? s.sessions[s.assistantId]?.tool : undefined))
   const createApp = useStore((s) => s.createApp)
   const allTools = useTools()
   /*
    * The default tool is guessed to match what the host would choose — a project app defaults to
-   * that project's default, a user-folder app to the orchestrator's tool. Even when the guess is
+   * that project's default, a user-folder app to the Assistant's tool. Even when the guess is
    * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
    * different tool than the one shown selected.
    */
   // An app's builder is given its role as text, which a tool that takes none cannot run (`roleText`)
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
-    (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
+    (projectId ? project?.defaultTool : assistantTool) ?? allTools[0]?.name ?? '',
     undefined,
     // A builder starts under `auto` (`AppSessions.createAppBuilder`), the default every new session gets
     { permissionPreset: 'auto', projectTrusted: true, roleText: true },
@@ -126,7 +126,7 @@ ${parent?.trim() ?? ''}`
           <p className="mt-1 text-xs leading-body text-ink-faint">
             {projectId
               ? 'Lives in this project, in .centralu/apps, and is shared with the repository.'
-              : 'A project of its own, in a new folder. The orchestrator and your other projects can use it.'}
+              : 'A project of its own, in a new folder. The Assistant and your other projects can use it.'}
           </p>
         </header>
 

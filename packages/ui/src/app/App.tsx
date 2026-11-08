@@ -20,7 +20,7 @@ import { Overlay } from '../features/evidence/Overlay.jsx'
 import { SessionView } from '../features/session/SessionView.jsx'
 import { KeptDraftCard } from '../features/session/KeptDraft.jsx'
 import { GridView } from '../features/grid/GridView.jsx'
-import { OrchestratorView } from '../features/orchestrator/OrchestratorView.jsx'
+import { AssistantView } from '../features/assistant/AssistantView.jsx'
 import { PinnedApps } from '../features/pinned-app/PinnedApps.jsx'
 import { ProjectView } from '../features/project/ProjectView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
@@ -314,7 +314,7 @@ function OnceOpened({ open, children }: { open: boolean; children: ReactNode }) 
  * For a first-time person, the intro takes the place of the center lane (FR-19 → #63).
  *
  * The condition is not "zero projects" but "has never created anything" — if there is even
- * one session (including an orchestrator), this person is not first-time, and showing the intro
+ * one session (including an Assistant), this person is not first-time, and showing the intro
  * again would only get in the way.
  *
  * The sidebar stands alongside it. While the intro used to cover the whole screen, Add project
@@ -335,7 +335,7 @@ function Body() {
 
   /*
    * Until the first lists arrive and the last screen is restored, no screen is chosen (owner, 2026-10-18): the
-   * intro, the orchestrator's empty screen or "Select a project or session" would each flash before the restored one
+   * intro, the Assistant's empty screen or "Select a project or session" would each flash before the restored one
    * replaced it. The sidebar shows its skeleton meanwhile, and the screen fades in once known.
    */
   if (!ready) {
@@ -355,8 +355,8 @@ function Body() {
           removed — the reasoning was that pressing them while the intro held the center would
           not change the screen, so the click would be dead. That diagnosis was right but the fix
           was wrong: instead of hiding the buttons, make them work. Now pressing either the
-          orchestrator or the grid button moves past the intro to that screen (setView and
-          openOrchestrator in the store set introSeen).
+          assistant or the grid button moves past the intro to that screen (setView and
+          openAssistant in the store set introSeen).
 
           Not forcing a flow is this onboarding's premise. Removing the path for a person who
           wants to skip the intro and start using the app right away would mean forcing "read the
@@ -376,7 +376,7 @@ function Body() {
   */
 
   /*
-    The grid and the orchestrator have no evidence lane. The grid already splits the screen;
+    The grid and the Assistant have no evidence lane. The grid already splits the screen;
     taking one more lane out of it drops the panel below its minimum width, which reproduces
     by our own hand the very thing that got the grid shelved (§5.4).
   */
@@ -385,7 +385,7 @@ function Body() {
     app's own record panel stands beside it. Adding one more lane there would shrink the screen
     down to sidebar width.
   */
-  const hasEvidenceLane = view !== 'orchestrator' && view !== 'grid' && view !== 'app'
+  const hasEvidenceLane = view !== 'assistant' && view !== 'grid' && view !== 'app'
 
   return (
     // relative: the notice cards need to float inside this. Applying it to the whole app would
@@ -416,8 +416,8 @@ function Body() {
         scrolls horizontally (the real cause of a bug found in dogfooding).
       */}
       <div className="cc-fade relative flex min-h-0 min-w-0 flex-1" style={{ minWidth: CENTER_FLOOR / zoom }}>
-        {view === 'orchestrator' ? (
-          <OrchestratorView />
+        {view === 'assistant' ? (
+          <AssistantView />
         ) : view === 'grid' ? (
           <GridView />
         ) : view === 'app' ? null : projectScreen ? (

@@ -44,7 +44,7 @@ export type AppDragMessage = z.infer<typeof AppDragMessage>
  * composer can say what would fix it when an item from that app is dropped on it.
  *
  *   other-project   the app is not one this session is given: another project's app, a user-folder
- *                   app outside the orchestrator, or a session stood up by an app (apps.md §9.1)
+ *                   app outside the Assistant, or a session stood up by an app (apps.md §9.1)
  *   untrusted       the app's project, which is this session's, is not trusted
  *   app-unusable    the app cannot be attached: its manifest is invalid, it is not turned on yet
  *                   (`unconfirmed`), or it stopped after repeated failures (`failed`); `status` says which

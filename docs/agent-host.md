@@ -20,13 +20,13 @@ agent-host/src/
 │  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
-│  ├─ contract/         # the contract's larger parts: orchestrator tools, session apps, the tool's process,
+│  ├─ contract/         # the contract's larger parts: Centralu tools, session apps, the tool's process,
 │  │                    #   the tool's surface (what it offers, what the adapter limits, #270)
 │  ├─ registry.ts       # the tool → adapter map
-│  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
+│  ├─ claude/           # based on the Claude Agent SDK (incl. centralu-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
 ├─ sessions/            # SessionManager and the parts moved out of it: delegation, handoff, the session archive (`session-trash.ts`),
-│                       #   orchestrator tools, session apps (folder-structure.md §1)
+│                       #   Centralu tools, session apps (folder-structure.md §1)
 ├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
 ├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
 ├─ links/               # linked machines (#82): links, the remote client, install and update over ssh
@@ -47,10 +47,10 @@ agent-host/src/
 └─ themes.ts            # the themes folder (#312)
 ```
 
-Usage parsing and the orchestrator's MCP surface do **not** have their own directories:
+Usage parsing and the Assistant's MCP surface do **not** have their own directories:
 per-account usage lives in `adapters/<tool>/usage.ts` (it is a per-tool question), and the
-orchestrator's tools are defined once in `sessions/tool-definitions.ts`, run by
-`sessions/orchestrator-tools.ts` (which re-exports every name, so most modules import from it) and exposed per
+Centralu tools are defined once in `sessions/tool-definitions.ts`, run by
+`sessions/centralu-tools.ts` (which re-exports every name, so most modules import from it) and exposed per
 adapter — in-process for claude, over a stdio bridge for codex. Which seat is shown and may run
 which tool is `sessions/tool-seats.ts`; the texts the answers are built from, `sessions/tool-answers.ts`.
 
@@ -60,18 +60,18 @@ Every session gets one bundle of the `centralu` server's tools, or none. One pur
 (`toolProfileFor` in `sessions/tool-profiles.ts`, from the row's kind, its app and builder slot and
 the Settings switch; `toolBundleFor` names the object behind each profile). The manager asks it in one
 place (`toolChoice`: the profile, and the bundle built when the adapter's options are), used at create, at
-every wake, on every bridge call and by `toolProfileOf`, so they cannot drift apart. The orchestrator's,
-a coordinator's and the reader's objects are one function, `orchestratorToolsFor` (`sessions/orchestrator-seat.ts`),
-over the narrow view of the manager it is handed (`OrchestratorSeatHost`);
+every wake, on every bridge call and by `toolProfileOf`, so they cannot drift apart. The Assistant's,
+a coordinator's and the reader's objects are one function, `centraluToolsFor` (`sessions/assistant-seat.ts`),
+over the narrow view of the manager it is handed (`AssistantSeatHost`);
 `profileAllows` decides both what the bundle exposes and what its calls may run, so a name the
 bundle leaves out is refused even through the Codex bridge.
 
 | Profile | Who | View | Tools | Instructions |
 |---|---|---|---|---|
-| `orchestrator` | the one orchestrator | every session | all but the builder's | role and usage |
+| `assistant` | the one Assistant | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an orchestrator's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
+| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -88,9 +88,9 @@ agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_
 with `agent_session` `delete`, keeping local work with the session in the session archive (#608, `cleanUpWorktreeChild` in `sessions/worktree-sessions.ts`). What stayed: the person's own worktree
 sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
 pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, kept in the former slot's row;
-the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The orchestrator gets no replacement for `propose_worktree_session`:
+the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The Assistant gets no replacement for `propose_worktree_session`:
 making a branch and a folder in the person's repository now goes through a project session's consent card, and the
-orchestrator reaches that session with `send_to_session`. Existing data: store v48 gives a former manager's worktree
+assistant reaches that session with `send_to_session`. Existing data: store v48 gives a former manager's worktree
 sessions `askedBy` = their parent, so it owns them as the agents it started; the slot's column stays until a later contract step.
 
 The reader's read tools stay inside its project, and its tools object refuses changing
@@ -107,7 +107,7 @@ tokens over a run with no `centralu` server, claude.ai connectors off):
 
 | Shape | Characters | Tokens |
 |---|---|---|
-| `list_sessions`, `read_session`, `recall`, `app_guide` in the orchestrator's words | 2,493 | +672 |
+| `list_sessions`, `read_session`, `recall`, `app_guide` in the Assistant's words | 2,493 | +672 |
 | the same four, re-worded | 1,138 | +338 |
 | listing merged into `read_session` (three tools, all loaded) | 897 | +267 |
 | **as shipped**: `app_guide` deferred behind tool search | 897 | **+192** |
@@ -116,11 +116,11 @@ tokens over a run with no `centralu` server, claude.ai connectors off):
 Per tool, loaded: `read_session` 239 → 98, `recall` 182 → 84, `app_guide` 148 → 85,
 `list_sessions` 103 → 75 before it was merged away. A tool costs about 55 tokens before its first
 word (name and schema envelope), which is why merging beat trimming. Deferring the whole set was
-refused: asked about an earlier conversation, the model never called `recall` (the orchestrator
+refused: asked about an earlier conversation, the model never called `recall` (the Assistant
 had measured the same for `send_to_session`, which is why its tools are `alwaysLoad`). Deferred,
 `app_guide` was found through tool search 4 times in 5, against 5 in 5 loaded; the miss is an answer
-from a guess about the app, and the orchestrator has the guide loaded. Codex has no deferral and
-gets all three. `orchestrator-tools.test.ts` fails if the serialized set and its instructions pass
+from a guess about the app, and the Assistant has the guide loaded. Codex has no deferral and
+gets all three. `centralu-tools.test.ts` fails if the serialized set and its instructions pass
 `READER_BUDGET_CHARS` (1,000 until #564 gave the set its 392 characters of instructions; 1,400 since,
 the set at 1,375). #581 adds the consented update tool, deferred on Claude like the guide, and its
 instructions pointer: 1,709 characters against a 1,750 ceiling. #1480 gave `read_session` `tools` (three words or a boolean),
@@ -128,13 +128,13 @@ instructions pointer: 1,709 characters against a 1,750 ceiling. #1480 gave `read
 ceiling raised to 1,950 (the reader's resident sum rises by the same 200: Claude 2,396 definitions + 413 instructions, 2,562 more
 deferred; Codex, loading all, 4,958 + 465 = 5,423 against 5,500). They are all in the definitions because Claude's in-process server
 strips an argument its schema does not list before the tool runs (measured on the SDK's `tool()`), so a read a note names would
-lose its argument. The same arguments cost the orchestrator and the scoped seat 178 characters (a short description for `tools` and
+lose its argument. The same arguments cost the Assistant and the scoped seat 178 characters (a short description for `tools` and
 `maxChars`), whose ceilings rise 9,500 → 9,700 (Codex 9,663) and 2,400 → 2,600 (Codex 2,560). The full reader profile's resident
 and deferred figures for both CLIs are in [tool-cost.md](tool-cost.md) §11 and §14. #1487 restored `.int().min(0)` on `offset` (the schema had lost it): +12
-characters in the reader set and in the orchestrator's, whose ceilings rise by 10 (1,960 and 9,710), the reader's resident sum by 25 (2,850).
+characters in the reader set and in the Assistant's, whose ceilings rise by 10 (1,960 and 9,710), the reader's resident sum by 25 (2,850).
 
 The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
-orchestrator's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
+Assistant's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
 when it needs one ([tool-cost.md](tool-cost.md) §12). In an ordinary session they ride on
 the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
 set grows into the other's headroom. Claude defers all three, which adds +31 tokens per request (the
@@ -154,15 +154,15 @@ reader set is 983 characters with it).
 **Measuring it again** (#513). `pnpm measure:tools` measures every profile on both CLIs the same way,
 repeatably: resident tokens (the API's usage, and `count_tokens` with and without Centralu's tools), cache
 reads and writes per request and which event caused a rebuild, tool selection and first-try argument
-validity on a fixed prompt set, and what tool results add over a longer session. `orchestrator-tools.test.ts`
+validity on a fixed prompt set, and what tool results add over a longer session. `centralu-tools.test.ts`
 pins each profile's resident characters (`RESIDENT_BUDGET_CHARS`), and `adapters/claude/tool-prefix.test.ts`
 that attaching or detaching an app never changes a Claude session's tool list. How to run it and read it,
 and the baseline: [tool-cost.md](tool-cost.md). That baseline (2026-10-12) found that Codex no longer puts
 MCP tools in the request up front: codex-cli 0.160.0 reaches them from its own `exec` tool, so "Codex has no
 deferral" above describes the CLI the numbers above were taken with.
 
-**The orchestrator's rare commands** (#512, the commands tier since 2026-10-12).
-`create_app`, `propose_skill` and `propose_mcp_server` are a third of what the orchestrator carries and the
+**The Assistant's rare commands** (#512, the commands tier since 2026-10-12).
+`create_app`, `propose_skill` and `propose_mcp_server` are a third of what the Assistant carries and the
 least of what it calls. The host takes
 them out of the tool list and serves three fixed tools in their place, `centralu_commands` (one line each),
 `centralu_help` (one command's schema) and `centralu_run` (checked on the host against that schema, strictly;
@@ -175,12 +175,12 @@ for it (the `resident` and `deferred` arms were measurement switches, removed un
 arms were compared in [tool-cost.md](tool-cost.md) §9. On Sonnet the tier lost nothing (every rare command
 reached, first-try arguments valid, English and Korean) and saved 835 tokens a request; on haiku it saved 709
 and reached a rare command less often (15 of 24 against 23 of 24). The owner made it the default on the Sonnet
-numbers and because it keeps the orchestrator's resident prefix from growing as commands are added
-(decision of 2026-10-12, #512): the orchestrator carries 9,317 characters instead of 11,862, and its ceiling
+numbers and because it keeps the Assistant's resident prefix from growing as commands are added
+(decision of 2026-10-12, #512): the Assistant carries 9,317 characters instead of 11,862, and its ceiling
 (`RESIDENT_BUDGET_CHARS`) went from 12,000 to 9,500.
 **Centralu's features first** (#564, owner decision 2026-10-12, product-spec.md §1.2): unless the person says
-otherwise, agents running in Centralu use Centralu's own features first. Two seats carry it. The orchestrator's role
-starts with a preamble saying so (`orchestratorRole`; it names `centralu_commands` where the seat has the tier), first
+otherwise, agents running in Centralu use Centralu's own features first. Two seats carry it. The Assistant's role
+starts with a preamble saying so (`assistantRole`; it names `centralu_commands` where the seat has the tier), first
 measured in round 2 of tool-cost.md §9 at 33 to 55 tokens a request with no regression and no gain that held, and on
 since #564. An ordinary session, which has no role, gets the same rule as its tools' instructions
 (`readerInstructions`): one sentence naming which tool answers which need (`readerFirst`: `recall` for earlier
@@ -191,7 +191,7 @@ or a worktree, or work the person will follow; the CLI's own subagents stay the 
 inside the turn, owner decision of 2026-10-12). A tool that joins the reader seat and answers a need the person states
 in words adds its line there. Before #564 the reader set had no instructions, on the principle that Centralu offered
 tools to the person's sessions and did not direct them; the owner withdrew that principle. The switches that turned either off
-(`CC_ORCHESTRATOR_PREAMBLE`, `CC_READER_INSTRUCTIONS`) were measurement tools and are removed. What
+(`CC_ASSISTANT_PREAMBLE`, `CC_READER_INSTRUCTIONS`) were measurement tools and are removed. What
 they cost and change: [tool-cost.md](tool-cost.md) §11.
 
 A Codex session with a bundle starts the stdio bridge, so since #320 every Codex session starts
@@ -208,7 +208,7 @@ The one reach an ordinary session has outside its project. `ask_project({ projec
 gives a task to an **existing ordinary session** in another registered project and returns its answer.
 It never creates a session in another project (#614, owner decision 2026-10-13). Creation remains the
 person's action in that project; `start_agent` creates only within its caller's own project. The global
-orchestrator, which belongs to no project, retains its own create-session tool.
+assistant, which belongs to no project, retains its own create-session tool.
 
 What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in `sessions/ask-project-flow.ts`, #428):
 
@@ -218,7 +218,7 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    (#603), the caller's own preset opens and logs that boundary. Under every preset, a session at the agent depth
    cannot delegate (#867, `agentDepthRefusal`): at the default of 1, a child started by another session or a
    session currently handling a cross-project task.
-2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
+2. **The session.** `session` names an ordinary session by name or id. Assistants, builders and
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
@@ -340,7 +340,7 @@ in one scratch project has the other write a file with a number only it knows an
 
 ### 1.2.4 A project on a linked machine (#700)
 
-`ask_project` reaches the projects of linked machines the way the orchestrator's `create_session` does
+`ask_project` reaches the projects of linked machines the way the Assistant's `create_session` does
 (docs/plans/remote-hub.md §12.6). `SessionManager.askProject` resolves `project` over this computer's
 projects and `LinkedSessions.projects()` (each reachable machine's `projects.list`) with `matchProjects`
 (`sessions/ask-project.ts`). In order, the first step that finds anything wins:
@@ -376,9 +376,9 @@ where it used to come back as an empty answer. It runs on that machine with its 
 | Paths in the answer are listed under "outside", none opened | They name the machine's files, not this computer's |
 | A session busy with a turn, or `ifBusy`, is refused with a reason; the machine's sessions are read again after the card is answered, and nothing is sent if the session left or started a turn meanwhile. The caller's trust and depth are read again after the card and right before the send (`askGateError`), and the caller's project losing trust withdraws a card still standing | A note or a queue into a session on another machine needs the machine to take them; not built. The card can stand for minutes, and a task sent into a turn the person started there would join it and end the call with their turn |
 | A machine's project list is waited for 4 s (`LOOKUP_MS`); one that does not answer is counted as away | The name is looked up on every call, so one half-open link must not hold up the asks that name something else. The name that is on this computer and on a machine is still refused as ambiguous when the machine answers; when it does not, the call goes on with what was heard. `create_session` finds a machine's project through the same list (`projects({ ref })`, #1143; it was `findProjects` until #1547): it was unbounded, and dropped a machine that did not answer, so a stalled link held up a create in a project on this computer and a name also on that machine started the work here. A name it finds only in a mirror is refused as away, and one also here is refused as ambiguous |
-| The turn's end is read by `linkedTurnEnd` (`sessions/linked-turn-end.ts`), the same reading the orchestrator's report from that machine uses (`LinkedReports`): an approval or a question there is a running turn (as is a working state, `isInTurn`), an error or a usage limit ends the call as not finished, an interruption does once the turn was seen running (before then it ended the turn the task joined, not the task's), and so does the session being deleted there (#428) | A local agent's run reads an interrupted turn as not finished (`AgentRunWait`, #698); the two copies had drifted, so an interrupted turn there answered as done and a deleted session left the call waiting |
+| The turn's end is read by `linkedTurnEnd` (`sessions/linked-turn-end.ts`), the same reading the Assistant's report from that machine uses (`LinkedReports`): an approval or a question there is a running turn (as is a working state, `isInTurn`), an error or a usage limit ends the call as not finished, an interruption does once the turn was seen running (before then it ended the turn the task joined, not the task's), and so does the session being deleted there (#428) | A local agent's run reads an interrupted turn as not finished (`AgentRunWait`, #698); the two copies had drifted, so an interrupted turn there answered as done and a deleted session left the call waiting |
 | A link that is no longer connected ends the tasks asked of its sessions (`observeLinkLoss`, on `machine_status`) | Their events stop reaching the hub, so the end of the turn would never be seen. The sentence says the task was delivered and may still be running there |
-| A turn that **completes** while the session's own background work (timers left out) still runs there is paused, as a local child's is (§1.2.1 step 7, #1457): the call answers `done` with the words so far and `paused` naming the work, "its report follows when that work ends and a turn there ends it", the warning that a server left running may make this the final answer, and `read_session` on that session. The asker is then owed the work's last turn end: `LinkedReports.oweAsker` keeps a paused linked report for it on the turn end, before the call is told (`LinkedReports.observe` reads the same event after and finds it paused, so nothing is sent for it), and the later turn there with none of that work left wakes the asker once through the same `reportGate`, person's-turn and loop rules as the orchestrator's linked reports (§1.2.1 step 7). A failed, stopped or person's turn is not paused; an older machine that does not list background tasks never pauses (today's answer); a report another session is owed there is not replaced. The turn the child's own tool starts when that work ends (a task notification, no message of anyone's) is the asker's work continuing: a note goes into it as into the turn the asker gave (`gateNow`: the report is paused, the hub saw the turn begin and the linked report reads it as the work's), and `status`, `wait` and `answer` read it as that turn; a turn a person's message started, or one another session is owed, is refused with the cause named ("the person may be using it there" only for a person's), and a turn the hub did not see begin (a hub swap in it) or a machine that lists no background work (never paused) keeps today's refusal, said as "a turn it started by itself that this hub cannot tie to the work you gave it" (#1576). The asker's new task to the session ends the pause (`releaseAsker`, put back if the send fails), since that ask's own end is what it hears next. A link lost while paused reports as `LinkedReports` does for any paused report ("the link to … dropped before that work ended"), except for a child `start_agent` started, whose report stays owed and is settled when the link is back (#1523). A call that went away first (cancelled, or past its bound) still gets the pause when it collects with no task, while the report is owed; collected after the report went out, the words are plain. Two limits, as for every linked report: it lives in the hub's memory, so a hub swap drops it, and a turn another session or the orchestrator gives the session ends the report owed to the asker, since a turn belongs to whoever sent its message (#1377) | The call used to answer at the first turn end, so work started in the background ("I will summarize when it ends", #1457) lost its result: nothing reached the asker, who went on as if the answer were final |
+| A turn that **completes** while the session's own background work (timers left out) still runs there is paused, as a local child's is (§1.2.1 step 7, #1457): the call answers `done` with the words so far and `paused` naming the work, "its report follows when that work ends and a turn there ends it", the warning that a server left running may make this the final answer, and `read_session` on that session. The asker is then owed the work's last turn end: `LinkedReports.oweAsker` keeps a paused linked report for it on the turn end, before the call is told (`LinkedReports.observe` reads the same event after and finds it paused, so nothing is sent for it), and the later turn there with none of that work left wakes the asker once through the same `reportGate`, person's-turn and loop rules as the Assistant's linked reports (§1.2.1 step 7). A failed, stopped or person's turn is not paused; an older machine that does not list background tasks never pauses (today's answer); a report another session is owed there is not replaced. The turn the child's own tool starts when that work ends (a task notification, no message of anyone's) is the asker's work continuing: a note goes into it as into the turn the asker gave (`gateNow`: the report is paused, the hub saw the turn begin and the linked report reads it as the work's), and `status`, `wait` and `answer` read it as that turn; a turn a person's message started, or one another session is owed, is refused with the cause named ("the person may be using it there" only for a person's), and a turn the hub did not see begin (a hub swap in it) or a machine that lists no background work (never paused) keeps today's refusal, said as "a turn it started by itself that this hub cannot tie to the work you gave it" (#1576). The asker's new task to the session ends the pause (`releaseAsker`, put back if the send fails), since that ask's own end is what it hears next. A link lost while paused reports as `LinkedReports` does for any paused report ("the link to … dropped before that work ended"), except for a child `start_agent` started, whose report stays owed and is settled when the link is back (#1523). A call that went away first (cancelled, or past its bound) still gets the pause when it collects with no task, while the report is owed; collected after the report went out, the words are plain. Two limits, as for every linked report: it lives in the hub's memory, so a hub swap drops it, and a turn another session or the Assistant gives the session ends the report owed to the asker, since a turn belongs to whoever sent its message (#1377) | The call used to answer at the first turn end, so work started in the background ("I will summarize when it ends", #1457) lost its result: nothing reached the asker, who went on as if the answer were final |
 | `trusted` is carried only when the machine says it | An older machine's absence is "not saying" (`ProjectAccess.to.trusted`), not "not trusted" |
 | Cancelling the call stops the wait, not the machine's turn | This host asks the machine to run a task but has no interrupt of its own turn there |
 | The machine's own cards are answered by the person in the hub's window | `asking` (the caller answering them) is not built across machines; the call says it waits on the person |
@@ -466,7 +466,7 @@ below retained for `safe` and `normal`:
    persists `prefs.agentDepth`; a record without it reads as 1 (`agentDepthOf`), so it needs no store migration. A
    session the person started is depth 0; one marked `askedBy`, or working on a task another session gave it (an
    unsettled delegation: ask_project, a fork, agent_session), is one deeper than that session, the deepest link
-   counting, and a fork whose requester is gone is at least 1. Two consequences beyond `auto`: a fork the orchestrator
+   counting, and a fork whose requester is gone is at least 1. Two consequences beyond `auto`: a fork the Assistant
    made has `forkedFrom` but no `askedBy`, so it counts 1 for good and cannot start agents at the default (it could
    before); a session an `auto` caller reaches through agent_session counts one deeper while that delegation is
    unsettled. A child or fork records the depth it was started at (`agent_depth:<id>` in `app_settings`, an app
@@ -554,14 +554,14 @@ below retained for `safe` and `normal`:
    person set any: the rules a parent otherwise repeats in every brief (its own worktree, stacked pull requests, never
    `git stash`), written once in the dialog of the project's menu, "Instructions for agents…", and said in the frame
    to be the person's, from the project's settings on that computer. They are read when the task is delivered, so a
-   card that stood a while or a start queued for memory carries what is set then; the orchestrator's children (no
+   card that stood a while or a start queued for memory carries what is set then; the Assistant's children (no
    project) get none, and nothing else (`agent_session send`, ask_project, a fork, which carries the conversation)
    carries them. They are kept as an app
    setting of the project (`agent_instructions:<projectId>`, at most 8,000 characters, gone with the project), not a
    column, so no store step: an older build serving the same store during a swap ignores the key, and its children
    start without them.
 6. **The answer.** Waited for by the same wait as ask_project's (`DelegationWaits.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
-   `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
+   `working` and the caller is told when the turn ends through the report the Assistant's `reportBack` uses
    (`awaitingReport` → `deliverReport`). What reaches the model is the part Centralu wrote (#1186): how the work
    ended (the turn ended, failed, paused on its own background work, a usage limit, cut short; a completed turn is
    never called the work finished, since whether it is done is the session's own word, #1902), the session's id, the
@@ -605,7 +605,7 @@ below retained for `safe` and `normal`:
    | Later turn ends while work still runs say nothing; the first turn end with none left delivers the owed report ("The session ended its turn", the answer of that turn) and wakes the caller through `deliver`'s resume | One pause notice per task: a Monitor that fires every few minutes would otherwise wake the caller each time. The turns that keep the report are the child's own work, never a loop: a report does not start the reporting session's turn |
    | The work ends with no turn running and none starts within `PAUSED_REPORT_SETTLE_MS` (60 s): the report goes out with the last answer and how each task ended ("background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished"; "…: completed …" when all completed) | Claude starts the turn within a second (its task-notification); a task the person stopped by hand starts none. Each change of the work starts the wait again, and a turn running when it is up reports at its own end |
    | A failed or stopped turn (error, usage limit, the person's Stop, the #698 reasons) is reported as it ended, work running or not | Those need the caller now; the next turn is not the work's own |
-   | A turn that stops without answering (an error, a usage limit, the network, its tool's interrupt, a Stop, a quit or shutdown found at the next start, a cut turn Centralu could not continue) releases the questions delivered into the cut turn and not answered (`needsReply` messages; the person's too) and tells each sender once, in one notice (`MessageService.sessionStopped`, [plans/turn-owned-by-no-one.md](plans/turn-owned-by-no-one.md) §4.1, #1948). It says what happened and what the reader can do, never the tool's own words. It wakes only a sender that is at rest and waits on the session (an open task it gave, or a wait), is written quiet for every other, and for a quit or shutdown wakes no one. The person is told in the Inbox in plain words, never of their own Stop or delete; a sender the older report path tells of the same stop is not told twice. The rows stay open, so a reply after the session is continued still answers them. Tasks are not here: the report above tells a task's owner. A request to the orchestrator is (owner: its sender always learns it will not be answered): the report of the request's turn tells the asker that turn was owed to, and the notice tells the asker that report misses (one the same quit cut) | A question asked of a session that then failed, hit its limit or was stopped was never heard of again by its asker; only a deleted session, or a turn a restart lost, told it. An asker whose request a quit cut, with the asker cut by the same quit, heard nothing either |
+   | A turn that stops without answering (an error, a usage limit, the network, its tool's interrupt, a Stop, a quit or shutdown found at the next start, a cut turn Centralu could not continue) releases the questions delivered into the cut turn and not answered (`needsReply` messages; the person's too) and tells each sender once, in one notice (`MessageService.sessionStopped`, [plans/turn-owned-by-no-one.md](plans/turn-owned-by-no-one.md) §4.1, #1948). It says what happened and what the reader can do, never the tool's own words. It wakes only a sender that is at rest and waits on the session (an open task it gave, or a wait), is written quiet for every other, and for a quit or shutdown wakes no one. The person is told in the Inbox in plain words, never of their own Stop or delete; a sender the older report path tells of the same stop is not told twice. The rows stay open, so a reply after the session is continued still answers them. Tasks are not here: the report above tells a task's owner. A request to the Assistant is (owner: its sender always learns it will not be answered): the report of the request's turn tells the asker that turn was owed to, and the notice tells the asker that report misses (one the same quit cut) | A question asked of a session that then failed, hit its limit or was stopped was never heard of again by its asker; only a deleted session, or a turn a restart lost, told it. An asker whose request a quit cut, with the asker cut by the same quit, heard nothing either |
    | A call waiting on the turn (`wait: true`, `agent_session wait`) takes the paused answer, with a notice that the work is not over, and the report is held for the end without a separate pause notice. `status` and `wait` on a paused child read the answer and the same notice and leave the report owed | A read of the paused answer used to take the report down, and with it the end |
    | The turn the child's own tool starts when the paused work ends (no message began it, no person wrote into it) is the caller's work (`ChildOwnership.continuesPause`, the same reading `reportBackIfAwaited` reports it by): `agent_session send` puts a note into it on a wait of its own, as an observer's note, with no `auto` needed and the report still owed; a person's turn or a person's message in it is refused as before, and the refusal says "the person may be using it" only for a turn a person started (#1576) | The note was refused "busy with something else (the person may be using it)" during the turn whose end the caller was owed |
 | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
@@ -615,16 +615,16 @@ below retained for `safe` and `normal`:
    | A handoff moves a paused child with its report; the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
    | Only a turn the delegation's own wait saw end is judged: the delegation's outcome path reports only a wait that failed with no ending event, or one notes held (`tracksInputs`) | Judged again a microtask later, the pause could read as the end once the work had ended |
 
-   A linked machine's session the hub's orchestrator asked to hear about (`reportBack`) pauses the same way (#723,
+   A linked machine's session the hub's Assistant asked to hear about (`reportBack`) pauses the same way (#723,
    `sessions/linked-reports.ts`). The hub keeps each linked session's task list for every session a machine relays,
-   so work started before the orchestrator asked is known: read whole from the machine's `sessions.list`
+   so work started before the Assistant asked is known: read whole from the machine's `sessions.list`
    (`LinkedSessions.backgroundTasks`) each time its link comes up (`machine_resync`: the first link, after a drop, after
    the hub's start), since a machine resends its work only when it changes, and then changed by the relayed
    `background_tasks` (the same `applyBackgroundTasks`). A change relayed while that read is out is newer and kept. A
    completed turn there with its own work running (timers left out) sends the paused notice once and keeps the linked
    report (`LinkedReport.paused`); a later turn end with none of that work left sends the final report; the work ending
    with no turn after it settles the report after `PAUSED_REPORT_SETTLE_MS`, saying how each task ended; a failed turn
-   is reported as it ended. The orchestrator has no `agent_session`, so the notice offers no stop, as for its own
+   is reported as it ended. The Assistant has no `agent_session`, so the notice offers no stop, as for its own
    sessions here; a new `send_to_session` to that session replaces the report, as before. While that send is out, the
    session's events go to the new wait; a send that fails puts the paused report back and starts its settle wait again.
    The machine's link dropping while the report is paused sends it at once, saying the link dropped before the work
@@ -637,7 +637,7 @@ below retained for `safe` and `normal`:
    (no source: the person's; the hub's instruction, another session's and an app's are the work's) and the turn's events
    (`LinkedReport.next` / `turn`), and the person's own turn is reported to nobody and changes nothing of the wait. A
    person's message into a running turn of the work is noted in its report. The relayed message carries the person's choice
-   (`intent`: `task`, `takeover`); `takeover` closes the wait and tells the orchestrator once, with the same line, without
+   (`intent`: `task`, `takeover`); `takeover` closes the wait and tells the Assistant once, with the same line, without
    the machine's words. The machine's host says whose each turn was on the event that ends it (`turn`), and the hub reads that; a host that does
    not say (an older one) is read from the messages the hub saw, taking a message seen while a turn runs as joining it. The
    hub also applies the choice itself as it routes the call (`Router` `forwarding`, `LinkedReports.choosing`): an older
@@ -707,7 +707,7 @@ card (a machine whose build predates them lists none, and its child starts witho
 gives what it listed before the card); the person edits them in that project's menu on
 the hub, which routes the save to the machine (`projects.setAgentInstructions`, by project). A call that waits opens its wait before the
 send, so a turn that ends at once is its answer, not a report. The hub records it (`remote_agents`, an app setting) and arms a linked report for the
-caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
+caller before the send (`LinkedReport`, as the Assistant's `reportBack`), so the end of its turn comes back as a
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
 works on it through the link: `status` and `wait` (the machine's state and last words), `send`, `stop`
@@ -834,7 +834,7 @@ report changes (`ChildOwnership.onLinkedReportChange`). The next host arms the r
 (`RemoteAgents.restore`; a call that waited is gone, so the end is its report now), and once the machine's link is up
 reads the child: a turn that ended meanwhile is reported then, one still running when it ends if it is the caller's
 (below), and a held report waits for its work once the link's resync has read it (`LinkedReports.resync`), not
-before: a link slow to come up would otherwise settle that work as ended. The orchestrator's own linked reports still live in memory. A child deleted there, or whose
+before: a link slow to come up would otherwise settle that work as ended. The Assistant's own linked reports still live in memory. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's session archive clears its
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among
 the sessions there and with its "Asked by <caller>" mark, since a project on another machine is a project of its own
@@ -1195,13 +1195,13 @@ turn, and never clears a report mark someone is owed of it (#1233, `domain-model
   detail are the target's words, so the caller reads them as a **tool result** (`agent_session` status, or
   `read_session` for a directing seat), fenced as JSON (`cardsText`), not in the person's seat.
 - **Answering** (`answerRoutedCard`). A question: `agent_session` `answer` (an ordinary session, also across
-  projects for an `ask_project` target: only status and answer there) or `answer_question` (the orchestrator; a rare
+  projects for an `ask_project` target: only status and answer there) or `answer_question` (the Assistant; a rare
   command, so through `centralu_run` in the default tier; a coordinator only reads). `text` is the answer, one line
   per question, `;` between a multi-select's choices, or a JSON array; a choice naming an option is that option's
   label (`answersFrom`). The card stays in the session for the person; the first answer lands, a later one finds the
   card gone. An approval: the caller is told, and may allow or deny only when **both** hold at the answer
   (`answersApproval`, the rule of #603/#606): the caller's own preset is `auto` and it is not an app's agent, and the
-  session running the turn is `normal` or `auto` and not an app's agent (owner decision: an `auto` orchestrator may
+  session running the turn is `normal` or `auto` and not an app's agent (owner decision: an `auto` assistant may
   approve for a `normal` session). A `safe` session's approvals stay the person's whoever gave it the work: the
   caller's `auto` never raises the target's permissions. Never a card the host raised in that session; "always" stays
   the person's.
@@ -1227,7 +1227,7 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 |---|---|
 | `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
 | `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): a leaving host delivers nothing (`disposing`), and the next host delivers a request when the session's turn ends there (a cut turn it continues), or soon after start for a session at rest, so its input never starts a second process. A request whose session or requester is gone is dropped, as are those of an archived session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A row being delivered is left out of `withdrawReaches` and `dropOpenedByAuto`, so its gate (`queuedGateError`, for every tool) is read once more after that wait and any wake, before the task is written (`stillAllowed`). A remembered pair consent revoked in that window does not stop it: being delivered counts as running, as a delegation already running is left to finish (`revokeProjectConsent`). A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
-| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the session archive. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
+| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the session archive. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the Assistant through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
 
 **Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a
 bare string (the enum would put the reader's Claude request over its 2,300), and the runner refuses other values;
@@ -1242,7 +1242,7 @@ Codex starts no language server. The owner decided (2026-10-15) two things.
 
 **Code intelligence is off for a child unless its caller asks.** `codeIntelligenceOff` (tool-profiles.ts) is the rule:
 a child (`isChildSession`: a `start_agent` child, a fork, an app's agent) starts without it unless `start_agent` passed
-`lsp: true`; sessions the person starts, the orchestrator and builder sessions keep the person's own setting. The
+`lsp: true`; sessions the person starts, the Assistant and builder sessions keep the person's own setting. The
 caller chooses per task (on for refactors and wide cross-file changes; research, docs, small fixes and tests do well
 with search and a final typecheck); Centralu does not guess the task's kind from its words. The decision is made once,
 in `createSession`, and recorded as the app setting `code_intelligence:<id>` = `off` (no column, so no migration), so
@@ -1301,7 +1301,7 @@ original's things is in this table; the bullets below say how.
   start_agent request still open (its card still standing, #673, or already allowed and queued until memory frees up,
   §1.2.4, #686) say so. A child with nothing owed (finished, and reported or read) is "finished; waiting for more work".
   Same-project children (`askedBy` or `parentSessionId` naming the original) and the original's delegations in another
-  project both count. A finished child is often still in use (waiting for its orchestrator's next instruction). Left
+  project both count. A finished child is often still in use (waiting for its Assistant's next instruction). Left
   with an original that goes it belonged to nobody (#738); left with one that stays, the session that carries the work
   on could not list or archive it (#1475). So it moves whether the original goes or stays.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
@@ -1383,7 +1383,7 @@ original's things is in this table; the bullets below say how.
   (`moveCaller`) before this is decided. An original that goes (`goes`) gives its tasks away with the rest, and the answer to the task given
   to it is not finished there either (a separate gap).
 - **Who may hand over** is not checked here: `moveChildren` trusts its caller. Two callers reach it through
-  `createSession`: the person's handoff (the window's RPC) and the orchestrator's `handoff_session`, after
+  `createSession`: the person's handoff (the window's RPC) and the Assistant's `handoff_session`, after
   `HandoffFlow` has checked its authority over the original (§1.2.6). Any other agent-facing path must check its
   authority the same way first.
 - **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
@@ -1414,9 +1414,9 @@ original's things is in this table; the bullets below say how.
   `session_owner` is unchanged, and the Inbox hears the mail change itself. A child on a linked machine has no mail thread yet (mail across machines is slice 4), so only its
   report link moves (`moveCaller`), as before.
 
-### 1.2.6 The orchestrator hands a session off (`handoff_session`, #694)
+### 1.2.6 The Assistant hands a session off (`handoff_session`, #694)
 
-Handoff was the session menu's alone (⋯ → Hand off to a fresh session…). The central orchestrator now has it as a tool,
+Handoff was the session menu's alone (⋯ → Hand off to a fresh session…). The Assistant now has it as a tool,
 so it can replace a session that has drifted, or move its work to the other CLI, the way the person does. The note is
 **from the record by default**, in the tool and in the window alike (owner decision on #694; the window archives
 the original by default since #1477, having kept it from #694 to then): the session being
@@ -1429,13 +1429,13 @@ the session to write it (`mode: "agent"`) stays an option in both.
 
 - **Arguments**: the target session, the receiving tool (the same by default), the note mode (`record` by default),
   and extra words for the new session, which its opening message gives after the note's opening as the
-  orchestrator's (`handoffOpening` in `packages/protocol/src/handoff.ts`, the window's own opening, now shared).
+  Assistant's (`handoffOpening` in `packages/protocol/src/handoff.ts`, the window's own opening, now shared).
 - **Who may hand off what** (`HandoffFlow` in `sessions/handoff-flow.ts`, the seat's checks in
-  `sessions/orchestrator-seat.ts`):
-  - Only the central orchestrator has the tool (`profileAllows`): a lead (`scoped`), an ordinary session (`reader`),
+  `sessions/assistant-seat.ts`):
+  - Only the Assistant has the tool (`profileAllows`): a lead (`scoped`), an ordinary session (`reader`),
     a builder and an app's agent do not, and the seat refuses it for any view but the central one.
-  - The target is a session of this computer the orchestrator sees, and of those only a project's ordinary session:
-    never the orchestrator itself, an orchestrator or coordinator, an app's session (its builder or an agent an app
+  - The target is a session of this computer the Assistant sees, and of those only a project's ordinary session:
+    never the Assistant itself, an Assistant or coordinator, an app's session (its builder or an agent an app
     started: the successor would not carry the tie to the app), a linked machine's session (handed off there), or a
     worktree session (refused with the window's reason).
   - A target mid-turn (working, waiting on an approval or a question) is refused, without a card: a handoff never cuts
@@ -1444,21 +1444,21 @@ the session to write it (`mode: "agent"`) stays an option in both.
   - The receiving tool is checked first (`toolProblem`: an adapter, installed and signed in): a tool that cannot start
     a session is refused before any card, so a name the model made up never reaches the person's eyes.
   - A handoff that guards nothing asks no one (#1509, owner 2026-10-24): the target is at rest (the check above) and the
-    preset the successor takes, which is the original's, is within the orchestrator's own (`HandoffFlow.covered`). The original
-    stays and the orchestrator hands over no power it lacks. It is read again where the successor starts, after an agent's note too. A target above the
-    orchestrator's preset takes the card below.
-  - Otherwise the person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
+    preset the successor takes, which is the original's, is within the Assistant's own (`HandoffFlow.covered`). The original
+    stays and the Assistant hands over no power it lacks. It is read again where the successor starts, after an agent's note too. A target above the
+    Assistant's preset takes the card below.
+  - Otherwise the person's consent is a card in the Assistant's own session for each handoff (`askHost`, an `other` card with
     `about: "session_handoff"`), naming the target, the receiving tool, where the note comes from, the preset the new
     session runs under and the extra words. Every name on it is someone else's text and is JSON-quoted; the extra words
-    are cut at 400 characters and the card says so and gives the full length. Under the orchestrator's own `auto` the
-    boundary is open (#603) and logged as `session_handoff of <target>`. "Always" lasts for that orchestrator while this
+    are cut at 400 characters and the card says so and gives the full length. Under the Assistant's own `auto` the
+    boundary is open (#603) and logged as `session_handoff of <target>`. "Always" lasts for that Assistant while this
     host serves it, never for a project (`sessionOnlyAlways`), as an update's does, and is recorded only for a call that
     passed every check after the card. Every check runs again after the card: a turn started while the card stood is
     not cut short. Every refusal is logged with the caller and the target.
 - **What it does** is the window's handoff without the deletion: the note is written to the same file
   (`<data>/handoff/<project>/<session>.md`), the successor is created with the original's settings (none of the
   tool-specific ones when the tool changes), the original's preset and name, and the note as its marker. Its opening
-  message is stored and shown as the orchestrator's (`from`, the internal `initialFrom` of `createSession`), not the
+  message is stored and shown as the Assistant's (`from`, the internal `initialFrom` of `createSession`), not the
   person's. The record labels every row another session or an app sent with its source and carries its text as one JSON
   string, as read_session does; only the person's rows are `[user]`, so a child's report cannot read as the person's
   instruction in the successor's note. A row starts only at the start of a line and its later lines are indented,
@@ -1466,7 +1466,7 @@ the session to write it (`mode: "agent"`) stays an option in both.
   session's own text can start a row either. Creating it
   moves the original's children (§1.2.5, scope `kept`): **the original always stays**, and is told in its
   conversation who took over. The person removes it.
-- **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the orchestrator's message, waits
+- **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the Assistant's message, waits
   for the turn to end and reads the note from the store (`exportHandoffNote`). The turn's end is read as start_agent
   reads a child's (`AgentRunWait` among `turnObservers`, #428): a turn that fails, hits a limit or is stopped, or ends
   with no note, answers at once and says which, instead of the bound's "wrote no note". The call waits up to 240 seconds, under
@@ -1480,39 +1480,39 @@ the session to write it (`mode: "agent"`) stays an option in both.
   The card waits like `create_project`'s, so on Codex a card left standing past the bridge's bound ends the call there
   while the card stays.
 
-### 1.2.7 The orchestrator starts sessions outside any project (#853)
+### 1.2.7 The Assistant starts sessions outside any project (#853)
 
-Handing off light work unrelated to any project (a web search, a lookup), the orchestrator reached for its CLI's own
+Handing off light work unrelated to any project (a web search, a lookup), the Assistant reached for its CLI's own
 subagent, which never appears in Centralu: the person could neither watch it nor step in. It now has `start_agent` and
 `agent_session` too, as commands of the `commands` tier (`RARE_COMMANDS`, reached through `centralu_run`; a direct
 tool in the other tiers), and one line of its instructions says to use them rather than its Agent tool. The flow is
-§1.2.1's (`AgentStartFlow`) with the orchestrator as the caller and no project as the place
-(`ORCHESTRATOR_PLACE`, an empty id):
+§1.2.1's (`AgentStartFlow`) with the Assistant as the caller and no project as the place
+(`ASSISTANT_PLACE`, an empty id):
 
-- **The child** has no project (`projectId: null`), is marked `askedBy` the orchestrator, and works in a folder of its
-  own, `<data>/orchestrator-agents/<uuid>` (`newOrchestratorAgentFolder`), never the orchestrator's: a file a child
-  left in the orchestrator's folder (Codex loads `.agents/skills` from it whatever the trust) would reach the session
+- **The child** has no project (`projectId: null`), is marked `askedBy` the Assistant, and works in a folder of its
+  own, `<data>/orchestrator-agents/<uuid>` (`newAssistantAgentFolder`), never the Assistant's: a file a child
+  left in the Assistant's folder (Codex loads `.agents/skills` from it whatever the trust) would reach the session
   that directs every other one, and children sharing one folder wrote over each other (#994 review). The folder goes
-  when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
+  when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the Assistant's
   preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
   and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
-  orchestrator's row (`orchestratorChildren`), folded until the mouse rests on its button (#1591), with a ⋯ menu to stop or delete it; a child whose orchestrator was
-  replaced stays there under "Started by an earlier orchestrator".
+  Assistant's row (`assistantChildren`), folded until the mouse rests on its button (#1591), with a ⋯ menu to stop or delete it; a child whose assistant was
+  replaced stays there under "Started by an earlier assistant".
 - **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
   ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
-  answer from an older window, is kept as always for the orchestrator while this host serves it, which the card says
-  ("lasts until Centralu restarts"). `auto` opens it. The depth binds as for any caller; the orchestrator is at 0, so
+  answer from an older window, is kept as always for the Assistant while this host serves it, which the card says
+  ("lasts until Centralu restarts"). `auto` opens it. The depth binds as for any caller; the Assistant is at 0, so
   its child starts none.
-- **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the orchestrator's children that
+- **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the Assistant's children that
   are still here, and worded as "agents you started"), the
   finish notice through the report path, a request kept across a swap (its `projectId` is the empty place id), and
-  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the orchestrator and no other
-  session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the orchestrator.
+  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the Assistant and no other
+  session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the Assistant.
 
-Characters: the orchestrator's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →
+Characters: the Assistant's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →
 8,945, under its 9,500); the two tools' definitions ride in no request in the default tier. Not measured live:
-whether the orchestrator then reaches for `start_agent` rather than its Agent tool. Not done: a read-only research
-preset for such a child (the issue's suggestion); it runs under the orchestrator's preset as any child does.
+whether the Assistant then reaches for `start_agent` rather than its Agent tool. Not done: a read-only research
+preset for such a child (the issue's suggestion); it runs under the Assistant's preset as any child does.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
@@ -1561,23 +1561,23 @@ Tested end to end against a local bare repository served over https (git's dumb 
 self-signed certificate trusted through `GIT_SSL_CAINFO`, the person's git configuration left out), including a
 path that answers 401 for a repository that needs a sign-in (`sessions/clone-project.test.ts`).
 
-**The orchestrator's `create_project { name?, parent?, git?, branch? }`** replaced `propose_project`, which only lit
-up the sidebar's Add project button. It raises a card in the orchestrator's own approval slot
+**The Assistant's `create_project { name?, parent?, git?, branch? }`** replaced `propose_project`, which only lit
+up the sidebar's Add project button. It raises a card in the Assistant's own approval slot
 (`project_create`: the name, the full path and, for a clone, the repository and branch), and the call waits for the answer, as `ask_project`'s
 consent card does (`askHost`). Nothing is made until the person chooses Create; "always" is read as
 allow and nothing is remembered; deny, or the call stopping, makes nothing. The target is checked
 before the card (a refusal costs the person nothing) and again after it. A project made this way is
 announced with `projects_changed`, which every window answers by re-reading the project list. It is
-the orchestrator's alone (security-boundaries.md), and it makes projects on this computer only: the
-hub's orchestrator does not see the linked machines; their projects are made from Add project, by picking the machine. A
-clone also says "Cloning … into …" in the orchestrator's conversation once Create is chosen, while the call runs. The
-swap left the orchestrator's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and
+the Assistant's alone (security-boundaries.md), and it makes projects on this computer only: the
+hub's Assistant does not see the linked machines; their projects are made from Add project, by picking the machine. A
+clone also says "Cloning … into …" in the Assistant's conversation once Create is chosen, while the call runs. The
+swap left the Assistant's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and
 11,770 with the clone's arguments; docs/tool-cost.md).
 
 **Adding a folder that already exists** (`add_project { path, machine? }` and `list_machines`, #1220, the first slice of
 #1219). The person linked a laptop and asked for two folders on its desktop as projects; `create_project` never reuses
-a folder, and nothing named the machines. Both are rare commands of the orchestrator (`RARE_COMMANDS`, reached through
-`centralu_run`, #1205), the central orchestrator's alone:
+a folder, and nothing named the machines. Both are rare commands of the Assistant (`RARE_COMMANDS`, reached through
+`centralu_run`, #1205), the Assistant's alone:
 
 1. The folder's machine reads it, changing nothing: `projects.inspect { path, machine? }` (additive, routed by `machine`)
    answers the absolute path in that machine's terms (a leading `~` is its home; any other relative path is refused),
@@ -1598,7 +1598,7 @@ line per machine from what `machines.list` answers (`SessionManager.useMachineLi
 `main.ts`): its name, status, OS and shell (from the shell the hub reaches it with), and whether it reconnects by itself
 (Auto reconnect, `MachineInfo.autoReconnect`, #1341).
 
-**Managing the linked machines** (#1219, second slice). The orchestrator's rare commands `add_machine { sshTarget, name?,
+**Managing the linked machines** (#1219, second slice). The Assistant's rare commands `add_machine { sshTarget, name?,
 wslDistro? }`, `install_machine { machine, action: install | update }`, `remove_machine`, `reconnect_machine`,
 `set_machine_auto_reconnect { on }` and `set_machine_autostart { on }` make the calls the Machines screen makes on the
 hub's links (`MachineFlow`, `sessions/machine-flow.ts`, wired by `SessionManager.useMachineOps(links)` in main.ts).
@@ -1609,7 +1609,7 @@ target that does not answer or runs nothing it can link is linked nowhere, and t
 The shell follows the probe as the Add machine dialog's rows do: a Unix shell, Windows through PowerShell, or a WSL
 distro of it when one is named. A target, name or distro with a control or format character (Unicode Cc, Cf, bidi
 overrides among them) is refused before anything runs. Linking, installing,
-updating, removing and start at boot wait for a card in the orchestrator's slot under every preset (an `other` card,
+updating, removing and start at boot wait for a card in the Assistant's slot under every preset (an `other` card,
 `about: "machine_change"`, the question whole in `raw`, so any window reads it; allow or deny, nothing remembered).
 Reconnecting and Auto reconnect act at once, as the row's buttons do, except that undoing what the person chose asks (#1341):
 `reconnect_machine` on a machine they disconnected or whose Auto reconnect is off, and `set_machine_auto_reconnect` turning the
@@ -1618,7 +1618,7 @@ a target that is no ssh target or that `ssh -G` cannot read, a name already link
 this computer cannot make (`LinkedMachine.operationRefusal`, the same sentences `operate` refuses with). Every answer
 ends with the machine as it is after the change (`machineLine`). An install or update runs while the tool call waits.
 
-**Preferences** (#1219, with the session archive). `get_preferences` and `set_preferences` are rare commands of the central orchestrator
+**Preferences** (#1219, with the session archive). `get_preferences` and `set_preferences` are rare commands of the Assistant
 (`PreferencesFlow`, `sessions/preferences-flow.ts`). They make the window's own calls through the router
 (`SessionManager.useWindowRpc`, wired in main.ts to `router.handle`; `callWindow` in `sessions/window-rpc.ts` checks
 the params with the method's schema and reads the answer with its result schema, and only the methods named in
@@ -1627,7 +1627,7 @@ the params with the method's schema and reads the answer with its result schema,
 - `get_preferences` reads `prefs.get`, `themes.list`, `agents.sleepPolicy`, `updates.status` (not forced: the read the window makes at start, which asks the registry only when checking is on and one is due)
   and `agents.versions`, one line each, with the choices; a part the host cannot read says so and the rest still answers.
   It also lists the theme files (`get_preferences { themeFile: id }` shows one in full), the models for started agents, and the limits on agents, which `set_agent_limits` changes behind a card.
-- #1978, the orchestrator sets what the person sets: `preferences-coverage.ts` names every field of `UiPreferences` as a field of `set_preferences` / `set_agent_limits` or as excluded with a reason, and `preferences-coverage.test.ts` fails when a new preference is in neither. Excluded: `accent` and `sessionTools` (gone from the product), `hubAuto` (no `set_preferences` field yet; the orchestrator turns it on or off through the call the window makes, `prefs.set` or `machines.hubAuto`, which asks nothing with the limited credential either, owner decision 2026-11-05). Never reached by any command, by design: sign-ins and credentials, OS permission prompts, pairing a machine by hand, the privacy choices only the person grants. `set_preferences` also takes `agentModels` (merged into the saved map; null clears one), `themeFile` (writes a theme file through `themes.save`, the same schema and host code as Settings; the unknown tokens the reader skips are reported) and `deleteThemeFile` (`themes.remove`: the host has no OS trash, which Settings reaches through the shell, so the file moves to the themes folder's `.removed/` under a name of its own, the answer says where, and a side that showed it goes back to its preset, as Settings does). `themes.save` refuses a theme above the reader's size limit and one whose id differs from a hand-written file in the folder only by case.
+- #1978, the Assistant sets what the person sets: `preferences-coverage.ts` names every field of `UiPreferences` as a field of `set_preferences` / `set_agent_limits` or as excluded with a reason, and `preferences-coverage.test.ts` fails when a new preference is in neither. Excluded: `accent` and `sessionTools` (gone from the product), `hubAuto` (no `set_preferences` field yet; the Assistant turns it on or off through the call the window makes, `prefs.set` or `machines.hubAuto`, which asks nothing with the limited credential either, owner decision 2026-11-05). Never reached by any command, by design: sign-ins and credentials, OS permission prompts, pairing a machine by hand, the privacy choices only the person grants. `set_preferences` also takes `agentModels` (merged into the saved map; null clears one), `themeFile` (writes a theme file through `themes.save`, the same schema and host code as Settings; the unknown tokens the reader skips are reported) and `deleteThemeFile` (`themes.remove`: the host has no OS trash, which Settings reaches through the shell, so the file moves to the themes folder's `.removed/` under a name of its own, the answer says where, and a side that showed it goes back to its preset, as Settings does). `themes.save` refuses a theme above the reader's size limit and one whose id differs from a hand-written file in the folder only by case.
 - `set_preferences` takes only what changes: `theme` (an id or a name), `textSize`, `bodyFont`, `codeFont`,
   `lineHeight`, `idleSleepMinutes` (a whole number, or "never"), `autoUpdate` ("Automatic updates", below), and
   `moveIdleSessionsToNewAgentCli` and `notifications` (the switches to change: `approval`, `done`, `whenFocused`, `sound`;
@@ -1642,13 +1642,13 @@ the params with the method's schema and reads the answer with its result schema,
   schema refusal comes before any write; a service the host lacks (no update service in a test) is reported next to the
   changes that did happen.
 - **The notification switches** (#1306) are in the preferences record (`UiPreferences.notifyPolicy`, optional), no longer only in the
-  window's workspace snapshot, so the window and the orchestrator share one source. `UiPreferenceStore.uiPreferences` carries
+  window's workspace snapshot, so the window and the Assistant share one source. `UiPreferenceStore.uiPreferences` carries
   them once: the first read that finds none takes the snapshot's `notifyPolicy` (the defaults when the window never saved
   one) and writes it, so a snapshot an older window still writes never overrides a switch chosen since (the text size moved
   the same way, #312). A patch carries only the switches that change and the host merges them one by one
-  (`setUiPreferences`), so the window and the orchestrator changing different switches do not undo each other. Every change
+  (`setUiPreferences`), so the window and the Assistant changing different switches do not undo each other. Every change
   is announced with `prefs_changed` (carries nothing; a window reads `prefs.get` again), which also brings the
-  orchestrator's other preferences (theme, text size) to an open window. The window keeps writing its snapshot's copy, for a
+  Assistant's other preferences (theme, text size) to an open window. The window keeps writing its snapshot's copy, for a
   build that reads it there; against a host that answers without the field it keeps using the snapshot's.
 - **When agents compact** (#1376) is Centralu's setting, `UiPreferences.autoCompact` `{ controlled, share }` (optional: a record from
   before it reads as on at 60%, `autoCompactOf`; an older host ignores the field). The point is a share of the model's context
@@ -1704,7 +1704,7 @@ the params with the method's schema and reads the answer with its result schema,
   (ACP: `/compact` when the agent advertises `compact` or its profile measured `infersCompaction`, else null, docs/plans/acp-adapter.md §5.6),
   then the adapter's. A null command means the session is never compacted by Centralu, and `compact_self` answers the agent that it cannot
   (Antigravity, which advertises only plan, logout and usage, where a bare `/compact` would only be a prompt to its model).
-  - **`compact_self`**, a tool of an ordinary session and the orchestrator (loaded, 579 characters; docs/tool-cost.md §15): asks for a compaction
+  - **`compact_self`**, a tool of an ordinary session and the Assistant (loaded, 579 characters; docs/tool-cost.md §15): asks for a compaction
     **after the current turn ends**, never in the middle of one, with an optional `focus` line (one line, 300 characters) and an optional `then` (below). Its description says when:
     work is finished and reported; before waiting more than a few minutes on a child, CI or the person; switching to an unrelated task.
     The request is always accepted: the size of the context known during a turn is the one read at the previous turn's end, so a turn that grew past the floor would have been refused. The **floor** of 100,000 tokens is checked at the turn's end on the size of the turn's last model request of its own conversation (`usage_update.request`, which both tools send), else on the size the tool reads then (Claude reads it just after the turn ends, so the request waits for that `context_update`, at most 5 seconds (its own timer) before it goes by the reading it has, and a reading owed for the turn before that lands in the next turn is not taken for the next turn's; Codex reads it during the turn); under the floor the request is dropped, and so is one with no size read **since the last compaction** (below). One request is pending per
@@ -1786,7 +1786,7 @@ the params with the method's schema and reads the answer with its result schema,
     **Once per share per compaction cycle:** a share is told the first time a request is over it (a request over both says it once); a compaction of
     any kind that succeeded (the agent's, Centralu's, the tool's own, the person's `/compact`) or a fresh conversation (`/clear`) starts the cycle again, so
     the shares are told again when the context grows back; a compaction that failed does not. The counters are in memory: a host that starts tells a session
-    already over a share again, once. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the orchestrator,
+    already over a share again, once. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
     context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
     line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
@@ -1842,13 +1842,13 @@ the params with the method's schema and reads the answer with its result schema,
   published package globally on the machine running it. The wire default of `UpdateStatus.autoApply`
   stays false, for older hosts. `set_preferences autoUpdate: true` asks first, in every preset, whenever either half is
   off: with both on, a newer Centralu installs by itself and the desktop window relaunches into it when nothing is busy, so
-  code arrives with no later question. It is an `other` card with `about: "orchestrator_change"` (`ORCHESTRATOR_CHANGE`),
+  code arrives with no later question. It is an `other` card with `about: "orchestrator_change"` (`ASSISTANT_CHANGE`),
   allow or deny only; on Allow it turns on the half or halves that are off. A denial leaves both as they were and the
   call's other changes still happen. `autoUpdate: false` asks nothing and turns installing off before checking. The
   separate `checkForUpdates` and `applyUpdatesWhenIdle` fields are gone and refused by name; `get_preferences` shows one
   line, and says which half is on when they differ.
 
-**The session archive** (#1219; its commands were `list_trash`, `restore_trashed`, `trash_subagent_steps`, `delete_trashed` and `empty_trash` until #1404, when an orchestrator read "empty the trash" as the operating system's bin). The rare commands `list_archive`, `restore_archived { sessionId, what? }`, `archive_subagent_steps { sessionId }`,
+**The session archive** (#1219; its commands were `list_trash`, `restore_trashed`, `trash_subagent_steps`, `delete_trashed` and `empty_trash` until #1404, when an Assistant read "empty the trash" as the operating system's bin). The rare commands `list_archive`, `restore_archived { sessionId, what? }`, `archive_subagent_steps { sessionId }`,
 `delete_archived { sessionId, what? }` and `delete_all_archived` (`TrashFlow`, `sessions/trash-flow.ts`, through the same window RPC as the
 preferences) are the Settings → Archive screen's calls. `what` is `session` (the default) or `steps`.
 
@@ -1859,7 +1859,7 @@ preferences) are the Settings → Archive screen's calls. `what` is `session` (t
   ask nothing, with one exception: restoring a session whose project was deleted registers the project's folder again (as
   the window's Restore does), which is what `add_project` asks about, so that restore raises a card naming the folder. A
   session not in the archive is refused before any call.
-- `delete_archived` and `delete_all_archived` delete for good, behind a card in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only).
+- `delete_archived` and `delete_all_archived` delete for good, behind a card in every preset (`ASSISTANT_CHANGE`, allow or deny only).
   A session or steps that are not in the archive are refused before the card, so a live session cannot be deleted this way.
   The card names the session (or the counts, the size and up to ten names), what goes with it (the tool's conversation
   file, a worktree marked for removal) and that it cannot be undone. After Allow the archive is read again and the host
@@ -1873,7 +1873,7 @@ preferences) are the Settings → Archive screen's calls. `what` is `session` (t
 (`TrustFlow`, `sessions/trust-flow.ts`, through the same window RPC as the preferences) are the project list's and the
 trust switch's calls (`projects.list`, `projects.setTrusted`, with `apps.list` and `machines.list` to name what the
 trust covers and where). `project` is an id, or a name exactly one project has (two that share it are named with their
-ids). The orchestrator's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
+ids). The Assistant's instructions point to these and the machine commands in one line: `centralu_commands "machine trust rule grant limits"` finds them all (2 characters more than the line it replaced).
 
 - `list_projects`: each project with its id, folder, machine and whether it is trusted.
 - `set_project_trust` with `trusted: false` asks too, in every preset (the reviewer's decision on #1325): it is not only
@@ -1881,7 +1881,7 @@ ids). The orchestrator's instructions point to these and the machine commands in
   own deny rules and the hooks that block tools stop applying to its agents, `auto` sessions included; its apps stop and
   its idle sessions restart (a busy one when its turn ends, #663). The card says so; after Allow the project is read again
   (removed, moved, unreachable, or untrusted meanwhile: nothing more changes).
-- With `trusted: true` it asks first, in every preset (`ORCHESTRATOR_CHANGE`, allow or deny only): the card names the
+- With `trusted: true` it asks first, in every preset (`ASSISTANT_CHANGE`, allow or deny only): the card names the
   project, its folder and machine, and each of its apps (root and inner) with its description and what it may ask for,
   in the window's trust card's words (`usesLines`, now in the protocol so both say it the same way). After Allow the
   project and its apps are read again: one removed meanwhile, or whose apps changed (an app added by a pull, or what one
@@ -1915,24 +1915,24 @@ ids). The orchestrator's instructions point to these and the machine commands in
   (a number, 0 unlimited, or `"preset"` for the preset's own) and the levels of sessions that may start agents (1 to 3).
   "Let sessions look at other sessions" (`sessionTools`) is not one of them: it is not a setting any more (owner decision
   2026-10-20, #1321), so the command has no field for it and refuses one by name. They bound what agents do and cost, the
-  orchestrator's own children included, so **every change asks**, narrowing too, in every preset: the card names each
+  Assistant's own children included, so **every change asks**, narrowing too, in every preset: the card names each
   limit as it is and as it becomes (`→`). Values are checked with `prefs.set`'s own schema before the card; nothing to
   change asks nothing. After Allow the limits are read again, and when the person changed one in Settings while the card
   stood nothing is changed (the card's "from" is not what is set); otherwise one `prefs.set` with exactly the named fields.
-  `set_preferences` still has no field for them. The agent models (`agentModels`) have one there since #1978: they act at once with no card, on the owner rule that the orchestrator sets what the person sets (2026-11-05): the tool must be an agent CLI on this computer, and a model and effort are free text, as Settings' picker takes with "Other…"; one that is not in the tool's current list (`agent_models`) is saved as typed and the answer says so; clearing a difficulty never set leaves no entry. Everything is checked before anything is written; the theme file is written last, and a `theme` named in the same call that is not found after the write is a partial success, said so.
+  `set_preferences` still has no field for them. The agent models (`agentModels`) have one there since #1978: they act at once with no card, on the owner rule that the Assistant sets what the person sets (2026-11-05): the tool must be an agent CLI on this computer, and a model and effort are free text, as Settings' picker takes with "Other…"; one that is not in the tool's current list (`agent_models`) is saved as typed and the answer says so; clearing a difficulty never set leaves no entry. Everything is checked before anything is written; the theme file is written last, and a `theme` named in the same call that is not found after the write is a partial success, said so.
 
-### 1.4 The inventory behind #1219: what the window calls, and what the orchestrator reaches
+### 1.4 The inventory behind #1219: what the window calls, and what the Assistant reaches
 
-The owner's direction (#1219): what the person can do in the window, the orchestrator can ask to do, through the same
+The owner's direction (#1219): what the person can do in the window, the Assistant can ask to do, through the same
 host checks; consequential or trust-changing actions raise a card the person answers, reading and reversible ones do not.
 This is the list that principle is applied to: every RPC method of `packages/protocol/src/commands/methods/` (the
 window's channel), grouped, and for each group one of three states.
 
-- **Has it**: reachable by the orchestrator today, as a tool or a rare command behind `centralu_run`.
-- **Should**: the orchestrator should reach it, in a slice not made yet, with the card it needs. None is left since the
+- **Has it**: reachable by the Assistant today, as a tool or a rare command behind `centralu_run`.
+- **Should**: the Assistant should reach it, in a slice not made yet, with the card it needs. None is left since the
   fourth slice (below): a method is now *has it*, *person*, or *not an errand* (a drawing aid, or a call that only means
   something to the window), each with its reason.
-- **Person**: stays with the person, with the reason. A method here may still be *read* by the orchestrator when the
+- **Person**: stays with the person, with the reason. A method here may still be *read* by the Assistant when the
   group says so.
 
 | Group (methods) | State | Notes |
@@ -1940,20 +1940,20 @@ window's channel), grouped, and for each group one of three states.
 | Sessions: start, message, stop. `agents.createSession`, `agents.send`, `agents.interrupt`, `agents.forkConversation`, `agents.switchTool`, `agents.exportHandoff*`, `agents.updateSettings` | Has it | `create_session`, `send_to_session`, `agent_session` (`stop`, `send`), `start_agent` (a fork), `handoff_session`, `update_session_settings`, each behind the target's preset |
 | Reading sessions. `sessions.list`, `messages.load`, `messages.subagent`, `messages.search`, `agents.worktreeStatus`, `agents.autoCompact` | Has it | `list_sessions`, `read_session`, `recall`, `agent_session` (`status`, `list`) |
 | Answering a waiting session. `agents.respondApproval`, `agents.answerQuestion` | Has it | `answer_question`, the target's preset and the delegation rules decide (security-boundaries.md) |
-| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the session archive keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that (the messages waiting for its answer and the tasks it owes a report of too, since restoring brings none back), when moving the session drops any of it (#1512: `agents.archiveIfAtRest` moves a session only when the list is empty and it is still at rest; the window's dialog reads the losses when it opens (`agents.archiveLosses`, read only, #1595) and calls it on an Archive that has not shown them, and when it lists losses the person confirms again (#1589); an idle local session nobody waits on is moved with no card unless the caller runs under `safe`, since the move is undone with `restore_archived` or Settings → Archive), and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an orchestrator or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (archiving ends its process), and one on a machine that cannot be reached |
+| Deleting a session. `agents.deleteSession` | Has it: its own children (`agent_session delete`), and any other worker session behind a card (`delete_session`, #1219 fourth slice) | A move to the session archive keeps the conversation, the worktree and the tool's file but not what the host holds for the session (a caller's wait for its report, delegations, grants, standing start_agent cards), so `delete_session` **asks**, naming that (the messages waiting for its answer and the tasks it owes a report of too, since restoring brings none back), when moving the session drops any of it (#1512: `agents.archiveIfAtRest` moves a session only when the list is empty and it is still at rest; the window's dialog reads the losses when it opens (`agents.archiveLosses`, read only, #1595) and calls it on an Archive that has not shown them, and when it lists losses the person confirms again (#1589); an idle local session nobody waits on is moved with no card unless the caller runs under `safe`, since the move is undone with `restore_archived` or Settings → Archive), and the host decides in the step that moves it (a message the person sent meanwhile keeps the session). It refuses the caller itself, an Assistant or coordinator, a child of the caller (that is `agent_session delete`, #637), a session that is working, waiting on the person or running a background job (archiving ends its process), and one on a machine that cannot be reached |
 | Restart or resume. `agents.restartSession`, `agents.resumeSession` | Has it | A send to an asleep or stopped session wakes it |
 | Housekeeping of a session. `sessions.rename`, `agents.clearBackgroundTasks` | Has it (#1219, fourth slice) | `rename_session` (a worker session; the answer quotes the old name, so it can be set back) and `clear_background_tasks` (ended tasks only; running ones stay): no card |
 | Reading how the agent CLIs stand. `agents.detect`, `agents.usage`, `agents.models` | Has it (#1219, fourth slice) | `agent_status` (installed, logged in, plan and limits) and `agent_models`: read only |
-| `agents.stopBackgroundTask` | **Person** | It ends a process the session started, which cannot be undone. A child the orchestrator started is stopped with `agent_session` (`stop`) |
+| `agents.stopBackgroundTask` | **Person** | It ends a process the session started, which cannot be undone. A child the Assistant started is stopped with `agent_session` (`stop`) |
 | `sessions.clearError` | **Person**, window only (`window` in `method-rights.ts`) | Done on an error moves the session to idle (#1549): an agent's script must not hide a failure of its own. It carries the newest row the window saw (`seq`) and clears only an error no newer row follows |
 | `sessions.markRead`, `sessions.reorder`, `projects.reorder` | **Person** | Marking a session read hides a notice the person has not seen; the order is the person's arrangement of their own sidebar |
 | `agents.account`, `agents.capabilities`, `agents.commands`, `agents.listExternalSessions`, `messages.image` | Not an errand | An opaque account fingerprint that only means something compared between two machines (#726), what the composer's menus draw, the "Past conversations" import dialog, and a picture for the screen. No command imports a past conversation |
-| MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every orchestrator turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the orchestrator's own instructions |
-| Preferences. `prefs.get`, `prefs.set` | Has it for theme, text size, fonts, line height, idle sleep, sending with Ctrl+Enter, folded groups and (#1978) the models for started agents; the rest **Person** | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`: has it (#1219, third slice), `set_agent_limits`, every change behind a card. `agentModels`: has it (#1978), `set_preferences agentModels`, no card. `hubAuto`: no field of the orchestrator's; `prefs.set` and `machines.hubAuto` turn it on or off with no card, with the limited credential too (owner decision 2026-11-05). `sendWithModifierEnter` and `foldedGroups` (#1219, fourth slice): `set_preferences` sets them with no card (a way of typing and a way of looking; folding names the sessions whose children fold, by id). `accent` is gone from the product (2026-10-20): not offered, and refused by name |
+| MCP and skill proposals. `agents.mcpProposals`, `agents.skillProposals` (the lists) and the `resolve*` calls | Proposing has it (`propose_mcp_server`, `propose_skill`); resolving is **Person** | Approving installs code or changes every Assistant turn from then on. `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill`: **Person**, they edit the Assistant's own instructions |
+| Preferences. `prefs.get`, `prefs.set` | Has it for theme, text size, fonts, line height, idle sleep, sending with Ctrl+Enter, folded groups and (#1978) the models for started agents; the rest **Person** | `sessionTools` is not a setting (always on, 2026-10-20). `agentCeiling`, `agentDepth`: has it (#1219, third slice), `set_agent_limits`, every change behind a card. `agentModels`: has it (#1978), `set_preferences agentModels`, no card. `hubAuto`: no field of the Assistant's; `prefs.set` and `machines.hubAuto` turn it on or off with no card, with the limited credential too (owner decision 2026-11-05). `sendWithModifierEnter` and `foldedGroups` (#1219, fourth slice): `set_preferences` sets them with no card (a way of typing and a way of looking; folding names the sessions whose children fold, by id). `accent` is gone from the product (2026-10-20): not offered, and refused by name |
 | Themes. `themes.list`, `themes.save`, `themes.remove` | Has it (#1978) | `get_preferences` lists the files, `set_preferences themeFile` writes one, `deleteThemeFile` removes one (kept in `.removed/`). `themes.import` (a file from elsewhere on disk) and `themes.resolve` (a path for the shell) are not an errand: `themeFile` takes the content itself |
 | Update switches. `updates.status`, `updates.setAuto`, `updates.setAutoApply`, `agents.versions`, `agents.setAutoApplyVersions` | **This change** | Turning "Automatic updates" **on** (`autoUpdate`, both halves) asks (it installs and relaunches without a later question); the rest act at once. `updates.apply` has `update_centralu install`; `updates.answerApply` and `updates.reportApply` are the window's side of an apply |
 | Idle sleep. `agents.sleepPolicy`, `agents.setSleepPolicy` | **This change** | |
-| Agent CLIs. `agents.applyVersions` | Has it (#1219, fourth slice) | `apply_agent_versions`: the header's "restart idle sessions on the new CLI", at once and with no card; each restart ends a turn only when idle, and a busy session, or one that spoke within the last minute (`keepQuiet`: the orchestrator is not the person's own button), is named and left |
+| Agent CLIs. `agents.applyVersions` | Has it (#1219, fourth slice) | `apply_agent_versions`: the header's "restart idle sessions on the new CLI", at once and with no card; each restart ends a turn only when idle, and a busy session, or one that spoke within the last minute (`keepQuiet`: the Assistant is not the person's own button), is named and left |
 | Notifications. The switches `approval`, `done`, `whenFocused`, `sound` (`notifyPolicy` in `prefs.get` / `prefs.set`, which still carries `error` and `allDone` for older builds; the window no longer raises those two, 2026-10-20) | **Has it** (#1306) | `set_preferences notifications`, no card, except to turn `approval` off, or `sound` while it would still notify. They moved from the window's workspace snapshot into the host's preferences record (as the text size did, #312), carried from the snapshot once; the window reads and writes them through the host and hears every change (`prefs_changed`) |
 | When agents compact (#1376). `autoCompact` in `prefs.get` / `prefs.set` | **This change** | `set_preferences { autoCompact: { controlled?, share?, idleShare?, nudge?, nudgeFirst?, nudgeSecond? } }`; no card (reversible, and only about when an agent compacts). Reaches a session when its process next starts |
 | The session archive. `trash.list`, `trash.read`, `trash.restore`, `trash.restoreSubagentSteps`, `subagents.usage`, `subagents.trash` | **This change** | List, restore a session or its subagent steps, move subagent steps to the archive: no card. `trash.read` (an archived conversation) and `trash.readRun`: not an errand: `restore_archived` then `read_session` reads a conversation, with the fencing `read_session` has; a second reader of conversation text would need its own |
@@ -1964,31 +1964,31 @@ window's channel), grouped, and for each group one of three states.
 | `projects.gitStatus`, `projects.origin`, `files.search` | Has it (#1219, fourth slice) | `project_git_status` (branch, changed files, origin) and `search_project_files` (by part of a name, as the composer's @ does): read only |
 | Project trust. `projects.setTrusted` | Has it (#1219, third slice) | `set_project_trust`: both ways ask (taking trust away drops the project's own deny rules and hooks); trusting's card names the folder and each app with what it may ask for; both checked again after Allow |
 | Project commands. `projects.setCommands`, `projects.setWorktreeSetup`, `worktrees.setTrunk`, `projects.delete`, `projects.reorder` | **Person** | Commands and worktree setup run shell commands; `projects.delete` can trash a folder |
-| Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The orchestrator hands this to a session in the project, which has the tools and the preset that decide it |
+| Git and files in a project. `git.*`, `fs.*`, `attachments.save` | **Person** | The window acting on the person's own repository and files. The Assistant hands this to a session in the project, which has the tools and the preset that decide it |
 | Approval rules. `approvals.rules` (read), `approvals.deleteRule` | Has it (#1219, third slice) | `list_approval_rules`, `remove_approval_rule` (it only narrows: no card). No command adds or widens a rule; the window has no such call, and a rule comes only from the person's "always" on a card |
 | Apps. `apps.list`, `apps.create`, `apps.sessionTools`, `apps.sessionCall` | Has it | `find_apps`, `attach_app`, `detach_app`, `create_app`; an app's own tools reach a session through its attach |
 | App grants. `apps.permissions`, `apps.forgetPermission`, `apps.setShared`, `projectConsents.list`, `projectConsents.revoke` | Has it (#1219, third slice) | `list_app_grants`, `forget_app_answer`, `revoke_project_consent` (they only make the next attempt ask: no card), `share_app` (on asks, with a card naming the app and what it may ask for, checked again after Allow; off acts at once) |
 | App trust and imports. `apps.reach`, `apps.enable`, `apps.review`, `apps.setSecret`, `apps.importPrepare`, `apps.importCommit`, `apps.importCancel` | **Person** | Enabling an app is trusting its project since #1141 (`set_project_trust`); importing one brings code in; a secret's value is never handed to an agent |
 | App upkeep. `apps.remove`, `apps.restart`, `apps.versions`, `apps.restoreVersion`, `apps.check`, `apps.runs`, `apps.errors`, `apps.usage` | Has it (#1219, fourth slice) | `remove_app` behind a card (the user-folder app's folder moves to `app-trash/`, and it is detached from every session). `list_app_versions`, `list_app_runs`, `list_app_errors`, `app_usage` read; `restore_app_version` (the code it replaces is kept first), `restart_app` and `check_app` act at once but are refused while another session, screen or app has a call in progress in the app (a restart ends it, as the window's Restart does). What an app wrote is quoted as data |
-| `apps.questions`, `apps.answerQuestion` | **Person** | A capability question a chain from a screen the person is looking at is waiting on: the answer is a trust decision (it is remembered for the app), and the orchestrator can already narrow one afterwards (`forget_app_answer`) |
-| The app builder's channel. `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Not an errand | How an app's screen talks to its building session. The orchestrator reaches that session as any other: `list_sessions`, `read_session`, `send_to_session` |
+| `apps.questions`, `apps.answerQuestion` | **Person** | A capability question a chain from a screen the person is looking at is waiting on: the answer is a trust decision (it is remembered for the app), and the Assistant can already narrow one afterwards (`forget_app_answer`) |
+| The app builder's channel. `apps.builder`, `apps.createBuilder`, `apps.askBuilder`, `apps.sendError` | Not an errand | How an app's screen talks to its building session. The Assistant reaches that session as any other: `list_sessions`, `read_session`, `send_to_session` |
 | App screens. `apps.viewFrame`, `apps.viewDocument`, `apps.openView`, `apps.closeView`, `apps.recoverView`, `apps.holdViews`, `apps.inlineReopen`, `apps.inlineViews`, `apps.viewMessage`, `apps.readResource`, `apps.invoke` | **Person** | Drawing and clicking an app's screen: they have no meaning without a window |
 | Linked machines. `machines.list`, `machines.add`, `machines.remove`, `machines.reconnect`, `machines.setAutoReconnect`, `machines.install`, `machines.update`, `machines.autostart`, `machines.probe` | Has it (slice 1, #1238) | Six commands and `list_machines`; add, install, update, remove and start at boot behind a card |
 | `machines.disconnect`, `machines.rollback`, `machines.uninstall`, `machines.sshHosts`, `machines.activity` | Has it (#1219, fourth slice) | `disconnect_machine` acts at once (the row's button; connecting it again asks, #1341). `rollback_machine` and `uninstall_machine` each ask, in every preset, with a card naming the machine and what happens there (the versions, that the Centralu there stops, what is removed and what stays, and that a disconnected machine is connected for it). `machine_activity` and `list_ssh_hosts` read |
 | `machines.acceptVersions` | Not an errand | Since #689 two versions of one protocol connect by themselves (`mayConnect`), and for different protocols the call refuses, so there is nothing to accept; it is the window's answer to a prompt that no longer comes |
 | What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk` | **Person** | It widens what code on another computer may do here (#550) |
 | Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
-| Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the orchestrator has no shell of its own, its sessions do |
-| The orchestrator's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the orchestrator itself |
+| Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the Assistant has no shell of its own, its sessions do |
+| The Assistant's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the Assistant itself |
 
-The same methods are classified once more for a caller that is neither the window nor the orchestrator (#1405): a
+The same methods are classified once more for a caller that is neither the window nor the Assistant (#1405): a
 script or tool holding the limited credential runs the everyday ones and is refused the rest
 (`transport/method-rights.ts`; the classes and the rule in [security-boundaries.md](security-boundaries.md), "Who holds
 full power"). Everything this table cards in every preset is `asks` there.
 
 The linked machines came first (#1238), then the preferences and the session archive (#1309) and the notification switches (#1313).
 The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),
-then approval rules, app trust and grants, and the orchestrator's own limits. In each, what narrows trust acts at once
+then approval rules, app trust and grants, and the Assistant's own limits. In each, what narrows trust acts at once
 and what widens it waits for the person's card, which names exactly what changes and is checked again after Allow.
 The fourth slice finished the inventory: the machine calls left (`disconnect_machine`, `rollback_machine`, `uninstall_machine`, `accept_machine_versions`, `machine_activity`, `list_ssh_hosts`), deleting a session that is not the caller's child (`delete_session`), app upkeep (`remove_app` behind a card, and `list_app_versions`, `restore_app_version`, `restart_app`, `check_app`, `list_app_runs`, `list_app_errors`, `app_usage`), the harmless preferences and `apply_agent_versions`, and the housekeeping and reads (`rename_session`, `clear_background_tasks`, `agent_status`, `agent_models`, `project_git_status`, `search_project_files`). Where the slice did not give a method a command, the row says why: the person's (it cannot be undone, or it hides something from them), or not an errand.
 
@@ -2140,7 +2140,7 @@ Implementation rules:
   | other `configWarning` | Codex's text | `you` |
   | full-history hydration (`deprecationNotice`, both wordings in the 0.160.0 binary) | "Codex says Centralu loads thread history in an outdated way", "Nothing to do on your side; Centralu will switch to the paginated API (#342)." | `centralu` |
   | other `deprecationNotice` | Codex's text | `centralu` if it names an app-server method (`thread/…`, `turn/…`, `review/…`), `you` if it names `config.toml` or `[features…]`, else unsaid |
-  | MCP start failure | Codex's text | `centralu` for Centralu's orchestrator bridge, unsaid for an app's bridge (`app-<id>`, it may fail for the app's reasons), `you` for any other server |
+  | MCP start failure | Codex's text | `centralu` for Centralu's Centralu tools bridge, unsaid for an app's bridge (`app-<id>`, it may fail for the app's reasons), `you` for any other server |
   | `warning`, `guardianWarning`, `model/rerouted`, thread settings changed | Codex's text (or ours, for the last two) | unsaid |
 
   Claude Code's notices carry `from: 'Claude Code'` and a label (`hook` — `for you`, `notice`, `model switch`,
@@ -2215,7 +2215,7 @@ Implementation rules:
 - **A launch a tool declared it cannot keep is refused before any process starts** (`presets`, `keepsRepoFilesOut`,
   `roleText`; `launchRefusal` in protocol, applied by `startFit` in `sessions/session-start.ts` at every start and wake, and through `ToolRegistry.refusal` with
   the session read by `sessionDemands` (`sessions/tool-fit.ts`) to a tool switch, a preset changed on a running session
-  and the orchestrator's tool).
+  and the Assistant's tool).
   The host is the gate whatever path asked; the pickers ask the same rule and grey the tool with the same words.
   Claude and Codex declare none of the three, so nothing changes for them ([plans/acp-adapter.md](plans/acp-adapter.md) §0.1).
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
@@ -2224,7 +2224,7 @@ Implementation rules:
 
 `ClaudeSession.start` is the single SDK `query({ options })` construction site. Both
 `SessionManager.createSession` and the resume/wake path use it, for ordinary sessions,
-orchestrators, coordinators, worktree managers, builders, app agents and `start_agent` children.
+assistants, coordinators, worktree managers, builders, app agents and `start_agent` children.
 The two build the adapter's options in one place (`SessionStarts.launchOptions` in `sessions/session-start.ts`, #428), so an option
 added there reaches a new session and a wake alike (`sessions/sleep.test.ts`).
 Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
@@ -2706,7 +2706,7 @@ installed: `lifecycle/keeper-held.ts`), and a window of an earlier build asking 
 standby passed its store check: the keeper writes `drain` only after that, and a build older than this store refuses
 there, failing the swap before any drain. Quitting Centralu completely ends it.
 
-**Drain** (`drain.ts`). Every WebSocket RPC and every in-process MCP tool call (the orchestrator tools, the
+**Drain** (`drain.ts`). Every WebSocket RPC and every in-process MCP tool call (the Centralu tools, the
 app-tool proxy) runs through one tracker. Built for the swap's drain, it is begun now only by `host.stop {ifIdle}`
 (`lifecycle/stop-gate.ts`, #1224): once the host is found idle, new calls are refused, answered with an error saying
 the host is restarting and to call again (RPC errors carry `retryable: true`), and a call still running past the
@@ -2887,7 +2887,7 @@ methods as the window. In the commands tier it is discovered and run through `ce
 and `centralu_run`; an ordinary session gets a minimal definition, deferred behind Claude's tool search
 like `app_guide` because updates are rare (Codex is offered it without a deferral flag). Its first call raises a consent card:
 allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
-cannot change the person's automatic-apply preference with it. (The orchestrator's `set_preferences` can turn it on, behind a
+cannot change the person's automatic-apply preference with it. (The Assistant's `set_preferences` can turn it on, behind a
 card in every preset, §1.4.) An install starts the normal host install; the window still
 performs its own safe relaunch step.
 
@@ -2995,7 +2995,7 @@ answers `children` with an empty list. Checked with a real beta.48 keeper and ho
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
 update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can
 lose: a Centralu tool call still running (a `start_agent` or `agent_session` wait, an `ask_project`, an app tool) is cut and has to be
-tried again, and running turns are cut and continued. An orchestrator with working children is almost always inside such a wait, so
+tried again, and running turns are cut and continued. An Assistant with working children is almost always inside such a wait, so
 dropping the busy rule would cut those waits on every automatic apply. An agent's explicit apply makes that choice for
 itself, as a person pressing the button does, and its own call is answered before the stop begins.
 
@@ -3169,8 +3169,8 @@ A turn can end before its work does, and nothing about the session says so: it r
 `waiting_input` like any other. On 2026-10-15 the internet dropped twice while several child sessions worked. The
 Claude children ended in `error` (the CLI retried `api_retry` ten times, about three minutes, then failed with
 `ECONNREFUSED` and `ENOTFOUND`) and sat there until the person sent "continue" by hand; the turns had been opened by
-the CLI itself (a Monitor firing), so no report was owed and the orchestrator that started them heard nothing. A Codex
-child's interrupted turn was reported to its orchestrator as "The assigned work finished", and "Quit completely" reset
+the CLI itself (a Monitor firing), so no report was owed and the Assistant that started them heard nothing. A Codex
+child's interrupted turn was reported to its Assistant as "The assigned work finished", and "Quit completely" reset
 sessions mid-turn to `idle` with no line in their conversation.
 
 The host now keeps **why the last turn did not finish** on the session (`SessionInfo.interruption`, stored as
@@ -3189,15 +3189,15 @@ tool-neutral (`sessions/interruptions.ts`):
 |---|---|
 | An app request cancelled mid-turn fails its wait before it interrupts the session | Claude's adapter ends the turn as soon as the CLI confirms the interrupt, before the turn's result, so the wait read the cancel as "stopped before it finished" |
 | Classify and surface; never resend by itself, except the turns a linked hub's update cut (owner, 2026-10-26, #1618: §4.8, "Continuing the turns an update cut"), which the next host continues once with the same sentence | A resent turn can repeat side effects (a push, a comment, a release). Continuing is one message from the person or the asker, the same sentence both ways: "Continue where you stopped. Check what already happened before repeating a step." Auto-resend on reconnect could come later as an opt-in |
-| A Codex `interrupted` turn ends as a Stop does (`state_change waiting_input`), not as `turn_complete` | `turn_complete` is "finished": the orchestrator was told the work was done. A wait on the turn (`AgentRunWait`) ends on the interrupt, since no `turn_complete` follows it now |
+| A Codex `interrupted` turn ends as a Stop does (`state_change waiting_input`), not as `turn_complete` | `turn_complete` is "finished": the Assistant was told the work was done. A wait on the turn (`AgentRunWait`) ends on the interrupt, since no `turn_complete` follows it now |
 | The Codex adapter tells its own interrupts from Codex's and logs which (`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). A Stop that lands while a note's `turn/start` is in flight interrupts the turn the answer names, and counts as ours too (`takeInputTurn`) | The real case could not tell whether the person's Stop, the host or the CLI sent it |
-| The person's Stop, and an orchestrator's `agent_session stop`, set nothing | They know; flagging their own act would be noise |
+| The person's Stop, and an Assistant's `agent_session stop`, set nothing | They know; flagging their own act would be noise |
 | Only `retrying` starts the `reconnecting` clock, never silence | A session polling CI with 15–40 s sleeps looked frozen and was not; long builds look the same |
 | A report owed for the turn names the reason first ("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") and how to go on | "The assigned work failed" made the asker redo or abandon work that only needed a "continue" |
 | When no report is owed (no report mark, no call waiting on the turn now), the session that gave the turn hears once of a `network`, `interrupted` or `quit` stop (`tellAskerOfInterruption`): a delegation's caller nobody waits for now (`ask_project` or `start_agent` past its bound), else the session that started it (`askedBy`). A call still waiting reads the stop from its own answer | The 2026-10-15 case, and an `ask_project` turn whose session has no `askedBy`. One report per stopped turn; another needs another turn, so two sessions cannot wake each other in a loop |
 | Every report and every word Centralu gives a session about its request (a start that did not start, a note or a queued request that did not go) goes through `tellSession` (#428): never while the host hands over or quits, never to a session that is gone | A quit used to report each running child as "failed: Centralu is shutting down" in its caller, which the next start then told again as a `quit` stop, and a report could wake a sleeping caller on the way out |
-| A `quit` is told at the next start, once per child, to the first that still exists of: the session owed its report, the one that gave the turn (`delegated_turns`), its `askedBy` (`quitNotices`). **No requester that is itself stopped by a quit** is told, at the start or later: it waits for the person's Continue | An asker that delegated without waiting was at rest, not cut, and its report mark used to be dropped: it never heard. Waking it once costs a turn; never hearing costs the work. An orchestrator the same quit cut would be resumed at launch with nobody there, and that turn would clear its own "stopped" mark before the person saw it; its children's rows say they stopped once it is continued |
-| The orchestrator's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session list` (#690) names such a child `stopped` and leaves the reason to `status`: it is a list for cleaning up, where what matters is that the child's work is not over |
+| A `quit` is told at the next start, once per child, to the first that still exists of: the session owed its report, the one that gave the turn (`delegated_turns`), its `askedBy` (`quitNotices`). **No requester that is itself stopped by a quit** is told, at the start or later: it waits for the person's Continue | An asker that delegated without waiting was at rest, not cut, and its report mark used to be dropped: it never heard. Waking it once costs a turn; never hearing costs the work. An Assistant the same quit cut would be resumed at launch with nobody there, and that turn would clear its own "stopped" mark before the person saw it; its children's rows say they stopped once it is continued |
+| The Assistant's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session list` (#690) names such a child `stopped` and leaves the reason to `status`: it is a list for cleaning up, where what matters is that the child's work is not over |
 | The screen shows it beside the state: the inbox row's word and **Continue**, the sidebar mark's ring (only while the stopped turn's answer is unread, #1549) and tooltip, a line above the composer (product-spec FR-15) | The state alone looks the same for a stopped turn and a finished one; Continue is the one message that goes on |
 | `CLAUDE_CODE_MAX_RETRIES` is left as the CLI sets it | Its three minutes outlast most drops; a longer budget would hold a turn hostage through a long outage |
 
@@ -3237,20 +3237,20 @@ message is a task from the person. Before a delegation out of a session's untrus
 Centralu's report on the turn's task (§9.2) and answers `ReportedAs` per §9.3: a turn that ended for good settles the task and every other open
 task of the pair delivered before the turn began; a pause (`paused`, or `waiting` on work handed on that the old paths still owe, or not yet
 delivered) leaves it open, wakes the owner the first time and is quiet after; an update's cut that goes on is the old path's to say. The end of
-the orchestrator's turn on a session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer
+the Assistant's turn on a session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer
 is the report, written as told. At each ready a report mark with no task gets one, and a task no old path owes any more is settled
 (`oldOwes`, `ChildOwnership.oldOwes`).
 
-**Turns** (§8.2). The delivery begins a turn with its work message (a task, or for the orchestrator one asker's request) and the message that
+**Turns** (§8.2). The delivery begins a turn with its work message (a task, or for the Assistant one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and
 A turn the person or the CLI started has no cause. A turn continued after a restart or an update (kept by the keeper,
 or cut by an update's stop and continued, `HostTenure.keptInTurn`) writes no new row: its open row is read back with its starter, work and
 asker, so neither count below counts it again. Nothing holds or defers mail for how much of it there is (#2014): past 20 mail-started turns an
 hour between two sessions, counted from the store since the person's last word to either, or past 120 on the host, the delivery writes the
-person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An orchestrator made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
+person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An Assistant made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
 trashed session's watched rows are settled `gone` and their senders told (`partyGone`), except what was sent to the role, which waits for the next.
 
-**The first message is the script's, not the person's** (3.8b). Only words the person typed may pass as theirs, and a script's first message can carry outside words (a CI log, an issue title). So `createSession` over the limited credential stores it, and announces it as `user_message`, with `fromScript: { credential }`, where `credential` is what the connection called itself in its hello (`RpcContext.label`, cut by the transport, never checked), made plain by `scriptLabel` (no quote, bracket, angle bracket or line break; `unnamed` when it said nothing). It is written by the host from the connection, never from a field of the call: a window's call has none, and a field in the params is ignored. The session reads it under a header of Centralu's (`scriptMessageFrame`: "sent by the script <label> the person set up; the person did not type it"), every line behind `> `, not stamped `origin: human`. The screen draws it as the script's (its label, drawn as the agent's bubble, like an app's message), not as the person's bubble; `read_session` gives the line `fromScript`, `recall` marks it `[script "<label>"]`, a handoff record and an orchestrator's memory do not take it for the person's; the session is not named from it. The thread's `assign` carries the label as a fact and `mail read` says it is a script's, not typed by the person; the owner stays the person, so reports still land in the Inbox. A call the person allowed on a card keeps the label (`HostRequests` passes it on). The label is the script's own claim: every process of the user holds the one limited credential, so any script may call itself anything, another script's name or `Centralu` included. It stands in quotes in every sentence of Centralu's (`the script "<label>"`), says who the script says it is and nothing more, and grants nothing. A later `agents.send` by a script is marked the same way, from the calling connection (`TurnInputs.send`'s `fromScript`): stored and announced as the script's, under the same header, not stamped `origin: human`, not naming the session, and with no `intent` (a script cannot take over a report another session is owed); it is the work's turn, not the person's own, so a thread the person owes is reported when it ends. Not done (#1468): `apps.askBuilder` from a script still stores its text as the person's, a session created on a linked machine has no mark, and the Inbox thread's subject is still taken from the script's text.
+**The first message is the script's, not the person's** (3.8b). Only words the person typed may pass as theirs, and a script's first message can carry outside words (a CI log, an issue title). So `createSession` over the limited credential stores it, and announces it as `user_message`, with `fromScript: { credential }`, where `credential` is what the connection called itself in its hello (`RpcContext.label`, cut by the transport, never checked), made plain by `scriptLabel` (no quote, bracket, angle bracket or line break; `unnamed` when it said nothing). It is written by the host from the connection, never from a field of the call: a window's call has none, and a field in the params is ignored. The session reads it under a header of Centralu's (`scriptMessageFrame`: "sent by the script <label> the person set up; the person did not type it"), every line behind `> `, not stamped `origin: human`. The screen draws it as the script's (its label, drawn as the agent's bubble, like an app's message), not as the person's bubble; `read_session` gives the line `fromScript`, `recall` marks it `[script "<label>"]`, a handoff record and an Assistant's memory do not take it for the person's; the session is not named from it. The thread's `assign` carries the label as a fact and `mail read` says it is a script's, not typed by the person; the owner stays the person, so reports still land in the Inbox. A call the person allowed on a card keeps the label (`HostRequests` passes it on). The label is the script's own claim: every process of the user holds the one limited credential, so any script may call itself anything, another script's name or `Centralu` included. It stands in quotes in every sentence of Centralu's (`the script "<label>"`), says who the script says it is and nothing more, and grants nothing. A later `agents.send` by a script is marked the same way, from the calling connection (`TurnInputs.send`'s `fromScript`): stored and announced as the script's, under the same header, not stamped `origin: human`, not naming the session, and with no `intent` (a script cannot take over a report another session is owed); it is the work's turn, not the person's own, so a thread the person owes is reported when it ends. Not done (#1468): `apps.askBuilder` from a script still stores its text as the person's, a session created on a linked machine has no mark, and the Inbox thread's subject is still taken from the script's text.
 
 The end of the first turn that is the work's (`reportToPersonIfOwed`, for a turn no one else is owed and the person did not start) is a report in the person's thread: Centralu's
 words (`personReportLine`: how the turn ended, a count of tasks, nothing of the session's words), the session's last response as its own relayed message beside them, the
@@ -3561,11 +3561,11 @@ host that crashed or is missing, not one the person stopped:
   then stopped again at once used to reset the backoff at every hello and was started again about every 10 s for
   good. Now the backoff, and the limit, start over only once a host has stayed up 60 s (`STABLE_MS`).
 - **Either way the row is `stopped`**, with `error` saying which, and the link starts nothing until the person's Start
-  (the row's button, `machines.reconnect`) or the orchestrator's `reconnect_machine` with the person's card. It still
+  (the row's button, `machines.reconnect`) or the Assistant's `reconnect_machine` with the person's card. It still
   reads the line on its backoff, so a host the person starts there is connected to; the row stays `stopped` while it
   does, and the reason is kept while the machine cannot be reached (`startHeldBack`, until a host runs there or a
   start goes through). The card is asked on that reason, not on the row's status of the moment, and without it the
-  orchestrator's reconnect only opens the link (`reconnect { start: false }`). A Start pressed while the machine cannot
+  Assistant's reconnect only opens the link (`reconnect { start: false }`). A Start pressed while the machine cannot
   be reached is spent, not kept for whenever it comes back. The `stopped` sentence after the limit ends with what the
   last start said when its host never answered. A machine whose Centralu predates the
   mark says no `stopped`, and is started as before, within the same limit.
@@ -3676,7 +3676,7 @@ at a time per machine, and the remote's `install.lock` guards the files.
 | Step | Update | Rollback | Uninstall |
 |---|---|---|---|
 | Install beside | `machines.install`'s steps with `activate: false`: the new version lands in `versions/<v>/`, nothing points at it, nothing is removed, and no launcher is written yet, so the lookup still finds what runs | — | — |
-| Wait | **Until no session there is in a turn** (#1399): `HostControl.beforeStop`, after the install beside and before anything is held or stopped, reads `host.activity` every 15 s and goes on once working, approvals, questions and background work are all 0 (terminals and project commands stay open for hours and are not waited for). The row's operation says `wait_idle` meanwhile, and `machines.cancelUpdate` (or an orchestrator's cancelled call) ends the wait: the update fails saying it was cancelled and nothing was switched. `when: 'now'` (the person's choice) skips the wait, the answer's `note` says how many sessions' turns it ended (and how many terminals and project commands closed), and the next host continues those turns (below, #1618). Once a reading says none, it is read again about 3 s later, right before the host is held and stopped (the stop takes seconds, and `host.stop { ifIdle }`, which would be atomic, counts terminals and commands too). A machine that cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and a machine none of whose readings has succeeded is read again twice, then not waited for either (waiting on what was never seen would never end). Once one reading has succeeded, a failed one proves nothing (a busy or dropped remote fails them too), so the wait goes on through failed readings, the row saying `wait_unread` ("it cannot read what runs there now"), and the host is stopped only on a successful reading of no session in a turn, the second one too; Cancel and `when: 'now'` are the ways out. `MachineInfo.updateWaits` (set by every hub that waits) lets a window promise the wait: an older hub sends nothing and stops at once, so the window words the plain Update there. When `install_machine` has answered "still under way", how the update ends is told to the orchestrator as a message in its conversation, a failure too. Removing the machine or stopping the hub ends the wait ("nothing was switched"). The wait is not kept across a restart of the hub (the version stays installed beside, harmless). `pnpm remote-dev` (`dev-build.ts`), rollback and uninstall do not wait. An older hub ignores `when` and stops at once; an older window shows the step as `wait_idle` and has no Cancel. `install_machine` (update) answers after about 200 s that the update is still under way, since a tool call that long is cut by its caller while the update goes on; the window's `machines.update` has the long call budget, and a wait that outlasts it is the row's to show | — | — |
+| Wait | **Until no session there is in a turn** (#1399): `HostControl.beforeStop`, after the install beside and before anything is held or stopped, reads `host.activity` every 15 s and goes on once working, approvals, questions and background work are all 0 (terminals and project commands stay open for hours and are not waited for). The row's operation says `wait_idle` meanwhile, and `machines.cancelUpdate` (or an Assistant's cancelled call) ends the wait: the update fails saying it was cancelled and nothing was switched. `when: 'now'` (the person's choice) skips the wait, the answer's `note` says how many sessions' turns it ended (and how many terminals and project commands closed), and the next host continues those turns (below, #1618). Once a reading says none, it is read again about 3 s later, right before the host is held and stopped (the stop takes seconds, and `host.stop { ifIdle }`, which would be atomic, counts terminals and commands too). A machine that cannot be asked at all (a host from before `host.activity`, a link held on another protocol) is not waited for, and a machine none of whose readings has succeeded is read again twice, then not waited for either (waiting on what was never seen would never end). Once one reading has succeeded, a failed one proves nothing (a busy or dropped remote fails them too), so the wait goes on through failed readings, the row saying `wait_unread` ("it cannot read what runs there now"), and the host is stopped only on a successful reading of no session in a turn, the second one too; Cancel and `when: 'now'` are the ways out. `MachineInfo.updateWaits` (set by every hub that waits) lets a window promise the wait: an older hub sends nothing and stops at once, so the window words the plain Update there. When `install_machine` has answered "still under way", how the update ends is told to the Assistant as a message in its conversation, a failure too. Removing the machine or stopping the hub ends the wait ("nothing was switched"). The wait is not kept across a restart of the hub (the version stays installed beside, harmless). `pnpm remote-dev` (`dev-build.ts`), rollback and uninstall do not wait. An older hub ignores `when` and stops at once; an older window shows the step as `wait_idle` and has no Cancel. `install_machine` (update) answers after about 200 s that the update is still under way, since a tool call that long is cut by its caller while the update goes on; the window's `machines.update` has the long call budget, and a wait that outlasts it is the row's to show | — | — |
 | Hold | The link stops reconnecting and starting a host of its own (Reconnect included) until the switch's outcome; it would otherwise start the old version between the stop and the switch | the same | the same |
 | Hand over | First the switch there is read: one under way refuses the update before the wait, the hold or any step (#1907). Then one command runs the new version's `centralu serve --switch` there (docs/plans/remote-hub.md §10.5a), which detaches a switcher and returns; the steps below are the machine's, written to `<data>/remote/switch.json`, and the hub reads them with `serve --switch-status` until the outcome. A link drop or a hub that dies leaves the machine to finish | The same, run by the version that runs now | — |
 | Stop | `centralu serve --stop` of the running version, by the switcher: it stops itself in order (§4.7). Not stopped: the outcome is a failure and nothing is switched | the same | The hub's own `serve --stop` through the lookup; not stopped, nothing is removed |
@@ -3716,7 +3716,7 @@ the person did not remove what the hub installed there, neither side runs a loca
   can be read, so it stays the person's to update (no protocol bump has happened yet: `PROTOCOL_VERSION` is 1).
 - **An agent's call.** A limited caller's `machines.update` with `when` `idle` or absent runs without a card when
   `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"); the
-  transport judges it once and tells the handler (`RpcContext.covered`), and the orchestrator's `install_machine` (update) goes without its card on the same check; both run `unasked`.
+  transport judges it once and tells the handler (`RpcContext.covered`), and the Assistant's `install_machine` (update) goes without its card on the same check; both run `unasked`.
 
 **The desktop copy follows the host** (#1736). The hub's update brings the host-only package, which has no desktop
 executable, so a Windows window that runs on the machine's `centralu serve` host (`start_plan.rs`, `Host::Serve`) kept the
@@ -3916,7 +3916,7 @@ value as it always did; a later release may add a column named for the switch an
 later). One switch per linked machine, on by default; it replaces the connect mode (`at_start` / `when_needed`, #1134).
 
 *On* is what every machine did before: connected when the hub starts and tried again after every drop, on the backoff (2 s,
-doubling to 5 minutes), so an orchestrator working through it hears reports and cards as they happen.
+doubling to 5 minutes), so an Assistant working through it hears reports and cards as they happen.
 
 *Off* is for a laptop that is often closed or a server used once a week: the hub tries **once** when it starts. After a
 failed attempt, or a drop that the quick redials do not undo, it tries nothing more until the person presses Connect
@@ -3935,10 +3935,10 @@ Nothing connects a machine on a need any more (`machines.need`, `NEED_HOLD_MS`, 
 it, or its switch is off and the attempt at the hub's start is over: `LinkedMachineConnection.waitsForPerson`) is answered
 at once: `start_agent` with the machine, `ask_project` on one of its projects, `agent_session`, a send to or a read of
 one of its sessions say "is not connected, and nothing here connects it by itself; ask the person to connect it (Settings,
-Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/orchestrator.ts`), and its projects are listed as
+Machines, Connect)" (`NOT_CONNECTED` / `awayPhrase`, `adapters/contract/centralu-tools.ts`), and its projects are listed as
 away with that reason. A machine with the switch on that is away between attempts is not waited out either (#1532): a call that
 needs it starts one attempt at once, `LinkedMachineConnection.reachForCall` through the same `connect` that the row's Connect,
-the badge's menu, the project menu's Reconnect and the orchestrator's `reconnect_machine` use (`keepBackoff`: the backoff goes on
+the badge's menu, the project menu's Reconnect and the Assistant's `reconnect_machine` use (`keepBackoff`: the backoff goes on
 from the step it was at instead of starting over, and a call starts no host the link would not start by itself), and waits for it
 (or for the attempt it found under way) at most `CALL_WAIT_MS` (10 s) from the moment it asks. Connected in time, the call goes through; not, it is answered "not reachable right now; the attempt to
 connect it just now failed: <ssh's words>" (or "an attempt to connect it is still under way"), and the backoff stands. One attempt at a time per machine:
@@ -3973,7 +3973,7 @@ holding anything. A dev build has no older side. A local build (`<base>.local.N`
 (`npm i -g centralu` there) and over ssh in phase 3.
 
 **After connecting**, the link reads the remote's `sessions.list` and `projects.list` into the mirror, notes which
-sessions it hides (the remote's orchestrator and coordinators, §3.4 of the plan), and broadcasts `machine_resync`; the
+sessions it hides (the remote's Assistant and coordinators, §3.4 of the plan), and broadcasts `machine_resync`; the
 window re-reads that machine and wakes what died. The link keeps one cursor and epoch per remote, so a dropped socket
 gets the gap replayed, and a remote that restarted is a new lifetime and a resync. Events of sessions the hub does not
 show are dropped, and session events keep the mirror's names and states current between reads.
@@ -3982,18 +3982,18 @@ show are dropped, and session events keep the mirror's names and states current 
 frame for a host to call its client, and `RemoteClient` drops anything shaped like a request without dispatching it
 (`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link.
 
-**The orchestrator reads every machine** (phase 4 step 1, [plans/remote-hub.md](plans/remote-hub.md) §12.3;
-`linked-sessions.ts`). The hub's central orchestrator's `list_sessions`, `read_session` and `recall` include each linked
+**The Assistant reads every machine** (phase 4 step 1, [plans/remote-hub.md](plans/remote-hub.md) §12.3;
+`linked-sessions.ts`). The hub's Assistant's `list_sessions`, `read_session` and `recall` include each linked
 machine's sessions, asked of that machine with `host.sessions`, `host.readSession` and `host.recall` (additive), which
-it answers with the orchestrator's own code over the view the hub's window has (`LinkedHost.hostReader`: no
-orchestrator or coordinator; at most 200 lines and 50 hits per call). The hub qualifies the ids, names the machine on
+it answers with the Assistant's own code over the view the hub's window has (`LinkedHost.hostReader`: no
+assistant or coordinator; at most 200 lines and 50 hits per call). The hub qualifies the ids, names the machine on
 each row and hit (`project api on Ubuntu box`), lists a machine it cannot ask from the headers mirror with why, and says
 which machines it could not search. What a machine answers is fenced as a worker's text is (#121): names on one line,
 ids that are not ids dropped, a conversation line that is not one line quoted. A manager, a lead and an ordinary
 session keep their own machine's view.
 
 **And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
-delivered there as an instruction from `<orchestrator> on <this computer>`; with `reportBack`, `observeLinked` watches
+delivered there as an instruction from `<assistant> on <this computer>`; with `reportBack`, `observeLinked` watches
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
 session's own background work running included (§1.2.1 step 7, #723). The watch starts at the instruction's own
 `user_message` there (#1082): a turn end relayed before it happened on the machine before the instruction was in, and
@@ -4276,7 +4276,7 @@ report from the API, and the screen's Rebuilds tooltip says so.
 | `model_change` model change | The model changed: the person's setting (`updateSettings`), or the tool's own switch (a refusal's fallback, `recordToolSettings`). A settings restart whose drift is the model says so too. Measured in #513's baseline: the only in-session event that rebuilt Claude's cache |
 | `compaction` compaction | A `compaction` event, or `conversation_reset` (Claude Code's /clear): the next request begins with a summary or nothing the cache has seen |
 | `thread_restart` thread restart | Codex's thread restarted so it takes an attached or detached app (`sessionAppsChanged`, at once or when the turn ends) |
-| `instructions` tools changed | Claude took an attached or detached app at once (its tool list is part of the prompt), or the orchestrator restarted for a skill or MCP change |
+| `instructions` tools changed | Claude took an attached or detached app at once (its tool list is part of the prompt), or the Assistant restarted for a skill or MCP change |
 | `launch_settings` launch settings changed | A live process restarted because its adapter launch fingerprint changed or the previous build had not recorded one (#589); an idle process restarts now, a working process after its turn; a change of the project's trust does the same for the project's live sessions (#663) and says so in the conversation |
 | `expired` cache expired | Idle longer than the lifetime the API reported for this lane's last write (Claude's `cache_creation` split: `ephemeral_1h_input_tokens` or `ephemeral_5m_input_tokens`) |
 | `probably_expired` probably expired | Idle more than 5 minutes when no lifetime was reported (Codex never reports one; a Claude lane that has not written yet) |
@@ -4345,7 +4345,7 @@ Counts, percentages and names only: no content.
 | A purged session's buckets go with it (in the purge's last transaction, `TrashRecords.purgeSession`); a trashed or archived session's stay | Purging is the only deletion that is for good: a session in the trash can come back, and an archived one is still the person's. What is not yet written for it is dropped too (`UsageRecorder.forget`), so a later flush cannot bring the rows back. A deleted *project* leaves its rows, named by id |
 | Local only, never synced; a linked machine records its own | Per-session counts say what the person worked on and when. Nothing here goes anywhere but to the person's own window; the hub asks a machine through the existing routing (`usage.history { machine }`, route `machine`, the session and project ids in the answer qualified like any other) |
 | Hourly buckets, summed to days in the host's local time at the question | One shape serves the day and the hour axis. A range that begins inside an hour takes that hour whole. In a time zone that is not a whole number of hours from UTC (India, +5:30) a bucket straddles local midnight and goes to the day it began in |
-| At most 50 keys per answer, the rest folded into `*` ("Others") | A range of many sessions stays one small answer, and the biggest are never folded. The sessions of no project are `none` ("Orchestrator") |
+| At most 50 keys per answer, the rest folded into `*` ("Others") | A range of many sessions stays one small answer, and the biggest are never folded. The sessions of no project are `none` ("Assistant") |
 | No alert line yet ("the weekly window will run out before its reset at this pace") | The issue asked it as a question. The readings are what such a line needs; the rule for the pace is a decision of its own, a named follow-up |
 | A purged session leaves nothing | At start the host also deletes buckets whose session no longer exists (`UsageRecords.sweepOrphans`): a build older than this one that purged a session during a swap leaves them. A trashed session still has its row, so its buckets stay. A purge also takes the session out of the in-memory cache figures (`CacheLedger.forget`), so no window names it with an empty name |
 | A linked machine on the hub's account (`sameAccountAsHub`) | The hub's limits stand for it, so the hub's readings are its readings; the machine still has its own token buckets, which the hub reads with `machine`. One list merging several machines' rows is a named follow-up: the dropdown asks one machine at a time, as the gauge does |
@@ -4354,8 +4354,8 @@ Counts, percentages and names only: no content.
 is read-only (routed as `machine`, like `agents.usage`) and answers `{ by, readings, rows, recordedSince? }`: the readings in the
 range (and for each series the last one before it, since a reading is stored only when it changes) as one series per tool, account and window, and rows of tokens per period and key (`UsageHistoryRow`: the sums above and
 `rebuildCauses`). `recordedSince` is the oldest hour kept, so a screen can say that earlier days are not known. The same answer
-reaches the orchestrator as the rare command `usage_history { days?, by? }` (behind `centralu_run`, so it costs nothing in every
-request; the orchestrator's alone; it answers the top 15 keys and each window's movement in a few lines), which is how an agent
+reaches the Assistant as the rare command `usage_history { days?, by? }` (behind `centralu_run`, so it costs nothing in every
+request; the Assistant's alone; it answers the top 15 keys and each window's movement in a few lines), which is how an agent
 checks what its work cost. An ordinary session does not get it: its resident tools are budgeted per request (§1.1).
 
 **The screen.** The usage dropdown ends with "Last 7 days" (`features/usage/HistorySection.tsx`): the weekly window's percent as a

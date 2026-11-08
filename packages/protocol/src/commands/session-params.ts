@@ -117,8 +117,8 @@ export const UpdateSettingsParams = z.object({
   permissionPreset: PermissionPreset.optional(),
   /**
    * Whose hand makes the call (#659). Absent means a person's client, which is announced without a toast. The
-   * orchestrator's settings tool on a linked machine sends `orchestrator`, so the machine broadcasts the change as the
-   * orchestrator's and the window still toasts it. A host from before this field strips it, and then says nothing.
+   * Assistant's settings tool on a linked machine sends `assistant`, so the machine broadcasts the change as the
+   * Assistant's and the window still toasts it. A host from before this field strips it, and then says nothing.
    */
   by: z.literal('orchestrator').optional(),
 })

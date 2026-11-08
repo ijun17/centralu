@@ -15,7 +15,7 @@ import { CLAUDE_RECORDINGS, recordedVersion } from './recorded.test-helpers.js'
  * so the CLI's calls to it (`mcp_message`) are in the recording with the host's answers; the replay has no host, so those answers
  * are not compared (`streamJsonCodec`'s `hostAnswers`), while what the CLI then does with them (the call and its result as the
  * screen draws them) is read from the events. The tools the host served are stand-ins that note what the adapter handed them (the
- * arguments the CLI's call carried, through the adapter's MCP server and `runOrchestratorTool`), so a call that never reached its
+ * arguments the CLI's call carried, through the adapter's MCP server and `runCentraluTool`), so a call that never reached its
  * tool, or reached it with other arguments, fails.
  */
 
@@ -43,7 +43,7 @@ async function replay(name: string) {
   const spawn = (s: AgentSpawnSpec) => (started.push(s), replayed(s))
   const events: NormalizedEvent[] = await drive(new ClaudeAdapter({ platform: 'linux', executable: () => '/usr/local/bin/claude' }), scenario, cwd, `replay-${name}`, 10_000, () => peers.at(-1)?.kill('SIGKILL'), {
     tool: 'claude',
-    session: { model: 'haiku', processSource: { spawn }, orchestratorTools: notingCentraluTools(handed), toolProfile: 'reader' },
+    session: { model: 'haiku', processSource: { spawn }, centraluTools: notingCentraluTools(handed), toolProfile: 'reader' },
     replay: state,
   }).finally(() => folder.remove())
   return { events, problems: state.problems, left: state.left(), started, handed, waitingFor: peers.at(-1)?.waitingFor() }

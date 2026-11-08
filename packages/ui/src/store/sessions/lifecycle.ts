@@ -299,7 +299,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
      * `focusedSessionId` is not set directly — it goes through `focusSession` instead, where the
      * "a picked session must be shown" view enforcement lives. Setting it directly used to be fine:
      * while a dialog was in use, the screen was already the focus view. Once onboarding started
-     * opening the orchestrator view first (#63), that created the combination where a session created
+     * opening the Assistant view first (#63), that created the combination where a session created
      * there was **never shown** (caught by e2e).
      */
     get().focusSession(info.id)

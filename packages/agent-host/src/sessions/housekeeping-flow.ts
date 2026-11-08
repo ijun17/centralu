@@ -19,7 +19,7 @@ const shownPath = (path: string): string => plainQuoted(path, 4096)
 
 
 /**
- * The orchestrator's housekeeping and reads of the window (#1219, fourth slice): renaming a session, taking ended
+ * The Assistant's housekeeping and reads of the window (#1219, fourth slice): renaming a session, taking ended
  * background tasks off its list, and reading how the agent CLIs stand (installed, logged in, their limits, their models),
  * a project's git state, and its files by name. Each is the call the window makes (`sessions.rename`,
  * `agents.clearBackgroundTasks`, `agents.detect`, `agents.usage`, `agents.models`, `projects.gitStatus`, `files.search`) through
@@ -67,7 +67,7 @@ export class HousekeepingFlow {
     if (checked.data === caller) return { error: 'This session is the one asking; it does not change itself.' }
     const row = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === checked.data)
     if (!row) return { error: `No session [${checked.data}] is listed; list_sessions shows them.` }
-    if (row.kind !== 'worker') return { error: `${shown(row.name)} is ${row.kind === 'orchestrator' ? 'an orchestrator' : 'a coordinator'}; only the person changes those.` }
+    if (row.kind !== 'worker') return { error: `${shown(row.name)} is ${row.kind === 'orchestrator' ? 'an Assistant' : 'a coordinator'}; only the person changes those.` }
     if (row.unreachable) return { error: `${shown(row.name)} is on a machine that cannot be reached just now; try again when it answers.` }
     return { row }
   }

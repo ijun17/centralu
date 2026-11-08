@@ -7,7 +7,7 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { NewAppDialog } from '../project/NewAppDialog.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { SIDEBAR_VARS } from './layout.js'
-import { OrchestratorButton } from './OrchestratorButton.jsx'
+import { AssistantButton } from './AssistantButton.jsx'
 import { GridButton } from './GridButton.jsx'
 import { SearchField } from '../palette/SearchField.jsx'
 import { OverlayScrollbar } from '../../components/OverlayScrollbar.jsx'
@@ -79,7 +79,7 @@ export function Sidebar() {
         <div className="px-2 pt-2">
           <SearchField />
         </div>
-        <OrchestratorButton />
+        <AssistantButton />
         <GridButton />
       </div>
       {/*

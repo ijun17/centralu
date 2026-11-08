@@ -250,7 +250,7 @@ export function scrub(frames: readonly Frame[], cwd: string, home: string = home
       // Centralu's bridge, as the host puts it in a Codex thread's config: the program, its file, the host's address and the session's credential
       if (key === 'CC_BRIDGE_TOKEN' || key === 'CC_HOST_CREDENTIAL') return '<secret>'
       if (key === 'CC_HOST_URL') return 'ws://127.0.0.1:<port>'
-      if (/orchestrator-bridge\.mjs$/.test(v)) return '<bridge>'
+      if (/centralu-bridge\.mjs$/.test(v)) return '<bridge>'
       if (key === 'command' && /(?:^|[\\/])node(?:\.exe)?$/.test(v)) return '<node>'
       // Codex: a thread's rollout file is named for the minute it began in local time, which says the time zone
       if (key === 'path' && /rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/.test(v)) return walk(v.replace(/rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-/, 'rollout-2000-01-01T00-00-00-'), 'rolloutPath')

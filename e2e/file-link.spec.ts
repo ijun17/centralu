@@ -261,12 +261,12 @@ test('a link that is neither a file nor a web URL renders as plain text', async 
 })
 
 /**
- * The orchestrator has no project, so it has no root for a relative path to be relative
+ * The Assistant has no project, so it has no root for a relative path to be relative
  * *to* — and guessing one from whatever project happens to be selected would open a file
  * of the same name from some other repository. The same sentence therefore links in a
  * project session and stays text here.
  */
-test('the same path links in a project session and stays text in the orchestrator', async ({ page }) => {
+test('the same path links in a project session and stays text in the Assistant', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line' })
   await newSession(page, 'alpha', 'work')
@@ -274,14 +274,14 @@ test('the same path links in a project session and stays text in the orchestrato
   // In a project session the code span is wrapped in the button that opens it
   await expect(page.getByTestId('file-link')).toHaveText('src/a.ts')
 
-  await page.getByTestId('orchestrator-button').click()
+  await page.getByTestId('assistant-button').click()
   // A session is born on its first message (#63)
-  await page.getByTestId('orchestrator-input').fill('hello')
-  await page.getByTestId('orchestrator-input').press('Enter')
+  await page.getByTestId('assistant-input').fill('hello')
+  await page.getByTestId('assistant-input').press('Enter')
   await expect(page.getByTestId('session-view')).toBeVisible()
-  // The orchestrator belongs to no project, so it is not the *focused* session — it is
+  // The Assistant belongs to no project, so it is not the *focused* session — it is
   // reached by its own id, which is the same fact that makes its paths unresolvable
-  const orcId: string = await page.evaluate(() => (window as any).__store.getState().orchestratorId)
+  const orcId: string = await page.evaluate(() => (window as any).__store.getState().assistantId)
   await agentSays(page, 'Look at `src/a.ts`.', orcId)
 
   const code = page.getByTestId('markdown').locator('code')

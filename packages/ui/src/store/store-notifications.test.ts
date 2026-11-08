@@ -177,7 +177,7 @@ describe('agent CLI versions (#297)', () => {
 /**
  * An MCP server suggestion card (option B) — the host says when a list changed, and clicking approve goes to the host.
  *
- * The screen never guesses the moment from the orchestrator's `tool_call` (#703): that event arrives when the call
+ * The screen never guesses the moment from the Assistant's `tool_call` (#703): that event arrives when the call
  * starts, before the host has saved the proposal, so a read on it returns the old list.
  */
 describe('MCP server suggestions', () => {
@@ -266,7 +266,7 @@ describe('MCP server suggestions', () => {
     await vi.waitFor(() => expect(useStore.getState().mcpProposals).toHaveLength(1))
     expect(mock.badge).toBe(1)
 
-    // While the socket was down the person answered in another window and the orchestrator proposed a skill: no event arrived
+    // While the socket was down the person answered in another window and the Assistant proposed a skill: no event arrived
     mock.mcpProposalList.splice(0)
     mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
     expect(useStore.getState().mcpProposals).toHaveLength(1)
@@ -350,7 +350,7 @@ describe('skill suggestions', () => {
 
 /** A pending proposal waits on the person like an approval does (#703): it is counted, listed and jumped to */
 describe('pending proposals wait on the person', () => {
-  it('count and list with the approvals, and a jump lands on the orchestrator screen', async () => {
+  it('count and list with the approvals, and a jump lands on the Assistant screen', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('pw-s1', sessionInfo('pw-s1'))
     await useStore.getState().attach(mock)
@@ -370,7 +370,7 @@ describe('pending proposals wait on the person', () => {
     expect(mock.badge).toBe(2)
 
     await useStore.getState().openWaiting(items[0]!.id)
-    await vi.waitFor(() => expect(useStore.getState().view).toBe('orchestrator'))
+    await vi.waitFor(() => expect(useStore.getState().view).toBe('assistant'))
   })
 
   it('leave the list when answered', async () => {
@@ -551,7 +551,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect((items[2] as { notice?: unknown }).notice).toBeUndefined()
   })
 
-  it('a model switch the tool made updates the model shown without a toast; the orchestrator still raises one', async () => {
+  it('a model switch the tool made updates the model shown without a toast; the Assistant still raises one', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('n-3', sessionInfo('n-3', { model: 'opus' }))
     await useStore.getState().attach(mock)
@@ -562,14 +562,14 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(useStore.getState().toast).toBeNull()
 
     mock.emit({ type: 'settings_changed', sessionId: 'n-3', model: 'haiku', effort: null, verbosity: null, serviceTier: null })
-    expect(useStore.getState().toast).toMatch(/Orchestrator changed/)
+    expect(useStore.getState().toast).toMatch(/Assistant changed/)
   })
 
   /*
    * #659: a window other than the caller (or the person's own window when an agent made the change) only learned the new
    * model and permission preset from a re-list. The mock emits what the host emits for `agents.updateSettings`.
    */
-  it('a settings change another client made shows the new model and permission preset, without the orchestrator toast (#659)', async () => {
+  it('a settings change another client made shows the new model and permission preset, without the Assistant toast (#659)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('n-4', sessionInfo('n-4', { model: 'fable', permissionPreset: 'normal' }))
     await useStore.getState().attach(mock)

@@ -352,7 +352,7 @@ export type AppVersions = z.infer<typeof AppVersions>
 
 /**
  * `uses` in plain words, one line per capability: the import review, the window's trust card, the inbox's app notice and
- * the orchestrator's trust card (#1219) all say an app's asks the same way, so the person reads one wording wherever
+ * the Assistant's trust card (#1219) all say an app's asks the same way, so the person reads one wording wherever
  * they are asked.
  */
 export function usesLines(uses: AppUses): string[] {

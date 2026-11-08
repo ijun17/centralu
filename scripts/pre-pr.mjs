@@ -18,7 +18,7 @@
 //   store-step  a store step number this branch adds (a new `to: N,` under the migrations folder) that main
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
-//             requests; the stack's own are left out. The orchestrator assigns the numbers; this is the backstop.
+//             requests; the stack's own are left out. The Assistant assigns the numbers; this is the backstop.
 //   guards    never a refusal: when the branch adds or changes a repository-wide guard test (a tooling/*.test.ts, or
 //             a test that scans the whole repository), each changed guard is run against every other open,
 //             non-draft pull request's head merged with this branch, and the ones it would fail are listed with
@@ -388,7 +388,7 @@ export function stepsAddedByDiff(diff) {
  */
 export function stepFindings({ added, onMain, others }) {
   const findings = []
-  const ask = 'The orchestrator assigns store step numbers (CONTRIBUTING.md): ask for a free one and renumber, or exempt this check with the reason it stands.'
+  const ask = 'The Assistant assigns store step numbers (CONTRIBUTING.md): ask for a free one and renumber, or exempt this check with the reason it stands.'
   for (const n of added) {
     if (onMain.has(n)) findings.push({ check: 'store-step', message: `Store step ${n} is already on main (${onMain.get(n)}). ${ask}` })
     for (const pr of others) {

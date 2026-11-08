@@ -15,7 +15,7 @@ import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * Another project's app tools through the manager (#371 part A) — the sharing RPC, the three tools
- * as a session's agent calls them (`runOrchestratorTool`, the Codex bridge's door; Claude's in-process
+ * as a session's agent calls them (`runCentraluTool`, the Codex bridge's door; Claude's in-process
  * server runs the same function), and what each kind of agent is given: Claude follows the attached
  * set live, a Codex thread is restarted through resume when the turn ends. A real store, real trust
  * and a real app; only the adapter is fake.
@@ -79,7 +79,7 @@ function repo(name: string): string {
 }
 
 const servers = (o: CreateSessionOpts) => o.apps?.current().map((a) => a.server)
-const tool = (sessionId: string, name: string, args: Record<string, unknown> = {}) => mgr.runOrchestratorTool(sessionId, name, args)
+const tool = (sessionId: string, name: string, args: Record<string, unknown> = {}) => mgr.runCentraluTool(sessionId, name, args)
 
 beforeEach(async () => {
   root = tempRoot('cc-app-access-')
@@ -140,7 +140,7 @@ describe('sharing an app (apps.setShared)', () => {
     rt.refresh()
     expect(rt.list().find((a) => a.appId === 'board')?.status).toBe('untrusted')
     expect((await tool(s.id, 'find_apps')).text).not.toContain('beta/board')
-    const result = await mgr.runOrchestratorTool(s.id, 'attach_app', { app: 'beta/board' })
+    const result = await mgr.runCentraluTool(s.id, 'attach_app', { app: 'beta/board' })
     expect(result).toMatchObject({ isError: true, text: expect.stringContaining('not trusted') })
     expect(card(s.id)).toBeUndefined()
     expect(mgr.consents.projectConsents()).toEqual([])

@@ -5,7 +5,7 @@ import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
-import { trustedJsonText } from './orchestrator-tools.js'
+import { trustedJsonText } from './centralu-tools.js'
 import { presetWithin } from './start-agent.js'
 import { raceBound } from '../timing.js'
 
@@ -33,7 +33,7 @@ export type HandoffFlowHost = {
     serviceTier?: string
     permissionPreset: SessionInfo['permissionPreset']
     initialPrompt: string
-    /** Who sent the opening: the orchestrator, so it is stored and shown as its words, never the person's (FR-11) */
+    /** Who sent the opening: the Assistant, so it is stored and shown as its words, never the person's (FR-11) */
     initialFrom: { sessionId: string; name: string }
     handoff: { from: string; note: string; fromSessionId: string }
   }): Promise<SessionInfo>
@@ -72,19 +72,19 @@ type Run = {
 }
 
 /**
- * The orchestrator's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the
+ * The Assistant's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the
  * window's session menu does (`handoffSession` in the UI's store), with the same note, the same first message and the
  * same move of the original's children (#693) and copy of its attached apps (#1638).
  *
- * **Who may hand off what.** Only the central orchestrator has the tool (`profileAllows`); a lead, an ordinary session
- * and an app's agent do not. Its target is a session of its own view on this computer (`orchestratorToolsFor`), and of
- * those only a project's ordinary session: never itself, an orchestrator or coordinator, an app's session (an app's
+ * **Who may hand off what.** Only the Assistant has the tool (`profileAllows`); a lead, an ordinary session
+ * and an app's agent do not. Its target is a session of its own view on this computer (`centraluToolsFor`), and of
+ * those only a project's ordinary session: never itself, an Assistant or coordinator, an app's session (an app's
  * agent or its builder, whose tie to the app the successor would not carry), a worktree session (refused with the
  * window's reason), or a session mid-turn (refused, never cut short). The person's consent is a card in the
- * orchestrator's own session for each handoff, unless the orchestrator runs under `auto` (#603, logged), the person
- * answered "always" on an earlier card (which lasts while this host serves that orchestrator), or the handoff
+ * Assistant's own session for each handoff, unless the Assistant runs under `auto` (#603, logged), the person
+ * answered "always" on an earlier card (which lasts while this host serves that Assistant), or the handoff
  * guards nothing (#1509, owner 2026-10-24): the target is at rest (never mid-turn, above) and the successor's preset,
- * which is the original's, is within the orchestrator's own (`covered`). The original stays, so nothing is lost and
+ * which is the original's, is within the Assistant's own (`covered`). The original stays, so nothing is lost and
  * no power is added. The checks run again after the card, since the target may have started a turn while it stood.
  *
  * What moves is what the person's own handoff moves: the children go to the successor, and the apps the original attached are copied, which is then owed their
@@ -97,7 +97,7 @@ export class HandoffFlow {
   private readonly running = new Map<string, Run>()
   /** Runs by handle: running ones, and finished ones a call was told to wait on, until read or expired */
   private readonly runs = new Map<string, Run>()
-  /** Orchestrators the person told "always" on a handoff card, while this host serves them */
+  /** Assistants the person told "always" on a handoff card, while this host serves them */
   private readonly always = new Set<string>()
 
   constructor(
@@ -108,7 +108,7 @@ export class HandoffFlow {
   /** Why `target` cannot be handed off by `callerId` now, or null */
   private refusal(callerId: string, target: SessionInfo, mode: 'record' | 'agent'): string | null {
     const name = trustedJsonText(target.name)
-    if (target.id === callerId) return 'An orchestrator does not hand itself off; the person does that.'
+    if (target.id === callerId) return 'An Assistant does not hand itself off; the person does that.'
     if (this.running.has(target.id)) return `${name} is already being handed off.`
     if (target.kind !== 'worker' || !target.projectId) return `${name} is not a project's ordinary session, so it cannot be handed off.`
     if (target.appId) return `${name} belongs to an app (its builder or an agent it started); only the person hands those off.`
@@ -122,7 +122,7 @@ export class HandoffFlow {
 
   /**
    * Whether this handoff needs no card (#1509): the successor runs under the original's preset (`succeed`), so it is never
-   * above it, and it is within the orchestrator's own, so the orchestrator hands over no power it lacks. The target being
+   * above it, and it is within the Assistant's own, so the Assistant hands over no power it lacks. The target being
    * at rest is `refusal`'s, checked before and after. A caller that cannot be read asks
    */
   private covered(callerId: string, target: SessionInfo): boolean {
@@ -193,7 +193,7 @@ export class HandoffFlow {
     const run: Run = { id: `ho-${randomUUID().slice(0, 8)}`, callerId, targetId: now.id, done: Promise.resolve({ ok: false, error: '' }) }
     this.running.set(now.id, run)
     this.runs.set(run.id, run)
-    // Read again with the log: an orchestrator moved off `auto` meanwhile was never asked, so it gets nothing
+    // Read again with the log: an Assistant moved off `auto` meanwhile was never asked, so it gets nothing
     if (viaAuto && !this.host.autoBoundaryOpen(callerId, `${SESSION_HANDOFF} of ${now.id} (${mode}, to ${tool})`)) {
       this.running.delete(now.id)
       this.runs.delete(run.id)
@@ -222,7 +222,7 @@ export class HandoffFlow {
   }
 
   /**
-   * Agent mode: the session is asked, as the window asks it, with the orchestrator named as the sender. The note is
+   * Agent mode: the session is asked, as the window asks it, with the Assistant named as the sender. The note is
    * read from the store once the turn ends (`exportHandoffNote`), never from the screen.
    */
   private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined, uncarded: boolean): Promise<HandoffResult> {
@@ -234,7 +234,7 @@ export class HandoffFlow {
     this.host.turnObservers.set(target.id, readers)
     try {
       try {
-        await this.host.send(target.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Orchestrator' })
+        await this.host.send(target.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Assistant' })
       } catch (e) {
         return { ok: false, error: `Could not ask ${trustedJsonText(target.name)} for its note: ${(e as Error).message}` }
       }
@@ -297,12 +297,12 @@ export class HandoffFlow {
     instructions: string | undefined,
     uncarded: boolean,
   ): Promise<HandoffResult> {
-    // No card stood for this call, so the successor's preset must still be within the orchestrator's: the original may have been raised while it wrote its note
+    // No card stood for this call, so the successor's preset must still be within the Assistant's: the original may have been raised while it wrote its note
     if (uncarded && !this.covered(callerId, target)) {
-      return { ok: false, error: `The preset of ${trustedJsonText(target.name)} or of the orchestrator changed before the successor started; nothing was handed off. Call again to be asked.` }
+      return { ok: false, error: `The preset of ${trustedJsonText(target.name)} or of the Assistant changed before the successor started; nothing was handed off. Call again to be asked.` }
     }
     const same = tool === target.tool
-    const callerName = this.host.meta.get(callerId)?.name ?? 'Orchestrator'
+    const callerName = this.host.meta.get(callerId)?.name ?? 'Assistant'
     const info = await this.host.createSession({
       projectId: target.projectId!,
       cwd: this.host.cwdFor(target),
@@ -312,16 +312,16 @@ export class HandoffFlow {
       ...(same && target.verbosity ? { verbosity: target.verbosity } : {}),
       ...(same && target.serviceTier ? { serviceTier: target.serviceTier } : {}),
       permissionPreset: target.permissionPreset,
-      initialPrompt: handoffOpening(target.name, note.text, note.path, instructions ? { from: `The orchestrator (${JSON.stringify(callerName)})`, text: instructions } : undefined),
+      initialPrompt: handoffOpening(target.name, note.text, note.path, instructions ? { from: `The Assistant (${JSON.stringify(callerName)})`, text: instructions } : undefined),
       initialFrom: { sessionId: callerId, name: callerName },
       handoff: { from: target.name, note: note.text, fromSessionId: target.id },
     })
     this.host.rename(info.id, target.name)
     this.host.onEvent({
       type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'handoff',
-      text: `The orchestrator “${callerName}” handed this session off to a fresh ${tool} session [${info.id}], which starts from a note ${mode === 'record' ? 'built from the record' : 'this session wrote'}. This session stays; remove it when you no longer need it.`,
+      text: `The Assistant “${callerName}” handed this session off to a fresh ${tool} session [${info.id}], which starts from a note ${mode === 'record' ? 'built from the record' : 'this session wrote'}. This session stays; remove it when you no longer need it.`,
     })
-    console.error(`[agent-host] orchestrator ${callerId.slice(0, 8)} handed off ${target.id.slice(0, 8)} -> ${info.id.slice(0, 8)} (${mode}, ${tool})`)
+    console.error(`[agent-host] assistant ${callerId.slice(0, 8)} handed off ${target.id.slice(0, 8)} -> ${info.id.slice(0, 8)} (${mode}, ${tool})`)
     return { ok: true, state: 'done', sessionId: info.id, sessionName: target.name, tool, mode, from: target.id, path: note.path }
   }
 
@@ -333,11 +333,11 @@ export class HandoffFlow {
   private question(target: SessionInfo, tool: ToolName, mode: 'record' | 'agent', instructions: string | undefined): string {
     const name = trustedJsonText(target.name)
     const words = instructions
-      ? ` The orchestrator adds, as JSON: ${trustedJsonText(instructions.slice(0, 400))}` +
+      ? ` The Assistant adds, as JSON: ${trustedJsonText(instructions.slice(0, 400))}` +
         (instructions.length > 400 ? ` (cut here; ${instructions.length} characters in all, given whole to the new session).` : '')
       : ''
     return (
-      `Allow the orchestrator to hand off the session ${name} to a fresh session of the tool ${trustedJsonText(tool)}? ` +
+      `Allow the Assistant to hand off the session ${name} to a fresh session of the tool ${trustedJsonText(tool)}? ` +
       (mode === 'record' ? 'The note is built from its stored conversation; the session is not asked. ' : 'The session is asked to write the note first. ') +
       `${name} stays, the sessions it started move to the new session, the apps it attached are copied to it (one it was allowed only once is not), and the new session runs under the ${target.permissionPreset} preset.` +
       words

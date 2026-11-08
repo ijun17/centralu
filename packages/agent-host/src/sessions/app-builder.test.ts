@@ -13,7 +13,7 @@ import { createRpcHandler } from '../rpc.js'
 import { until } from '../apps/external/test-helpers.js'
 import { SessionManager } from './manager.js'
 import { CapturingAdapter } from './session-apps.test-helpers.js'
-import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, setRareTier } from './centralu-tools.js'
 
 /**
  * An app's building session (M4 C-2) — it stands up together with the app when the app is
@@ -112,7 +112,7 @@ afterEach(async () => {
 })
 
 /*
- * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * These call the Assistant's rare commands by their own names, as tools: the `resident` tier (#512). The
  * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
  */
 beforeAll(() => setRareTier('resident'))
@@ -219,8 +219,8 @@ describe('it is found by that app\'s building session', () => {
   })
 
   it('create_app names the session it created and says to hand off what comes next to that session', async () => {
-    const orch = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: projectId })
+    const orch = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: projectId })
     const b = (await rpc('apps.builder', { appId: 'board', projectId })) as SessionInfo
     expect(r.text).toContain(`Building session: Board · builder [${b.id}] — send_to_session it what to build`)
   })
@@ -236,13 +236,13 @@ describe('a building session tries out its own app (C-3)', () => {
     const o = claude.last()
     expect(servers(o)).toEqual(['app-notes', 'app-other'])
     expect(o.toolProfile).toBe('builder')
-    expect(o.orchestratorTools).toBeDefined()
-    expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
+    expect(o.centraluTools).toBeDefined()
+    expect(o.centraluBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
     expect(mgr.tools.toolProfileOf(builder!.id)).toBe('builder')
     // The list the bridge (Codex) asks for is the same profile
     const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
     expect(tools.map((t) => t.name)).toEqual(['check'])
-    await expect(mgr.runOrchestratorTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
+    await expect(mgr.runCentraluTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
   })
 
   it('an app project\'s building session: only its own project\'s app attaches (another app project is another project)', async () => {
@@ -263,7 +263,7 @@ describe('a building session tries out its own app (C-3)', () => {
 
   it('check returns a report on checking its own app — a session cannot pick another', async () => {
     const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
-    const viaSession = await mgr.runOrchestratorTool(builder!.id, 'check', { app: 'someone-else' })
+    const viaSession = await mgr.runCentraluTool(builder!.id, 'check', { app: 'someone-else' })
     expect(viaSession.isError).toBeFalsy()
     expect(viaSession.text).toMatch(new RegExp(`^check ${projectId.slice(0, 8)}/notes: passed`))
     // The bridge (Codex) path goes through the same door
@@ -274,15 +274,15 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(viaRpc).toMatchObject({ ok: true, findings: [] })
   })
 
-  it('the orchestrator and an ordinary session have no check', async () => {
-    const orch = await mgr.orchestrator()
+  it('the Assistant and an ordinary session have no check', async () => {
+    const orch = await mgr.assistant()
     expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     // An ordinary session has the reader set (#320) — read-only, and no check in it
     expect(mgr.tools.toolProfileOf(worker.id)).toBe('reader')
     expect(claude.last().toolProfile).toBe('reader')
     expect(((await rpc('orchestrator.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
-    await expect(mgr.runOrchestratorTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)
+    await expect(mgr.runCentraluTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)
   })
 })
 

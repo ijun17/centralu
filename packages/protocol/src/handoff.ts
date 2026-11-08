@@ -1,6 +1,6 @@
 /**
  * The words of a handoff (#78, #102, #142) that both its starters use: the window's session menu
- * (`handoffSession` in the UI's store) and the orchestrator's handoff_session (#694, the host). Text only, no IO.
+ * (`handoffSession` in the UI's store) and the Assistant's handoff_session (#694, the host). Text only, no IO.
  */
 
 /**
@@ -18,7 +18,7 @@
  * record, not the screen, only the reply to this specific request, and only after the turn ends.
  *
  * Exported because the e2e tests identify the handoff message by this wording. Here rather than in the window's store
- * since the orchestrator's handoff_session asks for the note too (#694): one wording for both, and the host does not
+ * since the Assistant's handoff_session asks for the note too (#694): one wording for both, and the host does not
  * import the UI.
  */
 export function handoffPrompt(): string {
@@ -82,7 +82,7 @@ export function handoffOpening(
   note: string,
   path: string,
   /**
-   * Words for the successor from whoever started the handoff, when it is not the person (#694: the orchestrator's
+   * Words for the successor from whoever started the handoff, when it is not the person (#694: the Assistant's
    * handoff_session). Said as theirs, after the note's opening, so the successor reads the note first.
    */
   extra?: { from: string; text: string },

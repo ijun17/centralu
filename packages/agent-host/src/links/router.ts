@@ -36,7 +36,7 @@ export interface RoutedMachine {
   lastKnown(kind: 'sessions' | 'projects'): unknown[] | null
   /** The remote's lists as just read (raw), so the mirror and the hidden set follow them */
   observe(kind: 'sessions' | 'projects', list: unknown[]): void
-  /** A session of the remote the hub does not show: its orchestrator and coordinators (§3.4) */
+  /** A session of the remote the hub does not show: its Assistant and coordinators (§3.4) */
   hides(session: unknown): boolean
   /** A coordinator of the remote, which the hub does not show but a reader reads (#1941): its row as the remote last gave it. Absent: none kept */
   unshown?(sessionId: string): unknown

@@ -7,7 +7,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
-import { ORCHESTRATOR_TOOLS, RARE_COMMANDS, RARE_TIERS, profileAllows } from './orchestrator-tools.js'
+import { CENTRALU_TOOLS, RARE_COMMANDS, RARE_TIERS, profileAllows } from './centralu-tools.js'
 import { BROKER_TOOLS } from '../apps/external/broker.js'
 import { HOST_CAPABILITIES } from '../apps/external/capabilities.js'
 
@@ -146,31 +146,31 @@ describe('deleting all archived sessions', () => {
 
 /*
  * Nobody but the person decides to delete for good (#204, carried from #96; #1219). The session archive is reached through the RPC,
- * which is the UI's socket, and by the central orchestrator's six trash commands, which make the same calls and delete
+ * which is the UI's socket, and by the Assistant's six trash commands, which make the same calls and delete
  * for good only after the person's card (trash-commands.test.ts); the sixth, `delete_session`, only moves a session to the
  * trash, and nothing in it is destroyed. This holds it three ways: no other agent tool, broker tool or host capability is
- * named for it, those six are rare commands of the orchestrator's seat alone, and no code outside the RPC handler calls
+ * named for it, those six are rare commands of the Assistant's seat alone, and no code outside the RPC handler calls
  * the manager's purge.
  */
-const ORCHESTRATOR_TRASH_COMMANDS = ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_session', 'delete_archived', 'delete_all_archived']
+const ASSISTANT_TRASH_COMMANDS = ['list_archive', 'restore_archived', 'archive_subagent_steps', 'delete_session', 'delete_archived', 'delete_all_archived']
 const TRASH_VERB = /archive|trash|purge|delete_session|restore_session|empty/i
 
 describe('who can delete for good', () => {
-  it("agents and apps have no verb for the session archive, but the orchestrator's six commands", () => {
+  it("agents and apps have no verb for the session archive, but the Assistant's six commands", () => {
     const names = [
-      ...ORCHESTRATOR_TOOLS.map((t) => t.name),
+      ...CENTRALU_TOOLS.map((t) => t.name),
       ...BROKER_TOOLS,
       ...HOST_CAPABILITIES,
     ]
     expect(names.length).toBeGreaterThan(10)
     // A new verb for the session archive has to be named in this list, with the card that guards its delete
-    expect(names.filter((n) => TRASH_VERB.test(n)).sort()).toEqual([...ORCHESTRATOR_TRASH_COMMANDS].sort())
+    expect(names.filter((n) => TRASH_VERB.test(n)).sort()).toEqual([...ASSISTANT_TRASH_COMMANDS].sort())
     expect([...BROKER_TOOLS, ...HOST_CAPABILITIES].filter((n) => TRASH_VERB.test(n))).toEqual([])
   })
 
-  it("the orchestrator's session archive commands are its own rare commands: no other seat has them in any tier", () => {
-    for (const name of ORCHESTRATOR_TRASH_COMMANDS) {
-      expect(RARE_COMMANDS.orchestrator, name).toContain(name)
+  it("the Assistant's session archive commands are its own rare commands: no other seat has them in any tier", () => {
+    for (const name of ASSISTANT_TRASH_COMMANDS) {
+      expect(RARE_COMMANDS.assistant, name).toContain(name)
       for (const tier of RARE_TIERS) {
         for (const profile of ['scoped', 'builder', 'reader'] as const) {
           expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)

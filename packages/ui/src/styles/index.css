@@ -1058,7 +1058,7 @@
 }
 
 /*
- * A list that folds and unfolds (components/Fold.tsx: a project's rows, the orchestrator's children; #1605). A transition
+ * A list that folds and unfolds (components/Fold.tsx: a project's rows, the Assistant's children; #1605). A transition
  * of the grid track, not a keyframe animation: one that is reversed half way (the pointer comes back while it closes)
  * goes on from where it is, and what stands under it moves with it. The rows inside are uncovered, not moved. Closing is a
  * little shorter than opening (140ms against 180ms, as a layer's exit is) and ends before the rows are taken away at `LEAVE_MS`.

@@ -2,14 +2,14 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ToolProfile } from '../apps/contract.js'
-import { AGENT_TOOLS, APP_ACCESS_TOOLS, COMPACT_TOOLS, DELEGATE_TOOLS, MAIL_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, profileAllows, toolDefsFor } from './orchestrator-tools.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, COMPACT_TOOLS, DELEGATE_TOOLS, MAIL_TOOLS, CENTRALU_TOOLS, READER_TOOLS, profileAllows, toolDefsFor } from './centralu-tools.js'
 
 /**
  * The profile × tool matrix in docs/security-boundaries.md (#382) is the code's, not a copy that drifts: every
  * tool Centralu serves has a row, every profile a column, and each cell says what `profileAllows` (execution)
  * and `toolDefsFor` (what the session sees) decide. The "none" column is the sessions that get no server.
  * The table is drawn for the `resident` tier, where every command is a tool; the default tier (#512) reaches the
- * orchestrator's rare ones through centralu_run, and command-tier.test.ts checks that it reaches exactly these.
+ * Assistant's rare ones through centralu_run, and command-tier.test.ts checks that it reaches exactly these.
  */
 const doc = readFileSync(fileURLToPath(new URL('../../../../docs/security-boundaries.md', import.meta.url)), 'utf8')
 
@@ -23,8 +23,8 @@ function matrix(): { profiles: string[]; rows: Map<string, string[]> } {
   return { profiles: header!.slice(1), rows }
 }
 
-const PROFILES: ToolProfile[] = ['orchestrator', 'scoped', 'builder', 'reader']
-const ALL_TOOLS = [...new Set([...ORCHESTRATOR_TOOLS, ...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].map((t) => t.name))]
+const PROFILES: ToolProfile[] = ['assistant', 'scoped', 'builder', 'reader']
+const ALL_TOOLS = [...new Set([...CENTRALU_TOOLS, ...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].map((t) => t.name))]
 
 describe('the tool matrix in docs/security-boundaries.md (#382)', () => {
   const { profiles, rows } = matrix()

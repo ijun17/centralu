@@ -1,15 +1,15 @@
 import type { UiPreferences } from '@cc/protocol'
 
 /**
- * Every stored preference and how the orchestrator reaches it (#1978, owner rule 2026-11-05: what the person can set, the
- * orchestrator can set too). `preferences-coverage.test.ts` fails when a field of `UiPreferences` is not named here (the type
+ * Every stored preference and how the Assistant reaches it (#1978, owner rule 2026-11-05: what the person can set, the
+ * assistant can set too). `preferences-coverage.test.ts` fails when a field of `UiPreferences` is not named here (the type
  * also fails to compile), when a named tool field does not exist in the tool's schema, or when an exclusion has no reason.
  * A new preference is added to Settings, to `set_preferences` (or the tool that already carries it) and to this table in
  * one change.
  *
  * Excluded by design, with the reason on each: sign-ins and credentials, OS permission prompts, pairing a machine and
- * the privacy choices only the person grants never reach the orchestrator; none of those is a field of this record, so what
- * is excluded here is the rest of the record that is retired or has no field of the orchestrator's yet.
+ * the privacy choices only the person grants never reach the Assistant; none of those is a field of this record, so what
+ * is excluded here is the rest of the record that is retired or has no field of the Assistant's yet.
  */
 export type PreferenceReach =
   | { tool: 'set_preferences' | 'set_agent_limits'; field: string }

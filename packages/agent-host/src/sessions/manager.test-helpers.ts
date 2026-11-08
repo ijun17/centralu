@@ -5,7 +5,7 @@
  */
 import { afterEach } from 'vitest'
 import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, InputOrigin, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, InputOrigin, CentraluTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
@@ -120,8 +120,8 @@ export class FakeAdapter implements AgentAdapter {
     return `${this.launchFingerprint}:${settings.cwd}:${settings.permissionPreset}:${settings.projectTrusted ? 'trusted' : 'untrusted'}`
   }
   last: FakeHandle | null = null
-  /** Tools that come only to the orchestrator — the test checks whether they are attached or not. */
-  lastOrchestratorTools: OrchestratorTools | undefined
+  /** Tools that come only to the Assistant — the test checks whether they are attached or not. */
+  lastCentraluTools: CentraluTools | undefined
   private handles = new Map<string, FakeHandle>()
   handleOf(id: string) { return this.handles.get(id) }
   /** Creates a situation where the tool fails to start (the resurrection-failure path). */
@@ -157,7 +157,7 @@ export class FakeAdapter implements AgentAdapter {
     }
     this.lastCwd = opts.cwd
     this.lastOpts = opts
-    this.lastOrchestratorTools = opts.orchestratorTools
+    this.lastCentraluTools = opts.centraluTools
     this.last = new FakeHandle(opts.sessionId, emit)
     /*
      * **Report the id of the resumed conversation exactly as given** — this is what real adapters do

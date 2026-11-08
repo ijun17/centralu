@@ -129,7 +129,7 @@ export function SessionPane({
    * It is read from this session rather than from whatever is focused because a grid cell
    * renders this same component for a session that is not the focused one — asking the
    * focused session would resolve one pane's paths against another pane's project. The
-   * orchestrator has no project at all and so gets null, which is what stops its messages
+   * assistant has no project at all and so gets null, which is what stops its messages
    * from linking anywhere (see `parseFileRef`).
    */
   const projectRoot = useSessionFolder(sessionId)
@@ -363,7 +363,7 @@ export function SessionPane({
        * had nothing to aim at.
        *
        * Handling it here fixes all three screens at once: the focus view, a grid cell, and the
-       * orchestrator are all this same component. In the grid it also means it attaches to
+       * assistant are all this same component. In the grid it also means it attaches to
        * **the session of the cell it was dropped on** — not the focused session. Each cell
        * calls its own composer for the same reason.
        */

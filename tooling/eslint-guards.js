@@ -340,7 +340,7 @@ export const guardConfigs = [
   // The app runtime does not lean on what carries it; the external app runtime borrows only the named physics modules
   {
     files: [`${HOST_SRC}/apps/**/*.{ts,tsx}`],
-    rules: { 'guard/import-boundary': ['error', { forbidden: ['(^|/)sessions(/|$)'], why: 'the orchestrator is one caller of the runtime, and the runtime must not lean on it the other way around (#97)' }] },
+    rules: { 'guard/import-boundary': ['error', { forbidden: ['(^|/)sessions(/|$)'], why: 'the Assistant is one caller of the runtime, and the runtime must not lean on it the other way around (#97)' }] },
   },
   {
     files: [`${HOST_SRC}/apps/external/**/*.{ts,tsx}`],

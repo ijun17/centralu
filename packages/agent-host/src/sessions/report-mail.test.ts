@@ -207,12 +207,12 @@ describe('the old way tells when the mailbox cannot', () => {
 })
 
 describe('the seats of the mailbox’s policy', () => {
-  it('the mail tool is the seat’s; the orchestrator’s command form is the orchestrator’s alone, and only when the command is there', async () => {
+  it('the mail tool is the seat’s; the Assistant’s command form is the Assistant’s alone, and only when the command is there', async () => {
     const { parent } = await parentAndChild()
     expect(w.mgr.mail.mailSeats(() => true).mailTool(parent)).toBe(true)
     expect(w.mgr.mail.mailSeats(() => true).mailCommand(parent)).toBe(false)
     const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
-    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'orchestrator' : real(id)))
+    vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'assistant' : real(id)))
     expect(w.mgr.mail.mailSeats(() => true).mailCommand(parent)).toBe(true)
     expect(w.mgr.mail.mailSeats(() => false).mailCommand(parent)).toBe(false)
   })

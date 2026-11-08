@@ -67,7 +67,7 @@ xs, sm, md), `Segmented`(방향키로 움직이는 라디오 그룹), `Badge`, `
 | dev store | **better-sqlite3** | 이 규모에서는 동기 API가 가장 단순하고 빠르다. dev 전용, prod에서는 rusqlite로 교체 | node:sqlite (아직 실험 단계) |
 | dev git | **직접 작성한 git CLI spawn 래퍼** (`--porcelain=v2` 파싱) | prod에서 git2(Rust)로 교체할 임시 구현 — 얇을수록 버리기 쉽다 | simple-git (버릴 코드에 의존성 추가) |
 | 파일 워처 | **chokidar** | dev 전용, debounce와 조합 | — |
-| MCP 서버 | **@modelcontextprotocol/sdk** | 공식 SDK, 오케스트레이터용 (FR-11) | 직접 작성 (스펙을 추적하는 비용) |
+| MCP 서버 | **@modelcontextprotocol/sdk** | 공식 SDK, 어시스턴트용 (FR-11) | 직접 작성 (스펙을 추적하는 비용) |
 
 ## 4. Tauri 쪽 (apps/desktop/src-tauri — M1 이후)
 

@@ -25,7 +25,7 @@ import { appKeyOf } from '@cc/protocol'
  *                  first message as its name, so that fragment is what leaves — if the name is not
  *                  in the list, the app cannot use it, and nothing further leaks. A project app gets
  *                  that project's sessions; a user-folder app gets all sessions (a user-folder app
- *                  belongs to the orchestrator — decision 4)
+ *                  belongs to the Assistant — decision 4)
  *   git.status     the project's branch and its list of changed files. Project apps only — a
  *                  user-folder app has no project to pick
  */

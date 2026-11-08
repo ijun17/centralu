@@ -695,7 +695,7 @@ export class SessionEvents {
     m.lastSeq = seq
     m.lastReadSeq = seq // Something we sent counts as read
     // A session's name is never coined from a message an app or another session sent (ask_project's task, a
-    // parent's note, an orchestrator's instruction, #646) — the name always comes from the person's own words
+    // parent's note, an Assistant's instruction, #646) — the name always comes from the person's own words
     if (m.autoNamed && m.name === 'New session' && !fromApp && !from && !fromScript) {
       m.name = truncate(text)
       this.host.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
@@ -705,7 +705,7 @@ export class SessionEvents {
      * **Announces that a message was added.**
      *
      * This never used to be announced. The UI was the only place that ever produced a user message,
-     * so the UI drawing its own was enough. That assumption broke once the orchestrator became a
+     * so the UI drawing its own was enough. That assumption broke once the Assistant became a
      * second producer — an injected message was saved, but it never showed up on screen at all.
      */
     this.host.emit({
@@ -734,14 +734,14 @@ export class SessionEvents {
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
       // A script's text reaches the session as the script's, quoted under Centralu's header (§8.1)
       : fromScript ? scriptMessageFrame(fromScript.credential, text)
-      // A hub's orchestrator directs as this host's own does (`sendFromHub`)
+      // A hub's Assistant directs as this host's own does (`sendFromHub`)
       : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
-    // An orchestrator that had root apps attached reads once why their names are gone (#1205); never stored or shown
+    // An Assistant that had root apps attached reads once why their names are gone (#1205); never stored or shown
     const notice = this.host.apps.rootAppsNotice(sessionId)
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs

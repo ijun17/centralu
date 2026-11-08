@@ -601,7 +601,7 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
   })
 
   describe('merges', () => {
-    it('lists every machine’s sessions after the hub’s own, qualified, without the remote orchestrator and coordinators', async () => {
+    it('lists every machine’s sessions after the hub’s own, qualified, without the remote assistant and coordinators', async () => {
       const { router, localAnswers, m1, m2 } = rig()
       localAnswers['sessions.list'] = [session('h1')]
       m1.answers['sessions.list'] = [session('a'), session('orch', { kind: 'orchestrator', projectId: null }), session('co', { kind: 'coordinator' })]

@@ -191,7 +191,7 @@ type TurnWait = { busy: boolean; done: Promise<Step>; end(step: Step): void }
  * start_agent on a linked machine (#1038) and agent_session on what it starts there. The child is a session of the
  * machine's checkout of the caller's repository (the same `origin`, `gitRemoteKey`), made over the link under the
  * caller's preset and one level below it in the agent depth (`CreateSessionParams.agentDepth`), after a card that
- * names the machine. Its turn's end comes back as a linked machine's session's does for the orchestrator (`LinkedReports`,
+ * names the machine. Its turn's end comes back as a linked machine's session's does for the Assistant (`LinkedReports`,
  * #723), to the session that started it; a call waiting on it reads the answer instead, as a local child's wait does.
  * A link that drops is said to the parent, and a turn that ended while it was down is reported once it is back.
  *
@@ -259,7 +259,7 @@ export class RemoteAgents {
         this.save(this.records().map((x) => (x.sessionId === r.sessionId ? withoutOwed(x) : x)))
         continue
       }
-      this.host.children.setLinkedReport(r.sessionId, { orchestratorId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
+      this.host.children.setLinkedReport(r.sessionId, { assistantId: r.callerId, busy: false, ...(r.owed.paused ? { paused: r.owed.paused } : {}) })
       if (!r.owed.paused) this.toldDown.set(r.sessionId, false)
     }
   }
@@ -314,7 +314,7 @@ export class RemoteAgents {
       // A removed machine's child is out of reach for good: no end of it will come to free the place (#1038 review)
       if (!reader?.machineLinked(r.machineId)) return false
       const report = this.host.children.linkedReports.get(r.sessionId)
-      return this.waits.has(r.sessionId) || (report?.orchestratorId === r.callerId && !report.paused)
+      return this.waits.has(r.sessionId) || (report?.assistantId === r.callerId && !report.paused)
     }).length
   }
 
@@ -336,7 +336,7 @@ export class RemoteAgents {
     this.save(this.records().map((r) => (r.callerId === from ? { ...r, callerId: to } : r)))
     for (const r of moving) this.owned(r.sessionId, to)
     for (const [id, report] of [...this.host.children.linkedReports]) {
-      if (report.orchestratorId === from && this.of(id)) this.host.children.setLinkedReport(id, { ...report, orchestratorId: to })
+      if (report.assistantId === from && this.of(id)) this.host.children.setLinkedReport(id, { ...report, assistantId: to })
     }
   }
 
@@ -369,7 +369,7 @@ export class RemoteAgents {
     await this.verify(rec, reader)
     const report = this.host.children.linkedReports.get(rec.sessionId)
     // A paused report whose turn was seen is read too: the turn's end was deferred, and nothing else would report it (#1966 review)
-    if (!report || report.orchestratorId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) return
+    if (!report || report.assistantId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) return
     const now = await reader.read(rec.sessionId, 1)
     if (!now.ok || this.host.children.linkedReports.get(rec.sessionId) !== report || !this.gateNow(rec).owned) return
     this.deferred.delete(rec.sessionId)
@@ -382,7 +382,7 @@ export class RemoteAgents {
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) {
       return { ok: false, error: caller?.kind === 'orchestrator'
-        ? 'The orchestrator starts a session on a linked machine with create_session; start_agent with a machine is for a project\'s session.'
+        ? 'The Assistant starts a session on a linked machine with create_session; start_agent with a machine is for a project\'s session.'
         : 'This session belongs to no project, so it cannot start agents.' }
     }
     // Said, and an `auto` caller's crossing logged, before anything is asked, as by a local start's first gate
@@ -550,7 +550,7 @@ export class RemoteAgents {
      * waits, otherwise the report
      */
     const waiting = opts.wait === false ? undefined : this.openWait(rec.sessionId)
-    if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
+    if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { assistantId: callerId, busy: false })
     // It counts by itself now (`workingIn`)
     counted()
     // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
@@ -558,7 +558,7 @@ export class RemoteAgents {
     this.pending.delete(rec.sessionId)
     if (!sent.ok) {
       if (waiting && this.waits.get(rec.sessionId) === waiting) this.dropWait(rec.sessionId)
-      if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+      if (this.host.children.linkedReports.get(rec.sessionId)?.assistantId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
       return { ok: false, error: `The session "${rec.name}" [${rec.sessionId}] was made on ${machine.name} but did not take the task: ${bare(sent.error)}. Send it again with agent_session, or delete it.` }
     }
     // The machine recorded the task before it answered: a task not taken as a turn of its own (the person's first message came first) is not followed
@@ -784,7 +784,7 @@ export class RemoteAgents {
     const owned = whose === 'caller'
     // A report held over the background work of a turn that ended is no turn running (#1038 review)
     const report = this.host.children.linkedReports.get(rec.sessionId)
-    const mine = report?.orchestratorId === rec.callerId
+    const mine = report?.assistantId === rec.callerId
     /*
      * Except a turn the child's own tool started when that work ended (a task notification, no message of anyone's): the
      * linked report reads it as the work's (`LinkedReport.turn`, the report is owed its end), so it is the caller's too
@@ -825,7 +825,7 @@ export class RemoteAgents {
     // A person's message does not close the report (#1377): the linked report reads whose each turn is, and the person's is reported to nobody.
     // A call that was waiting took the report down: it is put back with what the message made of the turn it saw
     if (keep && wait && this.host.meta.has(rec.callerId)) {
-      this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: wait.busy, ...(wait.busy ? { turn: { by: 'work', wrote: true } } : { next: { by: 'person' } }) })
+      this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: wait.busy, ...(wait.busy ? { turn: { by: 'work', wrote: true } } : { next: { by: 'person' } }) })
     }
     if (!this.reportArmed(rec)) return
     if (keep) return void this.personHeld.add(rec.sessionId)
@@ -903,7 +903,7 @@ export class RemoteAgents {
       return 'a turn already running there when your message reached it, which this hub did not see begin (the person, or the child’s own tool)'
     }
     const report = this.host.children.linkedReports.get(rec.sessionId)
-    if (report && report.orchestratorId !== rec.callerId) return 'a turn another session is owed the end of (it is not the one you gave it)'
+    if (report && report.assistantId !== rec.callerId) return 'a turn another session is owed the end of (it is not the one you gave it)'
     return 'a turn it started by itself that this hub cannot tie to the work you gave it'
   }
 
@@ -970,7 +970,7 @@ export class RemoteAgents {
   private tookInstruction(rec: RemoteAgent): void {
     this.setWhose(rec, 'caller')
     if (this.waits.has(rec.sessionId) || this.reportArmed(rec) || !this.host.meta.has(rec.callerId)) return
-    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false })
+    this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: false })
   }
 
   /** Whether the child is in a turn there, as the machine's events last said (#1038 review): an instruction taken in one is a message in it */
@@ -1002,11 +1002,11 @@ export class RemoteAgents {
     this.whose.set(rec.sessionId, 'unknown')
     this.personHeld.delete(rec.sessionId)
     this.pending.add(rec.sessionId)
-    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
+    this.host.children.setLinkedReport(rec.sessionId, { assistantId: callerId, busy: false })
     const sent = await reader.send(rec.sessionId, framed, label, { depth: depthOf(this.host, callerId) + 1 })
     this.pending.delete(rec.sessionId)
     if (!sent.ok) {
-      if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+      if (this.host.children.linkedReports.get(rec.sessionId)?.assistantId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
       return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
     }
     taken?.()
@@ -1031,13 +1031,13 @@ export class RemoteAgents {
    */
   private async interruptFor(rec: RemoteAgent, callerId: string, reader: LinkedSessions): ReturnType<LinkedSessions['interrupt']> {
     const owed = this.host.children.linkedReports.get(rec.sessionId)
-    if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
+    if (owed?.assistantId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
     const held = this.of(rec.sessionId)?.queued
     this.setQueued(rec.sessionId, [])
     const r = await reader.interrupt(rec.sessionId)
     if (r.ok) return r
     if (held) this.setQueued(rec.sessionId, held)
-    if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
+    if (owed?.assistantId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
     return r
   }
 
@@ -1132,7 +1132,7 @@ export class RemoteAgents {
     if (this.whoseOf(rec) === 'unknown') return
     this.setGiven(rec.sessionId, held.filter((row) => row > named))
     if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return
-    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: true })
+    this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: true })
   }
 
   // ── Waits ───────────────────────────────────────────────────────────────────────────────
@@ -1150,7 +1150,7 @@ export class RemoteAgents {
      */
     const rearm = (): boolean => {
       const again = this.whoseOf(rec) !== 'other'
-      if (again) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: wait.busy })
+      if (again) this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: wait.busy })
       if (this.waits.get(rec.sessionId) === wait) this.dropWait(rec.sessionId)
       return again
     }
@@ -1179,7 +1179,7 @@ export class RemoteAgents {
     const words = await this.lastWords(rec, reader, r.since)
     // The turn left the child's own background work running there (#721): the report waits for that work's end
     const running: BackgroundTask[] = this.host.linkedReports.ownTasksRunning(rec.sessionId)
-    if (running.length) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: rec.callerId, busy: false, paused: running })
+    if (running.length) this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: false, paused: running })
     return {
       ok: true, state: 'done', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, answer: words.answer, readable: [], outside: [],
       notice: `It works on ${rec.machine}: the paths it names are that machine's, not readable from here.${running.length ? ' Its own background work still runs there; a final report follows when that work ends.' : ''}${words.notice}`,
@@ -1206,7 +1206,7 @@ export class RemoteAgents {
     const rec = this.of(sessionId)
     if (!rec) return
     const report = this.host.children.linkedReports.get(sessionId)
-    const armed = report?.orchestratorId === rec.callerId ? report : undefined
+    const armed = report?.assistantId === rec.callerId ? report : undefined
     const owed = this.waits.has(sessionId) || armed ? { ...(armed?.paused ? { paused: armed.paused } : {}) } : undefined
     if (JSON.stringify(owed) === JSON.stringify(rec.owed)) return
     this.save(this.records().map((r) => (r.sessionId !== sessionId ? r : owed ? { ...r, owed } : withoutOwed(r))))
@@ -1318,7 +1318,7 @@ export class RemoteAgents {
 
   /** Whether the child's turn end is owed to the session that started it */
   private reportArmed(rec: RemoteAgent): boolean {
-    return this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === rec.callerId
+    return this.host.children.linkedReports.get(rec.sessionId)?.assistantId === rec.callerId
   }
 
   // ── The link ────────────────────────────────────────────────────────────────────────────
@@ -1371,7 +1371,7 @@ export class RemoteAgents {
       const told = this.toldDown.get(rec.sessionId)
       // A report paused on work that has ended is settled by the linked reports now (`LinkedReports.linkChanged`); on work still going it is kept, and the caller told
       const settling = !!report?.paused && !report.busy && this.host.linkedReports.ownTasksRunning(rec.sessionId).length === 0
-      if (!report || report.orchestratorId !== rec.callerId || settling || (told !== undefined && (told || !alone))) continue
+      if (!report || report.assistantId !== rec.callerId || settling || (told !== undefined && (told || !alone))) continue
       if (mayRecover) continue
       /*
        * This hub's own update or rollback of the machine holds the link (#1618): its stop ends this turn, and the host it starts
@@ -1423,7 +1423,7 @@ export class RemoteAgents {
       const held = this.deferred.delete(rec.sessionId)
       if (this.whoseOf(rec) === 'unknown' && !this.pending.has(rec.sessionId)) await this.verify(rec, reader)
       const report = this.host.children.linkedReports.get(rec.sessionId)
-      if (!report || report.orchestratorId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) continue
+      if (!report || report.assistantId !== rec.callerId || (report.paused && !report.busy) || !this.gateNow(rec).owned) continue
       if (!report.busy && !missed && !held) continue
       const now = await reader.read(rec.sessionId, 1)
       // Read again: the turn's own end, or another's message, may have come in while the machine was asked
@@ -1495,7 +1495,7 @@ export class RemoteAgents {
 
   /** What start_agent and a send rest on in the caller, read again after a card and before each send: a local start's (`agentStartGateError`) */
   private gateError(callerId: string): string | null {
-    // Never the orchestrator's place (`''`): a caller here is a project's session, and one with none has none registered
+    // Never the Assistant's place (`''`): a caller here is a project's session, and one with none has none registered
     return agentStartGateError(this.host, callerId, this.host.meta.get(callerId)?.projectId || null)
   }
 

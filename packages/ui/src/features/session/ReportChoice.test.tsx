@@ -8,12 +8,12 @@ import { CHOICES, ReportChoice } from './ReportChoice.jsx'
  */
 describe('the choice the composer offers for a session that owes a report', () => {
   const render = (value: 'ask' | 'task' | 'takeover') =>
-    renderToStaticMarkup(<ReportChoice owed={{ callerId: 'o1', callerName: 'Orchestrator' }} value={value} onChange={() => {}} />)
+    renderToStaticMarkup(<ReportChoice owed={{ callerId: 'o1', callerName: 'Assistant' }} value={value} onChange={() => {}} />)
 
   it('names who waits for the work, and offers the three choices in order', () => {
     const html = render('ask')
     expect(html).toContain('Working for')
-    expect(html).toContain('Orchestrator')
+    expect(html).toContain('Assistant')
     expect(CHOICES.map((c) => c.label)).toEqual(['Just asking', 'Add to the task', 'Take it over'])
     expect(CHOICES.map((c) => c.value)).toEqual(['ask', 'task', 'takeover'])
     for (const c of CHOICES) expect(html).toContain(c.label)

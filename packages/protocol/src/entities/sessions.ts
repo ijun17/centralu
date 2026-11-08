@@ -32,7 +32,7 @@ export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
 /**
  * Why a session's turn did not run to its end, when nobody here chose to stop it (#698). A session in this state
  * looks like any other at rest (`error`, `idle`, `waiting_input`), and on 2026-10-15 several child sessions sat in
- * `error` for most of a day after the internet dropped twice, with neither the person nor the orchestrator told.
+ * `error` for most of a day after the internet dropped twice, with neither the person nor the Assistant told.
  *
  *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
  *                 response, the computer slept), after the tool's own retries
@@ -56,7 +56,7 @@ export type InterruptionReason = z.infer<typeof InterruptionReason>
 
 /**
  * What a `shutdown` says happened, in the same words wherever it is said (#1397): the label, the note above the composer, the line in
- * the conversation, the orchestrator's list and the report to the caller. After a colon, so it starts in lower case
+ * the conversation, the Assistant's list and the report to the caller. After a colon, so it starts in lower case
  */
 export const SHUTDOWN_WORDS = 'the computer shut down, restarted or signed out'
 

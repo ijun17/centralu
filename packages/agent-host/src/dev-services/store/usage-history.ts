@@ -16,7 +16,7 @@ export type UsageBucket = {
   /** The start of the hour, in ms */
   hour: number
   sessionId: string
-  /** '' for the orchestrator */
+  /** '' for the Assistant */
   projectId: string
   tool: ToolName
   /** '' when the session had no model set */

@@ -33,23 +33,23 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 세션 | 에이전트 도구 하나와의 대화 하나. 자기 프로세스(살아 있을 때), 상태, 모델, 권한 프리셋을 가진다 | `SessionInfo`, `packages/protocol/src/commands/sessions.ts` | 채팅, 스레드, 에이전트 |
 | 에이전트 도구 | 세션이 돌리는 CLI: Claude Code 또는 Codex. 세 번째를 더할 수 있게 문자열이다 | `ToolName`, `packages/protocol/src/entities/ids.ts`; 어댑터는 `packages/agent-host/src/adapters/` | 모델, 프로바이더 |
 | 어댑터 | 에이전트 도구 하나를 공통 계약으로 감싸고, 그 출력을 정규화된 이벤트로 바꾸는 모듈 | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | 드라이버 |
-| 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands/sessions.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
-| 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
-| 평범한 세션 | 빌더도 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션, 띄운 에이전트, 다른 프로젝트의 일을 받은 세션도). 신뢰한 프로젝트에서는 이 컴퓨터와 연결된 기계에서 오케스트레이터의 것을 뺀 모든 세션을 읽고, 신뢰하지 않은 프로젝트에서는 자기 프로젝트만 읽는다 (#984, #1941) | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
+| 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `assistant`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands/sessions.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
+| 어시스턴트 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/centralu-tools.ts`, `assistant-home.ts` | 프로젝트 어시스턴트(폐지) |
+| 평범한 세션 | 빌더도 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션, 띄운 에이전트, 다른 프로젝트의 일을 받은 세션도). 신뢰한 프로젝트에서는 이 컴퓨터와 연결된 기계에서 어시스턴트의 것을 뺀 모든 세션을 읽고, 신뢰하지 않은 프로젝트에서는 자기 프로젝트만 읽는다 (#984, #1941) | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 사람이 만든 것은 따로 서고, 세션이 `start_agent`로 띄운 것은 그 세션 아래에 놓인다(`parentSessionId`). 이것들을 쥐던 워크트리 매니저는 없어졌다(#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
-| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 보관함에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
+| 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 보관함에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 어시스턴트 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `AppSessions`의 `builderRefOf`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `auto`로 돌되 그 앱에 호출을 열어 둔 어떤 세션보다 높지 않으며(소유자 결정 2026-11-05, 전에는 `safe`), 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다. 실행이 깨끗하게 끝나고 아무도 참여하지 않았으면 지워지고, 그 기록이 세션 보관함에 남는다(#378) | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 일을 준, 이미 있는 평범한 세션. Centralu는 그 일을 위해 다른 프로젝트에 세션을 만들지 않고(#614) 표시도 붙이지 않는다. 부탁한 세션은 대화 속 그 일의 `from`이고, 일은 맡긴 턴으로 돈다. #614 이전에는 `ask_project`가 세션을 세우거나 다시 쓰고 `askedBy`로 표시했으며, 그 표시는 지워진다 | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
 | 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 연결된 기계에 띄운 것(#1038)은 그 기계 체크아웃의 세션이다. 허브가 그 기계의 행에 부모를 `askedBy`로 적고, 사이드바는 그 기계의 프로젝트에 "Asked by" 표시와 함께 그린다(#1416). 부모의 행에는 그 자식을 가리키는 포인터가 없다 (사장님, 2026-10-26). 지우면 그 기계에서 그 세션에 만든 작업 트리도 함께 지운다. 커밋하지 않았거나 푸시하지 않은 것이 없을 때만 지우고, 아니면 무엇을 왜 남겼는지 말한다(#1161). 다른 프로젝트의 일을 하는 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `sessions/start-agent-flow.ts`의 `startAgent`, `sessions/delegation-flow.ts`의 `agentSession`(둘 다 `manager.ts`를 거쳐 닿는다); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 에이전트 지침 | 프로젝트에서 `start_agent`가 띄우는 에이전트에게 사람이 정해 둔 지침(#1161 항목 2). 그런 일마다 일 뒤에 붙는다. 매 지시문에 되풀이하는 대신 프로젝트 메뉴("Instructions for agents…")에서 한 번 정한다. 기계마다 자기 프로젝트 사본의 것을 따로 가지므로, 연결된 기계에 띄운 자식은 그 기계의 지침(그 경로, 그 셸)을 읽는다 | `ProjectInfo.agentInstructions`, 앱 설정 `agent_instructions:<프로젝트>`; `packages/agent-host/src/sessions/start-agent.ts`의 `projectInstructions`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 프로젝트 프롬프트, 시스템 프롬프트 |
-| 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
+| 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `assistant`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
 | 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `edits`(`normal`에 세션 폴더 안의 파일 수정을 더한 것, #1525), `auto`(신뢰한 프로젝트의 새 세션, 연결된 컴퓨터의 것도, 그리고 앱의 빌더와 에이전트가 받는 기본값. 신뢰하지 않은 프로젝트에서는 `normal`, 소유자 결정 2026-11-05) | `PermissionPreset`, `entities/approvals.ts` | 모드 |
 | 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 숨기기(FR-20은 폐지) |
 | 잠듦 | 호스트가 유휴 세션의 프로세스를 끝냈거나(#568, 기본 15분) 재시작 뒤 아무것도 깨우지 않아 살아 있지 않은 상태. 입력하거나 메시지를 보내면 깨어난다. 고르기만 해서는 깨어나지 않는다 | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
 | 세션 보관함 | 끝났거나 치워 둔 세션을, 사람이 영영 지울 때까지 두는 곳. 열어 볼 수 있고 되돌릴 수 있다. 앱 에이전트 세션의 남긴 기록과 보관한 서브에이전트 단계도 여기에 든다. #1404 전에는 휴지통이라 불렀다. 나갈 길이 없던 폐지된 숨기기(아카이브) 기능 FR-20과는 다르다 | `sessions.deleted_at`, `sessions.trash`, `trash.*`; product-spec FR-22 | 휴지통, 숨기기(아카이브) |
 | 가져온 세션 | 도구가 Centralu 밖에서 시작한 대화를 이어 가는 세션 | `SessionInfo.importedFrom`; [agent-host.ko.md](agent-host.ko.md) §8 | |
-| 인계(세션) | 새 후임 세션(어느 도구든)이 노트를 통해 전임의 일을 넘겨받는 것. 노트는 저장된 대화에서 모델 없이 만들거나(#78, #694부터 기본), 에이전트가 직접 쓴다. 사람은 세션 메뉴에서 인계를 시작하고, 중앙 오케스트레이터는 `handoff_session`으로 시작한다. 오케스트레이터의 인계는 `auto`가 아니면 사람의 카드를 거치지만(대상이 쉬고 있고 그 프리셋이 오케스트레이터 자신의 프리셋 이내이면 카드 없이, #1509), 턴 도중에는 하지 않으며, 전임을 항상 남긴다(#694). 노트는 파일 `<data>/handoff/<project>/<session>.md`이고 후임의 첫 메시지가 그 경로를 가리킨다. 전임의 모든 자식(일하는 중, 기다리는 중, 큐에 든 것, 보고나 읽기가 남은 것, 아직 서 있는 시작 카드, 끝나고 다음 일을 기다리는 것)은 후임의 것이 되고 노트 맨 앞에 나열되며(#693, #738, #1475. 전임이 남는 경우, 전임이 자기 상위에게 빚진 task를 하는 자식은 그 보고가 task를 끝내도록 전임에게 남는다, #1932), 전임이 직접 붙인 앱도 복사된다(#1638). 창은 전임을 기본으로 보관함에 넣는다(#1477. #694부터 그때까지는 남겼고 그 전에는 지웠다). 체크를 끄면 두 세션이 나란히 간다. 전임이 남으면 전임은 앱의 자기 사본과 후임이 가져가지 않은 메일을 그대로 갖고, 인계 뒤에 시작한 자식은 전임을 나중에 지울 때 후임에게 간다. 인계가 가져가는 것과 두고 가는 것은 agent-host §1.2.5에 있다 | `handoff` 이벤트, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (키퍼 인계와 다르다, §1.5) |
+| 인계(세션) | 새 후임 세션(어느 도구든)이 노트를 통해 전임의 일을 넘겨받는 것. 노트는 저장된 대화에서 모델 없이 만들거나(#78, #694부터 기본), 에이전트가 직접 쓴다. 사람은 세션 메뉴에서 인계를 시작하고, 중앙 어시스턴트는 `handoff_session`으로 시작한다. 어시스턴트의 인계는 `auto`가 아니면 사람의 카드를 거치지만(대상이 쉬고 있고 그 프리셋이 어시스턴트 자신의 프리셋 이내이면 카드 없이, #1509), 턴 도중에는 하지 않으며, 전임을 항상 남긴다(#694). 노트는 파일 `<data>/handoff/<project>/<session>.md`이고 후임의 첫 메시지가 그 경로를 가리킨다. 전임의 모든 자식(일하는 중, 기다리는 중, 큐에 든 것, 보고나 읽기가 남은 것, 아직 서 있는 시작 카드, 끝나고 다음 일을 기다리는 것)은 후임의 것이 되고 노트 맨 앞에 나열되며(#693, #738, #1475. 전임이 남는 경우, 전임이 자기 상위에게 빚진 task를 하는 자식은 그 보고가 task를 끝내도록 전임에게 남는다, #1932), 전임이 직접 붙인 앱도 복사된다(#1638). 창은 전임을 기본으로 보관함에 넣는다(#1477. #694부터 그때까지는 남겼고 그 전에는 지웠다). 체크를 끄면 두 세션이 나란히 간다. 전임이 남으면 전임은 앱의 자기 사본과 후임이 가져가지 않은 메일을 그대로 갖고, 인계 뒤에 시작한 자식은 전임을 나중에 지울 때 후임에게 간다. 인계가 가져가는 것과 두고 가는 것은 agent-host §1.2.5에 있다 | `handoff` 이벤트, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (키퍼 인계와 다르다, §1.5) |
 | 도구 바꾸기 | 세션(이름, 순서, 기록, 패널)은 그대로 두고 그 아래의 에이전트 도구만 바꾸는 것. 새 도구는 새 스레드로 시작한다. 옛 도구의 대화는 에이전트에게 넘어가지 않고, 기록만 화면에 남는다 | `agents.switchTool`, `packages/protocol/src/commands/methods/sessions.ts`; `switchTool`, `manager.ts` | |
 | 목표 | 세션에 정한 목적. 도구가 판정한다. 살아 있는 동안만 | `SessionGoal`, `entities/sessions.ts` | |
 | 백그라운드 작업 | 에이전트가 자기 프로세스 안에 돌려 둔 일(서브에이전트, 셸). 살아 있는 동안만 | `BackgroundTask`, `entities/sessions.ts` | |
@@ -106,7 +106,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 용어 | 뜻 | 정의된 곳 |
 |---|---|---|
 | 포커스 뷰 | 기본 배치: 사이드바와 세션 하나 | product-spec §5.1 |
-| 인박스 | 프로젝트를 가로질러 사람을 기다리는 것 전부를 급한 순서로. 세션과, 아직 답하지 않은 오케스트레이터의 MCP 서버·스킬 제안(승인처럼 세고 올린다. 세션이 없으므로 점프는 카드가 있는 오케스트레이터 화면으로 간다, #703). 그리고 창이 마지막으로 본 뒤 신뢰한 프로젝트가 얻은 앱, 한 번(#1141) | `packages/ui/src/features/inbox/`; product-spec FR-15 |
+| 인박스 | 프로젝트를 가로질러 사람을 기다리는 것 전부를 급한 순서로. 세션과, 아직 답하지 않은 어시스턴트의 MCP 서버·스킬 제안(승인처럼 세고 올린다. 세션이 없으므로 점프는 카드가 있는 어시스턴트 화면으로 간다, #703). 그리고 창이 마지막으로 본 뒤 신뢰한 프로젝트가 얻은 앱, 한 번(#1141) | `packages/ui/src/features/inbox/`; product-spec FR-15 |
 | 그리드 | 여러 패널을 한꺼번에: 세션과 앱 | `packages/ui/src/features/grid/`; product-spec §5.4 |
 | 프로젝트 화면 | A project's page: explicitly added session and app panels, plus git; starts empty | `packages/ui/src/features/project/`; product-spec §5.5 |
 | 워크스페이스 | UI 자신의 상태(배치, 열린 세션)를 한 덩어리로 찍은 것. 바뀔 때마다 저장하고 시작할 때 되살린다 | `Store.saveWorkspace`; [state-management.ko.md](state-management.ko.md) §5 |
@@ -127,7 +127,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 드레인 | 멈추기 전에 새 호출을 거절하고 도는 호출에 10초를 주는 것. 스왑에서 나가던 호스트가 #1895 4단계 PR 5까지 했고, 지금은 `host.stop {ifIdle}`(멈춤 관문)만 한다 | `packages/agent-host/src/drain.ts` | |
 | 멈추기 / 업데이트를 위한 멈추기 | 호스트가 떠나는 방식: **멈추기**는 에이전트, 터미널, 명령을 끝낸다. **업데이트를 위한 멈추기**도 그것들을 끝내되, 턴과 터미널과 Run 명령을 다음 호스트를 위해 적어 두고, 다음 호스트가 턴을 이어 가고 그것들을 다시 연다. 키퍼의 자식들을 다음 호스트를 위해 살려 두던 **떼어 놓기**는 #1895 4단계 PR 1에서 없어졌다 | `packages/agent-host/src/lifecycle/shutdown.ts`; [architecture.ko.md](architecture.ko.md) §4.3 | |
 | 키퍼 인계 | 키퍼가 모든 디스크립터를 넘겨 더 새 키퍼로 자신을 바꾸는 것이어서, 아무것도 다시 연결하지 않았다. #1895 4단계 PR 4부터 없다: 키퍼는 평생 한 빌드를 돌고, `--take-over-fd`는 코드 7로 끝난다 | 없어짐; [architecture.ko.md](architecture.ko.md) §4.4 | (세션 인계와 다르다, §1.1) |
-| Codex 브리지 | `codex app-server`가 세션을 위해 띄우는 작은 Node MCP 서버: Centralu 도구에 하나, 붙은 앱마다 하나. 정문을 거쳐(키퍼가 없으면 호스트 자신의 포트로) 호스트를 부른다. Claude에는 필요 없다: 그 서버들은 호스트 안에서 돈다 | `packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs` | 오케스트레이터 브리지(그보다 많이 나른다) |
+| Codex 브리지 | `codex app-server`가 세션을 위해 띄우는 작은 Node MCP 서버: Centralu 도구에 하나, 붙은 앱마다 하나. 정문을 거쳐(키퍼가 없으면 호스트 자신의 포트로) 호스트를 부른다. Claude에는 필요 없다: 그 서버들은 호스트 안에서 돈다 | `packages/agent-host/src/adapters/codex/centralu-bridge.mjs` | 어시스턴트 브리지(그보다 많이 나른다) |
 | `centralu serve` | 창도 키퍼도 없이 `127.0.0.1:17175`에서 호스트를 띄우는 npm 런처. 원격 모드 1단계용 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.ko.md](agent-host.ko.md) §4.7 | |
 | 스트림 에포크 | 호스트 수명마다 하나씩인 무작위 id. 다시 연결했을 때 에포크가 다르면 클라이언트는 다시 받기 대신 다시 맞춘다 | `packages/agent-host/src/transport/event-log.ts`; [protocol.ko.md](protocol.ko.md) | |
 | 기기 | 자기 호스트를 돌리며 다른 호스트와 호스트끼리 이어지는 컴퓨터(§6). 그것이 건네는 id는 `<machine>.<id>`로 읽힌다 | `MachineInfo`, `packages/protocol/src/machines.ts`; `packages/agent-host/src/links/`; [agent-host.ko.md](agent-host.ko.md) §4.8 | 원격, 서버 |
@@ -161,7 +161,7 @@ classDiagram
     commands
   }
   class Session {
-    kind : worker | orchestrator | coordinator
+    kind : worker | assistant | coordinator
     tool
     state : SessionState
     live
@@ -175,7 +175,7 @@ classDiagram
     branch
     base
   }
-  class Orchestrator {
+  class Assistant {
     <<kind>>
   }
   class Coordinator {
@@ -191,7 +191,7 @@ classDiagram
   }
   Project "0..1" o-- "*" Session : runs
   Session "1" --> "0..1" Worktree : works in
-  Session <|-- Orchestrator : kind orchestrator, no project
+  Session <|-- Assistant : kind assistant, no project
   Session <|-- Coordinator : kind coordinator
   Session <|-- DelegatedSession : askedBy set
   Session "1" --> "*" StartedAgent : parentSessionId, a worktree child in the sidebar
@@ -201,14 +201,14 @@ classDiagram
   Coordinator "*" --> "*" Session : may see
 ```
 
-- 세션은 프로젝트에 **많아야 하나** 속한다. 프로젝트가 없는 세션: 오케스트레이터, 코디네이터, 사용자 폴더 앱의
+- 세션은 프로젝트에 **많아야 하나** 속한다. 프로젝트가 없는 세션: 어시스턴트, 코디네이터, 사용자 폴더 앱의
   빌더나 앱 에이전트 세션(사이드바에서 그 앱의 줄 아래에 선다), 그리고 보관함의 세션(프로젝트는 보관 기록에
-  남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Orchestrator"라고 적는다.
+  남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Assistant"라고 적는다.
 - 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
   되가리키지 않는 `appId`를 달고, 띄운 에이전트는 같은 프로젝트의 세션을 가리키는 `askedBy`를 가진다. 위임된
   세션은 저장된 관계가 아니라 지금 도는 맡긴 턴으로 알아본다(#614). 역할을 저장된 깃발로 옮기지 않은 것은
   일부러다. 깃발은 관계와 어긋날 수 있기 때문이다(#13, #80).
-- 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 오케스트레이터, 코디네이터(`scoped`), 빌더,
+- 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 어시스턴트, 코디네이터(`scoped`), 빌더,
   프로젝트 안의 평범한 세션(`reader`, 항상: 2026-10-20부터 끄는 설정이 없다), 없음(`toolProfileFor`).
 
 저장되는 곳:
@@ -345,7 +345,7 @@ classDiagram
 
 | 세션 | 기본으로 받는 것 | 붙일 수 있는 것 |
 |---|---|---|
-| 오케스트레이터 | 사용자 폴더 앱, 그리고 신뢰한 프로젝트의 루트 앱 | |
+| 어시스턴트 | 사용자 폴더 앱, 그리고 신뢰한 프로젝트의 루트 앱 | |
 | 신뢰한 프로젝트의 세션(신뢰하지 않은 프로젝트의 앱은 `auto`에서도 어디에도 붙지 않는다) | 그 프로젝트의 앱 | 사용자 폴더 앱과 신뢰한 다른 프로젝트의 루트 앱. 다른 프로젝트 안쪽의 앱은 공유되어 있고 프로젝트 동의(`apps`)가 있을 때 |
 | 빌더 | 자기 앱도 | 위와 같다 |
 | 앱 에이전트 세션 | 없음 | 없음 |
@@ -737,7 +737,7 @@ classDiagram
   쓰고 모든 줄에 `machine` 필드를 따로 실어서, UI는 id를 뜯어 읽지 않는다. 기기의 승인 규칙 id는 기기마다(그
   `slot`) 음수 하나로 접힌다.
 - 허브는 기기에서 마지막으로 들은 것을 비춰 둔다. 그래서 닿지 않는 기기도 세션이 목록에 남는다(닿지 않음 표시,
-  마지막으로 안 `live`, 깨우지 않음). 원격의 오케스트레이터와 코디네이터는 보이지 않는다.
+  마지막으로 안 `live`, 깨우지 않음). 원격의 어시스턴트와 코디네이터는 보이지 않는다.
 - 링크의 상태(`connecting`, `connected`, `unreachable`, `versions_differ` 등)는 메모리에만 있고 `machine_status`로
   보낸다. (다시) 이어질 때마다 `machine_resync`를 말한다. 자세한 것은 [agent-host.ko.md](agent-host.ko.md) §4.8,
   [protocol.ko.md](protocol.ko.md) §6.

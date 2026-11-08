@@ -59,7 +59,7 @@ export function useToolMeta(tool: ToolName): ToolDescriptor {
   )
 }
 
-/** Everything that waits on the person (#703): sessions in a waiting state, and the orchestrator's proposals nobody answered */
+/** Everything that waits on the person (#703): sessions in a waiting state, and the Assistant's proposals nobody answered */
 function candidates(state: Pick<AppState, 'sessions' | 'mcpProposals' | 'skillProposals' | 'appArrivals'>): InboxCandidate[] {
   // And the apps trusted projects gained (#1141)
   return [...Object.values(state.sessions).map(toCandidate), ...proposalCandidates(pendingProposals(state)), ...appArrivalCandidates(state.appArrivals)]
@@ -87,7 +87,7 @@ export function useCounts() {
   )
 }
 
-/** Is a proposal waiting for the person's answer? The orchestrator's row asks this (#703) */
+/** Is a proposal waiting for the person's answer? The Assistant's row asks this (#703) */
 export function useHasPendingProposal(): boolean {
   return useStore((s) => s.mcpProposals.length + s.skillProposals.length > 0)
 }
@@ -146,11 +146,11 @@ export function computeInbox(state: AppState, now = Date.now()): InboxItem[] {
 }
 
 /**
- * Where "next waiting" starts from (#703): the session on screen, or on the orchestrator's screen with a proposal
+ * Where "next waiting" starts from (#703): the session on screen, or on the Assistant's screen with a proposal
  * waiting, the last proposal (its cards stand there), so the jump moves on instead of landing on the same screen.
  */
 export function currentWaitingId(state: AppState): string | null {
-  if (state.view === 'orchestrator') {
+  if (state.view === 'assistant') {
     const last = computeInbox(state).findLast((i) => i.proposal)
     if (last) return last.id
   }
@@ -167,16 +167,16 @@ export function useProjectMachine(projectId: string | null | undefined): string 
 }
 
 /**
- * What names the project of a row beside it: the project's name, "Orchestrator" for a session that has none, and nothing
+ * What names the project of a row beside it: the project's name, "Assistant" for a session that has none, and nothing
  * for a project the list does not hold (yet). The inbox, the palette and the message picker said it three ways (#428).
  */
 export function projectLabelOf(projects: Readonly<Record<string, { name: string }>>, projectId: string | null): string {
-  return (projectId ? projects[projectId]?.name : 'Orchestrator') ?? ''
+  return (projectId ? projects[projectId]?.name : 'Assistant') ?? ''
 }
 
 /**
  * The folder a session works in, which every path its conversation names is relative to (#1209): its worktree when it
- * has one, its project's folder otherwise, and null for a session with no project (the orchestrator), whose words then
+ * has one, its project's folder otherwise, and null for a session with no project (the Assistant), whose words then
  * link nowhere (`parseFileRef`). One answer for the conversation's links and the approval rows: the conversation used
  * the project's folder while the rows used the worktree, so a worktree session's link opened the main checkout's file.
  */

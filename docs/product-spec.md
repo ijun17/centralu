@@ -5,7 +5,7 @@
 - Version: v0.5 (**synced to the implementation, 2026-08-26** — M2 is done and the app is in dogfooding, so this document now describes what exists, not what is planned)
 - Written: 2026-08-15 (v0.4), realigned 2026-08-26 (v0.5)
 - Status: shipped through M2; M2.5 (dogfooding) in progress
-- Main changes v0.4 → v0.5: §2's M0 preconditions recorded as verified; FR-4 updated to the evidence-panel tab layout (History split out of the git panel); FR-9 rewritten to what shipped (limit windows, not a cost dashboard); FR-11 rewritten to the implemented orchestrator design (kind marker, central/per-project hierarchy, curated tools, crown mark); the terminal non-goal withdrawn (§1.5); grid still experimental with its two live objections (§5.4); architecture (§6) corrected to the Node-host reality; measured numbers added to §7.1; roadmap (§8) marked up to date
+- Main changes v0.4 → v0.5: §2's M0 preconditions recorded as verified; FR-4 updated to the evidence-panel tab layout (History split out of the git panel); FR-9 rewritten to what shipped (limit windows, not a cost dashboard); FR-11 rewritten to the implemented assistant design (kind marker, central/per-project hierarchy, curated tools, crown mark); the terminal non-goal withdrawn (§1.5); grid still experimental with its two live objections (§5.4); architecture (§6) corrected to the Node-host reality; measured numbers added to §7.1; roadmap (§8) marked up to date
 - Main changes v0.3 → v0.4: product philosophy written down (§1.2), approval allowed in place from the banner (jump only when context is needed), the concurrent-session warning softened to inline plus a recovery path, hide-a-session, then called archive (FR-20, retired later)·conversation search (FR-21)·card collapse policy added, inbox promoted to M1, React settled as the front end, 4 open questions closed
 
 ---
@@ -38,8 +38,8 @@ The essence of a control tower is **not showing everything, but picking out the 
 ~~It does not restrict the agent's autonomy or the user's workflow~~ — **withdrawn 2026-10-12 (#564).** The sentence
 stood between the first two of the paragraph above, and it was read as "Centralu offers tools to the person's sessions
 and does not direct them": ordinary sessions got Centralu's tools with no instructions (#320), and only the
-orchestrator was told to look at Centralu first (#512). The owner replaced it with the rule above, so ordinary
-sessions and the orchestrator now carry it as instructions ([agent-host.md](agent-host.md) §1.1; what it costs in every
+assistant was told to look at Centralu first (#512). The owner replaced it with the rule above, so ordinary
+sessions and the Assistant now carry it as instructions ([agent-host.md](agent-host.md) §1.1; what it costs in every
 request and what it changes: [tool-cost.md](tool-cost.md) §11). Recorded rather than deleted, as in §1.5.
 
 Every time a feature is added or changed, ask against this standard: does it block the person or make things visible, does it conserve human attention or waste it?
@@ -121,7 +121,7 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Project | One registered local directory. It may or may not be a git repository |
 | Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
 | Adapter | A module wrapping a specific agent tool in the common interface |
-| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct every session in the app. Exactly one, belonging to no project. A project has no directing seat of its own: the worktree manager (#69) was folded into ordinary sessions (#561 part 3), and any ordinary session starts and owns agents in its own project with `start_agent` (FR-11) |
+| Assistant session | A session with `kind: 'orchestrator'` — able to inspect and instruct every session in the app. Exactly one, belonging to no project. A project has no directing seat of its own: the worktree manager (#69) was folded into ordinary sessions (#561 part 3), and any ordinary session starts and owns agents in its own project with `start_agent` (FR-11) |
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
@@ -282,25 +282,25 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   quiet for a minute. The conversation continues through resume, and a line in it says the session moved. The
   installed versions are read every ten minutes and when the window gains focus ([agent-host.md](agent-host.md) §4.6).
 
-#### FR-11. Orchestrator sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
+#### FR-11. Assistant sessions (implemented 2026-08-25, issues #13 · #30 — this section describes what was built)
 
 - **Kind is an explicit marker**, not a null check: a session is `kind: 'orchestrator'` or a normal session. There is
-  exactly one orchestrator, and it belongs to no project — it reaches every session in the app (an `inScope` predicate
+  exactly one Assistant, and it belongs to no project — it reaches every session in the app (an `inScope` predicate
   guards every tool call).
-- The orchestrator is marked with a **crown icon** on its sidebar button (the achromatic rule holds: kind is shape,
+- The Assistant is marked with a **crown icon** on its sidebar button (the achromatic rule holds: kind is shape,
   urgency is brightness).
-- **Retired (2026-09-01): the per-project orchestrator, and with it promote/demote (`sessions.setKind`).** #13 built a
+- **Retired (2026-09-01): the per-project assistant, and with it promote/demote (`sessions.setKind`).** #13 built a
   three-tier hierarchy (central > project > session) on the reasoning that one conversation cannot hold every project's
   context. The worktree manager (#69) then arrived and took the same seat from a different direction — a session that
   directs a project's sessions — and having two of those was one concept too many: the app's own author confused them
   in dogfooding, and the promote row was never used once. What survives is the pair that earns its keep: one
-  orchestrator across everything, and a manager per project whose scope comes from a **relationship** (it has worktree
+  assistant across everything, and a manager per project whose scope comes from a **relationship** (it has worktree
   children) rather than from a menu choice. Since #561 part 3 the manager seat is gone too: any ordinary session starts
   agents in its own project with `start_agent` and owns them, and a former manager's worktree sessions became its
   children (store v48). Schema v26 clears the marker off any session that still carries it with a
   project — without that step, removing the project tier would silently *widen* those sessions to central scope.
-- The host exposes **curated tools** to orchestrator sessions (inspect sessions, read conversations, send instructions,
-  `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
+- The host exposes **curated tools** to assistant sessions (inspect sessions, read conversations, send instructions,
+  `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/assistant/approvals/
   settings/updates) — compiled in, not read from `docs/` at runtime, because runtime doc reads are an AGENTS.md-style
   injection surface one level sideways.
 - **Ordinary sessions get a light, read-only set** (#320, owner decision 2026-10-05, on by default): other
@@ -309,17 +309,17 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   its own project; from a **trusted** project it now covers every project on this computer and on the linked
   machines, so a session can find the one to talk to later. From an untrusted project it stays inside its own
   project, as `ask_project` and `attach_app` refuse there (#382): text planted in an untrusted clone must not search
-  every conversation. It reads every session but an orchestrator's (#1941): a coordinator's, an app's (its
-  builder, or an agent an app asked for) and one with no project too; an orchestrator's conversation is the
+  every conversation. It reads every session but an Assistant's (#1941): a coordinator's, an app's (its
+  builder, or an agent an app asked for) and one with no project too; an Assistant's conversation is the
   person's own talk with it. Each row names its project and
   machine, a project nobody trusted is marked "(not trusted)", and the text stays framed as someone else's. The list
   shows 40 rows and counts the rest; `project` narrows it, and the own project's sessions and hits come first. A
   linked machine that does not answer within 4 s is listed from what the hub last knew, or named under "Not
   searched", so one slow link does not hold up every session's call. Sending,
-  creating and proposing stay with the orchestrator, acting on another project goes through `ask_project` and its
+  creating and proposing stay with the Assistant, acting on another project goes through `ask_project` and its
   consent, and no role goes with it; since
   #564 (2026-10-12) one short instruction does, the rule of §1.2 worded as which tool answers which need. It
-  rides in every session on every turn, so it was measured and cut: the four candidates in the orchestrator's
+  rides in every session on every turn, so it was measured and cut: the four candidates in the Assistant's
   words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
   §1.1). It is always on (owner decision 2026-10-20): the Settings switch "Let sessions look at other sessions" is gone.
 - **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
@@ -341,15 +341,15 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   is the person's choice per project app (Settings → Apps or the app's header, off by default); using another
   project's app asks once per pair of projects (allow once, always, deny; "always" revocable in Settings). Claude has
   the tools in the same turn; a Codex session gets them from its next turn. Detail in apps.md §9.4.
-- **The permission preset is deliberately inexpressible** in the orchestrator's settings tool schema — an orchestrator
+- **The permission preset is deliberately inexpressible** in the Assistant's settings tool schema — an Assistant
   must not be able to quietly widen another session's approval back door.
 - Settings changes surface as a `settings_changed` event + toast, so the human sees
-  what the orchestrator changed the moment it changes it.
-- Orchestrator-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
+  what the Assistant changed the moment it changes it.
+- Assistant-sent instructions are marked in the target session's conversation (built 2026-08-26): a source label
   above the bubble and the agent bubble's fill and a solid edge (`surface-raised`) — no color, per the palette rule. Worker completion reports in the
-  orchestrator's own chat carry the same marker. The sticky banner prefixes the source name.
-- **Dropped (2026-08-27): the per-session "refuse orchestrator instructions" toggle.** It was written into v0.4 as the
-  other half of that safeguard sentence, never requested and never missed: the person who creates the orchestrator and
+  Assistant's own chat carry the same marker. The sticky banner prefixes the source name.
+- **Dropped (2026-08-27): the per-session "refuse assistant instructions" toggle.** It was written into v0.4 as the
+  other half of that safeguard sentence, never requested and never missed: the person who creates the Assistant and
   chooses its scope is the same person who would flip the switch, so refusing your own control tower has no situation
   behind it. Same rule the adapters follow — build it when a real instance is observed, not because a design sentence
   once paired it with something else. (Shared-operator setups would change this; that is not what this app is.)
@@ -464,33 +464,33 @@ The whole control loop must turn without a mouse. The v1 default shortcuts:
 
 #### FR-19. First-run experience (onboarding)
 
-**Orchestrator-first** (#63, 2026-08-27 — replaces the folder-first flow). The goal is habit
-formation, not efficiency: someone who never asks the orchestrator anything on first run
-will not press it later either, and questions about the app should land on the orchestrator
+**Assistant-first** (#63, 2026-08-27 — replaces the folder-first flow). The goal is habit
+formation, not efficiency: someone who never asks the Assistant anything on first run
+will not press it later either, and questions about the app should land on the Assistant
 rather than on the maintainer. Exactly two stops, no wizard:
 
 1. **Intro screen** (shown once, to a truly virgin install — no projects and no sessions):
    a one-line statement of what the app is, a prominent one-or-two-sentence explanation of
-   the orchestrator's role, and two large agent cards (Claude Code / Codex). **The cards are
+   the Assistant's role, and two large agent cards (Claude Code / Codex). **The cards are
    the tool detection display**: a ready tool is an active card; a tool that is not ready is
    dimmed and disabled with "Not connected" and the specific remedy inside (install command
-   vs. login command for a terminal tool; Antigravity's card says why it cannot be the orchestrator yet, as a refused card with no Install or Sign in; those are in the new-session dialog), plus a re-detect button.
-   Clicking a ready card stores which tool the orchestrator will run on ("you can change
+   vs. login command for a terminal tool; Antigravity's card says why it cannot be the Assistant yet, as a refused card with no Install or Sign in; those are in the new-session dialog), plus a re-detect button.
+   Clicking a ready card stores which tool the Assistant will run on ("you can change
    this later" is stated on screen) and advances. It does **not** start any process.
-2. **The normal orchestrator session view**, empty. While the conversation has 0 messages,
+2. **The normal assistant session view**, empty. While the conversation has 0 messages,
    three large action-oriented suggested questions are shown (create a project / what can
-   the orchestrator do / how to run several sessions) plus an always-available escape hatch
+   the Assistant do / how to run several sessions) plus an always-available escape hatch
    ("or just pick a folder" → native picker → session-creation dialog). Clicking a question
    **sends it immediately** — that click (or the first typed message) is what actually
-   spawns the orchestrator process (lazy spawn). The suggestions are a function of message
+   spawns the Assistant process (lazy spawn). The suggestions are a function of message
    count, not an onboarding state machine; the composer, sidebar and grid stay fully usable.
 
-The project-creation answer ends in an action: the orchestrator's `create_project` tool (#515,
+The project-creation answer ends in an action: the Assistant's `create_project` tool (#515,
 which replaced `propose_project`) raises an approval card in its own conversation with the full
 path of the new, empty folder (in `~/Centralu`, made on first use, unless another location is given). Nothing is made
 until the person chooses Create, and nothing already there is reused. The new folder can also be a
 clone of a git repository (https or ssh), made with that machine's own git and saved sign-ins.
-A folder that already exists, on this computer or a linked machine, is added with the orchestrator's
+A folder that already exists, on this computer or a linked machine, is added with the Assistant's
 `add_project` command (#1220) behind a card showing the machine, the full path and whether it is a git
 repository and its origin, or by the person through Add project in the sidebar; either way it is asked
 about for trust once. `list_machines` names the linked machines.
@@ -498,7 +498,7 @@ about for trust once. `list_machines` names the linked machines.
 #### FR-20. Hide a session (once called "archive") — **retired (2026-09-02)**
 
 The old feature that hid a session from the list, then called "archive", is gone: the flag, the RPC,
-the orchestrator's `archive_session` tool, and the `d` key. Schema v28 drops the column, so nothing
+the Assistant's `archive_session` tool, and the `d` key. Schema v28 drops the column, so nothing
 is hidden any more. It is a different thing from the session archive of FR-22, which is the
 retired idea rebuilt with the way out it lacked.
 
@@ -539,7 +539,7 @@ delete one for good; and the archive is emptied by nothing but the person.
 Archiving a session (the sidebar's **Archive session…**) moves it to the session archive. A conversation leaves this machine only when the person
 deletes it for good in **Settings → Archive**, one at a time (**Delete for good**) or all at once (**Delete all archived sessions…**). The reason is the
 owner's: conversations are important data, and one click in the delete dialog used to destroy one
-with no way back. The archive was called the trash until #1404, when an orchestrator read "empty the trash"
+with no way back. The archive was called the trash until #1404, when an Assistant read "empty the trash"
 as the operating system's Recycle Bin and permanently deleted 108 sessions; the protocol methods (`trash.*`), the `sessions.trash` column and the `Trashed*` types keep the old word because the protocol only grows. Archiving a session from the window asks first, every time and also for an idle session (owner, 2026-10-26, #1589; #1512 had archived an idle one at once): the dialog offers the worktree choice and the "Delete the conversation file too, when deleted for good" box, ticked by default, and names what the host says the archive drops and Undo does not bring back (a report owed or awaited, a wait or a card on it, an unfinished mail thread) before it moves such a session; the toast after archiving reads "Archived <name>" with an **Undo** that restores it. Undo also puts back the unsent draft and the session's place in the project grids, not its scroll position. Archiving a session's subagent steps works the same way, and so does restoring an app version (Undo restores the version that was current). The same archive holds the kept records of app-agent sessions and archived subagent steps (below).
 
 - **What goes to the archive** is everything deleting used to destroy: the session row, its messages,
@@ -558,7 +558,7 @@ as the operating system's Recycle Bin and permanently deleted 108 sessions; the 
     drops the record), and Claude files a conversation by its working directory, so a moved worktree
     would lose the restored session its own history too.
 - **Out of reach while archived**: the sidebar, inbox, palette, grid, project screen (§5.5), conversation search (FR-21), the
-  orchestrator's `list_sessions` / `recall` / `read_session`, the apps' `host_data` `sessions.list`,
+  Assistant's `list_sessions` / `recall` / `read_session`, the apps' `host_data` `sessions.list`,
   and the approval rules list in Settings. Every store query that reads sessions has to say what it
   does about the archive; a host test fails on one that does not.
 - **The way back**, in Settings → Archive: each session with its name, project, when it was archived,
@@ -574,7 +574,7 @@ as the operating system's Recycle Bin and permanently deleted 108 sessions; the 
   when all archived sessions are deleted. The project's own rows (project-scope rules, usage totals, answers given
   to its apps) go with the project as before.
 - **Nobody but the person decides to delete for good.** The archive is reached through the UI's RPC, and by the
-  central orchestrator's `delete_archived` and `delete_all_archived` (#1219; `delete_trashed` and `empty_trash` until #1404), which make the same calls only after a card the person
+  Assistant's `delete_archived` and `delete_all_archived` (#1219; `delete_trashed` and `empty_trash` until #1404), which make the same calls only after a card the person
   answers, naming what goes. The agents' other tools and the apps' broker have no verb for it. An agent can put a session in the archive (a session's
   deletion of an agent it started, `agent_session` `delete`, does; a child without a worktree is stopped first), never take one out of it.
 - **The one deletion the host makes itself: a finished app-agent session** ([#378](https://github.com/ijun17/centralu/issues/378)).
@@ -631,16 +631,16 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 └────────────────┴─────────────────────────────────────────────────┘
 ```
 
-- Sidebar: the project/session tree, each session's mark in one of four looks (waiting, stopped, answering, idle; the state's table above, #736) with the crown for the orchestrator, unread dot, branch and change-count summary. Collapsible.
+- Sidebar: the project/session tree, each session's mark in one of four looks (waiting, stopped, answering, idle; the state's table above, #736) with the crown for the Assistant, unread dot, branch and change-count summary. Collapsible.
   - **Which project is open** (2026-10-01). A thin divider separates each project's group — its name row, its
     sessions and its apps — from the next. While the focus view shows a project's screen (§5.5) or one of its
-    sessions, or the app view shows one of its apps (2026-10-03), that project's whole group is tinted with the surface-hover of the selected Grid and Orchestrator
+    sessions, or the app view shows one of its apps (2026-10-03), that project's whole group is tinted with the surface-hover of the selected Grid and Assistant
     buttons, lighter, and the open row inside it keeps a stronger mark of its own (the ink-muted bar): the name row for
     the project screen, the session's row for a session, the app's row for an app. A row mark alone says "this row"; the tint says whose, and
-    it is the only mark a folded project (#205) has room for. The grid, the orchestrator, a session with no
+    it is the only mark a folded project (#205) has room for. The grid, the Assistant, a session with no
     project and an app in the user folder tint nothing — none of them is a project. Both layers are colour only, so selecting moves no row.
   - **A folded project opens under the pointer** (owner, 2026-10-26, [#1578](https://github.com/ijun17/centralu/issues/1578)). Resting the mouse pointer 0.1 s anywhere on a folded project's name row (the empty space beside the name included; [#1605](https://github.com/ijun17/centralu/issues/1605)) shows its rows; passing over it does nothing, so moving down the list moves no row. Leaving the project's whole block (its name and its rows) folds it again. This is a transient state on top of the saved fold and never written to it: a project the person unfolded with the arrow stays unfolded whatever the pointer does, and pressing the arrow or the name of a hover-expanded project makes it stay (the saved fold then opens). Moving into its session rows, or opening one, leaves it open. Keyboard focus does not trigger it, touch has no hover, and an open menu, a rename or a drag holds the project as it is until it ends. Nothing is drawn for it: the arrow and its label still speak the saved fold.
-  - **The orchestrator's children fold under its button and open under the pointer** (owner, 2026-10-26, [#1591](https://github.com/ijun17/centralu/issues/1591)). The sessions the orchestrator started with `start_agent` (and the "Started by an earlier orchestrator" group) are not drawn at rest. Resting the mouse pointer 0.1 s on the Orchestrator button shows them, by the rule and timing of a folded project's name (#1578); passing over does nothing, and leaving the whole block (the button and its list) folds them again. Nothing saved: clicking the button only opens the orchestrator screen and pins nothing. While one of the children is the open session the list stays shown, so that session's row does not vanish. Keyboard focus does not open it, touch has no hover, and an open row menu, the archive dialog or a drag from a row holds the list until it ends. For now nothing on the folded button says how many children there are: no count and no mark. A child waiting on an approval or in error still shows in the inbox.
+  - **The Assistant's children fold under its button and open under the pointer** (owner, 2026-10-26, [#1591](https://github.com/ijun17/centralu/issues/1591)). The sessions the Assistant started with `start_agent` (and the "Started by an earlier assistant" group) are not drawn at rest. Resting the mouse pointer 0.1 s on the Assistant button shows them, by the rule and timing of a folded project's name (#1578); passing over does nothing, and leaving the whole block (the button and its list) folds them again. Nothing saved: clicking the button only opens the Assistant screen and pins nothing. While one of the children is the open session the list stays shown, so that session's row does not vanish. Keyboard focus does not open it, touch has no hover, and an open row menu, the archive dialog or a drag from a row holds the list until it ends. For now nothing on the folded button says how many children there are: no count and no mark. A child waiting on an approval or in error still shows in the inbox.
 - Focus view: one session at full width. Bottom tabs switch to the file tree/git/viewer — at full width each tab is actually a usable size.
   - **Background work** ([#290](https://github.com/ijun17/centralu/issues/290)). When the agent runs tasks behind the
     turn — subagents, backgrounded shells, MCP tasks — the session header counts the running ones ("2 background";
@@ -694,7 +694,7 @@ Of the three, **1 and 2 still hold as they were.** They are kept here as live re
 - **3** — still true. What satisfies FR-1 is the sidebar; the grid is **another way of looking**, laid on top of it.
 
 So the mark goes not inside the screen but on **the sidebar's Grid button** (the same prescription as
-#1's orchestrator: ink-faint text + a dashed border, using neither colour nor brightness). The reason differs, though — #1 was
+#1's assistant: ink-faint text + a dashed border, using neither colour nor brightness). The reason differs, though — #1 was
 trying to stop you pressing without knowing, but the grid is free to press and reversible. What is costly is the
 time spent inside it, and the sidebar is never covered while the grid is open, so a single mark covers both **before pressing
 and throughout**.
@@ -743,7 +743,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | **Start empty; add only the panels the person chooses** | A project may contain many sessions and apps, but the screen should show only what the person puts there, as the global grid does (owner, 2026-10-13, #604). Creating a session does not add a panel. |
 | × **removes** a panel from the list; the session keeps running, and an app view closes with teardown first | This removes a way of looking, not the session or app. There is no hidden set or show-again header; the sidebar remains the place to add a panel. |
 | **Drag this project's sidebar sessions and apps onto the screen** | An absent panel is added where it lands (before or after the target, or at the end on padding); a visible one moves there and stays put on padding. This is the grid's existing gesture. |
-| **Only this project's**: another project's session or app, and the orchestrator, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
+| **Only this project's**: another project's session or app, and the Assistant, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
 | Remember the **explicit ordered `panels` list per project across restarts**, in the workspace snapshot beside the sidebar fold | Availability filters drawing, not saved membership. Reordering preserves unavailable ids in their saved slots; adding appends one id, and removing takes only the chosen id off the list. Explicit session deletion removes its membership. Project apps have no explicit removal event, so catalog omission never removes their panels. Deleting a project drops its entry. |
 | A session in the session archive (FR-22) is never a visible panel | Availability filters drawing; an explicit `session_deleted` event also removes and persists its membership. Restoring that session does not add its panel again. |
 | **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first. While anything is dragged, the panel covers its view with a transparent layer and the view stays in sight, as on the grid (§5.4) | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. In WebKit a drag goes into a frame whatever the frame's pointer-events say (measured in Playwright's WebKit): a row dropped on an app's view would land in the app instead of beside it, and a session's panel carried into an app's view from the side, not through its header, never reached the screen at all (#288). The cover above the frame catches both on the page; hiding the view did too, at the cost of a blank screen for the whole drag (#296). |
@@ -785,7 +785,7 @@ the host does the work, and the UI talks to the host over one WebSocket that is 
 ┌──────────────────────────────┴────────────────────────────────────────┐
 │                      Node sidecar (Agent Host)                        │
 │  · ClaudeAdapter (Claude Agent SDK)   · CodexAdapter (app-server RPC) │
-│  · common event normalisation         · orchestrator tools (FR-11)    │
+│  · common event normalisation         · Centralu tools (FR-11)    │
 │  · git CLI wrapper (FR-4)             · file tree IO + dir watchers   │
 │  · SQLite (~/.centralu/store.db — sessions, messages, workspace)      │
 └──────┬──────────────────────────┬─────────────────────────────────────┘
@@ -818,9 +818,9 @@ interface AgentAdapter {
 ### 6.3 Data model (SQLite)
 
 - `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
-- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the session archive (FR-22, v39), and every listing filters on it
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single assistant carries (FR-11). `deleted_at` is set while the session is in the session archive (FR-22, v39), and every listing filters on it
 - `messages(session_id, seq, role, kind, payload, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. It closes at a recorded event, at the end of a turn, at a switch between answer and reasoning, and at a chunk that names a different message than the open row (`messageId`, #212: codex can say two things in a row with nothing recorded between them). Reads merge legacy per-delta rows, so pre-migration data behaves identically. A tool call is kept whole (#221, v40): its `summary` (the card) plus the raw `input` and the whole `output`, which only the store keeps — readers get the card unless they ask for the record by name, and the index holds only `text` and `reasoning` rows (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). Rows written before v40 have the card alone.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the orchestrator's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the session archive keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled. `trashed_at` (v58, #418) is set while a step is in the archive without its session: its card no longer reads it, and the archive's purge of those steps deletes it.
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts, trashed_at)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the Assistant's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the session archive keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled. `trashed_at` (v58, #418) is set while a step is in the archive without its session: its card no longer reads it, and the archive's purge of those steps deletes it.
 - `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it is archived; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
 - `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it. Dropping it is a later, breaking step
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
@@ -866,9 +866,9 @@ ring, and the spin settings left with the spinner. The lesson is recorded here b
 
 **Status 2026-08-26: M0 ✓ · M1 ✓ · M1.5 ✓ · M2 ✓ — M2.5 (dogfooding) is where we are.** The milestone
 contents below are kept as written (they record what was decided, and against what); ✓ marks completion.
-Shipped during M2.5 so far, driven by real use: the orchestrator redesign (FR-11 — #13, #30), codex verbosity
+Shipped during M2.5 so far, driven by real use: the Assistant redesign (FR-11 — #13, #30), codex verbosity
 (#54), external file-tree changes (#34), History as its own tab (FR-4), the 5-step text scale, the sticky
-user-message banner, and the standing-render fix measured in §7.1. Of the original M3 list, the orchestrator
+user-message banner, and the standing-render fix measured in §7.1. Of the original M3 list, the Assistant
 and the worktree option are done; the weekly cost dashboard remains open (FR-9).
 
 **2026-09-25: M4 (apps) is under way beside M2.5** — see M4 below.
@@ -919,7 +919,7 @@ This is the one point where a human judges (decided 2026-08-15, see plans/m1.5-p
 ### M3 — intelligence
 
 - Weekly usage **cost** dashboard (FR-9 — the limit-window view shipped earlier; the cost view is what remains)
-- ~~Orchestrator session~~ (completed 2026-08-25 during M2.5, redesigned — see FR-11)
+- ~~Assistant session~~ (completed 2026-08-25 during M2.5, redesigned — see FR-11)
 - ~~Worktree option~~ (completed 2026-08-19 — FR-2's lower-priority option), per-project default presets, ~~performance tuning~~ (§7.1 measured 2026-08-26)
 
 ### M4 (in progress) — apps: the place a tool is built is the place it is used (detail in [plans/apps-plan.md](plans/apps-plan.md))
@@ -954,9 +954,9 @@ Out: the team server (permissions, distribution, central run records — the pai
 up by themselves (timers, watchers — the broker refuses a call that no run started); also a process sandbox for app servers,
 and handing the builder a capture of the view.
 
-The built-in control app (the rail on the orchestrator screen, with its tasks and their foremen, #80/#81) was not moved to
+The built-in control app (the rail on the Assistant screen, with its tasks and their foremen, #80/#81) was not moved to
 the new format; it was removed with the compiled app framework under it ([#372](https://github.com/ijun17/centralu/pull/372), decided in [#97](https://github.com/ijun17/centralu/issues/97),
-owner decision 2026-10-05: the rail was rarely looked at and sessions are run from the grid; a view of the orchestrator's
+owner decision 2026-10-05: the rail was rarely looked at and sessions are run from the grid; a view of the Assistant's
 sessions, if one is wanted, is built as an external app). The inbox (FR-15) stays in the top bar.
 
 ---
@@ -970,7 +970,7 @@ sessions, if one is wanted, is built as an external app). The inbox (FR-15) stay
 | The SDK may not give enough context/usage detail | FR-14 accuracy | Demote to 'estimate' via capability + say so in the tooltip (no ≈ on the figure, #1572), with log parsing as backup |
 | File conflicts between concurrent sessions in the same directory | **Data loss** | An explicit warning dialog at creation time + a same-file-modification detection badge (FR-2), worktree option later |
 | Situations where resume is impossible (tool update, lost logs) | FR-10 degraded | Design the "view the record + new session" fallback as a first-class path |
-| The orchestrator running away (excessive instructions) | Cost and confusion | Instructions made visible (source label, built) + a `create_session` proposal card + respecting the approval preset. Per-session refusal was dropped — see FR-11 |
+| The Assistant running away (excessive instructions) | Cost and confusion | Instructions made visible (source label, built) + a `create_session` proposal card + respecting the approval preset. Per-session refusal was dropped — see FR-11 |
 
 ---
 
@@ -984,7 +984,7 @@ sessions, if one is wanted, is built as an external app). The inbox (FR-15) stay
 - Weekly usage data source → **stay with log parsing** (confirmed that the SDK only gives per-turn usage for its own sessions, with no weekly aggregation or plan limit API — see FR-9).
 
 - Front end → **React**. Idle energy is decided by the render policy (§7.1), so framework lightness is not the deciding factor; ecosystem and agent-driven-development friendliness take priority.
-- Orchestrator `create_session` → **proposal card + human confirmation** (the three inspect/read/send tools are automatic).
+- Assistant `create_session` → **proposal card + human confirmation** (the three inspect/read/send tools are automatic).
 - "Always allow" rules → **patterns allowed + a match preview at registration + rule management in settings**. Make the consequences visible instead of limiting expressiveness.
 - `waiting_input` notification → **silent by default (badge only)**; the "all done" notification was retired on 2026-10-20 (#1429).
 

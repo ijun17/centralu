@@ -24,7 +24,7 @@ export function projectScreenOf(
  * The project the focus lane is showing — its screen, one of its sessions or one of its apps — or null. The sidebar tints that
  * project's group, so the person can see which project they are in as well as which row.
  *
- * Only the focus lane counts: the grid and the orchestrator are views of their own, lit by their own buttons, and a
+ * Only the focus lane counts: the grid and the Assistant are views of their own, lit by their own buttons, and a
  * tinted project beside them would be a second answer to "what am I looking at".
  *
  * A focused session answers with **its own** project, not `focusedProjectId`. Opening a session that has no project
@@ -202,8 +202,8 @@ function screenUnder(
   switch (s.view) {
     case 'grid':
       return { kind: 'grid' }
-    case 'orchestrator':
-      return { kind: 'orchestrator' }
+    case 'assistant':
+      return { kind: 'assistant' }
     case 'app':
       return s.focusedApp
         ? {

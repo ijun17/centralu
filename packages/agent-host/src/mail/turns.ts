@@ -43,7 +43,7 @@ export type TurnNow = TurnRead & { starter: string | null; asker: string | null;
 type LastTurn = {
   seq: number
   startedAt: number
-  /** The turn's work message (a task, or the orchestrator's request) */
+  /** The turn's work message (a task, or the Assistant's request) */
   messageId: string | null
 }
 

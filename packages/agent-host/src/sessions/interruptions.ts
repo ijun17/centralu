@@ -64,7 +64,7 @@ export function isNetworkFailure(message: string): boolean {
  *   running turn (`endedTurn`)
  *   any other error, a finished turn           cleared: what shows is the error itself, or nothing to tell
  *   an interrupt nobody here asked for         interrupted
- *   a Stop of ours                             cleared: the person or the orchestrator knows
+ *   a Stop of ours                             cleared: the person or the Assistant knows
  */
 export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: boolean): Interruption | null | undefined {
   switch (e.type) {
@@ -114,7 +114,7 @@ export function stopOf(e: NormalizedEvent, interruption: Interruption | null | u
   }
 }
 
-/** One line for an orchestrator's list and agent_session (#698), in the words the model reads */
+/** One line for an Assistant's list and agent_session (#698), in the words the model reads */
 export function interruptionWords(i: Interruption): string {
   switch (i.reason) {
     case 'network':

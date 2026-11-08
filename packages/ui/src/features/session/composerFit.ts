@@ -90,7 +90,7 @@ export function fitHeight(el: HTMLTextAreaElement): number | null {
 export const COMPOSER_MAX_H = 160
 
 /**
- * Fits a composer's text box to its value. The session's composer and the one before the orchestrator exists both
+ * Fits a composer's text box to its value. The session's composer and the one before the Assistant exists both
  * call it, so a box that grows with its text grows the same way in both (#1143 U17).
  */
 export function fitComposerHeight(el: HTMLTextAreaElement): void {

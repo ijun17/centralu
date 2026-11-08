@@ -19,7 +19,7 @@
 
 /**
  * A name starting with this prefix belongs to Centralu itself — the name of the in-process
- * orchestrator server. If an approved server took this name, it would replace the built-in
+ * assistant server. If an approved server took this name, it would replace the built-in
  * server entirely (measured in #93).
  */
 export const RESERVED_NAME_PREFIX = 'centralu'

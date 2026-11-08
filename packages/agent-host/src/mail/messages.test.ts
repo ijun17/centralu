@@ -128,7 +128,7 @@ describe('the guards', () => {
     expect(refusedFor(() => w.send(A, { replyTo: t.id, text: 'reply 32' }))).toBe('NOT REFUSED')
   })
 
-  it('a request to the orchestrator has no one-open rule; the sixth an hour from one group is refused ask_rate; an answer to its needsReply message is no request', () => {
+  it('a request to the Assistant has no one-open rule; the sixth an hour from one group is refused ask_rate; an answer to its needsReply message is no request', () => {
     const w = world()
     // Three from A and two from B (one project, one group): none waits for the first to be answered
     for (let i = 1; i <= 3; i++) w.send(A, { to: [ORC], text: `A asks ${i}` })
@@ -137,7 +137,7 @@ describe('the guards', () => {
     expect(refusedFor(() => w.send(B, { to: [ORC], text: 'B asks 3' }))).toBe('ask_rate')
     // Another project is another group
     expect(refusedFor(() => w.send(C, { to: [ORC], text: 'C asks' }))).toBe('NOT REFUSED')
-    // The orchestrator asks B something; B's answer is no request and is not counted or refused
+    // The Assistant asks B something; B's answer is no request and is not counted or refused
     const q = w.send(ORC, { to: [B], text: 'which?' }).message
     expect(refusedFor(() => w.send(B, { replyTo: q.id, text: 'this one' }))).toBe('NOT REFUSED')
     expect(w.records.requestsSince([A, B], ORC, NOW)).toBe(5)
@@ -146,13 +146,13 @@ describe('the guards', () => {
     expect(refusedFor(() => w.send(B, { to: [ORC], text: 'B asks 3' }))).toBe('NOT REFUSED')
   })
 
-  it('a session writes to the orchestrator only while its tool can put a request’s steps to the person; an answer to the orchestrator is no request', () => {
+  it('a session writes to the Assistant only while its tool can put a request’s steps to the person; an answer to the Assistant is no request', () => {
     const w = world()
     const q = w.send(ORC, { to: [B], text: 'which?' }).message
     w.state.asks = false
     expect(refusedFor(() => w.send(B, { to: [ORC], text: 'may I?' }))).toBe('orchestrator_asks')
     expect(refusedFor(() => w.send(B, { replyTo: q.id, text: 'this one' }))).toBe('NOT REFUSED')
-    // The orchestrator itself writes to whomever it likes
+    // The Assistant itself writes to whomever it likes
     expect(refusedFor(() => w.send(ORC, { to: [B], text: 'carry on' }))).toBe('NOT REFUSED')
   })
 })
@@ -186,7 +186,7 @@ describe('done', () => {
 })
 
 describe('the one hold (D12)', () => {
-  it('an untrusted project’s session to another project’s session and to the orchestrator is held policy; to its own project and to the person it is not', () => {
+  it('an untrusted project’s session to another project’s session and to the Assistant is held policy; to its own project and to the person it is not', () => {
     const w = world()
     const m = w.send(X, { to: [C, ORC, Y, PERSON, A], text: 'out and in' })
     expect(m.held.map((h) => [h.recipient, h.why])).toEqual([[C, 'policy'], [ORC, 'policy'], [A, 'policy']])
@@ -286,7 +286,7 @@ describe('the one hold (D12)', () => {
     const w = world()
     const alone = w.send(X, { to: [C], text: 'to c only' }).message
     const shared = w.send(Y, { to: [C, X], text: 'to c and a friend' }).message
-    const another = w.send(Y, { to: [ORC], text: 'to the orchestrator' }).message
+    const another = w.send(Y, { to: [ORC], text: 'to the Assistant' }).message
     w.mail.refused('x', { tool: 'start_agent', target: 'session c', firstLine: 'build', projectId: 'px' })
     w.send(A, { to: [B], text: 'unrelated' })
 
@@ -397,7 +397,7 @@ describe('cause and clarifications (D9, §9.7)', () => {
     w.startTurn(W, t.id)
     const q = w.send(W, { to: [ORC], text: 'which branch?' })
     expect(q.message).toMatchObject({ kind: 'message', needsReply: true, causeId: t.id, depth: 0, facts: { clarifies: t.id } })
-    // It is not a request: the orchestrator's relation word, the ask count and the work pick all leave it out
+    // It is not a request: the Assistant's relation word, the ask count and the work pick all leave it out
     expect(w.records.requestsSince([W], ORC, NOW)).toBe(0)
     for (let i = 0; i < 3; i++) w.send(W, { to: [ORC], text: `clarify ${i}` })
     expect(w.records.requestsSince([W], ORC, NOW)).toBe(0)
@@ -524,7 +524,7 @@ describe('reports (§9.3)', () => {
     expect(w.mail.report(t.id, { outcome: 'finished', body: 'x' })).toEqual({ settledAlready: true })
   })
 
-  it('a request to the orchestrator that a turn carried is settled reported when that turn ends (§7.6)', () => {
+  it('a request to the Assistant that a turn carried is settled reported when that turn ends (§7.6)', () => {
     const w = world()
     const mine = w.send(B, { to: [ORC], text: 'please look' }).message
     const mine2 = w.send(B, { to: [ORC], text: 'and this' }).message
@@ -537,7 +537,7 @@ describe('reports (§9.3)', () => {
     expect(w.rowOf(mine.id, ORC)).toMatchObject({ settled: 'reported' })
     expect(w.rowOf(mine2.id, ORC)).toMatchObject({ settled: 'reported' })
     expect(w.rowOf(theirs.id, ORC).settled).toBeNull()
-    // An answer to the orchestrator's own question is no request, and an earlier turn's request is not this turn's
+    // An answer to the Assistant's own question is no request, and an earlier turn's request is not this turn's
     expect(w.rowOf(answer.id, ORC).settled).toBeNull()
     expect(w.mail.requestTurnEnded(ORC, B, 4)).toBe(0)
   })
@@ -693,7 +693,7 @@ describe('what the deep review of #1899 found', () => {
     expect(w.rowOf(answer.message.id, W).settled).toBeNull()
   })
 
-  it('read with no id leaves an undelivered request to the orchestrator unread, also in its asker’s turn; once delivered it is read there', () => {
+  it('read with no id leaves an undelivered request to the Assistant unread, also in its asker’s turn; once delivered it is read there', () => {
     const w = world()
     const request = w.send(B, { to: [ORC], text: 'please look' }).message
     w.startTurn(ORC, request.id, { messageId: request.id })
@@ -703,7 +703,7 @@ describe('what the deep review of #1899 found', () => {
     expect(w.mail.read(ORC).items.map((i) => i.message.body)).toEqual(['please look'])
   })
 
-  it('a worker’s answer to an orchestrator message that needed no reply is a request, so it is not quiet and wakes the orchestrator as work', () => {
+  it('a worker’s answer to an Assistant message that needed no reply is a request, so it is not quiet and wakes the Assistant as work', () => {
     const w = world()
     const note = w.send(ORC, { to: [W], text: 'carry on', needsReply: false }).message
     const answer = w.send(W, { replyTo: note.id, text: 'ok' })

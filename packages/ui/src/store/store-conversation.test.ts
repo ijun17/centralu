@@ -848,12 +848,12 @@ describe('a failed send returns what was written (#180)', () => {
     expect(useStore.getState().toast).toBe('That question is already gone')
   })
 
-  it('never claims the first question went out if the orchestrator failed to be born', async () => {
+  it('never claims the first question went out if the Assistant failed to be born', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
-    vi.spyOn(mock.agents, 'orchestrator').mockRejectedValueOnce(new Error('no tool'))
-    expect(await useStore.getState().askOrchestrator('first question')).toBe(false)
-    expect(useStore.getState().toast).toBe('Could not start the orchestrator: no tool')
+    vi.spyOn(mock.agents, 'assistant').mockRejectedValueOnce(new Error('no tool'))
+    expect(await useStore.getState().askAssistant('first question')).toBe(false)
+    expect(useStore.getState().toast).toBe('Could not start the Assistant: no tool')
   })
 
   it('returns a failure to the calling window if the worktree trunk could not be set', async () => {

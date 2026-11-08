@@ -55,7 +55,7 @@ function show(st: AppState, screen: Screen): void {
       st.openApp(screen.projectId, screen.appId, { machine: screen.machine })
       break
     case 'grid':
-    case 'orchestrator':
+    case 'assistant':
       st.setView(screen.kind)
       break
   }
@@ -80,7 +80,7 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
       focusedSessionId: null,
       // The project screen exists only in the focus lane — what the person picked must be shown (the same
       // rule as `focusSession`). This combination actually arose once onboarding started opening the
-      // orchestrator view first (#63) (caught by e2e).
+      // assistant view first (#63) (caught by e2e).
       view: 'focus',
       viewerPath: null,
       viewerProjectId: null,
@@ -94,7 +94,7 @@ export const navigationActions = (set: StoreSet, get: StoreGet): NavigationActio
     /*
      * Picking a screen = having passed the intro (#63).
      *
-     * A person who clicks the grid or the orchestrator from the sidebar beside the intro screen is
+     * A person who clicks the grid or the Assistant from the sidebar beside the intro screen is
      * saying "enough explaining, I want to use the app." If that click did not change the screen, the
      * button would look broken; hiding the button instead would force reading the intro — squarely
      * against this onboarding's premise of never forcing a conversation.

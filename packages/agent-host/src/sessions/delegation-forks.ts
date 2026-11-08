@@ -41,7 +41,7 @@ export class DelegationForks {
     const deep = agentDepthRefusal(this.host, callerId, 'start a sub-session')
     // Worded for "No fork of …: <why>."
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
-    // A session with no project (the orchestrator's child, #853) has no repository to fork from (#994 review)
+    // A session with no project (the Assistant's child, #853) has no repository to fork from (#994 review)
     if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
     const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)
     if (!project) return 'its project is no longer registered'
@@ -121,7 +121,7 @@ export class DelegationForks {
           ...(target.effort ? { effort: target.effort } : {}),
           // Never above either preset as they are when it starts, nor above the one the card showed
           permissionPreset: lowestPreset(preset, this.host.meta.get(callerId)?.permissionPreset ?? 'safe', this.host.meta.get(target.id)?.permissionPreset ?? 'safe'),
-          // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
+          // A same-project ordinary session owns it as its agent; the Assistant, which has no project, through the delegation alone
           ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
           forkedFrom: target.id,
           resumeExternalId: forked,

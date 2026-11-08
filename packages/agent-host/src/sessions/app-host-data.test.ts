@@ -47,19 +47,19 @@ describe('sessions.list', () => {
     expect(JSON.stringify(r.structured)).not.toContain('BLUEBIRD')
   })
 
-  it('a user-folder app receives every session — a user-folder app belongs to the orchestrator', async () => {
+  it('a user-folder app receives every session — a user-folder app belongs to the Assistant', async () => {
     w.plant('user', 'timer', { host: ['sessions.list'] })
     w.rt.refresh()
-    const orchestrator = await w.mgr.orchestrator()
+    const assistant = await w.mgr.assistant()
     const worker = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
-    const r = await read(orchestrator, 'app-timer', 'sessions.list')
+    const r = await read(assistant, 'app-timer', 'sessions.list')
     const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()
-    expect(ids).toEqual([orchestrator.id, worker.id].sort())
+    expect(ids).toEqual([assistant.id, worker.id].sort())
   })
 })
 
 describe('sessions.list for a project that is an app (#1141)', () => {
-  it("a root app receives its project's sessions only, as the permission card says, also when the orchestrator calls it", async () => {
+  it("a root app receives its project's sessions only, as the permission card says, also when the Assistant calls it", async () => {
     plantApp(w.root, 'repo', {
       id: 'board',
       server: { command: process.execPath, args: [fileURLToPath(new URL('../apps/external/test-fixtures/app.mjs', import.meta.url)), '--mode', 'mediation'] },
@@ -69,14 +69,14 @@ describe('sessions.list for a project that is an app (#1141)', () => {
     const other = join(w.root, 'other')
     execFileSync('git', ['init', '-q', '-b', 'main', other])
     const otherId = ((await w.rpc('projects.add', { path: other })) as { id: string }).id
-    const orchestrator = await w.mgr.orchestrator()
+    const assistant = await w.mgr.assistant()
     const mine = (await w.rpc('agents.createSession', { projectId: w.projectId, cwd: w.repo, tool: 'claude' })) as SessionInfo
     const elsewhere = (await w.rpc('agents.createSession', { projectId: otherId, cwd: other, tool: 'claude' })) as SessionInfo
-    // The orchestrator attaches a root app when it needs one (#1205): through its commands, as its agent does
-    const attached = await w.mgr.runOrchestratorTool(orchestrator.id, 'centralu_run', { command: 'attach_app', args: { app: 'board' } })
+    // The Assistant attaches a root app when it needs one (#1205): through its commands, as its agent does
+    const attached = await w.mgr.runCentraluTool(assistant.id, 'centralu_run', { command: 'attach_app', args: { app: 'board' } })
     expect(attached.text).toContain('as the app-board server')
     expect(attached.isError).toBeFalsy()
-    const r = await read(orchestrator, 'app-board', 'sessions.list')
+    const r = await read(assistant, 'app-board', 'sessions.list')
     expect(r.isError).toBe(false)
     const ids = (r.structured as { sessions: { id: string }[] }).sessions.map((s) => s.id).sort()
     expect(ids).toEqual([mine.id])
@@ -102,8 +102,8 @@ describe('git.status', () => {
   it('a user-folder app has no project to pick — refused, with a reason', async () => {
     w.plant('user', 'timer', { host: ['git.status'] })
     w.rt.refresh()
-    const orchestrator = await w.mgr.orchestrator()
-    expect(await read(orchestrator, 'app-timer', 'git.status')).toMatchObject({
+    const assistant = await w.mgr.assistant()
+    expect(await read(assistant, 'app-timer', 'git.status')).toMatchObject({
       isError: true,
       text: 'host_data failed: git.status needs a project — this app lives in your user folder, so there is no project to read',
     })

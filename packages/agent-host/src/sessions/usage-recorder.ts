@@ -21,7 +21,7 @@ const ACCOUNT_MS = 10 * 60_000
 
 export type RequestSource = {
   sessionId: string
-  /** null for the orchestrator */
+  /** null for the Assistant */
   projectId: string | null
   tool: ToolName
   model: string | undefined

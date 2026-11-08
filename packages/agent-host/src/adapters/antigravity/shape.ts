@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import { asObj } from '../../json-value.js'
 import type { RequestPermission, ToolCallFields } from '../acp/wire.js'
 
@@ -70,7 +70,7 @@ export function isAgyQuestion(req: Pick<RequestPermission, 'toolCall'>): boolean
 export function agyCentraluTool(call: ToolCallFields): string | null {
   if (call.kind !== 'other') return null
   const mcp = asObj(asObj(Reflect.get(call, '_meta')).mcp)
-  return mcp.server === ORCHESTRATOR_MCP_NAME && typeof mcp.tool === 'string' && mcp.tool ? mcp.tool : null
+  return mcp.server === CENTRALU_MCP_NAME && typeof mcp.tool === 'string' && mcp.tool ? mcp.tool : null
 }
 
 /**

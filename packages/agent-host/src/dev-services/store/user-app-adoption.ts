@@ -74,7 +74,7 @@ export class UserAppAdoptionRecords {
       // The run ledger and its kept failures
       this.db.prepare(`UPDATE app_runs SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
       this.db.prepare(`UPDATE app_run_failures SET project_id = ? WHERE project_id IS NULL AND app_id = ?`).run(projectId, appId)
-      // Its sessions (its builder, the agents it started): a user-folder app's had no project; the orchestrator and coordinators are not its
+      // Its sessions (its builder, the agents it started): a user-folder app's had no project; the Assistant and coordinators are not its
       const sessions = (
         this.db
           .prepare<unknown[], { id: string }>(
@@ -129,11 +129,11 @@ export class UserAppAdoptionRecords {
         this.settings.setAppSetting(row.key, JSON.stringify(book))
       }
       /*
-       * The orchestrator was given it as a user-folder app; a root app it attaches when it needs one (#1205). One it has
+       * The Assistant was given it as a user-folder app; a root app it attaches when it needs one (#1205). One it has
        * seen keeps it attached, under the name it called it by: an attachment of its own, as attach_app writes one
        */
-      const orchestrators = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all()
-      for (const { id } of orchestrators) {
+      const assistants = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all()
+      for (const { id } of assistants) {
         const book = parseJson(this.settings.appSetting(`session_app_names:${id}`))
         const server = isObj(book) ? book[to] : undefined
         if (typeof server !== 'string' || !server.startsWith('app-')) continue

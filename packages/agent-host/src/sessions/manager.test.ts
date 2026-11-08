@@ -58,7 +58,7 @@ describe('registry defaults', () => {
     const project = (await thirdRpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
 
     expect(((await thirdRpc('projects.list', {})) as { id: string; defaultTool: string }[]).find((p) => p.id === project.id)?.defaultTool).toBe('fixture-agent')
-    await thirdManager.orchestrator()
+    await thirdManager.assistant()
     expect(third.lastOpts?.sessionId).toBeTruthy()
   })
 })
@@ -228,7 +228,7 @@ describe('deleting a session', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as SessionInfo
     await rpc('agents.send', { sessionId: s.id, text: 'the codename is BLUEBIRD' })
     await rpc('grid.set', { panels: [{ kind: 'session', sessionId: s.id }] })
-    const orch = await mgr.orchestrator()
+    const orch = await mgr.assistant()
     // The reply may still be streaming when the session is deleted; it is written out then, so its time moves
     const said = (rows: unknown) => (rows as StoredMessage[]).map(({ seq, role, kind, payload }) => ({ seq, role, kind, payload }))
     const before = said(await rpc('messages.load', { sessionId: s.id, limit: 100 }))
@@ -237,10 +237,10 @@ describe('deleting a session', () => {
       sessions: ((await rpc('sessions.list', {})) as SessionInfo[]).some((x) => x.id === s.id),
       grid: ((await rpc('grid.get', { tagged: true })) as GridPanel[]).some((x) => x.kind === 'session' && x.sessionId === s.id),
       search: ((await rpc('messages.search', { query: 'BLUEBIRD' })) as unknown[]).length > 0,
-      listTool: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'list_sessions', {})).includes(s.id),
-      recall: JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),
+      listTool: JSON.stringify(await mgr.runCentraluTool(orch.id, 'list_sessions', {})).includes(s.id),
+      recall: JSON.stringify(await mgr.runCentraluTool(orch.id, 'recall', { query: 'BLUEBIRD' })).includes(s.id),
       // The refusal for a deleted session names it (the id's help), so the body is what must not come back
-      read: !JSON.stringify(await mgr.runOrchestratorTool(orch.id, 'read_session', { sessionId: s.id })).includes('Not a session'),
+      read: !JSON.stringify(await mgr.runCentraluTool(orch.id, 'read_session', { sessionId: s.id })).includes('Not a session'),
     })
     expect(await reach()).toEqual({ sessions: true, grid: true, search: true, listTool: true, recall: true, read: true })
 
@@ -381,10 +381,10 @@ describe('a settings change actually takes effect', () => {
   })
 
   /*
-   * #659 review: the orchestrator's settings tool on a linked machine reaches that machine's `agents.updateSettings`.
+   * #659 review: the Assistant's settings tool on a linked machine reaches that machine's `agents.updateSettings`.
    * Without its origin the machine announced the change as a person's, and the hub's window raised no toast.
    */
-  it("announces a change as the orchestrator's when the call says so, with no person flag (#659)", async () => {
+  it("announces a change as the Assistant's when the call says so, with no person flag (#659)", async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', model: 'fable' })) as { id: string }
     events.length = 0

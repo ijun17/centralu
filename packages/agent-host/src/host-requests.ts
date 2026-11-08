@@ -11,10 +11,10 @@ import { asItRuns, effectOf, namedTargets } from './host-request-targets.js'
  * Host requests (#1405): a call made with the limited credential that cannot be undone or widens what runs without
  * asking (`asks` in transport/method-rights.ts) waits for the person, as a card the window shows, and runs only when
  * they allow it. Not a session's card: the program that asked holds no session's rights, and a card in the
- * orchestrator's slot would read as the orchestrator's doing.
+ * Assistant's slot would read as the Assistant's doing.
  *
- * - **What the card names.** The trash's deletes go through the orchestrator's own trash flow (sessions/trash-flow.ts),
- *   with this card in place of the orchestrator's: the same question, naming each session and what goes with it, and the
+ * - **What the card names.** The trash's deletes go through the Assistant's own trash flow (sessions/trash-flow.ts),
+ *   with this card in place of the Assistant's: the same question, naming each session and what goes with it, and the
  *   same reading of the trash again after Allow, so nothing the card did not name is deleted (`trash.empty` deletes the
  *   rows its card listed, never what arrived while it stood). Every other method gets a card that names the method, what
  *   it acts on by name and what it loses, and its parameters as its schema parses them, quoted on one line; it runs with
@@ -179,7 +179,7 @@ export class HostRequests {
   }
 
   /**
-   * A trash delete through the orchestrator's own flow, with this card for its question. `result` makes the method's own
+   * A trash delete through the Assistant's own flow, with this card for its question. `result` makes the method's own
    * answer from how many sessions the flow purged and what it said.
    */
   private async viaTrash(

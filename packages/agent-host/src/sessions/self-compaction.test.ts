@@ -1715,7 +1715,7 @@ describe('on the session manager (#1451)', () => {
     const { rpc, mgr, adapter } = world
     const p = (await rpc('projects.add', { path: dir('compact-self-') })) as { id: string }
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: dir('compact-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
-    const tools = adapter.lastOrchestratorTools!
+    const tools = adapter.lastCentraluTools!
     const h = adapter.last!
     await mgr.inputs.send(s.id, 'hello')
     h.emitContext(150_000, 200_000)
