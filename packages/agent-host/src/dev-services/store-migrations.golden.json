@@ -268,12 +268,16 @@
   {
    "to": 67,
    "breaksOlderReaders": false
+  },
+  {
+   "to": 68,
+   "breaksOlderReaders": false
   }
  ],
- "version": 67,
- "ran": 66,
+ "version": 68,
+ "ran": 67,
  "store": {
-  "userVersion": 67,
+  "userVersion": 68,
   "master": [
    {
     "type": "index",
@@ -873,7 +877,7 @@
     "type": "table",
     "name": "sessions",
     "tbl_name": "sessions",
-    "sql": "CREATE TABLE \"sessions\" (\n              id            TEXT PRIMARY KEY,\n              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n              tool          TEXT NOT NULL,\n              external_id   TEXT,\n              name          TEXT NOT NULL,\n              auto_named    INTEGER NOT NULL DEFAULT 1,\n              state         TEXT NOT NULL DEFAULT 'idle',\n              is_orchestrator INTEGER NOT NULL DEFAULT 0,\n              last_read_seq INTEGER NOT NULL DEFAULT 0,\n              waiting_since INTEGER,\n              created_at    INTEGER NOT NULL,\n              touched_paths TEXT NOT NULL DEFAULT '[]',\n              model         TEXT,\n              effort        TEXT,\n              verbosity     TEXT,\n              permission_preset TEXT NOT NULL DEFAULT 'normal',\n              imported_from TEXT,\n              worktree_path TEXT,\n              worktree_branch TEXT,\n              sidebar_order INTEGER NOT NULL DEFAULT 0\n            , cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT, mail_args INTEGER)"
+    "sql": "CREATE TABLE \"sessions\" (\n              id            TEXT PRIMARY KEY,\n              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n              tool          TEXT NOT NULL,\n              external_id   TEXT,\n              name          TEXT NOT NULL,\n              auto_named    INTEGER NOT NULL DEFAULT 1,\n              state         TEXT NOT NULL DEFAULT 'idle',\n              is_orchestrator INTEGER NOT NULL DEFAULT 0,\n              last_read_seq INTEGER NOT NULL DEFAULT 0,\n              waiting_since INTEGER,\n              created_at    INTEGER NOT NULL,\n              touched_paths TEXT NOT NULL DEFAULT '[]',\n              model         TEXT,\n              effort        TEXT,\n              verbosity     TEXT,\n              permission_preset TEXT NOT NULL DEFAULT 'normal',\n              imported_from TEXT,\n              worktree_path TEXT,\n              worktree_branch TEXT,\n              sidebar_order INTEGER NOT NULL DEFAULT 0\n            , cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT, mail_args INTEGER, is_assistant INTEGER NOT NULL DEFAULT 0)"
    },
    {
     "type": "table",
@@ -1943,7 +1947,8 @@
      "asked_by_session_id TEXT notnull=0 default=null pk=0",
      "forked_from_session_id TEXT notnull=0 default=null pk=0",
      "interruption TEXT notnull=0 default=null pk=0",
-     "mail_args INTEGER notnull=0 default=null pk=0"
+     "mail_args INTEGER notnull=0 default=null pk=0",
+     "is_assistant INTEGER notnull=1 default=0 pk=0"
     ],
     "rows": [
      {
@@ -1982,7 +1987,8 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null
+      "mail_args": null,
+      "is_assistant": 0
      },
      {
       "id": "s1",
@@ -2020,7 +2026,8 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null
+      "mail_args": null,
+      "is_assistant": 0
      },
      {
       "id": "s2",
@@ -2058,7 +2065,8 @@
       "asked_by_session_id": null,
       "forked_from_session_id": null,
       "interruption": null,
-      "mail_args": null
+      "mail_args": null,
+      "is_assistant": 0
      }
     ]
    },
