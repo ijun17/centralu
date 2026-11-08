@@ -28,8 +28,7 @@ centralu/
 │        │                      #   src/shell/ installs the shell and starts the keeper through it (macOS)
 │        ├─ keeper/             # crate centralu-keeper-core: keeper and host supervisor, no Tauri (#440)
 │        │                      #   src/keeper/server/: 제어 소켓(start, host, windows, switch);
-│        │                      #   src/keeper/children/: 자식 서비스(child, reactor, requests, stop,
-│        │                      #   snapshot, buffer); src/keeper/accept.rs: 세 accept 루프가 함께 쓰는 것
+│        │                      #   src/keeper/accept.rs: 두 accept 루프가 함께 쓰는 것
 │        └─ shell/              # crate centralu-shell: the macOS shell that holds permissions; verifies
 │                               #   content, copies it, starts the keeper, exits. Built once per shell
 │                               #   version and pinned in packaging/shell/shell.lock (plans/thin-shell.md).
@@ -148,7 +147,7 @@ centralu/
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts (세션 보관함)
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     └─ search-index.ts  vacuum.ts   # 단계와 위의 테이블 모듈이 함께 쓴다. vacuum.ts는 밀린 VACUUM도 돌린다
-│        └─ keeper/             # 키퍼의 자식 서비스: 거기서 띄우는 에이전트와 pty, 다시 붙기 (#280)
+│        └─ keeper/             # children-client.ts: beta.48 키퍼가 아직 쥔 것을 묻는다 (lifecycle/keeper-held.ts)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts와 seed-store.mts는
 │                               #   시드한 무거운 스토어(fixtures/heavy-store.ts)로 메모리를 잰다

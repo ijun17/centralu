@@ -305,23 +305,12 @@ issuance and the front door stay with the keeper. The details are in [agent-host
 
 **The children service, from #280 step 2 to #1895 step 4.** Until #1895 step 3 the keeper spawned these children
 itself over a second user-only socket, `<data>/children.sock`, so they outlived a host that crashed, restarted or was
-swapped out, and the next host listed them and re-attached mid-turn. Since step 3 a keeper started fresh offers no
-such socket (owner decision 2026-11-03, option C), and since step 4 PR 1 the host never connects to one: its children
-client, the re-attach and the detach mode are gone ([plans/keeper-removal.md](plans/keeper-removal.md)). **The keeper's
-children service still exists in the keeper until the next PR (PR 2), but no host uses it.** A keeper that took
-children over from a holding keeper of an earlier build keeps serving them until its next update, switch or quit, and
-hands them on only while its host cannot stop for an update; a host of step 4 PR 1 or later never takes them over.
-What the service does in the keeper, until PR 2 removes it:
-
-| Decision | Why |
-|---|---|
-| Every child runs in its own session (`setsid`) | Outside the keeper's and every host's process group, so a host's exit or group kill cannot reach it. Before, claude and codex shared the host's group. |
-| The keeper owns each pty (`openpty`, `setsid`, `TIOCSCTTY`) | node-pty keeps the master in the host, so a host that went away took the screen and, with SIGHUP, the shell. |
-| A pty is drained continuously into a 256 KiB ring, replayed to the next host | A pty child cannot finish exiting while its output is unread (measured in #280: bash stuck in `?Es` for over 5 s). The ring is the same 256 KiB a terminal's scrollback keeps. |
-| An agent's stdout is buffered losslessly (up to 64 MiB, then the child waits) and handed over in whole lines | It is a protocol; a dropped byte breaks a frame. Claude was measured buffering 60 s with stdout unread. One codex `thread/resume` answer was 23 MB on one line, hence the size. A host that dies loses at most what was already in its socket; the next host starts on a line boundary. |
-| No connection closing ever signals a child, closes its stdin or closes its pty | That is what lets a host leave without its agents. The Agent SDK kills its process when its owner exits; that kill is a keeper request, and a leaving host never sends it. |
-| Exits are watched with kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` (macOS), pidfd (Linux) | They report a non-child's exit (and, on macOS, its status), which a keeper that took the children over from another keeper (§4.4) needs. |
-| One thread owns every descriptor | The child table is plain data plus raw descriptors, so a keeper handoff (§4.4) freezes it between two passes, serialises it and passes the descriptors to the next keeper over `SCM_RIGHTS`. |
+swapped out, and the next host listed them and re-attached mid-turn. Step 3 stopped offering it (owner decision
+2026-11-03, option C), step 4 PR 1 removed the host's side and PR 2 the keeper's ([plans/keeper-removal.md](plans/keeper-removal.md)):
+the keeper's `children` op answers an empty list, and a handoff that carries a child table, which only a holding keeper
+of beta.48 or older sends, is refused (§4.4). What holding them took (a session per child, the keeper owning and
+draining each pty, lossless whole-line agent streams, no closed connection ever signalling a child) is in
+[runtime-lessons.md](runtime-lessons.md) §7.
 
 **Leaving has one mode.** Every ending is a stop: sessions, terminals and commands stop with the host. The keeper
 asks for it by a line on the host's stdin, plain when it is stopping for good ("Quit completely", "Restart
@@ -342,23 +331,23 @@ keeper A (running build)                           keeper B (new build, from its
  1  starts B: centralu-keeper                     ──▶  hello
             --take-over-fd 3
  2  freezes: accepts nothing, parks every relay,
-    pauses the host's stdout, freezes the child table,
+    pauses the host's stdout,
     stops copying and removing host copies
  3  state + buffers + descriptors (SCM_RIGHTS)    ──▶  4  rebuilds everything, no I/O; proves it holds the lock
- 6  commit point, on ready: reaps, sends commit   ◀──  5  ready
+ 6  commit point, on ready: sends commit         ◀──  5  ready
     and exits without touching anything           ──▶  7  starts all I/O, adopts the host, serves;
                                                           then swaps the host, if the switch asked for it
 ```
 
 **What is passed:** `keeper.lock` (the same open file description, so the `flock` never has a gap), `keeper.sock`'s
-and `children.sock`'s listeners, the front door's listener and its token, the host's stdin and stdout, every child's
-pipes or pty master, every connection on the child socket, both sockets of every relayed front-door connection, every
-attached window's connection, and as data: every buffer with its absolute offsets, half-read requests, unsent events,
-tags, pids, exit statuses, the build records, settings, idle clocks and the last swap.
+listener, the front door's listener and its token, the host's stdin and stdout, both sockets of every relayed
+front-door connection, every attached window's connection, and as data: the host's output read but not yet handled,
+the build records, settings, idle clocks and the last swap.
 
 **What survives and what reconnects.** Nothing reconnects. The host is the same process; it never notices, since its
 pipes are the same, now held by B, and its agents, terminals and commands are its own descendants, which go with it.
-Only a keeper that still holds children of an earlier build has a child table to pass. A WebSocket through the front door, an
+A keeper of an earlier build that still holds children sends a child table as well; since step 4 PR 2 B refuses such a
+handoff before it touches a descriptor, and A rolls back and carries on with what it holds. A WebSocket through the front door, an
 app view's traffic and a Codex bridge's connection are the same TCP connections, pumped by B. An attached window keeps
 its control connection and hears B's next status on it. Connections waiting in a listen queue are accepted by B. The
 only thing turned away is a control request other than `status` that arrives in the instant of the freeze: it is
@@ -368,14 +357,14 @@ answered "try again", and the app's retry reaches B.
 |---|---|
 | B is the new build's keeper executable **inside its bundle**, the path the attaching window names (`centralu-keeper` beside its own executable, `keeper::exe`), never a copy | It is the file the person installed, signed with the bundle. A is handed nothing else: an executable of another name (a window from before #440 names its own) is refused before anything starts, and a keeper of 0.1.0-beta.11 or earlier, which starts the window's executable, meets its refusal and rolls back (§4.1, #461); `scripts/keeper-handoff-integration.mjs --old-keeper` runs that against a real 0.1.0-beta.11 executable, and the whole handoff against a real 0.1.0-beta.16 one. Replacing the bundle later does not disturb B: `tauri build` deletes the old `.app` and writes a new one (`bundle_project`, tauri-bundler 2.10), and `centralu install` copies the new bundle beside the old one with `ditto`, renames the old one aside, renames the new one in and then deletes the old one (`swapInto`, `packaging/npm/centralu/bin/swap.mjs`), so the running executable's file is unlinked, not overwritten, and keeps running (the integration script deletes and rewrites keeper A's executable under it, and A goes on serving and hands over). An in-place overwrite is not something to rely on: a probe that overwrote a running keeper's file in place saw it keep answering for the 3 s it watched, its code being resident, but any page not yet loaded would come from the new file. Nothing in the tree overwrites in place. |
 | The channel is a `socketpair` end at B's descriptor 3, not a socket file | It has no path, so no other process can connect at all (stronger than `0600`), and there is nothing to clean up. B still checks the peer's uid. |
-| A **freezes** rather than drains | A byte A read but did not deliver would be lost with A (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it read). Frozen, A reads nothing more; everything it holds is in the snapshot. A relay is stopped between two copies, the host's reader between two lines, the child table between two passes: the freeze reaches the reactor in the middle of a pass, from its command queue, and ends that pass there, before it reads a child's output or sends anything the snapshot still holds (#368: carrying on lost a line in 3 of 200 runs under load). |
+| A **freezes** rather than drains | A byte A read but did not deliver would be lost with A (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it read). Frozen, A reads nothing more; everything it holds is in the snapshot. A relay is stopped between two copies, the host's reader between two lines. |
 | The commit point is A receiving `ready` | Before it, any failure (B not starting, B failing to rebuild, B dying, a timeout) rolls A back: it kills B and thaws, and since it closed nothing (the snapshot holds duplicates) and read nothing, it carries on exactly where it stopped. After it, A never resumes. B treats a channel that closes after `ready` without `commit` as A having died: it takes over if A is gone, since it holds the only copy of everything, and exits if A is still there. "Gone" counts A's zombie and waits up to 5 s for A to finish exiting: A's channel closes as it exits, and a single `kill(pid, 0)` there read both as alive, so both keepers exited (#840 item 4). |
-| B rebuilds everything before `ready`, but starts no reader or writer until `commit` | A rolled-back A must be the only reader of every child and socket. |
+| B rebuilds everything before `ready`, but starts no reader or writer until `commit` | A rolled-back A must be the only reader of the host's output and of every socket. |
 | A stops copying and removing host copies at the freeze, after any copy or cleanup in progress | B may copy and clean `<data>/hosts/` as soon as it commits, while A is still on its way out; a cleanup A started before could otherwise remove the copy B's swap just made (#368). A rolled-back A carries on and cleans at its host's next ready line. |
 | A rollback says how B ended, when B exited | When B exits before `ready`, the channel just ends, and the read error said only "failed to fill whole buffer". A waits up to 2 s for B's exit status and reports that (exit code, or the signal that killed it); B's own explanation, if it gave one, is in the keeper log, which both write to (#368). |
-| A reaps at the commit and passes the statuses on | B is not the children's parent. kqueue `NOTE_EXIT \| NOTE_EXITSTATUS` gives a non-child's status (measured in #280), but registering on a child that is already a zombie fails with `ESRCH` (measured 2026-10-04, Darwin 27), so the statuses of children that exited during the freeze come from A. After A exits, launchd (or init) reaps. On Linux a pidfd tells B a non-child has gone; the status is read from `/proc/<pid>/stat` while the zombie lasts and is otherwise unknown (no non-parent status before `PIDFD_GET_INFO`, Linux 6.15). |
+| B watches the handed-over host by its identity | B is not the host's parent: once the host ends and its parent reaps it, its pid may be someone else's. B watches it with kqueue `NOTE_EXIT` (macOS) or a pidfd (Linux), made before A can reap it; registering on a host that is already a zombie fails with `ESRCH`, which reads as ended (#840 item 8, `os::process::ProcessWatch`). Until step 4 PR 2 A also reaped the children that exited during the freeze and passed their statuses on; no child table travels since. |
 | "Switch to this build" moves the keeper first, then the new keeper swaps the host, in one action | Moving the keeper costs nothing, so it needs no question of its own, and a full update ends with keeper, host and app on one build. Keeper first means every exchange across builds is read by the newer side: B reads A's snapshot, B supervises A's host, B drains A's host and starts its own build's host. Swapping the host first would have the old keeper drive a newer host. |
-| A failed handoff still lets the host switch run | The host switch is what the person asked for; the old keeper can do it, as in step 3 (it already did in beta.10: `move_keeper` falls through to the host swap on any rolled-back handoff). Keeper↔host traffic across builds is lines and child tags the keeper does not interpret, so an older keeper supervising a newer host is the step-3 case, not a new one. |
+| A failed handoff still lets the host switch run | The host switch is what the person asked for; the old keeper can do it, as in step 3 (it already did in beta.10: `move_keeper` falls through to the host swap on any rolled-back handoff). Keeper↔host traffic across builds is lines the keeper does not interpret, so an older keeper supervising a newer host is the step-3 case, not a new one. |
 | Once the host runs the window's build, a keeper that stayed behind is a note, not a failure (#387) | The fix for a handoff that fails lives in the **sending** keeper, and in an update the sender is the old, running build, which the update cannot change: beta.10's keeper fails on macOS with "Message too long" (the row below) on every try once its state is large. Offering "Switch to this build" again only repeated the failure, and the second try read "Could not switch builds" although the window already ran against its own build's host. So when the host is on the window's build, the keeper is not, and the last swap to this build says why the keeper stayed (`keeperStaysBehind`, `switch-plan.ts`), the bar says "Running this build. The background keeper moves to it the next time it restarts." and offers **Restart completely**, never the switch, and a window does not switch by itself again either. "Could not switch builds" stays for a swap whose host did not reach the build. |
 | "Restart completely" stops the keeper and the window starts one of its own build | It is the keeper's `stop`, the one "Quit completely" uses, so it stops what that stops (the host, every agent process, terminal and running command, said in its confirmation), but the window stays: its attach loop sees the keeper exit and launches a keeper from its own executable with its own host, then reattaches. Conversations resume through the store. The alternative, waiting for the keeper's next idle exit or quit, leaves the fixed keeper unused for days in background mode. |
 | A descriptor batch that finds no room waits for it, up to 30 s | On macOS a `sendmsg` carrying descriptors on a stream socket fails at once with `EMSGSIZE` instead of blocking when the 8 KiB send buffer (`net.local.stream.sendspace`) has less room than the batch; Linux blocks. Whether it happens depends on the exact number of bytes before each batch, so a large enough state hit it in the field (4 agents, 2 terminals, 7 app views, relayed connections; 2026-10-05) while small test states never did. A batch carries one byte, so a failed attempt sent nothing and the retry cannot duplicate or split it. The bound only matters for an incoming keeper that is alive but not reading (one that died fails the send at once); everything is frozen meanwhile, so rolling back beats waiting forever. `wire.rs` sweeps the bytes before the descriptors across three buffers' worth. |

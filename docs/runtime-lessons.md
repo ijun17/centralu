@@ -342,8 +342,7 @@ Platforms: all.
 **PA13. The dev host is started directly, never through a wrapper.**
 Happened: killing the pnpm wrapper left the host orphaned holding its port (M1.5 defect 1, three hosts); on Windows
 `.bin/tsx` is an sh script `CreateProcessW` cannot start.
-Rule: start Node with tsx's loader (`--import …/tsx/dist/loader.mjs`, unix: the host is then the one process started,
-which the keeper's child socket checks by pid, #538) or Node with tsx's `cli.mjs` (Windows) directly, in a process
+Rule: start Node with tsx's loader (`--import …/tsx/dist/loader.mjs`, unix: the host is then the one process started) or Node with tsx's `cli.mjs` (Windows) directly, in a process
 group of its own.
 Guard: `keeper/host_proc.rs` `the_dev_host_is_started_directly_never_through_a_package_manager`;
 `keeper/host_proc.rs` `a_host_leads_a_process_group_of_its_own`; `scripts/keeper-integration.mjs` check "stop ends the
@@ -434,7 +433,7 @@ Platforms: macOS, Linux.
 Happened: an exit hook alone left an orphaned host holding its port when the parent was SIGKILLed (8cc60ff0); deciding
 by "is stdin a TTY" made a host with stdin on `/dev/null` kill itself (M1.5 defect 4).
 Rule: only a supervisor passes `--watch-parent`; then stdin `end`/`close`/`error` is "parent gone" and the host shuts
-down (detach under a keeper's child service, otherwise stop). Without the flag stdin EOF means nothing. This is the
+down (a stop). Without the flag stdin EOF means nothing. This is the
 only parent-death signal on Windows.
 Guard: `tooling/launcher-serve.test.ts` "takes the host down when the launcher itself is killed, instead of leaving
 it unsupervised"; `scripts/keeper-integration.mjs` check "a SIGKILLed keeper takes its host with it";
@@ -532,13 +531,8 @@ Platforms: all.
 **HO15. Detach or stop is decided by whether the keeper holds the children.**
 Happened: under the keeper's child service a signal means a restart and the agents stay; without it, it is a stop
 (#280 step 2).
-Rule: on a signal the mode is detach only when held children exist; the keeper's `stop` forces stop; ssh links and
-app processes always end with the host.
-Guard: `host/lifecycle/shutdown.test.ts` "a signal detaches only when the keeper holds the children" and "a detach
-lets go of terminals, commands and sessions, but still ends the ssh links and app processes";
-`host/lifecycle/endings.test.ts` "under the keeper's child service a signal is a restart: detach, and the next host takes
-the views", "without it a signal is a stop, and nothing is handed over", "the keeper's stop forces a stop even when it
-holds the children" and "a crash or a vanished parent hands nothing over". *Changed by step 3.*
+Removed: detach mode went with #1895 step 4 PR 1 and the keeper's children service with PR 2: every ending is a
+stop or a stop for an update, and its guards went with them. *Changed by step 3.*
 Platforms: all.
 
 ## 4. One instance per data folder
@@ -602,9 +596,9 @@ Platforms: macOS (108 on Linux).
 
 **LK8. The keeper's sockets are private from birth.**
 Rule: sockets are created under umask 077 (no window before a chmod); every connection's peer uid must match.
-Guard: `keeper/keeper/children/tests.rs` `the_socket_is_private_to_this_user`; `keeper/os/unix.rs`
+Guard: `keeper/os/unix.rs`
 `the_peer_of_our_own_socket_is_us`; `scripts/keeper-integration.mjs` check "the control socket is user-only (0600)".
-`keeper/os/unix.rs` `another_user_or_an_unknown_one_is_refused` (`os::peer_is_this_user`, which all three sockets
+`keeper/os/unix.rs` `another_user_or_an_unknown_one_is_refused` (`os::peer_is_this_user`, which both sockets
 call).
 Platforms: macOS, Linux.
 
@@ -866,12 +860,13 @@ Platforms: Windows.
 
 ## 7. Children the keeper holds
 
+The keeper held them from #280 step 2 until #1895 step 4: what was learned stays here, and each lesson says where its
+guard went.
+
 **CH1. Every child runs in a session of its own.**
 Happened: claude and codex shared the host's process group, so a host's exit or group kill reached them (#280).
 Rule: `setsid` for every child; a pty child gets `TIOCSCTTY`; pid ≤ 1 is never signalled.
-Guard: `keeper/os/unix/children.rs` `a_child_runs_in_a_session_of_its_own_and_its_exit_status_is_seen`;
-`keeper/os/unix/children.rs` `only_known_signal_names_are_accepted`; `keeper/os/unix/children.rs`
-`a_pty_child_sees_a_terminal_of_the_asked_size_and_follows_a_resize`.
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH2. The keeper owns the pty and always drains it.**
@@ -879,19 +874,17 @@ Happened: node-pty kept the master in the host, so a host that went away took th
 pty child cannot finish exiting while its output is unread: bash stuck in `?Es` for over 5 s (#280).
 Rule: the keeper opens the pty and drains it continuously into a 256 KiB ring, replayed to the next host; a slow reader
 skips ahead instead of holding the child.
-Guard: `keeper/keeper/children/tests.rs` `an_unwatched_pty_is_drained_so_its_child_can_exit`;
-`keeper/keeper/children/buffer.rs` `a_slow_pty_reader_skips_ahead_instead_of_holding_the_child`.
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH3. EIO from a pty master is end of file.**
 Rule: a read returning EIO once every slave descriptor is closed ends the stream normally.
-Guard: `keeper/os/unix/children.rs` `eio_ends_the_stream`; `keeper/os/unix/children.rs`
-`a_pty_whose_child_has_gone_reads_to_its_end` (`os::children::read_output`).
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH4. `openpty` does not set close-on-exec.**
 Rule: set `FD_CLOEXEC` on both ends, or every later child inherits every pty.
-Guard: `keeper/os/unix/children.rs` `neither_end_of_a_pty_is_inherited`.
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH5. An agent's stdout is a protocol: never drop a byte.**
@@ -899,10 +892,7 @@ Happened: claude was measured buffering 60 s with stdout unread; one codex `thre
 line; Node's `readline` cut that line in two and the resume hung forever (448815d2).
 Rule: buffer losslessly up to 64 MiB, then stop reading so the child blocks; hand over whole lines only; a lost
 reader's half line goes whole to the next; only whole lines reach the child's stdin. Readers split on `\n` by hand.
-Guard: `keeper/keeper/children/buffer.rs` `a_full_agent_stream_stops_reading_instead_of_dropping`;
-`keeper/keeper/children/buffer.rs` `a_line_half_sent_to_a_lost_reader_is_sent_whole_to_the_next`;
-`keeper/keeper/children/tests.rs` `half_a_line_from_a_host_that_died_never_reaches_the_child`;
-`host/adapters/codex/client.test.ts` "a 24MB single-line response arrives intact".
+Guard: `host/adapters/codex/client.test.ts` "a 24MB single-line response arrives intact" (the keeper side went with #1895 step 4 PR 2, which removed its children service).
 Platforms: all.
 
 **CH6. A long-lived process gives memory back.**
@@ -910,8 +900,7 @@ Happened: `Vec::drain` keeps capacity, so one 23 MB line pinned more than 32 MiB
 never fire (#392, #395, aab29764); exit records were never forgotten.
 Rule: buffers shrink once mostly empty (1 MiB floor); the 8 MiB control-queue cap is checked whatever the flush did;
 released children's exit records are dropped.
-Guard: `keeper/keeper/children/buffer.rs` `a_burst_gives_its_memory_back_once_it_is_sent`;
-`keeper/keeper/children/tests.rs` `a_control_queue_past_the_cap_is_dropped_while_the_socket_is_full` (the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more).
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH7. No connection closing ever signals a child.**
@@ -919,19 +908,16 @@ Happened: the Agent SDK kills its process when its owner exits; a host leaving f
 untouched (#280).
 Rule: only an explicit request signals a child, closes its stdin or its pty; a detached handle ignores `kill()` and
 `stdin.end()`; the SDK's exit hook is neutralised by a `process.once('exit')` registered at module load.
-Guard: `keeper/keeper/children/tests.rs` `a_departing_host_does_not_end_the_child_and_the_next_host_gets_what_it_missed`
-(the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, with `agent-process.test.ts` and `adapters/codex/keeper.test.ts`).
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH8. The keeper's stop escalates in a fixed order.**
 Rule: the host stops its own children first (up to 6 s); then stdin EOF for pipes and SIGHUP for ptys; TERM to the
 group after 2 s; KILL 1 s later; then `children.sock` is removed. A pty's signals go to every group in its session,
 its shell's jobs included (#840 item 2).
-Guard: `keeper/keeper/children/tests.rs` `stop_all_ends_pipes_and_ptys_the_host_left_running`;
-`keeper/keeper/children/tests.rs` `stop_all_ends_every_group_in_a_terminals_session`;
-`keeper/keeper/children/tests.rs` `asking_the_host_to_stop_waits_for_it_to_hang_up`;
-`scripts/keeper-integration.mjs` scenario `update` check "stop ends the keeper, the host and its N children" (the
-host's own children since #1895 step 4 PR 1; `keeper-children-integration.mjs` went in that PR).
+Guard: `scripts/keeper-integration.mjs` scenario `update` check "stop ends the keeper, the host and its N children" (the
+host's own children since #1895 step 4 PR 1). The keeper's own escalation went with its children service in PR 2: its
+stop now tells the host `{"op":"stop"}` on its stdin and waits up to 6 s (`host_proc::STOP_WAIT`).
 Platforms: macOS, Linux.
 
 **CH9. The keeper's agent sweep never hits a reused number.**
@@ -939,22 +925,18 @@ Happened: the keeper side of #435.
 Rule: when a pipe child exits, TERM its group at once and KILL it after 2 s; never while any process holds that pid
 (an unreaped zombie, a reuse); never pgid ≤ 1 or the keeper's own group; ptys are not swept; pending sweeps travel in
 the handoff; `stop_all` kills leftover sweeps.
-Guard: `keeper/keeper/children/tests.rs` `an_agents_helpers_do_not_outlive_it`; `keeper/keeper/children/tests.rs`
-`a_helper_that_ignores_term_is_killed_and_nothing_outside_the_group_is_touched`; `keeper/keeper/children/tests.rs`
-`stop_all_ends_the_helpers_of_agents_that_exited_during_the_stop`; `keeper/keeper/handoff/tests.rs`
-`a_sweep_still_waiting_at_the_handoff_is_finished_by_the_next_keeper`.
+Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
 Platforms: macOS, Linux.
 
 **CH10. The exit of a process you did not start.**
-Happened: after a handoff the keeper is not its children's parent. kqueue `NOTE_EXIT | NOTE_EXITSTATUS` reports a
-non-child's status on macOS, but registering on a child that is already a zombie fails with ESRCH (Darwin 27,
-2026-10-04); Linux has a pidfd, and no non-parent status before `PIDFD_GET_INFO` (6.15).
-Rule: macOS: kqueue, polling plus the status the outgoing keeper reaped as the fallback; Linux: a pidfd per child and
-`/proc/<pid>/stat` field 52 while the zombie lasts; elsewhere polling; `NOTE_EXIT` can fire before the zombie is
-waitable, so the reap is retried.
-Guard: `keeper/os/unix/children.rs` `the_exit_of_a_process_that_is_not_our_child_is_seen`;
-`keeper/os/unix/children.rs` `a_status_from_the_outgoing_keeper_completes_a_polled_child`;
-`keeper/os/unix/children.rs` `a_zombie_exit_status_is_read_from_proc_stat`.
+Happened: after a handoff the keeper is not its host's parent. kqueue `NOTE_EXIT` reports a non-child's exit on macOS,
+but registering on a process that is already a zombie fails with ESRCH (Darwin 27, 2026-10-04); Linux has a pidfd.
+Rule: a handed-over host is watched by its identity, not its number (`os::process::ProcessWatch`, #840 item 8): kqueue
+on macOS, a pidfd on Linux, polling elsewhere; ESRCH alone means gone. Its exit status is not needed, so none is read
+(the children service, which needed one, went with #1895 step 4 PR 2).
+Guard: `keeper/os/unix/process.rs` `the_end_of_a_process_that_is_not_our_child_is_seen`;
+`keeper/os/unix/process.rs` `only_esrch_means_a_process_has_gone`; `keeper/host_proc/handover.rs`
+`a_watch_sees_a_running_host_end_and_a_zombie_as_ended`.
 Platforms: macOS, Linux.
 
 **CH11. A graceful stdin close is a request, not a socket end.**
@@ -1190,10 +1172,11 @@ Platforms: macOS, Linux. *Changed by #461.*
 
 **HD6. The snapshot only grows, and the newer side reads the older.**
 Happened: the outgoing keeper is always the older build in an update.
-Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461 every snapshot and child-table field
+Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461 every snapshot field
 is required: a snapshot without one is refused and the handoff rolls back. A keeper of 0.1.0-beta.11 or earlier wrote no
 `sweeps` (#435) and rolls back; 0.1.0-beta.12 and later hand over.
-Guard: `keeper/keeper/children/tests.rs` `a_child_table_without_its_sweeps_is_refused`. *Manual*:
+Since #1895 step 4 PR 2 a snapshot that carries a child table
+at all is refused (`keeper/keeper/handoff/tests.rs` `a_handoff_that_carries_a_child_table_is_refused`). *Manual*:
 `scripts/keeper-handoff-integration.mjs --old-keeper` against a real 0.1.0-beta.16 (hands over) and 0.1.0-beta.11 (rolls
 back); no CI job runs an old keeper: **UNGUARDED** in CI. *Changed by #461.*
 Platforms: macOS, Linux.

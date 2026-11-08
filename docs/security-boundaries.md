@@ -1782,7 +1782,7 @@ door's port and a credential, stop the host, and make the keeper run a host from
 **only this user's processes get in, and only a Centralu window gets the token** (#1405).
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
-  `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
+  `SO_PEERCRED`) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
   exact resolved path, one of the window executables the keeper accepts (`accepted_windows`): the `centralu` beside
   the keeper's own executable (the macOS bundle's `Contents/MacOS/`, a debug build), unless the keeper runs from
   `<data>/content/`, where a file dropped beside it proves nothing; and the window of each build the keeper names: its
@@ -1925,45 +1925,15 @@ host. It changes where a client connects, not what it must prove:
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.
 
-### The keeper's child socket
+### The keeper's child socket (gone)
 
-No host connects to this socket any more (#1895 step 4 PR 1): every host spawns and stops its own agents, terminals
-and commands, and a keeper started fresh has not served it since step 3. It stays in the keeper until the next PR
-removes it, and what follows describes it as it still is.
-
-The keeper also holds the host's agents, terminals and commands (#280 step 2) and serves them on a second socket,
-`<data>/children.sock`. Through it a process can start a program with the arguments, folder and environment of its
-choosing, read and write an agent's stdin and stdout (its whole conversation, approvals included) or a terminal, and
-signal any child the keeper holds. The rule (#538, owner decision 2026-10-18): **only the hosts this keeper holds
-get in**, not every process of this user.
-
-- Created under `umask 077`, so it is born `0600`; every connection's peer uid is read from the kernel and the
-  connection is dropped unless it is the keeper's own uid.
-- Then its peer pid, also from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS), recorded when the
-  peer connected: the connection is dropped, with a line in `keeper.log`, unless that pid is the current host's
-  (the supervisor's, its own or one handed over by the previous keeper) or a swap's standby while it is one: that
-  exact pid, not its process group. `spawn_host` makes the host lead a group, and what the host runs without a
-  session of its own (a worktree's setup command, `npm install -g`, a version probe) is in that group, so a setup
-  script an agent changed would otherwise get in. A host run from source is one process for this (Node with tsx's
-  loader, `source_launch`). Nothing is answered before the keeper names its host (`Children::answer_hosts`); after a
-  keeper handoff, the host handed over is answered from the first accept until the new keeper has adopted it.
-- What the keeper holds can still be listed, read-only, through `keeper.sock` (`{"op":"children"}`), for this user's
-  tools and the integration scripts.
-- A control line is capped at 16 MiB (a spawn carries a whole environment); a host's input to a child is queued up
-  to 8 MiB before the keeper stops reading it; a control connection that stops reading its events is dropped past
-  8 MiB.
-- `signal` takes only TERM, KILL, INT, HUP, QUIT, USR1, USR2 and WINCH, never pid 1 or below, and is a no-op for a
-  child that has exited, whose pid may already belong to someone else.
-- Children start in their own session, with the environment the host passed. The host takes `CC_KEEPER`,
-  `CC_HOST_SOURCE`, `CC_HOST_TOKEN`, `CC_HOST_TOKEN_ON_STDIN` and `CC_FRONT_DOOR` out of its own environment before
-  it spawns anything; the token is not there to begin with unless an older keeper started it.
-- The keeper stores each child's tag and parses nothing in it, and parses nothing a child says.
-
-Limits: the check names processes, not code. A process that can act as the host (attach a debugger to it, or
-replace its files before it starts) gets in, and this user can do both. It closes the path where any process of this
-user, a command an agent ran included, simply connects. A pid is the kernel's record of who connected; it is not
-reused while the keeper holds that host. It is local only. Windows has no keeper; when it gets one, its child channel would
-be a named pipe whose DACL names this user, with `GetNamedPipeClientProcessId` for the same check by pid.
+From #280 step 2 the keeper held the host's agents, terminals and commands and served them on a second socket,
+`<data>/children.sock`, through which a process could start a program, read and write an agent's stdin and stdout, and
+signal any child the keeper held; only the hosts the keeper held got in (#538, by the peer pid the kernel recorded).
+A keeper started fresh has not served it since #1895 step 3, no host connects to one since step 4 PR 1, and the keeper
+has no children service since PR 2: nothing listens there, a socket a dead holding keeper left is removed at start,
+`keeper.sock`'s read-only `{"op":"children"}` answers an empty list, and a keeper handoff that carries a child table
+is refused.
 
 ### The keeper handoff channel
 

@@ -119,7 +119,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides, also without `--db`; the legacy folder is moved only into the default one) | `packages/agent-host/src/data-dir.ts` (`chooseDataDir`) | |
 | Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
 | Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
-| Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3, and no host uses it since step 4 PR 1; it stays in the keeper until the next PR | `apps/desktop/src-tauri/keeper/src/keeper/children/`; [architecture.md](architecture.md) §4.3 | |
+| Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3; the host's side went with step 4 PR 1 and the keeper's with PR 2, whose keeper answers `children` with an empty list | gone; [architecture.md](architecture.md) §4.3 | |
 | Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
 | Swap | Replacing the running host with another build's, blue-green, behind the front door | `apps/desktop/src-tauri/keeper/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | restart |
 | Drain | What the outgoing host does in a swap: refuse new calls, give running ones 10 s, stop for an update, release the lock, exit | `packages/agent-host/src/drain.ts` | |
@@ -540,8 +540,8 @@ flowchart TD
   and end with it. An update or a swap stops them for an update: the next host continues the cut turns and opens the
   terminals and Run commands again. A crash ends them, and a turn in flight shows stopped with Continue
   ([architecture.md](architecture.md) §4.3). Until #1895 step 3 the keeper held the agents, terminals and commands
-  over `children.sock`, and a host that restarted or was swapped re-attached to them; that service stays in the keeper
-  until the next PR of step 4, but no host uses it.
+  over `children.sock`, and a host that restarted or was swapped re-attached to them; that service went with #1895
+  step 4 PR 2.
 - Claude's Centralu tools and app proxies run **inside the host** (in-process SDK MCP servers), reached over the
   CLI's own stdio. Codex has no in-process servers, so it starts a bridge per session that calls back over the front
   door.

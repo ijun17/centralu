@@ -1,7 +1,8 @@
 /**
  * What a keeper of a build that still holds children (beta.48 or older, `keeper-holding-last`) still runs, for the
- * update from such a build to this one (#1895 step 4, PR 1 review). Removed with the keeper's children service (PR 2),
- * when no keeper this host can run under holds anything.
+ * update from such a build to this one (#1895 step 4, PR 1 review). It outlives this build's own children service
+ * (gone in PR 2): such a keeper runs this host whatever this build's keeper is, as long as a window can still switch
+ * it (below). It goes once none can (`docs/plans/keeper-removal.md` §4, PR 3 or at the latest PR 6).
  *
  * Such a keeper, refused by this build's keeper at handoff, rolls back and swaps its host to this build under itself
  * anyway (its `move_keeper`). Its host's drain hands its agents, terminals and commands to the keeper's children
@@ -18,7 +19,7 @@
  *   get it from here, as that keeper's own stop sends it to every group in a terminal's session (`sessionGroups`).
  *
  * A keeper of this build or of a step-3 build serves no `children.sock` (it removes one a holding keeper left), and
- * nothing is asked. The sockets and the process table are `keeper/children-client.ts`.
+ * nothing is asked; this build's answers `children` with an empty list. The sockets and the process table are `keeper/children-client.ts`.
  */
 
 /** One child as the keeper lists it; `exit` is null while it runs. */

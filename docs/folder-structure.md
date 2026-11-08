@@ -26,8 +26,7 @@ centralu/
 │        │                      #   src/shell/ installs the shell and starts the keeper through it (macOS)
 │        ├─ keeper/             # crate centralu-keeper-core: keeper and host supervisor, no Tauri (#440)
 │        │                      #   src/keeper/server/: the control socket (start, host, windows, switch);
-│        │                      #   src/keeper/children/: the child service (child, reactor, requests, stop,
-│        │                      #   snapshot, buffer); src/keeper/accept.rs: what all three accept loops share
+│        │                      #   src/keeper/accept.rs: what both accept loops share
 │        └─ shell/              # crate centralu-shell: the macOS shell that holds permissions; verifies
 │                               #   content, copies it, starts the keeper, exits. Built once per shell
 │                               #   version and pinned in packaging/shell/shell.lock (plans/thin-shell.md).
@@ -160,7 +159,7 @@ centralu/
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     ├─ mail-types.ts  # the old thread mail words and a message row that live code still reads (mailbox-adopt.ts moves what the old tables hold)
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM
-│        └─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
+│        └─ keeper/             # children-client.ts: asks a beta.48 keeper what it still holds (lifecycle/keeper-held.ts)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts
 │                               #   measure against a seeded heavy store (fixtures/heavy-store.ts)

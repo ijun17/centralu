@@ -8,7 +8,7 @@ import type { HeldIo, ProcRow } from '../lifecycle/keeper-held.js'
  * The sockets of a keeper of beta.48 or older, for `lifecycle/keeper-held.ts` only (#1895 step 4, PR 1 review): its
  * `keeper.sock` read-only `children` op and its children service (`children.sock`), whose wire protocol is that
  * keeper's (`keeper/src/keeper/children/mod.rs` at `keeper-holding-last`), and the process table a terminal's session
- * is read from. Removed with the children service (PR 2).
+ * is read from. Goes with `keeper-held.ts`.
  */
 
 const ASK_TIMEOUT_MS = 3000

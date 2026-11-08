@@ -2627,8 +2627,8 @@ predecessor holds the lock but does not answer (on its way out) waits up to 15 s
 **Descriptors.** A keeper started from Finder or launchd gets a soft descriptor limit of 256, which a few dozen
 relays and attached streams used up. It raises its soft limit to 10,240 (or the hard limit) as it starts; what it
 starts (hosts, agents, terminals, commands) gets the limit from before back, so a `select`-based program is never
-handed a descriptor past 1,024. When an `accept` still fails for want of one, each of its three listeners (`keeper.sock`,
-`children.sock`, the front door) is left alone for 100 ms and the failure is logged once every 10 s with a count,
+handed a descriptor past 1,024. When an `accept` still fails for want of one, each of its two listeners (`keeper.sock` and
+the front door) is left alone for 100 ms and the failure is logged once every 10 s with a count,
 instead of the loop coming straight back to the waiting connection (one core and thousands of log lines a second on
 Linux; macOS drops the connection instead), and a thread the OS refuses for a connection closes that connection
 rather than aborting the keeper (`keeper/accept.rs`, #840 item 3). A front-door relay holds one descriptor per
@@ -2736,9 +2736,8 @@ The host spawns its agents, terminals and Run commands itself on every machine, 
 stops them, or stops them for an update (§4.5). Since #1895 step 4 PR 1 it never connects to the keeper's
 `<data>/children.sock`, lists no keeper children at start and takes none over ([plans/keeper-removal.md](plans/keeper-removal.md)
 §4). Before, a host under a keeper that offered the children service asked it to spawn and hold them, so they
-outlived the host; a keeper started fresh has not offered it since step 3 (`holds_children` in `server/start.rs`),
-and the host already took this path then. **The keeper's children service still exists in the keeper until the
-next PR (PR 2), but no host uses it.** The design is in [architecture.md](architecture.md) §4.3.
+outlived the host; a keeper started fresh has not offered it since step 3, and the host already took this path then.
+Since step 4 PR 2 the keeper has no children service at all: its `children` op answers an empty list. The design is in [architecture.md](architecture.md) §4.3.
 
 **Agents.** The host starts the CLI itself, Claude's through `spawnClaudeCodeProcess` too (`adapters/local-process.ts`).
 On macOS and Linux it gets a process group of its own; a stop is `kill-tree.ts`'s TERM to every group in its tree and
@@ -2802,8 +2801,8 @@ writes on stdout during the freeze (an activity report, say) waits in the pipe a
 old keeper had already read from it but not acted on is handed over with the rest. Its own control lines on stdin,
 used by a swap, keep working from the new keeper, which can drain it as the start of a switch. Its children are its
 own processes and stay with it: nothing of them passes through the keeper, so a turn in progress loses and repeats
-nothing. (A keeper of an earlier build that still holds children passes its child table on as before; a host of this
-build never connects to the child socket, so it takes none of them over, §4.5.)
+nothing. (A keeper of an earlier build that still holds children and passes its child table on is refused since step 4 PR 2,
+and rolls back, §4.5.)
 
 `scripts/keeper-handoff-integration.mjs` drives this with real binaries of three builds, the real host, claude (haiku)
 and codex (`gpt-5.6-luna`): a handoff with a turn of each in a tool call, a terminal and a dev server counting; a
@@ -2952,11 +2951,11 @@ updating", and the busy report is the keeper's, so nothing applies by itself wit
 host of #1895 step 4 PR 1 or later) is the same stop: the drain begins it before it stops them, and the host that takes over continues what it ended.
 
 **The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
-the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 is built). The macOS release keeps its shape, shell then keeper then host, because the
+the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 and PR 2 are built). The macOS release keeps its shape, shell then keeper then host, because the
 release is ad-hoc signed and only a tree the shell starts keeps its macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)
-§1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket
-(`holds_children`), so the host spawns its own children as on every other machine, and every ending stops them. Since
-step 4 PR 1 the host does not look for the socket at all (§4.3):
+§1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket,
+so the host spawns its own children as on every other machine, and every ending stops them. Since
+step 4 PR 1 the host does not look for the socket at all, and since PR 2 the keeper has no children service (§4.3):
 
 | | Before (the keeper holds the children) | Since step 3 |
 |---|---|---|
@@ -2965,7 +2964,7 @@ step 4 PR 1 the host does not look for the socket at all (§4.3):
 | A host crash | the keeper restarts it, and children re-attach mid-turn | the keeper restarts it by the same rules; the agents, terminals and commands end with it, and a turn in flight shows stopped with Continue, as on Windows and Linux. Only a stop for an update lists turns to continue |
 | "Quit completely", background mode off, idle exit | `stop` on the child service: the host stops its children and notes the person quit (#1143) | a plain `{"op":"stop"}` on the host's stdin (`STOP_LINE`): the same stop and the same mark |
 | Background mode, credential issuance (#1405), the front door, supervision, per-build copies | the keeper's | unchanged, the keeper's |
-| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents. A keeper still holding children (below) whose host can stop for an update stops for one and exits instead of handing over, and the window starts a keeper of its own build. Whether the host can is what the host said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not pass it on: a keeper that took children over with a host it adopted reads "cannot" until a new host starts (the swap of a switch starts one), so a handoff without a swap hands the children on again at that keeper's next switch |
+| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents. A step 3 keeper still holding children (below; one of step 4 PR 2 or later holds none) whose host can stop for an update stops for one and exits instead of handing over, and the window starts a keeper of its own build. Whether the host can is what the host said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not pass it on: a keeper that took children over with a host it adopted reads "cannot" until a new host starts (the swap of a switch starts one), so a handoff without a swap hands the children on again at that keeper's next switch |
 
 The window knows the keeper does this from its view (`stopsForUpdate`); an older keeper lacks it and gets `relaunching` as before.
 `RelaunchCheck.restartsHost` is set then, and also for an older keeper whose host does not hand its agents over.
@@ -2983,21 +2982,24 @@ build's host, or one not up), and keeper.log says so; otherwise the keeper stops
 (`handoff::held_children_on_handoff`), so holding never passes from keeper to keeper while a host could have ended it. Stopping them at once instead was not done: a host of 0.1.0-beta.48 or earlier takes the stop line only from a window
 (`CC_STARTED_BY=app`), and its drain hands the children over rather than stopping them, so nothing could have listed its running
 turns, and they would have ended as a quit's. This was checked end to end by `keeper-children-integration.mjs`, removed
-in #1895 step 4 PR 1. A host of that PR or later never takes children over, and a keeper of that build refuses a handoff
-whose child table still has a running child ([plans/keeper-removal.md](plans/keeper-removal.md) §6): the sending keeper
+in #1895 step 4 PR 1. A host of that PR or later never takes children over. A keeper of that build refused a handoff
+whose child table still had a running child, and one of PR 2 or later refuses any handoff that carries a child table
+([plans/keeper-removal.md](plans/keeper-removal.md) §6): the sending keeper
 rolls back and carries on with its children and its host, and the update is refused with "quit Centralu completely and
 open it again to update". Quitting stops those children, and the keeper the shell starts next holds none.
 
 Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`), and its
-host's drain would hand its children to it, where no host of this build looks. So until PR 2 the host keeps one small
-check (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
+host's drain would hand its children to it, where no host of this build looks. So the host keeps one small check, past
+PR 2 since such a keeper runs this host whatever this build's keeper is, until no window can switch one (PR 3, or at
+the latest PR 6) (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
 standby under a keeper whose `children.sock` answers stands by only when that keeper lists its children and none runs
 (an `ok: false`, no answer or an unreadable list refuses it too), so that swap fails before the running host is touched
 and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it restores
 its sessions, so their turns show stopped and Continue starts the only CLI. It signals each child's process group
 through the service and, for a terminal, every group in the shell's session (found by its controlling terminal), as
 that keeper's own stop does, so a job the shell put in a group of its own (`sleep &`) ends too. A keeper of step 3 or
-later serves no `children.sock` (it removes one a holding keeper left), and nothing is asked. Checked with a real beta.48 keeper and host on Linux (#2122 review).
+later serves no `children.sock` (it removes one a holding keeper left), and nothing is asked; one of PR 2 or later
+answers `children` with an empty list. Checked with a real beta.48 keeper and host on Linux (#2122 review).
 
 The automatic mode ("Automatic updates", on unless the person turned it off) still waits for the keeper to report nothing busy. An
 update stops the host (by the keeper since step 3, by the relaunched window's switch before), and that stop is what a busy host can

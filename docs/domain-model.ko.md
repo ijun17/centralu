@@ -121,7 +121,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 데이터 폴더 | `~/.centralu`(개발 중에는 `~/.centralu-dev`, `CC_DATA_DIR`로 바꿀 수 있다) | `packages/agent-host/src/data-dir.ts` | |
 | 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, #461부터 그렇게 띄우면 디버그 창이 요청한 때가 아니면 거절한다). 호스트를 띄우고 지켜보며, 정문을 가진다. 호스트의 자식은 호스트 자신의 것이다(#1895). macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `src-tauri/src/sidecar/`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
 | 정문 | 키퍼의 루프백 포트 하나와 토큰. 지금의 호스트에게 바이트를 그대로 옮겨 주므로, 클라이언트는 호스트 자신의 포트를 보지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.ko.md](architecture.ko.md) §4.2 | 프록시 |
-| 자식 서비스 | 키퍼의 `<data>/children.sock`. 예전에 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁했고, 그래서 그것들은 호스트보다 오래 살았다. 새로 뜬 키퍼는 #1895 3단계부터 이것을 내놓지 않고, 4단계 PR 1부터는 어떤 호스트도 쓰지 않는다. 다음 PR까지는 키퍼에 남아 있다 | `apps/desktop/src-tauri/keeper/src/keeper/children/`; [architecture.ko.md](architecture.ko.md) §4.3 | |
+| 자식 서비스 | 키퍼의 `<data>/children.sock`. 예전에 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁했고, 그래서 그것들은 호스트보다 오래 살았다. 새로 뜬 키퍼는 #1895 3단계부터 이것을 내놓지 않는다. 호스트 쪽은 4단계 PR 1에서, 키퍼 쪽은 PR 2에서 없어졌고, PR 2의 키퍼는 `children`에 빈 목록으로 답한다 | 없어짐; [architecture.ko.md](architecture.ko.md) §4.3 | |
 | 빌드별 사본 | `<data>/hosts/<build>/`: 키퍼가 돌리는 빌드의 호스트 사본. 다시 빌드해도 두 빌드가 섞이지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
 | 스왑 | 정문 뒤에서 도는 호스트를 다른 빌드의 호스트로 블루그린으로 바꾸는 것 | `apps/desktop/src-tauri/keeper/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | 재시작 |
 | 드레인 | 스왑에서 나가는 호스트가 하는 일: 새 호출을 거절하고, 도는 호출에 10초를 주고, 업데이트를 위해 멈추고, 잠금을 풀고, 끝난다 | `packages/agent-host/src/drain.ts` | |
@@ -528,7 +528,7 @@ flowchart TD
   끝난다. 업데이트나 스왑은 그것들을 업데이트를 위해 멈춘다. 다음 호스트가 잘린 턴을 이어 가고 터미널과 Run 명령을 다시
   연다. 크래시는 그것들을 끝내고, 돌던 턴은 멈춤 표시와 Continue로 보인다([architecture.ko.md](architecture.ko.md) §4.3).
   #1895 3단계까지는 키퍼가 `children.sock`으로 에이전트, 터미널, 명령을 쥐고 있었고, 다시 뜨거나 스왑된 호스트가 그것들에
-  다시 붙었다. 그 서비스는 4단계의 다음 PR까지 키퍼에 남지만, 어떤 호스트도 쓰지 않는다.
+  다시 붙었다. 그 서비스는 #1895 4단계 PR 2에서 없어졌다.
 - Claude의 Centralu 도구와 앱 프록시는 **호스트 안에서** 돈다(프로세스 안 SDK MCP 서버). CLI 자신의 stdio로 닿는다.
   Codex에는 프로세스 안 서버가 없으므로, 세션마다 브리지를 띄우고 브리지가 정문을 거쳐 호스트를 부른다.
 - 앱 화면은 호스트가 정문을 거쳐 HTTP로 내준다. 자기 출처를 달라고 한 앱(`view.origin: app`)은 정문 밖에서
