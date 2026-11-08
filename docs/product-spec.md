@@ -253,21 +253,15 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   app re-attaches to them with nothing to restore — a waiting approval is still waiting. The quit dialog follows
   the setting: off, its main button is **Quit completely**, and while a turn is running **Quit and keep running** turns the setting on and quits; on, **Quit** closes the window and leaves everything
   running, and **Quit completely** stops the keeper, the host and every agent, terminal and running command anyway. A Windows window on the computer's `centralu serve` host (#1466) has no setting and reads as on: **Quit** leaves the host running, and **Quit completely** runs `serve --stop`, saying it also ends the link a hub has to this computer; Settings shows a line in place of the switch. An unwatched host stops by itself after 30 minutes with no window open and
-  nothing running. A reopened app of a different build says so and offers to switch the host to its own build.
-  Switching is a blue-green swap (#280 step 3): the new build starts next to the running host, which gets up to
-  10 seconds to finish the calls it serves itself, and the window reconnects in a moment. The bar shows each step
-  and, if the switch fails, why and which build serves now. It asks first only when something can be lost (a
-  session working or waiting, a terminal or a command), and says what: running turns, terminals and commands carry
-  on across the switch (step 2), and only an orchestrator or app tool call still running after 10 seconds is
-  stopped, with the agent told to try it again. The same switch first moves the keeper (the background process
-  that holds the host and the agents) to the new build (#280 step 4): it hands everything to the new build's
-  keeper and exits, which stops nothing and does not even make the window reconnect; an open app view keeps
-  working across the whole switch. A keeper that is behind while the host is not gets the same bar, and switching
-  then asks nothing. If the keeper cannot move, the host switch still happens. Once the host runs the window's
-  build, the bar does not offer the switch again (an older keeper fails the same way every time, #387): it says
-  this window runs its build and the keeper moves the next time it restarts, and offers **Restart completely**,
-  which says it stops agents, terminals and running commands, restarts the keeper on this build and reconnects
-  the window. "Could not switch builds" is kept for a switch whose host did not reach the build. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.1–4.4).
+  nothing running. A reopened app of a different build says so and offers **Restart into this build** (**Go back to this build** when
+  the running build is newer). Since #1895 step 4 PR 3 that is the same stop as an update: a keeper that can stops the
+  host for an update, so running turns stop and go on once this build is up and terminals and Run commands start
+  again; an earlier keeper is stopped as **Quit completely** stops it, and the question says so. It asks first when
+  something is running, and always before a stop of the second kind. The window then starts the keeper and host of its
+  own build; while it does, the bar says "Restarting Centralu on this build…". With automatic updates on, a newer window
+  does this by itself when nothing is running and the keeper can stop for an update; it never moves back to an older
+  build. Until step 4 PR 3 this was "Switch to this build", a blue-green swap with its steps shown in the bar. Desktop
+  only; it needs the keeper ([architecture.md](architecture.md) §4.5).
 - **Applying an update** (#352). Once an update is installed, the update line offers **Apply now**: the app
   relaunches itself into the new version. Since #1895 step 3 the keeper first stops the host for the update and exits,
   and the relaunched window starts the new build's keeper: running turns go on once the host is back, and terminals and

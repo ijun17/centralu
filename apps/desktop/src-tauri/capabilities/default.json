@@ -47,7 +47,6 @@
     "allow-quit-app",
     "allow-take-app-links",
     "allow-host-build",
-    "allow-switch-host-build",
     "allow-background-mode",
     "allow-set-background-mode",
     "allow-quit-and-stop-agents",

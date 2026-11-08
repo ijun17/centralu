@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './store.js'
+import type { MigrationStep } from './store/migrations/context.js'
 
 const dirs: string[] = []
 function dir(): string {
@@ -31,6 +32,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
@@ -178,20 +180,140 @@ describe('the whole migration list, from v1 to the newest', () => {
       './store-migrations.golden.json',
     )
   })
+})
 
-  it('a swap leaves the same steps for later as before, and the store they end in is the same', async () => {
-    const file = v1Store()
-    const swapped = new Store(file, { swap: true })
-    const deferred = swapped.deferredSteps
-    const mid = { version: swapped.schemaVersion, deferred, minReader: swapped.minReaderVersion }
-    expect(deferred.length).toBeGreaterThan(3)
-    expect(swapped.runDeferred()).toBe(deferred.length)
-    swapped.close()
+/*
+ * Steps a host swap of an earlier build left for later (#280 step 3; no host swaps since #1895).
+ *
+ * A host that took over in a swap ran only what the previous build could still read, and left heavy and breaking steps
+ * for after the swap: `user_version` moved past them and `app_settings.deferred_migrations` listed them. A host of that
+ * build that stopped before it ran them left the list behind, and this build no longer writes one. These tests write
+ * that left-behind state by hand on a current store (v40 is heavy, fts rebuild + VACUUM; v56 breaks older readers,
+ * #423) and open it as this build does.
+ */
+const KNOWN = new Store().latestKnownVersion
 
-    // Not equal to a plain open's store: a step that runs after later steps adds its column after theirs (v33's `trusted`)
-    const { master, userVersion } = dump(file) as { master: unknown; userVersion: number }
-    await expect(JSON.stringify({ mid, userVersion, master }, null, 1) + '\n').toMatchFileSnapshot(
-      './store-migrations-swap.golden.json',
-    )
+/**
+ * A store this build made, with a project in it. The steps in `skipped` do nothing on that first open, as on a store an
+ * earlier host's swap left: it moved `user_version` past them without running them.
+ */
+function currentStore(skipped: number[] = []): string {
+  const file = join(dir(), 'store.db')
+  const proto = Store.prototype as unknown as { migrationSteps: () => MigrationStep[] }
+  const real = proto.migrationSteps
+  const spy = vi.spyOn(proto, 'migrationSteps').mockImplementation(function (this: unknown) {
+    return real.call(this).map((step) => (skipped.includes(step.to) ? { ...step, run: () => {} } : step))
+  })
+  try {
+    const s = new Store(file)
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.close()
+  } finally {
+    spy.mockRestore()
+  }
+  return file
+}
+const hasTable = (file: string, name: string) =>
+  raw(file, (db) => db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name) !== undefined)
+
+function raw<T>(file: string, f: (db: Database.Database) => T): T {
+  const db = new Database(file)
+  try {
+    return f(db)
+  } finally {
+    db.close()
+  }
+}
+const setting = (file: string, key: string) =>
+  raw(file, (db) => (db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as { value: string } | undefined)?.value)
+
+/** What a swap of an earlier build left: `user_version` past the steps it listed, and the floor below its breaking one */
+function leftBySwap(file: string, list: string, minReader = 28): void {
+  raw(file, (db) => {
+    db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('deferred_migrations', ?)`).run(list)
+    db.prepare(`UPDATE app_settings SET value = ? WHERE key = 'min_reader_version'`).run(String(minReader))
+  })
+}
+
+describe('steps an earlier host swap left for later (#280 step 3, #1895)', () => {
+  it('run at the next open, after the later steps, and the list goes', () => {
+    const file = currentStore([40, 56])
+    // What v56 drops, still there because the swap skipped it (a store that old had the table)
+    raw(file, (db) => db.exec(`CREATE TABLE usage_facts (id INTEGER PRIMARY KEY)`))
+    leftBySwap(file, '[40,56]')
+
+    const s = new Store(file)
+    expect(s.migrationsRun).toBe(2)
+    expect(hasTable(file, 'usage_facts')).toBe(false)
+    expect(s.schemaVersion).toBe(KNOWN)
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
+    s.close()
+    expect(setting(file, 'deferred_migrations')).toBeUndefined()
+    // Nothing left for the open after
+    const next = new Store(file)
+    expect(next.migrationsRun).toBe(0)
+    next.close()
+  })
+
+  it('a breaking step among them raises min_reader_version when it runs, not before', () => {
+    const file = currentStore([56])
+    leftBySwap(file, '[56]')
+    const before = raw(file, (db) => db.prepare(`SELECT value FROM app_settings WHERE key = 'min_reader_version'`).get()) as { value: string }
+    expect(before.value).toBe('28')
+
+    const s = new Store(file)
+    expect(s.minReaderVersion).toBe(56)
+    s.close()
+  })
+
+  it('each is crossed off in its own commit: an open stopped part way still owes the rest, and the next open runs it', () => {
+    const file = currentStore([40, 56])
+    leftBySwap(file, '[40,56]')
+    const proto = Store.prototype as unknown as { migrationSteps: () => MigrationStep[] }
+    const real = proto.migrationSteps
+    vi.spyOn(proto, 'migrationSteps').mockImplementation(function (this: unknown) {
+      return real.call(this).map((step) =>
+        step.to === 56
+          ? {
+              ...step,
+              run: () => {
+                throw new Error('stopped here')
+              },
+            }
+          : step,
+      )
+    })
+
+    expect(() => new Store(file)).toThrow('stopped here')
+    expect(setting(file, 'deferred_migrations')).toBe('[56]')
+
+    vi.restoreAllMocks()
+    const next = new Store(file)
+    expect(next.migrationsRun).toBe(1)
+    expect(next.minReaderVersion).toBe(56)
+    next.close()
+  })
+
+  /*
+   * A list of owed steps that does not read (#384): `user_version` is already past them, so they never run. Only a
+   * hand edit or a write cut short leaves one, and a step a swap left owes an index or a contraction, never data, so
+   * it is not guessed at: the open says which row it could not read and what it held.
+   */
+  it('a list that does not read is said on stderr, naming the row', () => {
+    const file = currentStore()
+    leftBySwap(file, '[40,5')
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    new Store(file).close()
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toMatch(/app_settings\.deferred_migrations .*"\[40,5"/)
+  })
+
+  it('an ordinary open runs every pending step at once, heavy ones included, and leaves no list', () => {
+    const file = currentStore()
+    raw(file, (db) => db.pragma('user_version = 38'))
+    const s = new Store(file)
+    expect(s.migrationsRun).toBe(KNOWN - 38)
+    s.close()
+    expect(setting(file, 'deferred_migrations')).toBeUndefined()
   })
 })

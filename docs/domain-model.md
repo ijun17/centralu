@@ -117,14 +117,14 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Host | The Node process that owns sessions, the store and apps. One per data folder (ownership lock) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | server, backend, sidecar (only the direct path is) |
 | Store | The host's SQLite database, `<data>/store.db`; the only writer is the host | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides, also without `--db`; the legacy folder is moved only into the default one) | `packages/agent-host/src/data-dir.ts` (`chooseDataDir`) | |
-| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
+| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds, and macOS debug builds with `CC_USE_KEEPER=1` (Linux too until #1895 step 4 PR 7) | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
 | Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
-| Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3, and no host uses it since step 4 PR 1; it stays in the keeper until the next PR | `apps/desktop/src-tauri/keeper/src/keeper/children/`; [architecture.md](architecture.md) §4.3 | |
+| Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3; the host's side went with step 4 PR 1 and the keeper's with PR 2, whose keeper answers `children` with an empty list | gone; [architecture.md](architecture.md) §4.3 | |
 | Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
-| Swap | Replacing the running host with another build's, blue-green, behind the front door | `apps/desktop/src-tauri/keeper/src/keeper/swap.rs`; `packages/agent-host/src/swap-control.ts`, `drain.ts` | restart |
-| Drain | What the outgoing host does in a swap: refuse new calls, give running ones 10 s, stop for an update, release the lock, exit | `packages/agent-host/src/drain.ts` | |
+| Swap | Replacing the running host with another build's, blue-green, behind the front door. No keeper swaps since #1895 step 4 PR 4 and no host stands by for one since PR 5: an update or another build is a stop | gone; `packages/agent-host/src/keeper-control.ts` keeps the control lines and the front door's addresses | restart |
+| Drain | Refusing new calls and giving running ones 10 s before a stop. A swap's outgoing host drained until #1895 step 4 PR 5; now only `host.stop {ifIdle}` (the stop gate) does | `packages/agent-host/src/drain.ts` | |
 | Stop / stop for an update | How a host leaves: a **stop** ends its agents, terminals and commands; a **stop for an update** ends them too and lists the turns, terminals and Run commands for the next host, which continues and reopens them. **Detach**, which left the keeper's children running for the next host, went with #1895 step 4 PR 1 | `packages/agent-host/src/lifecycle/shutdown.ts`; [architecture.md](architecture.md) §4.3 | |
-| Keeper handoff | A keeper replacing itself with a newer keeper, passing every descriptor; nothing reconnects | `apps/desktop/src-tauri/keeper/src/keeper/handoff/`; [architecture.md](architecture.md) §4.4 | (not the session handoff, §1.1) |
+| Keeper handoff | A keeper replacing itself with a newer keeper, passing every descriptor, so nothing reconnected. Gone since #1895 step 4 PR 4: a keeper runs one build for its life, and `--take-over-fd` exits with code 7 | gone; [architecture.md](architecture.md) §4.4 | (not the session handoff, §1.1) |
 | Codex bridge | A small Node MCP server that `codex app-server` starts for a session: one for Centralu's tools and one per attached app. It calls back into the host over the front door (or the host's own port without a keeper). Claude needs none: its servers run inside the host | `packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs` | orchestrator bridge (it carries more) |
 | `centralu serve` | The npm launcher running a host headless on `127.0.0.1:17175`, no window and no keeper, for remote mode phase 1 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.md](agent-host.md) §4.7 | |
 | Stream epoch | A random id per host life. A client whose epoch differs after a reconnect resyncs instead of replaying | `packages/agent-host/src/transport/event-log.ts`; [protocol.md](protocol.md) | |
@@ -135,7 +135,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 
 | Word | The two meanings |
 |---|---|
-| Handoff | A session handing its work to a successor (§1.1); a keeper handing itself to a newer keeper (§1.5). Open views passed to the next host in a swap are the **view handover** |
+| Handoff | A session handing its work to a successor (§1.1); a keeper handing itself to a newer keeper (§1.5, gone since #1895 step 4 PR 4). Open views passed to the next host are the **view handover** |
 | Manager | `SessionManager`, the host's class that runs every session; before #561 part 3 also the worktree manager, a role folded into ordinary sessions (a session now starts and owns its worktree agents) |
 | Delegate | `DELEGATE_TOOLS` and the consent kind `delegate` are the **caller's** side of `ask_project`; the session doing the work is the delegated session |
 | Capability | `AdapterCapabilities`: what an agent tool supports; an app's capability: what it may ask the broker for |
@@ -502,7 +502,7 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
 
 Who starts whom, and who talks to whom over what. The parent/child edges are solid; connections are dashed.
 
-### 4.1 With a keeper (macOS release builds; Linux or a debug build with `CC_USE_KEEPER=1`)
+### 4.1 With a keeper (macOS release builds; a macOS debug build with `CC_USE_KEEPER=1`)
 
 ```mermaid
 flowchart TD
@@ -527,28 +527,28 @@ flowchart TD
   codex -- "spawns: stdio MCP" --> bridge
   keeper --- door
 
-  app -. "keeper.sock: attach, switch" .-> keeper
+  app -. "keeper.sock: attach, stop" .-> keeper
   web -. "WebSocket, app view HTTP" .-> door
   bridge -. "WebSocket" .-> door
   door -. "bytes relayed" .-> host
 ```
 
 - The keeper is an executable of its own beside the window's, launched detached so quitting the app sends it nothing. It
-  starts the host from the per-build copy, with the front door's token on its stdin (#538), and swaps it blue-green.
+  starts the host from the per-build copy, with the front door's token on its stdin (#538), and restarts it on a crash. It runs one build for its life (#1895 step 4 PR 4).
   A host dies with its keeper (`--watch-parent` on the keeper's pipe).
 - Agent CLIs, terminals, command runs and app MCP servers are the **host's** children, as without a keeper (§4.2),
-  and end with it. An update or a swap stops them for an update: the next host continues the cut turns and opens the
+  and end with it. An update stops them for an update: the next host continues the cut turns and opens the
   terminals and Run commands again. A crash ends them, and a turn in flight shows stopped with Continue
   ([architecture.md](architecture.md) §4.3). Until #1895 step 3 the keeper held the agents, terminals and commands
-  over `children.sock`, and a host that restarted or was swapped re-attached to them; that service stays in the keeper
-  until the next PR of step 4, but no host uses it.
+  over `children.sock`, and a host that restarted or was swapped re-attached to them; that service went with #1895
+  step 4 PR 2.
 - Claude's Centralu tools and app proxies run **inside the host** (in-process SDK MCP servers), reached over the
   CLI's own stdio. Codex has no in-process servers, so it starts a bridge per session that calls back over the front
   door.
 - App views are served by the host over HTTP through the front door. An app that asks for its own origin
   (`view.origin: app`) gets a port of its own on the host, outside the front door (`views/origin-ports.ts`).
-- A keeper hands itself over to a newer keeper (§1.5) by passing every descriptor; the host and its children keep
-  running and nothing reconnects.
+- An update, or a window of another build, stops the keeper and its host, and the window starts a keeper of its own
+  build. Until #1895 step 4 PR 4 a keeper handed itself over to a newer keeper (§1.5) by passing every descriptor.
 
 ### 4.2 Without a keeper (Windows, debug builds, `pnpm dev`, `centralu serve`)
 
@@ -698,43 +698,35 @@ Each `run_agent` stands up a new session; nothing is reused. The broker's reques
 tool call's (`parentRunId`), linked to the session it stood up. A clean run takes its session with it before the app
 has its answer (#378); the record of what it did stays in the session archive.
 
-### 5.4 Switching builds (blue-green swap, with a keeper)
+### 5.4 Another build, with a keeper (a stop)
+
+Since #1895 step 4 an update, and a window of another build, stop the keeper and the window starts a keeper of its own
+build, whose host continues the turns. A keeper runs one build for its life: `switch` and `upgrade`, which an earlier
+build's window may still send, answer `gone` (PR 4). Until then this was a blue-green swap of the host, with the keeper
+handing itself over first when it was of another build.
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant W as Window (build B)
-  participant K as Keeper
+  participant KA as Keeper (build A)
   participant HA as Host A
+  participant KB as Keeper (build B)
   participant HB as Host B
   participant C as Agents, terminals, commands
-  W->>K: switch to build B (keeper.sock)
-  opt keeper is another build
-    K->>K: hand over to build B's keeper, which continues
-  end
-  K->>K: copy build B to hosts/B
-  K->>HB: start --standby
-  HB->>HB: load, read the store without writing, refuse one too new
-  HB-->>K: standby report (no lock, no listen, no attach)
-  K->>K: front door holds new connections
-  K->>HA: drain
-  HA->>HA: refuse new calls, running ones get 10 s, then cut retryably
-  HA->>HA: write the view handover, stop for an update: list and end agents, terminals, commands, stop app servers, close the store
-  HA-->>K: drained, lock released, exits
-  K->>K: close connections still relayed to A
-  K->>HB: activate
-  HB->>HB: take the lock, expand-only migrations
-  HB-->>K: ready (listening)
-  K->>K: front door points at B
+  W->>KA: stop {forUpdate} (a plain stop, behind the loss confirmation, when it cannot)
+  KA->>HA: stop line for an update
+  HA->>C: list the turns, terminals and Run commands, end them
+  HA-->>KA: exits
+  KA-->>W: ok, exits
+  W->>KB: start (through the shell on macOS release)
+  KB->>HB: start from build B
   HB->>C: continue the listed turns, open the terminals and Run commands again
-  W->>K: reconnect, same address and token
-  K-->>HB: bytes relayed
+  W->>KB: attach; connect to its front door (a new port and token)
   HB-->>W: hello_ok, new stream epoch, window resyncs
-  HB->>HB: heavy and breaking migrations, after ready
 ```
 
-If B fails after A drained, the keeper starts A's build again from its kept copy. Every phase is pushed to windows
-(`view.swap`). Detail: [architecture.md](architecture.md) §4.2, [agent-host.md](agent-host.md) §4.2.
+Detail: [architecture.md](architecture.md) §4.4, §4.5, [agent-host.md](agent-host.md) §4.5.
 
 ## 6. Machines
 

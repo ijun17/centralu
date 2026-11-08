@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
  * The shell's banner (the desktop keeper's "other build" bar) covers nothing (#326).
  *
  * It used to be laid over the window (`fixed inset-x-0 top-0 z-30`): its text started under the
- * macOS traffic lights and its "Switch to this build" button sat on the top bar's own controls.
+ * macOS traffic lights and its button sat on the top bar's own controls.
  * Now App draws it in the flow, directly below the top bar, and the lanes give up its height.
  *
  * Driven through apps/web/shell-banner.html, which mounts the real App on the mock with the
@@ -78,7 +78,7 @@ async function expectBelowTopBar(page: Page) {
 
   // Header controls are still the top of the stack where they are drawn
   expect(await hitsItself(page, 'counter'), 'the waiting counter in the top bar is covered').toBe(true)
-  // One line of one height in every state (the lanes must not jump when a switch starts), long
+  // One line of one height in every state (the lanes must not jump when a restart starts), long
   // text truncates instead of wrapping, and nothing spills past the window
   expect(banner.height).toBe(BANNER_HEIGHT)
   expect(
@@ -110,9 +110,9 @@ export function shellBannerTests(): void {
         await text.evaluate((el) => el.scrollWidth > el.clientWidth),
         'the build text should be cut, not wrapped',
       ).toBe(true)
-      const button = await box(page, 'host-switch-build')
+      const button = await box(page, 'host-restart-keeper')
       expect(button.x + button.width).toBeLessThanOrEqual(page.viewportSize()!.width)
-      expect(await hitsItself(page, 'host-switch-build'), 'something is drawn over the switch button').toBe(
+      expect(await hitsItself(page, 'host-restart-keeper'), 'something is drawn over the restart button').toBe(
         true,
       )
 
@@ -135,57 +135,43 @@ export function shellBannerTests(): void {
       expect(panel.y - (field.y + field.height)).toBeLessThan(16)
     })
 
-    for (const state of ['progress', 'failed'] as const) {
-      test(`the switch ${state} state sits in the same place`, async ({ page }) => {
-        await open(page, `demo=focus&state=${state}`)
-        const banner = await expectBelowTopBar(page)
-        await expect(page.getByTestId('host-switch-progress')).toBeVisible()
-        await expectBelow(page, banner, ['sidebar', 'session-view'])
-      })
-    }
-
     /*
-     * #387: beta.10's keeper cannot hand itself over on macOS ("Message too long"), and the fix is
-     * in the sending keeper, which an update does not replace. The host swap still goes ahead
-     * under it, so the window runs its own build; the bar must say that calmly and offer the full
-     * restart, instead of "Switch to this build" forever and "Could not switch builds" on the second try.
+     * #1895 step 4, PR 3: a restart into this build, not a switch with phases. It asks first while something runs, says
+     * what stops, and shows one line while the keeper restarts.
      */
-    for (const state of ['keeper-later', 'keeper-later-first'] as const) {
-      test(`a keeper that could not move while the host runs this build (${state}): a note and a full restart, no switch`, async ({
-        page,
-      }) => {
+    for (const [state, loses] of [
+      ['other', 'Running turns stop and go on once this build is up'],
+      ['earlier', 'Also stops agents, terminals and running commands.'],
+    ] as const) {
+      test(`the restart into this build asks first while something runs (${state}), and shows one line while it runs`, async ({ page }) => {
         await open(page, `demo=focus&state=${state}`)
-        await expectBelowTopBar(page)
-        const bar = page.getByTestId('host-other-build')
-        await expect(bar).toHaveAttribute('role', 'status')
-        await expect(page.getByTestId('host-switch-progress')).toHaveText(
-          'Running this build. The background keeper moves to it the next time it restarts.',
-        )
-        await expect(bar).not.toContainText('Could not switch builds')
-        await expect(page.getByTestId('host-switch-build')).toHaveCount(0)
         const restart = page.getByTestId('host-restart-keeper')
-        await expect(restart).toHaveText('Restart completely')
-        expect(await hitsItself(page, 'host-restart-keeper'), 'something is drawn over the restart button').toBe(true)
-
-        // It says plainly what stops before anything does
+        await expect(restart).toHaveText('Restart into this build')
         await restart.click()
-        await expect(page.getByTestId('confirm-restart-keeper-loses')).toContainText(
-          'Also stops agents, terminals and running commands.',
-        )
+        await expect(page.getByTestId('confirm-restart-keeper-loses')).toContainText(loses)
         const calls = () => page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)
         expect(await calls()).toEqual([])
         await page.getByTestId('confirm-restart-keeper-yes').click()
         expect(await calls()).toEqual(['restart_keeper'])
-        await expect(page.getByTestId('host-switch-progress')).toHaveText('Restarting the background keeper on this build…')
+        const banner = await expectBelowTopBar(page)
+        await expect(page.getByTestId('host-restarting')).toHaveText('Restarting Centralu on this build…')
         await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
+        await expectBelow(page, banner, ['sidebar', 'session-view'])
       })
     }
 
+    test('with nothing running the restart goes without a question', async ({ page }) => {
+      await open(page, 'demo=focus&state=idle')
+      await page.getByTestId('host-restart-keeper').click()
+      await expect(page.getByTestId('confirm-restart-keeper')).toHaveCount(0)
+      expect(await page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)).toEqual(['restart_keeper'])
+    })
+
     /*
      * #352: a window of an older build than the one running (a backed-up app opened while a newer
-     * one runs) never switches by itself. The bar still offers the switch, and says it goes back.
+     * one runs) never restarts by itself. The bar still offers the restart, and says it goes back.
      */
-    test('a window of an older build says so, and the switch it offers goes back', async ({ page }) => {
+    test('a window of an older build says so, and the restart it offers goes back', async ({ page }) => {
       await open(page, 'demo=focus&state=older')
       await expectBelowTopBar(page)
       const line = page.getByTestId('host-older-build')
@@ -194,34 +180,21 @@ export function shellBannerTests(): void {
       )
       // The paths are one hover away, to tell which app is which
       await expect(line).toHaveAttribute('title', /Running: build 53b9cf7 \(0\.1\.0-beta\.7\) from .*This window: build 2ffcaec5/)
-      const button = page.getByTestId('host-switch-build')
-      await expect(button).toHaveText('Switch back to this build')
-      expect(await hitsItself(page, 'host-switch-build'), 'something is drawn over the switch button').toBe(true)
+      const button = page.getByTestId('host-restart-keeper')
+      await expect(button).toHaveText('Go back to this build')
+      expect(await hitsItself(page, 'host-restart-keeper'), 'something is drawn over the restart button').toBe(true)
       await button.click()
-      expect(await page.evaluate(() => (window as unknown as { __shellCalls: string[] }).__shellCalls)).toEqual([
-        'switch_host_build',
-      ])
+      await expect(page.getByTestId('confirm-restart-keeper')).toBeVisible()
     })
 
     test('a window of a newer build keeps the plain wording', async ({ page }) => {
       await open(page, 'demo=focus&state=other')
       await expect(page.getByTestId('host-older-build')).toHaveCount(0)
       await expect(page.getByTestId('host-other-build')).toContainText('This window is build 53b9cf7 (0.1.0-beta.7)')
-      await expect(page.getByTestId('host-switch-build')).toHaveText('Switch to this build')
+      await expect(page.getByTestId('host-restart-keeper')).toHaveText('Restart into this build')
     })
 
-    test('a real failure still reads as one: the reason, "Try again", and no restart offered', async ({ page }) => {
-      await open(page, 'demo=focus&state=failed')
-      const bar = page.getByTestId('host-other-build')
-      await expect(bar).toHaveAttribute('role', 'alert')
-      await expect(page.getByTestId('host-switch-progress')).toHaveText(
-        'Could not switch builds: the new build did not pass its start check: no answer within 60s. The running build was not touched and is still serving.',
-      )
-      await expect(page.getByTestId('host-switch-build')).toHaveText('Try again')
-      await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
-    })
-
-    test('a release that started its keeper without the shell says so, why on hover, and nothing to switch', async ({ page }) => {
+    test('a release that started its keeper without the shell says so, why on hover, and nothing to restart', async ({ page }) => {
       await open(page, 'demo=focus&state=shell')
       await expectBelowTopBar(page)
       const line = page.getByTestId('host-shell-fallback')
@@ -230,7 +203,6 @@ export function shellBannerTests(): void {
       )
       await expect(line).toHaveAttribute('title', /is not what the project signed: bad signature$/)
       await expect(page.getByTestId('host-other-build')).toHaveAttribute('role', 'status')
-      await expect(page.getByTestId('host-switch-build')).toHaveCount(0)
       await expect(page.getByTestId('host-restart-keeper')).toHaveCount(0)
       await page.getByTestId('host-bar-dismiss').click()
       await expect(page.getByTestId('host-other-build')).toHaveCount(0)

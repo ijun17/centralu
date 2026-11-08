@@ -92,7 +92,7 @@ describe('a vacuum cut off by a kill is still owed', () => {
   const owed = (file: string) =>
     raw(file, (db) => db.prepare(`SELECT 1 FROM app_settings WHERE key = 'vacuum_owed'`).get() !== undefined)
 
-  async function openAndDieAtVacuum(file: string, swap: boolean): Promise<void> {
+  async function openAndDieAtVacuum(file: string): Promise<void> {
     const script = join(dirname(file), 'die-at-vacuum.mts')
     writeFileSync(
       script,
@@ -108,8 +108,7 @@ Database.prototype.exec = function (sql) {
   }
   return exec.call(this, sql)
 }
-const s = new Store(${JSON.stringify(file)}, { swap: ${swap} })
-if (${swap}) s.runDeferred()
+const s = new Store(${JSON.stringify(file)})
 writeSync(1, 'survived\\n')
 `,
     )
@@ -127,7 +126,7 @@ writeSync(1, 'survived\\n')
   // A Node with tsx started, and a store opened and migrated in it: seconds on a loaded Windows runner
   it('the next open vacuums', { timeout: 60_000 * SLOW }, async () => {
     const file = storeWithFreePages()
-    await openAndDieAtVacuum(file, false)
+    await openAndDieAtVacuum(file)
     // v40 committed; its vacuum did not happen
     expect(raw(file, (db) => db.pragma('user_version', { simple: true }))).toBe(40)
     expect(freePages(file)).toBeGreaterThan(0)
@@ -141,39 +140,9 @@ writeSync(1, 'survived\\n')
     expect(owed(file)).toBe(false)
     expect(said.mock.calls.some(([line]) => String(line).includes('left it owed'))).toBe(true)
   })
-
-  it('in a swap, the steps left for later are run with it, not the open', { timeout: 60_000 * SLOW }, async () => {
-    const file = storeWithFreePages()
-    await openAndDieAtVacuum(file, true)
-    expect(owed(file)).toBe(true)
-
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    const s = new Store(file, { swap: true })
-    // v40 ran before the kill; the one step after it that breaks older readers (v56, #423) is still left for later
-    expect(s.deferredSteps).toEqual([56])
-    expect(s.vacuumOwed).toBe(true)
-    expect(freePages(file)).toBeGreaterThan(0)
-
-    s.runDeferred()
-    expect(s.vacuumOwed).toBe(false)
-    s.close()
-    expect(freePages(file)).toBe(0)
-  })
 })
 
 describe('the WAL', () => {
-  it('is folded once the steps a swap left for later have run', () => {
-    const file = storeFile()
-    raw(file, (db) => db.pragma('user_version = 38'))
-    const s = new Store(file, { swap: true })
-    expect(s.deferredSteps).toEqual([40, 56])
-
-    s.runDeferred()
-
-    expect(statSync(`${file}-wal`).size).toBe(0)
-    s.close()
-  })
-
   /*
    * "Without waiting" means not waiting out the busy timeout. With the store's own 5 s the bound had to sit between a
    * slow runner and 5 s (1,078 ms seen on Windows against 1,000 first, then 2,500): load alone could cross it. The

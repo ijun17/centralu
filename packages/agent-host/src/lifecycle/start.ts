@@ -16,8 +16,6 @@ export const START_ORDER = [
   'log',
   // PA1: a GUI app has no login-shell PATH; the tools are found before anything looks for them
   'path',
-  // A swap's standby checks the store and waits here, before the lock, until the running host lets go
-  'standby',
   // LK2: one host per data folder
   'lock',
   // HO6: right after the lock, a signal is held until the shutdown exists
@@ -31,7 +29,7 @@ export const START_ORDER = [
   'listen',
   // The ready line; the supervisor reads it from stdout
   'ready',
-  // Signals, crashes, the parent's pipe, `host.stop`, the keeper's stop and drain (HO7, HO10, HO15)
+  // Signals, crashes, the parent's pipe, `host.stop`, the keeper's and the window's stop line (HO7, HO10, HO15)
   'endings',
 ] as const
 

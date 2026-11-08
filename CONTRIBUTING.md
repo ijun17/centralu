@@ -123,8 +123,8 @@ with them set for that Vite only (`VITE_HOST_URL`, `VITE_HOST_TOKEN`). It reads 
 folder and never writes there, and it never prints the credential. Open the address it prints
 with `127.0.0.1`, not `localhost`: the host accepts browser connections only from
 `http://127.0.0.1:5173` and `:5174`, so the port is strict and a taken port is an error, not a
-move to another one. The token stays the same across host swaps and updates and changes only when the app is
-fully quit and opened again; run it again then.
+move to another one. The token stays the same across host restarts and changes with the keeper: when the app is
+fully quit and opened again, or updated; run it again then.
 It says in one line when no app is running, when the keeper has no host yet, and when the
 port is taken. Windows has no keeper (the app runs the host directly there), so use the
 shell recipe above.
@@ -367,7 +367,6 @@ verifier or the keeper start it uses:
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-shell
 pnpm exec tsx scripts/shell-integration.mts   # the real binary against signed test content
-pnpm exec tsx scripts/keeper-content-integration.mts   # a keeper from verified content handing over
 ```
 
 **Some defects only reproduce in the packaged app.** If you changed anything to do with
@@ -449,9 +448,9 @@ pull request. Review rounds were the largest delay in landing work, and much of 
 sent back was one of these (#1181). "Does not apply, because …" is an answer; a blank is not. A
 change with no behaviour (documents, a pure refactor) writes n/a.
 
-- **Host swap.** An older build is still serving the same store while the new one starts
-  (`Store.migrate()`, [docs/agent-host.md](docs/agent-host.md)). What does each of them do with
-  what the other wrote?
+- **Two builds on one store.** An older build opens the store a newer one wrote: the person goes
+  back a release, or a linked machine's update is rolled back (`Store.migrate()`,
+  [docs/agent-host.md](docs/agent-host.md)). What does each of them do with what the other wrote?
 - **Link loss and reconnect.** The window, a remote or a child loses its connection in the middle
   of this and comes back. What is resent, what is lost, what is done twice?
 - **An older build reading what this one writes.** A field, a message or a file this change adds,

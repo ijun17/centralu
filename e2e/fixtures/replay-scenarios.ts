@@ -34,6 +34,8 @@ export type Held = {
   thoughts?: number
   /** The compactions the tool announced, with the size of the conversation before and after where it says */
   compactions: { before?: number; after?: number }[]
+  /** What the tool said in the agent's place when a request failed (Claude's synthetic message with `error`): the error line's words, not a bubble */
+  failure?: string
 }
 
 /** Whether the MCP server's calls are drawn with a mark of their own: Centralu's own tools and an attached app's */
@@ -57,7 +59,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         ended = true
         continue
       }
-      const m = f.msg as { type?: string; subtype?: string; parent_tool_use_id?: string | null; message?: { id?: string; content?: { type: string; text?: string; name?: string }[] }; request?: { subtype?: string }; response?: { response?: { updatedInput?: { answers?: Record<string, string> } } }; event?: Record<string, any>; compact_metadata?: { pre_tokens: number; post_tokens: number } } | undefined
+      const m = f.msg as { type?: string; subtype?: string; error?: string; parent_tool_use_id?: string | null; message?: { id?: string; content?: { type: string; text?: string; name?: string }[] }; request?: { subtype?: string }; response?: { response?: { updatedInput?: { answers?: Record<string, string> } } }; event?: Record<string, any>; compact_metadata?: { pre_tokens: number; post_tokens: number } } | undefined
       if (!m) continue
       if (f.dir === 'out') {
         if (m.type === 'user') {
@@ -78,7 +80,8 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         if (m.type === 'system' && m.subtype === 'compact_boundary') held.compactions.push({ before: m.compact_metadata!.pre_tokens, after: m.compact_metadata!.post_tokens })
         // A subagent's own words and calls are drawn inside its card, not in the conversation
         if (m.parent_tool_use_id) continue
-        if (m.type === 'assistant' && !streamed.has(String(m.message?.id))) {
+        if (m.type === 'assistant' && m.error) held.failure = (m.message?.content ?? []).map((b) => b.text ?? '').join('')
+        else if (m.type === 'assistant' && !streamed.has(String(m.message?.id))) {
           for (const b of m.message?.content ?? []) {
             if (b.type === 'text') say(b.text ?? '')
             else if (b.type === 'tool_use') call(String(b.name))
@@ -353,8 +356,9 @@ export const REPLAYS: Replay[] = [
     tool: 'claude',
     scenario: 'failed',
     async shows(page, held) {
-      // The CLI's own message (a synthetic one, no model behind it) is drawn as a bubble, as the error line in the conversation and as the reason under the composer
-      expect(text(await page.getByTestId('msg-mark').innerText())).toBe(`The agent could not finish this turn — ${text(held.said[0]!)}`)
+      // The CLI's own message (a synthetic one, no model behind it) is the error line only: no bubble (`expectPane`), and the note under the composer points to the line (#2050)
+      expect(text(await page.getByTestId('msg-mark').innerText())).toBe(`The agent could not finish this turn — ${text(held.failure!)}`)
+      await expect(page.getByTestId('msg-assistant')).toHaveCount(0)
       await expect(page.getByTestId('error-note')).toBeVisible()
     },
   },

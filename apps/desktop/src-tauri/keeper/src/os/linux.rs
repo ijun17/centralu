@@ -1,22 +1,15 @@
-//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, a child's exit by
-//! a `pidfd` (and a zombie's status from `/proc`), and descriptors received with
-//! `MSG_CMSG_CLOEXEC`.
+//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, and a process's state, executable and
+//! start read from `/proc`.
 
-use std::collections::HashMap;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-
-use super::children::{parse_proc_exit, set_cloexec, ExitStatus, Seen, Watch};
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
 
 /// Nothing to hear: the host asks systemd itself where there is one (#1397), and elsewhere nothing says who sent a stop
 pub fn on_system_stop(_told: impl Fn() + Send + 'static) {}
-
-/// Received descriptors are close-on-exec from the moment they exist.
-pub const RECV_FLAGS: libc::c_int = libc::MSG_CMSG_CLOEXEC;
 
 /// The uid of the process on the other end of a unix socket.
 /// The pid of the process at the other end of a unix socket (`SO_PEERCRED`), as of its `connect`.
@@ -59,57 +52,6 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     }
 }
 
-/// A `pidfd` per child, readable once it exits (`ExitWatch`).
-pub struct ExitBackend {
-    pidfds: HashMap<i32, OwnedFd>,
-}
-
-impl ExitBackend {
-    pub fn new() -> io::Result<Self> {
-        Ok(ExitBackend { pidfds: HashMap::new() })
-    }
-
-    pub fn watch(&mut self, pid: i32) -> Watch {
-        // SAFETY: pidfd_open(pid, 0) takes no pointers.
-        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
-        if fd < 0 {
-            // Gone (ESRCH), or a kernel without pidfd_open (before 5.3) and anything else: polled
-            return Watch::after_error(io::Error::last_os_error());
-        }
-        let _ = set_cloexec(fd);
-        // SAFETY: the syscall just returned it.
-        self.pidfds.insert(pid, unsafe { OwnedFd::from_raw_fd(fd) });
-        Watch::Registered
-    }
-
-    pub fn fds(&self) -> Vec<RawFd> {
-        self.pidfds.values().map(|f| f.as_raw_fd()).collect()
-    }
-
-    /// Every watched child: a pidfd says that something happened, not what, so each is checked.
-    pub fn seen(&mut self) -> Vec<Seen> {
-        self.pidfds.keys().map(|&pid| Seen { pid, exited: None }).collect()
-    }
-
-    /// Whether the child's pidfd reports it gone (readable), without waiting.
-    pub fn gone(&self, pid: i32) -> bool {
-        let Some(fd) = self.pidfds.get(&pid) else { return true };
-        let mut p = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-        // SAFETY: one valid pollfd, no wait.
-        unsafe { libc::poll(&mut p, 1, 0) == 1 }
-    }
-
-    pub fn forget(&mut self, pid: i32) {
-        self.pidfds.remove(&pid);
-    }
-
-    /// A zombie's exit status from `/proc/<pid>/stat`, while the zombie is still there.
-    pub fn zombie_status(pid: i32) -> Option<ExitStatus> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        parse_proc_exit(&stat)
-    }
-}
-
 /// Whether `pid` is a zombie: ended, and not yet gone (`/proc/<pid>/stat`'s state `Z`, or `X`).
 /// `kill(pid, 0)` cannot tell, it succeeds on a zombie (`super::pid_alive`).
 ///
@@ -120,13 +62,6 @@ impl ExitBackend {
 pub fn is_zombie(pid: u32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
         .is_ok_and(|stat| matches!(proc_state(&stat), Some('Z' | 'X' | 'x')))
-}
-
-/// Every process id the system has now, whoever owns it (the numeric names in `/proc`). Used to
-/// find the members of a session (`children::signal_session`), which no call lists directly.
-pub fn all_pids() -> Vec<i32> {
-    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
-    dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok()).filter(|&p| p > 0).collect()
 }
 
 /// The state letter of a `/proc/<pid>/stat` line: the first field after the command name, which is

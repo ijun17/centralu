@@ -12,23 +12,14 @@
 //! host says another owner holds the data folder (#184). Only where the status goes differs, and
 //! that is the `StatusSink`.
 //!
-//! The keeper's own upgrade (#280 step 4) adds two things: a host's stdout is read by a
-//! `HostOut` that can be stopped between lines and handed over with what it had read, and a
-//! supervisor can take over a host **another keeper started** (`adopt_foreign`): it holds the
-//! host's pipes but is not its parent, so it learns of the end from stdout closing and stops it by
-//! pid, as it already did.
-//!
 //! **Where the operating system shows.** This file is the logic every OS shares, written once. The
 //! mechanism that differs is the OS layer's (`crate::os`): signalling a host and its group
 //! (`kill_pid`, `kill_group`), how a host is started (`own_group`, `hide_console`), how it is asked
 //! to stop (`CLOSE_STDIN_TO_STOP`, `group_signal_after_exit_is_safe`), whether tsx's sh script runs as it
-//! is (`RUNS_SH_SCRIPTS`) and the login-shell probe. What only the keeper does, which is unix-only
-//! until the keeper has a Windows half, is `handover.rs`: the stdout reader that can be frozen
-//! (`HostOut`) and the handoff of a running host (`freeze`, `adopt_foreign`); `no_handover.rs` is
-//! its uninhabited stand-in. Finding Node is `node.rs`, its per-OS candidate lists and hints
+//! is (`RUNS_SH_SCRIPTS`) and the login-shell probe. Finding Node is `node.rs`, its per-OS candidate lists and hints
 //! included, chosen by `start_plan::Os::current`, so they are tested on every OS.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -38,21 +29,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 mod node;
-#[cfg(unix)]
-mod handover;
-#[cfg(windows)]
-mod no_handover;
-
-#[cfg(unix)]
-use handover as hand;
-#[cfg(windows)]
-use no_handover as hand;
 
 pub use crate::os::{hide_console, kill_group, kill_group_now, kill_pid};
 use crate::os;
-pub use hand::Gate;
-#[cfg(unix)]
-pub use handover::{ForeignAdopt, HostFreeze, HostOut, LineGate, NextLine};
 pub use node::resolve_node;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,29 +109,15 @@ pub enum LaunchError {
     Retry(String),
 }
 
-/// Builds the launch for the next attempt. Called once per attempt, so the keeper can change
-/// which build the next attempt runs (a switch) without restarting the supervisor.
+/// Builds the launch for the next attempt. Called once per attempt.
 pub type Launcher = Arc<dyn Fn() -> Result<HostLaunch, LaunchError> + Send + Sync>;
 
-/// A host's stdout, one line at a time: a blocking reader for a host the supervisor started, or a
-/// channel for one the keeper started itself and then handed over (#280 step 3, `adopt`).
+/// A host's stdout, one line at a time.
 pub type Lines = Box<dyn Iterator<Item = String> + Send>;
-
-/// A host that is already running and has said it is ready, handed to `Supervisor::adopt`.
-pub struct Adopted {
-    pub child: Child,
-    pub lines: Lines,
-    pub info: HostInfo,
-    /// The reader behind `lines`, so this host can be frozen for a keeper handoff later (unix).
-    pub gate: Option<Gate>,
-}
 
 #[derive(Default)]
 struct Inner {
     child: Option<HostProc>,
-    /// The running host's stdout reader, when it can be paused (unix: read by `freeze` and `thaw`).
-    #[cfg_attr(not(unix), allow(dead_code))]
-    gate: Option<Gate>,
     info: Option<HostInfo>,
     status_text: Option<String>,
     shutting_down: bool,
@@ -160,13 +125,6 @@ struct Inner {
     /// second thread — if two of them alternate starting a host against the same data folder,
     /// they end up blocking each other's lock.
     running: bool,
-    /// The host about to exit was stopped on purpose to start another one (the keeper's build
-    /// switch). Its exit is not a crash: no backoff, no attempt counted.
-    bouncing: bool,
-    /// The host about to exit is draining for a blue-green swap (#280 step 3): its exit ends this
-    /// watcher without a restart or a status, because the keeper hands the supervisor the next
-    /// host itself (`adopt`).
-    handing_over: bool,
     /// The last things the host said before it died (dogfooding: an installed build looked
     /// stuck on "Starting…" forever, and the real reason — another instance was holding the
     /// data — was something the host had spelled out plainly on stdout the whole time. The
@@ -197,9 +155,12 @@ pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// The line that asks a host the window or the keeper started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
-/// The line a keeper with no child service stops its host with for good: the person quit Centralu here, which the host
-/// notes for a linked hub (#1143), as it did when the child service said `stop` (#1895 step 3)
+/// The line a keeper stops its host with for good: the person quit Centralu here, which the host notes for a linked hub
+/// (#1143)
 pub const STOP_LINE: &str = r#"{"op":"stop"}"#;
+/// How long a host asked to stop for good gets to stop its agents, terminals and commands before it is stopped the usual
+/// way. The host's stop closes codex's stdin and gives claude the SDK's 2 s grace
+pub const STOP_WAIT: Duration = Duration::from_secs(6);
 
 /// The lines that tell a host the system is ending, and that it is not after all (agent-host `main.ts`, `system-ending`; #1397,
 /// #1970): said by whoever hears the end first, the window at Windows' end-session question or the keeper at launchd's stop
@@ -217,17 +178,12 @@ pub const STOP_FOR_UPDATE_WAIT: Duration = Duration::from_secs(15);
 pub enum AfterExit {
     /// Start again after this attempt's backoff.
     Retry { attempt: u32 },
-    /// Start again at once, from attempt zero (a deliberate bounce).
-    Again,
     /// Give up and show this.
     GiveUp(String),
 }
 
 /// The restart rule, pulled out so it can be tested without a process.
-pub fn after_exit(attempt: u32, uptime: Duration, bounced: bool, reason: &str, code: Option<i32>) -> AfterExit {
-    if bounced {
-        return AfterExit::Again;
-    }
+pub fn after_exit(attempt: u32, uptime: Duration, reason: &str, code: Option<i32>) -> AfterExit {
     /*
      * If another instance is holding the data, or the data needs a newer Centralu, relaunching
      * just gets the same answer — instead of cycling through five backoff rounds (about 15
@@ -285,7 +241,7 @@ impl Supervisor {
     /// Launches the host and starts the watcher thread. Returns false if one is already running.
     pub fn start(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) -> bool {
         if self.claim(false) {
-            self.watch(sink, launcher, None);
+            self.watch(sink, launcher);
             true
         } else {
             false
@@ -307,39 +263,8 @@ impl Supervisor {
         if !self.claim(true) {
             return false;
         }
-        self.watch(sink, launcher, None);
+        self.watch(sink, launcher);
         true
-    }
-
-    /**
-     * Takes over a host the keeper started and brought to ready itself: the new host of a
-     * blue-green swap (#280 step 3). From here on it is supervised exactly like one this supervisor
-     * launched: its ready status goes out now, its later lines reach the sink, and if it dies it is
-     * restarted with `launcher` by the usual rules. Hands `host` back if a watcher is still running.
-     */
-    pub fn adopt(&self, host: Adopted, sink: Arc<dyn StatusSink>, launcher: Launcher) -> Result<(), Adopted> {
-        if !self.claim(true) {
-            return Err(host);
-        }
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.last_output.clear();
-            inner.child = Some(HostProc::Own(host.child));
-            inner.info = Some(host.info.clone());
-            inner.gate = host.gate.clone();
-        }
-        self.watch(sink, launcher, Some((host.lines, host.info)));
-        Ok(())
-    }
-
-    /**
-     * Marks the running host as draining for a swap (#280 step 3): when it exits, the watcher ends
-     * quietly instead of restarting it. Returns its pid, or None when no host is running.
-     */
-    pub fn hand_over(&self) -> Option<u32> {
-        let mut inner = self.inner.lock().ok()?;
-        let pid = inner.child.as_ref().map(|c| c.id())?;
-        inner.handing_over = true;
-        Some(pid)
     }
 
     /// Writes one line to the running host's stdin: the keeper's control lines (#280 step 3).
@@ -383,48 +308,8 @@ impl Supervisor {
         self.shutdown();
     }
 
-    /// Stops the running host the usual way (TERM, a grace period, then its group) without telling
-    /// the watcher anything: for a host already handed over that did not exit on its own.
-    pub fn stop_current(&self) -> bool {
-        let Some(pid) = self.pid() else { return false };
-        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
-        stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
-        true
-    }
-
-    /**
-     * Kills the running host and its group outright (SIGKILL; Windows `taskkill /F /T`): for a
-     * host that ignored TERM and its grace (#840 item 1). While the host runs it is held and not
-     * reaped, so its pid and its group's number are still its own. A host that has already exited
-     * may leave members behind that ignored TERM and still hold its stdout, so its watcher runs on:
-     * their group is killed too, under the rule `stop_pid_gracefully` keeps for an ended host
-     * (`os::group_signal_after_exit_is_safe`). Returns false when no host is running.
-     */
-    pub fn kill_current(&self) -> bool {
-        let Ok(mut inner) = self.inner.lock() else { return false };
-        let Some(child) = inner.child.as_mut() else { return false };
-        let pid = child.id();
-        if !child.has_exited() {
-            kill_group_now(pid);
-            child.kill();
-        } else if os::group_signal_after_exit_is_safe(pid) {
-            kill_group_now(pid);
-        }
-        true
-    }
-
-    /**
-     * Undoes `hand_over`: the host was not replaced after all (a swap gave up while it still ran),
-     * so its exit is handled like any other, a restart by the usual rules (#840 item 1). Left set,
-     * the watcher would end quietly once that host exits, and nothing would start another.
-     */
-    pub fn cancel_hand_over(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.handing_over = false;
-        }
-    }
-
     /// Whether a watcher thread is running: a host is up, starting, or between restarts.
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.inner.lock().map(|i| i.running).unwrap_or(false)
     }
@@ -446,7 +331,7 @@ impl Supervisor {
         true
     }
 
-    fn watch(&self, sink: Arc<dyn StatusSink>, launcher: Launcher, mut adopted: Option<(Lines, HostInfo)>) {
+    fn watch(&self, sink: Arc<dyn StatusSink>, launcher: Launcher) {
         let me = self.clone();
         thread::spawn(move || {
             // Clear the running flag no matter which path this ends on — otherwise Retry could
@@ -458,31 +343,24 @@ impl Supervisor {
                     return;
                 }
                 let started = Instant::now();
-                let outcome = if let Some((lines, info)) = adopted.take() {
-                    // Handed over by a swap, already up: report it and follow it to its end
-                    sink.status(&HostStatus::Ready(info));
-                    Ok(me.pump(&*sink, lines))
-                } else {
-                    sink.status(&if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
-
-                    let launch = match launcher() {
-                        Ok(l) => l,
-                        Err(LaunchError::Fatal(message)) => {
+                sink.status(&if attempt == 0 { HostStatus::Starting } else { HostStatus::Restarting { attempt } });
+                let launch = match launcher() {
+                    Ok(l) => l,
+                    Err(LaunchError::Fatal(message)) => {
+                        me.give_up(&*sink, message);
+                        return;
+                    }
+                    Err(LaunchError::Retry(message)) => {
+                        attempt += 1;
+                        if attempt > MAX_RESTARTS {
                             me.give_up(&*sink, message);
                             return;
                         }
-                        Err(LaunchError::Retry(message)) => {
-                            attempt += 1;
-                            if attempt > MAX_RESTARTS {
-                                me.give_up(&*sink, message);
-                                return;
-                            }
-                            thread::sleep(backoff(attempt));
-                            continue;
-                        }
-                    };
-                    me.spawn_once(&*sink, &launch)
+                        thread::sleep(backoff(attempt));
+                        continue;
+                    }
                 };
+                let outcome = me.spawn_once(&*sink, &launch);
 
                 match outcome {
                     Ok(code) => {
@@ -490,18 +368,9 @@ impl Supervisor {
                         if me.inner.lock().map(|i| i.shutting_down).unwrap_or(true) {
                             return;
                         }
-                        // Drained for a swap: the keeper adopts the next host itself
-                        if me.inner.lock().map(|mut i| std::mem::take(&mut i.handing_over)).unwrap_or(false) {
-                            return;
-                        }
-                        let bounced = me.inner.lock().map(|mut i| std::mem::take(&mut i.bouncing)).unwrap_or(false);
                         // The last things the host said — if it died before ready, this is why.
                         let reason = me.take_last_output();
-                        match after_exit(attempt, started.elapsed(), bounced, &reason, code) {
-                            AfterExit::Again => {
-                                attempt = 0;
-                                continue;
-                            }
+                        match after_exit(attempt, started.elapsed(), &reason, code) {
                             AfterExit::Retry { attempt: next } => attempt = next,
                             AfterExit::GiveUp(message) => {
                                 me.give_up(&*sink, message);
@@ -537,8 +406,7 @@ impl Supervisor {
         let mut child = spawn_host(launch)?;
         let stdout = child.stdout.take().ok_or("could not open stdout")?;
 
-        // unix: a reader that can be paused for a keeper handoff (#280 step 4)
-        let (lines, gate) = hand::host_lines(stdout);
+        let lines: Lines = Box::new(BufReader::new(stdout).lines().map_while(Result::ok));
         {
             let Ok(mut inner) = self.inner.lock() else {
                 stop_child(&mut child);
@@ -551,8 +419,7 @@ impl Supervisor {
                 stop_child(&mut child);
                 return Ok(None);
             }
-            inner.child = Some(HostProc::Own(child));
-            inner.gate = gate;
+            inner.child = Some(HostProc(child));
         }
         Ok(self.pump(sink, lines))
     }
@@ -595,7 +462,6 @@ impl Supervisor {
         let mut child = {
             let mut guard = self.inner.lock().ok()?;
             guard.info = None;
-            guard.gate = None;
             guard.child.take()
         };
         child.as_mut().and_then(|c| c.wait())
@@ -614,31 +480,6 @@ impl Supervisor {
             .lock()
             .map(|mut i| std::mem::take(&mut i.last_output).join("\n"))
             .unwrap_or_default()
-    }
-
-    /**
-     * Stops the running host so the watcher starts the next one at once, from attempt zero. The
-     * launcher decides what the next one runs. The keeper uses it for a `switch` while a host is
-     * still starting; a host that is up is swapped blue-green instead (`keeper/swap.rs`).
-     *
-     * The host is stopped the same way as on shutdown — TERM, a grace period for its own
-     * `shutdown()`, then the group. Returns false when no host is running.
-     */
-    pub fn bounce(&self) -> bool {
-        let pid = match self.inner.lock() {
-            Ok(mut inner) => match inner.child.as_ref().map(|c| c.id()) {
-                Some(id) => {
-                    inner.bouncing = true;
-                    inner.info = None;
-                    id
-                }
-                None => return false,
-            },
-            Err(_) => return false,
-        };
-        let stdin = self.inner.lock().ok().and_then(|mut i| i.child.as_mut().and_then(|c| c.take_stdin()));
-        stop_pid_gracefully(pid, stdin, || self.pid() != Some(pid));
-        true
     }
 
     /// Stops the host for good. Kills it **as a whole group** — no zombies left behind.
@@ -713,8 +554,8 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
     Ok(child)
 }
 
-/// Stops a host the supervisor does not hold (a swap's standby that failed its check, #280 step 3)
-/// the same way the supervisor stops its own, and reaps it.
+/// Stops a host the supervisor does not hold yet (one launched while the supervisor was shutting down
+/// or its lock was poisoned) the same way the supervisor stops its own, and reaps it.
 pub fn stop_child(child: &mut Child) {
     let pid = child.id();
     let stdin = child.stdin.take().map(|s| Box::new(s) as Box<dyn Send>);
@@ -770,57 +611,33 @@ fn stop_pid_gracefully(pid: u32, stdin: Option<Box<dyn Send>>, gone: impl FnMut(
     }
 }
 
-/// The host process a supervisor holds: one it started, or (unix) one another keeper started and
-/// handed over, which it is not the parent of (`handover::Foreign`; there is none on Windows).
-pub enum HostProc {
-    Own(Child),
-    Foreign(hand::Foreign),
-}
+/// The host process a supervisor holds, which it started.
+pub struct HostProc(Child);
 
 impl HostProc {
     pub fn id(&self) -> u32 {
-        match self {
-            HostProc::Own(c) => c.id(),
-            HostProc::Foreign(f) => f.id(),
-        }
+        self.0.id()
     }
 
     fn stdin(&mut self) -> Option<&mut dyn Write> {
-        match self {
-            HostProc::Own(c) => c.stdin.as_mut().map(|s| s as &mut dyn Write),
-            HostProc::Foreign(f) => f.stdin(),
-        }
+        self.0.stdin.as_mut().map(|s| s as &mut dyn Write)
     }
 
     fn take_stdin(&mut self) -> Option<Box<dyn Send>> {
-        match self {
-            HostProc::Own(c) => c.stdin.take().map(|s| Box::new(s) as Box<dyn Send>),
-            HostProc::Foreign(f) => f.take_stdin(),
-        }
+        self.0.stdin.take().map(|s| Box::new(s) as Box<dyn Send>)
     }
 
     fn has_exited(&mut self) -> bool {
-        match self {
-            HostProc::Own(c) => matches!(c.try_wait(), Ok(Some(_))),
-            HostProc::Foreign(f) => f.has_exited(),
-        }
+        matches!(self.0.try_wait(), Ok(Some(_)))
     }
 
     fn kill(&mut self) {
-        match self {
-            HostProc::Own(c) => {
-                let _ = c.kill();
-            }
-            HostProc::Foreign(f) => f.kill(),
-        }
+        let _ = self.0.kill();
     }
 
-    /// Waits for it to end and returns its exit code, when it is ours to read.
+    /// Waits for it to end and returns its exit code.
     fn wait(&mut self) -> Option<i32> {
-        match self {
-            HostProc::Own(c) => c.wait().ok().and_then(|s| s.code()),
-            HostProc::Foreign(f) => f.wait(),
-        }
+        self.0.wait().ok().and_then(|s| s.code())
     }
 }
 

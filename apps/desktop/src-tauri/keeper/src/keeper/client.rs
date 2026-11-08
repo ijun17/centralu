@@ -64,12 +64,6 @@ pub fn alive(sock: &Path) -> bool {
 // The window's requests, one function per op it sends (`server::handle` answers them), each with the
 // bound the window has always given it.
 
-/// `relaunching` (#352): the keeper holds on through the window's relaunch. Its grace, in seconds.
-pub fn relaunching(sock: &Path) -> Result<u64, String> {
-    let v = request(sock, &json!({ "op": "relaunching" }), Duration::from_secs(5))?;
-    Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
-}
-
 /// `system_ending` (#1970): tells the host, through the keeper, that the system is ending (`cancelled`: that it is not after all)
 pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
     request(sock, &json!({ "op": "system_ending", "cancelled": cancelled }), Duration::from_secs(3)).map(|_| ())
@@ -79,16 +73,6 @@ pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
 pub fn restart_host(sock: &Path) -> Result<bool, String> {
     let v = request(sock, &json!({ "op": "restart" }), Duration::from_secs(5))?;
     Ok(v.get("started").and_then(Value::as_bool).unwrap_or(false))
-}
-
-/// `switch` (#280 step 3): swaps the host to `source`, and the keeper to the executable `keeper`
-/// first when named (step 4).
-pub fn switch(sock: &Path, source: &super::source::BuildSource, keeper: Option<&Path>) -> Result<(), String> {
-    let mut req = json!({ "op": "switch", "source": source });
-    if let Some(exe) = keeper {
-        req["keeper"] = json!({ "exe": exe });
-    }
-    request(sock, &req, Duration::from_secs(10)).map(|_| ())
 }
 
 /// `settings`: whether background mode is on.
@@ -112,6 +96,45 @@ pub fn stop(sock: &Path) -> Result<(), String> {
 /// which takes up to `host_proc::STOP_FOR_UPDATE_WAIT`; this waits that and a margin.
 pub fn stop_for_update(sock: &Path) -> Result<(), String> {
     request(sock, &json!({ "op": "stop", "forUpdate": true }), crate::host_proc::STOP_FOR_UPDATE_WAIT + Duration::from_secs(10)).map(|_| ())
+}
+
+/// What `stop_and_wait` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stopped {
+    /// No keeper answered: nothing to stop.
+    NoneAnswered,
+    /// It took the stop and no longer answers.
+    Stopped,
+    /// It did not take the stop (the error it gave, or why it could not be asked).
+    Refused(String),
+    /// It took the stop and was still running after the wait.
+    StillAnswering,
+}
+
+/// Asks a keeper answering on `sock` to stop (`stop`, which any process of this user may ask for: its host ends what it
+/// runs as a quit does), and waits up to `limit` for the keeper to be gone: its `lock` (`keeper.lock`) free. Not its
+/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`, PR 7 review); the lock goes with
+/// the keeper's process, which exits only once its host has.
+pub fn stop_and_wait(sock: &Path, lock: &Path, limit: Duration) -> Stopped {
+    if !alive(sock) {
+        return Stopped::NoneAnswered;
+    }
+    if let Err(e) = stop(sock) {
+        return Stopped::Refused(e);
+    }
+    // Free when the file is gone or its flock can be taken; taken only to look, and let go at once (the File drops)
+    let free = || match std::fs::File::open(lock) {
+        Err(_) => true,
+        Ok(f) => os::try_lock(&f).unwrap_or(false),
+    };
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if free() {
+            return Stopped::Stopped;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Stopped::StillAnswering
 }
 
 /// A live attach connection. Its being open is what tells the keeper a window is attached;
@@ -248,14 +271,12 @@ mod tests {
     /// (`server::handle`), so each function must send exactly the request the window always sent.
     #[test]
     fn each_request_sends_its_op_and_reads_its_answer() {
-        use super::super::source::BuildSource;
         let check = |name: &str, answer: &'static str, call: &dyn Fn(&Path) -> String, sent: Value, got: &str| {
             let (sock, asked) = one_answer(name, answer);
             assert_eq!(call(&sock), got, "{name}");
             assert_eq!(asked.join().unwrap(), sent, "{name}");
             let _ = std::fs::remove_file(&sock);
         };
-        check("relaunching", r#"{"ok":true,"graceSecs":30}"#, &|s| format!("{:?}", relaunching(s)), json!({ "op": "relaunching" }), "Ok(30)");
         check("restart", r#"{"ok":true,"started":true}"#, &|s| format!("{:?}", restart_host(s)), json!({ "op": "restart" }), "Ok(true)");
         check("settings", r#"{"ok":true}"#, &|s| format!("{:?}", background(s)), json!({ "op": "settings" }), "Ok(false)");
         check(
@@ -268,15 +289,6 @@ mod tests {
         check("stop", r#"{"ok":true}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), "Ok(())");
         check("stop-for-update", r#"{"ok":true}"#, &|s| format!("{:?}", stop_for_update(s)), json!({ "op": "stop", "forUpdate": true }), "Ok(())");
         check("system-ending", r#"{"ok":true}"#, &|s| format!("{:?}", system_ending(s, false)), json!({ "op": "system_ending", "cancelled": false }), "Ok(())");
-        let source = BuildSource { commit: "abc".into(), ..Default::default() };
-        check(
-            "switch",
-            r#"{"ok":true}"#,
-            &|s| format!("{:?}", switch(s, &source, Some(Path::new("/A.app/Contents/MacOS/centralu-keeper")))),
-            json!({ "op": "switch", "source": { "commit": "abc" }, "keeper": { "exe": "/A.app/Contents/MacOS/centralu-keeper" } }),
-            "Ok(())",
-        );
-        check("switch-bare", r#"{"ok":true}"#, &|s| format!("{:?}", switch(s, &source, None)), json!({ "op": "switch", "source": { "commit": "abc" } }), "Ok(())");
         check("refused", r#"{"ok":false,"error":"no"}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), r#"Err("no")"#);
     }
 
@@ -287,5 +299,48 @@ mod tests {
         assert!(read_line(&mut r).is_err());
         let mut ok = BufReader::new(&b"{\"ok\":true}\n"[..]);
         assert_eq!(read_line(&mut ok).unwrap().as_deref(), Some("{\"ok\":true}\n"));
+    }
+
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// #1895 step 4 PR 7: what a Linux window does to a keeper an earlier build left on its data folder. Like a real
+    /// keeper (`Keeper::shutdown`), this one removes its socket first and holds its lock while its host still stops.
+    #[test]
+    fn a_keeper_answering_is_asked_to_stop_and_waited_for_until_it_is_gone() {
+        let dir = std::env::temp_dir().join(format!("cc-stop-and-wait-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (sock, lock) = (dir.join("keeper.sock"), dir.join("keeper.lock"));
+        assert_eq!(stop_and_wait(&sock, &lock, Duration::from_secs(5)), Stopped::NoneAnswered);
+
+        let held = std::fs::File::create(&lock).unwrap();
+        assert!(os::try_lock(&held).unwrap());
+        let listener = UnixListener::bind(&sock).unwrap();
+        let gone = Arc::new(AtomicBool::new(false));
+        let keeper = {
+            let (sock, gone) = (sock.clone(), gone.clone());
+            thread::spawn(move || {
+                for conn in listener.incoming() {
+                    let mut conn = conn.unwrap();
+                    let mut line = String::new();
+                    BufReader::new(conn.try_clone().unwrap()).read_line(&mut line).unwrap();
+                    conn.write_all(b"{\"ok\":true}\n").unwrap();
+                    if line.contains("\"stop\"") {
+                        let _ = std::fs::remove_file(&sock);
+                        // Its host takes a while to end its turns; the keeper exits, and its lock goes, after that
+                        thread::sleep(Duration::from_millis(1500));
+                        gone.store(true, Ordering::SeqCst);
+                        drop(held);
+                        return;
+                    }
+                }
+            })
+        };
+        assert_eq!(stop_and_wait(&sock, &lock, Duration::from_secs(10)), Stopped::Stopped);
+        assert!(gone.load(Ordering::SeqCst), "it waited for the keeper's lock, not its socket");
+        keeper.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

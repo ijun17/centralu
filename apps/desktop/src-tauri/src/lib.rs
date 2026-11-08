@@ -90,13 +90,6 @@ async fn off_main_thread<T: Send + 'static>(app: AppHandle, work: impl FnOnce(Ap
     tauri::async_runtime::spawn_blocking(move || work(app)).await.map_err(|e| format!("the request to the keeper did not finish: {e}"))
 }
 
-/// Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). The
-/// swap's progress reaches the UI in `host-build`.
-#[tauri::command]
-async fn switch_host_build(app: AppHandle) -> Result<(), String> {
-    off_main_thread(app, |app| app.state::<Supervisor>().switch_build()).await?
-}
-
 /// Background mode (#280): whether quitting leaves the agents running. Off by default.
 #[tauri::command]
 async fn background_mode(app: AppHandle) -> Result<bool, String> {
@@ -121,8 +114,8 @@ async fn quit_and_stop_agents(app: AppHandle) -> Result<(), String> {
     .await?
 }
 
-/// "Restart completely" (#387): stops the keeper and everything it holds, and this window starts a
-/// keeper of its own build. For a keeper that could not hand itself over to this build.
+/// The build bar's restart into this build (#387, #1895 step 4 PR 3): stops the keeper of another build, for an update when
+/// it can, and this window starts a keeper of its own build.
 #[tauri::command]
 async fn restart_keeper(app: AppHandle) -> Result<(), String> {
     off_main_thread(app, |app| app.state::<Supervisor>().restart_keeper()).await?
@@ -138,12 +131,9 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * "Apply now" (#352): relaunches the app from its bundle, which `centralu install` has just
  * replaced, so the new window is the new build.
  *
- * A keeper of #1895 step 3 is asked to stop the host for an update and exit (`before_relaunch`): the relaunched
- * window starts the new build's keeper, and its host continues what this one ended. An older keeper is told instead,
- * so the window closing is not "the last window left" even with background mode off; the new window attaches within the
- * keeper's grace and is told it is the relaunched one, then applies the switch (keeper, then host) by itself when nothing
- * can be lost. A keeper too old to hold on is acceptable only with background mode on, where a window closing never
- * stopped anything; with it off this refuses, rather than cutting every turn.
+ * The keeper is asked to stop the host for an update and exit (`before_relaunch`): the relaunched window starts the new
+ * build's keeper, and its host continues what this one ended. A keeper of an earlier build than #1895 step 3 cannot, and is
+ * not offered this (`relaunch_info`): the build bar's restart into this build comes first.
  *
  * A window that starts its host itself has no keeper to hold it: it stops the host for an update
  * first, waiting for it to end (#1895), and the window it relaunches into starts the next host,
@@ -164,7 +154,7 @@ async fn apply_update_relaunch(app: AppHandle) -> Result<(), String> {
             return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
         }
         // Where this window starts its host itself (#1895), the host is stopped for an update, and given the time it needs,
-        // before the relaunch ends it; a keeper does the same and exits (step 3), or, older, holds it through the relaunch
+        // before the relaunch ends it; a keeper does the same and exits
         sup.before_relaunch()?;
         app.state::<QuitApproved>().0.store(true, std::sync::atomic::Ordering::SeqCst);
         app.request_restart();
@@ -217,13 +207,12 @@ fn leave_app_folder() {
 /**
  * #840 item 6: a command that waits on the keeper's socket runs that wait off the main thread, on
  * the blocking pool (`off_main_thread`). A plain command runs on the main thread, so while the
- * keeper was slow to answer (up to 10 s for a switch) the whole window hung.
+ * keeper was slow to answer (up to 25 s for a stop for an update) the whole window hung.
  */
 #[cfg(test)]
 mod keeper_command_tests {
     /// The `Supervisor` calls that send a request to the keeper and wait for its answer.
-    const WAITS_ON_KEEPER: [&str; 7] = [
-        ".switch_build(",
+    const WAITS_ON_KEEPER: [&str; 6] = [
         ".background(",
         ".set_background(",
         ".stop_agents(",
@@ -246,7 +235,7 @@ mod keeper_command_tests {
                 assert!(body.contains("async fn ") && body.contains("off_main_thread("), "the command `{name}` waits on the keeper on the main thread");
             }
         }
-        assert!(checked >= 7, "only {checked} commands that wait on the keeper were found");
+        assert!(checked >= 6, "only {checked} commands that wait on the keeper were found");
     }
 }
 
@@ -334,7 +323,6 @@ pub fn run() {
             quit_app,
             take_app_links,
             host_build,
-            switch_host_build,
             background_mode,
             set_background_mode,
             quit_and_stop_agents,

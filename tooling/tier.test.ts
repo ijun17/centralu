@@ -82,7 +82,7 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'the desktop capabilities', paths: ['apps/desktop/src-tauri/capabilities/default.json'], tier: 'deep', rule: 'desktop-permissions' },
   { name: 'a linked machine\'s tunnel', paths: ['packages/agent-host/src/links/tunnel.ts'], tier: 'deep', rule: 'processes' },
   { name: 'centralu serve', paths: ['packaging/npm/centralu/bin/serve-run.mjs'], tier: 'deep', rule: 'processes' },
-  { name: 'the keeper', paths: ['apps/desktop/src-tauri/keeper/src/keeper/swap.rs'], tier: 'deep', rule: 'processes' },
+  { name: 'the keeper', paths: ['apps/desktop/src-tauri/keeper/src/keeper/front_door.rs'], tier: 'deep', rule: 'processes' },
   { name: 'the host\'s start', paths: ['packages/agent-host/src/lifecycle/start.ts'], tier: 'deep', rule: 'processes' },
   { name: 'app secrets', paths: ['packages/agent-host/src/apps/external/secrets.ts'], tier: 'deep', rule: 'trust' },
   { name: 'the desktop shell\'s install', paths: ['apps/desktop/src-tauri/src/shell/install.rs'], tier: 'deep', rule: 'processes' },

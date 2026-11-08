@@ -113,7 +113,8 @@ Running code from outside a signed bundle with the app's permissions needs a rea
   spawns from it. Nothing runs from the window bundle directly.
 - **Handoff.** On an update the running keeper (already verified) verifies and copies the new content itself with
   the same code and keys, then hands off as it does today. The shell is not involved, which is why its own code
-  can stay this small. Built in step 5 (§10.3).
+  can stay this small. Built in step 5 (§10.3); removed by #1895 step 4 PR 4, since a keeper now runs one build and
+  an update starts the next one through the shell.
 
 What this protects, stated plainly: a release can only run code the project signed; a partly written or
 corrupted update is refused instead of half-running; a file dropped into Centralu's folders does not inherit the
@@ -223,7 +224,7 @@ Every step lands behind the current behaviour until step 4 switches release buil
 shipping in between.
 
 Status: steps 1 and 2 are merged (#444, #445). Step 3 is §10.1 (#448), step 4 is §10.2 (#449), step 5 is §10.3
-(with it the host copies moved under the content folder, §5). Step 6 is open.
+(with it the host copies moved under the content folder, §5; its keeper handoff went with #1895 step 4 PR 4). Step 6 is open.
 
 ### 10.1 Step 3 as built (2026-10-08)
 
@@ -279,6 +280,14 @@ survives the next update.
 
 ### 10.3 Step 5 as built (2026-10-08)
 
+**Removed by #1895 step 4 PR 4** ([plans/keeper-removal.md](keeper-removal.md) §4, row 4): a keeper runs one build for
+its life and hands over to nothing, so the keeper's verify-and-copy, its handoff into the copy, its `test-key` feature
+and `keeper-content-integration.mts` went. The next build's content is verified and copied by the shell when the window
+starts it (§10.1, §10.2). What stays from this step: the **Hosts** row (a keeper from verified content runs its hosts
+from the copy's `host/`) and the **Cleanup** row without a switch's target or the freeze (the running host's folder,
+the next launch's and the keeper's own are kept). The verifier's `check` and `diagnose` stay in the keeper crate for the
+window's refusal dialog (§10.4). The rest of this section is the record of what was built.
+
 A keeper that runs from verified content verifies and copies the next build's content itself before it hands over
 (`keeper/src/keeper/content.rs`, `server::move_to_content` in the keeper crate). The window did not change: it still
 sends `switch` with the keeper executable of its bundle. What the plan left open:
@@ -310,7 +319,9 @@ a pinned shell (§10.2); the step 6 manual check covers it.
 
 Until now a refusal reached the person as one line in the build bar, drawn by the web UI, which the host feeds. The host is
 the thing whose content failed to verify, so it could hide that line. The window now draws a native dialog itself
-(`src/refusal.rs`, the dialog plugin from the Rust side), from what it reads without the host. What the plan left open:
+(`src/refusal.rs`, the dialog plugin from the Rust side), from what it reads without the host. Since #1895 step 4 PR 3
+the window asks for no switch, so it shows only the shell's refusal, and since PR 4 the keeper has no switch to refuse;
+the rows below about the keeper's swap view and `Announcer` describe what was built before that. What the plan left open:
 
 | Question | Choice | Why |
 |---|---|---|

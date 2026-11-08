@@ -162,14 +162,14 @@ describe('every ending, wired (HO15)', () => {
     const clock = { t: 0 }
     const f = fakeProcess()
     const s = fakeStdin()
-    /** Whether each leave handed the views over */
-    const left: boolean[] = []
+    /** Each leave asked for */
+    const left: 'leave'[] = []
     const forced: string[] = []
     const signals = holdSignals(f.proc, () => {})
     const endings = wireEndings({
       proc: f.proc,
       signals,
-      leave: (handOver) => void left.push(handOver),
+      leave: () => void left.push('leave'),
       force: (why) => void forced.push(why),
       record: () => {},
       stdin: s.stdin,
@@ -183,21 +183,21 @@ describe('every ending, wired (HO15)', () => {
   it('a signal is a stop, and nothing is handed over', () => {
     const w = wired()
     w.f.emitter.emit('SIGTERM', 'SIGTERM')
-    expect(w.left).toEqual([false])
+    expect(w.left).toEqual(['leave'])
   })
 
   // host.stop, as `centralu serve --stop` asks it
   it('a stop asked over the socket is a stop that hands nothing over', () => {
     const w = wired()
     w.endings.stopAsked()
-    expect(w.left).toEqual([false])
+    expect(w.left).toEqual(['leave'])
   })
 
   it('a crash or a vanished parent hands nothing over', () => {
     const w = wired()
     w.f.emitter.emit('uncaughtException', new Error('state broke'))
     w.s.emitter.emit('end')
-    expect(w.left).toEqual([false, false])
+    expect(w.left).toEqual(['leave', 'leave'])
   })
 
   it('a second signal while shutting down, a second or more later, exits at once instead of waiting it out', () => {
@@ -206,7 +206,7 @@ describe('every ending, wired (HO15)', () => {
     expect(w.forced).toEqual([])
     w.clock.t = REPEAT_AFTER_MS
     w.f.emitter.emit('SIGINT', 'SIGINT')
-    expect(w.left).toEqual([false])
+    expect(w.left).toEqual(['leave'])
     expect(w.forced).toEqual(['asked again while shutting down'])
   })
 
@@ -217,7 +217,7 @@ describe('every ending, wired (HO15)', () => {
     w.f.emitter.emit('SIGINT', 'SIGINT')
     w.clock.t = REPEAT_AFTER_MS - 1
     w.f.emitter.emit('SIGHUP', 'SIGHUP')
-    expect(w.left).toEqual([false])
+    expect(w.left).toEqual(['leave'])
     expect(w.forced).toEqual([])
     // A later one still does: the guard only swallows the duplicates
     w.clock.t = REPEAT_AFTER_MS + 500
@@ -228,7 +228,7 @@ describe('every ending, wired (HO15)', () => {
   it('a terminal closing (SIGHUP) runs the shutdown, not the kernel default', () => {
     const w = wired()
     w.f.emitter.emit('SIGHUP', 'SIGHUP')
-    expect(w.left).toEqual([false])
+    expect(w.left).toEqual(['leave'])
   })
 })
 

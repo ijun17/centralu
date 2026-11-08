@@ -21,32 +21,102 @@ pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource)
     keeper.is_some_and(|b| b.same_build(app))
 }
 
+/// Why "Apply now" is not offered with a keeper that cannot stop for an update: one of an earlier build than #1895 step 3, or
+/// one that took its host over from another keeper (it does not hold that host's stdin)
+pub(crate) const KEEPER_TOO_OLD_TO_UPDATE: &str = "The background keeper cannot stop the agent host for an update (it is of an earlier build, or took the host over from one). Restart it from the bar at the top, or quit Centralu completely and open it again.";
+
+/// Why "Apply now" waits while the keeper's host is starting, restarting or failed: the keeper says it can stop a host for an
+/// update only once that host has said so at its start
+pub(crate) const HOST_NOT_UP_FOR_UPDATE: &str = "The agent host is not running yet. Try again once it is up.";
+
+/// What the keeper's view says of a stop for an update (#1895 step 4, PR 3 review)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpdateStop {
+    /// No view yet
+    Unknown,
+    /// The keeper stops its host for an update and exits
+    Stops,
+    /// Not now: its host is not up, and the keeper knows only from a running host whether it can
+    HostNotUp,
+    /// It cannot: a keeper of an earlier build, or one that took its host over from one
+    Cannot,
+}
+
+impl UpdateStop {
+    pub(crate) fn of(view: Option<&KeeperView>) -> UpdateStop {
+        match view {
+            None => UpdateStop::Unknown,
+            Some(v) if v.stops_for_update => UpdateStop::Stops,
+            Some(v) if !matches!(v.status, HostStatus::Ready(_)) => UpdateStop::HostNotUp,
+            Some(_) => UpdateStop::Cannot,
+        }
+    }
+
+    /// Why "Apply now" is not offered, or None when it is
+    pub(crate) fn refusal(self) -> Option<&'static str> {
+        match self {
+            UpdateStop::Stops => None,
+            UpdateStop::Unknown => Some("not attached to the background keeper yet"),
+            UpdateStop::HostNotUp => Some(HOST_NOT_UP_FOR_UPDATE),
+            UpdateStop::Cannot => Some(KEEPER_TOO_OLD_TO_UPDATE),
+        }
+    }
+}
+
 /**
- * "Apply now" with a keeper (#1895 step 3). A keeper that stops for an update (`stops_for_update`) stops the host that way and
- * exits, and the relaunched window starts the new build's. An older keeper holds the host through the relaunch and the
- * relaunched window switches it, which stops the host for an update too unless that host hands its agents to the keeper
- * (`keepsAgents`). Either way the keeper reports when the host is busy, so the automatic mode can still wait for idle.
+ * "Apply now" with a keeper (#1895 step 4, PR 3): the keeper stops the host for an update and exits, and the relaunched window
+ * starts the new build's (`stops_for_update`, what `before_relaunch` asks). The keeper reports when the host is busy, so the
+ * automatic mode waits for idle and applies by itself. A keeper of an earlier build than step 3 cannot stop that way, and no
+ * window switches one any more: not offered, the build bar's restart into this build comes first. While the keeper's host is
+ * not up it cannot say, and the reason says to wait rather than to restart the keeper.
  */
-pub(crate) fn with_keeper(info: RelaunchInfo, keeps_agents: Option<bool>, stops_for_update: bool) -> RelaunchInfo {
-    let restarts_host = stops_for_update || keeps_agents != Some(true);
-    RelaunchInfo { restarts_host, keeps_agents: !restarts_host, idle_reported: true, ..info }
+pub(crate) fn with_keeper(info: RelaunchInfo, stop: UpdateStop) -> RelaunchInfo {
+    match stop.refusal() {
+        None => RelaunchInfo { restarts_host: true, idle_reported: true, ..info },
+        Some(why) => RelaunchInfo { ready: false, reason: Some(why.into()), ..info },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// #1895 step 3: "Apply now" restarts the host unless an older keeper's host hands its agents over, and the update line must say so
+    /// #1895 step 4, PR 3: "Apply now" stops the host for an update through the keeper, and only a keeper that can is
+    /// offered it: an earlier one would be left holding the old host behind a relaunch nobody switches any more
     #[test]
-    fn apply_now_with_a_keeper_restarts_the_host_unless_an_older_one_keeps_its_agents() {
+    fn apply_now_is_offered_only_with_a_keeper_that_stops_for_an_update() {
         let ready = RelaunchInfo { ready: true, ..Default::default() };
-        let held = with_keeper(ready.clone(), Some(true), false);
-        assert!(!held.restarts_host && held.keeps_agents, "an older keeper whose host hands its agents over: they keep going");
-        for (keeps, stops_for_update) in [(Some(true), true), (Some(false), true), (None, true), (Some(false), false), (None, false)] {
-            let stops = with_keeper(ready.clone(), keeps, stops_for_update);
-            assert!(stops.restarts_host && !stops.keeps_agents, "{keeps:?} {stops_for_update}: the update stops the host");
-            assert!(stops.idle_reported && stops.ready);
+        let stops = with_keeper(ready.clone(), UpdateStop::Stops);
+        assert!(stops.ready && stops.restarts_host && stops.idle_reported);
+        let old = with_keeper(ready.clone(), UpdateStop::Cannot);
+        assert!(!old.ready && old.reason.as_deref() == Some(KEEPER_TOO_OLD_TO_UPDATE), "{old:?}");
+        assert!(!with_keeper(ready, UpdateStop::Unknown).ready, "no view yet: nothing is known of the keeper");
+    }
+
+    /// Review: a keeper's host that is starting, restarting or failed reads "cannot stop for an update" in the view, since
+    /// only a running host says it can. "Apply now" waits for it, rather than calling the keeper too old: a keeper of this
+    /// build gets no bar to restart it from
+    #[test]
+    fn apply_now_waits_for_a_host_that_is_not_up_rather_than_calling_the_keeper_too_old() {
+        let view = |status: HostStatus, stops_for_update: bool| KeeperView {
+            keeper: crate::keeper::KeeperInfo { pid: 1, protocol: 1, version: "0.0.0".into(), started_at: 0, data_dir: String::new(), build: None },
+            status,
+            host_pid: None,
+            source: None,
+            background: false,
+            attached: 1,
+            busy: false,
+            rights: None,
+            stops_for_update,
+        };
+        assert_eq!(UpdateStop::of(None), UpdateStop::Unknown);
+        for status in [HostStatus::Starting, HostStatus::Restarting { attempt: 1 }, HostStatus::Failed { message: "x".into() }] {
+            assert_eq!(UpdateStop::of(Some(&view(status, false))), UpdateStop::HostNotUp);
         }
+        let ready = HostStatus::Ready(HostInfo { port: 1, token: String::new() });
+        assert_eq!(UpdateStop::of(Some(&view(ready.clone(), false))), UpdateStop::Cannot);
+        assert_eq!(UpdateStop::of(Some(&view(ready, true))), UpdateStop::Stops);
+        assert_eq!(UpdateStop::HostNotUp.refusal(), Some(HOST_NOT_UP_FOR_UPDATE));
     }
 
     /// #461: a keeper that cannot say its build (older than #280 step 4) is another build, never
@@ -72,8 +142,7 @@ mod tests {
         assert!(is_news(Some(&before), &HostStatus::Restarting { attempt: 1 }, &build));
         for changed in [
             HostBuild { busy: Some(true), ..build.clone() },
-            HostBuild { relaunched: true, ..build.clone() },
-            HostBuild { swap_to_this_build: Some(true), ..build.clone() },
+            HostBuild { stops_for_update: Some(true), ..build.clone() },
             HostBuild { keeper_same_build: Some(false), ..build.clone() },
         ] {
             assert!(is_news(Some(&before), &HostStatus::Starting, &changed), "{changed:?}");
@@ -88,12 +157,11 @@ fn is_news(before: Option<&(HostStatus, HostBuild)>, status: &HostStatus, after:
 }
 
 /// How long a keeper this window launched gets to answer. It waits for the data folder's lock first, which a keeper on its way
-/// out holds until it exits: after a switch that stops for an update instead of handing over, up to about 25 s (the host's
-/// 15 s, its 3 s after TERM, and up to 6 s for the children it held, `children::stop_all`). Then its own start
+/// out holds until it exits: after a restart into this build that stops a keeper of another build for an update, up to about
+/// 25 s (the host's 15 s, its 3 s after TERM, and up to 6 s for the children an earlier keeper held). Then its own start
 const KEEPER_ANSWERS_WITHIN: Duration = Duration::from_secs(40);
 
-/// What "Quit completely" says while the keeper stops for an update ("Apply now", or a switch whose keeper stops instead of
-/// handing over): that stop leaves the turns it cut listed for the next start, so a quit now could not end them as a quit does
+/// What "Quit completely" says while the keeper stops for an update ("Apply now", or a restart into this build): that stop leaves the turns it cut listed for the next start, so a quit now could not end them as a quit does
 const QUIT_DURING_AN_UPDATE_STOP: &str = "Centralu is stopping for an update; quit again once it has relaunched";
 
 #[derive(Default)]
@@ -105,9 +173,6 @@ struct LinkState {
     /// view of an attachment: losing the keeper ends with `Restarting` or `Failed`, sent past this.
     told: Option<(HostStatus, HostBuild)>,
     same_build: Option<bool>,
-    /// The keeper said this window is the one an announced relaunch started (#352). Kept for
-    /// the window's life: a later re-attach (the keeper restarted) does not undo it.
-    relaunched: bool,
     attached: Option<client::Attached>,
     running: bool,
     shutting_down: bool,
@@ -117,8 +182,7 @@ struct LinkState {
     shell: Option<crate::shell::Report>,
     /// The shell did not start a keeper once: every later start in this window's life is direct.
     shell_off: bool,
-    /// What is shown of a refusal of signed content, and when: the shell's refusal of this window's content, and the keeper's
-    /// of a switch this window sent (`refusal::Announcer`).
+    /// What is shown of the shell's refusal of this window's signed content, and when (`refusal::Announcer`).
     announcer: crate::refusal::Announcer,
 }
 
@@ -198,11 +262,8 @@ impl KeeperLink {
             keeper: st.view.as_ref().and_then(|v| v.keeper.build.clone()),
             keeper_same_build: st.view.as_ref().map(|v| keeper_same_build(v.keeper.build.as_ref(), &self.app_build)),
             background: st.view.as_ref().map(|v| v.background),
-            swap: st.view.as_ref().and_then(|v| v.swap.clone()),
-            swap_to_this_build: st.view.as_ref().and_then(|v| v.swap.as_ref()).map(|s| s.is_to(&self.app_build)),
-            keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
+            stops_for_update: st.view.as_ref().map(|v| v.stops_for_update),
             busy: st.view.as_ref().map(|v| v.busy),
-            relaunched: st.relaunched,
             shell: st.shell.clone(),
         }
     }
@@ -213,14 +274,18 @@ impl KeeperLink {
     /// bundle the update did not touch (`pnpm app:open` opens the build output in place) or from
     /// no bundle at all (`pnpm app:dev`).
     pub fn relaunch_info(&self) -> RelaunchInfo {
-        let keeps_agents = self.state.lock().ok().and_then(|st| st.view.as_ref().and_then(|v| v.keeps_agents));
         let info = super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev));
-        with_keeper(info, keeps_agents, self.stops_for_update())
+        with_keeper(info, self.update_stop())
     }
 
-    /// Whether the keeper stops for an update and exits, as a keeper of #1895 step 3 says in its view
-    pub fn stops_for_update(&self) -> bool {
-        self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.stops_for_update)).unwrap_or(false)
+    /// What the keeper's view says of a stop for an update, for "Apply now"
+    pub(crate) fn update_stop(&self) -> UpdateStop {
+        self.state.lock().map(|st| UpdateStop::of(st.view.as_ref())).unwrap_or(UpdateStop::Unknown)
+    }
+
+    /// Whether the keeper stops for an update and exits, as a keeper of #1895 step 3 or later says in its view. None before a view
+    pub fn stops_for_update(&self) -> Option<bool> {
+        self.state.lock().ok().and_then(|st| st.view.as_ref().map(|v| v.stops_for_update))
     }
 
     /// "Apply now" (#1895 step 3): the keeper stops the host for an update and exits, and this window stops attaching, so it
@@ -268,10 +333,6 @@ impl KeeperLink {
         client::system_ending(&self.sock, cancelled)
     }
 
-    pub fn announce_relaunch(&self) -> Result<u64, String> {
-        client::relaunching(&self.sock)
-    }
-
     /// Starts a keeper the way the plan says (`mode`, never `Direct` or `Attach` here).
     fn launch_keeper(&self, mode: StartMode) -> std::io::Result<()> {
         let me = std::env::current_exe()?;
@@ -291,19 +352,7 @@ impl KeeperLink {
         // The keeper executable next to this one (#440). A debug build always runs it in its own
         // executable: `tauri dev` does not rebuild `centralu-keeper`, so the one beside it may be
         // older code (keeper::exe).
-        let mut copy = None;
         let (exe, in_process) = match mode {
-            // From the copy of what this window carries, so that nothing long-lived runs from
-            // the AppImage's mount (FI4); no keeper answers, so a stale copy may be replaced.
-            // Without a copy, from beside this executable as before.
-            StartMode::Keeper => match self.carried(true) {
-                Some(dir) => {
-                    let exe = dir.join(keeper_exe::KEEPER_EXE);
-                    copy = Some(dir);
-                    (exe, false)
-                }
-                None => (keeper_exe::beside(&me), false),
-            },
             StartMode::KeeperInProcess => (me.clone(), true),
             // KeeperBeside, and a mode that never reaches here (Direct, Attach)
             _ => (keeper_exe::beside(&me), false),
@@ -315,32 +364,8 @@ impl KeeperLink {
                 format!("this bundle has no {} beside {}; reinstall Centralu", keeper_exe::KEEPER_EXE, me.display()),
             ));
         }
-        let mut start = self.keeper_start(in_process);
-        if let Some(dir) = copy {
-            start.host_source = Some(dir.join(crate::keeper::content::HOST_DIR));
-        }
+        let start = self.keeper_start(in_process);
         client::launch_detached(&exe, &start.args(), &start.env(), &start.log_path())
-    }
-
-    /**
-     * Copies the keeper beside this executable and the bundled host into
-     * `<data>/content/<version>/` (`keeper::carried`), for `StartMode::Keeper`. `replace`: no
-     * keeper runs, so a copy there that is damaged or of another build may be replaced. `None`
-     * when there is nothing to copy or the copy was refused; the reason is logged and the window
-     * goes on as before the copy existed.
-     */
-    fn carried(&self, replace: bool) -> Option<PathBuf> {
-        let me = std::env::current_exe().ok()?;
-        let host = self.host_dir.as_deref()?;
-        let keeper = keeper_exe::beside(&me);
-        let what = crate::keeper::carried::Carried { keeper: &keeper, host, version: &self.app_version };
-        match crate::keeper::carried::place(&self.data, &what, replace, &|m: &str| eprintln!("[keeper] {m}")) {
-            Ok(dir) => Some(dir),
-            Err(r) => {
-                eprintln!("[keeper] not running the keeper from a copy: {r}");
-                None
-            }
-        }
     }
 
     /**
@@ -386,37 +411,18 @@ impl KeeperLink {
     }
 
     /**
-     * Shows each new refusal of signed content in a native window, drawn here and not by the web UI that the host feeds:
-     * the shell's refusal of this window's content, and the keeper's of a new build's (`swap.refused`). Each is shown
-     * once. Shows only: nothing it names is run, trusted or unlocked. Thread-safe to call from any view.
+     * Shows a new refusal of this window's signed content by the shell in a native window, drawn here and not by the web UI
+     * that the host feeds, once. Shows only: nothing it names is run, trusted or unlocked. Thread-safe to call from any view.
      */
     fn announce_refusals(&self, app: &AppHandle) {
         let (refusal, open) = {
             let Ok(mut st) = self.state.lock() else { return };
-            // Only a refusal of this window's own build, and only of a switch this window sent (`Announcer::we_asked`): the
-            // keeper keeps the last swap's view for a window that attaches later, and any process of the user can ask it for
-            // a switch of its own
-            let seen = st.view.as_ref().and_then(|v| v.swap.as_ref()).filter(|s| s.is_to(&self.app_build)).map(|s| {
-                let ended = matches!(s.phase, crate::keeper::swap::Phase::Done | crate::keeper::swap::Phase::Failed);
-                // The version is this window's own, not whatever the request that asked for the switch said
-                let refusal = crate::refusal::Refusal::from_swap(
-                    s.refused.as_deref().filter(|_| s.phase == crate::keeper::swap::Phase::Failed),
-                    s.refused_check.as_deref(),
-                    s.refused_file.as_deref(),
-                    s.refused_hashes.as_ref(),
-                    s.message.as_deref(),
-                    Some(self.app_version.as_str()),
-                    s.from.as_ref().and_then(|b| b.version.as_deref()),
-                );
-                crate::refusal::SwapSeen { started_at: s.started_at, ended, refusal }
-            });
-            st.announcer.view(seen);
             let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
             (st.announcer.next(now_ms), st.announcer.open_flag())
         };
         if let Some(r) = refusal {
-            // The full sentence the shell or the keeper gave is for the log; the dialog is built from the check, the file,
-            // the hashes and this window's version only
+            // The full sentence the shell gave is for the log; the dialog is built from the check, the file, the hashes and
+            // this window's version only
             // One line in the log, whatever the sentence holds (it is another process's text)
             let sentence: String = r.message.chars().map(|c| if c.is_control() { ' ' } else { c }).take(2_000).collect();
             crate::shell::log(&self.data, &format!("showing why signed content was refused ({}): {sentence}", r.reason));
@@ -512,10 +518,8 @@ impl KeeperLink {
             },
         )?;
         let same = first.get("sameBuild").and_then(Value::as_bool);
-        let relaunched = first.get("relaunched").and_then(Value::as_bool) == Some(true);
         if let Ok(mut st) = self.state.lock() {
             st.same_build = same;
-            st.relaunched |= relaunched;
             st.attached = Some(attached);
         }
         self.on_view(app, first.get("view"));
@@ -561,7 +565,7 @@ impl KeeperLink {
             }
             st.view = Some(view);
             // Compared with what the UI was last told, whole: a field added to `HostBuild` is noticed
-            // without being named here, and so is a change made between views (`shell`, `relaunched`).
+            // without being named here, and so is a change made between views (`shell`).
             let after = self.build_of(&st);
             let news = is_news(st.told.as_ref(), &status, &after);
             if news {
@@ -594,37 +598,6 @@ impl KeeperLink {
         client::restart_host(&self.sock).unwrap_or(false)
     }
 
-    /// Switches to this window's build. The keeper is handed this build's keeper executable, inside
-    /// its bundle (#440), so that a keeper of another build first hands itself over to this build's
-    /// keeper (#280 step 4): the program the bundle shipped, never a copy (#220). A keeper older than
-    /// step 4 ignores the field and swaps only the host; the window then offers "Restart
-    /// completely" for it (`keeper_same_build`).
-    pub fn switch_build(&self) -> Result<(), String> {
-        let mut exe = std::env::current_exe().ok().map(|me| keeper_exe::beside(&me));
-        let mut source = self.app_build.clone();
-        // A Linux window names its copy, not its AppImage's mount, which goes when it quits
-        // (FI4). A keeper answers and may run from that version's folder: never replaced here.
-        if self.plan(false) == StartMode::Keeper {
-            if let Some(dir) = self.carried(false) {
-                let host = dir.join(crate::keeper::content::HOST_DIR);
-                exe = Some(dir.join(keeper_exe::KEEPER_EXE));
-                source.host_dir = Some(host.to_string_lossy().to_string());
-            }
-        }
-        // Noted before the request: a refusal is shown only for a switch this window sent (`Announcer`)
-        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        if let Ok(mut st) = self.state.lock() {
-            st.announcer.we_asked(at);
-        }
-        let sent = client::switch(&self.sock, &source, exe.as_deref().filter(|_| !self.dev));
-        if sent.is_err() {
-            if let Ok(mut st) = self.state.lock() {
-                st.announcer.we_were_refused();
-            }
-        }
-        sent
-    }
-
     pub fn background(&self) -> Result<bool, String> {
         client::background(&self.sock)
     }
@@ -634,8 +607,8 @@ impl KeeperLink {
     }
 
     /**
-     * "Quit completely". Refused while the keeper stops for an update: "Apply now" asked it (`stop_for_update`), or a switch's
-     * keeper stops instead of handing over (its socket gone, its process still running, `handoff::give`). That stop lists the
+     * "Quit completely". Refused while the keeper stops for an update: "Apply now" asked it (`stop_for_update`), or a restart
+     * into this build did (`restart_keeper`: its socket gone, its process still running). That stop lists the
      * turns it cut for the next start and leaves no quit mark, so a quit could only end as it; the person quits again in the
      * relaunched window. A keeper already gone leaves nothing to stop. Any other failure leaves the window attaching.
      */
@@ -661,12 +634,23 @@ impl KeeperLink {
         stopped
     }
 
-    /// Stops the keeper and everything it holds, like `stop`, but stays: the attach loop (`run`)
-    /// sees the connection end when the keeper has exited, and starts a keeper from this
-    /// window's own executable, with this window's host. The keeper removes its socket before it
-    /// stops anything, so nothing reaches it on its way out, and the next one waits for its lock.
+    /**
+     * The build bar's restart into this build (#1895 step 4, PR 3), for a keeper or host of another build. A keeper that stops for
+     * an update is asked to (`stop {forUpdate}`): this window's host continues the turns it cut and opens its terminals and Run
+     * commands again, as after "Apply now". An earlier keeper gets a plain stop, which ends what it holds as "Quit completely"
+     * does; the bar asks first before any plain stop. Which stop goes is read from the view now, not from the one the bar
+     * planned with: a host that went down in between turns a planned stop for an update into a plain stop, which is harmless,
+     * since such a keeper holds nothing once its host is gone (review). Either way this window stays: the attach loop (`run`) sees the
+     * connection end when the keeper has exited and starts a keeper of this window's build. The keeper removes its socket before
+     * it stops anything, so nothing reaches it on its way out, and the next one waits for its lock. Returns once the keeper took
+     * the request: a stop for an update answers once its host is gone.
+     */
     pub fn restart_keeper(&self) -> Result<(), String> {
-        client::stop(&self.sock)
+        if self.stops_for_update() == Some(true) {
+            client::stop_for_update(&self.sock)
+        } else {
+            client::stop(&self.sock)
+        }
     }
 
     /// Detaches without asking for anything: the keeper decides what that means.
@@ -803,13 +787,14 @@ mod update_stop_tests {
         let e = sup.before_relaunch().unwrap_err();
         assert!(e.starts_with("Not relaunched: a build switch is under way"), "{e}");
         assert!(!e.contains("background mode"), "{e}");
-        assert!(!ops.lock().unwrap().iter().any(|op| op == "relaunching"), "an older keeper's path was taken too: {:?}", ops.lock().unwrap());
+        let asked: Vec<String> = ops.lock().unwrap().iter().filter(|op| *op != "status").cloned().collect();
+        assert_eq!(asked, ["stop forUpdate"], "anything but the one stop for an update was asked");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /**
-     * Review of #1895 step 3: a switch whose keeper stops for an update instead of handing over removes its socket and runs
-     * on for up to the stop's bound, with no stop for an update of this window's under way. "Quit completely" then found no
+     * Review of #1895 step 3: a keeper stopping for an update that this window's "Apply now" did not ask for (now a restart into
+     * this build) removes its socket and runs on for up to the stop's bound, with no `stopping_for_update` of this window's set. "Quit completely" then found no
      * socket and failed with no reason the person could act on, and the window, already marked shutting down, never attached
      * again. It is refused now, saying why, and the window attaches on.
      */
@@ -825,6 +810,25 @@ mod update_stop_tests {
         assert_eq!(quit, Err(QUIT_DURING_AN_UPDATE_STOP.into()));
         assert!(!link.shutting_down(), "the window stopped attaching after a quit that did not happen");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /**
+     * #1895 step 4, PR 3: the build bar's restart into this build asks a keeper that can for a stop for an update, so this
+     * window's host continues the turns, and gives an earlier one the plain stop it understands. The window keeps attaching.
+     */
+    #[test]
+    fn a_restart_into_this_build_stops_the_keeper_for_an_update_when_it_can() {
+        for (stops_for_update, sent) in [(true, "stop forUpdate"), (false, "stop")] {
+            let dir = scratch(&format!("restart-{stops_for_update}"));
+            let ops = Arc::new(Mutex::new(Vec::new()));
+            let sock = stand_in_keeper(&dir, Takes::StopsIn(0), ops.clone());
+            let link = link_to(&sock);
+            link.state.lock().unwrap().view.as_mut().unwrap().stops_for_update = stops_for_update;
+            assert_eq!(link.restart_keeper(), Ok(()));
+            assert_eq!(*ops.lock().unwrap(), [sent]);
+            assert!(!link.shutting_down(), "the window stopped attaching, so no keeper of its build would start");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// A quit the keeper refuses leaves the window open: it attaches on, rather than sit with no keeper until the app restarts

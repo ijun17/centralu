@@ -162,6 +162,15 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * out of the parent's conversation (#98).
      */
     forwardSubagentText: true,
+    /*
+     * Thinking as readable text (#2062). Current models send thinking blocks with no text unless asked for a summary
+     * ("omitted" is their default), so a session's thinking rows came out empty. Measured (CLI 2.1.316, 2026-11-07): with
+     * the flag the blocks carry summarized text, and the output tokens stay as they were; the API documents `display` as
+     * what is shown, not what is thought or billed. A flag rather than the SDK's `thinking` option, which would also pass
+     * `--thinking adaptive` and so decide for the model whether it thinks. The CLI takes it since 2.1.100 at least (that
+     * version's SDK already passes it); an older CLI refuses an unknown option and would not start.
+     */
+    extraArgs: { 'thinking-display': 'summarized' },
     // MCP servers — the orchestrator's tools and any attached external apps (including approved MCP servers). See mcpServers().
     ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
     /*

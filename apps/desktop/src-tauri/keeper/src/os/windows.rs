@@ -5,6 +5,11 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+/// Windows never had a keeper to leave behind (`unix.rs`, #1895 step 4 PR 7).
+pub fn stop_earlier_keeper(_dev: bool) -> Option<String> {
+    None
+}
+
 /// The `centralu` launcher `centralu serve` keeps in this window's data folder (#1223): the managed one an install
 /// over ssh made (`<data>/remote/bin/centralu.cmd`), else the one an npm install keeps (`<data>/bin/centralu.cmd`).
 /// Its presence says a linked hub's `serve` may hold this folder, so the window attaches to that host

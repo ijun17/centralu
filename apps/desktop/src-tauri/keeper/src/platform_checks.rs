@@ -34,15 +34,14 @@ const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs", "src/os_integration.rs", "sr
 
 /// Today's sites outside the OS layer, with how many each has. Only shrinks.
 const NOT_YET: &[(&str, usize)] = &[
-    // The keeper is unix-only until step 9 gives the OS layer a Windows half: the keeper's module,
-    // its executable, and the keeper's half of the host supervisor (`host_proc/handover.rs`).
-    ("keeper/src/host_proc/mod.rs", 6),
+    // The keeper is unix-only until step 9 gives the OS layer a Windows half: the keeper's module and
+    // its executable. The host supervisor's half went with the keeper handoff (#1895 step 4, PR 4).
     ("keeper/src/lib.rs", 1),
     ("src/bin/centralu-keeper.rs", 2),
     // The window's start and quit (step 7). Its own OS integration (the badge, the trash, app links,
     // the Quit menu item) is in `WINDOW_INTEGRATION`'s files, so what is left here is runtime.
     ("src/lib.rs", 14),
-    ("src/sidecar/mod.rs", 27),
+    ("src/sidecar/mod.rs", 25),
 ];
 
 const OS_WORDS: &[&str] = &["unix", "windows", "target_os", "target_family", "target_vendor", "target_env"];

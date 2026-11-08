@@ -13,7 +13,7 @@ import { MailboxRecords } from './store/mailbox.js'
 import { legacyChain, legacyChainFor, movePendingThreadMail } from './store/mailbox-adopt.js'
 import { UserAppAdoptionRecords } from './store/user-app-adoption.js'
 import { MessageRecords } from './store/messages.js'
-import { MigrationRunner, type StoreInspection, type StoreOptions } from './store/migrate-runner.js'
+import { MigrationRunner } from './store/migrate-runner.js'
 import { type MigrationStep } from './store/migrations/context.js'
 import { migrationSteps } from './store/migrations/index.js'
 import { PermissionRecords } from './store/permissions.js'
@@ -26,7 +26,7 @@ import { TrashRecords } from './store/trash.js'
 import { SubagentStepRecords } from './store/subagent-steps.js'
 
 // The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
-export type { QueuedRequest, StoreInspection }
+export type { QueuedRequest }
 
 // The migration runner and the reader gate `Store` stands on are named here as they always were
 export { StoreTooNewError, storeTooNewMessage }
@@ -82,10 +82,7 @@ export class Store extends MigrationRunner {
   /** User-folder apps registered as projects in place (#1141) */
   readonly adoption: UserAppAdoptionRecords
 
-  constructor(
-    protected readonly dbPath = ':memory:',
-    protected readonly opts: StoreOptions = {},
-  ) {
+  constructor(protected readonly dbPath = ':memory:') {
     super()
     const path = dbPath
     this.db = new Database(path)
@@ -125,7 +122,7 @@ export class Store extends MigrationRunner {
       this.db.pragma('busy_timeout = 5000')
       /*
        * A checkpoint that resets the WAL also cuts the file back to this. Without a limit the WAL keeps the size of the
-       * largest transaction it ever held until the next TRUNCATE, at open or close: after a swap's deferred VACUUM
+       * largest transaction it ever held until the next TRUNCATE, at open or close: after a step's VACUUM
        * (146 MB measured) that was the rest of a host's life, and under the keeper a host lives for days.
        */
       this.db.pragma(`journal_size_limit = ${WAL_SIZE_LIMIT}`)

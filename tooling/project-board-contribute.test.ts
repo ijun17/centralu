@@ -130,10 +130,10 @@ describe('the rules for public text', () => {
   const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', situationsChecked: 'n/a', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
 
   it("fills this repository's pull request template, without its guidance, in its order", () => {
-    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Host swap: unchanged.', Usability: 'n/a', closes: 'Closes #1' })
+    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Two builds on one store: unchanged.', Usability: 'n/a', closes: 'Closes #1' })
     expect(r.problems).toEqual([])
     expect(r.warnings).toEqual([])
-    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nHost swap: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
+    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nTwo builds on one store: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
   })
 
@@ -149,7 +149,7 @@ describe('the rules for public text', () => {
     expect(noUsability.problems.join()).toMatch(/"Usability" is empty, and the template keeps it/)
     // The self-attack review (#1181): an author who skips it is sent to the situations, not let through
     const noSituations = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' })
-    expect(noSituations.problems.join()).toMatch(/"Situations checked" is empty, and the template keeps it: .*Host swap/)
+    expect(noSituations.problems.join()).toMatch(/"Situations checked" is empty, and the template keeps it: .*Two builds on one store/)
     const dropped = fillTemplate(TEMPLATE, { ...kept, Why: 'Because.' })
     expect(dropped.warnings).toEqual(['"What changed" is left out.', '"Verified" is left out.', '"Closes" is left out.'])
     expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Situations checked\n\nn/a\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')

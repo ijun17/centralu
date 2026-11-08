@@ -26,8 +26,7 @@ centralu/
 │        │                      #   src/shell/ installs the shell and starts the keeper through it (macOS)
 │        ├─ keeper/             # crate centralu-keeper-core: keeper and host supervisor, no Tauri (#440)
 │        │                      #   src/keeper/server/: the control socket (start, host, windows, switch);
-│        │                      #   src/keeper/children/: the child service (child, reactor, requests, stop,
-│        │                      #   snapshot, buffer); src/keeper/accept.rs: what all three accept loops share
+│        │                      #   src/keeper/accept.rs: what both accept loops share
 │        └─ shell/              # crate centralu-shell: the macOS shell that holds permissions; verifies
 │                               #   content, copies it, starts the keeper, exits. Built once per shell
 │                               #   version and pinned in packaging/shell/shell.lock (plans/thin-shell.md).
@@ -123,7 +122,7 @@ centralu/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
 │     └─ src/
-│        ├─ main.ts             # CLI entry (--port, --token, --db, --standby)
+│        ├─ main.ts             # CLI entry (--port, --token, --db; --standby is refused, #1895)
 │        ├─ lifecycle/          # a start's steps, the readiness gate, shutdown and endings
 │        ├─ transport/          # WS server, session handshake, the event log
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract (contract.ts); each tool's usage
@@ -154,13 +153,13 @@ centralu/
 │        │                      #   tree and file operations as the manager passes them on (#1143)
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
-│        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner (and `Store.inspect`), the min-reader gate
+│        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner, the min-reader gate
 │        │     ├─ store-keys.ts  # the bookkeeping keys the runner, the gate and vacuum.ts keep in app_settings
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts (the session archive)
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     ├─ mail-types.ts  # the old thread mail words and a message row that live code still reads (mailbox-adopt.ts moves what the old tables hold)
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM
-│        └─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
+│        └─ keeper/             # children-client.ts: asks a beta.48 keeper what it still holds (lifecycle/keeper-held.ts)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts
 │                               #   measure against a seeded heavy store (fixtures/heavy-store.ts)

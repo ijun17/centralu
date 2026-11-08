@@ -69,7 +69,7 @@ export class MailTool {
   constructor(
     private readonly service: MessageService,
     private readonly records: MailboxRecords,
-    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel'>,
+    private readonly reach: Pick<MailReach, 'labelOf' | 'projectLabel' | 'elsewhere'>,
     private readonly host: MailToolHost,
   ) {
     this.now = host.now ?? Date.now
@@ -159,6 +159,9 @@ export class MailTool {
     const named = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === word.toLowerCase())
     const [only] = named
     if (only && named.length === 1) return { address: this.service.sessionAddress(only.id) }
+    // A child this host started on a linked machine (#2067): the service refuses it in its own words (elsewhere), not as a session it never had
+    // (a name with spaces is no session id, and makes no address)
+    if (!only && parseAddress(own + word) && this.reach.elsewhere(own + word)) return { address: own + word }
     if (only) {
       const shown = named.slice(0, 8).map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`}, ${s.state})`)
       throw refuse('ambiguous', `${named.length} sessions are named ${JSON.stringify(word)}: ${shown.join(', ')}${named.length > shown.length ? ', and more' : ''}. Send to one of them by its address.`)

@@ -1,34 +1,23 @@
-//! Verified content, from the keeper's side (docs/plans/thin-shell.md §4, §5, §10 step 5).
+//! Verified content, from the keeper's side (docs/plans/thin-shell.md §4, §5).
 //!
 //! A macOS release starts its keeper through the shell, which verifies the window's signed content,
 //! copies it into `<data>/content/<version>/` and starts `centralu-keeper` from that copy. Such a
 //! keeper and everything it starts are judged by macOS as the shell, so they must only ever run code
-//! the project signed. On an update the window asks the running keeper to switch to its build, naming
-//! the new bundle's keeper executable; a keeper that runs from verified content does not start that
-//! executable. It verifies the new bundle's `Contents/Resources/content` with the same code and keys
-//! as the shell, copies it into `<data>/content/<new version>/`, and hands over to the keeper inside
-//! that copy, whose host runs from the copy too (`server::move_to_content`). The shell is not
-//! involved, which is why its own code can stay small.
+//! the project signed: its hosts run from that copy as they are (`version_dir_of`, `source::Copies`).
+//! Until #1895 step 4 PR 7 a Linux window also copied what its AppImage carried there, unsigned, and
+//! started its keeper from that copy; Linux is direct now.
 //!
-//! A keeper started any other way (`Origin::Direct`: a debug build, the window's fallback when
-//! the shell refused or is missing) hands over to the executable it is given, as it always did. So
-//! does a keeper from an unsigned copy (`Origin::Content` with `signed: false`): a Linux window
-//! copies what its AppImage carries into `<data>/content/<version>/` itself (`carried.rs`), because
-//! the release signs no Linux content yet (runtime-unification plan §8, decision 1), and names the
-//! keeper in its copy on a switch.
-//!
-//! The rules are the shell's, so that a handoff accepts exactly what a fresh start through the shell
-//! would: the signature against the built-in keys (`keys.rs`), the platform, a keeper executable and a
-//! host in the content, and the downgrade floor `<data>/content/highest-started`. Not the minimum shell
-//! version: the running keeper is not a shell, and a content that needs a newer one is the window's to
-//! decide about (§6). A downgrade is refused: an explicit rollback goes through the shell (`--rollback`
-//! on a fresh start), never through a handoff (§10.3).
+//! What is left here since a keeper no longer moves to another build (#1895 step 4, PR 4; it verified
+//! and copied the next build's content for its handoff, thin-shell plan §10 step 5): where a keeper runs
+//! from (`Origin`), the cleanup of `<data>/content/`, and the verifier's checks under the shell's rules,
+//! which the window runs again after the shell refused its content to say which file or check failed
+//! (`diagnose`).
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use content_verify::version::{check_not_downgrade, read_highest_seen, Rollback, Version};
-use content_verify::{read_verified_manifest, remove_content, Error, Expect, Fault, Manifest, PlaceError, Placement, Placing, TrustedKey};
+use content_verify::{read_verified_manifest, remove_content, Error, Expect, Fault, Manifest, TrustedKey};
 
 use super::exe::KEEPER_EXE;
 
@@ -39,8 +28,6 @@ pub const CONTENT_DIR: &str = "content";
 pub const FLOOR_FILE: &str = "highest-started";
 /// Where in the content the host is (the shell's `run::HOST_DIR`).
 pub const HOST_DIR: &str = "host";
-/// Where a window's bundle carries its signed content, below `Contents/` (thin-shell.md §10.2).
-pub const BUNDLE_CONTENT: &str = "Resources/content";
 
 pub fn content_root(data: &Path) -> PathBuf {
     data.join(CONTENT_DIR)
@@ -59,10 +46,8 @@ pub fn version_dir(data: &Path, version: &str) -> PathBuf {
 /// Where the running keeper's own executable is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
-    /// `<data>/content/<version>/centralu-keeper`: started by the shell, or handed to by a keeper that
-    /// was, or started by a Linux window from the copy it made. With `signed`, every handoff from
-    /// here verifies the next content first.
-    Content { dir: PathBuf, version: String, signed: bool },
+    /// `<data>/content/<version>/centralu-keeper`: started by the shell.
+    Content { dir: PathBuf, version: String },
     /// Anything else: the window's bundle, a debug build, a test's build folder.
     Direct,
 }
@@ -73,21 +58,6 @@ impl Origin {
         match self {
             Origin::Content { dir, .. } => Some(dir),
             Origin::Direct => None,
-        }
-    }
-
-    /// Whether a handoff from here takes only signed content (`server::content_route`).
-    pub fn signed(&self) -> bool {
-        matches!(self, Origin::Content { signed: true, .. })
-    }
-
-    /// The same origin where every content folder must be signed: on an OS whose release signs its
-    /// content (`start_plan::Os::signs_content`), a folder without a signature is no reason to take
-    /// a window's word for the next keeper.
-    pub fn requiring_signature(self, required: bool) -> Origin {
-        match self {
-            Origin::Content { dir, version, signed } => Origin::Content { dir, version, signed: signed || required },
-            o => o,
         }
     }
 }
@@ -106,16 +76,13 @@ pub fn origin_of(exe: &Path, data: &Path) -> Origin {
     if dir.parent() != Some(content_root(&resolve(data)).as_path()) || Version::parse(version).is_err() {
         return Origin::Direct;
     }
-    // Signed content is written by a verifier, which never places a folder without its signature.
-    let signed = dir.join(content_verify::SIGNATURE_NAME).is_file();
-    Origin::Content { dir: version_dir(data, version), version: version.to_string(), signed }
+    Origin::Content { dir: version_dir(data, version), version: version.to_string() }
 }
 
 /// The running keeper's own origin.
 pub fn own_origin(data: &Path) -> Origin {
-    let required = crate::start_plan::Os::current().signs_content();
     match std::env::current_exe() {
-        Ok(exe) => origin_of(&exe, data).requiring_signature(required),
+        Ok(exe) => origin_of(&exe, data),
         Err(_) => Origin::Direct,
     }
 }
@@ -139,28 +106,8 @@ pub fn version_dir_of(data: &Path, host_dir: &Path) -> Option<PathBuf> {
     Some(version_dir(data, &version))
 }
 
-/// The signed content a window's bundle carries, found from the executable the window named as its
-/// keeper: `<bundle>/Contents/MacOS/centralu-keeper` gives `<bundle>/Contents/Resources/content`.
-/// Windows from before #440 named their own `centralu` instead; since #461 that names no content,
-/// and the bundle path the window sends with it is used, as for a window that named no executable.
-pub fn bundle_content_of_exe(exe: &Path) -> Option<PathBuf> {
-    if !super::exe::is_keeper_exe(exe) {
-        return None;
-    }
-    let macos = exe.parent()?;
-    if macos.file_name()? != "MacOS" {
-        return None;
-    }
-    Some(macos.parent()?.join(BUNDLE_CONTENT))
-}
-
-/// The same from a bundle path (`/Applications/Centralu.app`), for a window that named no executable.
-pub fn bundle_content_of_bundle(bundle: &Path) -> PathBuf {
-    bundle.join("Contents").join(BUNDLE_CONTENT)
-}
-
-/// Why the next content was not taken. The ids are the shell's where the meaning is the same
-/// (`content`, `downgrade`, `copy`), so the window can say them the same way.
+/// Why content would be refused. The ids are the shell's where the meaning is the same
+/// (`content`, `downgrade`), so the window can say them the same way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     pub reason: &'static str,
@@ -264,13 +211,12 @@ impl Verifier<'_> {
         if !fs::metadata(src).map(|m| m.is_dir()).unwrap_or(false) {
             return Err(Refusal::new("no-content", format!("the new build carries no signed content at {}", src.display())));
         }
-        // Never take content from under `<data>/content/`: a copy found not to verify is removed
-        // before copying again (`place`), and that must not be the source itself.
+        // Never content from under `<data>/content/`: that is the shell's copy, checked against, never a source.
         let resolve = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         if src.starts_with(content_root(data)) || resolve(src).starts_with(content_root(&resolve(data))) {
             return Err(Refusal::new("content", format!("{} is inside the folder the keeper copies into", src.display())));
         }
-        let (manifest, bytes) = read_verified_manifest(src, self.keys, &self.expect()).map_err(|e| self.refusal(e, src, Stage::Source))?;
+        let (manifest, bytes) = read_verified_manifest(src, self.keys, &self.expect()).map_err(|e| self.refusal(e, src))?;
         let has = |path: &str, exe: bool| manifest.files.iter().any(|f| f.path == path && (!exe || f.executable));
         if !has(KEEPER_EXE, true) {
             return Err(Refusal::new("content", format!("the new build's content has no executable {KEEPER_EXE}")));
@@ -295,50 +241,14 @@ impl Verifier<'_> {
         Ok((manifest, bytes))
     }
 
-    /**
-     * Puts the content `check` read into `<data>/content/<version>/` and returns that folder: the copy
-     * already there when it verifies where it is and holds the same signed manifest, else a fresh
-     * copy. A folder there that does not verify, or holds another signed manifest, is removed and
-     * copied again, unless `in_use` (a keeper or host runs from it, or a swap or handoff holds it):
-     * then the update is refused, and nothing anything runs from is touched.
-     */
-    pub fn place(&self, data: &Path, src: &Path, manifest: &Manifest, manifest_bytes: &[u8], in_use: bool) -> Result<PathBuf, Refusal> {
-        let root = content_root(data);
-        let expect = self.expect();
-        let placement = Placement { root: &root, src, manifest, manifest_bytes, keys: self.keys, expect: &expect, in_use };
-        content_verify::place(&placement, &mut |step| match step {
-            Placing::Reused(dest) => (self.log)(&format!("{} verifies; handing over to it", dest.display())),
-            Placing::Replacing(dest, why) => (self.log)(&format!("{} {why}; copying again", dest.display())),
-            Placing::Copied(dest, files) => (self.log)(&format!("verified and copied {files} files into {}", dest.display())),
-        })
-        .map_err(|e| match e {
-            PlaceError::CreateRoot(root, e) => Refusal::new("copy", format!("cannot create {}: {e}", root.display())),
-            PlaceError::InUse(dest, why) => Refusal::new(
-                "in-use",
-                format!("{} {why}, and something runs from it; restart Centralu completely to start this build", dest.display()),
-            ),
-            PlaceError::Remove(dest, e) => Refusal::new("copy", format!("cannot remove {}: {e}", dest.display())),
-            PlaceError::SourceChanged => Refusal::new("content", format!("the content at {} changed while it was being copied", src.display())),
-            PlaceError::Copy(e) => self.refusal(e, src, Stage::Copy),
-        })
-    }
 }
-
-#[derive(Clone, Copy, PartialEq)]
-enum Stage {
-    /// Reading the new build's content.
-    Source,
-    /// Copying it into the data folder.
-    Copy,
-}
-
 /// The verifier's error as a refusal, worded for the window. The shell's `run::refusal`, without the
 /// shell version.
 impl Verifier<'_> {
     /// The verifier's error as a refusal: worded for the window, naming the check and the file, and for a
     /// file that does not match its hash, saying which hash the signed manifest lists and which the file has.
-    fn refusal(&self, e: Error, src: &Path, stage: Stage) -> Refusal {
-        let mut r = refusal_text(&e, src, stage).because(&e);
+    fn refusal(&self, e: Error, src: &Path) -> Refusal {
+        let mut r = refusal_text(&e, src).because(&e);
         if let Error::HashMismatch(path) = &e {
             if let Some((expected, found)) = self.hash_detail(src, path) {
                 r.message = format!("{}; the signed manifest lists {expected}, the file is {found}", r.message);
@@ -465,8 +375,8 @@ pub fn diagnose(data: &Path, src: &Path) -> Option<Refusal> {
     diagnose_with(&Verifier { keys: &keys, platform: content_verify::current_platform(), log: &log }, data, src)
 }
 
-fn refusal_text(e: &Error, src: &Path, stage: Stage) -> Refusal {
-    match e.fault(stage == Stage::Copy) {
+fn refusal_text(e: &Error, src: &Path) -> Refusal {
+    match e.fault(false) {
         Fault::Copy => Refusal::new("copy", format!("could not copy the new build's content: {e}")),
         Fault::Unreadable => {
             Refusal::new("content", format!("the new build's content at {} is incomplete or unreadable: {e}", src.display()))
@@ -479,7 +389,7 @@ fn refusal_text(e: &Error, src: &Path, stage: Stage) -> Refusal {
  * Which entries of `<data>/content/` to remove: every version folder not in `keep`, and every
  * `.<version>.partial-*` folder a copy that died left behind (`stale` says which partial folders are
  * old enough to be leftovers; one being written right now belongs to a copy in progress, the shell's
- * or a keeper's). Anything else there (`highest-started`, its temporary files, a stray file) is left
+ * or a Linux window's). Anything else there (`highest-started`, its temporary files, a stray file) is left
  * alone.
  */
 pub fn stale_content(entries: &[(String, bool)], keep: &[String], stale: &dyn Fn(&str) -> bool) -> Vec<String> {

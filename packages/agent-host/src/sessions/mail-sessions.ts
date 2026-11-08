@@ -81,6 +81,8 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'c
   readonly reports: ChildReports
   /** The tools a session receives: its profile, and what it may read */
   readonly tools: SessionTools
+  /** Whether the id is a child this host started on a linked machine (`RemoteAgents.of`) */
+  linkedChild(sessionId: string): boolean
 }
 
 /**
@@ -93,6 +95,11 @@ export class MailSessionsView {
 
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   hooks: MailHooks | null = null
+
+  /** Whether the id is a child this host started on a linked machine (#2067): mail refuses it as elsewhere, not as gone */
+  onLinkedMachine(sessionId: string): boolean {
+    return this.host.linkedChild(sessionId)
+  }
 
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
   oldOwes(ownerId: string, childId: string): boolean {

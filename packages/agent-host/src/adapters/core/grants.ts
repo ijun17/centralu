@@ -54,7 +54,7 @@ export class Grants {
 
   /**
    * @param auto What `auto` answers for a call that reaches the order: `deny` for Claude (in `bypassPermissions` the CLI
-   *   asks only when the person's `ask` rule matched), `allow` for ACP, null for a tool whose own policy answers under
+   *   asks only when an `ask` rule matched, a hook answered `ask` or its own check asked), `allow` for ACP, null for a tool whose own policy answers under
    *   `auto` so no request comes (Codex: `approvalPolicy: never`)
    */
   constructor(private readonly auto: 'allow' | 'deny' | null) {}

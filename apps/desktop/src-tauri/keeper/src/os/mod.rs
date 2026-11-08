@@ -7,10 +7,8 @@
 //! anywhere else.
 //!
 //! - `unix.rs`: what macOS and Linux share (a lock, a session, the creation mask, peer
-//!   credentials, the host's process group and signals, the login-shell probe), with
-//!   `unix/children.rs` (the children the keeper holds) and `unix/handles.rs` (descriptor passing).
-//! - `macos.rs`, `linux.rs`: what differs between the two (`peer_uid`, `ExitBackend`,
-//!   `RECV_FLAGS`); `other_unix.rs` keeps a unix that is neither compiling with the old fallbacks.
+//!   credentials, the host's process group and signals, the login-shell probe).
+//! - `macos.rs`, `linux.rs`: what differs between the two (`peer_uid`, `peer_pid`, a process's start); `other_unix.rs` keeps a unix that is neither compiling with the old fallbacks.
 //! - `windows.rs`: the host process on Windows (stdin EOF, `taskkill`, no console). The keeper's
 //!   operations have no Windows half yet (plan step 9): the keeper is unix-only.
 

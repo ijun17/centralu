@@ -11,7 +11,7 @@ import { tryParseJson } from '../json-value.js'
  */
 
 export type LaunchEnv = {
-  /** Started by the keeper (#280): control lines on stdin, the child service, a swap's standby */
+  /** Started by the keeper (#280): control lines on stdin, the activity report and start line on stdout, the turns the keeper held */
   underKeeper: boolean
   /** Where the keeper says this host's files came from, for `hello_ok` (keeper-link.ts) */
   keeperSource: string | undefined

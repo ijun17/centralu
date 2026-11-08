@@ -46,6 +46,7 @@ interface AppStore {
 ```
 
 - **왜 zustand인가**: 이벤트는 React 렌더 사이클 밖(WS 콜백)에서 도착한다. zustand는 React 밖에서의 `store.setState`를 허용하고, 구독 단위를 selector로 잘라 리렌더를 제어할 수 있다. ([tech-stack.ko.md](tech-stack.ko.md) 참고)
+- **스토어 리스너는 하나씩 따로 돈다** (`store/isolated-listeners.ts`, #2070): zustand는 `setState` 안에서 리스너를 한 루프로 부르므로, 하나가 던지면 나머지를 건너뛰고 상태를 바꾼 코드로까지 던져서 호스트 이벤트 처리가 중간에 멈췄다. 이제 던진 리스너는 기록하고 나머지를 돌린 뒤, 그 오류를 따로 다시 던진다. 그래서 e2e는 여전히 페이지 오류로 잡는다.
 - 세션 상태 전이는 반드시 전이 테이블(`protocol/session-state.ts`, `core/session`이 다시 내보낸다. 호스트도 자기 사본에 같은 규칙을 돌린다. [domain-model.ko.md](domain-model.ko.md) §3)을 거친다. 불법 전이(예: `state_change`가 주장하는 `idle → waiting_approval`)는 dev 모드에서는 throw하고, prod에서는 로그만 남기고 무시한다. 단 **호스트가 보내 오는 사실(fact)인 `approval_request`/`question_request`는 예외다** — 승인 요청이 실제로 존재하는데 테이블이 막아 버리면 인박스에도 배지에도 영영 나타나지 않고 에이전트는 계속 블록된다(측정됨). 이 둘은 어떤 상태에서든 `waiting_approval`로 전이한다.
 
 ## 3. 파생 상태 규칙 (버그의 절반이 여기서 막힌다)

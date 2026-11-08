@@ -2,7 +2,7 @@ import { both, runSteps, type Step } from './steps.js'
 
 /** What the shutdown stops, as the host wires it. Each is one of the host's services */
 export type HostParts = {
-  /** Writes the open app views down for the next host (view-handover.ts) */
+  /** An update's stop writes the open app views down for the next host (view-handover.ts); any other stop writes nothing */
   handOverViews: () => void
   /** An update's stop lists the terminals and Run commands it is about to end, for the next host (#1902, update-ended.ts) */
   recordEnded: () => void
@@ -45,12 +45,12 @@ export type HostParts = {
  * ssh links and app processes end with the host too (#280 decision 2): a next host opens its own
  * links and starts apps again on demand.
  *
- * `handOver` marks a planned ending under the keeper, after which the keeper starts the next host:
- * the open app views are written down for it, first, before anything below closes them.
+ * A stop for an update writes down, for the host that starts next, the open app views and what it ends: first, before
+ * anything below closes them. Both steps are always in the plan; the host's own parts write only when the stop is an update's.
  */
-export function stopPlan(handOver: boolean, p: HostParts): Step[] {
+export function stopPlan(p: HostParts): Step[] {
   const steps: Step[] = []
-  if (handOver) steps.push({ name: 'handing the open app views over', run: p.handOverViews })
+  steps.push({ name: 'handing the open app views over', run: p.handOverViews })
   // Before the shells go: it reads their screens
   steps.push({ name: 'listing the terminals and commands an update ends', run: p.recordEnded })
   steps.push(
@@ -71,8 +71,8 @@ export function stopPlan(handOver: boolean, p: HostParts): Step[] {
   /*
    * Git runs in a process group of its own (git-exec.ts), so nothing
    * else ends a commit or push still waiting on a hook or a sign-in, and it would keep the repository's locks for up
-   * to its bound. On a swap the drain has already waited, within its bound, for the RPCs that started them (drain.ts);
-   * what still runs then is ended here. Before the sessions: their cleanup runs git of its own, and awaits it.
+   * to its bound. A stop that waited for the host to be idle waited for the RPCs that started them (drain.ts); what still
+   * runs then is ended here. Before the sessions: their cleanup runs git of its own, and awaits it.
    */
   steps.push({ name: 'the git calls still running', run: () => p.git.stopAll() })
   steps.push(
@@ -95,8 +95,8 @@ export function stopPlan(handOver: boolean, p: HostParts): Step[] {
 
 /**
  * Leaving, once (HO8). Whatever asks first (a signal, a crash, the parent going away, `host.stop`,
- * the keeper's `stop` or its drain) runs the ending; a later request runs no second one. The services stop at most once, and a leave ends with its log line and
- * exit 0, also when a step failed.
+ * the keeper's or the window's `stop` line) runs the ending; a later request runs no second one. The services stop at most once, and a
+ * leave ends with its log line and exit 0, also when a step failed.
  *
  * **Bounded.** A step that never settles (a peer, a child that will not die) would hold the process
  * forever where nothing supervises it (`centralu serve`, `pnpm host`): after `boundMs` the host says
@@ -106,12 +106,11 @@ export function stopPlan(handOver: boolean, p: HostParts): Step[] {
  */
 export class Shutdown {
   private began = false
-  private stopping: Promise<void> | null = null
   private ending: Promise<void> | null = null
 
   constructor(
     private readonly o: {
-      plan: (handOver: boolean) => Step[]
+      plan: () => Step[]
       log: (line: string) => void
       /** Stops copying stderr to host.log, just before the exit */
       stopLog: () => void
@@ -137,23 +136,9 @@ export class Shutdown {
     return this.began
   }
 
-  /**
-   * Stops everything the host holds, without exiting: the swap's drain, which says
-   * `drained` and exits on its own (swap-control.ts). A second call gets the first one's promise.
-   */
-  stopServices(handOver: boolean): Promise<void> {
-    if (!this.stopping) {
-      this.began = true
-      this.stopping = runSteps(this.o.plan(handOver), this.o.log)
-    }
-    return this.stopping
-  }
-
   /** Stops the services, says why it ended, and exits 0 */
-  leave(handOver: boolean): Promise<void> {
+  leave(): Promise<void> {
     if (this.ending) return this.ending
-    // A drain already stopping the services owns the ending: it exits when it has said `drained`
-    if (this.stopping) return this.stopping.catch(() => {})
     this.began = true
     let before: Promise<void> | undefined
     try {
@@ -161,7 +146,8 @@ export class Shutdown {
     } catch {
       // A throw in the notice must not keep the leave from beginning
     }
-    const stopped = before ? before.then(() => this.stopServices(handOver)) : this.stopServices(handOver)
+    const stop = () => runSteps(this.o.plan(), this.o.log)
+    const stopped = before ? before.then(stop) : stop()
     const setTimer = this.o.setTimer ?? ((f, ms) => void setTimeout(f, ms).unref())
     setTimer(() => this.force(`did not finish within ${this.o.boundMs ?? SHUTDOWN_BOUND_MS}ms`), this.o.boundMs ?? SHUTDOWN_BOUND_MS)
     this.ending = stopped

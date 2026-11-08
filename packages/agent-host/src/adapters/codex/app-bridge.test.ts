@@ -14,7 +14,7 @@ import { SessionManager } from '../../sessions/manager.js'
 import { FIXTURE_APP } from '../../sessions/session-apps.test-helpers.js'
 import { HostServer } from '../../transport/server.js'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
-import { bridgeAddress } from '../../swap-control.js'
+import { bridgeAddress } from '../../keeper-control.js'
 import { bridgeToken } from '../../transport/bridge-token.js'
 import { bridgePath } from '../bridge-path.js'
 

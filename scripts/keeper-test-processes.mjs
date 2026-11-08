@@ -1,8 +1,7 @@
 /**
  * Ending everything a keeper integration script started, pass or fail, and saying what went wrong;
  * and talking to a keeper's sockets and a host's WebSocket and waiting on processes, the same way in every script.
- * Shared by `keeper-integration.mjs`, `keeper-handoff-integration.mjs` and
- * `keeper-content-integration.mts`, which run in CI as well as by hand (the `keeper` jobs in
+ * Shared by `keeper-integration.mjs` and its scenarios, which run in CI as well as by hand (the `keeper` jobs in
  * `.github/workflows/build.yml`).
  *
  * Killing the pids a script recorded is not enough. A terminal's shell runs in a session of its own

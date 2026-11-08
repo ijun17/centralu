@@ -1,5 +1,9 @@
 # A keeper on linked machines: updates that keep what runs there (#1614)
 
+> **Superseded by [keeper-removal.md](keeper-removal.md) (#1895 option C, owner, 2026-11-03).** Steps 3 to 8 are
+> cancelled. Step 1's keeper beside `host/` in the Linux host-only packages went with keeper-removal PR 7: nothing ever
+> started it. §3 to §5.1 stay as measured background. The status below is this document's as it was decided.
+>
 > **Status: decided (owner, 2026-10-26, §12), being built from step 1.** The root fix for #1614: an update of a linked
 > machine switches at once and keeps what runs there, as an update on the Mac does, instead of waiting for a moment when
 > nothing runs (#1399, #1508, #1579). It is runtime-unification steps 9 and 10 ([runtime-unification.md](runtime-unification.md)),

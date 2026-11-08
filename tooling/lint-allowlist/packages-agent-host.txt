@@ -441,7 +441,6 @@ packages/agent-host/src/sessions/turn-answer.ts @typescript-eslint/no-unsafe-typ
 packages/agent-host/src/sessions/worktree-sessions.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/worktree-sessions.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/worktree-sessions.ts @typescript-eslint/no-unsafe-type-assertion 14
-packages/agent-host/src/swap-control.ts @typescript-eslint/no-unsafe-type-assertion 4
 packages/agent-host/src/temp-dir.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/agent-host/src/themes.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/this-machine.ts @typescript-eslint/no-unnecessary-type-assertion 1

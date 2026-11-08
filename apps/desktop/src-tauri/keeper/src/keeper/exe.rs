@@ -18,7 +18,7 @@
 //! `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` is whatever
 //! an earlier `cargo build` left there: older code than the window's, with nothing to tell the two
 //! apart (the two binaries of one `cargo build` are linked in no fixed order, so their times say
-//! nothing either). A debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
+//! nothing either). A macOS debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
 //! its own executable with `--keeper` and this variable. That is the only `--keeper` left.
 
 use std::path::{Path, PathBuf};
@@ -102,13 +102,6 @@ impl Start {
 /// The keeper executable shipped next to the window's executable `window_exe`.
 pub fn beside(window_exe: &Path) -> PathBuf {
     window_exe.with_file_name(KEEPER_EXE)
-}
-
-/// Whether `exe` is a keeper executable by its name. A keeper hands itself over only to one
-/// (`handoff::give`): a window from before #440 names its own executable instead, which no longer
-/// answers `--keeper` and must never be started without it.
-pub fn is_keeper_exe(exe: &Path) -> bool {
-    exe.file_name().is_some_and(|n| n == KEEPER_EXE)
 }
 
 /// Whether `centralu --keeper` may run the keeper in this process: only a debug build, and only when
@@ -198,15 +191,6 @@ mod tests {
         assert_eq!(beside(Path::new("/tmp/.mount_x/usr/bin/centralu")), PathBuf::from("/tmp/.mount_x/usr/bin/centralu-keeper"));
     }
 
-    #[test]
-    fn only_centralu_keeper_is_a_keeper_executable() {
-        assert!(is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper")));
-        assert!(is_keeper_exe(Path::new("/d/content/0.1.0/centralu-keeper")));
-        assert!(!is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), "a window from before #440 names this");
-        assert!(!is_keeper_exe(Path::new("/tmp/centralu-keeper-old")));
-        assert!(!is_keeper_exe(Path::new("/")));
-    }
-
     /// `tauri dev` relinks only the window; a keeper from an earlier `cargo build` is older code. A
     /// release never runs one in the window's executable, whatever the environment says.
     #[test]
@@ -247,7 +231,7 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        // SAFETY: dup2 and fcntl are async-signal-safe (the same as handoff::spawn_successor).
+        // SAFETY: dup2 and fcntl are async-signal-safe.
         unsafe {
             cmd.pre_exec(move || {
                 if fd == 3 {

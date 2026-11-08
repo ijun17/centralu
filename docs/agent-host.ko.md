@@ -8,7 +8,7 @@
 
 ```
 agent-host/src/
-├─ main.ts              # CLI(--port --token --db --watch-parent --memory --standby), 서비스 연결,
+├─ main.ts              # CLI(--port --token --db --watch-parent --memory; --standby는 거절), 서비스 연결,
 │                       #   기동 단계마다 lifecycle/start.ts의 START_ORDER에 맞춘 표시
 ├─ lifecycle/           # 프로세스의 시작과 끝(runtime-unification.md 3단계):
 │                       #   launch-env(한 번 읽고 지우는 변수), start(데이터로 적은 순서, 마지막 거절),
@@ -31,9 +31,9 @@ agent-host/src/
 ├─ views/               # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지, 끌기 중계
 ├─ links/               # 링크된 기기(#82): 링크, 원격 클라이언트, ssh로 하는 설치와 업데이트
 ├─ dev-services/        # git/fs/store, 터미널, 명령 (dev 전용이 아니다 — 메시지가 사는 곳이다, §5)
-├─ swap-control.ts      # 교체에서 호스트가 맡는 절반(#280 3단계). drain.ts가 호스트가 처리 중인 호출을 기다린다
+├─ keeper-control.ts    # stdin의 제어 줄, 그리고 호스트보다 오래 사는 주소(§4.2). drain.ts: 멈추기 전에 호출을 기다린다
 ├─ keeper-link.ts       # 호스트가 키퍼에게 알리는 것과 자기 빌드
-├─ view-handover.ts     # 교체를 넘어 열린 앱 뷰 (#280 4단계)
+├─ view-handover.ts     # 업데이트를 위한 멈춤을 넘어 열린 앱 뷰 (#280 4단계)
 ├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
 ├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
 ├─ stream-text.ts       # 자식 스트림에서 읽은 텍스트: 쥐어 둔 꼬리, 줄, 한 스트림으로 디코딩 (#428)
@@ -355,7 +355,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    깊이 1 규칙에 여전히 맞는지(그사이 ask_project 일을 맡았을 수 있다), 프리셋이 카드에 적힌 것보다 높지 않은지.
    하나라도 어긋나면 자식을 시작하지 않고 부르는 세션에 까닭을 알린다. 신뢰를 끄면 그 프로젝트에 서 있는 카드를 곧바로
    거두고 부른 세션들에 알린다. 카드가 서 있는 동안 같은 세션이 같은 할 일(도구를 적었다면 같은 도구)을 다시 부르면
-   새 카드 대신 기존 핸들을 돌려준다. 호스트 교체의 drain은 끊긴 호출에 다시 부르라고 하는데, 그 호출은 `pending`을
+   새 카드 대신 기존 핸들을 돌려준다. 멈추기 전의 drain은 끊긴 호출에 다시 부르라고 하는데, 그 호출은 `pending`을
    읽지 못했기 때문이다. 요청은 사람이 답할 때, 부르는 세션이 거둘 때(`agent_session stop`), 카드가 서 있는 동안 호출이
    취소될 때, 부르는 세션이 삭제될 때 끝난다. 자식 없이 끝나면 부르는 세션에 사람이 읽을 알림
    (`Centralu · agent request`)을 남긴다. 호출이 아직 기다리던 카드에서 거부한 경우는 카드 자체가 보여 주므로 남기지
@@ -847,6 +847,12 @@ interface AdapterCapabilities {
   `tool_call.input`은 도구가 받은 입력을 받은 그대로, `tool_result.output`은 도구가 답한 글 전체를 자르지 않고 싣는다.
   이미지는 뺀다(`message_image`로 따로 나간다, #40). host가 기록을 저장소에 남기고 내보내는 모든 것에서 걷으므로
   ([protocol.md](protocol.md) §2), 어댑터는 작은 카드와 온전한 기록 사이에서 고를 필요가 없다.
+- **Claude의 생각은 글로 온다**(#2062). 요즘 모델은 요약을 요청하지 않으면 글이 빈 생각 블록을 보낸다. 그래서 모든
+  세션이 CLI를 `--thinking-display summarized`로 시작한다(`sdk-query.ts`의 `extraArgs`). SDK의 `thinking` 옵션은 쓰지
+  않는다. 그 옵션은 `--thinking adaptive`도 함께 넘겨서, 모델이 생각할지까지 정해 버리기 때문이다. 이 플래그는 보이는
+  것만 바꾸고, 생각하는 양이나 비용은 바꾸지 않는다. CLI 2.1.316에서 재 보니 한 턴의 출력 토큰이 같았다. CLI는 적어도
+  2.1.100부터 이 플래그를 받는다. 그보다 옛 CLI는 모르는 옵션이라며 거절하고, 세션이 시작되지 않는다. 이전 호스트가
+  띄운 CLI를 이 호스트가 이어받으면 그 CLI는 처음 받은 인자를 그대로 쓰므로, 다시 시작하기 전까지는 생각이 빈 채로 온다.
 - **네이티브 서브에이전트의 걸음은 감싸서, 띄운 호출을 붙여 내보낸다** (#222). 부모 자신의 이벤트로는 결코 내보내지
   않는다(#98): `step`이 글, 추론, 도구 호출, 도구 결과 중 하나이고 `parentCallId`가 서브에이전트를 띄운 호출인
   `subagent_event`다. Claude: 서브에이전트의 메시지에는 `parent_tool_use_id`가 붙어 있고, `forwardSubagentText`를 켜면
@@ -911,6 +917,7 @@ interface AdapterCapabilities {
   | Claude | `system/api_retry {attempt, max_retries, retry_delay_ms, error_status, error}` — 529가 두 번 답한 뒤 합성 "API Error" 메시지와 오류 결과 | 한 번의 재시도 구간에 `retrying` 한 번과 시도마다 host.log 한 줄. 다음 스트림 이벤트나 assistant 메시지에서 이전 활동이 돌아온다 |
   | Claude | `system/model_refusal_fallback` (실행하지 못함, sdk.d.ts) | scope가 `session`이거나 없으면 알림과 폴백 모델을 실은 `settings_changed`. scope `local`(서브에이전트)은 host.log만. `retracted_message_uuids`는 처리하지 않는다 |
   | Claude | `system/model_refusal_no_fallback` (실행하지 못함, CLI는 메인 스레드 경로에서 `content: ""`로 보낸다) | 결과까지 붙잡았다가 실패한 턴의 오류 메시지로, 턴이 실패하지 않았으면 알림으로. 글은 `content`, 없으면 거절 설명, 없으면 분류 |
+  | Claude | `error`가 붙은 `assistant` 메시지(모델 `<synthetic>`): CLI가 실패한 요청의 글을 모델이 말한 것처럼 보낸다. 예: `error: 'model_not_found'` 뒤에 같은 `result`의 오류 결과 (CLI 2.1.296, #2050) | 말풍선 없음: 위의 거절처럼 붙잡아 두므로 실패한 턴은 그 글을 오류 줄에서 한 번만 보인다. 그 뒤에도 이어지는 턴은 `api-error` 알림을 받는다 (기록 없음) |
   | Codex | `thread/start`가 답해지는 동안 `configWarning {summary, details}`, 이어서 같은 글의 `warning {threadId, message}`, 시작·재개 때마다 | `oncePerSession` 붙은 `notice`. 모르는 키 경고는 "Codex ignored N settings in `~/.codex/config.toml`"과 한 줄에 하나씩인 키, `for you` |
   | Codex | `deprecationNotice {summary, details}`: 오너가 "Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`…"를 보았다(#342). `guardianWarning {threadId, message}` (실행하지 못함) | `notice` (앞의 것은 세션당 한 번). 전체 기록 불러오기 알림은 "Codex says Centralu loads thread history in an outdated way", `for Centralu` |
   | Codex | `mcpServer/startupStatus/updated` — 실패하는 서버는 스레드 시작 한 번에 `starting` → `failed {error}`를 두 번 거친다 | 서버마다 Codex의 말로 된 `notice` 하나(`MCP client for \`x\` failed to start: …`). 그 사이에 한 번 시작된 뒤에야 다시 |
@@ -1072,11 +1079,9 @@ host restarts   → session processes, terminals and commands end with it, under
                   → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
                   → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
-host swapped    → the old host drains and stops for an update, the new one takes over behind the same front
-                  door and continues what it ended (§4.2)
-                → clients reconnect to the same address and resync on the new streamEpoch
-keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host, the
-                  agents, terminals and commands it runs, and every connection carry on; nothing reconnects
+                → under a keeper, clients reconnect to the same front-door address (§4.2)
+another build   → a keeper runs one build (§4.4): the keeper and its host stop, for an update when the
+                  host can, and the window starts a keeper of its own build (§4.5)
 app quits       → background mode off (default): the keeper stops the host, as above
                 → background mode on: nothing happens to the host; a relaunched app re-attaches
 app relaunches  → "Apply now" (#352): the host stops for an update and the relaunched window starts
@@ -1099,7 +1104,9 @@ app relaunches  → "Apply now" (#352): the host stops for an update and the rel
 때만 키퍼를 돈다(`KeeperInProcess` 행). 다른 누가 그렇게 띄우면 창을 열지 않고 곧바로 64로 끝난다
 (`keeper::exe::run_from_window`). 0.1.0-beta.16까지는 옆의 `centralu-keeper`로 `exec`했다: 새 빌드의 창 실행 파일을
 `centralu --keeper --take-over-fd 3 ...`로 띄워 넘겨주는 0.1.0-beta.11 이하의 키퍼와 #440 이전의 창 때문이었다. 그런
-키퍼는 이제 `ready`를 듣지 못해 되돌아가고, 창은 "완전히 다시 시작"을 내놓는다. 창 옆에 `centralu-keeper`가 없는
+키퍼는 이제 `ready`를 듣지 못해 되돌아간다. 이 빌드의 창은 인계를 시작하지 않고(#1895 4단계 PR 3) 그런 키퍼에는
+"Restart into this build"를 내놓으며, 다른 키퍼를 넘겨받으려고 뜬 이 빌드의 `centralu-keeper`는 곧바로 끝난다(PR 4, §4.4).
+창 옆에 `centralu-keeper`가 없는
 번들(손으로 조립한 것)은 창의 실행 파일 안에서 키퍼를 돌렸지만, 이제는 키퍼를 띄우지 못하고 그렇다고 말한다.
 
 | 어디서 | 변수 | 방식 | 무엇이 도는가 | 이유 |
@@ -1111,11 +1118,10 @@ app relaunches  → "Apply now" (#352): the host stops for an update and the rel
 | 번들된 호스트가 없는 macOS 릴리스(`cargo run --release`) | 없음 | `KeeperBeside` | 창 옆의 키퍼, 소스 호스트, 개발용 데이터 폴더 | 셸이 검증할 것이 없다 |
 | 키퍼가 이미 답함 | | `Attach` | 아무것도 띄우지 않고 붙는다 | 데이터 폴더 하나에 키퍼 하나 |
 | macOS 디버그(`pnpm app:dev`) | 없음 | `Direct` | 창이 tsx로 소스 호스트를 돌린다, `CC_DEV=1` | 키퍼 이전처럼 앱이 호스트의 부모다. `target/debug`에 남은 번들 호스트는 무시한다 |
-| macOS나 Linux 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
+| macOS 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
 | 어디서나 | `CC_HOST_CMD`(값 무관) | `Direct` | 그 명령줄(빈 값이면 번들된 호스트나 소스 호스트) | 다른 호스트를 돌리는 비상구 |
-| Linux 릴리스(AppImage, deb, rpm) | 없음 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다 | 키퍼가 AppImage 안에서 돈다: 더 새 AppImage의 빌드로 전환하면 그 AppImage의 마운트에서 돌게 되는데, 그 마운트는 그 창이 끝나면 사라지고, 그 뒤 디버그 키퍼는 SIGBUS로 죽었다. 먼저 사본에서 돌아야 한다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6, #295) |
-| Linux 디버그 | 없음 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
-| Linux 릴리스 | `CC_USE_KEEPER=1` | `KeeperBeside` | 창 옆의 키퍼(AppImage의 `usr/bin/`) | macOS 밖에는 셸이 없다 |
+| Linux 릴리스(AppImage, deb) | `CC_USE_KEEPER`는 무시하고 창의 로그에 한 줄 남긴다 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다. 첫 호스트를 띄우기 전에 데이터 폴더의 `keeper.sock`에 답하는 키퍼가 있으면 멈추라고 청하고, 그 `keeper.lock`이 풀려 키퍼가 사라질 때까지 기다린다. 소켓은 기준이 아니다: 키퍼는 호스트가 멈추기 전에 소켓부터 지운다(`os::stop_earlier_keeper`, `keeper::client::stop_and_wait`): 이전 빌드의 `CC_USE_KEEPER=1` 창이 띄운 키퍼로, 그 호스트가 폴더의 잠금을 쥐고 있을 것이기 때문이다. 그 턴은 종료할 때처럼 끝난다. AppImage에는 `centralu-keeper`가 실리지 않는다(`tauri.linux.conf.json`이 `build.features`를 비운다) | 키퍼가 지킬 권한 모델이 없고, AppImage의 마운트에서는 오래 사는 것이 돌면 안 된다([plans/keeper-removal.md](plans/keeper-removal.md) §2.4). #1895 4단계 PR 7 전까지 `CC_USE_KEEPER=1`은 마운트 밖 사본에서 키퍼를 돌렸지만, 기본으로 그것을 돌린 Linux 데스크톱은 없었다 |
+| Linux 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
 | Windows, 릴리스와 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | 번들된 호스트(릴리스)나 소스 호스트(디버그), 콘솔 창 없이(§1) | 키퍼는 unix 소켓, 디스크립터 전달, `flock` 위에 지어졌다 |
 
 창이 정하지 않는 것, 각자 제자리에서:
@@ -1123,8 +1129,7 @@ app relaunches  → "Apply now" (#352): the host stops for an update and the rel
 | 무엇 | 어디서 정하는가 |
 |---|---|
 | 열린 셸이 하는 일: 설치할지 둘지, 고정됐는지, 검증, 복사, 거절 이유 | 창의 `shell::prepare`, `shell::install::plan`, `shell::start::start`, 그리고 셸 크레이트([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
-| 직접 띄운 키퍼의 넘겨주기(§4.4): 창이 지정한 `centralu-keeper`로(#444부터). 다른 이름의 실행 파일(#440 이전의 창은 제 실행 파일을 지정한다)은 거절되고 키퍼는 제 빌드에 남는다(#461) | `server::switch`, `server::upgrade`, `handoff::give` |
-| 검증된 콘텐츠에서 뜬 키퍼의 넘겨주기: 새 콘텐츠를 검증하고 복사한 뒤 `<data>/content/<new>/centralu-keeper`로 넘겨준다 | `server::content_route`(§4.4) |
+| 다른 빌드로 옮기라는 요청을 받은 키퍼(`switch`나 `upgrade`, 이전 빌드의 창에서 온 것): #1895 4단계 PR 4부터 `gone`으로 거절한다. 다른 키퍼를 넘겨받으려고 뜬 키퍼(`--take-over-fd`)는 코드 7로 끝나고, 보낸 쪽이 되돌아간다(§4.4). PR 4 전에는 키퍼가 스스로를 넘겨주었고, 검증된 콘텐츠에서는 검증한 사본을 거쳤다 | `server::handle`, `server::start` |
 | 원격의 `centralu serve`: npm 런처가 시스템 Node로 번들된 호스트를 돌린다. 창도 키퍼도 없다 | `packaging/npm/centralu/bin/serve.mjs`와 그 옆에서 관심사 하나씩을 맡는 `serve-*.mjs` 모듈들(§4.7) |
 | `pnpm dev`와 e2e: `pnpm host`가 소스 호스트를 돌린다. 창도 키퍼도 없다 | `CONTRIBUTING.md` |
 
@@ -1135,7 +1140,7 @@ app relaunches  → "Apply now" (#352): the host stops for an update and the rel
 `CC_DATA_DIR=<data>`로 띄우고, stdin 파이프를 쥐며, 앱이 쓰던 규칙 그대로 다시 띄운다: 연속 실패 다섯 번,
 30초 안정 가동이면 횟수 초기화, 잠금 충돌이나 더 새 빌드만 읽을 수 있는 store면 곧바로 멈춤(`host_proc/`,
 키퍼와 앱의 직접 경로가 함께 쓴다: 모든 OS가 함께 쓰는 로직은 `mod.rs`, OS마다 다른 프로세스 메커니즘은
-keeper 크레이트의 OS 계층 `src/os/`, 키퍼의 호스트 넘겨주기는 `handover.rs`, Node 찾기는 `node.rs`). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
+keeper 크레이트의 OS 계층 `src/os/`, Node 찾기는 `node.rs`). 키퍼가 죽으면 호스트는 그 파이프에서 EOF를 보고 스스로 내려간다.
 
 **키퍼를 띄우는 쪽.** `<data>/keeper.sock`에서 답하는 키퍼가 없을 때 창이 띄운다. macOS 릴리스는 먼저 셸에게
 맡긴다([plans/thin-shell.md](plans/thin-shell.md) §6, §10.2, 창의 `src/shell/`): 자기가 싣고 온 셸로
@@ -1151,13 +1156,12 @@ nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 
 **빌드별 사본.** 띄울 때마다 키퍼는 번들의 `resources/host` 폴더를 `<data>/hosts/<key>/`에 복사하고(임시 폴더에
 쓴 뒤 rename) 거기서 `main.mjs`를 돌린다. key는 `bundle-info.json`에 찍힌 커밋이다. `-dirty`나 `unknown`
 빌드는 빌드 시각을 덧붙여, 서로 다른 dirty 빌드가 사본을 함께 쓰지 않는다. 호스트가 준비되면 그 호스트가 돌지
-않는 사본을 지우되, 띄우기나 교체가 붙잡은 사본은 남긴다(`source::Copies`): 띄우기는 키퍼가 그 사본을 도는 호스트의
-것으로 적을 때까지, 교체는 새 호스트를 넘겨받거나 포기할 때까지 붙잡는다. 복사와 정리는 한 잠금을 거치고, 정리는
-호스트가 어느 사본에서 도는지를 도는 그때 읽으며, 스스로를 넘겨주는 키퍼는 얼릴 때 둘 다 멈춘다. 붙잡기가 없을 때는
-키퍼가 막 넘겨받은 호스트가 부른 정리가 교체가 방금 만든 사본을 지웠다("Cannot find module
-.../hosts/<key>/main.mjs", #368). 온전한 사본은 원래 폴더가 사라져도 그대로 쓴다: Linux에서 그 폴더는 AppImage
-안에 있어 누군가 붙들고 있는 동안만 마운트되고, 더 새 AppImage의 창에게서 넘겨받은 키퍼는 그 창의 마운트보다 오래
-산다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
+않는 사본을 지우되, 띄우기가 붙잡은 사본은 남긴다(`source::Copies`): 띄우기는 키퍼가 그 사본을 도는 호스트의
+것으로 적을 때까지 붙잡는다. 복사와 정리는 한 잠금을 거치고, 정리는 호스트가 어느 사본에서 도는지와 다음에 어느
+사본에서 돌지를 도는 그때 읽는다. 붙잡기가 없을 때는 막 준비된 호스트가 부른 정리가 교체가 방금 만든 사본을
+지웠다("Cannot find module .../hosts/<key>/main.mjs", #368). 그 교체는 #1895 4단계 PR 4에서 없어졌고, 붙잡기는 모든
+띄우기에 남는다. 온전한 사본은 원래 폴더가 사라져도 그대로 쓴다(업데이트가 바꾼 앱 번들. #1895 4단계 PR 7
+전까지는 Linux AppImage의 마운트도, [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
 
 셸이 띄운 키퍼(자기 실행 파일이 `<data>/content/<version>/`에 있는 키퍼)는 사본을 만들지 않는다: 호스트를 검증된
 사본의 `host/` 폴더에서 그대로 돌린다. 그 폴더는 읽기 전용이고 서명된 매니페스트와 대조를 마쳤다
@@ -1175,13 +1179,11 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 
 | 요청 | 답 |
 |---|---|
-| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 자격 증명(§4.2: Centralu 창에는 토큰, 다른 프로세스에는 제한 자격 증명. 어느 쪽인지는 `view.rights`, #1405), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 지금 또는 마지막 교체(`swap`), 교체 때 호스트가 에이전트를 넘겨주는지(`keepsAgents`), 키퍼 자신의 빌드(`keeper.build`, 4단계부터) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. `relaunched`: 이 창이 알린 다시 띄우기로 뜬 창이다(§4.5) |
-| `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — 앱이 업데이트를 적용하려고 곧 스스로를 다시 띄운다(#352): `n`초(기본 60, 최대 300) 동안은 붙은 창이 없어도 키퍼가 멈추지 않는다, 백그라운드 모드가 무엇이든. 다음 attach가 이것을 써 버린다 |
+| `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 자격 증명(§4.2: Centralu 창에는 토큰, 다른 프로세스에는 제한 자격 증명. 어느 쪽인지는 `view.rights`, #1405), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 키퍼 자신의 빌드(`keeper.build`, 4단계부터). 지금 또는 마지막 교체(`swap`)와 `keepsAgents`는 #1895 4단계 PR 4에서 없어졌고, 3단계 이후의 모든 창 빌드는 둘 다 선택 항목으로 읽는다 |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. 이전 빌드의 키퍼는 `relaunched`도 답하지만, 이 빌드의 창은 그것을 읽지 않는다(#1895 4단계 PR 3) |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit completely", 그리고 창이 이어서 자기 빌드의 키퍼를 띄우는 "Restart completely") |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | 창만 보낼 수 있다(#1405, 다른 프로세스는 `window_only`). 그 빌드로 블루그린 교체(§4.2, 빌드 표식은 그 폴더에서 다시 읽는다). 떠 있는 호스트가 없으면 다음 시작이 그 빌드를 돌린다. `keeper`가 있고(앱은 제 빌드의 `centralu-keeper`를 보낸다. #440 이전의 앱이 보내던 제 실행 파일은 #461부터 거절되고 키퍼는 제 빌드에 남는다) 키퍼가 다른 빌드면, 키퍼가 먼저 그 빌드의 키퍼에게 스스로를 넘기고([architecture.ko.md](architecture.ko.md) §4.4) 그 키퍼가 교체를 한다. 검증된 콘텐츠에서 도는 키퍼는 번들에서 아무것도 띄우지 않는다: 번들의 서명된 콘텐츠를 검증해 복사하고 그 사본 안의 키퍼에게 넘긴다(§4.4). 거절되면 교체는 `refused`가 채워진 `failed`로 끝난다. 교체 중의 두 번째 `switch`는 거절한다 |
-| `{"op":"upgrade","exe":…,"source":…}` | 창만 보낼 수 있다(#1405). 호스트는 그대로 두고, 키퍼를 `exe`에 있는 `source` 빌드의 키퍼에게 넘긴다(§4.4). 검증된 콘텐츠에서 돌면 `exe`가 든 번들의 콘텐츠를 검증한 사본 안의 키퍼에게 넘긴다 |
-| `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry (교체 중에는 거절) |
+| `{"op":"switch",…}` / `{"op":"upgrade",…}` | 누구에게나 `{"ok":false,"error":"gone: …"}`, Centralu를 완전히 종료하고 다시 열라고 알린다(#1895 4단계 PR 4. 이전 빌드의 창은 자기 호스트를 돌리는 다른 빌드의 키퍼에 대해 "Restart completely"를 내놓지 않는다). PR 3부터 어느 창도 보내지 않고, 이전 빌드의 창은 그 거절을 보여 준다. PR 4 전에는 호스트를 다른 빌드로 블루그린 교체하는 것과 키퍼를 그 빌드의 키퍼에게 넘겨주는 것이었다(§4.4) |
+| `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
 
 **옛 폴더.** 기본 데이터 폴더를 무엇이 만들기 전에, 앱과 키퍼가 이름을 바꾸기 전의 폴더를 `data-dir.ts`와
@@ -1192,25 +1194,25 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 소켓에서 답하면 두 번째 키퍼는 코드 3으로 끝나고 호스트를 띄우지 않는다. 앞선 키퍼가 잠금을 쥐었는데 답하지
 않으면(내려가는 중) 15초까지 기다린다.
 
-**언제 끝나는가.** `keeper/mod.rs`의 `idle_decision`: 창이 붙어 있으면 끝나지 않는다. 알린 다시 띄우기의
-유예(§4.5) 동안에는 어느 모드에서든 아직 끝나지 않는다. 백그라운드 모드가 꺼져 있으면 마지막 창이 떨어질 때. 켜져 있으면 창도 없고 호스트가 보고한 활동(일하거나 기다리는 세션, 터미널, 명령
+**언제 끝나는가.** `keeper/mod.rs`의 `idle_decision`: 창이 붙어 있으면 끝나지 않는다. 키퍼가 스스로 닫은 창이
+돌아올 수 있는 동안(`REATTACH_GRACE`)에는 어느 모드에서든 아직 끝나지 않는다. 백그라운드 모드가 꺼져 있으면 마지막 창이 떨어질 때. 켜져 있으면 창도 없고 호스트가 보고한 활동(일하거나 기다리는 세션, 터미널, 명령
 실행)도 없이 30분이 지났을 때. 시작하고 60초 안에 아무 창도 붙지 않은 키퍼도 끝난다: 그것을 띄운 앱이 먼저
 죽은 것이다.
 
 `scripts/keeper-integration.mjs`가 진짜 바이너리(`cargo build`, `/tmp`로)와 진짜 번들 호스트로 임시
-`CC_DATA_DIR`에서 알린 다시 띄우기까지 이것을 전부 몰아 본다.
+`CC_DATA_DIR`에서 이것을 전부 몰아 본다.
 
 **CI에서.** `.github/workflows/build.yml`의 `keeper e2e` 잡(macOS)이 바이너리와 호스트를 한 번 빌드하고, 두 키퍼
 스크립트 가운데 모델도 네트워크도 필요 없는 부분을 돌린다: `keeper-integration.mjs` 전부(그 `update` 시나리오가
-#1895 4단계 PR 1에서 지운 `keeper-children-integration.mjs`의 검사를 맡는다), 그리고 `--no-claude --no-codex`를 붙인
-`keeper-handoff-integration.mjs`, 이어서 셸의 것
-(`shell-integration.mts`)과 검증된 콘텐츠에서의 넘겨주기(`keeper-content-integration.mts`, §4.4). 이 잡이 있는
+#1895 4단계 PR 1에서 지운 `keeper-children-integration.mjs`의 검사를 맡고, `front-door` 시나리오가 PR 4에서 지운 교체와
+넘겨주기 스크립트의 정문 검사를 맡는다), 이어서 셸의 것
+(`shell-integration.mts`). 이 잡이 있는
 까닭은 이 중 어느 것도 단위 테스트나 e2e에 드러나지 않기 때문이다: 서버가 생기기 전에 넣은 #329의 `await`가 터미널을
 쥔 호스트의 재시작을 모두 크래시시켰고(#348), 알아챈 것은 손으로 돌린 키퍼의 children 스크립트(지금은 없다)뿐이었다. claude와 codex
 턴은 손으로 돌리는 채로 남는다. 각 스크립트는 통과하든 실패하든 자기가 띄운 프로세스와 그것들이 띄운 것까지 모두
 끝낸다. 이름이 아니라 프로세스 표 하나로 찾는다(`scripts/keeper-test-processes.mjs`). 검사가 실패하면
-`keeper.log`와 `host.log`의 끝을 찍는다. `keeper e2e (linux)` 잡은 같은 스크립트와 키퍼 크레이트의 단위 테스트를
-ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 자신에게 SIGTERM이 닿아 끝났다: 멈추는 길이
+`keeper.log`와 `host.log`의 끝을 찍는다. `keeper e2e (linux)` 잡은 키퍼 크레이트의 단위 테스트를
+ubuntu-24.04에서 돌린다. #1895 4단계 PR 7이 Linux를 직접 경로로 만들기 전까지는 같은 스크립트도 돌렸다. 그곳의 첫 시도(2026-10-05)는 스크립트 자신에게 SIGTERM이 닿아 끝났다: 멈추는 길이
 `/bin/kill -TERM -<pid>`를 썼는데, procps-ng 4.0.4는 이것을 pid의 **첫 자리 숫자**가 가리키는 그룹에 보내므로 1로
 시작하는 호스트 pid는 사용자의 모든 프로세스에 신호를 보냈다(#350). 이제 두 멈춤 함수 모두 `kill(2)`를 직접 부른다
 ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md)).
@@ -1227,9 +1229,9 @@ ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 �
 
 **업데이트 중 섞인 버전** (#538). 키퍼는 모든 호스트에 토큰을 stdin으로만 넘긴다. 0.1.0-beta.45 이후의 모든
 호스트가 거기서 읽는다(#1143). stdin으로 읽으라는 말을 듣지 않은 호스트는 셸에서 손으로 띄운 호스트처럼 여전히
-`CC_HOST_TOKEN`을 읽는다(CONTRIBUTING.md). 키퍼 인계는 토큰을 자기 채널로 넘기고 호스트의 stdin은 그대로 두므로 다시 읽을
-것이 없다. Codex 브리지는 정문 주소로 띄운다(`swap-control.ts`, `bridgeAddress`): 도는 codex는 브리지를
-계속 쥐고, 이 호스트보다 오래 사는 주소만 교체를 견딘다. 키퍼가 없으면 예전처럼 호스트 자신의 포트를 준다.
+`CC_HOST_TOKEN`을 읽는다(CONTRIBUTING.md). Codex 브리지는 정문 주소로 띄운다(`keeper-control.ts`, `bridgeAddress`): 도는 codex는 브리지를
+계속 쥐고, 이 호스트보다 오래 사는 주소만 호스트의 재시작을 견딘다(`keeper-integration.mjs`의 `front-door` 시나리오가
+호스트를 죽이고 다음 실행에 브리지가 닿는지 확인한다). 키퍼가 없으면 예전처럼 호스트 자신의 포트를 준다.
 
 **브리지의 자격 증명** (#382). 브리지는 토큰을 받지 않는다. 대신 `CC_BRIDGE_TOKEN`을 받는데, 호스트의 토큰을 키로
 한 세션 id의 HMAC이다(`transport/bridge-token.ts`). 같은 사용자의 어떤 프로세스든 브리지가 시작될 때의 환경을 읽을
@@ -1240,46 +1242,54 @@ ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 �
 브리지의 자격 증명을 받아 준다. 이 변경 이전의 호스트는 거절한다: 그런 빌드로 되돌아가면 새 빌드가 시작한 Codex
 세션은 다시 시작할 때까지 Centralu 도구를 잃고, 브리지가 그렇게 말한다.
 
-**stdin의 제어 줄** (`swap-control.ts`). 키퍼의 파이프는 한 줄에 JSON 객체 하나씩도 나른다. 호스트는 준비 줄
-옆 stdout으로 답한다. 어느 쪽도 상대가 하는 다른 말은 해석하지 않는다.
+**stdin의 제어 줄** (`keeper-control.ts`). 키퍼의 파이프, 그리고 데스크톱 창이 호스트를 띄웠을 때는 그 창의 파이프도
+한 줄에 JSON 객체 하나씩 나른다. 호스트는 부모가 보내는 다른 것은 해석하지 않는다.
 
-| 키퍼 → 호스트 | 호스트 → 키퍼 |
+| 부모 → 호스트 | 호스트가 하는 일 |
 |---|---|
-| (`--standby`로 띄움) | 자기 점검을 통과하면 `{"standby":{pid,schema}}` |
-| `{"op":"activate"}` | 일을 시작하면 평소의 준비 줄 |
-| `{"op":"drain","timeoutMs":N}` | `{"drained":{waitedFor,cut,ms,keptAgents}}`, 그리고 끝난다 |
-| — | 시작할 때마다 한 번 `{"swap":{"keepsAgents":false,"stopsForUpdate":true}}` |
+| `{"op":"stop"}` | 멈춘다. 키퍼가 보낸 것이면 먼저 사람이 종료했다고 적어 둔다(#1143) |
+| `{"op":"stop","forUpdate":true}` | 업데이트를 위해 멈춘다(§4.5) |
+| `{"op":"system-ending"}`, `{"op":"system-ending","cancelled":true}` | 시스템이 끝나는 중이라고, 또는 더는 아니라고 적어 둔다(§4.6.2, #1397) |
 
-**대기(standby).** 소유 잠금 전에: 호스트는 번들을 읽었고 도구를 찾았다. 저장소를 읽기 전용으로 읽고
-(`Store.inspect`), `min_reader_version`이 자기보다 높으면 "written by a newer Centralu" 문장을 말하고 1로 끝나서,
-도는 호스트를 건드리기 전에 교체가 실패한다. 아니면 보고하고 `activate`를 기다린다. 파이프가 닫히면(키퍼가
-포기했다) 아무것도 건드리지 않은 채 끝난다. 대기 중에는 듣지 않는다: 정문이 포트를 가리고, 서버는 세션 관리자가
-필요하며 그것은 쓰기용으로 연 저장소가 필요하다.
+키퍼 아래의 호스트는 시작할 때마다 준비 줄 뒤에 한 번 `{"swap":{"keepsAgents":false,"stopsForUpdate":true}}`를 말한다:
+키퍼의 멈춤 줄을 받는다는 뜻이다. 이 빌드의 키퍼는 `swap` 줄이면 무엇이든 그렇게 읽고, 이전 빌드의 키퍼는
+`stopsForUpdate`를 읽으며, beta.40~52의 창은 여전히 `keepsAgents`를 읽는다.
+
+**교체 없음** (#1895 4단계 PR 5). 그때까지 키퍼는 도는 호스트 옆에 두 번째 호스트를 `--standby`로 띄우고, 그것에
+`activate`를 쓰고, 도는 호스트에 `drain`을 쓸 수 있었다(블루-그린 교체, #280 3단계, [architecture.ko.md](architecture.ko.md)
+§4.2). PR 4 이후의 어느 키퍼도 그러지 않는다. `--standby`로 띄운 호스트(이전 빌드의 키퍼만 그렇게 띄운다)는 대기하지
+않는다고 말하고 데이터 폴더를 건드리기 전에 1로 끝나므로, 그 키퍼의 교체는 실패하고 도는 호스트는 계속 일한다
+(`lifecycle/host-process.test.ts`). 이 말은 stderr뿐 아니라 stdout에도 쓴다: 그 키퍼는 대기 호스트가 마지막으로
+찍은 일반 줄들을 교체 실패 이유에 넣으므로, 이전 빌드 창의 막대가 Centralu를 완전히 종료하라고 말하게 된다.
+`activate`와 `drain`에는 답이 없다: 이전 빌드의 키퍼가 이 빌드의 호스트에 `drain`을 쓰면 한도만큼 기다린 뒤 신호로
+호스트를 멈추는데, 그것은 업데이트를 위한 멈춤이 아니라 그냥 멈춤이라서 끊긴 턴은 이어 가지 않고 Continue와 함께 멈춘
+것으로 보이며(§4.6.2), 호스트가 띄운 자식들도 함께 멈춘다. 그때까지 이전 빌드의 창은 교체가 드레인 중이라고 보여 준다.
+이것은 이전 빌드의 키퍼가 이 빌드의 호스트를 돌리고(그 키퍼는 번들의 경로로 호스트를 띄우는데, 설치가 끝나면 그 경로에
+이 빌드가 있다: `lifecycle/keeper-held.ts`), 이전 빌드의 창이 대기 호스트가 저장소 확인을 통과한 제3의 빌드로 교체를
+청할 때만 생긴다: 키퍼는 그 확인 뒤에야 `drain`을 쓰고, 이 저장소보다 오래된 빌드는 거기서 거절해 드레인 전에 교체가
+실패한다. Centralu를 완전히 종료하면 끝난다.
 
 **드레인** (`drain.ts`). 모든 WebSocket RPC와 모든 프로세스 안 MCP 도구 호출(오케스트레이터 도구, 앱 도구
-프록시)이 추적기 하나를 지난다. `drain`이 오면 새 호출은 거절하고 도는 호출에 한도를 준다. 한도가 지나면 각
-호출에 "호스트가 빌드를 바꾸느라 기다리기를 멈췄고, 호출은 끝났을 수도 아닐 수도 있으니 확인하고 다시 부르라"는
-오류로 답한다. 거절과 끊기에서 나온 RPC 오류는 `retryable: true`다. 그 다음 차례로: 끊긴 호출의 오류가 에이전트에
-닿을 잠깐, **멈춤 훅**(`stopServices(true)`), 잠금 놓기, `drained` 쓰기, 종료. 멈춤 훅은 업데이트를 위한 멈춤이다:
-열린 앱 화면을 적어 두고(아래), 끝내는 턴·터미널·실행을 적고, 에이전트를 포함해 호스트가 띄운 것을 모든 끝처럼
-멈춘다(§4.3). 이어받는 호스트가 끝난 것을 이어 간다(§4.5). `drained.keptAgents`와 시작 때의 `keepsAgents`는 여전히
-보내지만 언제나 `false`다: 키퍼에 에이전트를 남기는 호스트는 더 없다(#1895 4단계 PR 1).
+프록시)이 추적기 하나를 지난다. 교체의 드레인을 위해 만들었지만 지금은 `host.stop {ifIdle}`만
+(`lifecycle/stop-gate.ts`, #1224) 시작한다: 호스트가 쉬는 것을 확인하면 새 호출은 거절하고 "호스트가 다시 시작하는
+중이니 다시 부르라"는 오류로 답하며(RPC 오류는 `retryable: true`), 한도가 지나도 도는 호출은 끝났을 수도 아닐 수도
+있다는 오류로 끊는다. 드레인하는 동안 `updateAtRest`와 허브의 기기 자동 업데이트는 기다린다.
 
-**넘겨받기.** `activate` 뒤에 호스트는 잠금을 잡고 저장소를 `swap: true`로 연다: 확장 단계는 지금 돌고, 무거운
-단계와 깨는 단계는 준비 줄 뒤에 돈다(§5.1).
-
-**열려 있는 앱 화면** (#280 4단계). 화면의 프레임 주소는 정문의 포트(`swap-control.ts`, `viewPort`)와 키퍼의
-토큰에서 유도한 비밀(`transport/http.ts`, `deriveHttpSecret`)을 쓴다. 그래서 키퍼가 돌리는 모든 호스트는 같은
-인스턴스에 같은 주소를 내준다. 키퍼가 없으면 둘 다 전과 같다(호스트의 포트, 무작위 비밀). 인스턴스 자체는 메모리에만
-있으므로, 교체의 drain(위)은 `stopServices`의
-맨 처음에 열려 있는 각 인스턴스의 id·앱·`ui://` 주소를 `app_settings`에 적는다(`views.handover`,
-`view-handover.ts`). 키퍼 아래에서 시작한 다음 호스트는 listen 전에 그 기록을 읽어 지우고, 10분이 넘지 않았으면 같은
+**열려 있는 앱 화면** (#280 4단계). 화면의 프레임 주소는 정문의 포트(`keeper-control.ts`, `viewPort`)와 키퍼의
+토큰에서 유도한 비밀(`transport/http.ts`, `deriveHttpSecret`)을 쓴다. 그래서 한 키퍼가 돌리는 모든 호스트(충돌 뒤
+키퍼가 다시 띄운 호스트)는 같은 인스턴스에 같은 주소를 내준다. 키퍼가 없으면 둘 다 전과 같다(호스트의 포트, 무작위
+비밀). 인스턴스 자체는 메모리에만 있으므로, 업데이트를 위한 멈춤(§4.5)이 열려 있는 각 인스턴스의 id·앱·`ui://`
+주소를 `app_settings`에 적는다(`views.handover`, `view-handover.ts`). 멈춤 계획의 맨 처음에 적으며, 다른 멈춤은
+아무것도 적지 않는다. 데이터 폴더의 다음 호스트는 누가 띄웠든 listen 전에 그 기록을 읽어 지우고, 10분이 넘지 않았으면 같은
 id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙들고, 사라진 앱은 건너뛰며, 대화 안 화면은 자기 카드에
 다시 묶여(`InlineViews.adopt`) 그 메시지가 여전히 그 대화로만 간다. 대화 안 화면이 잃는 것은 그 호출의 입력과
 결과(디스크에 적지 않는다)라서, 닫히고 나면 재시작 뒤처럼 "앱 열기"만 남는다. 크래시는 아무것도 적지 않아 화면을
 전처럼 잃는다. 앱별 출처 포트는 `apps.viewFrame`이나 프록시 페이지가 처음 필요로 할 때 새 호스트가 늦게 연다. UI
 쪽에서는 열려 있는 모든 `AppFrame`이 재동기화 뒤에 주소를 다시 묻는다(스토어의 `hostResyncs`): 같은 주소면 화면과 그
-상태를 그대로 두고, 다른 주소면 새로 띄우고, 실패하면 첫 로드의 실패 경로로 간다.
+상태를 그대로 두고, 다른 주소면 새로 띄우고, 실패하면 첫 로드의 실패 경로로 간다. 업데이트 뒤에는 주소가 다르므로(새
+키퍼라서 정문과 비밀이 새로 생기거나, 새 창의 호스트가 새 무작위 비밀을 쓴다) 열려 있는 각 화면은 예전 id와 카드 그대로
+한 번 더 로드한다. 창이 임대한 화면은 `LEASE_GRACE_MS` 동안 창이 다시 잡기를 기다렸다가 닫힌다. 대화 안 화면은 창이
+없다고 닫히지 않고 자기 층이 닫으므로(사람, 세션 삭제, 앱이 사라짐), 돌아오는 창이 없어도 멈춤 전처럼 열려 있다.
 
 ### 4.3 호스트가 띄우는 자식들, 키퍼 아래에서도 (#280, #1895)
 
@@ -1287,8 +1297,8 @@ id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙
 업데이트를 위해 멈춘다(§4.5). #1895 4단계 PR 1부터 호스트는 키퍼의 `<data>/children.sock`에 붙지 않고, 시작할 때 키퍼의
 자식을 읽지 않으며, 아무것도 넘겨받지 않는다([plans/keeper-removal.md](plans/keeper-removal.md) §4). 전에는 자식 서비스를
 내놓은 키퍼 아래의 호스트가 키퍼에게 그것들을 띄워 쥐어 달라고 부탁했고, 그래서 그것들은 호스트보다 오래 살았다. 새로
-띄운 키퍼는 3단계부터 그 서비스를 내놓지 않으므로(`server/start.rs`의 `holds_children`) 호스트는 그때 이미 이 경로를
-탔다. **키퍼의 자식 서비스는 다음 PR(PR 2)까지 키퍼에 남아 있지만, 어떤 호스트도 쓰지 않는다.** 설계는
+띄운 키퍼는 3단계부터 그 서비스를 내놓지 않으므로 호스트는 그때 이미 이 경로를 탔다. 4단계 PR 2부터는 키퍼에 자식
+서비스가 아예 없고, `children` 요청에는 빈 목록으로 답한다. 설계는
 [architecture.ko.md](architecture.ko.md) §4.3에 있다.
 
 **에이전트.** 호스트가 CLI를 직접 띄운다. Claude도 `spawnClaudeCodeProcess`로 그렇게 한다(`adapters/local-process.ts`).
@@ -1318,12 +1328,12 @@ Codex와 같은 `MidTurnLedger.exited`에 Claude의 `inFlight`) 열린 턴, 기�
 `PtySlot`(`dev-services/pty-slot.ts`, #428)에 담는다: 출력(256 KiB), 출력이 끝난 뒤에 알리는 종료(종료 뒤 최대 1초,
 `exit-after-drain.ts`), 트리 멈춤, 그리고 실패한 시작(node-pty를 불러오지 못한 경우 포함)은 화면에 알리고 종료를 보낸다.
 
-**떠나기** (`lifecycle/shutdown.ts`, `stopPlan(handOver, parts)`). 모든 끝은 stop이다: SIGTERM, SIGINT, SIGHUP, 부모의
-파이프가 닫힘, 잡히지 않은 예외, `host.stop`, 키퍼의 멈춤 줄, 교체의 드레인. 터미널과 실행을 먼저 동기로 끝내고, 이어서
+**떠나기** (`lifecycle/shutdown.ts`, `stopPlan(parts)`). 모든 끝은 stop이다: SIGTERM, SIGINT, SIGHUP, 부모의
+파이프가 닫힘, 잡히지 않은 예외, `host.stop`, 키퍼나 창의 멈춤 줄. 터미널과 실행을 먼저 동기로 끝내고, 이어서
 세션을 정리하고 앱 프로세스와 in-process 서버를 멈춘다. 업데이트를 위한 멈춤(`forUpdate`를 단 키퍼나 창의 멈춤 줄, 허브의
-`host.stop { forUpdate }`, 교체의 드레인)도 같은 stop이고, 그것이 끝내는 턴·터미널·실행을 먼저 다음 호스트를 위해 적어
-둔다. 다음 호스트는 그 턴을 이어 가고 터미널과 실행을 다시 연다(§4.5). `handOver`는 교체의 드레인에서 열린 앱 화면을
-먼저 적어 두는 것만 더한다(§4.2). 어댑터에는 더 이상 detach가 없고, 에이전트를 살려 두는 떠나기 방식도 없다.
+`host.stop { forUpdate }`)도 같은 stop이고, 먼저 열린 앱 화면을 적어 두고(§4.2) 그것이 끝내는 턴·터미널·실행을 다음
+호스트를 위해 적어 둔다. 다음 호스트는 그것들을 다시 열고 이어 간다(§4.5). 어댑터에는 더 이상 detach가 없고, 에이전트를
+살려 두는 떠나기 방식도 없다.
 
 **죽은 호스트.** 키퍼는 평소 규칙대로 호스트를 다시 띄운다(§4.1). 에이전트는 호스트 감시로 옛 호스트와 함께 끝나고,
 터미널과 실행도 함께 끝난다. 진행 중이던 턴은 Windows와 Linux에서처럼 Continue와 함께 멈춤으로 보인다(§4.6.2). 이어 갈
@@ -1345,33 +1355,24 @@ Codex와 같은 `MidTurnLedger.exited`에 Claude의 `inFlight`) 열린 턴, 기�
 자식을 끝낸다. `--claude`는 업데이트가 끊고 다음 호스트가 이어 가는 claude(haiku) 턴 하나와 크래시가 끊는 턴 하나를
 더한다. CI는 `--claude` 없이 돌린다(§4.1).
 
-### 4.4 호스트에서 본 키퍼 넘겨주기 (#280, 옵션 C 4단계)
+### 4.4 키퍼는 한 빌드를 돈다 (#1895 4단계 PR 4)
 
-설계는 [architecture.ko.md](architecture.ko.md) §4.4에 있다. 호스트는 이를 위해 하는 일도, 알아채는 것도 없다: stdin과
-stdout은 같은 파이프이고, 토큰과 정문 주소는 바뀌지 않고, 옛 키퍼가
-끝나면 부모가 init이 된다. 얼어 있는 동안 stdout에 쓴 것(예를 들어 활동 보고)은 파이프에서 기다렸다가 새 키퍼가 읽는다.
-옛 키퍼가 이미 읽었지만 처리하지 않은 것은 나머지와 함께 넘어간다. 교체가 쓰는 stdin의 제어 줄은 새 키퍼에게서도 그대로
-통하고, 새 키퍼는 바꾸기의 시작으로 이 호스트를 비울 수 있다. 자식들은 호스트 자신의 프로세스라서 호스트와 함께 남는다:
-키퍼를 거치는 것이 없으니, 도는 턴은 잃는 것도 되풀이하는 것도 없다. (아직 자식을 쥔 이전 빌드의 키퍼는 예전처럼 자식 표를
-넘긴다. 이 빌드의 호스트는 자식 소켓에 붙지 않으므로 그중 아무것도 넘겨받지 않는다, §4.5.)
+키퍼는 자기가 시작된 빌드를, 그 호스트들과 함께 평생 돈다: 업데이트나 다른 빌드의 창은 멈춤이고(§4.5), 다음 창이 자기
+빌드의 키퍼를 띄운다. `switch`와 `upgrade`는 `gone`으로 답한다(§4.1). `--take-over-fd`로 시작한 `centralu-keeper`(이전
+빌드의 키퍼가 창이 전환시킬 때 창이 이름 붙인 키퍼를 그렇게 띄우고, 설치가 번들을 바꾼 뒤에는 그 파일이 이 빌드의 것이다)는
+아무것도 bind하기 전에 한 줄을 남기고 코드 7로 끝난다. 보낸 쪽은 그것을 넘겨주기가 중단된 것으로 읽고, 되돌아가 호스트와
+함께 계속 선다. 호스트는 둘 중 어느 것도 알아채지 않는다.
 
-`scripts/keeper-handoff-integration.mjs`가 세 빌드의 실제 바이너리, 실제 호스트, claude(haiku), codex(`gpt-5.6-luna`)로
-이것을 돌린다: 각각 도구 호출 중인 턴과 세는 터미널·개발 서버를 둔 채의 넘겨주기, 커밋 전에 죽인 넘겨주기, 키퍼를 옮기고
-이어서 호스트를 교체하는 바꾸기, 그리고 그 모든 과정을 넘는 앱 뷰와 창의 연결. CI는 `--no-claude --no-codex`로
-돌린다(§4.1).
+PR 4 전에는 키퍼가 다른 빌드의 키퍼에게 스스로를 넘겨주었다(#280, 옵션 C 4단계): 듣는 소켓, 창의 연결, 정문, 호스트의
+파이프가 디스크립터 채널로 넘어가서, 호스트는 토큰과 주소를 그대로 두고 부모가 init이 되었다. 검증된 콘텐츠에서 뜬
+키퍼는 새 빌드의 서명된 콘텐츠를 먼저 검증하고 복사한 뒤 그 사본 안의 키퍼에게 넘겼다.
+`keeper-handoff-integration.mjs`, `keeper-content-integration.mts`, `keeper-integration-swap.mjs`가 이것을 돌렸고 함께
+없어졌다. 정문의 검사는 `keeper-integration.mjs`의 `front-door` 시나리오로 옮겨 갔다([plans/keeper-removal.md](plans/keeper-removal.md)
+§4, 4행).
 
-**검증된 콘텐츠에서** ([plans/thin-shell.md](plans/thin-shell.md) §10.3). 셸이 띄운 키퍼는 `<data>/content/<version>/`에서
-돌고 서명된 코드만 띄워야 하므로, 넘겨줄 때 창이 건넨 키퍼 실행 파일을 그 번들의 `Contents/Resources/content`를 가리키는
-표지로만 쓴다. 그 콘텐츠를 셸의 규칙과 키로 검증하고(서명, 플랫폼, 목록에 든 키퍼와 호스트,
-`<data>/content/highest-started` 아래가 아닐 것), `<data>/content/<새 버전>/`에 복사하거나(그 자리에서 검증되는 사본은
-그대로 쓴다), 그 사본 안의 키퍼에게 `--host-source`로 사본의 `host/`를 주어 넘긴다. `switch`라면 이어서 교체하는 호스트도
-바로 그 폴더다. 넘겨받은 키퍼는 서기 시작하면 바닥을 자기 버전으로 올린다. 거절(`content`, `downgrade`, `copy`,
-`in-use`, `no-content`)이면 아무것도 움직이지 않는다: 키퍼와 호스트는 계속 서고, 창은 `refused`에 이유가, `message`에
-문장이 담긴 실패한 교체를 본다. 되돌리기는 셸로만 한다. 호스트는 이 중 아무것도 알아채지 않는다: 자기가 도는 곳은 여느
-사본과 같은 폴더다. 직접 띄운 키퍼(디버그 빌드, Linux, 창의 대체 시작)는 위처럼 받은 실행 파일에게 넘긴다.
-`scripts/keeper-content-integration.mts`가 일회용 키를 믿는 테스트 셸과 테스트 키퍼, 실제 호스트, 세는 터미널로 이것을
-돌린다: 바뀐 콘텐츠와 더 오래된 콘텐츠는 모두 계속 선 채로 거절되고, `content/0.2.1/`로 넘겨줘도 호스트·터미널·정문이
-같으며, 호스트가 새 사본으로 옮겨 가고, 아무것도 돌지 않게 된 옛 버전 폴더는 지워진다.
+#1895 4단계 PR 7 전까지는 콘텐츠 폴더에서 뜬 키퍼가 물려받은 디스크립터를 닫고 AppImage의 변수를 가장 먼저
+버렸다(`keeper/appimage.rs`). 창이 AppImage 밖 사본에서 띄운 Linux 키퍼를 위한 것이었다(runtime-lessons FI4, FI5).
+이제 키퍼를 띄우는 Linux 창은 없고, 셸은 macOS 키퍼에 그런 것을 넘기지 않는다.
 
 ### 4.5 호스트에서 본 업데이트 적용 (#352)
 
@@ -1430,51 +1431,56 @@ exe, 매핑된 호스트의 `better-sqlite3`·`node-pty` 모듈)으로 측정했
 턴을 이어 가고, 끝난 백그라운드 작업과 카드를 에이전트에게 알리고, 터미널과 Run 명령을 다시 연다. 제때 끝나지 않는 호스트는 늘 하던 대로 멈추고 그 턴은
 종료처럼 끝난다. 업데이트 줄이 이를 말한다(`RelaunchCheck.restartsHost`). `relaunch_info`가 ready일 때만이고, 키퍼가 있을 때와 같다: 업데이트가 바꾼 앱 번들에서(macOS).
 Linux 패키지와 Windows 설치는 번들이 아니므로 "Restart Centralu to finish updating"이 그대로이고, 바쁨 보고는 키퍼의 것이라 키퍼 없이는 스스로 적용되지 않는다.
-에이전트를 쥐지 않는 호스트(#1895 4단계 PR 1 이후의 호스트)의 교체도 같은 멈춤이다: drain이 에이전트를 멈추기 전에 시작하고, 이어받는 호스트가 끝난 것을 이어 간다.
+#1895 4단계 PR 1부터 PR 5 사이에는 에이전트를 쥐지 않는 호스트의 교체 drain이 같은 멈춤이었다. PR 5부터는 교체 때문에 drain하는 호스트가 없다(§4.2).
 
-**키퍼는 자식을 쥐지 않는다** (#1895 3단계, 사장님 결정 2026-11-03, 옵션 C). macOS 릴리스는 셸 → 키퍼 → 호스트 모양을 그대로 둔다. 릴리스는 ad-hoc
+**키퍼는 자식을 쥐지 않는다** (#1895 3단계, 사장님 결정 2026-11-03, 옵션 C. 이어지는 제거 설계는 [plans/keeper-removal.md](plans/keeper-removal.md)이고 PR 1부터 PR 3까지 만들어졌다). macOS 릴리스는 셸 → 키퍼 → 호스트 모양을 그대로 둔다. 릴리스는 ad-hoc
 서명이라 셸이 시작한 트리만 업데이트를 건너 macOS 권한을 지키기 때문이다([plans/thin-shell.md](plans/thin-shell.md) §1, §2). 호스트가 직접 띄운 에이전트도
-그 트리 안에 있다. 바뀌는 것은 새로 시작한 키퍼가 자식 소켓을 열지 않는다는 것 하나다(`server/start.rs`의 `holds_children`, 스위치가 있는 유일한 곳.
-`CC_KEEPER_HOLDS_CHILDREN=1`은 아직 쥐기를 시험하는 키퍼 스크립트용). 그래서 호스트는 다른 기기처럼 자식을 직접 띄우고, 모든 끝남이 그것을 멈춘다. 4단계 PR 1부터 호스트는 그 소켓을 아예 찾지 않는다(§4.3).
+그 트리 안에 있다. 바뀌는 것은 새로 시작한 키퍼가 자식 소켓을 열지 않는다는 것 하나다. 그래서 호스트는 다른 기기처럼 자식을 직접 띄우고, 모든 끝남이 그것을 멈춘다. 4단계 PR 1부터 호스트는 그 소켓을 아예 찾지 않고, PR 2부터 키퍼에는 자식 서비스가 없다(§4.3).
 
 - "Apply now": 창이 `keeper.sock`에 `{"op":"stop","forUpdate":true}`를 보낸다. 키퍼는 호스트에 업데이트용 멈춤 줄을 쓰고 최대 15초 기다린 뒤
   답하고 끝난다. 창은 다시 뜨면서 셸을 열고, 셸이 새 빌드의 키퍼를 띄운다. 다음 호스트가 목록의 턴을 Centralu의 안내와 함께 이어 가고 터미널과 Run 명령을
-  다시 연다. 다른 빌드의 호스트를 돌리는 키퍼는 없다. 창은 키퍼의 view(`stopsForUpdate`)로 이를 알고, 그것이 없는 예전 키퍼에는 예전처럼 `relaunching`을 보낸다.
+  다시 연다. 다른 빌드의 호스트를 돌리는 키퍼는 없다. 창은 키퍼의 view(`stopsForUpdate`)로 이를 알고, 그때 `RelaunchCheck.restartsHost`를 붙인다. 그것이 없는 키퍼(이전 빌드의 키퍼, 또는 그런 키퍼에게서 호스트를 넘겨받은 키퍼)에는 "Apply now"를 내지 않는다. 업데이트 줄은 그 키퍼가 업데이트를 위해 호스트를 멈출 수 없으니 빌드 바에서 먼저 다시 시작하거나 Centralu를 완전히 끝내라고 말한다(`KEEPER_TOO_OLD_TO_UPDATE`). 4단계 PR 3 전에는 그런 키퍼에 `relaunching`을 보내고 새 창이 그것을 전환했다.
   창만 청할 수 있다(다른 프로세스는 `window_only`로 거절된다. 그러지 않으면 에이전트의 Bash가 모든 턴을 끊고 업데이트처럼 이어 가게 만들 수 있다). 설치가 방금 실행 파일을 바꿔 놓은 창도 창이다: 붙을 때의 pid와 시작 시각으로 알아본다(#2117, [security-boundaries.md](security-boundaries.md)). 설치 뒤 다시 붙어도 그렇다: 키퍼는 받아들인 창을 그 프로세스가 살아 있는 동안 기억한다(#2119). 설치 뒤에 시작된 키퍼는 그 전의 창을 모른다. 그 거절은 자신에게 붙은 창만 멈출 수 있다고 말하고, Centralu의 창에게는 종료했다가 다시 열라고 말한다. 그러면 설치된 빌드가 뜬다. 거절(키퍼가
-  멈추는 중, 전환 중, 호스트가 아직 뜨지 않음)은 아무것도 멈추지 않고 저마다의 이유로 보인다. 멈추는 동안 누른 "Quit completely"는 거절되고("Centralu is stopping for an update; quit
+  멈추는 중, 호스트가 아직 뜨지 않음)은 아무것도 멈추지 않고 저마다의 이유로 보인다. 멈추는 동안 누른 "Quit completely"는 거절되고("Centralu is stopping for an update; quit
   again once it has relaunched") 아무것도 보내지 않는다. 그 멈춤은 끊은 턴을 목록에 남기고 연결된 허브가 볼 종료 표시를 남기지 않기 때문이다(#1143).
-  다시 띄우기는 그대로 진행되고, 사람은 다시 뜬 창에서 종료한다. 전환하던 키퍼가 넘기는 대신 업데이트용으로 멈추는 동안(소켓은 없고 프로세스는 살아 있음)
-  누른 종료도 같은 말로 거절된다. `RelaunchCheck.keepsAgents`는 에이전트를 넘겨받는 예전 키퍼의 호스트일 때만 붙는다. 설정은 그때만 에이전트가 계속 돈다고 말하고,
-  알 수 없는 창(Windows, Linux, 브라우저, 아직 키퍼에 붙지 않은 창)은 Centralu를 다시 시작하면 적용된다고만 말한다.
-- 손으로 연 다른 빌드의 창: 예전처럼 "Switch to this build"(handoff와 교체). 자식을 아직 쥔 키퍼(아래)의 호스트가 업데이트용으로 멈출 수 있으면, 넘기지 않고
-  업데이트용으로 멈춘 뒤 끝나고, 창이 자기 빌드의 키퍼를 띄운다. 멈출 수 있는지는 호스트가 시작할 때 한 말(`{"swap":{...,"stopsForUpdate":true}}`)로
-  알고, handoff는 이를 넘기지 않는다. 그래서 자식과 함께 호스트를 넘겨받은 키퍼는 새 호스트가 뜰 때까지(전환의 교체가 하나 띄운다) "멈출 수 없음"으로
-  읽고, 교체 없는 handoff였다면 그 키퍼의 다음 전환에서 자식을 다시 넘긴다.
+  다시 띄우기는 그대로 진행되고, 사람은 다시 뜬 창에서 종료한다. 빌드 바의 다시 시작으로 키퍼가 업데이트용으로 멈추는 동안(소켓은 없고 프로세스는 살아 있음)
+  누른 종료도 같은 말로 거절된다. 알 수 없는 창(Windows, Linux, 브라우저, 아직 키퍼에 붙지 않은 창)은 Centralu를 다시 시작하면 적용된다고만 말한다.
+- 손으로 연 다른 빌드의 창: 4단계 PR 3부터 "Restart into this build"(키퍼가 더 새 빌드면 "Go back to this build"). view에 `stopsForUpdate`가 있는 키퍼에는
+  `{"op":"stop","forUpdate":true}`를 보내 다음 호스트가 턴을 이어 가게 하고, 그 밖의 키퍼에는 평범한 `{"op":"stop"}`을 보내 종료처럼 끝낸다. 확인 창은 그 손실을
+  말하고, 키퍼가 한가하다고 보고하지 않을 때와 평범한 멈춤일 때는 언제나 묻는다(호스트가 내려간 키퍼는 무엇을 쥐고 있든 한가하다고 보고한다). 창은 계속 붙으려 하고, 그 실행 루프가 자기 빌드의 키퍼를 띄운다. 자동 업데이트가 켜져 있으면 키퍼보다
+  새 빌드의 창이 업데이트용으로 멈출 수 있는 한가한 키퍼에게 스스로 이것을 한다. 창마다 한 번이고, 바를 닫은 뒤에는 하지 않으며, 키퍼를 더 오래된 빌드로 되돌리지는 않는다. 호스트가 업데이트용으로
+  멈출 수 있는지는 시작할 때 한 말(`{"swap":{...,"stopsForUpdate":true}}`)로 안다. #1895 4단계 PR 4 전에는 handoff가 이를 넘기지 않아서, 호스트를 넘겨받은 키퍼는 새 호스트를 띄울
+  때까지 "멈출 수 없음"으로 읽었다. 3단계부터 4단계 PR 3 전까지는 "Switch to this build"였고, 그 교체의 drain이 업데이트용 멈춤이었다.
 - 자동 모드: 그대로 키퍼가 한가하다고 보고할 때 적용한다(`RelaunchCheck.idleReported`).
 - 호스트 충돌: 키퍼가 같은 규칙으로 다시 띄우지만 에이전트·터미널·명령은 함께 끝나고, 돌던 턴은 Windows·Linux처럼 멈춤과 Continue로 남는다.
 - "Quit completely", 백그라운드 모드 꺼짐, 유휴 종료: 호스트 stdin의 평범한 `{"op":"stop"}`(`STOP_LINE`)이 같은 멈춤과 같은 종료 표시(#1143)를 남긴다.
 - 백그라운드 모드, 자격 증명 발급(#1405), 정문, 감독, 빌드별 사본: 그대로 키퍼의 것.
 
-*자식을 쥔 키퍼에서 넘어오기.* 이전 빌드의 창에서 "Apply now"를 누르면 그 키퍼가 `relaunching`을 받고, 새 창이 그 키퍼에 붙어 예전처럼 전환한다. 예전 키퍼는
-쥔 것을 모두 새 빌드의 키퍼에 넘기고(§4.4), 교체된 호스트가 자식을 이어받는다. 이렇게 자식을 받은 키퍼는 남은 생애 동안 그것을 계속 내준다: 그 호스트는
+*자식을 쥔 키퍼에서 넘어오기.* 이전 빌드의 창에서 "Apply now"를 누르면 그 키퍼가 `relaunching`을 받는다. 4단계 PR 3 전에는 새 창이 그 키퍼에 붙어 아래처럼
+전환했다. 그 뒤로는 새 창이 "Restart into this build"를 내고, 이는 그 키퍼가 쥔 것을 종료처럼 끝내는 평범한 멈춤이다. 전환에서는 예전 키퍼가
+쥔 것을 모두 새 빌드의 키퍼에 넘기고(§4.4), 교체된 호스트가 자식을 이어받았다. 이렇게 자식을 받은 키퍼는 남은 생애 동안 그것을 계속 내준다: 그 호스트는
 그 서비스로 계속 띄우고, 넘어오는 일 자체로 끊기는 것은 없다. 다음 업데이트·전환·종료가 그것을 멈추고, 셸이 다음에 띄우는 키퍼는 아무것도 쥐지 않는다.
 handoff는 키퍼의 호스트가 업데이트용으로 멈출 수 없을 때(이전 빌드의 호스트, 또는 아직 뜨지 않은 호스트)만 자식 표를 넘기고 keeper.log에 그렇게 적는다.
-그 밖에는 키퍼가 업데이트용으로 멈추고 끝난다(`handoff::held_children_on_handoff`). 그래서 호스트가 끝낼 수 있었는데도 쥐기가 키퍼에서 키퍼로 이어지는 일은 없다. 받자마자
+그 밖에는 키퍼가 업데이트용으로 멈추고 끝난다(3단계의 `held_children_on_handoff`, 4단계 PR 2에서 없어짐). 그래서 호스트가 끝낼 수 있었는데도 쥐기가 키퍼에서 키퍼로 이어지는 일은 없다. 받자마자
 멈추지 않은 이유: 0.1.0-beta.48까지의 호스트는 멈춤 줄을 창(`CC_STARTED_BY=app`)에게서만 받고 drain에서는 자식을 넘기므로, 그 턴을 목록에 올릴 방법이 없어
 종료처럼 끝났을 것이다. 이것은 #1895 4단계 PR 1에서 지운 `keeper-children-integration.mjs`가 끝까지 확인했다. 그 PR 이후의
-호스트는 자식을 넘겨받지 않고, 그 빌드의 키퍼는 아직 도는 자식이 있는 자식 표를 실은 인계를 거절한다([plans/keeper-removal.md](plans/keeper-removal.md) §6).
+호스트는 자식을 넘겨받지 않는다. 그 빌드의 키퍼는 아직 도는 자식이 있는 자식 표를 실은 인계를 거절했고, PR 2 이후의 키퍼는 자식 표를 실은
+인계를 모두 거절하며([plans/keeper-removal.md](plans/keeper-removal.md) §6), PR 4 이후의 키퍼는 인계를 아예 받지 않는다(§4.4):
 보내는 키퍼는 되돌아가 자기 자식들과 호스트를 그대로 이어 가고, 업데이트는 "quit Centralu completely and open it again to update"라는
 이유로 거절된다. 완전히 끝내면 그 자식들이 멈추고, 셸이 다음에 띄우는 키퍼는 아무것도 쥐지 않는다.
 
-그런 키퍼(beta.48 이하)는 그 뒤에도 자기 아래에서 호스트를 새 빌드로 바꾸고(`move_keeper`), 그 호스트의 drain은 자식을
-키퍼에게 넘기는데, 이 빌드의 호스트는 거기를 보지 않는다. 그래서 PR 2까지 호스트는 작은 확인 하나를 남긴다
-(`lifecycle/keeper-held.ts`, `keeper.sock`의 읽기 전용 `children`과, 끝낼 때는 `children.sock`): `children.sock`이
-응답하는 키퍼 아래의 대기 호스트는 그 키퍼가 자식 목록을 주고 그중 도는 것이 없을 때만 대기한다(`ok: false`, 무응답,
-읽을 수 없는 목록도 거절한다). 그래서 그 교체는 도는 호스트를 건드리기 전에 실패하고 그 호스트가 계속 일한다. 그런 키퍼
+그런 키퍼(beta.48 이하)는 그 뒤에도 자기 아래에서 호스트를 새 빌드로 바꾼다(`move_keeper`). PR 5부터 이 빌드의 호스트는
+그 교체를 위해 대기하지 않으므로(§4.2) 그 교체는 도는 호스트를 건드리기 전에 실패하고, 그 호스트는 자식과 함께 계속
+일한다. 완전히 종료하는 것이 업데이트다. 그 키퍼의 자식은 한 순간이 더 있어서, 호스트는 작은 확인 하나를 남긴다. 그런 키퍼는 이 빌드의
+키퍼가 어떻든 이 호스트를 돌리므로 이 확인은 PR 2 뒤에도 남는다. PR 3 뒤에도 남는다: 그런 키퍼는 번들의 경로에서 호스트를 띄우고, 업데이트 뒤 그 경로에는 이 빌드가
+있으므로, 그 호스트가 끝나면(충돌) 창 없이도 이 빌드로 다시 뜬다. PR 6과 함께 없어진다
+(`lifecycle/keeper-held.ts`, `keeper.sock`의 읽기 전용 `children`과, 끝낼 때는 `children.sock`): 그런 키퍼
 아래의 보통 시작(호스트가 죽었거나 멈춘 뒤)은 세션을 되살리기 전에 키퍼가 쥔 것을 끝내므로, 그 턴은 멈춤으로 보이고
-Continue는 CLI를 하나만 띄운다. 각 자식의 프로세스 그룹에는 서비스를 통해, 터미널은 그 키퍼의 정지처럼 셸 세션의 모든
+Continue는 CLI를 하나만 띄운다(`ok: false`, 무응답, 읽을 수 없는 목록은 아무것도 끝내지 않는다). PR 5 전에는 그런 키퍼 아래의
+대기 호스트도 그 키퍼가 자식 목록을 주고 그중 도는 것이 없을 때만 대기했다. 각 자식의 프로세스 그룹에는 서비스를 통해, 터미널은 그 키퍼의 정지처럼 셸 세션의 모든
 그룹(제어 터미널로 찾는다)에 신호를 보내므로, 셸이 따로 그룹을 준 작업(`sleep &`)도 끝난다. 3단계 이후의 키퍼는
-`children.sock`을 열지 않으므로(쥐는 키퍼가 남긴 것은 지운다) 아무것도 묻지 않는다. 실제 beta.48
+`children.sock`을 열지 않으므로(쥐는 키퍼가 남긴 것은 지운다) 아무것도 묻지 않는다. PR 2 이후의 키퍼는 `children`에
+빈 목록으로 답한다. 실제 beta.48
 키퍼와 호스트로 Linux에서 확인했다(#2122 리뷰).
 
 **규칙** (`idle.ts`). `hostBusy(snapshot)`이 "지금 멈추면 누가 무엇을 잃는가"에 대한 유일한 답이다: 일하거나 승인 또는
@@ -1488,10 +1494,9 @@ Continue는 CLI를 하나만 띄운다. 각 자식의 프로세스 그룹에는 
 터미널이 닫히기를 기다린다. 세션 하나를 새로 설치된 에이전트 CLI로 옮기는 일(#297)은 같은 파일의 더 좁은 규칙
 `sessionIdle`을 쓴다(§4.6).
 
-**호스트가 보는 것.** 업데이트를 위한 멈추기다: 3단계부터는 키퍼의 멈춤 줄로, 다시 띄운 창이 이전 빌드의 키퍼를 바꿀 때는
-키퍼가 스스로를 넘긴 뒤(§4.4) 스왑의 drain으로(§4.2). 어떤 호스트도 더는 키퍼에 자식을 맡기지 않으므로(#1895 4단계) drain은
-업데이트의 멈추기처럼 이 호스트의 에이전트, 터미널, 명령을 멈추고, 다음 호스트가 적어 둔 턴을 이어 가고 터미널과 Run 명령을
-다시 연다. 새 호스트의 업데이트 상태는 자기 버전에서 새로 시작한다.
+**호스트가 보는 것.** 키퍼의 멈춤 줄로 오는 업데이트용 멈춤이다(3단계부터. 4단계 PR 3 전까지는 다시 띄운 창이 이전 빌드의
+키퍼를 바꿀 수도 있었고, 그 교체의 drain도 PR 5가 지우기 전까지는 같은 멈춤이었다). 이 멈춤은 이 호스트의 에이전트, 터미널, 명령을 멈추고, 다음
+호스트가 적어 둔 턴을 이어 가고 터미널과 Run 명령을 다시 연다. 새 호스트의 업데이트 상태는 자기 버전에서 새로 시작한다.
 
 ### 4.6 새로 설치된 에이전트 CLI로 세션 옮기기 (#297)
 
@@ -1874,7 +1879,7 @@ Disconnect는 기기를 연결 해제하지 않고 링크를 닫고, 스위치�
 
 **연결된 기기는 허브의 버전을 따른다**(#1508, 2026-10-24 소유자 결정). 허브의 "Automatic updates"(`updates.autoApply`)가 켜져 있으면,
 허브와 같은 채널의 더 오래된 릴리스를 돌리는 연결된 기기는 누구의 클릭 없이 허브의 버전으로 올라간다. 조건은 `LinkedMachine.followsHub` 한 곳에만 있다:
-자동 업데이트가 켜져 있고(허브가 스왑을 위해 드레인하는 동안은 꺼진 것으로 읽는다), 허브가 그 기기를 업데이트할 수 있고, 사람이 허브가 설치한 것을
+자동 업데이트가 켜져 있고(허브가 멈추려고 드레인하는 동안은 꺼진 것으로 읽는다), 허브가 그 기기를 업데이트할 수 있고, 사람이 허브가 설치한 것을
 지우지 않았고, 어느 쪽도 로컬 빌드가 아니며, `versions.older`가 `remote`일 때. 허브는 연결될 때마다(허브 자신의 업데이트 뒤 새 호스트가 다시 연결할 때도)
 그리고 사람이 자동 업데이트를 켤 때 `machines.update { when: 'now' }`과 같은 업데이트를 스스로 시작한다(`unasked`, `LinkedMachine.stopAtOnce`).
 이 업데이트는 기다리지 않는다(2026-10-26 소유자 결정, #1618): 예전에는 턴(#1399)과 터미널·프로젝트 명령(`OPEN_WORK_WAIT_MS`, #1579)을 기다렸고,
@@ -1949,10 +1954,10 @@ Windows 패키지를 실패시킨다.
   받지 못한다: 그 세션은 목록에 들어가 이어진다. 턴은 끝났지만 백그라운드 작업(개발 서버, 감시)이 돌던 세션은 프로세스와 함께 그 작업을 잃고 이어지지
   않는다: 이어 갈 턴이 없었다. 도구가 다시 이어 받지 못한 세션은 충돌 때처럼 끝난다(`turnLostInSwap`): `quit`, 보고나
   요청자에게 멈췄다고 알린다.
-- **스왑이 끊은 턴도 같은 방식으로 잇는다**(#1966). #1895 4단계 PR 1부터 교체의 drain은 업데이트를 위한 멈춤이므로(§4.2),
-  그것이 끊은 턴은 목록에 오르고 위처럼 같은 문(`HostTenure.sendUpdateNote`)으로 이어지며, 새 프로세스가 뜨는 동안 상태는
-  `working`으로 유지된다(`continuingTurns`). 그 전송이 실패할 때만 위처럼 끝난다. 사람 자신의 종료(`markQuit`, 목록 없음)가 끊은
-  턴은 예전처럼 잇지 않는다(#1947).
+- **스왑이 끊은 턴도 같은 방식으로 이었다**(#1966). #1895 4단계 PR 1부터 PR 5 사이에 교체의 drain은 업데이트를 위한
+  멈춤이었으므로, 그것이 끊은 턴은 목록에 오르고 위처럼 같은 문(`HostTenure.sendUpdateNote`)으로 이어졌으며, 새 프로세스가
+  뜨는 동안 상태는 `working`으로 유지됐다(`continuingTurns`). PR 5부터는 교체 때문에 drain하는 호스트가 없다(§4.2). 사람
+  자신의 종료(`markQuit`, 목록 없음)가 끊은 턴은 예전처럼 잇지 않는다(#1947).
 - **호출자는 끊긴 것을 듣지 않는다**(#1966). 업데이트는 끊긴 자식마다 알림 하나를 보내 부모의 턴을 매번 깨웠다. 이제 부모는 이어 간 턴이 끝날 때까지
   아무것도 듣지 않고, 그 보고에 한 줄이 실린다: "An update of Centralu cut this turn and Centralu continued it."(`TurnStarter.cut`,
   Continue가 들어가기 전에 정해지고 실패하면 지워진다, `ChildOwnership.noteContinuedCut`. 기기의 호스트가 끝내는 이벤트에 `TurnWho.cut`으로 싣기에
@@ -2025,7 +2030,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
   git2(Rust)로의 이전은 **측정으로 병목이 확인되기 전까지는 하지 않는다** (m2-plan 결정 3).
   포트 인터페이스가 같으므로 나중에 옮겨도 UI는 변경되지 않는다.
 - **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고, 자신이 상속하는 두 클래스로 마이그레이션을 돌린다:
-  러너(`store/migrate-runner.ts`, `Store.inspect`도 여기서 답한다)와 그 아래의 최소 읽기 버전 관문(`store/reader-gate.ts`). 밀린 `VACUUM`은
+  러너(`store/migrate-runner.ts`)와 그 아래의 최소 읽기 버전 관문(`store/reader-gate.ts`). 밀린 `VACUUM`은
   `store/vacuum.ts`에 있다. 기록은 `dev-services/store/`의 개념별 모듈(프로젝트, 세션, 메시지, 세션 보관함, 앱 실행 기록 등)이고,
   `Store`는 이를 필드로 들고 호출하는 쪽이 그 필드를 부른다(`store.projects.listProjects()`). 단계 목록은 `store/migrations/`에 있다. 스키마 DDL은 정확히 한 곳,
   `protocol/src/schema/schema.sql`에만 있다. 번들에서는 빌드 산출물 옆에 복사되어 함께 배포된다 (F-0).
@@ -2060,22 +2065,20 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
    아는 호스트는 다시 계산하고 그렇다고 말한다. 스토어보다 오래된 호스트는 그 행을 밝히며 같은 식으로 거절한다. 더 적은
    단계로 계산한 기록은 자기가 읽지 못하는 스토어를 열 수 있기 때문이다(#384).
 4. **무거운 단계는 `heavy: true`로 표시한다:** 모든 메시지를 고쳐 쓰거나 다시 색인하거나 `VACUUM`하는 단계(지금까지
-   v3, v11, v21, v40; v40은 메시지 137,722개에서 시작을 1.9초 붙잡았다). 교체는 이 단계들을 전환 도중이 아니라
-   전환 뒤에 돌린다.
-5. **교체 중에는 (#280 3단계)** 넘겨받는 호스트가 확장 단계를 돌리고, 무거운 단계와 깨는 단계는 모두 `runDeferred`로
-   미룬다. 이것은 준비 줄 바로 뒤, 정문이 이 호스트를 가리키고 바뀐 호스트가 완전히 사라진 다음에 부른다. 이전 빌드는
-   넓혀진 저장소를 여전히 읽으므로, 준비되기 전에 실패한 새 호스트는 다시 이전 빌드로 바꿀 수 있다. 깨는 단계가 바로
-   그것을 막는 것이다. `user_version`은 미룬 단계를 지나가고, 아직 남은 것은 `app_settings.deferred_migrations`가
-   적는다: 먼저 죽은 호스트는 그것을 다음 열기에 남기고, 다음 열기가 제자리에서 돌린다. 그래서 무거운 단계와 깨는
-   단계는 나중 단계 뒤에 돌아도 맞아야 하고, 그 단계를 싣는 빌드는 그 단계가 돌기 전에도 동작해야 한다(줄이기 단계는
-   규칙 2로, 무거운 단계는 코드가 어느 쪽이든 읽는 데이터만 모양을 바꾸는 것으로 이를 지킨다).
+   v3, v11, v21, v40; v40은 메시지 137,722개에서 시작을 1.9초 붙잡았다). 시작은 host.log에 마이그레이션했다는 것과
+   걸린 시간을 남긴다.
+5. **스왑이 남긴 것 (#280 3단계, #1895 4단계 PR 5부터 없음).** 스왑에서 넘겨받은 이전 빌드의 호스트는 확장 단계를
+   돌리고, 무거운 단계와 깨는 단계는 모두 그 뒤로 미뤘으며, 그때 `user_version`은 이미 그 단계들을 지나 있었고
+   `app_settings.deferred_migrations`가 남은 것을 적었다. 먼저 죽은 호스트는 그 목록을 남겼다. 이 빌드는 그런 목록을
+   쓰지 않으며, 목록을 발견한 열기는 그 단계들을 제자리에서 순서대로 돌리고 단계마다 자기 커밋에서 목록에서 지운다
+   (`store-migrations.test.ts`). 그래서 한 번이라도 그렇게 미뤄진 적이 있는 단계는 나중 단계 뒤에 돌아도 맞아야 한다.
 6. **단계는 자신이 돌았다는 기록과 함께 한 단위로 커밋한다 (#396):** 단계의 문장들, `min_reader_version` 상향,
-   `user_version` 증가(그리고 `deferred_migrations` 목록이 바뀔 때는 그 목록: 스왑이 미뤄 둔 단계가 돌면 줄어들고,
-   스왑이 단계를 미루면 늘어난다)가 한 트랜잭션에 들어간다. 전에는 문장마다
+   `user_version` 증가(그리고 스왑이 미뤄 둔 단계가 돌면 줄어드는 `deferred_migrations` 목록)가
+   한 트랜잭션에 들어간다. 전에는 문장마다
    따로 커밋되어, v12나 v17의 두 `ALTER` 사이에서 죽은 시작은 첫 열만 남겼고, 다음 시작은 그 열을 보고 단계의 나머지를
    영영 건너뛰었다. `VACUUM`은 트랜잭션 안에서 돌 수 없으므로 단계는 그것을 커밋 뒤로 미루고, 그 커밋 안에 VACUUM이
    밀려 있다고 적는다(`app_settings`의 `vacuum_owed` 행, VACUUM이 돌거나 실패하면 지운다; `vacuumAfterStep`). VACUUM
-   도중에 멈춘 호스트는 그 행을 남기고, 다음 열기가, 스왑이면 `runDeferred`가 VACUUM을 돌린다. v10은 트랜잭션
+   도중에 멈춘 호스트는 그 행을 남기고, 다음 열기가 VACUUM을 돌린다. v10은 트랜잭션
    안에서는 무시되는 `foreign_keys`를 바꾸므로 스스로 커밋하고(`ownTransaction`), 그 자체로 한 단위다.
 
 | 단계 | 하는 일 | 옛 빌드 |
@@ -2259,7 +2262,7 @@ sonnet으로 바꾸자 0을 읽고 23,268 중 23,266을 썼고 `model_change`로
 두 기록 모두 호스트가 전해 듣거나 도구 자신에게 물은 것에서 온다(§6 맨 위의 규칙, 도구의 파일은 읽지 않는다). `store.db`(v62)에 두며 **이 컴퓨터에만 있다: 동기화하지 않고, 연결된 기기는 자기 것을 둔다.** 개수, 퍼센트, 이름만 있고 내용은 없다.
 
 - **한도 측정값**(`usage_readings`: `at`, 도구, 계정, 창, 퍼센트, `resets_at`). `agents.usage`가 도구에서 새로 받은 답마다 하나다(`ToolQueries.usageFor`). 누가 물었든 같다: 게이지, 턴의 끝, 타이머. 게이지의 폴링 말고도 턴이 끝나면(도구마다 2분에 한 번까지) 묻고, 타이머가 10분마다 여기 살아 있는 세션이 있는 도구를 묻는다. 세션이 없는 도구는 들여다보자고 띄우지 않는다. 지난번과 같게 읽히는 창은 행을 쓰지 않는다: 퍼센트가 같고 초기화 시각이 1분 안쪽이다(Claude는 초기화 시각을 상대 시간에서 구하므로 바뀌지 않은 창을 읽을 때마다 수백 ms씩 움직인다). `account`는 `agents.account`의 지문이고(10분에 한 번까지만 찾는다) 도구가 말하지 않으면 비어 있다. 모델에 한정된 창은 `scope`를 가진다. Claude의 `rate_limit_event`는 퍼센트를 싣지 않으므로(거절만) 턴의 끝에서 따로 묻는다.
-- **시간당 토큰**(`usage_buckets`): `CacheLedger`가 이미 세는 요청(§6.1)을 `UsageRecorder`(`sessions/usage-recorder.ts`)가 시간·세션·프로젝트·도구·모델·기기마다 한 버킷으로 합한다(이 호스트 자신의 요청은 `''`). 요청 수, 캐시 안 된 입력, 캐시 읽기, 캐시 쓰기(와 그중 API가 5분 또는 1시간 보관한다고 말한 몫, `cacheTtl`), 출력, 원인별 재구축이다. 버킷은 1분마다와 드레인(`disposeAll`)에서 쓰고, 하나당 행에 **더하는** upsert 하나이므로 시간 한가운데의 재시작이나 교체는 더하기만 한다. 실패한 쓰기는 버킷을 다음 분까지 둔다. 모델은 도구가 어느 모델이 처리했는지 알려 주면 요청에서 온다(Claude의 `message.model`이므로 다른 모델의 서브에이전트나 대체 모델은 자기 것으로 센다). 아니면 세션의 설정이다(Codex: 그때 `by: model`은 세션에 설정된 모델이며 알려진 한계다). 출력은 도구가 요청마다 알려 주는 경우 요청 자신의 사용량에서 온다(`RequestInput.outputTokens`: Codex의 `last.outputTokens`). **Claude의 것은 0으로 둔다**: assistant 메시지는 스트림이 시작할 때의 값(몇 토큰)만 싣고 최종 값은 스트림의 `message_delta`로 오는데 노멀라이저는 그것을 따르지 않는다. 자리 표시 값을 기록하면 몇 자릿수나 적게 나오므로 값이 없는 편이 낫다. `message_delta`에서 세는 것은 이름 붙인 후속이다. 그동안 `usage_history`는 출력이 없는 행에 `out 0` 대신 `out n/a`를 찍는다(에이전트가 사실로 받아들이므로. 토큰으로는 1.6%지만 Haiku 가격으로는 비용의 약 9.5%다).
+- **시간당 토큰**(`usage_buckets`): `CacheLedger`가 이미 세는 요청(§6.1)을 `UsageRecorder`(`sessions/usage-recorder.ts`)가 시간·세션·프로젝트·도구·모델·기기마다 한 버킷으로 합한다(이 호스트 자신의 요청은 `''`). 요청 수, 캐시 안 된 입력, 캐시 읽기, 캐시 쓰기(와 그중 API가 5분 또는 1시간 보관한다고 말한 몫, `cacheTtl`), 출력, 원인별 재구축이다. 버킷은 1분마다와 드레인(`disposeAll`)에서 쓰고, 하나당 행에 **더하는** upsert 하나이므로 시간 한가운데의 재시작이나 교체는 더하기만 한다. 실패한 쓰기는 버킷을 다음 분까지 둔다. 모델은 도구가 어느 모델이 처리했는지 알려 주면 요청에서 온다(Claude의 `message.model`이므로 다른 모델의 서브에이전트나 대체 모델은 자기 것으로 센다). 아니면 세션의 설정이다(Codex: 그때 `by: model`은 세션에 설정된 모델이며 알려진 한계다). 출력은 도구가 요청마다 알려 주는 경우 요청 자신의 사용량에서 온다(`RequestInput.outputTokens`: Codex의 `last.outputTokens`). **Claude의 것은 스트림의 `message_delta`에서 온다**(#2135): assistant 메시지는 스트림이 시작할 때의 값(몇 토큰)만 실으므로, 노멀라이저는 스트리밍된 응답의 요청을 그 `message_delta`가 최종 값을 가져올 때까지 들고 있다가(`heldRequest`) 함께 보낸다. 그 전에 다음 응답이 시작되거나, 턴이 끝나거나(멈춘 스트림), 프로세스가 끝나면 출력 없이 보낸다. 그래서 요청의 시각은 첫 메시지가 아니라 스트림이 끝난 때이고, 장부가 재는 쉰 시간(§6.1)은 두 응답 길이의 차이만큼 어긋난다. 이전에도 두 응답이 생각한 시간의 차이만큼 어긋났으므로, 새로 생긴 오차는 아니다. 서브에이전트의 응답은 스트리밍되지 않으므로 그 요청에는 여전히 출력이 없고, 통째로 오는 응답(`message_start` 없음)은 출력 없이 바로 보낸다. 이 수정 전의 버킷은 Claude의 `output`이 0이다. `usage_history`는 출력이 없는 행에 `out 0` 대신 `out n/a`를 찍는다(에이전트가 사실로 받아들이므로).
 
 | 결정 | 이유 |
 |---|---|

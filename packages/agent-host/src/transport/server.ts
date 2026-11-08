@@ -191,7 +191,7 @@ export type HostServerOptions = {
   /** How many windows that show host requests are attached, each time it changes (#1405, `HostRequests.showingChanged`) */
   onShowing?: (count: number) => void
   /**
-   * Tracks every RPC for a planned host swap (#280 step 3, drain.ts): once the drain begins, new
+   * Tracks every RPC for a stop that drains first (`host.stop {ifIdle}`, drain.ts): once the drain begins, new
    * RPCs are refused and running ones get its bound to finish. Refused and cut calls are answered
    * `retryable: true`, because the same call reaches the next host.
    */

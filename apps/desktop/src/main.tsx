@@ -4,7 +4,7 @@ import { backgroundCount, isInTurn } from '@cc/core'
 import { errorMessage } from '@cc/protocol/client'
 import { App, confirmKeyAction, prepareFirstPaint, pressesItself, useStore } from '@cc/ui'
 import {
-  autoSwitch,
+  autoRestart,
   buildBar,
   createTauriPlatform,
   focusWindow,
@@ -16,13 +16,12 @@ import {
   quitApp,
   restartHost,
   restartKeeper,
-  switchHostBuild,
-  switchPlan,
+  restartPlan,
   type ShellHostBuild,
   type TauriPlatform,
   watchHostBuild,
 } from '@cc/platform/tauri'
-import { BuildBarView, RestartKeeperDialog, SwitchBuildDialog } from './build-bar.js'
+import { BuildBarView, RestartKeeperDialog } from './build-bar.js'
 import { QuitDialog } from './quit-dialog.js'
 import '../../../packages/ui/src/styles/index.css'
 
@@ -210,36 +209,19 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
     [],
   )
   /*
-   * A window of one build attached to a host of another (#280). Happens when the app was updated
-   * or rebuilt while the keeper kept the old host running in the background. The window still
-   * works against the old host; this bar says so and offers to switch.
+   * A window of one build attached to a keeper or host of another (#280): the app was updated or opened by hand while the
+   * keeper ran on. The window still works against them; this bar says so and offers a restart into this build, which stops
+   * the keeper (for an update when it can, so the turns it cuts go on here) and starts this build's (#1895 step 4, PR 3). It
+   * asks first only when something is running (`restartPlan`).
    *
-   * Switching is the keeper's blue-green swap (#280 step 3): the new build starts next to the
-   * running host, which gets up to 10 seconds to finish the calls it serves itself, and the window
-   * reconnects through the same front door. The bar shows each phase, and a failure with its
-   * reason. It asks first only when something can be lost (`switchPlan`).
-   *
-   * The keeper itself moves to the window's build first (#280 step 4), handing everything over
-   * without stopping anything. A keeper that is behind while the host is not gets the same bar.
-   *
-   * A keeper that cannot move (a handoff that fails in an older keeper, #387) stays on its build
-   * while the host swap goes ahead under it. Then the bar says this window runs its build and the
-   * keeper moves when it next starts, and offers "Restart completely" rather than a switch that
-   * would only fail again (`buildBar`, `keeperStaysBehind`).
+   * With "Apply updates automatically when idle" on, a window of a newer build restarts by itself once nothing is running,
+   * once per window (`autoRestart`, #352). A failure stays on the bar, next to the button.
    */
   const [build, setBuild] = useState<ShellHostBuild | null>(null)
-  const [askSwitch, setAskSwitch] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [switchError, setSwitchError] = useState<{
-    message: string
-    /** Present for a switch request, absent for a full restart failure. */
-    afterSwap?: { startedAt?: number }
-  } | null>(null)
-  const [relaunchError, setRelaunchError] = useState<string | null>(platform.relaunchSwap.error ?? null)
+  const [restartError, setRestartError] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
-  // A failed swap stays on the bar until dismissed; this remembers which one was
-  const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
   // The note that the keeper started without the permission shell, once dismissed, for this window's life
   const [dismissedShell, setDismissedShell] = useState(false)
   // Subscribed before asking, and a report that arrived first is not overwritten by the answer (`watchHostBuild`)
@@ -249,59 +231,29 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
         setBuild(b)
         if (b.sameBuild && b.keeperSameBuild !== false) {
           setDismissed(false)
-          // The keeper of this build answered: a full restart, if one ran, is over
+          // The keeper of this build answered: a restart, if one ran, is over
           setRestarting(false)
         }
       }),
     [],
   )
-  useEffect(() => {
-    // A keeper carries its last swap across handoffs. Repeated reports of that old final
-    // state cannot settle a new request which was refused or has not started a swap yet.
-    const swap = build?.swap
-    const final = swap && (swap.phase === 'done' || swap.phase === 'failed')
-    if (build?.sameBuild || (final && swap.startedAt !== platform.relaunchSwap.previousSwapStartedAt)) {
-      setRelaunchError(null)
-    }
-    // A request can time out even though its swap continues. The new outcome supersedes
-    // that request error, including when the outcome arrived before the rejection.
-    if (final && switchError?.afterSwap && swap.startedAt !== switchError.afterSwap.startedAt) {
-      setSwitchError(null)
-    }
-  }, [build, platform.relaunchSwap.previousSwapStartedAt, switchError])
-  const bar = build ? buildBar({ build, dismissed, dismissedSwap, dismissedShell }) : ({ kind: 'none' } as const)
-  const plan = build ? switchPlan(build) : null
-  const startSwitch = () => {
-    setSwitchError(null)
-    setRelaunchError(null)
-    const afterSwap = { startedAt: build?.swap?.startedAt }
-    void switchHostBuild().catch((e: Error) => setSwitchError({ message: e.message, afterSwap }))
-  }
-  /*
-   * Applying an update by itself (#352). A window started by "Apply now" (the keeper held on
-   * through the relaunch and said so: `build.relaunched`), or any window with "Apply updates
-   * automatically when idle" on, switches the keeper and then the host to its build without a
-   * click when nothing can be lost. When something can, the window "Apply now" started asks at
-   * once, and the automatic mode waits for the next activity report that says idle. Once per
-   * window: a failure stays on the bar with "Try again". Progress shows in the bar as for a click.
-   * Forward only: a window whose build is not newer than the keeper's and the host's (an older
-   * app opened from a backup, a build that cannot be ordered) never switches by itself.
-   */
+  const bar = build ? buildBar({ build, dismissed, dismissedShell }) : ({ kind: 'none' } as const)
+  const plan = restartPlan(build ?? {})
+  const startRestart = useCallback(() => {
+    setRestartError(null)
+    setRestarting(true)
+    void restartKeeper().catch((e: Error) => {
+      setRestarting(false)
+      setRestartError(e.message)
+    })
+  }, [])
   const autoApply = useStore((s) => s.update?.autoApply ?? false)
-  const autoTried = useRef(platform.relaunchSwap.tried)
+  const autoTried = useRef(false)
   useEffect(() => {
-    if (!build || build.mode !== 'keeper') return
-    const next = autoSwitch({ build, autoApply, tried: autoTried.current, dismissed })
-    if (next === 'switch') {
-      autoTried.current = true
-      setSwitchError(null)
-      const afterSwap = { startedAt: build.swap?.startedAt }
-      void switchHostBuild().catch((e: Error) => setSwitchError({ message: e.message, afterSwap }))
-    } else if (next === 'ask') {
-      autoTried.current = true
-      setAskSwitch(true)
-    }
-  }, [build, autoApply, dismissed])
+    if (!build || build.mode !== 'keeper' || !autoRestart({ build, autoApply, tried: autoTried.current, dismissed })) return
+    autoTried.current = true
+    startRestart()
+  }, [build, autoApply, dismissed, startRestart])
 
   const dialogRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -354,27 +306,15 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       <BuildBarView
         build={build}
         bar={bar}
-        error={switchError?.message ?? relaunchError}
+        error={restartError}
         restarting={restarting}
-        onSwitch={() => {
-          setSwitchError(null)
-          if (build.swap) setDismissedSwap(build.swap.startedAt)
-          // Ask only when something can be lost; otherwise just switch
-          if (plan?.confirm) setAskSwitch(true)
-          else startSwitch()
-        }}
-        onDismiss={() => {
-          if (bar.kind === 'shell') {
-            setDismissedShell(true)
-            return
-          }
-          if (build.swap) setDismissedSwap(build.swap.startedAt)
-          setDismissed(true)
-        }}
         onRestart={() => {
-          setSwitchError(null)
-          setAskRestart(true)
+          setRestartError(null)
+          // Ask only when something can be lost; otherwise just restart
+          if (plan.confirm) setAskRestart(true)
+          else startRestart()
         }}
+        onDismiss={() => (bar.kind === 'shell' ? setDismissedShell(true) : setDismissed(true))}
       />
     ) : null
   return (
@@ -392,27 +332,13 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
           />
         </div>
       )}
-      {askSwitch && build && plan && (
-        <SwitchBuildDialog
-          loses={plan.loses}
-          keepsAgents={build.keepsAgents}
-          onCancel={() => setAskSwitch(false)}
-          onConfirm={() => {
-            setAskSwitch(false)
-            startSwitch()
-          }}
-        />
-      )}
       {askRestart && (
         <RestartKeeperDialog
+          loses={plan.loses}
           onCancel={() => setAskRestart(false)}
           onConfirm={() => {
             setAskRestart(false)
-            setRestarting(true)
-            void restartKeeper().catch((e: Error) => {
-              setRestarting(false)
-              setSwitchError({ message: e.message })
-            })
+            startRestart()
           }}
         />
       )}

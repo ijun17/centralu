@@ -60,7 +60,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
 
   if (update.phase === 'restart_required') {
     const offer = applyOffer(update, APP_VERSION, relaunch)
-    // This window is the new build already; the build bar carries the rest (the switch)
+    // This window is the new build already; the build bar carries the rest (the restart into this build)
     if (offer.kind === 'current') return null
     if (offer.kind === 'apply') {
       return (
@@ -69,11 +69,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
           content={
             <span className="flex flex-col gap-1">
               <span>{update.latest ? `${update.latest} is installed` : 'An update is installed'} (this is {APP_VERSION}).</span>
-              <span>
-                {relaunch?.keepsAgents
-                  ? 'Press to relaunch into it; running agents and terminals keep going.'
-                  : 'Press to relaunch into it; running turns go on once it is back, and open terminals and commands start again.'}
-              </span>
+              <span>Press to relaunch into it; running turns go on once it is back, and open terminals and commands start again.</span>
               {waiting && <span data-testid="update-waiting">It applies by itself once idle: waiting because {waiting}.</span>}
               {update.error && <span>{update.error}</span>}
             </span>

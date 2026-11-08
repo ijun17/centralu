@@ -60,7 +60,7 @@ export const eslintOptions = (cwd: string): ESLint.Options => ({ cwd, ...LINT_OP
  * number: tooling/type-aware-lint.test.ts refuses one above main's.
  */
 export const ASSERTIONS: Readonly<Record<string, number>> = {
-  'apps/desktop': 4,
+  'apps/desktop': 3,
   'apps/web': 6,
   'packages/agent-host': 529,
   'packages/core': 1,

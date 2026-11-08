@@ -1427,7 +1427,7 @@ on a machine with other users, any of them can fetch `http://127.0.0.1:5173/` an
 served bundle, and then connect to the front door and read every conversation. So `dev:live` is for single-user
 machines, and it prints a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`): do not expose it (no
 `--host` other than `127.0.0.1`, no tunnel). The credential is derived from the front door's token, which the keeper makes once per
-keeper lifetime and keeps across host swaps and keeper handoffs (`front_door.rs`); it changes only when the
+keeper lifetime and keeps across the host's restarts (`front_door.rs`); it changes only when the
 keeper restarts, that is, when the app is fully quit and opened again, and the script is run again then.
 
 ## Who holds full power (#1405)
@@ -1503,7 +1503,7 @@ Stopping an update is what the person's Cancel does and changes nothing there, s
 `machines.rollback`, `machines.uninstall`, `machines.install` and `machines.acceptVersions` still ask. `updates.apply` reads the
 host's state in the same way (`RightsHost.updateAtRest`, #1509, owner 2026-10-24): it runs without a card while the person's
 Automatic updates are on and nothing is running (`hostBusy`: no turn, no card waiting, no background work, no terminal or command, and
-no swap draining), since the host installs the known update by itself then (`UpdateService.setAutoApply`). Anything else, and a
+not draining to stop), since the host installs the known update by itself then (`UpdateService.setAutoApply`). Anything else, and a
 server given no state, asks. Turning the setting on stays an ask. The rule for `asks`: it deletes beyond what the trash brings back, moves out of reach what the trash does not fully
 restore, widens what agents, apps or machines may do without the person, or brings in code that later runs unasked;
 and everything the orchestrator's tools card in every preset is `asks` too. A test reads the orchestrator's flows
@@ -1540,8 +1540,8 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   counted again when the card is raised (a trash delete reads the trash first, so many at once cannot pass the bound).
 - **When it ends unanswered.** The program's socket closes, 15 minutes pass (owner, 2026-10-21: the one card with a
   timer, since a raw call has no turn to end it), no window shows requests for 30 seconds (a window that reloads comes
-  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a swap: the caller asks the
-  next host again. An allowed call runs as a call the host serves, so a swap's drain refuses or cuts it like any other.
+  back within it and keeps its cards), or the host stops (its sockets close with it). Nothing is kept across a restart: the caller asks the
+  next host again. An allowed call runs as a call the host serves, so a drain before a stop refuses or cuts it like any other.
 - **Linked machines.** The card is raised on the host where the call started, before the router, so a call naming a
   linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
   machine's token). A linked machine's own limited callers are refused there: no window there shows host requests, and
@@ -1778,32 +1778,32 @@ A host started with `centralu serve` on another machine is reached by the app th
 ## The keeper's control socket
 
 The keeper (`centralu-keeper`, #280, #440) is a new trust boundary: through its socket a process can read the front
-door's port and a credential, stop the host, and make the keeper run a host from another folder (`switch`). The rule:
+door's port and a credential and stop the host (until #1895 step 4 PR 4 also make the keeper run a host from another
+folder, `switch`). The rule:
 **only this user's processes get in, and only a Centralu window gets the token** (#1405).
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
-  `SO_PEERCRED`, as the child socket reads it) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
+  `SO_PEERCRED`) names an executable (`proc_pidpath`, `/proc/<pid>/exe`) that is, by
   exact resolved path, one of the window executables the keeper accepts (`accepted_windows`): the `centralu` beside
   the keeper's own executable (the macOS bundle's `Contents/MacOS/`, a debug build), unless the keeper runs from
   `<data>/content/`, where a file dropped beside it proves nothing; and the window of each build the keeper names: its
-  own `--bundle-path` and the bundle of the current host's and the next launch's build, which only a window's `switch`
-  sets (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
+  own `--bundle-path` and the bundle of the current host's and the next launch's build, the keeper's own since #1895 step 4 PR 4 (until
+  then a window's `switch` set them) (`<bundle>/Contents/MacOS/centralu` for a macOS bundle, the executable itself elsewhere). What a client says
   about its own build in `attach` counts for nothing. A file named `centralu` anywhere else, a renamed `node` among
   them, is not a window. Linux's ` (deleted)` mark is taken only after an accepted path (an update replaced the
   file). On a keeper signed with a team identifier the executable must also be signed by that team (`codesign
   --display`), and one whose signature cannot be read is not a window; no release is signed with a team today
   (macOS releases are signed ad hoc), so in every build that ships the path decides. A peer whose pid or executable
   the kernel does not name is not a window. The keeper judges before it takes its state lock, logs every refusal with
-  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A
-  window adopted in a keeper handoff is judged again from its socket, whose peer record travels with it. A test runs
+  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A test runs
   two copies of the test binary against the socket, one at the accepted path and one named `centralu` elsewhere: only
   the first gets the token (`only_the_accepted_window_executable_gets_the_token`).
 - **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
-  every status pushed to it. It alone may `switch` and `upgrade`, which start a build of the request's naming and hand
-  it the token.
+  every status pushed to it. (Until #1895 step 4 PR 4 it alone could `switch` and `upgrade`, which started a build of
+  the request's naming and handed it the token; both answer `gone` to anyone now.)
 - **What anything else gets.** The limited credential in the token's place (`view.rights: "limited"`, `limited.rs`,
-  derived as the host derives it, so it works behind the door across swaps), on `status`, `attach` and every push to
-  it; `switch` and `upgrade` are refused (`window_only`). `stop`, `restart`, `relaunching`, `settings`,
+  derived as the host derives it, so it works behind the door across the host's restarts), on `status`, `attach` and
+  every push to it. `stop`, `restart`, `settings`,
   `set_background` and `children` hand out no token and stay open to this user. A test sends every op from a process
   that is not a window and fails if any line it gets back holds the token
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
@@ -1823,8 +1823,7 @@ door's port and a credential, stop the host, and make the keeper run a host from
   pid taken by another process, is refused, not remembered as that process. Any other pid is refused whatever its path
   reads, a process started from the window's own file that never attached included, so a replaced file widens nothing.
   `system_ending` is a window's by either rule (an attached window, or by its path), so a window the install replaced
-  can still tell the host the system is ending. `status`, `switch` and `upgrade` keep the path rule (`switch` and
-  `upgrade` start code with the token, which a window about to relaunch does not need). A keeper started after the
+  can still tell the host the system is ending. `status` keeps the path rule. A keeper started after the
   install (it restarted or crashed) knows no window from before it: "Apply now" is refused with "only a Centralu window
   attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it
   ran, quit Centralu and open it again", which runs the installed build. Tests:
@@ -1838,11 +1837,10 @@ door's port and a credential, stop the host, and make the keeper run a host from
   record across an `exec` (its pid and start do not change), so it attaches again as a window and may stop the keeper
   for an update; only code already running in the window can `exec` it, and the window never does. `codesign --display` reads the file
   now at the path, not the code running in the peer; a team-signed keeper should judge the peer's audit token
-  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). On
-  Linux, where the keeper runs only with `CC_USE_KEEPER=1`, a window runs from its AppImage's mount, whose path
-  changes at every launch: only the window that started or switched the keeper is accepted, and a later launch gets
-  the limited credential until a window of its own starts a keeper; to settle before the Linux keeper runs by
-  default.
+  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). No
+  Linux window starts a keeper since #1895 step 4 PR 7. A window there runs from its AppImage's mount, whose path
+  changes at every launch, so a keeper would accept only the window that started it; to settle before a Linux keeper
+  is ever brought back.
   A debug keeper started with `CC_KEEPER_TEST_WINDOW_EXE=<path>` also accepts that executable, for the integration
   scripts, which pass the `node` that runs them; a release keeper compiles that out. An older keeper (before #1405) still hands the
   token to every process until the app is fully quit or the keeper is updated (its update hands over to a keeper that
@@ -1860,14 +1858,11 @@ door's port and a credential, stop the host, and make the keeper run a host from
 
 Limits:
 
-- `switch` runs `main.mjs` from whatever host folder the request names, and only a window may ask (#1405): it would
-  otherwise hand the token to code of the caller's choosing. A process of this user can still replace the files of a
-  host folder before a window switches to it; that is the same-user residual, not a boundary. The same holds with no
-  window at all: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
+- `switch` ran `main.mjs` from whatever host folder the request named, so only a window could ask (#1405); it answers
+  `gone` to anyone since #1895 step 4 PR 4. A process of this user can still replace the files of a host folder; that
+  is the same-user residual, not a boundary: a host the keeper restarts after it exits runs from its copy as the copy is (`<data>/hosts/<key>/`,
   or `<data>/content/<version>/host/`, not verified again before each launch), so a process that edits the copy and
   then ends the host (its pid is in `status`) has its own code started with the token.
-- `relaunching` (#352) keeps a keeper with no window running for at most 300 s, whatever background mode says. It
-  grants nothing `set_background` does not already, and only for a bounded time.
 - `children` (#538) lists what the keeper holds (each child's id, pid, kind, tag and state), read-only: the child
   socket that used to answer it now answers only the keeper's hosts.
 - The socket is local only. Windows has no keeper yet (named pipes and their ACLs are not written). On Windows the
@@ -1919,74 +1914,30 @@ host. It changes where a client connects, not what it must prove:
   out of the one process that held it for a session; per the bullet above, the token itself stays within reach of
   the same user.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
-  the agents it serves; a keeper restart makes a new one, and a keeper update (step 4) passes the
-  same one on to the new keeper over the handoff channel below.
+  the agents it serves; a keeper restart makes a new one, and so does an update, which restarts the keeper (until
+  #1895 step 4 PR 4 a keeper update passed the same one on over the handoff channel below).
 - While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.
 
-### The keeper's child socket
+### The keeper's child socket (gone)
 
-No host connects to this socket any more (#1895 step 4 PR 1): every host spawns and stops its own agents, terminals
-and commands, and a keeper started fresh has not served it since step 3. It stays in the keeper until the next PR
-removes it, and what follows describes it as it still is.
+From #280 step 2 the keeper held the host's agents, terminals and commands and served them on a second socket,
+`<data>/children.sock`, through which a process could start a program, read and write an agent's stdin and stdout, and
+signal any child the keeper held; only the hosts the keeper held got in (#538, by the peer pid the kernel recorded).
+A keeper started fresh has not served it since #1895 step 3, no host connects to one since step 4 PR 1, and the keeper
+has no children service since PR 2: nothing listens there, a socket a dead holding keeper left is removed at start,
+`keeper.sock`'s read-only `{"op":"children"}` answers an empty list, and since PR 4 the keeper takes no handoff at all.
 
-The keeper also holds the host's agents, terminals and commands (#280 step 2) and serves them on a second socket,
-`<data>/children.sock`. Through it a process can start a program with the arguments, folder and environment of its
-choosing, read and write an agent's stdin and stdout (its whole conversation, approvals included) or a terminal, and
-signal any child the keeper holds. The rule (#538, owner decision 2026-10-18): **only the hosts this keeper holds
-get in**, not every process of this user.
+### The keeper handoff channel (gone since #1895 step 4 PR 4)
 
-- Created under `umask 077`, so it is born `0600`; every connection's peer uid is read from the kernel and the
-  connection is dropped unless it is the keeper's own uid.
-- Then its peer pid, also from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS), recorded when the
-  peer connected: the connection is dropped, with a line in `keeper.log`, unless that pid is the current host's
-  (the supervisor's, its own or one handed over by the previous keeper) or a swap's standby while it is one: that
-  exact pid, not its process group. `spawn_host` makes the host lead a group, and what the host runs without a
-  session of its own (a worktree's setup command, `npm install -g`, a version probe) is in that group, so a setup
-  script an agent changed would otherwise get in. A host run from source is one process for this (Node with tsx's
-  loader, `source_launch`). Nothing is answered before the keeper names its host (`Children::answer_hosts`); after a
-  keeper handoff, the host handed over is answered from the first accept until the new keeper has adopted it.
-- What the keeper holds can still be listed, read-only, through `keeper.sock` (`{"op":"children"}`), for this user's
-  tools and the integration scripts.
-- A control line is capped at 16 MiB (a spawn carries a whole environment); a host's input to a child is queued up
-  to 8 MiB before the keeper stops reading it; a control connection that stops reading its events is dropped past
-  8 MiB.
-- `signal` takes only TERM, KILL, INT, HUP, QUIT, USR1, USR2 and WINCH, never pid 1 or below, and is a no-op for a
-  child that has exited, whose pid may already belong to someone else.
-- Children start in their own session, with the environment the host passed. The host takes `CC_KEEPER`,
-  `CC_HOST_SOURCE`, `CC_HOST_TOKEN`, `CC_HOST_TOKEN_ON_STDIN` and `CC_FRONT_DOOR` out of its own environment before
-  it spawns anything; the token is not there to begin with unless an older keeper started it.
-- The keeper stores each child's tag and parses nothing in it, and parses nothing a child says.
-
-Limits: the check names processes, not code. A process that can act as the host (attach a debugger to it, or
-replace its files before it starts) gets in, and this user can do both. It closes the path where any process of this
-user, a command an agent ran included, simply connects. A pid is the kernel's record of who connected; it is not
-reused while the keeper holds that host. It is local only. Windows has no keeper; when it gets one, its child channel would
-be a named pipe whose DACL names this user, with `GetNamedPipeClientProcessId` for the same check by pid.
-
-### The keeper handoff channel
-
-A keeper update hands everything the keeper holds to the new build's keeper (#280 step 4,
-[architecture.md](architecture.md) §4.4): through that channel go the front door's token, every
-agent's and terminal's descriptors with their unsent output, and the listening sockets. So who can
-be on the other end matters as much as on `keeper.sock`.
-
-- The channel is one end of a `socketpair` that the outgoing keeper places at descriptor 3 of the
-  process it starts itself. It has no path in the filesystem, so no other process can connect to it
-  at all; there is no socket file to protect with `0600` and none to remove. The incoming keeper
-  still reads its peer's uid from the kernel and refuses another user's.
-- The process started is the executable named by `switch` (`keeper.exe`) or `upgrade` (`exe`):
-  the app's own executable inside its bundle. Only a Centralu window may send either (#1405), since
-  the keeper starts what it names and hands it the token and every handle. A process of this user
-  that replaces a bundle's files before a window switches to it is the same-user residual, not a
-  boundary.
-- Nothing from the channel is logged: the snapshot carries the token, and the log lines name only
-  pids, counts and reasons.
-- The incoming keeper proves it holds `keeper.lock` by taking the `flock` on the passed description
-  before it says ready; a third keeper is refused throughout, as before.
-- `CC_KEEPER_HANDOFF_HOLD_MS` makes an incoming keeper wait before it says ready. It exists for the
-  integration test and changes nothing but timing.
+Until #1895 step 4 PR 4 a keeper update handed everything the keeper held to the new build's keeper over a
+`socketpair` end at descriptor 3 of the process it started (#280 step 4): the front door's token, the listening
+sockets and every connection. It had no path, so no other process could connect, and the incoming keeper still
+checked its peer's uid; the process started was the executable a window named in `switch` or `upgrade`, which only a
+window could send (#1405). A keeper now runs one build for its life ([architecture.md](architecture.md) §4.4): it
+starts no other keeper and passes nothing, and a keeper started with `--take-over-fd` exits with code 7 before it
+reads the channel, binds or locks anything.
 
 ## Signed content (#440)
 
@@ -1994,11 +1945,12 @@ With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and
 folder outside any signed app bundle, with the permissions the person granted to the shell. The boundary
 is **what may be started from that folder**: only files signed by a key compiled into the verifier,
 including release content and owner-approved local content (#610). The verifier is
-`apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
+`apps/desktop/content-verify` (shared by the shell and the window's diagnosis of a refusal); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
 the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
-`shell.lock` pins; until shell v1 is pinned, no release opens it. Its second is a keeper the shell started,
-which verifies the next build's content itself before handing over to it (step 5, §10.3).
+`shell.lock` pins; until shell v1 is pinned, no release opens it. Until #1895 step 4 PR 4 its second
+was a keeper the shell started, which verified the next build's content itself before handing over to it (step 5,
+§10.3).
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -2061,68 +2013,46 @@ The shell adds:
   the shell through LaunchServices with absolute paths only; an old `shell-status.json` cannot answer for a
   start, because the window matches it by a fresh nonce.
 
-The keeper adds, on a handoff (step 5, [plans/thin-shell.md](plans/thin-shell.md) §10.3):
+**The keeper verifies nothing to run it** since #1895 step 4 PR 4: a keeper runs one build, and the next build's
+content is verified and copied by the shell when the window starts it. Until then a keeper the shell started verified
+and copied the next build's content itself before handing over (step 5, [plans/thin-shell.md](plans/thin-shell.md)
+§10.3), by the shell's rules: a refusal moved nothing, a version below the floor was refused on a handoff whatever the
+window asked, and the window's `hostDir` was never read. What stays of the keeper's side:
 
-- **A keeper from verified content never starts a bundle.** A keeper whose own executable is
-  `<data>/content/<version>/centralu-keeper` (resolved, so a symlinked data folder still counts) treats the
-  keeper executable a window names only as a pointer to that bundle's `Contents/Resources/content`. It
-  verifies that content with the same verifier and the same rules as the shell (signature against
-  keys.json, platform, a listed keeper and host, the downgrade floor; not the minimum shell version, which
-  the window decides), copies it into `<data>/content/<new version>/` (or reuses a copy that verifies in
-  place with the same manifest bytes), and hands over to the keeper inside that copy, its host named in
-  that copy too. The window's `hostDir` is never read. Its hosts run from the copy's `host/`, never from a
-  copy of a bundle in `<data>/hosts/`. A content inside `<data>/content/` is refused as the source.
-- **A refusal moves nothing.** The keeper and its host stay; no partial copy is left; the window is told
-  the reason (`refused` in the swap view). A refused build only ever runs through the window's fallback,
-  the direct start under the window's own identity (§10.2), which a person reaches with Restart completely.
-- **A rollback never goes through a handoff.** A version below `<data>/content/highest-started` is refused
-  on a handoff whatever the window asks; only the shell's `--rollback` lowers the floor. The incoming keeper
-  raises the floor once it serves.
-- **What runs is never removed under it.** A version folder the keeper runs from, a host runs from or will
-  run from next, or a switch holds is never removed by the cleanup, and one that no longer verifies while
-  something runs from it is refused (`in-use`) rather than replaced.
-- **The keys are keys.json.** The keeper crate's `test-key` feature (`keeper/src/keeper/keys.rs`) is guarded
-  as the shell's is: refused without `debug_assertions`, turned on by nothing on the way to a release
-  (`tooling/keeper-executable.test.ts`). `scripts/keeper-content-integration.mts` builds the test keeper
-  and puts the plain one back in the target folder before anything else runs from it.
+- **What runs is never removed under it.** A version folder the keeper runs from, or a host runs from or will run
+  from next, is never removed by the cleanup.
+- **The keys are keys.json.** The keeper has no test key at all (`keeper/src/keeper/keys.rs`,
+  `tooling/keeper-executable.test.ts`); its verifier only words the window's diagnosis.
 
-A refusal is **shown by the window itself, in a native dialog** (#634, `apps/desktop/src-tauri/src/refusal.rs`):
+The shell's refusal is **shown by the window itself, in a native dialog** (#634, `apps/desktop/src-tauri/src/refusal.rs`).
+The keeper's refusal of a switch's content was shown the same way until #1895 step 4 PR 3, when the window stopped asking
+for switches; PR 4 removed the switch:
 
 - **Why it is drawn there.** The build bar is drawn by the web UI, which the host feeds, and the host is the thing whose
   content failed to verify: it could hide the line or write another. The dialog is drawn by the window process, the signed
-  app bundle, from what the window reads itself: the shell's `shell-status.json` and the keeper's swap view over the
-  keeper's socket. Neither passes through the host, and nothing of this is sent to or from it. Both
-  can be written by another process of the user (the keeper's socket takes a `switch` naming any folder, and
-  `shell-status.json` is the user's file), so **the dialog repeats no free text from either**: it is built from the kind
+  app bundle, from what the window reads itself: the shell's `shell-status.json`. It does not pass through the host, and
+  nothing of this is sent to or from it. It can be written by another process of the user (it is the user's file), so
+  **the dialog repeats no free text from it**: it is built from the kind
   of check (a fixed list of ids, each with fixed words; an id it does not know is not repeated), the file's name (it comes from
   the signed manifest; cut to plain text of at most 200 characters), the two hashes (only if each is 64 hex characters) and the
-  window's own version (the running one only if it is a plain version). The sentence the keeper or the shell gave goes to
-  `keeper.log` on one line, which "Show log" reveals.
-- **Only for a switch this window sent.** The window notes the moment before it sends its switch (`Announcer::we_asked`); the
-  first ended swap that began after it, whose target is this window's build, is that request's end, and is shown if it is a
-  refusal; the ask is spent either way. A refusal of a switch another process asked for gets no dialog, however often it asks
-  (the keeper keeps the last swap's view for a window that attaches later, and another window's refused update is not
-  announced either). **One dialog at a time**: none is handed out while one is open (the dialog's own callback clears the
-  flag), and two are at least 5 seconds apart; one that had to wait is shown by a later view.
-- **What it says.** Which version could not be verified and which one keeps running (an update), or that Centralu started
-  without the permission shell (a start), and under Details the check that failed (an unknown signing key, a signature that
-  does not match, a file whose hash differs, another platform, a version below the floor, a newer shell needed), the file
-  and both hashes. The keeper names the check and the file in its refusal (`check_id`, `file_of` in `keeper/content.rs`;
-  `refusedCheck` and `refusedFile` in the swap view, additions only: a keeper or window of another build ignores them). For
-  the shell's refusal of the window's own content, the window reads that content again (`keeper::content::diagnose`: the
+  window's own version. The sentence the shell gave goes to `keeper.log` on one line, which "Show log" reveals.
+- **One dialog at a time**: none is handed out while one is open (the dialog's own callback clears the flag), and two are
+  at least 5 seconds apart.
+- **What it says.** That Centralu started without the permission shell, and under Details the check that failed (an
+  unknown signing key, a signature that does not match, a file whose hash differs, another platform, a version below the
+  floor, a newer shell needed), the file and both hashes. The check ids are the keeper crate's (`check_id`, `file_of` in
+  `keeper/content.rs`); the swap view that carried a switch's (`refusedCheck`, `refusedFile`) went with #1895 step 4 PR 4. The window reads its own content again (`keeper::content::diagnose`: the
   shell's checks, then every listed file's size and hash; it reads and hashes and starts, copies and changes nothing),
   because the shell's status carries one sentence and no hashes and its crate cannot change without a new shell version.
 - **Show, do not run.** The dialog only tells. It starts, trusts and unlocks nothing; what keeps running is what already ran
-  (an update swap) or what the window starts itself when the shell refused (§6 of the plan, unchanged), and the dialog says
-  which: after a refusal by the shell it says that Centralu was started directly from the app and that this start was not
-  verified, not that nothing ran. Its two buttons are "Show log" (reveals `keeper.log`) and "Close"; it names the commands that
+  (what the window starts itself when the shell refused, §6 of the plan, unchanged), and the dialog says so: Centralu was
+  started directly from the app and this start was not verified, not that nothing ran. Its two buttons are "Show log" (reveals `keeper.log`) and "Close"; it names the commands that
   fetch the build again (`npm i -g centralu@<version>`, then `centralu install --force`: `centralu update` does nothing when
   the registry's latest is the version already installed). A "run anyway" (the owner's decision of 2026-10-14 on #634) is not
   built: the shell and keeper still verify by default and there is no override.
 - **Only verification failures** (`content`, `downgrade`, `shell-too-old`) are shown this way. A copy that failed, a folder in
   use, a shell that would not open and the like stay in the build bar, which is the host's to draw and can be hidden by it.
-- **Once per refusal** in a window's life (the keeper pushes the same failed view on every status change); a second attempt
-  that is refused again is shown again.
+- **Once per refusal** in a window's life; a later start that is refused again is shown again.
 
 Limits:
 
@@ -2135,12 +2065,9 @@ Limits:
 - Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8), so no refusal arises there
   and the dialog is never shown.
 - The dialog is drawn by the window process, which runs as the same user as everything else here: another process of the
-  user could draw over it or close it, and one that reaches the keeper's socket (the host is a child of the keeper and does)
-  can ask for a switch to content it names, which the keeper refuses: the window shows no dialog for that (only for a switch it
-  sent itself), and a refusal it does show repeats none of the requester's words (its folder name is in the log only). It can,
-  in a race, make the keeper refuse the window's own switch (one swap runs at a time) and so use up the window's one dialog for
-  that request; it cannot make the dialog say more than the check, the file, the hashes and the versions, and it cannot suppress
-  a refusal the keeper or the shell made. What it protects against is the host hiding or rewriting a refusal, not the user's
+  user could draw over it or close it, or write `shell-status.json`; it cannot make the dialog say more than the check, the
+  file, the hashes and the version, and it cannot suppress a refusal the shell made. One that reaches the keeper's socket
+  cannot ask it for other content at all: `switch` and `upgrade` answer `gone` since #1895 step 4 PR 4. What it protects against is the host hiding or rewriting a refusal, not the user's
   own processes.
 - The text of the shell's refusal is the shell's (pinned) and the window's diagnosis reads the content again: a content changed
   between the shell's refusal and the diagnosis is described as it is then, or, when it verifies then, by the shell's sentence.
@@ -2431,7 +2358,7 @@ A view is an app's HTML running inside the desktop window, isolated in layers. B
 behind a 32-byte random path segment made at each launch, a different value from the WebSocket
 token (`transport/http.ts`). Under the keeper the segment is instead derived from the keeper's token
 (HMAC-SHA256 under a fixed label, base64url, 43 characters; `deriveHttpSecret`), so that every host
-the keeper starts has the same one and a view's address survives a build switch (#280 step 4). It
+the keeper starts has the same one and a view's address survives the host's restarts under one keeper (#280 step 4; a build switch too, until #1895 step 4 PR 4). It
 is still a different value from the token, and one-way from it: a leaked view address gives nothing
 toward the RPC door. The other direction was never a boundary, since whoever holds the token can
 already ask `apps.viewFrame` for an address carrying the secret. It lives as long as the keeper's
@@ -2443,7 +2370,7 @@ response sends `Referrer-Policy: no-referrer`, so a view cannot read the secret 
 A frame address is given only to a parent on the WebSocket origin allowlist (`view-host.ts`
 `frame`; "gives no address to a parent origin outside the allow list, and 404s even when the
 address is tampered with"). Under the keeper the address names the front door's port rather than
-the host's (`swap-control.ts` `viewPort`); the door relays the request unread, so the host applies
+the host's (`keeper-control.ts` `viewPort`); the door relays the request unread, so the host applies
 exactly the same secret and allowlist checks. The desktop CSP opens frames to `http://127.0.0.1:*`
 and nothing wider (`tooling/desktop-csp.test.ts`): the port changes every launch, and the secret
 locks the path.
@@ -2560,13 +2487,13 @@ Limits:
   puts a link or text into a composer's draft, never sends it. An app the person is pressing in at
   that moment could still post an end pointing at a session of its choosing; what it gets is text
   in a draft the person sees before sending.
-- Open view instances survive a planned hand-over under the keeper (`view-handover.ts`): the
-  leaving host writes each instance's id, app and `ui://` address (nothing the app returned) to the
-  store under `views.handover`, and the next host reopens them under the same ids if the record is
+- Open view instances survive a stop for an update (`view-handover.ts`; a swap's drain until #1895
+  step 4 PR 5): the leaving host writes each instance's id, app and `ui://` address (nothing the app
+  returned) to the store under `views.handover`, and the next host reopens them under the same ids if the record is
   at most ten minutes old, then deletes it. Each reopened instance holds its app as a fresh one
   does and must still match its app on every request; a view in a conversation is re-bound to its
   card so its messages still go only there. An instance id is a bearer handle to that one view for
-  whoever holds the WebSocket token, as it was before; it now lives across the swap too.
+  whoever holds the WebSocket token, as it was before; it now lives across an update too.
 
 ## Desktop command permissions
 
@@ -2588,7 +2515,7 @@ it to that one pattern. It also holds the app-link setup (M4 E-4) to
 one URL scheme, `centralu`, and no deep-link plugin.
 
 Measured on a real Tauri instance (#186, when there were 12; `take_app_links` came with app links,
-M4 E-4, and the five keeper commands came with #280 — `host_build`, `switch_host_build`, `background_mode`,
+M4 E-4, and the five keeper commands came with #280 — `host_build`, `switch_host_build` (gone with #1895 step 4 PR 3), `background_mode`,
 `set_background_mode`, `quit_and_stop_agents` — and none of those has been measured this way): all 12 answer from the main page, in dev and in a
 `tauri://localhost` debug build. From an app frame holding a leaked invoke key, 60 of 60 calls were
 refused by the permission check and none reached a handler.

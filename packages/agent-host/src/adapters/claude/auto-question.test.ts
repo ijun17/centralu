@@ -71,3 +71,33 @@ describe("Centralu's own tools in auto sessions (#382)", () => {
     await handle.dispose()
   })
 })
+
+/*
+ * #2134: under auto the refusal says why the CLI asked, as the CLI told it. Measured with CLI 2.1.316: a PreToolUse hook
+ * that answers `ask` makes a `can_use_tool` request whose `decision_reason` is the hook's `permissionDecisionReason`
+ * (`decision_reason_type: "hook"`), which the SDK passes as `decisionReason`; an `ask` rule comes as `matchedAskRule`.
+ * The text used to name a settings rule for every ask, so a hook's ask sent an agent looking for a rule that was not there.
+ */
+describe('the auto refusal names why the CLI asked (#2134)', () => {
+  it("carries a hook's reason, names a rule only when one matched, and says it does not know otherwise", async () => {
+    const handle = await new ClaudeAdapter().createSession({ sessionId: 's4', cwd: '/x', permissionPreset: 'auto' }, () => {})
+    const ask = async (cause: Record<string, unknown>) => {
+      const r = await sdk.options!.canUseTool!('Bash', { command: 'echo probe123' }, cause)
+      expect(r.behavior).toBe('deny')
+      return (r as { message: string }).message
+    }
+    const hook = await ask({ decisionReason: 'probe hook reason: confirm first' })
+    expect(hook).toContain('probe hook reason: confirm first')
+    expect(hook).not.toContain('rule matched')
+    const rule = await ask({ matchedAskRule: { source: 'userSettings', toolName: 'Bash', ruleContent: 'ssh:*' } })
+    expect(rule).toContain('a settings "ask" rule matched (Bash(ssh:*) in userSettings)')
+    // The mode asking is no news, a reason that is not text is not read, and a long one is cut
+    expect(await ask({ decisionReason: 'The current permission mode requires approval for this tool' })).not.toContain('permission mode')
+    expect(await ask({ decisionReason: { why: 'x' } })).toContain('the auto preset does not ask')
+    expect((await ask({ decisionReason: 'y'.repeat(2_000) })).length).toBeLessThan(600)
+    const none = await ask({})
+    expect(none).toContain('the auto preset does not ask')
+    expect(none).not.toContain('rule matched')
+    await handle.dispose()
+  })
+})

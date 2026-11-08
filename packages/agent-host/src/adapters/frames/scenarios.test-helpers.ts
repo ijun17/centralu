@@ -196,8 +196,8 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    // Extended thinking with its text shown: the thinking arrives as text, not as an empty block. Turned on by a flag of the recording's:
-    // the adapter never asks for the text, so a Centralu session on this CLI gets empty thinking blocks
+    // Extended thinking with its text shown: the thinking arrives as text, not as an empty block. The recording turns thinking on
+    // (the model it runs on does not think by default); the text is asked for by the adapter, as in every session (#2062)
     name: 'thinking',
     tools: ['claude'],
     settings: 'thinking',

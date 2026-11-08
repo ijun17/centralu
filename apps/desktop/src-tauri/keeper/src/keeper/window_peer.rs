@@ -26,11 +26,10 @@
 //! only as strong as the path. What this closes is the easy path: a script asking the socket for
 //! the token, or running a copy of `node` named `centralu`.
 //!
-//! **Linux.** A window there runs from its AppImage's mount, whose path changes at every launch,
-//! while the keeper runs from `<data>/content/<version>/` (`carried.rs`): only the window that
-//! started the keeper or switched it (its `--bundle-path`) is accepted, and a later launch gets the
-//! limited credential until a window of its own starts a keeper. The Linux keeper runs only with
-//! `CC_USE_KEEPER=1` (`start_plan.rs`), so this is a limit to settle before it runs by default.
+//! **Linux.** No Linux window starts a keeper since #1895 step 4 PR 7 (`start_plan.rs`). A window there
+//! runs from its AppImage's mount, whose path changes at every launch, so a keeper would accept only
+//! the window that started it (its `--bundle-path`), and this is a limit to settle before a Linux
+//! keeper is ever brought back (docs/plans/keeper-removal.md §2.4).
 //!
 //! **How it fails.** A peer whose pid or executable the kernel does not name is not a window: the
 //! token is not handed out on a guess. Every refusal is logged with the executable and why, and a

@@ -94,21 +94,21 @@ describe('the stop plan (HO8)', () => {
   it('terminals and commands end before anything is awaited, even when the links never stop', () => {
     const f = parts()
     f.p.links = { stop: () => (f.did.push('links'), f.never) }
-    void runSteps(stopPlan(false, f.p), () => {})
-    expect(f.did.slice(0, 3)).toEqual(['record ended', 'terminals end', 'commands end'])
+    void runSteps(stopPlan(f.p), () => {})
+    expect(f.did.slice(0, 4)).toEqual(['hand over views', 'record ended', 'terminals end', 'commands end'])
   })
 
   it('an update lists the terminals and commands before the shells go (#1902)', async () => {
     const stop = parts()
     stop.releaseSessions()
-    await runSteps(stopPlan(false, stop.p), () => {})
+    await runSteps(stopPlan(stop.p), () => {})
     expect(stop.did).toContain('record ended')
     expect(stop.did.indexOf('record ended')).toBeLessThan(stop.did.indexOf('terminals end'))
   })
 
   it('app processes stop while the sessions are still cleaning up, not after', async () => {
     const f = parts()
-    const run = runSteps(stopPlan(false, f.p), () => {})
+    const run = runSteps(stopPlan(f.p), () => {})
     await new Promise((r) => setTimeout(r, 0))
     expect(f.did).toContain('sessions end')
     expect(f.did).toContain('apps')
@@ -120,7 +120,7 @@ describe('the stop plan (HO8)', () => {
   it('the server closes after every service, then the store', async () => {
     const f = parts()
     f.releaseSessions()
-    await runSteps(stopPlan(false, f.p), () => {})
+    await runSteps(stopPlan(f.p), () => {})
     expect(f.did.slice(-2)).toEqual(['server', 'store'])
     expect(f.did.indexOf('views')).toBeLessThan(f.did.indexOf('server'))
     expect(f.did.indexOf('sessions end')).toBeLessThan(f.did.indexOf('server'))
@@ -130,61 +130,55 @@ describe('the stop plan (HO8)', () => {
     const f = parts()
     f.releaseSessions()
     f.p.views = { dispose: () => Promise.reject(new Error('a view would not close')) }
-    await expect(runSteps(stopPlan(false, f.p), () => {})).rejects.toThrow('a view would not close')
+    await expect(runSteps(stopPlan(f.p), () => {})).rejects.toThrow('a view would not close')
     expect(f.did.slice(-2)).toEqual(['server', 'store'])
   })
 
   it('compacting idle sessions stops before the sessions are let go of too, so a sweep cannot send a compact to a process that is being stopped (#1451)', async () => {
-    for (const handOver of [false, true]) {
-      const f = parts()
-      f.releaseSessions()
-      await runSteps(stopPlan(handOver, f.p), () => {})
-      expect(f.did).toContain('compaction')
-      expect(f.did.indexOf('compaction')).toBeLessThan(f.did.indexOf('sessions end'))
-    }
+    const f = parts()
+    f.releaseSessions()
+    await runSteps(stopPlan(f.p), () => {})
+    expect(f.did).toContain('compaction')
+    expect(f.did.indexOf('compaction')).toBeLessThan(f.did.indexOf('sessions end'))
   })
 
   it('putting idle sessions to sleep stops before the sessions are let go of, so a sweep cannot race the sessions’ own stop (#568)', async () => {
-    for (const handOver of [false, true]) {
-      const f = parts()
-      f.releaseSessions()
-      await runSteps(stopPlan(handOver, f.p), () => {})
-      expect(f.did).toContain('sleeper')
-      expect(f.did.indexOf('sleeper')).toBeLessThan(f.did.indexOf('sessions end'))
-    }
+    const f = parts()
+    f.releaseSessions()
+    await runSteps(stopPlan(f.p), () => {})
+    expect(f.did).toContain('sleeper')
+    expect(f.did.indexOf('sleeper')).toBeLessThan(f.did.indexOf('sessions end'))
   })
 
   it('the mailbox’s delivery stops before the sessions are let go of, so a host that is leaving wakes no session that is being stopped (#1347)', async () => {
-    for (const handOver of [false, true]) {
-      const f = parts()
-      f.releaseSessions()
-      await runSteps(stopPlan(handOver, f.p), () => {})
-      expect(f.did).toContain('mail delivery')
-      expect(f.did.indexOf('mail delivery')).toBeLessThan(f.did.indexOf('sessions end'))
-    }
-  })
-
-  it('a planned ending hands the open views over first, before anything closes them', async () => {
     const f = parts()
     f.releaseSessions()
-    await runSteps(stopPlan(true, f.p), () => {})
+    await runSteps(stopPlan(f.p), () => {})
+    expect(f.did).toContain('mail delivery')
+    expect(f.did.indexOf('mail delivery')).toBeLessThan(f.did.indexOf('sessions end'))
+  })
+
+  it('the open views are handed over first, before anything closes them (the host writes them only on a stop for an update)', async () => {
+    const f = parts()
+    f.releaseSessions()
+    await runSteps(stopPlan(f.p), () => {})
     expect(f.did[0]).toBe('hand over views')
   })
 })
 
 describe('the git calls still running (#982)', () => {
   // Git runs in a group of its own, out of reach of a Ctrl+C; nothing else ends it
-  it.each([false, true])('ends them (handing over: %s), before the sessions are let go of', async (handOver) => {
+  it('ends them before the sessions are let go of', async () => {
     const f = parts()
     f.releaseSessions()
-    await runSteps(stopPlan(handOver, f.p), () => {})
+    await runSteps(stopPlan(f.p), () => {})
     expect(f.did).toContain('git')
     expect(f.did.indexOf('git')).toBeLessThan(f.did.indexOf('sessions end'))
   })
 })
 
 describe('leaving, once (HO8)', () => {
-  function shutdown(plan: (handOver: boolean) => Step[], beforeLeave?: () => Promise<void> | undefined) {
+  function shutdown(plan: () => Step[], beforeLeave?: () => Promise<void> | undefined) {
     const logged: string[] = []
     const exits: number[] = []
     let logStopped = 0
@@ -210,8 +204,8 @@ describe('leaving, once (HO8)', () => {
       () => [{ name: 'terminals', run: () => void ran.push('terminals') }],
       () => (asked++, new Promise<void>((r) => (answer = r))),
     )
-    const first = t.s.leave(false)
-    void t.s.leave(false)
+    const first = t.s.leave()
+    void t.s.leave()
     await Promise.resolve()
     expect({ asked, ran, leaving: t.s.leaving }).toEqual({ asked: 1, ran: [], leaving: true })
     answer()
@@ -222,7 +216,7 @@ describe('leaving, once (HO8)', () => {
     // With nothing to wait for (no question where the system cannot be asked), the leave begins in the call, as before (HO8)
     const sync: string[] = []
     const u = shutdown(() => [{ name: 'terminals', run: () => void sync.push('terminals') }], () => undefined)
-    void u.s.leave(false)
+    void u.s.leave()
     expect(sync).toEqual(['terminals'])
   })
 
@@ -234,42 +228,33 @@ describe('leaving, once (HO8)', () => {
         throw new Error('no notice')
       },
     )
-    await t.s.leave(false)
+    await t.s.leave()
     expect({ ran, leaving: t.s.leaving, exits: t.exits }).toEqual({ ran: ['terminals'], leaving: true, exits: [0] })
   })
 
   it('a second ending changes nothing: the services stop once and the process exits once', async () => {
-    const planned: boolean[] = []
-    const t = shutdown((handOver) => (planned.push(handOver), [{ name: 'server', run: async () => {} }]))
-    const first = t.s.leave(true)
-    const second = t.s.leave(false)
+    let planned = 0
+    const t = shutdown(() => (planned++, [{ name: 'server', run: async () => {} }]))
+    const first = t.s.leave()
+    const second = t.s.leave()
     await Promise.all([first, second])
-    expect(planned).toEqual([true])
+    expect(planned).toBe(1)
     expect(t.exits).toEqual([0])
     expect(t.s.leaving).toBe(true)
   })
 
   it('ends with its log line and exit 0 even when a step failed', async () => {
     const t = shutdown(() => [{ name: 'sessions', run: () => Promise.reject(new Error('codex would not stop')) }])
-    await t.s.leave(false)
+    await t.s.leave()
     expect(t.logged.join('\n')).toContain('codex would not stop')
     expect(t.logged.at(-1)).toBe('[agent-host] shutting down (pid 42, stopped)')
     expect(t.logStopped()).toBe(1)
     expect(t.exits).toEqual([0])
   })
 
-  it('a signal during a drain runs no second ending: the drain exits on its own', async () => {
-    let planned = 0
-    const t = shutdown(() => (planned++, []))
-    await t.s.stopServices(true)
-    await t.s.leave(false)
-    expect(planned).toBe(1)
-    expect(t.exits).toEqual([])
-  })
-
   it('a step that never settles does not hold the process: past the bound it says so and exits 1', async () => {
     const t = shutdown(() => [{ name: 'a peer that never answers', run: () => new Promise(() => {}) }])
-    void t.s.leave(false)
+    void t.s.leave()
     await new Promise((r) => setTimeout(r, 0))
     expect(t.exits).toEqual([])
     t.fireBound()
@@ -280,7 +265,7 @@ describe('leaving, once (HO8)', () => {
 
   it('a bound that fires after a clean exit changes nothing', async () => {
     const t = shutdown(() => [])
-    await t.s.leave(false)
+    await t.s.leave()
     t.fireBound()
     expect(t.exits).toEqual([0])
   })

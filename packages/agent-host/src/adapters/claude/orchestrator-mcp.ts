@@ -68,7 +68,7 @@ export function orchestratorMcp(
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: defs.map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>
-        // Served by the host itself, so a planned swap waits for it, within a bound (#280, drain.ts)
+        // Served by the host itself, so a stop that drains first waits for it, within a bound (drain.ts)
         hostDrain
           .track(`tool ${ORCHESTRATOR_MCP_NAME}/${t.name}`, async () => {
             // The call's own signal (MCP's request extra): the CLI cancelling the call stops what it started (ask_project, #371)

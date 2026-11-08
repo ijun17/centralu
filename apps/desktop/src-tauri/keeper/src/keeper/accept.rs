@@ -1,4 +1,4 @@
-//! What the keeper's three accept loops (`keeper.sock`, `children.sock`, the front door) do when
+//! What the keeper's two accept loops (`keeper.sock` and the front door) do when
 //! `accept` fails (#840 item 3).
 //!
 //! The listeners are polled, and a poll on a listener with a connection waiting stays readable
@@ -95,9 +95,6 @@ pub(crate) mod few_descriptors {
     use std::fs::File;
     use std::net::TcpStream;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::net::UnixStream;
-    use std::path::Path;
     use std::process::Command;
 
     const ENV: &str = "CC_KEEPER_FEW_DESCRIPTORS_TEST";
@@ -191,19 +188,6 @@ pub(crate) mod few_descriptors {
             a.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
             self.connect(a).into()
         }
-
-        /// Connects to the socket at `path` (a spare made with `AF_UNIX`).
-        pub(crate) fn connect_unix(self, path: &Path) -> UnixStream {
-            // SAFETY: all zeroes is a valid sockaddr_un.
-            let mut a: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-            a.sun_family = libc::AF_UNIX as libc::sa_family_t;
-            let bytes = path.as_os_str().as_bytes();
-            assert!(bytes.len() < a.sun_path.len(), "the socket path fits sockaddr_un");
-            for (to, from) in a.sun_path.iter_mut().zip(bytes) {
-                *to = *from as libc::c_char;
-            }
-            self.connect(a).into()
-        }
     }
 
     /// Lowers this process's soft descriptor limit to `limit` and opens files until it is reached.
@@ -264,18 +248,5 @@ mod tests {
         crate::os::original_descriptor_limit(&mut c);
         let out = c.output().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "256", "a child starts with the limit from before");
-        let mut agent = crate::os::children::spawn_pipes("/bin/sh", &["-c".into(), "ulimit -n".into()], "/tmp", &Default::default()).unwrap();
-        let mut b = [0u8; 16];
-        let mut got = String::new();
-        let end = std::time::Instant::now() + Duration::from_secs(5);
-        while !got.ends_with('\n') && std::time::Instant::now() < end {
-            match crate::os::children::read_fd(std::os::fd::AsRawFd::as_raw_fd(&agent.out), &mut b) {
-                Ok(0) => break,
-                Ok(n) => got.push_str(&String::from_utf8_lossy(&b[..n])),
-                Err(_) => thread::sleep(Duration::from_millis(10)),
-            }
-        }
-        drop(agent.stdin.take());
-        assert_eq!(got.trim(), "256", "so does a child the keeper holds");
     }
 }

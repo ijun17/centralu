@@ -1,11 +1,8 @@
 //! What macOS and Linux share: the system calls the keeper and the host supervisor need that `std`
 //! does not offer. A lock the OS releases when its holder dies, a new session, the creation mask and
 //! who is on the other end of a socket (here); the host process's group, signals and the login
-//! shell probe (below); the children the keeper holds (`children`); descriptor passing for a
-//! handoff (`handles`). What differs between the two is in `macos.rs` and `linux.rs`.
+//! shell probe (below). What differs between the two is in `macos.rs` and `linux.rs`.
 
-pub mod children;
-pub mod handles;
 
 use std::fs::File;
 use std::io;
@@ -16,29 +13,16 @@ use std::process::Command;
 
 pub use super::this_unix::{code_signature_display, exe_of_pid, on_system_stop, peer_pid, peer_uid, process_started, RELAUNCH_WITHOUT_KEEPER};
 
-/// Every descriptor above stderr this process has open, except those in `keep`: what it inherited,
-/// when it is asked before it opens anything of its own. `/dev/fd` lists them on macOS and Linux
-/// (there a link to `/proc/self/fd`); the listing's own descriptor is gone once it is read.
-pub fn inherited_descriptors(keep: &[i32]) -> Vec<i32> {
-    let Ok(dir) = std::fs::read_dir("/dev/fd") else { return Vec::new() };
-    let listed: Vec<i32> = dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect();
-    listed
-        .into_iter()
-        // The listing's own descriptor is closed by now and answers EBADF
-        .filter(|&fd| fd > 2 && !keep.contains(&fd) && unsafe { libc::fcntl(fd, libc::F_GETFD) } != -1)
-        .collect()
-}
-
-/// Closes every descriptor `inherited_descriptors` names. Only for the start of a process, before any
-/// thread or library holds a descriptor of its own (lesson FI4: an AppImage's keep-alive pipe and
-/// mount descriptor, which keep it mounted for as long as anything holds them).
-pub fn close_inherited(keep: &[i32]) -> Vec<i32> {
-    let fds = inherited_descriptors(keep);
-    for &fd in &fds {
-        // SAFETY: closing a descriptor nothing in this process owns yet.
-        unsafe { libc::close(fd) };
+/// Sets close-on-exec on a descriptor this process made.
+pub fn set_cloexec(fd: std::os::fd::RawFd) -> io::Result<()> {
+    // SAFETY: fcntl on a descriptor we own.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) == -1 {
+            return Err(io::Error::last_os_error());
+        }
     }
-    fds
+    Ok(())
 }
 
 /// Takes an exclusive `flock` without waiting. `Ok(false)` means someone else holds it.
@@ -176,6 +160,26 @@ pub const CLOSE_STDIN_TO_STOP: bool = false;
 /// Whether a `.bin/` sh script can be started as a program (it can: the kernel reads its `#!`).
 pub const RUNS_SH_SCRIPTS: bool = true;
 
+/**
+ * A keeper an earlier build may have left on the window's data folder (`dev`: the dev one), its host holding the folder's
+ * lock: asked to stop and waited for (`keeper::client::stop_and_wait`), so the window's own host finds the folder free.
+ * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): until
+ * then `CC_USE_KEEPER=1` ran a keeper there.
+ */
+pub fn stop_earlier_keeper(dev: bool) -> Option<String> {
+    use crate::keeper::client::{stop_and_wait, Stopped};
+    let data = crate::keeper::data_dir_with(dev);
+    let sock = crate::keeper::socket_path(&data);
+    let wait = crate::host_proc::STOP_WAIT + crate::host_proc::STOP_GRACE + std::time::Duration::from_secs(5);
+    let at = sock.display();
+    match stop_and_wait(&sock, &data.join("keeper.lock"), wait) {
+        Stopped::NoneAnswered => None,
+        Stopped::Stopped => Some(format!("a keeper an earlier build started on {at} was asked to stop, and has")),
+        Stopped::Refused(e) => Some(format!("a keeper an earlier build started on {at} did not take the stop: {e}")),
+        Stopped::StillAnswering => Some(format!("a keeper an earlier build started on {at} is still running after {}s; starting the host anyway", wait.as_secs())),
+    }
+}
+
 /// Only Windows' window attaches to a `centralu serve` host (#1223, `start_plan::Host::Serve`): elsewhere a window
 /// runs its own host, or attaches to a keeper.
 pub fn serve_launcher() -> Option<std::path::PathBuf> {
@@ -193,12 +197,11 @@ pub fn hide_console(cmd: &mut Command) {
 }
 
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
-/// *runs*. Not whether its number is taken, which a zombie still does (`children::number_in_use`,
-/// the question before signalling a group by a number that may be reused).
+/// *runs*. Not whether its number is taken, which a zombie still does.
 ///
-/// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
-/// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it
-/// ran, so it was never seen as exited (no restart) and `Foreign::wait` sat out its 10 s.
+/// `kill(pid, 0)` alone succeeds on a zombie. A process that is someone else's child (until #1895
+/// step 4 PR 4, a host handed over by the previous keeper) and died before its parent reaped it kept
+/// reading as running under signal 0, so it was never seen as exited.
 ///
 /// The state is read before `kill` asks whether the pid exists, never after (#546). The other
 /// order took a zombie reaped between the two calls for a running process: `kill` found the
@@ -521,9 +524,8 @@ mod tests {
     }
 
     /// A process that ended but is not reaped yet is not alive. `kill(pid, 0)` succeeds on a
-    /// zombie, so a handed-over host that died before the keeper that started it reaped it was
-    /// never seen as exited (`host_proc::handover::Foreign`). Here the test itself is the parent
-    /// that has not reaped.
+    /// zombie, so a process whose parent has not reaped it yet would read as running. Here the test
+    /// itself is the parent that has not reaped.
     #[test]
     fn a_zombie_is_not_alive() {
         let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();

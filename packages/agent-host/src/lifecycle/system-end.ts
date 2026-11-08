@@ -19,13 +19,12 @@ export type SystemEnd = { at: number }
 
 /**
  * This host's notice, kept in the file. A notice it outlives by `SYSTEM_END_TAIL_MS` was no end (the system did not go), so a host
- * that runs on leaves none behind. `close`: the host let go of the data folder (a swap's successor owns it from then on)
+ * that runs on leaves none behind.
  */
 export class SystemEndNotice {
   private at: number | null = null
   /** Which notice an expiry belongs to: a later one is not called off by an earlier one's timer */
   private notices = 0
-  private closed = false
 
   constructor(
     private readonly o: {
@@ -59,12 +58,8 @@ export class SystemEndNotice {
     this.flush()
   }
 
-  close(): void {
-    this.closed = true
-  }
-
   private flush(): void {
-    if (!this.closed) this.o.write(this.at === null ? null : { at: this.at })
+    this.o.write(this.at === null ? null : { at: this.at })
   }
 }
 

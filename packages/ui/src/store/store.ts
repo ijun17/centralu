@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isolatedListeners } from './isolated-listeners.js'
 import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from '@cc/protocol/client'
 import type {
   AppQuestion,
@@ -185,7 +186,7 @@ function prefsSaved(get: () => { refreshPrefs(): Promise<void> }): void {
   }
 }
 
-export const useStore = create<AppState>((rawSet, get) => {
+export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
   const set = stampToasts(rawSet)
   return {
     platform: null,
@@ -408,7 +409,7 @@ export const useStore = create<AppState>((rawSet, get) => {
     ...navigationActions(set, get),
     ...layoutActions(set, get),
   }
-})
+}))
 
 /** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
 export function usableThemeFiles(s: {

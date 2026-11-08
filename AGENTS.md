@@ -57,8 +57,8 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
   scrollbar bugs need the real app.
 - PATH, bundling and native modules only misbehave in the packaged app; dev mode inherits PATH
   from your terminal.
-- Store migrations add first and remove later: a step may not break the previous build, which
-  can still be serving during a host swap (`Store.migrate()`, `docs/agent-host.md`).
+- Store migrations add first and remove later: a step may not break the previous build, which a
+  person can go back to and a linked machine's rollback starts again (`Store.migrate()`, `docs/agent-host.md`).
 - The host logs to stderr only. stdout carries one handshake line with a secret.
 - An adapter's tests replay recorded frames of a real run (`adapters/*/recordings`, `adapters/frames/`) wherever a
   real run can send them, not hand-written ones: a fake holds what you believe the tool sends. Record first (docs/agent-host.md §3 step 3).

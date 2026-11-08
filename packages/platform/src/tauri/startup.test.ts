@@ -118,34 +118,6 @@ describe('background mode (#280)', () => {
 })
 
 
-describe('a relaunched window whose automatic swap fails', () => {
-  it('creates a working platform on the attached host and records the startup attempt and error', async () => {
-    const build = {
-      mode: 'keeper', relaunched: true, sameBuild: false, keeperSameBuild: false, busy: false, keepsAgents: true,
-      app: { version: `0.1.0-beta.${20}`, commit: 'new' },
-      host: { version: `0.1.0-beta.${19}`, commit: 'old' },
-      keeper: { version: `0.1.0-beta.${19}`, commit: 'old' },
-    }
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === 'host_info') return { port: 1, token: 't' }
-      if (cmd === 'host_error') return null
-      if (cmd === 'host_build') return build
-      if (cmd === 'switch_host_build') throw new Error('Keeper refused the handoff')
-      return null
-    })
-    try {
-      const platform = await createTauriPlatform()
-      try {
-        expect(platform.background).toBeDefined()
-        expect(invoke.mock.calls.filter(([cmd]) => cmd === 'switch_host_build')).toHaveLength(1)
-        expect(platform.relaunchSwap).toEqual({ tried: true, error: 'Keeper refused the handoff' })
-        expect(unlistened).toContain('host-build')
-      } finally { await platform.dispose() }
-    } finally { warn.mockRestore() }
-  })
-})
-
 describe('a host restart during startup (#972 item 1)', () => {
   it('is followed: a ready for a new port between reading host_info and the web platform subscribing moves the client there', async () => {
     const urls: string[] = []

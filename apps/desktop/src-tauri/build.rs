@@ -40,7 +40,6 @@ fn main() {
             "quit_app",
             "take_app_links",
             "host_build",
-            "switch_host_build",
             "background_mode",
             "set_background_mode",
             "quit_and_stop_agents",

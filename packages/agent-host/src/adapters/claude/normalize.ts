@@ -1,6 +1,6 @@
 import type { NormalizedEvent, RequestInput, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
-import { addTokens, NO_TOKENS } from '../token-usage.js'
+import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
@@ -243,6 +243,13 @@ export class ClaudeStreamNormalizer {
   /** The last turn result's reading, the process's total then, and the parent's requests since (see `withRequest`) */
   private resultTokens: TokenUsage | null = null
   private sinceResult: TokenUsage = NO_TOKENS
+  /**
+   * The parent's streamed request, held until its `message_delta` brings the request's output count (#2135). The
+   * assistant messages of a streamed response carry the count the stream started with (a few tokens); the final one
+   * comes only in `message_delta`, after them. Let go without output when the next response starts or the turn ends
+   * first (a stopped stream), or the process ends (`release`), so a request is never lost to a missing delta.
+   */
+  private heldRequest: { id: string; request: RequestInput } | null = null
   /** Claude Code's task list, kept as the plan (see `followTasks`) */
   private readonly taskPlan: ClaudeTaskPlan
   /** Edits whose result has not come yet (see `touch`) */
@@ -257,11 +264,13 @@ export class ClaudeStreamNormalizer {
   /** The CLI is retrying a failed API call (`system/api_retry`, #304): the same rule as Codex's (`RetryActivity`) */
   private readonly retry: RetryActivity
   /**
-   * What the CLI said when the model refused and no fallback ran (`model_refusal_no_fallback`, #304), held until the
-   * turn's result: if the turn failed, this is its message (the result itself only says *that* it failed); if not, it
-   * goes out as a notice.
+   * What the CLI said in the model's place, held until the turn's result; a turn that did not fail gets it as a notice.
+   * Two sources: a refusal no fallback ran for (`model_refusal_no_fallback`, #304), whose words become the failed
+   * turn's error (the result only says *that* it failed), and an API error the CLI writes as an assistant message
+   * (`error` set, model "<synthetic>", #2050), which is not the agent's words and so is no bubble of its own: a failed
+   * result already carries those words, or a reason of its own, which it keeps. A process that ends first drops it.
    */
-  private refusal: string | null = null
+  private held: { text: string; label: string } | null = null
 
   constructor(
     private readonly sessionId: string,
@@ -297,8 +306,8 @@ export class ClaudeStreamNormalizer {
     const explanation = str(m.api_refusal_explanation)
     if (m.subtype === 'model_refusal_no_fallback') {
       const category = str(m.api_refusal_category)
-      this.refusal =
-        str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
+      const text = str(m.content).trim() || explanation || `The model declined to answer${category ? ` (${category})` : ''}`
+      this.held = { text, label: 'refusal' }
       return []
     }
     const from = str(m.original_model, 'the model')
@@ -355,13 +364,27 @@ export class ClaudeStreamNormalizer {
       ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
       ...ttlOf(usage.cache_creation),
       ...(str(m.message?.model) ? { model: str(m.message?.model) } : {}),
-      // No output count: an assistant message carries the placeholder the stream started with (a few tokens), and the
-      // final count only comes in the stream's message_delta, which this path does not follow (usage history, §6.2)
+      // No output count here: an assistant message carries the placeholder the stream started with (a few tokens). A
+      // streamed response's final count comes in its message_delta (`heldRequest`); a subagent's is not streamed
     }
     if (subagent) {
       return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events
     }
+    if (id === this.streamMessageId) {
+      const earlier = this.releaseRequest()
+      this.heldRequest = { id, request }
+      return [...earlier, ...events]
+    }
     return events.map((e) => (e.type === 'usage_update' ? { ...e, request } : e))
+  }
+
+  /** The held request (see `heldRequest`), with the output count when its message_delta brought one */
+  private releaseRequest(outputTokens?: number): NormalizedEvent[] {
+    const held = this.heldRequest
+    this.heldRequest = null
+    if (!held || !this.lastTokens) return []
+    const request = outputTokens ? { ...held.request, outputTokens } : held.request
+    return [{ type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }]
   }
 
   /**
@@ -469,13 +492,17 @@ export class ClaudeStreamNormalizer {
     if (!subagent) events = this.followTasks(msg.type === 'user' ? msg : undefined, events)
     if (subagent) return events
     events = this.followRetry(type, events)
-    if (type === 'result' && this.refusal !== null) {
-      const refusal = this.refusal
-      this.refusal = null
+    if (msg.type === 'assistant' && msg.error) {
+      const text = events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
+      events = events.filter((e) => e.type !== 'message_delta')
+      if (text) this.held = { text, label: 'api-error' }
+    }
+    if (type === 'result' && this.held !== null) {
+      const { text, label } = this.held
+      this.held = null
       const failed = events.some((e) => e.type === 'error')
-      events = failed
-        ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: refusal } } : e))
-        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text: refusal, from: 'Claude Code', label: 'refusal' }, ...events]
+      if (failed && label === 'refusal') events = events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
+      else if (!failed) events = [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label }, ...events]
     }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
@@ -486,8 +513,14 @@ export class ClaudeStreamNormalizer {
      */
     if (msg.type === 'stream_event') {
       const e = msg.event
-      if (e?.type === 'message_start') this.streamMessageId = str(e.message?.id) || undefined
+      if (e?.type === 'message_start') {
+        events = [...this.releaseRequest(), ...events]
+        this.streamMessageId = str(e.message?.id) || undefined
+      } else if (e?.type === 'message_delta' && this.heldRequest?.id === this.streamMessageId) {
+        events = [...events, ...this.releaseRequest(tokenCount(e.usage?.output_tokens))]
+      }
     }
+    if (type === 'result') events = [...this.releaseRequest(), ...events]
     const wholeId = msg.type === 'assistant' ? str(msg.message?.id) || undefined : undefined
     const messageId = type === 'stream_event' ? this.streamMessageId : wholeId
     if (messageId) events = events.map((e) => (e.type === 'message_delta' && !e.messageId ? { ...e, messageId } : e))
@@ -535,7 +568,9 @@ export class ClaudeStreamNormalizer {
 
   release(why: string): NormalizedEvent[] {
     // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
-    const out: NormalizedEvent[] = this.deferred.splice(0)
+    // A request held for its output count still counts when the process ends mid-stream (#2135), as it did before
+    const out: NormalizedEvent[] = [...this.releaseRequest(), ...this.deferred.splice(0)]
+    this.held = null
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
     this.background.clear()
     // The reason above names an agent's card; a background shell went the same way, so its ending says what happened

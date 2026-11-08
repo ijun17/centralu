@@ -377,7 +377,7 @@ npm 설치 이벤트가 없어도 **Apply now**를 보여 준다. 자동 적용�
 설치한 창을 한 번 로드한다. 에이전트가 실행 중이면 먼저 Settings → Background →
 **Keep agents running after Centralu quits**를 켜고 **Quit completely**가 아닌 **Quit**를 쓴다.
 그렇지 않으면 에이전트가 끝날 때까지 기다린다. 다시 연 창은 기존 키퍼에 붙으며, 그 창의
-**Switch to this build**로 새 키퍼/호스트를 적용한다. 이것은 새 창 코드를 처음 적용하는 것이지,
+**Restart into this build**로 새 키퍼/호스트를 적용한다. 이것은 새 창 코드를 처음 적용하는 것이지,
 추가 **Restart completely**, 셸 재빌드나 권한 초기화가 아니다. 이후 로컬 설치는 그 창이 감지하고
 **Apply now**를 보여 준다. 예전 창의 재실행을 요청하는 기존 CLI나 앱 링크 엔드포인트는 없으며,
 명령은 그 창을 강제로 종료하거나 npm 설치 이벤트를 꾸며 내지 않는다.
