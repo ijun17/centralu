@@ -341,8 +341,8 @@ impl Supervisor {
             #[cfg(unix)]
             Choice::Keeper => {
                 let link = self.link().map_err(|e| format!("Not relaunched: {e}."))?;
-                if link.stops_for_update() != Some(true) {
-                    return Err(format!("Not relaunched: {}", link::KEEPER_TOO_OLD_TO_UPDATE));
+                if let Some(why) = link.update_stop().refusal() {
+                    return Err(format!("Not relaunched: {why}"));
                 }
                 link.stop_for_update().map_err(|e| format!("Not relaunched: {e}."))
             }

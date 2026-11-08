@@ -77,9 +77,15 @@ describe('which of two builds is newer, for restarting by itself only forward (#
 describe('what a restart into this build costs (#1895 step 4, PR 3)', () => {
   it('restarts without asking when nothing is running, and asks when something is or nobody knows', () => {
     expect(restartPlan({ busy: false, stopsForUpdate: true }).confirm).toBe(false)
-    expect(restartPlan({ busy: false }).confirm).toBe(false)
     expect(restartPlan({ busy: true, stopsForUpdate: true }).confirm).toBe(true)
+    expect(restartPlan({ stopsForUpdate: true }).confirm).toBe(true)
     expect(restartPlan({}).confirm).toBe(true)
+  })
+
+  /* A keeper whose host is down reports idle and cannot stop for an update; one of beta.48 still holds agents then (review) */
+  it('a plain stop always asks, even from a keeper that reports itself idle', () => {
+    expect(restartPlan({ busy: false }).confirm).toBe(true)
+    expect(restartPlan({ busy: false, stopsForUpdate: false }).confirm).toBe(true)
   })
 
   it('a keeper that stops for an update: turns stop and go on, terminals and commands start again', () => {
@@ -100,7 +106,7 @@ describe('what a restart into this build costs (#1895 step 4, PR 3)', () => {
 /** The automatic mode restarting into this build by itself (#352) */
 describe('restarting by itself with automatic updates on (#352)', () => {
   const idle: AutoRestartInput = {
-    build: { app: beta11, host: beta10, keeper: beta10, busy: false, sameBuild: false, keeperSameBuild: false },
+    build: { app: beta11, host: beta10, keeper: beta10, busy: false, stopsForUpdate: true, sameBuild: false, keeperSameBuild: false },
     autoApply: true,
     tried: false,
     dismissed: false,
@@ -118,6 +124,12 @@ describe('restarting by itself with automatic updates on (#352)', () => {
     expect(autoRestart({ ...idle, tried: true })).toBe(false)
     expect(autoRestart({ ...idle, dismissed: true })).toBe(false)
     expect(autoRestart({ ...idle, build: { ...idle.build, sameBuild: true, keeperSameBuild: true } })).toBe(false)
+  })
+
+  /* Review: a keeper whose host is down reports idle and no stopsForUpdate; a beta.48 one still holds agents then */
+  it('never a plain stop: a keeper that cannot stop for an update, or does not say, is left to the button', () => {
+    expect(autoRestart({ ...idle, build: { ...idle.build, stopsForUpdate: false } })).toBe(false)
+    expect(autoRestart({ ...idle, build: { ...idle.build, stopsForUpdate: undefined } })).toBe(false)
   })
 
   /*

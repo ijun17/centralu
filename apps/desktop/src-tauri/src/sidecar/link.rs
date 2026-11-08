@@ -25,17 +25,55 @@ pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource)
 /// one that took its host over from another keeper (it does not hold that host's stdin)
 pub(crate) const KEEPER_TOO_OLD_TO_UPDATE: &str = "The background keeper cannot stop the agent host for an update (it is of an earlier build, or took the host over from one). Restart it from the bar at the top, or quit Centralu completely and open it again.";
 
+/// Why "Apply now" waits while the keeper's host is starting, restarting or failed: the keeper says it can stop a host for an
+/// update only once that host has said so at its start
+pub(crate) const HOST_NOT_UP_FOR_UPDATE: &str = "The agent host is not running yet. Try again once it is up.";
+
+/// What the keeper's view says of a stop for an update (#1895 step 4, PR 3 review)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpdateStop {
+    /// No view yet
+    Unknown,
+    /// The keeper stops its host for an update and exits
+    Stops,
+    /// Not now: its host is not up, and the keeper knows only from a running host whether it can
+    HostNotUp,
+    /// It cannot: a keeper of an earlier build, or one that took its host over from one
+    Cannot,
+}
+
+impl UpdateStop {
+    pub(crate) fn of(view: Option<&KeeperView>) -> UpdateStop {
+        match view {
+            None => UpdateStop::Unknown,
+            Some(v) if v.stops_for_update => UpdateStop::Stops,
+            Some(v) if !matches!(v.status, HostStatus::Ready(_)) => UpdateStop::HostNotUp,
+            Some(_) => UpdateStop::Cannot,
+        }
+    }
+
+    /// Why "Apply now" is not offered, or None when it is
+    pub(crate) fn refusal(self) -> Option<&'static str> {
+        match self {
+            UpdateStop::Stops => None,
+            UpdateStop::Unknown => Some("not attached to the background keeper yet"),
+            UpdateStop::HostNotUp => Some(HOST_NOT_UP_FOR_UPDATE),
+            UpdateStop::Cannot => Some(KEEPER_TOO_OLD_TO_UPDATE),
+        }
+    }
+}
+
 /**
  * "Apply now" with a keeper (#1895 step 4, PR 3): the keeper stops the host for an update and exits, and the relaunched window
  * starts the new build's (`stops_for_update`, what `before_relaunch` asks). The keeper reports when the host is busy, so the
  * automatic mode waits for idle and applies by itself. A keeper of an earlier build than step 3 cannot stop that way, and no
- * window switches one any more: not offered, the build bar's restart into this build comes first. `None`: no view yet.
+ * window switches one any more: not offered, the build bar's restart into this build comes first. While the keeper's host is
+ * not up it cannot say, and the reason says to wait rather than to restart the keeper.
  */
-pub(crate) fn with_keeper(info: RelaunchInfo, stops_for_update: Option<bool>) -> RelaunchInfo {
-    match stops_for_update {
-        Some(true) => RelaunchInfo { restarts_host: true, idle_reported: true, ..info },
-        Some(false) => RelaunchInfo { ready: false, reason: Some(KEEPER_TOO_OLD_TO_UPDATE.into()), ..info },
-        None => RelaunchInfo { ready: false, reason: Some("not attached to the background keeper yet".into()), ..info },
+pub(crate) fn with_keeper(info: RelaunchInfo, stop: UpdateStop) -> RelaunchInfo {
+    match stop.refusal() {
+        None => RelaunchInfo { restarts_host: true, idle_reported: true, ..info },
+        Some(why) => RelaunchInfo { ready: false, reason: Some(why.into()), ..info },
     }
 }
 
@@ -48,11 +86,39 @@ mod tests {
     #[test]
     fn apply_now_is_offered_only_with_a_keeper_that_stops_for_an_update() {
         let ready = RelaunchInfo { ready: true, ..Default::default() };
-        let stops = with_keeper(ready.clone(), Some(true));
+        let stops = with_keeper(ready.clone(), UpdateStop::Stops);
         assert!(stops.ready && stops.restarts_host && stops.idle_reported);
-        let old = with_keeper(ready.clone(), Some(false));
+        let old = with_keeper(ready.clone(), UpdateStop::Cannot);
         assert!(!old.ready && old.reason.as_deref() == Some(KEEPER_TOO_OLD_TO_UPDATE), "{old:?}");
-        assert!(!with_keeper(ready, None).ready, "no view yet: nothing is known of the keeper");
+        assert!(!with_keeper(ready, UpdateStop::Unknown).ready, "no view yet: nothing is known of the keeper");
+    }
+
+    /// Review: a keeper's host that is starting, restarting or failed reads "cannot stop for an update" in the view, since
+    /// only a running host says it can. "Apply now" waits for it, rather than calling the keeper too old: a keeper of this
+    /// build gets no bar to restart it from
+    #[test]
+    fn apply_now_waits_for_a_host_that_is_not_up_rather_than_calling_the_keeper_too_old() {
+        let view = |status: HostStatus, stops_for_update: bool| KeeperView {
+            keeper: crate::keeper::KeeperInfo { pid: 1, protocol: 1, version: "0.0.0".into(), started_at: 0, data_dir: String::new(), build: None },
+            status,
+            host_pid: None,
+            source: None,
+            background: false,
+            attached: 1,
+            busy: false,
+            swap: None,
+            keeps_agents: None,
+            rights: None,
+            stops_for_update,
+        };
+        assert_eq!(UpdateStop::of(None), UpdateStop::Unknown);
+        for status in [HostStatus::Starting, HostStatus::Restarting { attempt: 1 }, HostStatus::Failed { message: "x".into() }] {
+            assert_eq!(UpdateStop::of(Some(&view(status, false))), UpdateStop::HostNotUp);
+        }
+        let ready = HostStatus::Ready(HostInfo { port: 1, token: String::new() });
+        assert_eq!(UpdateStop::of(Some(&view(ready.clone(), false))), UpdateStop::Cannot);
+        assert_eq!(UpdateStop::of(Some(&view(ready, true))), UpdateStop::Stops);
+        assert_eq!(UpdateStop::HostNotUp.refusal(), Some(HOST_NOT_UP_FOR_UPDATE));
     }
 
     /// #461: a keeper that cannot say its build (older than #280 step 4) is another build, never
@@ -211,7 +277,12 @@ impl KeeperLink {
     /// no bundle at all (`pnpm app:dev`).
     pub fn relaunch_info(&self) -> RelaunchInfo {
         let info = super::relaunch::relaunch_info(&self.app_build, self.host_dir.as_deref().filter(|_| !self.dev));
-        with_keeper(info, self.stops_for_update())
+        with_keeper(info, self.update_stop())
+    }
+
+    /// What the keeper's view says of a stop for an update, for "Apply now"
+    pub(crate) fn update_stop(&self) -> UpdateStop {
+        self.state.lock().map(|st| UpdateStop::of(st.view.as_ref())).unwrap_or(UpdateStop::Unknown)
     }
 
     /// Whether the keeper stops for an update and exits, as a keeper of #1895 step 3 or later says in its view. None before a view

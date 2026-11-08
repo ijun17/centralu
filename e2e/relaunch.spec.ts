@@ -41,10 +41,12 @@ test('with something running, the restart asks first, says the turns go on, and 
   await expect(page.getByTestId('host-other-build')).toHaveCount(0)
 })
 
-test('a keeper of an earlier build: the question says what a full quit stops', async ({ page }) => {
-  await open(page, 'keeper=earlier')
+test('a keeper of an earlier build: the question says what a full quit stops, asked even when it reports itself idle', async ({ page }) => {
+  // Such a keeper reports idle while its host is down, and one of beta.48 still holds agents then (#1895 step 4 PR 3 review)
+  await open(page, 'keeper=earlier&busy=no')
   await page.getByTestId('host-restart-keeper').click()
   await expect(page.getByTestId('confirm-restart-keeper-loses')).toContainText('Also stops agents, terminals and running commands.')
+  expect(await calls(page)).toEqual([])
 })
 
 test('with nothing running, the restart goes without a question', async ({ page }) => {

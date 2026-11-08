@@ -34,12 +34,15 @@ export const UPDATE_STOP_LOSES =
   'A waiting approval or question is asked again.'
 
 /**
- * Whether to ask before a restart into this build, and what to say. Asked only when something can be lost: a session working
+ * Whether to ask before a restart into this build, and what to say. Asked when something can be lost: a session working
  * or waiting, a terminal or a command running (`busy`). Unknown counts as busy, because a confirmation too many costs a
- * click and one too few costs a turn.
+ * click and one too few costs a turn. A restart that is a plain stop (the keeper cannot stop its host for an update) always
+ * asks: such a keeper reports itself idle while its host is down, and one of beta.48 or older still holds agents and
+ * terminals then (#1895 step 4 PR 3 review).
  */
 export function restartPlan(b: { busy?: boolean; stopsForUpdate?: boolean }): RestartPlan {
-  return { confirm: b.busy !== false, loses: b.stopsForUpdate ? UPDATE_STOP_LOSES : RESTART_COMPLETELY_LOSES }
+  const forUpdate = b.stopsForUpdate === true
+  return { confirm: b.busy !== false || !forUpdate, loses: forUpdate ? UPDATE_STOP_LOSES : RESTART_COMPLETELY_LOSES }
 }
 
 /**
@@ -109,6 +112,8 @@ export type AutoRestartInput = {
     host?: Build
     keeper?: Build
     busy?: boolean
+    /** The keeper can stop its host for an update, so the restart continues the turns */
+    stopsForUpdate?: boolean
     sameBuild?: boolean
     keeperSameBuild?: boolean
   }
@@ -123,12 +128,14 @@ export type AutoRestartInput = {
 /**
  * Whether a window of a newer build than its keeper or host restarts into its build by itself (#352): only with "Apply
  * updates automatically when idle" on, only when the keeper reports nothing running, never twice from one window and never
- * after "Not now". Only forward: never when the window's build is not newer than the host or keeper it would replace.
+ * after "Not now". Only forward: never when the window's build is not newer than the host or keeper it would replace. Only
+ * a keeper that stops for an update: a plain stop is left to the button, whose confirmation says what it stops, since a
+ * keeper whose host is down reports idle whatever it still holds (`restartPlan`).
  */
 export function autoRestart(i: AutoRestartInput): boolean {
   const b = i.build
   const behind = b.sameBuild === false || b.keeperSameBuild === false
-  return behind && i.autoApply && !i.tried && !i.dismissed && b.busy === false && forwardOnly(b)
+  return behind && i.autoApply && !i.tried && !i.dismissed && b.busy === false && b.stopsForUpdate === true && forwardOnly(b)
 }
 
 /** What the window's build bar shows: one of these, or nothing */
