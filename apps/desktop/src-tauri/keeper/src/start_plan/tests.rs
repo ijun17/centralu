@@ -135,23 +135,31 @@ fn every_row_of_the_start_table() {
             Reason::HostCommand,
         ),
         // Linux
-        ("Linux release: direct, the bundled host", packaged(LINUX), Direct, Some(Bundle), false, Reason::KeeperOptIn),
-        ("Linux debug: direct, the source host", window(LINUX, DEBUG), Direct, Some(Source), true, Reason::KeeperOptIn),
+        ("Linux release: direct, the bundled host", packaged(LINUX), Direct, Some(Bundle), false, Reason::LinuxDirect),
+        ("Linux debug: direct, the source host", window(LINUX, DEBUG), Direct, Some(Source), true, Reason::LinuxDirect),
         (
-            "Linux release, CC_USE_KEEPER=1: the keeper from the window's copy of it (no shell, FI4)",
+            "Linux release ignores CC_USE_KEEPER=1 (#1895 step 4 PR 7)",
             env(packaged(LINUX), USE_KEEPER),
-            Keeper,
+            Direct,
             Some(Bundle),
             false,
-            Reason::NoShellHere,
+            Reason::LinuxDirect,
         ),
         (
-            "Linux debug, CC_USE_KEEPER=1: the keeper in the window's executable",
+            "Linux debug ignores CC_USE_KEEPER=1",
             env(window(LINUX, DEBUG), USE_KEEPER),
-            KeeperInProcess,
+            Direct,
             Some(Source),
             true,
-            Reason::DebugKeeper,
+            Reason::LinuxDirect,
+        ),
+        (
+            "Linux release, a keeper of an earlier build answering: still direct (the window stops that keeper first)",
+            Facts { keeper_answering: true, ..env(packaged(LINUX), USE_KEEPER) },
+            Direct,
+            Some(Bundle),
+            false,
+            Reason::LinuxDirect,
         ),
         // Windows
         ("Windows release: direct, the bundled host", packaged(WIN), Direct, Some(Bundle), false, Reason::NoKeeperHere),
@@ -212,8 +220,9 @@ fn legacy(f: &Facts) -> (StartMode, Option<Host>, bool) {
             return false;
         }
         let opted_in = f.env.use_keeper;
+        // Changed on purpose by #1895 step 4 PR 7: Linux, where only CC_USE_KEEPER=1 ran a keeper, is direct
         if !macos {
-            return opted_in;
+            return false;
         }
         release || opted_in
     })();
@@ -253,10 +262,6 @@ fn legacy(f: &Facts) -> (StartMode, Option<Host>, bool) {
     // purpose by #461: that bundle now fails to start its keeper, and says so.
     let mode = if !release {
         StartMode::KeeperInProcess
-    } else if !macos {
-        // Changed on purpose by runtime-unification step 4: a Linux window copies the keeper out of
-        // its AppImage and starts it from the copy (FI4).
-        StartMode::Keeper
     } else {
         StartMode::KeeperBeside
     };
@@ -294,13 +299,4 @@ fn the_plan_is_the_code_it_replaced() {
         }
     }
     assert_eq!(n, 3 * 2 * 3 * 3 * 64);
-}
-
-/// Only macOS's release signs content (`scripts/release-npm.mts`). A Linux keeper from a copy its
-/// window made hands over to the copy the next window names; a macOS one never does (`content.rs`).
-#[test]
-fn only_the_macos_release_signs_content() {
-    assert!(MAC.signs_content());
-    assert!(!LINUX.signs_content());
-    assert!(!WIN.signs_content());
 }

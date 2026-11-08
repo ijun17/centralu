@@ -117,7 +117,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Host | The Node process that owns sessions, the store and apps. One per data folder (ownership lock) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | server, backend, sidecar (only the direct path is) |
 | Store | The host's SQLite database, `<data>/store.db`; the only writer is the host | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides, also without `--db`; the legacy folder is moved only into the default one) | `packages/agent-host/src/data-dir.ts` (`chooseDataDir`) | |
-| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
+| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds, and macOS debug builds with `CC_USE_KEEPER=1` (Linux too until #1895 step 4 PR 7) | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
 | Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
 | Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3; the host's side went with step 4 PR 1 and the keeper's with PR 2, whose keeper answers `children` with an empty list | gone; [architecture.md](architecture.md) §4.3 | |
 | Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
@@ -502,7 +502,7 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
 
 Who starts whom, and who talks to whom over what. The parent/child edges are solid; connections are dashed.
 
-### 4.1 With a keeper (macOS release builds; Linux or a debug build with `CC_USE_KEEPER=1`)
+### 4.1 With a keeper (macOS release builds; a macOS debug build with `CC_USE_KEEPER=1`)
 
 ```mermaid
 flowchart TD

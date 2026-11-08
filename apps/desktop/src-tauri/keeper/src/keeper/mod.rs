@@ -31,8 +31,6 @@
 //! (`content.rs`, thin-shell plan §10 step 5), and its hosts run from that copy as well.
 
 mod accept;
-pub mod appimage;
-pub mod carried;
 pub mod client;
 pub mod content;
 pub mod exe;

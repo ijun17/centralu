@@ -29,7 +29,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
     MacOs,
-    /// Linux, and any other unix: the keeper compiles there, but only runs when asked for.
+    /// Linux, and any other unix: the window is the host's parent (#1895 step 4 PR 7). The keeper
+    /// crate compiles there because the window supervises its host with `host_proc`.
     Linux,
     /// Windows, and anything else that is not unix: there is no keeper.
     Windows,
@@ -44,13 +45,6 @@ impl Os {
         } else {
             Os::Windows
         }
-    }
-
-    /// Whether the release signs the content a keeper runs from here (`<data>/content/<version>/`).
-    /// Only macOS's does (`scripts/release-npm.mts`): a Linux window copies the keeper and host its
-    /// AppImage carries without a signature to check (runtime-unification plan §8, decision 1).
-    pub fn signs_content(self) -> bool {
-        self == Os::MacOs
     }
 }
 
@@ -87,7 +81,7 @@ pub struct Env {
     /// `CC_HOST_CMD`: the host's command line, split on whitespace. Any value, even a blank one,
     /// keeps the window the host's parent; only a non-blank one replaces the host it runs.
     pub host_cmd: Var,
-    /// `CC_USE_KEEPER=1`: a debug build, or Linux, uses the keeper.
+    /// `CC_USE_KEEPER=1`: a macOS debug build uses the keeper. Linux ignores it since #1895 step 4 PR 7.
     pub use_keeper: bool,
     /// `CC_KEEPER_HOST_SOURCE`: the host folder a keeper runs (the keeper scripts' way of naming the
     /// repository's freshly bundled host). Any value keeps the window from going through the shell;
@@ -193,11 +187,6 @@ pub enum StartMode {
     /// The window starts `centralu-keeper` next to its own executable. A bundle without one (assembled
     /// by hand) fails to start it, and says so (#461).
     KeeperBeside,
-    /// The window copies the `centralu-keeper` beside it and its bundled host into
-    /// `<data>/content/<version>/` and starts the keeper from the copy, so nothing long-lived runs
-    /// from the AppImage's mount (lesson FI4; Linux releases). Not verified: the release signs no
-    /// Linux content yet. A copy that fails falls back to `KeeperBeside`.
-    Keeper,
     /// A debug window starts its own executable with `--keeper` and `CC_KEEPER_IN_PROCESS=1`, which
     /// then runs the keeper itself rather than `exec` a `centralu-keeper` that may be older code.
     KeeperInProcess,
@@ -233,14 +222,13 @@ pub enum Host {
 pub enum Reason {
     HostCommand,
     NoKeeperHere,
-    KeeperOptIn,
+    LinuxDirect,
     DebugDirect,
     KeeperAnswers,
     MacRelease,
     ShellFellBack,
     HostSourceNamed,
     NoBundledHost,
-    NoShellHere,
     DebugKeeper,
     ServeInstalled,
 }
@@ -250,19 +238,15 @@ impl Reason {
         match self {
             Reason::HostCommand => "CC_HOST_CMD is set: the window runs that host itself",
             Reason::NoKeeperHere => "the keeper is built on unix sockets, descriptor passing and flock; Windows has no keeper yet",
-            // The keeper's scripts pass on Linux (the `keeper e2e (linux)` job), and it runs from a copy
-            // out of the AppImage's mount (FI4), but the real window has never started it on a Linux
-            // desktop (docs/spikes/2026-10-linux-keeper.md §7 items 2 and 3; plan step 4b).
-            Reason::KeeperOptIn => {
-                "on Linux the keeper only runs with CC_USE_KEEPER=1 until the window has run it on a Linux desktop"
-            }
+            // Until #1895 step 4 PR 7 CC_USE_KEEPER=1 ran a keeper from a copy out of the AppImage's mount
+            // (docs/plans/keeper-removal.md §2.4): no Linux desktop ever ran it by default.
+            Reason::LinuxDirect => "a Linux window is the host's parent: there is no permission model for a keeper to hold",
             Reason::DebugDirect => "a debug build is the host's parent unless CC_USE_KEEPER=1",
             Reason::KeeperAnswers => "a keeper already answers on keeper.sock",
             Reason::MacRelease => "a macOS release starts its keeper through the shell, which holds macOS permissions across updates",
             Reason::ShellFellBack => "the shell did not start a keeper earlier in this window's life",
             Reason::HostSourceNamed => "CC_KEEPER_HOST_SOURCE is set (the keeper scripts name a host with it), and the shell would not run that host",
             Reason::NoBundledHost => "this release build carries no bundled host, so it runs the source host like a debug build",
-            Reason::NoShellHere => "only macOS has a shell; elsewhere the window starts the keeper",
             Reason::DebugKeeper => "tauri dev builds only the window, so a centralu-keeper beside it may be older code",
             Reason::ServeInstalled => {
                 "centralu serve is installed in this data folder (a hub linked this machine): the window uses that host, started in this sign-in, instead of one the folder's lock would refuse"
@@ -309,7 +293,7 @@ pub fn plan(f: &Facts) -> Plan {
             return Plan { mode: StartMode::Direct, host: Some(Host::Serve), dev, reason: Reason::ServeInstalled };
         }
         Os::Windows => return direct(Reason::NoKeeperHere),
-        Os::Linux if !f.env.use_keeper => return direct(Reason::KeeperOptIn),
+        Os::Linux => return direct(Reason::LinuxDirect),
         Os::MacOs if !release && !f.env.use_keeper => return direct(Reason::DebugDirect),
         _ => {}
     }
@@ -326,9 +310,7 @@ pub fn plan(f: &Facts) -> Plan {
         return keeper(StartMode::Attach, Reason::KeeperAnswers);
     }
     // Why the shell does not start this keeper, if it does not.
-    let no_shell = if f.os != Os::MacOs {
-        Some(Reason::NoShellHere)
-    } else if !release {
+    let no_shell = if !release {
         Some(Reason::DebugKeeper)
     } else if f.env.keeper_host_source != Var::Unset {
         Some(Reason::HostSourceNamed)
@@ -344,8 +326,6 @@ pub fn plan(f: &Facts) -> Plan {
     };
     if !release {
         keeper(StartMode::KeeperInProcess, Reason::DebugKeeper)
-    } else if f.os == Os::Linux {
-        keeper(StartMode::Keeper, why)
     } else {
         keeper(StartMode::KeeperBeside, why)
     }

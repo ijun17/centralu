@@ -16,7 +16,6 @@
     "arm64"
   ],
   "files": [
-    "host",
-    "centralu-keeper"
+    "host"
   ]
 }

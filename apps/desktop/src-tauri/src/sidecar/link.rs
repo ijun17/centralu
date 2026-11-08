@@ -352,19 +352,7 @@ impl KeeperLink {
         // The keeper executable next to this one (#440). A debug build always runs it in its own
         // executable: `tauri dev` does not rebuild `centralu-keeper`, so the one beside it may be
         // older code (keeper::exe).
-        let mut copy = None;
         let (exe, in_process) = match mode {
-            // From the copy of what this window carries, so that nothing long-lived runs from
-            // the AppImage's mount (FI4); no keeper answers, so a stale copy may be replaced.
-            // Without a copy, from beside this executable as before.
-            StartMode::Keeper => match self.carried(true) {
-                Some(dir) => {
-                    let exe = dir.join(keeper_exe::KEEPER_EXE);
-                    copy = Some(dir);
-                    (exe, false)
-                }
-                None => (keeper_exe::beside(&me), false),
-            },
             StartMode::KeeperInProcess => (me.clone(), true),
             // KeeperBeside, and a mode that never reaches here (Direct, Attach)
             _ => (keeper_exe::beside(&me), false),
@@ -376,32 +364,8 @@ impl KeeperLink {
                 format!("this bundle has no {} beside {}; reinstall Centralu", keeper_exe::KEEPER_EXE, me.display()),
             ));
         }
-        let mut start = self.keeper_start(in_process);
-        if let Some(dir) = copy {
-            start.host_source = Some(dir.join(crate::keeper::content::HOST_DIR));
-        }
+        let start = self.keeper_start(in_process);
         client::launch_detached(&exe, &start.args(), &start.env(), &start.log_path())
-    }
-
-    /**
-     * Copies the keeper beside this executable and the bundled host into
-     * `<data>/content/<version>/` (`keeper::carried`), for `StartMode::Keeper`. `replace`: no
-     * keeper runs, so a copy there that is damaged or of another build may be replaced. `None`
-     * when there is nothing to copy or the copy was refused; the reason is logged and the window
-     * goes on as before the copy existed.
-     */
-    fn carried(&self, replace: bool) -> Option<PathBuf> {
-        let me = std::env::current_exe().ok()?;
-        let host = self.host_dir.as_deref()?;
-        let keeper = keeper_exe::beside(&me);
-        let what = crate::keeper::carried::Carried { keeper: &keeper, host, version: &self.app_version };
-        match crate::keeper::carried::place(&self.data, &what, replace, &|m: &str| eprintln!("[keeper] {m}")) {
-            Ok(dir) => Some(dir),
-            Err(r) => {
-                eprintln!("[keeper] not running the keeper from a copy: {r}");
-                None
-            }
-        }
     }
 
     /**

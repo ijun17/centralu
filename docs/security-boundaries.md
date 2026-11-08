@@ -1837,11 +1837,10 @@ folder, `switch`). The rule:
   record across an `exec` (its pid and start do not change), so it attaches again as a window and may stop the keeper
   for an update; only code already running in the window can `exec` it, and the window never does. `codesign --display` reads the file
   now at the path, not the code running in the peer; a team-signed keeper should judge the peer's audit token
-  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). On
-  Linux, where the keeper runs only with `CC_USE_KEEPER=1`, a window runs from its AppImage's mount, whose path
-  changes at every launch: only the window that started the keeper is accepted, and a later launch gets
-  the limited credential until a window of its own starts a keeper; to settle before the Linux keeper runs by
-  default.
+  (`LOCAL_PEERTOKEN`, `SecCodeCopyGuestWithAttributes`) before releases are signed with a team (#1439). No
+  Linux window starts a keeper since #1895 step 4 PR 7. A window there runs from its AppImage's mount, whose path
+  changes at every launch, so a keeper would accept only the window that started it; to settle before a Linux keeper
+  is ever brought back.
   A debug keeper started with `CC_KEEPER_TEST_WINDOW_EXE=<path>` also accepts that executable, for the integration
   scripts, which pass the `node` that runs them; a release keeper compiles that out. An older keeper (before #1405) still hands the
   token to every process until the app is fully quit or the keeper is updated (its update hands over to a keeper that

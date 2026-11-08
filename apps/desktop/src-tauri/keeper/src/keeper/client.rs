@@ -98,6 +98,38 @@ pub fn stop_for_update(sock: &Path) -> Result<(), String> {
     request(sock, &json!({ "op": "stop", "forUpdate": true }), crate::host_proc::STOP_FOR_UPDATE_WAIT + Duration::from_secs(10)).map(|_| ())
 }
 
+/// What `stop_and_wait` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stopped {
+    /// No keeper answered: nothing to stop.
+    NoneAnswered,
+    /// It took the stop and no longer answers.
+    Stopped,
+    /// It did not take the stop (the error it gave, or why it could not be asked).
+    Refused(String),
+    /// It took the stop and still answered after the wait.
+    StillAnswering,
+}
+
+/// Asks a keeper answering on `sock` to stop (`stop`, which any process of this user may ask for: its host ends what it
+/// runs as a quit does), and waits up to `limit` for it to stop answering, which it does once its host has gone.
+pub fn stop_and_wait(sock: &Path, limit: Duration) -> Stopped {
+    if !alive(sock) {
+        return Stopped::NoneAnswered;
+    }
+    if let Err(e) = stop(sock) {
+        return Stopped::Refused(e);
+    }
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if !alive(sock) {
+            return Stopped::Stopped;
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+    Stopped::StillAnswering
+}
+
 /// A live attach connection. Its being open is what tells the keeper a window is attached;
 /// closing it (or this process ending, however it ends) is the detach.
 pub struct Attached {
@@ -260,5 +292,44 @@ mod tests {
         assert!(read_line(&mut r).is_err());
         let mut ok = BufReader::new(&b"{\"ok\":true}\n"[..]);
         assert_eq!(read_line(&mut ok).unwrap().as_deref(), Some("{\"ok\":true}\n"));
+    }
+
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// #1895 step 4 PR 7: what a Linux window does to a keeper an earlier build left on its data folder
+    #[test]
+    fn a_keeper_answering_is_asked_to_stop_and_waited_for() {
+        let dir = std::env::temp_dir().join(format!("cc-stop-and-wait-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("keeper.sock");
+        assert_eq!(stop_and_wait(&sock, Duration::from_secs(5)), Stopped::NoneAnswered);
+
+        let listener = UnixListener::bind(&sock).unwrap();
+        let gone = Arc::new(AtomicBool::new(false));
+        let keeper = {
+            let (sock, gone) = (sock.clone(), gone.clone());
+            thread::spawn(move || {
+                for conn in listener.incoming() {
+                    let mut conn = conn.unwrap();
+                    let mut line = String::new();
+                    BufReader::new(conn.try_clone().unwrap()).read_line(&mut line).unwrap();
+                    conn.write_all(b"{\"ok\":true}\n").unwrap();
+                    if line.contains("\"stop\"") {
+                        // Gone a moment after its answer, as a keeper is once its host has stopped
+                        thread::sleep(Duration::from_millis(300));
+                        gone.store(true, Ordering::SeqCst);
+                        let _ = std::fs::remove_file(&sock);
+                        return;
+                    }
+                }
+            })
+        };
+        assert_eq!(stop_and_wait(&sock, Duration::from_secs(10)), Stopped::Stopped);
+        assert!(gone.load(Ordering::SeqCst), "it waited for the keeper to go");
+        keeper.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

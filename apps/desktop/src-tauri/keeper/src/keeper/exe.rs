@@ -18,7 +18,7 @@
 //! `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` is whatever
 //! an earlier `cargo build` left there: older code than the window's, with nothing to tell the two
 //! apart (the two binaries of one `cargo build` are linked in no fixed order, so their times say
-//! nothing either). A debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
+//! nothing either). A macOS debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
 //! its own executable with `--keeper` and this variable. That is the only `--keeper` left.
 
 use std::path::{Path, PathBuf};

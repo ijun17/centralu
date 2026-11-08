@@ -55,11 +55,7 @@ function hostsFor(data) {
     .map((l) => ({ pid: Number(l.split(/\s+/, 1)[0]), command: l.replace(/^\d+\s+/, '') }))
 }
 
-/**
- * `extra`: more descriptors for the keeper to inherit from 3 on, as an AppImage's window passes its
- * runtime's keep-alive pipe and mount descriptor (`'pipe'` each; their ends here are in `stdio`).
- */
-function startKeeper(data, { env = {}, hostSource = HOST_SRC, bin = BIN, extra = [] } = {}) {
+function startKeeper(data, { env = {}, hostSource = HOST_SRC, bin = BIN } = {}) {
   const logFd = openSync(join(data, 'keeper.log'), 'a')
   const child = spawn(
     bin,
@@ -67,7 +63,7 @@ function startKeeper(data, { env = {}, hostSource = HOST_SRC, bin = BIN, extra =
     {
       // The app starts the keeper in a session of its own; so does this.
       detached: true,
-      stdio: ['ignore', logFd, logFd, ...extra],
+      stdio: ['ignore', logFd, logFd],
       env: { ...process.env, CC_DATA_DIR: data, ...env },
     },
   )

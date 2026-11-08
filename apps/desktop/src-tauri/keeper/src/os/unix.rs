@@ -185,6 +185,25 @@ pub const CLOSE_STDIN_TO_STOP: bool = false;
 /// Whether a `.bin/` sh script can be started as a program (it can: the kernel reads its `#!`).
 pub const RUNS_SH_SCRIPTS: bool = true;
 
+/**
+ * A keeper an earlier build may have left on the window's data folder (`dev`: the dev one), its host holding the folder's
+ * lock: asked to stop and waited for (`keeper::client::stop_and_wait`), so the window's own host finds the folder free.
+ * What happened, for the window's log; None when no keeper answered. Only a Linux window asks (#1895 step 4 PR 7): until
+ * then `CC_USE_KEEPER=1` ran a keeper there.
+ */
+pub fn stop_earlier_keeper(dev: bool) -> Option<String> {
+    use crate::keeper::client::{stop_and_wait, Stopped};
+    let sock = crate::keeper::socket_path(&crate::keeper::data_dir_with(dev));
+    let wait = crate::host_proc::STOP_WAIT + crate::host_proc::STOP_GRACE + std::time::Duration::from_secs(5);
+    let at = sock.display();
+    match stop_and_wait(&sock, wait) {
+        Stopped::NoneAnswered => None,
+        Stopped::Stopped => Some(format!("a keeper an earlier build started on {at} was asked to stop, and has")),
+        Stopped::Refused(e) => Some(format!("a keeper an earlier build started on {at} did not take the stop: {e}")),
+        Stopped::StillAnswering => Some(format!("a keeper an earlier build started on {at} still answers after {}s; starting the host anyway", wait.as_secs())),
+    }
+}
+
 /// Only Windows' window attaches to a `centralu serve` host (#1223, `start_plan::Host::Serve`): elsewhere a window
 /// runs its own host, or attaches to a keeper.
 pub fn serve_launcher() -> Option<std::path::PathBuf> {

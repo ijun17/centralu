@@ -1118,11 +1118,10 @@ app relaunches  → "Apply now" (#352): the host stops for an update and the rel
 | 번들된 호스트가 없는 macOS 릴리스(`cargo run --release`) | 없음 | `KeeperBeside` | 창 옆의 키퍼, 소스 호스트, 개발용 데이터 폴더 | 셸이 검증할 것이 없다 |
 | 키퍼가 이미 답함 | | `Attach` | 아무것도 띄우지 않고 붙는다 | 데이터 폴더 하나에 키퍼 하나 |
 | macOS 디버그(`pnpm app:dev`) | 없음 | `Direct` | 창이 tsx로 소스 호스트를 돌린다, `CC_DEV=1` | 키퍼 이전처럼 앱이 호스트의 부모다. `target/debug`에 남은 번들 호스트는 무시한다 |
-| macOS나 Linux 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
+| macOS 디버그 | `CC_USE_KEEPER=1` | `KeeperInProcess` | 창이 `CC_KEEPER_IN_PROCESS=1`과 함께 자신을 `centralu --keeper`로 띄우고, 키퍼는 소스 호스트를 돌린다 | `tauri dev`는 창만 빌드하므로 옆의 `centralu-keeper`가 더 오래된 코드일 수 있다([architecture.md](architecture.md) §4.1) |
 | 어디서나 | `CC_HOST_CMD`(값 무관) | `Direct` | 그 명령줄(빈 값이면 번들된 호스트나 소스 호스트) | 다른 호스트를 돌리는 비상구 |
-| Linux 릴리스(AppImage, deb, rpm) | 없음 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다 | 키퍼가 AppImage 안에서 돈다: 더 새 AppImage의 빌드로 전환하면 그 AppImage의 마운트에서 돌게 되는데, 그 마운트는 그 창이 끝나면 사라지고, 그 뒤 디버그 키퍼는 SIGBUS로 죽었다. 먼저 사본에서 돌아야 한다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6, #295) |
-| Linux 디버그 | 없음 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
-| Linux 릴리스 | `CC_USE_KEEPER=1` | `KeeperBeside` | 창 옆의 키퍼(AppImage의 `usr/bin/`) | macOS 밖에는 셸이 없다 |
+| Linux 릴리스(AppImage, deb) | `CC_USE_KEEPER`는 무시하고 창의 로그에 한 줄 남긴다 | `Direct` | 창이 시스템 Node로 번들된 호스트를 돌린다. 첫 호스트를 띄우기 전에 데이터 폴더의 `keeper.sock`에 답하는 키퍼가 있으면 멈추라고 청하고 사라질 때까지 기다린다(`os::stop_earlier_keeper`, `keeper::client::stop_and_wait`): 이전 빌드의 `CC_USE_KEEPER=1` 창이 띄운 키퍼로, 그 호스트가 폴더의 잠금을 쥐고 있을 것이기 때문이다. 그 턴은 종료할 때처럼 끝난다. AppImage에는 `centralu-keeper`가 실리지 않는다(`tauri.linux.conf.json`이 `build.features`를 비운다) | 키퍼가 지킬 권한 모델이 없고, AppImage의 마운트에서는 오래 사는 것이 돌면 안 된다([plans/keeper-removal.md](plans/keeper-removal.md) §2.4). #1895 4단계 PR 7 전까지 `CC_USE_KEEPER=1`은 마운트 밖 사본에서 키퍼를 돌렸지만, 기본으로 그것을 돌린 Linux 데스크톱은 없었다 |
+| Linux 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | tsx로 소스 호스트 | 위와 같다 |
 | Windows, 릴리스와 디버그 | `CC_USE_KEEPER`는 무시 | `Direct` | 번들된 호스트(릴리스)나 소스 호스트(디버그), 콘솔 창 없이(§1) | 키퍼는 unix 소켓, 디스크립터 전달, `flock` 위에 지어졌다 |
 
 창이 정하지 않는 것, 각자 제자리에서:
@@ -1161,9 +1160,8 @@ nonce가 적힌 `<data>/shell-status.json`을 최대 45초 기다린다. 셸은 
 것으로 적을 때까지 붙잡는다. 복사와 정리는 한 잠금을 거치고, 정리는 호스트가 어느 사본에서 도는지와 다음에 어느
 사본에서 돌지를 도는 그때 읽는다. 붙잡기가 없을 때는 막 준비된 호스트가 부른 정리가 교체가 방금 만든 사본을
 지웠다("Cannot find module .../hosts/<key>/main.mjs", #368). 그 교체는 #1895 4단계 PR 4에서 없어졌고, 붙잡기는 모든
-띄우기에 남는다. 온전한 사본은 원래 폴더가 사라져도 그대로 쓴다: Linux에서 그 폴더는 AppImage
-안에 있어 누군가 붙들고 있는 동안만 마운트되고, 더 새 AppImage의 창에게서 넘겨받은 키퍼는 그 창의 마운트보다 오래
-산다([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
+띄우기에 남는다. 온전한 사본은 원래 폴더가 사라져도 그대로 쓴다(업데이트가 바꾼 앱 번들. #1895 4단계 PR 7
+전까지는 Linux AppImage의 마운트도, [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
 
 셸이 띄운 키퍼(자기 실행 파일이 `<data>/content/<version>/`에 있는 키퍼)는 사본을 만들지 않는다: 호스트를 검증된
 사본의 `host/` 폴더에서 그대로 돌린다. 그 폴더는 읽기 전용이고 서명된 매니페스트와 대조를 마쳤다
@@ -1213,8 +1211,8 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 쥔 호스트의 재시작을 모두 크래시시켰고(#348), 알아챈 것은 손으로 돌린 키퍼의 children 스크립트(지금은 없다)뿐이었다. claude와 codex
 턴은 손으로 돌리는 채로 남는다. 각 스크립트는 통과하든 실패하든 자기가 띄운 프로세스와 그것들이 띄운 것까지 모두
 끝낸다. 이름이 아니라 프로세스 표 하나로 찾는다(`scripts/keeper-test-processes.mjs`). 검사가 실패하면
-`keeper.log`와 `host.log`의 끝을 찍는다. `keeper e2e (linux)` 잡은 같은 스크립트와 키퍼 크레이트의 단위 테스트를
-ubuntu-24.04에서 돌린다. 그곳의 첫 시도(2026-10-05)는 스크립트 자신에게 SIGTERM이 닿아 끝났다: 멈추는 길이
+`keeper.log`와 `host.log`의 끝을 찍는다. `keeper e2e (linux)` 잡은 키퍼 크레이트의 단위 테스트를
+ubuntu-24.04에서 돌린다. #1895 4단계 PR 7이 Linux를 직접 경로로 만들기 전까지는 같은 스크립트도 돌렸다. 그곳의 첫 시도(2026-10-05)는 스크립트 자신에게 SIGTERM이 닿아 끝났다: 멈추는 길이
 `/bin/kill -TERM -<pid>`를 썼는데, procps-ng 4.0.4는 이것을 pid의 **첫 자리 숫자**가 가리키는 그룹에 보내므로 1로
 시작하는 호스트 pid는 사용자의 모든 프로세스에 신호를 보냈다(#350). 이제 두 멈춤 함수 모두 `kill(2)`를 직접 부른다
 ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md)).
@@ -1372,8 +1370,9 @@ PR 4 전에는 키퍼가 다른 빌드의 키퍼에게 스스로를 넘겨주었
 없어졌다. 정문의 검사는 `keeper-integration.mjs`의 `front-door` 시나리오로 옮겨 갔다([plans/keeper-removal.md](plans/keeper-removal.md)
 §4, 4행).
 
-어느 콘텐츠 폴더에서 뜬 키퍼든, 서명됐든 아니든, 물려받은 디스크립터를 닫고 AppImage의 변수를 가장 먼저 버려
-(`keeper/appimage.rs`) 어떤 AppImage도 키퍼의 평생 동안 마운트된 채 남지 않는다(runtime-lessons FI4, FI5).
+#1895 4단계 PR 7 전까지는 콘텐츠 폴더에서 뜬 키퍼가 물려받은 디스크립터를 닫고 AppImage의 변수를 가장 먼저
+버렸다(`keeper/appimage.rs`). 창이 AppImage 밖 사본에서 띄운 Linux 키퍼를 위한 것이었다(runtime-lessons FI4, FI5).
+이제 키퍼를 띄우는 Linux 창은 없고, 셸은 macOS 키퍼에 그런 것을 넘기지 않는다.
 
 ### 4.5 호스트에서 본 업데이트 적용 (#352)
 

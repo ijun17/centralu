@@ -119,7 +119,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 호스트 | 세션, 스토어, 앱을 가진 Node 프로세스. 데이터 폴더마다 하나(소유 잠금) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | 서버, 백엔드, 사이드카(직접 경로만 그렇다) |
 | 스토어 | 호스트의 SQLite 데이터베이스 `<data>/store.db`. 쓰는 것은 호스트뿐이다 | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | 데이터 폴더 | `~/.centralu`(개발 중에는 `~/.centralu-dev`, `CC_DATA_DIR`로 바꿀 수 있다) | `packages/agent-host/src/data-dir.ts` | |
-| 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, #461부터 그렇게 띄우면 디버그 창이 요청한 때가 아니면 거절한다). 호스트를 띄우고 지켜보며, 정문을 가진다. 호스트의 자식은 호스트 자신의 것이다(#1895). macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `src-tauri/src/sidecar/`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
+| 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, #461부터 그렇게 띄우면 디버그 창이 요청한 때가 아니면 거절한다). 호스트를 띄우고 지켜보며, 정문을 가진다. 호스트의 자식은 호스트 자신의 것이다(#1895). macOS 릴리스 빌드에서 쓰고, macOS 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다(#1895 4단계 PR 7 전까지는 Linux도) | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `src-tauri/src/sidecar/`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
 | 정문 | 키퍼의 루프백 포트 하나와 토큰. 지금의 호스트에게 바이트를 그대로 옮겨 주므로, 클라이언트는 호스트 자신의 포트를 보지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.ko.md](architecture.ko.md) §4.2 | 프록시 |
 | 자식 서비스 | 키퍼의 `<data>/children.sock`. 예전에 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁했고, 그래서 그것들은 호스트보다 오래 살았다. 새로 뜬 키퍼는 #1895 3단계부터 이것을 내놓지 않는다. 호스트 쪽은 4단계 PR 1에서, 키퍼 쪽은 PR 2에서 없어졌고, PR 2의 키퍼는 `children`에 빈 목록으로 답한다 | 없어짐; [architecture.ko.md](architecture.ko.md) §4.3 | |
 | 빌드별 사본 | `<data>/hosts/<build>/`: 키퍼가 돌리는 빌드의 호스트 사본. 다시 빌드해도 두 빌드가 섞이지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
@@ -490,7 +490,7 @@ stateDiagram-v2
 
 누가 누구를 띄우고, 누가 누구와 무엇으로 이야기하는가. 부모와 자식은 실선, 연결은 점선이다.
 
-### 4.1 키퍼가 있을 때(macOS 릴리스 빌드. Linux나 디버그 빌드는 `CC_USE_KEEPER=1`일 때)
+### 4.1 키퍼가 있을 때(macOS 릴리스 빌드. macOS 디버그 빌드는 `CC_USE_KEEPER=1`일 때)
 
 ```mermaid
 flowchart TD

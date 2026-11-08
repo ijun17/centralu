@@ -8,13 +8,12 @@
  *
  * - Tauri bundles every binary of the package whose required features are among the build's
  *   `build.features`; drop `keeper-exe` from tauri.conf.json and the bundle silently loses it.
- * - Windows has no keeper; tauri.windows.conf.json clears the features so the installer does not
- *   ship a stub.
+ * - Windows and Linux have no keeper (Linux since #1895 step 4 PR 7); tauri.windows.conf.json and
+ *   tauri.linux.conf.json clear the features so the installer and the AppImage do not ship one.
  * - The keeper links `centralu-keeper-core` and nothing of the window's. One `use centralu_lib` in
  *   the keeper's main, or a GUI crate added to the core crate, and it carries the webview again.
  *
- * `pnpm release:npm` checks the built bundle itself (`checkMacKeeperExe` in scripts/release-npm.mts, and
- * on Linux `keeperProblems` in scripts/host-package.mts);
+ * `pnpm release:npm` checks the built bundle itself (`checkMacKeeperExe` in scripts/release-npm.mts);
  * this catches the same mistakes on every pull request, without a release build.
  */
 import { describe, expect, it } from 'vitest'
@@ -49,12 +48,13 @@ describe('the keeper executable', () => {
     expect(manifest).toMatch(/^default-run = "centralu"/m)
   })
 
-  it('is bundled on macOS and Linux, and not on Windows', () => {
+  it('is bundled on macOS, and not on Windows or Linux', () => {
     expect(json(`${TAURI}/tauri.conf.json`).build?.features).toContain('keeper-exe')
-    expect(json(`${TAURI}/tauri.linux.conf.json`).build?.features ?? ['keeper-exe']).toContain('keeper-exe')
-    const windows = json(`${TAURI}/tauri.windows.conf.json`).build?.features
-    expect(windows, 'tauri.windows.conf.json must replace build.features, or it inherits keeper-exe').toBeDefined()
-    expect(windows).not.toContain('keeper-exe')
+    for (const os of ['windows', 'linux']) {
+      const features = json(`${TAURI}/tauri.${os}.conf.json`).build?.features
+      expect(features, `tauri.${os}.conf.json must replace build.features, or it inherits keeper-exe`).toBeDefined()
+      expect(features).not.toContain('keeper-exe')
+    }
   })
 
   it('links the keeper crate and nothing of the window', () => {

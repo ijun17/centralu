@@ -29,10 +29,7 @@
  *     `--claude` adds a claude (`haiku`, a few cents) turn that the update cuts and the next host
  *     continues with Centralu's note, and one that the crash cuts, shown stopped and not continued;
  *   - stop ends everything;
- *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over;
- *   - a keeper started from `<data>/content/<version>/` closes the descriptors it inherited and
- *     drops the AppImage's variables, so neither it nor its host keeps an AppImage mounted (FI4,
- *     FI5); one started from anywhere else keeps them.
+ *   - a keeper killed outright takes its host with it, and a new keeper takes the folder over.
  *
  * Step 3's front door (`keeper-integration-front-door.mjs`): clients and the host's Codex bridge address are the front
  * door's, not the host's own port, the host gets the front door's token on its stdin, and after a host crash the same
@@ -54,7 +51,7 @@ import { join } from 'node:path'
 import { cleanupOnExit } from './keeper-test-processes.mjs'
 import { BIN, buildKeeper, cleanup, countFailure, failures, HOST_SRC, log } from './keeper-integration-harness.mjs'
 import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, scenarioKeeperDies, scenarioStop } from './keeper-integration-lifecycle.mjs'
-import { scenarioFromACopy, scenarioUpdate } from './keeper-integration-relaunch.mjs'
+import { scenarioUpdate } from './keeper-integration-relaunch.mjs'
 import { scenarioFrontDoor } from './keeper-integration-front-door.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
@@ -76,7 +73,6 @@ async function main() {
     'busy-holds-idle': scenarioBusyHoldsIdle,
     'keeper-dies': scenarioKeeperDies,
     'front-door': scenarioFrontDoor,
-    'from-a-copy': scenarioFromACopy,
   }
   const at = process.argv.indexOf('--only')
   const only = at >= 0 ? process.argv[at + 1].split(',') : Object.keys(scenarios)

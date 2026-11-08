@@ -1224,7 +1224,7 @@ jobs:
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
 
       # Each script runs whatever the one before said, so one failure does not hide the next.
-      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, the front door across a restart, from a copy out of the AppImage)
+      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, the front door across a restart)
         if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
         run: node scripts/keeper-integration.mjs --no-build
 
@@ -1240,16 +1240,13 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: pnpm exec tsx scripts/shell-integration.mts
 
-  # The same keeper scripts on Linux (#350, 2026-10-08). A first trial here (2026-10-05) ended when
-  # SIGTERM reached the script itself: the keeper stopped its host's group with
-  # `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (this image's) sends to the group named by the
-  # pid's first digit, so a host pid starting with 1 signalled every process of the user. Now a
-  # direct kill(2). Measured in WSL2 Ubuntu 24.04: docs/spikes/2026-10-linux-keeper.md.
-  #
-  # The keeper crate's unit tests run here too: `kill_group_signals_the_group_the_pid_leads_and_
-  # nothing_else` only tells the two apart against Linux's `kill`, and nothing else runs them on
-  # Linux. The window crate is built as well, since `centralu-keeper`'s binary is one of its targets; that needs
-  # webkit2gtk's headers (the same list as the bundle job). No shell steps: the shell is macOS's.
+  # The keeper crate's unit tests on Linux, where `host_proc` supervises the window's direct host. The keeper
+  # scripts ran here too (#350) until #1895 step 4 PR 7 made Linux direct: no Linux window starts a keeper.
+  # `kill_group_signals_the_group_the_pid_leads_and_nothing_else` only tells the two apart against Linux's
+  # `kill` (procps-ng 4.0.4 sends `kill -TERM -<pid>` to the group named by the pid's first digit, which once
+  # signalled every process of the user; now a direct kill(2)), and nothing else runs them on Linux. The
+  # window crate is built as well, a debug build of its Linux code; that needs webkit2gtk's headers (the
+  # same list as the bundle job). No shell steps: the shell is macOS's.
   keeper-linux:
     name: keeper e2e (linux)
     needs: changes
@@ -1303,7 +1300,3 @@ jobs:
       - name: keeper crate unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -p centralu-keeper-core --lib
-
-      - name: keeper (start, attach, background, relaunch, stop for an update, host crash, stop, the front door across a restart, from a copy out of the AppImage)
-        if: ${{ !cancelled() && steps.bundle.outcome == 'success' && steps.build.outcome == 'success' }}
-        run: node scripts/keeper-integration.mjs --no-build

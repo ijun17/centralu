@@ -2523,11 +2523,10 @@ by hand) used to run the keeper in the window's executable; it now fails to star
 | macOS release with no bundled host (`cargo run --release`) | none | `KeeperBeside` | the keeper beside the window, the source host, the dev data folder | there is nothing for the shell to verify |
 | a keeper already answers | | `Attach` | nothing is started; the window attaches | one keeper per data folder |
 | macOS debug (`pnpm app:dev`) | none | `Direct` | the window runs the source host through tsx, `CC_DEV=1` | the app is the host's parent, as before the keeper; a bundled host left in `target/debug` is ignored |
-| macOS or Linux debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
+| macOS debug | `CC_USE_KEEPER=1` | `KeeperInProcess` | the window starts itself as `centralu --keeper` with `CC_KEEPER_IN_PROCESS=1`; the keeper runs the source host | `tauri dev` builds only the window, so a `centralu-keeper` beside it may be older code ([architecture.md](architecture.md) §4.1) |
 | any | `CC_HOST_CMD` (any value) | `Direct` | that command line (a blank value: the bundled or source host) | the escape hatch for running some other host |
-| Linux release (AppImage, deb, rpm) | none | `Direct` | the window runs the bundled host through the system Node | the real window has not yet run the keeper on a Linux desktop ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §7, runtime-unification step 4b) |
-| Linux debug | none | `Direct` | the source host through tsx | as above |
-| Linux release | `CC_USE_KEEPER=1` | `Keeper` | the window copies the keeper beside it (`usr/bin/` in the AppImage) and its bundled host into `<data>/content/<version>/` (`keeper/carried.rs`: hashed, renamed into place, read-only; not signed) and starts the keeper from the copy, which runs the host from it; a copy that fails falls back to the keeper beside the window | nothing long-lived may run from the AppImage's mount, which goes when its window quits (runtime-lessons FI4); no shell off macOS |
+| Linux release (AppImage, deb) | `CC_USE_KEEPER` is ignored, with a line in the window's log | `Direct` | the window runs the bundled host through the system Node. Before its first host it asks a keeper answering on the data folder's `keeper.sock` to stop and waits for it to go (`os::stop_earlier_keeper`, `keeper::client::stop_and_wait`): one a `CC_USE_KEEPER=1` window of an earlier build started, whose host would hold the folder's lock. Its turns end as a quit's. The AppImage carries no `centralu-keeper` (`tauri.linux.conf.json` clears `build.features`) | no permission model for a keeper to hold, and nothing long-lived may run from the AppImage's mount ([plans/keeper-removal.md](plans/keeper-removal.md) §2.4). Until #1895 step 4 PR 7 `CC_USE_KEEPER=1` ran a keeper from a copy out of the mount; no Linux desktop ran it by default |
+| Linux debug | `CC_USE_KEEPER` is ignored | `Direct` | the source host through tsx | as above |
 | Windows, release or debug | `CC_USE_KEEPER` is ignored | `Direct` | the bundled host (release) or the source host (debug), no console window (§1) | the keeper is built on unix sockets, descriptor passing and `flock` |
 | Windows release, `centralu serve` installed in the data folder (`<data>/remote/bin/centralu.cmd` or `<data>/bin/centralu.cmd`), and its `serve --connection` lists `window` in `takes` and names this window's protocol (`serve_window::choose`; otherwise the row above) | none | `Direct` (`Host::Serve`) | that launcher as `centralu serve --window`: it starts the folder's serve host in this sign-in when none runs (the sign-in task, as `--detach` does), prints that host's port and token as the ready line, and ends when the window closes its stdin, leaving the host running. "Quit completely" runs `serve --stop` first (`ServeHost::stop`, with `CENTRALU_STOP_BY=quit`), which ends the host and what it holds and leaves the mark that keeps a linked hub from starting it again, worded to the hub as "by quitting Centralu there"; while an attempt of this window is still starting the host it waits for the attempt to be ready (up to 45 s) and stops then, since a stop that finds none running would leave the one that comes up behind it, and a folder held by another Centralu host (`heldByOther` in the stop's answer) is reported in the dialog instead of quitting; a window that fell back to the bundled host stops nothing through serve, since quitting ends its own child (#1466). A host in a network logon is used as it is, and the sign-in task moves it into this sign-in once idle. A `serve --window` that ends before its ready line hands every later attempt in the window's life to the bundled host (`ServeFallback`); if a host holds the folder all the same, the folder's lock refuses that start with the message naming who holds it | one host per data folder: a linked hub's serve holds this folder, or will, and the window's own host was refused by the lock ("Could not start the agent host", #1223). The window and the hub's link are two clients of one host |
 
@@ -2570,9 +2569,8 @@ dirty builds never share a copy. Once a host is ready, the copies it does not ru
 launch holds (`source::Copies`): a launch holds its copy until the keeper records it as the running host's. Copying
 and cleaning take one lock, and the cleanup reads which copy the host runs from, and which it will run next, when it
 runs. Without the hold, the cleanup a newly ready host set off deleted the copy a swap had just made ("Cannot find
-module .../hosts/<key>/main.mjs", #368); the swap went in #1895 step 4 PR 4, the hold stays for every launch. A complete copy is used even when the folder it came from is gone: on Linux that
-folder is inside an AppImage, mounted only while something holds it open, and a keeper that took over from a newer
-AppImage's window outlives that window's mount ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
+module .../hosts/<key>/main.mjs", #368); the swap went in #1895 step 4 PR 4, the hold stays for every launch. A complete copy is used even when the folder it came from is gone (an app bundle an update replaced; until #1895
+step 4 PR 7 also a Linux AppImage's mount, [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) §6).
 
 A keeper the shell started (its own executable in `<data>/content/<version>/`) makes no copies: its hosts run from
 the verified copy's `host/` folder, which is read-only and was checked against the signed manifest
@@ -2646,8 +2644,8 @@ because none of this shows in unit tests or e2e: #329's `await` before the serve
 restart that held a terminal (#348), and only a hand run of the keeper's children script (since removed) noticed. The claude and codex
 turns stay manual. Each script ends every process it started and everything those started, pass or fail, found
 from one process table rather than by name (`scripts/keeper-test-processes.mjs`), and prints the end of
-`keeper.log` and `host.log` when a check fails. The `keeper e2e (linux)` job runs the same scripts and the keeper
-crate's unit tests on ubuntu-24.04. A first trial there (2026-10-05) ended when SIGTERM reached the script itself: the
+`keeper.log` and `host.log` when a check fails. The `keeper e2e (linux)` job runs the keeper crate's unit tests on
+ubuntu-24.04; it ran the same scripts too until #1895 step 4 PR 7 made Linux direct. A first trial there (2026-10-05) ended when SIGTERM reached the script itself: the
 stop path ran `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 sends to the group named by the pid's first digit, so a
 host pid starting with 1 signalled every process of the user (#350). Both stop functions call `kill(2)` now
 ([spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md)).
@@ -2813,9 +2811,10 @@ signed content first and handed over to the keeper in that copy. `keeper-handoff
 moved to the `front-door` scenario of `keeper-integration.mjs` ([plans/keeper-removal.md](plans/keeper-removal.md) §4,
 row 4).
 
-A keeper from any content folder, signed or not, closes the descriptors it inherited and drops the AppImage's
-variables before anything else (`keeper/appimage.rs`), so no AppImage stays mounted for its life (runtime-lessons FI4,
-FI5).
+Until #1895 step 4 PR 7 a keeper from a content folder also closed the descriptors it inherited and dropped the
+AppImage's variables first (`keeper/appimage.rs`), for the Linux keeper a window started from a copy out of its
+AppImage (runtime-lessons FI4, FI5). No Linux window starts a keeper any more, and the shell hands a macOS keeper
+nothing of the kind.
 
 ### 4.5 Applying an update, seen from the host (#352)
 

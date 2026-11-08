@@ -75,12 +75,6 @@ pub fn run(args: &[String]) -> i32 {
     // Before anything opens a descriptor
     let raised = os::raise_descriptor_limit();
     let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
-    // From content nothing runs from an AppImage's mount any more: let it go before anything else
-    // opens a descriptor or starts a thread (FI4, FI5, `appimage.rs`).
-    let shed = content::own_origin(&data).dir().is_some().then(super::appimage::shed);
-    if let Some(what) = &shed {
-        log(what);
-    }
     if let Some((from, to)) = raised {
         log(&format!("descriptor limit raised from {from} to {to}"));
     }
@@ -192,9 +186,7 @@ pub fn run(args: &[String]) -> i32 {
 
 /// Says in the log where this keeper runs from.
 fn log_origin(origin: &content::Origin) {
-    if let content::Origin::Content { dir, signed: false, .. } = origin {
-        log(&format!("running from the copy {} a window made", dir.display()));
-    } else if let content::Origin::Content { dir, .. } = origin {
+    if let content::Origin::Content { dir, .. } = origin {
         log(&format!("running from verified content {}", dir.display()));
     }
 }

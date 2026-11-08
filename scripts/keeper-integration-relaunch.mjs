@@ -1,14 +1,14 @@
 /**
  * Keeper scenarios (`keeper-integration.mjs`): an update as a stop and continue, with a host crash,
- * background mode and a quit under the keeper started next (#1895); and a keeper started from a
- * content copy that lets go of what an AppImage handed it (FI4, FI5). An announced relaunch ("Apply
- * now" holding the keeper, #352) went with #1895 step 4 PR 3: an update stops the keeper.
+ * background mode and a quit under the keeper started next (#1895). An announced relaunch ("Apply
+ * now" holding the keeper, #352) went with #1895 step 4 PR 3: an update stops the keeper. The keeper
+ * a Linux window started from a copy out of its AppImage (FI4, FI5) went with step 4 PR 7.
  */
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, attachHere, familyOf, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
-import { attachClient, BIN, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
+import { attachClient, check, log, newData, readyView, session, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 /** `--claude`: the update and the crash below also cut a claude (`haiku`) turn. A few cents of model use; never in CI */
 const WITH_CLAUDE = process.argv.includes('--claude')
@@ -16,78 +16,6 @@ const WITH_CLAUDE = process.argv.includes('--claude')
 const CONTINUED = 'Centralu was updated during this turn'
 const stoppedMark = (data) => existsSync(join(data, 'stopped.json')) && readFileSync(join(data, 'stopped.json'), 'utf8')
 const hostLog = (data) => readFileSync(join(data, 'host.log'), 'utf8')
-
-/** Resolves once every process holding the other end of `stream` has closed it */
-function released(stream) {
-  return new Promise((resolve) => {
-    stream.on('end', resolve)
-    stream.on('close', resolve)
-    stream.on('error', resolve)
-    stream.resume()
-  })
-}
-
-/** A process's environment: `/proc` on Linux, `ps -E` (own processes only) on macOS */
-function environOf(pid) {
-  if (existsSync(`/proc/${pid}/environ`)) return readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
-  return execFileSync('ps', ['-wwE', '-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).split(/\s+/)
-}
-
-/**
- * FI4 and FI5 (docs/spikes/2026-10-linux-keeper.md §6): a keeper the window started from its copy in
- * `<data>/content/<version>/` lets go of what the AppImage's runtime handed it, so the mount can go
- * when the window quits, and its host and children see nothing of the AppImage's environment. A
- * keeper started any other way keeps them: they are what keeps its code mounted.
- */
-async function scenarioFromACopy() {
-  log('\nthe keeper from a copy lets the AppImage go (FI4, FI5)')
-  const mount = mkdtempSync('/tmp/ck-mount-')
-  tempDirs.push(mount)
-  const appEnv = {
-    APPDIR: mount,
-    APPIMAGE: `${mount}.AppImage`,
-    XDG_DATA_DIRS: `${mount}/usr/share:/usr/share`,
-    GTK_PATH: `${mount}/usr/lib/gtk-3.0`,
-  }
-  const pipes = ['pipe', 'pipe']
-
-  // Started any other way (here: from the build folder): the descriptors stay held
-  const direct = newData()
-  const dk = startKeeper(direct, { env: appEnv, extra: pipes })
-  const dHeld = [released(dk.stdio[3]), released(dk.stdio[4])]
-  const dView = await waitFor(async () => {
-    const v = await status(join(direct, 'keeper.sock'))
-    return ready(v) && v
-  }, 30_000)
-  if (!check(dView, 'a keeper started outside content brings the host up')) return
-  const dLet = await Promise.race([Promise.all(dHeld).then(() => true), sleep(2000).then(() => false)])
-  check(!dLet, 'it and its host keep what the window handed them (what keeps its own code mounted)')
-  await request(join(direct, 'keeper.sock'), { op: 'stop' }).catch(() => {})
-
-  // From the window's copy
-  const data = newData()
-  const sock = join(data, 'keeper.sock')
-  const dir = join(data, 'content', '0.0.0-test')
-  mkdirSync(dir, { recursive: true })
-  cpSync(BIN, join(dir, 'centralu-keeper'))
-  cpSync(HOST_SRC, join(dir, 'host'), { recursive: true })
-  const k = startKeeper(data, { bin: join(dir, 'centralu-keeper'), hostSource: join(dir, 'host'), env: appEnv, extra: pipes })
-  const held = Promise.all([released(k.stdio[3]), released(k.stdio[4])])
-  const view = await waitFor(async () => {
-    const v = await status(sock)
-    return ready(v) && v
-  }, 30_000)
-  if (!check(view, 'the keeper from the copy brings the host up')) return
-  const host = hostsFor(data)[0]
-  check(host?.command.includes(`${dir}/host/main.mjs`), 'the host runs from the copy as it is, not from hosts/', host?.command)
-  const let_ = await Promise.race([held.then(() => true), sleep(10_000).then(() => false)])
-  check(let_, 'neither the keeper nor its host holds what the window handed them, so the mount can go')
-  const env = environOf(view.hostPid)
-  const leaked = env.filter((e) => e.includes(mount) || /^(APPDIR|APPIMAGE)=/.test(e))
-  check(leaked.length === 0, "the host's environment names nothing of the AppImage", leaked.join(' '))
-  check(env.includes('XDG_DATA_DIRS=/usr/share'), 'and keeps the rest of a list it was in', env.filter((e) => e.startsWith('XDG')).join(' '))
-  await request(sock, { op: 'stop' }).catch(() => {})
-}
 
 /**
  * An update is a stop and continue (#1895): `stop` with `forUpdate` stops the host, which ends its own terminal, dev server
@@ -222,4 +150,4 @@ async function scenarioUpdate() {
   check((stoppedMark(data) || '').includes('"quit"'), 'and noted that the person quit, for a linked hub (#1143)', String(stoppedMark(data)))
 }
 
-export { scenarioFromACopy, scenarioUpdate }
+export { scenarioUpdate }

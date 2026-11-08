@@ -66,7 +66,7 @@ pub(super) use self::windows::WINDOW_WRITE_TIMEOUT;
 #[cfg(test)]
 use self::windows::add_test_window;
 // What the moved parts name as `super::…` (the keeper module itself).
-use super::{appimage, data_dir, prepare_default_dir};
+use super::{data_dir, prepare_default_dir};
 #[cfg(test)]
 use self::host::*;
 use self::windows::*;

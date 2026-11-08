@@ -47,7 +47,7 @@ import { minosProblems, SUPPORTED_MACOS } from './macos-minos.mjs'
 import { CONPTY_FILES as CONPTY_FILES_JS } from './conpty-files.mjs'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
-import { floorDiffers, hostPackageDir, hostPackageKeeper, hostPackageProblems, keeperProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
+import { floorDiffers, hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
 import { missingIcoImages } from './icon-check.mjs'
 const CONPTY_FILES = CONPTY_FILES_JS as readonly string[]
 import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
@@ -244,7 +244,7 @@ function checkRemoteRuntime(hostDir: string): void {
   console.log('  Node floor present (centralu-package.json)')
 }
 
-/** The keeper's own executable, shipped next to the window's on macOS and Linux (#440) */
+/** The keeper's own executable, shipped next to the window's on macOS (#440; Linux is direct since #1895 step 4 PR 7) */
 const KEEPER_EXE = 'centralu-keeper'
 
 /**
@@ -252,8 +252,7 @@ const KEEPER_EXE = 'centralu-keeper'
  *
  * The last part is the reason it is a separate executable: the window's links WebKit and AppKit, and a keeper that
  * pulled them in again would not be one that can later start from outside the bundle. It is linked from a crate with
- * no Tauri in it, so this only fails if someone adds such a dependency there. A Linux keeper is checked from its own
- * bytes instead (`keeperProblems`, host-package.mts), the same check as the copy in the host-only package.
+ * no Tauri in it, so this only fails if someone adds such a dependency there.
  */
 function checkMacKeeperExe(path: string): void {
   if (!existsSync(path)) fail(`the keeper executable is missing: ${path}`)
@@ -264,37 +263,6 @@ function checkMacKeeperExe(path: string): void {
   const libs = out('/usr/bin/otool', ['-L', path])
   if (/WebKit|AppKit|JavaScriptCore/i.test(libs)) fail(`the keeper executable links a GUI framework:\n${libs}`)
   console.log(`  ${KEEPER_EXE} present, arm64, no GUI framework linked`)
-}
-
-/**
- * The keeper inside an AppImage, checked as the host-only package's copy is (`keeperProblems`). The AppImage runtime
- * extracts by itself (`--appimage-extract <pattern>`, into `squashfs-root/` of the working folder) without FUSE, so
- * this runs on any runner that can build one.
- */
-function checkKeeperInAppImage(appImage: string, platform: string): void {
-  withKeeperFromAppImage(appImage, (keeper) => {
-    if (!existsSync(keeper)) fail(`the AppImage carries no ${KEEPER_EXE}`)
-    const problems = keeperProblems(keeper, platform)
-    if (problems.length) fail(`the keeper in the AppImage:\n  ${problems.join('\n  ')}`)
-  })
-  console.log(`  ${KEEPER_EXE} present, ${platform}, linking the C runtime only`)
-}
-
-/**
- * Runs `use` on the keeper the AppImage carries, extracted into a folder under `target/` that is removed afterwards.
- * The host-only package takes its keeper from here too (docs/plans/remote-keeper.md §7): the bytes the platform package
- * ships, not cargo's copy, which the bundler may not have used as it is.
- */
-function withKeeperFromAppImage<T>(appImage: string, use: (keeper: string) => T): T {
-  const dir = join(ROOT, 'apps/desktop/src-tauri/target/release/keeper-check')
-  rmSync(dir, { recursive: true, force: true })
-  mkdirSync(dir, { recursive: true })
-  try {
-    execFileSync(appImage, ['--appimage-extract', `usr/bin/${KEEPER_EXE}`], { cwd: dir, stdio: 'ignore' })
-    return use(join(dir, 'squashfs-root/usr/bin', KEEPER_EXE))
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
 }
 
 type Target = {
@@ -324,11 +292,6 @@ type Target = {
   install: (src: string, dest: string) => void
   /** prove the copied artifact is intact, executable, and the right machine */
   check: (dest: string) => void
-  /**
-   * Hands `stage` the keeper the host-only package carries beside `host/` (`hostPackageKeeper`), taken from the
-   * artifact at `dest`. Absent where that package carries none (Windows, until docs/plans/remote-keeper.md step 7)
-   */
-  withKeeper?: (dest: string, stage: (keeper: string) => void) => void
 }
 
 /**
@@ -399,11 +362,7 @@ const linuxAppImage = (id: string, machine: string): Target => {
       const arch = out('/usr/bin/file', ['-b', dest])
       if (!arch.includes(machine)) fail(`not ${machine}: ${arch}`)
       console.log(`  ${arch.split(',')[0]}`)
-
-      // (d) the keeper executable inside the AppImage (#440), for `CC_USE_KEEPER=1` there
-      checkKeeperInAppImage(dest, id)
     },
-    withKeeper: (dest, stage) => withKeeperFromAppImage(dest, stage),
   }
 }
 
@@ -653,13 +612,10 @@ if (target && ARCH_PKG) {
     // same folder the platform package's host was copied from, for the reason given at `win32-x64`
     step('Staging the host-only package')
     const hostSrc = join(ROOT, 'apps/desktop/src-tauri/resources/host')
-    const keeperName = hostPackageKeeper(target.id)
-    if (keeperName && !target.withKeeper) fail(`the host-only package carries ${keeperName}, and ${target.id} names no artifact to take it from`)
-    if (keeperName && target.withKeeper) target.withKeeper(dest, (src) => stageHostPackage(hostSrc, HOST_PKG, { src, name: keeperName }))
-    else stageHostPackage(hostSrc, HOST_PKG)
+    stageHostPackage(hostSrc, HOST_PKG)
     const problems = hostPackageProblems(HOST_PKG, target.id)
     if (problems.length) fail(`the host-only package would not run on a remote:\n  ${problems.join('\n  ')}`)
-    console.log(`  host/${keeperName ? ` and ${keeperName}` : ''} staged and checked: @centralu/host-${target.id}`)
+    console.log(`  host/ staged and checked: @centralu/host-${target.id}`)
   }
 
   // If `files` does not actually point at what was packed, the tarball ships **empty inside**

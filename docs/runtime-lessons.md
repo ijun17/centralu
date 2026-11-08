@@ -190,12 +190,15 @@ Guard: `tooling/keeper-executable.test.ts` "is bundled on macOS and Linux, and n
 `keeper/start_plan/tests.rs` `every_row_of_the_start_table`.
 Platforms: Windows.
 
-**ST15. Linux stays on the direct path until the keeper runs from a copy.**
+**ST15. Linux stays on the direct path.**
 Happened: the AppImage mounts its files while some process holds them; a keeper running from a newer AppImage's mount
 loses its own executable when that window quits (§10 FI4). The keeper had never run on Linux before #458.
-Rule: a Linux release starts the host directly unless `CC_USE_KEEPER=1` (`Reason::KeeperOptIn`); the keeper becomes
-the default only after it runs from `<data>/content/<version>/`.
-Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table`.
+Rule: a Linux window, release or debug, starts the host directly and ignores `CC_USE_KEEPER` (`Reason::LinuxDirect`,
+#1895 step 4 PR 7; docs/plans/keeper-removal.md §2.4). Before its first host it stops a keeper an earlier build's
+`CC_USE_KEEPER=1` window left on the data folder, whose host would hold the lock. The AppImage carries no keeper.
+Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table` (the Linux rows);
+`keeper/keeper/client.rs` `a_keeper_answering_is_asked_to_stop_and_waited_for`; `tooling/keeper-executable.test.ts`
+"is bundled on macOS, and not on Windows or Linux".
 Platforms: Linux. *Changed by #458, #459.*
 
 **ST16. Secrets travel on a pipe or in the environment, are read once and removed.**
@@ -1270,26 +1273,19 @@ Happened: the type-2 runtime keeps the squashfs mounted while any process holds 
 descriptor; a keeper started by keeper A from a newer AppImage holds neither, so its mount went when that window quit,
 and a debug keeper then died of SIGBUS when asked to stop, most likely at a page-in (#458, spikes/2026-10-linux-keeper.md
 §6). The same holds for the host and every terminal.
-Rule: the keeper and the host run from plain files under `<data>/content/<version>/`, copied out before a keeper starts; once
-nothing runs from the mount, inherited descriptors are closed. The copy is not signed (the release signs Linux content only once plan §8 decision 1 says so): it is hashed
-after copying, checked against the keeper and build stamp read from the source, renamed into place and made
-read-only, reused only while every file matches its manifest, and never replaced while a keeper may run from it.
-Guard: `keeper/keeper/carried/tests.rs` `the_keeper_and_host_are_copied_into_content_read_only_with_their_exec_bits`;
-`keeper/keeper/carried/tests.rs` `a_damaged_copy_is_copied_again_only_when_nothing_may_run_from_it`;
-`keeper/keeper/carried/tests.rs` `another_build_of_the_same_version_replaces_the_copy_only_when_nothing_may_run_from_it`;
-`start_plan/tests.rs` "Linux
-release, CC_USE_KEEPER=1"; `scripts/keeper-integration.mjs` `from-a-copy` (the descriptors a window hands over are
-released by a keeper from content and its host, and held by one started elsewhere; `keeper e2e (linux)` runs it).
-Not covered: the window's copy step itself runs only in the real window on Linux (plan step 4b's manual run).
+Rule: the keeper and the host ran from plain, hashed, read-only files under `<data>/content/<version>/`, copied out
+before a keeper started (`keeper/carried.rs`), and inherited descriptors were closed once nothing ran from the mount.
+Removed: went with #1895 step 4 PR 7, which made Linux direct (ST15). What is left of the rule: nothing long-lived
+outlives its window on Linux, since the window is the host's parent and the host runs from the mount only while the
+window does.
 Platforms: Linux. *Changed by runtime-unification step 4.*
 
 **FI5. The AppImage's environment leaks into children.**
 Happened: the AppRun sets GDK, GTK, `XDG_DATA_DIRS` and `APPDIR`, which reach terminals and agents (#14 audit).
-Rule: a child's environment does not carry the AppImage runtime's variables: a keeper from content drops `APPDIR`,
-`APPIMAGE`, `ARGV0`, `OWD` and every `:`-separated entry inside the mount before it starts anything.
-Guard: `keeper/keeper/appimage.rs` `nothing_that_points_into_the_mount_is_left`; `scripts/keeper-integration.mjs`
-`from-a-copy` (the host's environment). The direct path, Linux's default until plan step 4b, still passes them on
-(work list row 56).
+Rule: a keeper from content dropped `APPDIR`, `APPIMAGE`, `ARGV0`, `OWD` and every `:`-separated entry inside the mount
+before it started anything (`keeper/appimage.rs`).
+Removed: went with #1895 step 4 PR 7 with the Linux keeper (ST15). The direct path, now Linux's only one, still passes
+the variables on (work list row 56).
 Platforms: Linux. *Changed by runtime-unification step 4.*
 
 **FI6. The Linux host ships unpacked.**
@@ -1815,8 +1811,9 @@ These are practices, not invariants of the code; they say how a replacement modu
 and at the scale people reach (several agents, terminals and app views, a large store). CONTRIBUTING.md.
 
 **TE2. CI starts a real keeper on each OS it ships on.** CI never started a keeper, so a host crash loop stayed green
-(#329, #348); the `keeper e2e` job runs the keeper scripts on macOS (#349) and, since #458, on ubuntu-24.04
-(`keeper e2e (linux)`). A Windows keeper needs its own job before it ships.
+(#329, #348); the `keeper e2e` job runs the keeper scripts on macOS (#349). They ran on ubuntu-24.04 too
+(`keeper e2e (linux)`, #458) until #1895 step 4 PR 7 made Linux direct; that job keeps the keeper crate's unit tests,
+since `host_proc` supervises Linux's direct host. A Windows keeper needs its own job before it ships.
 
 **TE3. Test processes are ended by recorded pid, never by name.** `scripts/keeper-test-processes.mjs` reads one process
 table and ends every descendant and group of each recorded pid; the installed app, its keeper and host match the same
@@ -1845,8 +1842,6 @@ Not fixed here; each belongs to the pull request that next touches its document.
 
 - thin-shell.md §10.2 ("An unpinned shell" row), releasing.md "The macOS shell" and security-boundaries.md "Signed
   content" say releases start their keeper directly until shell v1 is pinned; #450 pinned it.
-- architecture.md §4.1 says the keeper ships in the AppImage's `usr/bin/` without saying Linux uses it only with
-  `CC_USE_KEEPER=1` (agent-host.md §4.0 has it right).
 - `links/tunnel.ts` says the first ssh "falls back to `~/.centralu/bin/centralu` on exit 127"; the fallback is decided
   on the remote (RE3).
 
