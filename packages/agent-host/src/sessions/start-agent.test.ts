@@ -12,7 +12,7 @@ import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import type { ModelOption } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { assistantAgentsRoot } from './assistant-home.js'
+import { assistantAgentsRoot, assistantHome, isAssistantAgentFolder } from './assistant-home.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -1974,5 +1974,46 @@ describe('the lowest preset (#1525)', () => {
     expect(lowestPreset('auto', 'edits', 'safe')).toBe('safe')
     expect(lowestPreset('edits')).toBe('edits')
     expect(lowestPreset()).toBe('auto')
+  })
+})
+
+/*
+ * #2133 step 3 (docs/plans/assistant-rename.md): the Assistant's folders under the new name when a later build made
+ * them, else under the old one, which this build never renames or leaves for a new one it makes.
+ */
+describe("the Assistant's folders under both names (#2133)", () => {
+  let root: string
+  let n = 0
+  beforeEach(() => {
+    root = join(process.env.CC_DATA_DIR!, `rename-${++n}`)
+    mkdirSync(root, { recursive: true })
+    vi.stubEnv('CC_DATA_DIR', root)
+  })
+  const uuid = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+  it('uses the old folders when no later build made the new ones, and makes no new one', () => {
+    expect(assistantHome()).toBe(join(root, 'orchestrator'))
+    expect(existsSync(join(root, 'orchestrator'))).toBe(true)
+    expect(assistantAgentsRoot()).toBe(join(root, 'orchestrator-agents'))
+    expect(existsSync(join(root, 'assistant'))).toBe(false)
+    expect(existsSync(join(root, 'assistant-agents'))).toBe(false)
+  })
+
+  it('uses the new folders a later build made, and not a file under the new name', () => {
+    writeFileSync(join(root, 'assistant'), 'not a folder')
+    expect(assistantHome()).toBe(join(root, 'orchestrator'))
+    mkdirSync(join(root, 'assistant-agents'))
+    expect(assistantAgentsRoot()).toBe(join(root, 'assistant-agents'))
+    rmSync(join(root, 'assistant'))
+    mkdirSync(join(root, 'assistant'))
+    expect(assistantHome()).toBe(join(root, 'assistant'))
+  })
+
+  it("knows a child's folder under either name, whichever is in use", () => {
+    mkdirSync(join(root, 'assistant-agents'))
+    expect(isAssistantAgentFolder(join(root, 'orchestrator-agents', uuid))).toBe(true)
+    expect(isAssistantAgentFolder(join(root, 'assistant-agents', uuid))).toBe(true)
+    expect(isAssistantAgentFolder(join(root, 'assistant-agents'))).toBe(false)
+    expect(isAssistantAgentFolder(join(root, 'orchestrator', uuid))).toBe(false)
   })
 })

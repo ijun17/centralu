@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { dataRoot } from '../data-dir.js'
 import { commandsFor } from './centralu-tools.js'
@@ -43,20 +43,42 @@ export function assistantRole(): string {
  * rewrite it along the way.
  */
 export function assistantHome(): string {
-  const dir = join(dataRoot(), 'orchestrator')
+  const dir = renamedFolder('orchestrator', 'assistant')
   mkdirSync(dir, { recursive: true })
   return dir
 }
 
 /**
- * Where the sessions the Assistant starts work (#853): each in a folder of its own under `<data>/orchestrator-agents`,
+ * Where the sessions the Assistant starts work (#853): each in a folder of its own under `<data>/orchestrator-agents` (or `assistant-agents`, `renamedFolder`),
  * never in the Assistant's (#994 review). A child writes files; written into the Assistant's folder they would
  * reach the session that directs every other one (Codex loads `.agents/skills` from its folder whatever the trust,
  * `codex/launch-config.ts`), and children sharing one folder would write over each other. Removed when its session is
  * deleted for good (`purgeSession`).
  */
 export function assistantAgentsRoot(): string {
-  return join(dataRoot(), 'orchestrator-agents')
+  return renamedFolder('orchestrator-agents', 'assistant-agents')
+}
+
+/** The folders the Assistant's children may be in: under either name of `assistantAgentsRoot` */
+const AGENTS_ROOTS = ['orchestrator-agents', 'assistant-agents'] as const
+
+/**
+ * A folder of the data root under the Assistant's new name (#2133, docs/plans/assistant-rename.md) when a later build
+ * made it, else under its old name. Never makes or renames the new one: until step 4 the old name is the one every
+ * build that can open this data knows. A session keeps the folder it started in (`cwdFor`, manager.ts), so this only
+ * places sessions made from now on.
+ */
+function renamedFolder(oldName: string, newName: string): string {
+  const renamed = join(dataRoot(), newName)
+  return isFolder(renamed) ? renamed : join(dataRoot(), oldName)
+}
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 /** A new, empty folder for one child of the Assistant */
@@ -69,7 +91,7 @@ export function newAssistantAgentFolder(): string {
 /** Whether `path` is one child's folder (directly under the root, never the root itself) */
 export function isAssistantAgentFolder(path: string): boolean {
   const p = resolve(path)
-  return dirname(p) === resolve(assistantAgentsRoot()) && /^[0-9a-f-]{36}$/.test(basename(p))
+  return AGENTS_ROOTS.some((root) => dirname(p) === resolve(dataRoot(), root)) && /^[0-9a-f-]{36}$/.test(basename(p))
 }
 
 export const ASSISTANT_ROLE = `You are the Assistant of the Centralu app.
