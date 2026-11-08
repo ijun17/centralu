@@ -310,7 +310,9 @@ a pinned shell (§10.2); the step 6 manual check covers it.
 
 Until now a refusal reached the person as one line in the build bar, drawn by the web UI, which the host feeds. The host is
 the thing whose content failed to verify, so it could hide that line. The window now draws a native dialog itself
-(`src/refusal.rs`, the dialog plugin from the Rust side), from what it reads without the host. What the plan left open:
+(`src/refusal.rs`, the dialog plugin from the Rust side), from what it reads without the host. Since #1895 step 4 PR 3
+the window asks for no switch, so it shows only the shell's refusal; the rows below about the keeper's swap view and
+`Announcer` describe what was built before that. What the plan left open:
 
 | Question | Choice | Why |
 |---|---|---|

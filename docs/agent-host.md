@@ -2594,11 +2594,10 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | request | answer |
 |---|---|
 | `{"op":"status"}` | `{"ok":true,"view":…}` — host state, the front door's port and a credential (§4.2: the token for a Centralu window, the limited credential for any other process, and `view.rights` says which, #1405), build source, background mode, attached windows, activity, the current or last swap (`swap`), whether the host keeps agents across one (`keepsAgents`), and the keeper's own build (`keeper.build`, since step 4; a window counts a keeper without one as another build, which only "Restart completely" moves, #461) |
-| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool,"relaunched":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. `relaunched`: this window is the one an announced relaunch started (§4.5) |
+| `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, then `{"event":"status","view":…}` on every change for as long as the connection is open. An open attach connection is what "a window is attached" means; its closing is the detach. A keeper of an earlier build also answers `relaunched`, which this build's window no longer reads (#1895 step 4, PR 3) |
 | `{"op":"system_ending","cancelled":bool?}` | a window's only (#1970): `{"ok":true}` once the host has been written the `system-ending` line (`cancelled`: that it is not after all); `{"ok":false}` when no host is up |
-| `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is about to relaunch itself to apply an update (#352): for `n` s (60 by default, at most 300) no window attached does not stop the keeper, whatever background mode says. The next attach spends it |
 | `{"op":"stop"}` | stops the host and the keeper ("Quit completely", and "Restart completely", after which the window starts a keeper of its own build) |
-| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a window's only (#1405; anything else gets `window_only`): a blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
+| `{"op":"switch","source":…,"keeper":{"exe":…}?}` | a window's only (#1405; anything else gets `window_only`). No window of this build sends it since #1895 step 4 PR 3; a window of an earlier build still may, until PR 4 removes it. A blue-green swap to that build (§4.2; the build stamp is re-read from its folder). With no host up, the next start simply runs that build. With `keeper` (the app sends its build's `centralu-keeper`; an app from before #440 sent its own executable, which is refused since #461, the keeper staying on its build) and a keeper of another build, the keeper first hands itself over to that build's keeper ([architecture.md](architecture.md) §4.4), which then runs the swap. A keeper from verified content starts nothing from the bundle: it verifies and copies the bundle's signed content and hands over to the keeper in that copy (§4.4); a refusal ends the swap as `failed` with `refused` set. A second `switch` during a swap is refused |
 | `{"op":"upgrade","exe":…,"source":…}` | a window's only (#1405): hands the keeper over to the keeper at `exe`, of build `source`, leaving the host alone (§4.4); from verified content, to the keeper in the verified copy of `exe`'s bundle content |
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
@@ -2607,7 +2606,7 @@ A window that does not take a status push within 5 s (it stopped reading) is clo
 detach; the window then attaches again. Before #840 item 5 it was only taken off the push list, kept counting as
 attached, and got no status again. A window the keeper closed itself may only be stalled (suspended, in a debugger,
 its reader blocked), so its detach does not stop the keeper even when it was the last one and background mode is
-off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window as it does for an announced relaunch, the next
+off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window, the next
 attach spends that, and if none comes the idle rule applies as usual. Each window has a writer thread of its own
 (`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one of the same
 swap phase, and the attach answer is queued first and never replaced. A view of another swap phase is kept: a
@@ -2636,12 +2635,12 @@ socket (its table shares the relay's sockets instead of duplicating them, which 
 relays at most 1,024 connections at once: one past that is closed as it is accepted, logged once per run, so a
 client connecting in a loop cannot run the keeper out of descriptors (`front_door.rs`, `MAX_RELAYS`).
 
-**When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. During an announced
-relaunch's grace (§4.5), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
+**When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. While a window it closed
+itself may still come back (`REATTACH_GRACE`, below), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
 host (a working or waiting session, a terminal, a command run). A keeper no window attached to within 60 s of
 starting ends too: the app that launched it died first.
 
-`scripts/keeper-integration.mjs` drives all of this, the announced relaunch included, with the real binary (`cargo build` into `/tmp`) and the
+`scripts/keeper-integration.mjs` drives all of this with the real binary (`cargo build` into `/tmp`) and the
 real bundled host against a temporary `CC_DATA_DIR`.
 
 **In CI.** The `keeper e2e` job in `.github/workflows/build.yml` (macOS) builds the binary and the host once and runs
@@ -2901,7 +2900,7 @@ like `app_guide` because updates are rare (Codex is offered it without a deferra
 allow once, or always for that session until the host restarts. It never calls `updates.setAutoApply`, so an agent
 cannot change the person's automatic-apply preference with it. (The orchestrator's `set_preferences` can turn it on, behind a
 card in every preset, §1.4.) An install starts the normal host install; the window still
-performs its own safe relaunch/switch step.
+performs its own safe relaunch step.
 
 **Applying for an agent (#665).** `update_centralu(action: "apply")` is the window's "Apply now" asked for by an agent.
 Only a window can relaunch, so the host asks over the event stream (`update-apply.ts`, `UpdateApplyBroker`): an
@@ -2931,7 +2930,7 @@ cannot parse, while `other` with its text has been read by every build. The ques
 #1895 step 3 the host restarts, so running turns in every session, the asker's included, stop and go on once it is back,
 and terminals and Run commands start again (`CENTRALU_APPLY_QUESTION`; before, it said the agents keep running and the new
 window's switch cuts a Centralu tool call still running after 10 s). One window relaunches: one ticket goes per request, and the
-keeper's relaunch is the single owner of the switch the new window makes. A replayed request or go starts nothing (the
+window relaunches only after its keeper has stopped for the update. A replayed request or go starts nothing (the
 host is no longer asking, or the window no longer holds the ticket), a linked machine's apply events never reach a
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows
 none of them, and the agent's call is cut at the drain like any in-process tool call.
@@ -2951,7 +2950,7 @@ updating", and the busy report is the keeper's, so nothing applies by itself wit
 host of #1895 step 4 PR 1 or later) is the same stop: the drain begins it before it stops them, and the host that takes over continues what it ended.
 
 **The keeper holds no children** (#1895 step 3, owner decision 2026-11-03, option C; the removal that follows is
-the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 and PR 2 are built). The macOS release keeps its shape, shell then keeper then host, because the
+the removal design of #1895 step 4, [plans/keeper-removal.md](plans/keeper-removal.md), whose PR 1 to PR 3 are built). The macOS release keeps its shape, shell then keeper then host, because the
 release is ad-hoc signed and only a tree the shell starts keeps its macOS permissions across updates ([plans/thin-shell.md](plans/thin-shell.md)
 §1, §2): agents the host spawns itself are still in that tree. What changes is that a keeper started fresh serves no child socket,
 so the host spawns its own children as on every other machine, and every ending stops them. Since
@@ -2964,16 +2963,18 @@ step 4 PR 1 the host does not look for the socket at all, and since PR 2 the kee
 | A host crash | the keeper restarts it, and children re-attach mid-turn | the keeper restarts it by the same rules; the agents, terminals and commands end with it, and a turn in flight shows stopped with Continue, as on Windows and Linux. Only a stop for an update lists turns to continue |
 | "Quit completely", background mode off, idle exit | `stop` on the child service: the host stops its children and notes the person quit (#1143) | a plain `{"op":"stop"}` on the host's stdin (`STOP_LINE`): the same stop and the same mark |
 | Background mode, credential issuance (#1405), the front door, supervision, per-build copies | the keeper's | unchanged, the keeper's |
-| A window of another build opened by hand | "Switch to this build": handoff and swap | the same, and the swap's drain stops the host for an update (above), since it holds no agents. A step 3 keeper still holding children (below; one of step 4 PR 2 or later holds none) whose host can stop for an update stops for one and exits instead of handing over, and the window starts a keeper of its own build. Whether the host can is what the host said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not pass it on: a keeper that took children over with a host it adopted reads "cannot" until a new host starts (the swap of a switch starts one), so a handoff without a swap hands the children on again at that keeper's next switch |
+| A window of another build opened by hand | "Switch to this build": handoff and swap | since step 4 PR 3, "Restart into this build" ("Go back to this build" when the keeper is newer): a keeper whose view says `stopsForUpdate` gets `{"op":"stop","forUpdate":true}`, so the next host continues the turns; any other a plain `{"op":"stop"}`, which ends them as a quit does. The confirmation names that loss and is asked only when the keeper does not report itself idle. The window keeps attaching, and its run loop starts a keeper of its own build. With automatic updates on, a window newer than an idle keeper does this by itself, once per window and not after the bar was dismissed; it never moves a keeper back to an older build. Whether a host can stop for an update is what it said at its start (`{"swap":{...,"stopsForUpdate":true}}`), and a handoff does not pass it on: a keeper that took a host over reads "cannot" until it starts a new one. Between step 3 and step 4 PR 3 this was "Switch to this build", whose swap's drain stopped the host for an update |
 
-The window knows the keeper does this from its view (`stopsForUpdate`); an older keeper lacks it and gets `relaunching` as before.
-`RelaunchCheck.restartsHost` is set then, and also for an older keeper whose host does not hand its agents over.
-`RelaunchCheck.keepsAgents` is set only for an older keeper whose host does: Settings says agents keep going only then, and a window
-that cannot tell (Windows, Linux, a browser, one not attached to a keeper yet) says only that restarting Centralu applies the update.
+The window knows the keeper does this from its view (`stopsForUpdate`), and sets `RelaunchCheck.restartsHost` then. A keeper whose
+view lacks it (an earlier build, or one that took its host over from one) gets no "Apply now": the update line says it cannot stop the
+agent host for an update and to restart it from the build bar first, or to quit Centralu completely (`KEEPER_TOO_OLD_TO_UPDATE`).
+Before step 4 PR 3 such a keeper was told `relaunching` and the new window switched it. A window that cannot tell (Windows, Linux, a
+browser, one not attached to a keeper yet) says only that restarting Centralu applies the update.
 
 *The transition from a keeper that holds children.* A person on an earlier build presses "Apply now" in that build's window, which
-tells its keeper `relaunching`; the new window attaches to that keeper and switches it, as before (its view has no
-`stopsForUpdate`). The old keeper hands itself over to the new build's keeper with everything it holds (§4.4), and the swapped host
+tells its keeper `relaunching`. Until step 4 PR 3 the new window attached to that keeper and switched it (its view has no
+`stopsForUpdate`), as told here; since then the new window offers "Restart into this build", a plain stop that ends what that keeper
+holds as a quit does. The old keeper hands itself over to the new build's keeper with everything it holds (§4.4), and the swapped host
 takes the children over. A keeper that received children this way keeps serving them for the rest of its life: its host goes on
 spawning through it, and nothing running is cut by the transition itself. Its next update, switch or quit stops them (the host's
 stop for an update kills them through the service and lists the turns; the keeper ends what is left), and the keeper the shell
@@ -2990,8 +2991,9 @@ open it again to update". Quitting stops those children, and the keeper the shel
 
 Such a keeper (beta.48 or earlier) then swaps its host to the new build under itself anyway (its `move_keeper`), and its
 host's drain would hand its children to it, where no host of this build looks. So the host keeps one small check, past
-PR 2 since such a keeper runs this host whatever this build's keeper is, until no window can switch one (PR 3, or at
-the latest PR 6) (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
+PR 2 since such a keeper runs this host whatever this build's keeper is, and past PR 3 since it starts its host from the bundle's
+paths, which after the update hold this build: a host of its that exits comes back as this build with no window involved. It goes
+with PR 6 (`lifecycle/keeper-held.ts`, through `keeper.sock`'s read-only `children` op and, to end, `children.sock`): a
 standby under a keeper whose `children.sock` answers stands by only when that keeper lists its children and none runs
 (an `ok: false`, no answer or an unreadable list refuses it too), so that swap fails before the running host is touched
 and it serves on; a plain start under one (its host crashed or stopped) ends what the keeper holds before it restores
@@ -3006,7 +3008,7 @@ update stops the host (by the keeper since step 3, by the relaunched window's sw
 lose: a Centralu tool call still running (a `start_agent` or `agent_session` wait, an `ask_project`, an app tool) is cut and has to be
 tried again, and running turns are cut and continued. An orchestrator with working children is almost always inside such a wait, so
 dropping the busy rule would cut those waits on every automatic apply. An agent's explicit apply makes that choice for
-itself, as a person pressing the button does, and its own call is answered before the switch begins.
+itself, as a person pressing the button does, and its own call is answered before the stop begins.
 
 **On Windows**, measured on Windows 11 on 2026-10-08 with a temporary npm prefix and a stand-in holding the same
 handles as the running app (an exe started from the folder, the host's `better-sqlite3` and `node-pty` modules mapped):
@@ -3034,25 +3036,15 @@ terminal counts even at a prompt: the host cannot tell an idle shell from one ru
 waits for terminals to close. Moving one session to a newly installed agent CLI (#297) uses the same file's narrower
 rule, `sessionIdle` (§4.6).
 
-**What the host sees.** A stop for an update: by the keeper's stop line since step 3, or, when the relaunched window
-switches a keeper of an earlier build, by the swap's drain (§4.2), after the keeper has handed itself over (§4.4). The
-drain stops this host's agents, terminals and commands as an update's stop does, since no host holds them in the keeper
-any more (#1895 step 4), and the next host continues the listed turns and opens the terminals and Run commands again.
+**What the host sees.** A stop for an update, by the keeper's stop line (since step 3; until step 4 PR 3 a relaunched
+window could also switch a keeper of an earlier build, whose swap's drain was the same stop). It stops this host's agents,
+terminals and commands, and the next host continues the listed turns and opens the terminals and Run commands again.
 The new host's update status starts fresh at its own version.
 
-The desktop waits for its automatic relaunch swap before mounting the app (#580). If that attempt
-fails or times out, it opens on the attached host and remembers the attempt so `DesktopRoot` does
-not repeat it automatically. The platform records the attached swap's `startedAt` before requesting
-another switch: the keeper retains its last swap across handoffs. The startup wait ignores failed
-swap broadcasts with that same timestamp, including activity changes before a new swap starts;
-the current request's rejection, a new failure, a matching host build or the timeout settles it.
-Only a matching host build or a final swap with a different `startedAt` supersedes the startup
-error. A failed new swap shows its reason once, and a late success clears the timeout; an old final
-swap cannot hide a new refusal.
-Later switch requests record the same boundary, so a new final swap clears their request timeout
-even if it arrives before the timeout. Repeated old reports and full restart errors stay independent.
-The browser regression in `e2e/relaunch.spec.ts` boots the real desktop entry with a mocked shell
-boundary.
+The desktop mounts the app once it has a host, with no swap to wait for: the relaunch swap and its start-up wait (#580)
+went with #1895 step 4 PR 3, since the window no longer switches a keeper. `e2e/relaunch.spec.ts` boots the real desktop
+entry with a mocked shell boundary and checks "Apply now" against a keeper that can stop for an update and one that
+cannot, and the build bar's restart.
 
 ### 4.6 Moving sessions to a newly installed agent CLI (#297)
 

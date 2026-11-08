@@ -1224,11 +1224,11 @@ Platforms: macOS, Linux.
 Happened: the EMSGSIZE fix lives in the outgoing keeper, and in an update that is the old build, which still failed on
 every try; the window kept offering "Switch to this build" (#391, dbe96997).
 Rule: ask of every compatibility fix which side runs the code during an update. A failed handoff still lets the host
-switch run; once the host is on the window's build, a keeper left behind is a note with "Restart completely", never a
-retried switch.
-Guard: `platform/tauri/switch-plan.test.ts` "reads the host on this build with the keeper left behind as running the
-new version, not as a failure"; `platform/tauri/switch-plan.test.ts` "does not switch by itself again either". That the
-keeper falls through to the host swap after a rolled-back handoff is **UNGUARDED** in the keeper crate.
+switch run. Since #1895 step 4 PR 3 the window never switches: a keeper of another build is restarted (UP7), so a
+keeper left behind on a switch cannot arise from this build's window.
+Guard: `platform/tauri/switch-plan.test.ts` "offers the restart for a host or a keeper of another build, a keeper that
+says no build of its own included (#461)". That the keeper falls through to the host swap after a rolled-back handoff
+is **UNGUARDED** in the keeper crate (it goes in PR 4).
 Platforms: macOS, Linux.
 
 **HD13. A running executable that is unlinked keeps running; one overwritten in place may not.**
@@ -1529,7 +1529,7 @@ Guard: **UNGUARDED**.
 Platforms: all.
 
 **UP3. Under a keeper, quitting only detaches.**
-Rule: the window never stops the host or waits on it; background mode and the relaunch grace are the keeper's; in
+Rule: the window never stops the host or waits on it; background mode and the reattach grace are the keeper's; in
 direct mode the window kills its host on exit.
 Guard: `window/sidecar/mod.rs` `a_supervisor_that_never_started_reports_direct_mode` (direct mode); detach is **UNGUARDED**.
 Platforms: all.
@@ -1553,33 +1553,43 @@ Platforms: macOS.
 
 **UP6. The keeper is told before the window goes.**
 Happened: with background mode off (the default), the old window closing was "the last window" and stopped
-everything (#352).
-Rule: announce `relaunching` (60 s, at most 300); the keeper tells the next window it is the relaunched one, once; a
-keeper too old to know `relaunching` is acceptable only with background mode on, otherwise the window refuses.
-Guard: `keeper/keeper/mod.rs` `an_announced_relaunch_holds_a_keeper_with_background_off`; `keeper/keeper/mod.rs`
-`a_relaunch_nobody_came_back_from_falls_back_to_stopping`. The window's refusal is **UNGUARDED**.
+everything (#352). Announcing the relaunch (`relaunching`, a grace of up to 300 s) kept the keeper for the new window,
+which then switched it; #1895 step 4 PR 3 replaced both with the stop below.
+Rule: "Apply now" sends `stop {forUpdate}` and relaunches only once the keeper answered; it is offered only by a keeper
+whose view says `stopsForUpdate`, and any other keeper is restarted from the build bar first; a refused stop keeps the
+window attached and says why.
+Guard: `window/sidecar/link.rs` `apply_now_is_offered_only_with_a_keeper_that_stops_for_an_update`;
+`window/sidecar/link.rs` `apply_now_refused_by_the_keeper_does_not_relaunch_even_with_background_mode_on`;
+`window/sidecar/link.rs` `a_refused_stop_for_an_update_keeps_the_window_attached_and_says_why`.
 Platforms: macOS, Linux.
 
-**UP7. A window switches by itself only forward, and only when nothing is lost.**
+**UP7. A window restarts a keeper of another build by itself only forward, and only when nothing is lost.**
 Happened: opening an older window with the automatic mode on quietly downgraded keeper and host (#421, 5c5f60a3).
-Rule: newer means a higher app version, then a later build time; what cannot be ordered is never newer; switch by
-itself only when `hostBusy` says idle and nobody typed for 20 s.
-Guard: `platform/tauri/switch-plan.test.ts` "only forward: a window of an older build never switches, asks or waits by
-itself"; `platform/tauri/switch-plan.test.ts` "what cannot be ordered is never newer, either way";
+Rule: newer means a higher app version, then a later build time; what cannot be ordered is never newer; restart by
+itself only with automatic updates on, when the keeper reports itself idle (`busy === false`), once per window and not
+after the bar was dismissed; the button asks first unless the keeper reports itself idle.
+Guard: `platform/tauri/switch-plan.test.ts` "only forward: a window of an older build never restarts by itself";
+`platform/tauri/switch-plan.test.ts` "what cannot be ordered is never newer, either way";
+`platform/tauri/switch-plan.test.ts` "never while something runs or nobody knows, never with the setting off, never
+twice, never after "Not now""; `e2e/relaunch.spec.ts` "with something running, the restart asks first, says the
+turns go on, and nothing restarts by itself";
 `packages/ui/src/features/settings/apply-update.test.ts` "never applies while anything is running, and unknown counts
 as running".
 Platforms: macOS, Linux.
 
 **UP8. "Restart completely" replaces a keeper that cannot move.**
 Happened: #387's fix lives in the sending keeper (HD12).
-Rule: it is the keeper's `stop`; the window stays, sees the keeper exit and starts one of its own build.
+Rule: it is the keeper's `stop`; the window stays, sees the keeper exit and starts one of its own build. The build bar's
+"Restart into this build" (#1895 step 4 PR 3) is the same, with `stop {forUpdate}` to a keeper that can stop for an
+update (`window/sidecar/link.rs` `a_restart_into_this_build_stops_the_keeper_for_an_update_when_it_can`).
 Guard: **UNGUARDED** in Rust (the window's attach loop); covered in `e2e/quit-dialog.spec.ts` for the dialog only.
 Platforms: macOS, Linux.
 
 **UP9. A switch names the keeper inside the bundle, never a copy.**
 Rule: `switch` carries `keeper.exe` as the `centralu-keeper` beside the window's executable (none in debug); an older
-keeper ignores the field and swaps only the host.
-Guard: **UNGUARDED** on the window side.
+keeper ignores the field and swaps only the host. No window of this build sends `switch` since #1895 step 4 PR 3; the
+rule stands for an earlier build's window until the keeper's `switch` goes (PR 4).
+Guard: none left on the window side.
 Platforms: macOS, Linux.
 
 **UP10. The code that runs an update is the old code.**

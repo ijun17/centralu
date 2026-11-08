@@ -655,7 +655,7 @@ in that window. If it already offers **Apply now**, use that button: no separate
 restart is needed. Otherwise load the newly installed window once by closing and reopening
 it. With agents active, first enable Settings → Background → **Keep agents running after
 Centralu quits**, and use **Quit**, not **Quit completely**; otherwise wait until they finish.
-The reopened window attaches to the existing keeper; use its **Switch to this build** action
+The reopened window attaches to the existing keeper; use its **Restart into this build** action
 to apply the new keeper/host. This is the first application of the new window code, not an
 additional **Restart completely**, a shell rebuild or a permission reset. Subsequent local
 installs are detected by that window and offer **Apply now**. There is no existing CLI or

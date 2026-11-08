@@ -1,8 +1,10 @@
 /**
  * What a keeper of a build that still holds children (beta.48 or older, `keeper-holding-last`) still runs, for the
  * update from such a build to this one (#1895 step 4, PR 1 review). It outlives this build's own children service
- * (gone in PR 2): such a keeper runs this host whatever this build's keeper is, as long as a window can still switch
- * it (below). It goes once none can (`docs/plans/keeper-removal.md` §4, PR 3 or at the latest PR 6).
+ * (gone in PR 2) and the window's switch request (gone in PR 3): such a keeper still runs this host whenever it starts
+ * one after the update, since it starts its host from the bundle's paths and those now hold this build. A host that
+ * exits (a crash) is started again that way with no window involved, which is `endHeld`'s case below. It goes with the
+ * handoff in PR 6 (`docs/plans/keeper-removal.md` §4), which waits four releases.
  *
  * Such a keeper, refused by this build's keeper at handoff, rolls back and swaps its host to this build under itself
  * anyway (its `move_keeper`). Its host's drain hands its agents, terminals and commands to the keeper's children

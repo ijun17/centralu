@@ -527,7 +527,7 @@ flowchart TD
   codex -- "spawns: stdio MCP" --> bridge
   keeper --- door
 
-  app -. "keeper.sock: attach, switch" .-> keeper
+  app -. "keeper.sock: attach, stop" .-> keeper
   web -. "WebSocket, app view HTTP" .-> door
   bridge -. "WebSocket" .-> door
   door -. "bytes relayed" .-> host
@@ -699,6 +699,11 @@ tool call's (`parentRunId`), linked to the session it stood up. A clean run take
 has its answer (#378); the record of what it did stays in the session archive.
 
 ### 5.4 Switching builds (blue-green swap, with a keeper)
+
+No window of this build asks for this since #1895 step 4 PR 3: an update, and a window of another build, stop the
+keeper (`stop {forUpdate}` when it can stop its host for an update, a plain `stop` otherwise) and the window starts a
+keeper of its own build, whose host continues the turns. The keeper still serves `switch` for an earlier build's window
+until PR 4 removes it, as below.
 
 ```mermaid
 sequenceDiagram

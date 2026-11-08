@@ -515,7 +515,7 @@ flowchart TD
   codex -- "spawns: stdio MCP" --> bridge
   keeper --- door
 
-  app -. "keeper.sock: attach, switch" .-> keeper
+  app -. "keeper.sock: attach, stop" .-> keeper
   web -. "WebSocket, app view HTTP" .-> door
   bridge -. "WebSocket" .-> door
   door -. "bytes relayed" .-> host
@@ -685,6 +685,10 @@ sequenceDiagram
 간다(#378). 그것이 한 일의 기록은 세션 보관함에 남는다.
 
 ### 5.4 빌드 바꾸기(키퍼가 있을 때의 블루그린 스왑)
+
+#1895 4단계 PR 3부터 이 빌드의 창은 이것을 청하지 않는다. 업데이트와 다른 빌드의 창은 키퍼를 멈추고(호스트를 업데이트용으로
+멈출 수 있으면 `stop {forUpdate}`, 아니면 평범한 `stop`), 창이 자기 빌드의 키퍼를 띄우며, 그 호스트가 턴을 이어 간다. 키퍼는
+PR 4가 지울 때까지 이전 빌드의 창을 위해 아래의 `switch`를 계속 받는다.
 
 ```mermaid
 sequenceDiagram
