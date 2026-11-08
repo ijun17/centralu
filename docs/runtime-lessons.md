@@ -135,10 +135,11 @@ Platforms: macOS, Linux.
 
 **ST9. A keeper nobody attaches to ends by itself.**
 Happened: a window that dies between starting the keeper and attaching would leave a keeper nobody watches.
-Rule: no attach within 60 s ends the keeper; an announced relaunch holds it up to 60 s (at most 300 s); background mode
-on, it idles out after 30 minutes with no window and no activity.
+Rule: no attach within 60 s ends the keeper; a window the keeper closed itself is waited for up to 5 minutes
+(`REATTACH_GRACE`; the announced relaunch's grace went with #1895 step 4 PR 3); background mode on, it idles out after 30
+minutes with no window and no activity.
 Guard: `keeper/keeper/mod.rs` `a_keeper_nobody_attached_to_ends_after_the_grace`; `keeper/keeper/mod.rs`
-`the_relaunch_grace_is_bounded`.
+`a_window_expected_back_holds_a_keeper_with_background_off`.
 Platforms: macOS, Linux.
 
 **ST10. A process LaunchServices starts gets `/` and launchd's environment.**
@@ -1566,11 +1567,14 @@ Platforms: macOS, Linux.
 **UP7. A window restarts a keeper of another build by itself only forward, and only when nothing is lost.**
 Happened: opening an older window with the automatic mode on quietly downgraded keeper and host (#421, 5c5f60a3).
 Rule: newer means a higher app version, then a later build time; what cannot be ordered is never newer; restart by
-itself only with automatic updates on, when the keeper reports itself idle (`busy === false`), once per window and not
-after the bar was dismissed; the button asks first unless the keeper reports itself idle.
+itself only with automatic updates on, when the keeper reports itself idle (`busy === false`) and can stop for an update,
+once per window and not after the bar was dismissed; the button asks first unless the keeper reports itself idle, and
+always before a plain stop (a keeper whose host is down reports idle).
 Guard: `platform/tauri/switch-plan.test.ts` "only forward: a window of an older build never restarts by itself";
 `platform/tauri/switch-plan.test.ts` "what cannot be ordered is never newer, either way";
-`platform/tauri/switch-plan.test.ts` "never while something runs or nobody knows, never with the setting off, never
+`platform/tauri/switch-plan.test.ts` "never a plain stop: a keeper that cannot stop for an update, or does not say, is left
+to the button"; `platform/tauri/switch-plan.test.ts` "a plain stop always asks, even from a keeper that reports itself
+idle"; `platform/tauri/switch-plan.test.ts` "never while something runs or nobody knows, never with the setting off, never
 twice, never after "Not now""; `e2e/relaunch.spec.ts` "with something running, the restart asks first, says the
 turns go on, and nothing restarts by itself";
 `packages/ui/src/features/settings/apply-update.test.ts` "never applies while anything is running, and unknown counts
