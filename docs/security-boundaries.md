@@ -1794,16 +1794,15 @@ door's port and a credential, stop the host, and make the keeper run a host from
   --display`), and one whose signature cannot be read is not a window; no release is signed with a team today
   (macOS releases are signed ad hoc), so in every build that ships the path decides. A peer whose pid or executable
   the kernel does not name is not a window. The keeper judges before it takes its state lock, logs every refusal with
-  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A
-  window adopted in a keeper handoff is judged again from its socket, whose peer record travels with it. A test runs
+  the executable, the accepted paths and why, and a window given the limited credential says so in its own log. A test runs
   two copies of the test binary against the socket, one at the accepted path and one named `centralu` elsewhere: only
   the first gets the token (`only_the_accepted_window_executable_gets_the_token`).
 - **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
-  every status pushed to it. It alone may `switch` and `upgrade`, which start a build of the request's naming and hand
-  it the token.
+  every status pushed to it. (Until #1895 step 4 PR 4 it alone could `switch` and `upgrade`, which started a build of
+  the request's naming and handed it the token; both answer `gone` to anyone now.)
 - **What anything else gets.** The limited credential in the token's place (`view.rights: "limited"`, `limited.rs`,
-  derived as the host derives it, so it works behind the door across swaps), on `status`, `attach` and every push to
-  it; `switch` and `upgrade` are refused (`window_only`). `stop`, `restart`, `settings`,
+  derived as the host derives it, so it works behind the door across the host's restarts), on `status`, `attach` and
+  every push to it. `stop`, `restart`, `settings`,
   `set_background` and `children` hand out no token and stay open to this user. A test sends every op from a process
   that is not a window and fails if any line it gets back holds the token
   (`no_reply_carries_the_token_to_a_process_that_is_not_a_window`); the ops are listed once (`OPS`) and a second test
@@ -1823,8 +1822,7 @@ door's port and a credential, stop the host, and make the keeper run a host from
   pid taken by another process, is refused, not remembered as that process. Any other pid is refused whatever its path
   reads, a process started from the window's own file that never attached included, so a replaced file widens nothing.
   `system_ending` is a window's by either rule (an attached window, or by its path), so a window the install replaced
-  can still tell the host the system is ending. `status`, `switch` and `upgrade` keep the path rule (`switch` and
-  `upgrade` start code with the token, which a window about to relaunch does not need). A keeper started after the
+  can still tell the host the system is ending. `status` keeps the path rule. A keeper started after the
   install (it restarted or crashed) knows no window from before it: "Apply now" is refused with "only a Centralu window
   attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it
   ran, quit Centralu and open it again", which runs the installed build. Tests:
@@ -1930,31 +1928,17 @@ From #280 step 2 the keeper held the host's agents, terminals and commands and s
 signal any child the keeper held; only the hosts the keeper held got in (#538, by the peer pid the kernel recorded).
 A keeper started fresh has not served it since #1895 step 3, no host connects to one since step 4 PR 1, and the keeper
 has no children service since PR 2: nothing listens there, a socket a dead holding keeper left is removed at start,
-`keeper.sock`'s read-only `{"op":"children"}` answers an empty list, and a keeper handoff that carries a child table
-is refused.
+`keeper.sock`'s read-only `{"op":"children"}` answers an empty list, and since PR 4 the keeper takes no handoff at all.
 
-### The keeper handoff channel
+### The keeper handoff channel (gone since #1895 step 4 PR 4)
 
-A keeper update hands everything the keeper holds to the new build's keeper (#280 step 4,
-[architecture.md](architecture.md) §4.4): through that channel go the front door's token, every
-agent's and terminal's descriptors with their unsent output, and the listening sockets. So who can
-be on the other end matters as much as on `keeper.sock`.
-
-- The channel is one end of a `socketpair` that the outgoing keeper places at descriptor 3 of the
-  process it starts itself. It has no path in the filesystem, so no other process can connect to it
-  at all; there is no socket file to protect with `0600` and none to remove. The incoming keeper
-  still reads its peer's uid from the kernel and refuses another user's.
-- The process started is the executable named by `switch` (`keeper.exe`) or `upgrade` (`exe`):
-  the app's own executable inside its bundle. Only a Centralu window may send either (#1405), since
-  the keeper starts what it names and hands it the token and every handle. A process of this user
-  that replaces a bundle's files before a window switches to it is the same-user residual, not a
-  boundary.
-- Nothing from the channel is logged: the snapshot carries the token, and the log lines name only
-  pids, counts and reasons.
-- The incoming keeper proves it holds `keeper.lock` by taking the `flock` on the passed description
-  before it says ready; a third keeper is refused throughout, as before.
-- `CC_KEEPER_HANDOFF_HOLD_MS` makes an incoming keeper wait before it says ready. It exists for the
-  integration test and changes nothing but timing.
+Until #1895 step 4 PR 4 a keeper update handed everything the keeper held to the new build's keeper over a
+`socketpair` end at descriptor 3 of the process it started (#280 step 4): the front door's token, the listening
+sockets and every connection. It had no path, so no other process could connect, and the incoming keeper still
+checked its peer's uid; the process started was the executable a window named in `switch` or `upgrade`, which only a
+window could send (#1405). A keeper now runs one build for its life ([architecture.md](architecture.md) §4.4): it
+starts no other keeper and passes nothing, and a keeper started with `--take-over-fd` exits with code 7 before it
+reads the channel, binds or locks anything.
 
 ## Signed content (#440)
 

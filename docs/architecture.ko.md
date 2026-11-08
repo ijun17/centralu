@@ -240,7 +240,7 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
 
 키퍼는 자기가 시작된 빌드를, 그 호스트들과 함께 평생 돈다. 업데이트나 다른 빌드의 창은 그것을 멈추고(호스트가 할 수 있으면
 업데이트용으로, §4.5), 창이 셸을 통해 자기 빌드의 키퍼를 띄운다. `switch`와 `upgrade`는 `gone`으로 답하고
-"Restart completely"를 이름으로 든다. `--take-over-fd`로 시작한 `centralu-keeper`(이전 빌드의 키퍼가 창이 전환시킬 때 다음
+Centralu를 완전히 종료하고 다시 열라고 알린다(이전 빌드의 창은 그 문구를 보여 줄 뿐, 이 경우에는 "Restart completely"가 없다). `--take-over-fd`로 시작한 `centralu-keeper`(이전 빌드의 키퍼가 창이 전환시킬 때 다음
 키퍼를 그렇게 띄운다)는 아무것도 bind하기 전에 한 줄을 남기고 코드 7로 끝난다.
 
 | 결정 | 이유 |

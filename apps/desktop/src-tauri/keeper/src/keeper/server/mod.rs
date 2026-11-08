@@ -488,7 +488,7 @@ pub(in crate::keeper) fn exit_after_stop() -> ! {
 /// The refusal of a restart by a keeper on its way out
 pub(super) const KEEPER_STOPPING: &str = "the keeper is stopping";
 /// The answer to `switch` and `upgrade` (#1895 step 4, PR 4), in words an earlier window shows as it is
-pub(super) const GONE: &str = "gone: this keeper runs one build for its whole life and no longer switches builds; \"Restart completely\" starts this window's build";
+pub(super) const GONE: &str = "gone: this keeper runs one build for its whole life and no longer switches builds; quit Centralu completely and open it again to run another build";
 
 fn reply(stream: &mut UnixStream, v: &Value) {
     let _ = stream.write_all(&json_line(v));

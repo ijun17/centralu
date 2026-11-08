@@ -302,7 +302,7 @@ re-`initialize`, codex's `thread/resume`) are in the earlier versions of [agent-
 
 A keeper runs the build it was started as, with its hosts, for its whole life. An update, or a window of another
 build, stops it (for an update when its host can, §4.5), and the window starts a keeper of its own build through the
-shell. `switch` and `upgrade` answer `gone`, naming "Restart completely". A `centralu-keeper` started with
+shell. `switch` and `upgrade` answer `gone`, telling the person to quit Centralu completely and open it again (a window of an earlier build shows that text and has no "Restart completely" for this case). A `centralu-keeper` started with
 `--take-over-fd`, as a keeper of an earlier build starts the next one when a window switches it, logs a line and exits
 with code 7 before it binds anything.
 

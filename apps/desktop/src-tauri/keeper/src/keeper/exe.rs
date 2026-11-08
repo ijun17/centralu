@@ -104,13 +104,6 @@ pub fn beside(window_exe: &Path) -> PathBuf {
     window_exe.with_file_name(KEEPER_EXE)
 }
 
-/// Whether `exe` is a keeper executable by its name. A keeper hands itself over only to one
-/// (`handoff::give`): a window from before #440 names its own executable instead, which no longer
-/// answers `--keeper` and must never be started without it.
-pub fn is_keeper_exe(exe: &Path) -> bool {
-    exe.file_name().is_some_and(|n| n == KEEPER_EXE)
-}
-
 /// Whether `centralu --keeper` may run the keeper in this process: only a debug build, and only when
 /// the debug window that started it asked (`IN_PROCESS_ENV`).
 pub fn runs_in_process(asked: bool, build: crate::start_plan::Build) -> bool {
@@ -198,15 +191,6 @@ mod tests {
         assert_eq!(beside(Path::new("/tmp/.mount_x/usr/bin/centralu")), PathBuf::from("/tmp/.mount_x/usr/bin/centralu-keeper"));
     }
 
-    #[test]
-    fn only_centralu_keeper_is_a_keeper_executable() {
-        assert!(is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu-keeper")));
-        assert!(is_keeper_exe(Path::new("/d/content/0.1.0/centralu-keeper")));
-        assert!(!is_keeper_exe(Path::new("/Applications/Centralu.app/Contents/MacOS/centralu")), "a window from before #440 names this");
-        assert!(!is_keeper_exe(Path::new("/tmp/centralu-keeper-old")));
-        assert!(!is_keeper_exe(Path::new("/")));
-    }
-
     /// `tauri dev` relinks only the window; a keeper from an earlier `cargo build` is older code. A
     /// release never runs one in the window's executable, whatever the environment says.
     #[test]
@@ -247,7 +231,7 @@ mod tests {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        // SAFETY: dup2 and fcntl are async-signal-safe (the same as handoff::spawn_successor).
+        // SAFETY: dup2 and fcntl are async-signal-safe.
         unsafe {
             cmd.pre_exec(move || {
                 if fd == 3 {

@@ -1170,9 +1170,8 @@ Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461
 is required: a snapshot without one is refused and the handoff rolls back. A keeper of 0.1.0-beta.11 or earlier wrote no
 `sweeps` (#435) and rolls back; 0.1.0-beta.12 and later hand over.
 Since #1895 step 4 PR 2 a snapshot that carried a child table
-at all was refused. *Manual*:
-`scripts/keeper-handoff-integration.mjs --old-keeper` against a real 0.1.0-beta.16 (hands over) and 0.1.0-beta.11 (rolls
-back); no CI job runs an old keeper: **UNGUARDED** in CI. *Changed by #461.*
+at all was refused. *Changed by #461.*
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD7. A rollback says how the incoming keeper ended.**

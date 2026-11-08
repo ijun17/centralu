@@ -48,10 +48,6 @@ impl StatusSink for KeeperSink {
         if ready {
             let k = k.clone();
             thread::spawn(move || {
-                if let Some(hold) = test_clean_hold() {
-                    log(&format!("holding {}ms before removing unused host copies (CC_KEEPER_CLEAN_HOLD_MS)", hold.as_millis()));
-                    thread::sleep(hold);
-                }
                 let removed = k.copies.clean(|| k.state.lock().map(|st| host_dirs_in_use(&st)).unwrap_or_default());
                 if !removed.is_empty() {
                     log(&format!("removed unused host copies: {}", removed.join(", ")));
@@ -89,11 +85,6 @@ impl StatusSink for KeeperSink {
     }
 }
 
-/// A test hook: wait this long after a host is ready before removing unused copies, so a test can
-/// have the cleanup land while a launch holds a copy (#368).
-pub(super) fn test_clean_hold() -> Option<Duration> {
-    std::env::var("CC_KEEPER_CLEAN_HOLD_MS").ok()?.trim().parse::<u64>().ok().map(Duration::from_millis)
-}
 
 /**
  * The host folders in use: the running host's (its copy, or its verified content) and the one the next launch runs. No

@@ -1184,7 +1184,7 @@ copyDir }`를 들고, 제어 소켓으로 돌려주고, `<data>/keeper.json`(토
 | `{"op":"status"}` | `{"ok":true,"view":…}` — 호스트 상태, 정문의 포트와 자격 증명(§4.2: Centralu 창에는 토큰, 다른 프로세스에는 제한 자격 증명. 어느 쪽인지는 `view.rights`, #1405), 빌드 출처, 백그라운드 모드, 붙은 창 수, 활동, 키퍼 자신의 빌드(`keeper.build`, 4단계부터). 지금 또는 마지막 교체(`swap`)와 `keepsAgents`는 #1895 4단계 PR 4에서 없어졌고, 3단계 이후의 모든 창 빌드는 둘 다 선택 항목으로 읽는다 |
 | `{"op":"attach","protocol":1,"build":…}` | `{"ok":true,"view":…,"sameBuild":bool,"keeperSameBuild":bool}`, 그 뒤 연결이 열려 있는 동안 바뀔 때마다 `{"event":"status","view":…}`. 열린 attach 연결이 곧 "창이 붙어 있다"는 뜻이고, 그것이 닫히는 것이 떨어짐이다. 이전 빌드의 키퍼는 `relaunched`도 답하지만, 이 빌드의 창은 그것을 읽지 않는다(#1895 4단계 PR 3) |
 | `{"op":"stop"}` | 호스트와 키퍼를 멈춘다("Quit completely", 그리고 창이 이어서 자기 빌드의 키퍼를 띄우는 "Restart completely") |
-| `{"op":"switch",…}` / `{"op":"upgrade",…}` | 누구에게나 `{"ok":false,"error":"gone: …"}`, "Restart completely"를 이름으로 든다(#1895 4단계 PR 4). PR 3부터 어느 창도 보내지 않고, 이전 빌드의 창은 그 거절을 보여 준다. PR 4 전에는 호스트를 다른 빌드로 블루그린 교체하는 것과 키퍼를 그 빌드의 키퍼에게 넘겨주는 것이었다(§4.4) |
+| `{"op":"switch",…}` / `{"op":"upgrade",…}` | 누구에게나 `{"ok":false,"error":"gone: …"}`, Centralu를 완전히 종료하고 다시 열라고 알린다(#1895 4단계 PR 4. 이전 빌드의 창은 자기 호스트를 돌리는 다른 빌드의 키퍼에 대해 "Restart completely"를 내놓지 않는다). PR 3부터 어느 창도 보내지 않고, 이전 빌드의 창은 그 거절을 보여 준다. PR 4 전에는 호스트를 다른 빌드로 블루그린 교체하는 것과 키퍼를 그 빌드의 키퍼에게 넘겨주는 것이었다(§4.4) |
 | `{"op":"restart"}` | 호스트가 포기한 뒤의 Retry |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | 백그라운드 모드, `<data>/keeper-settings.json`에 둔다 |
 

@@ -1,8 +1,7 @@
 //! What macOS and Linux share: the system calls the keeper and the host supervisor need that `std`
 //! does not offer. A lock the OS releases when its holder dies, a new session, the creation mask and
 //! who is on the other end of a socket (here); the host process's group, signals and the login
-//! shell probe (below); watching a handed-over host (`process`) and descriptor passing for a
-//! handoff (`handles`), both until the handoff goes. What differs between the two is in `macos.rs` and `linux.rs`.
+//! shell probe (below). What differs between the two is in `macos.rs` and `linux.rs`.
 
 
 use std::fs::File;
@@ -205,9 +204,9 @@ pub fn hide_console(cmd: &mut Command) {
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
 /// *runs*. Not whether its number is taken, which a zombie still does.
 ///
-/// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
-/// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it
-/// ran, so it was never seen as exited (no restart) and `Foreign::wait` sat out its 10 s.
+/// `kill(pid, 0)` alone succeeds on a zombie. A process that is someone else's child (until #1895
+/// step 4 PR 4, a host handed over by the previous keeper) and died before its parent reaped it kept
+/// reading as running under signal 0, so it was never seen as exited.
 ///
 /// The state is read before `kill` asks whether the pid exists, never after (#546). The other
 /// order took a zombie reaped between the two calls for a running process: `kill` found the
@@ -530,9 +529,8 @@ mod tests {
     }
 
     /// A process that ended but is not reaped yet is not alive. `kill(pid, 0)` succeeds on a
-    /// zombie, so a handed-over host that died before the keeper that started it reaped it was
-    /// never seen as exited (`host_proc::handover::Foreign`). Here the test itself is the parent
-    /// that has not reaped.
+    /// zombie, so a process whose parent has not reaped it yet would read as running. Here the test
+    /// itself is the parent that has not reaped.
     #[test]
     fn a_zombie_is_not_alive() {
         let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
