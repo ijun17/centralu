@@ -107,22 +107,29 @@ pub enum Stopped {
     Stopped,
     /// It did not take the stop (the error it gave, or why it could not be asked).
     Refused(String),
-    /// It took the stop and still answered after the wait.
+    /// It took the stop and was still running after the wait.
     StillAnswering,
 }
 
 /// Asks a keeper answering on `sock` to stop (`stop`, which any process of this user may ask for: its host ends what it
-/// runs as a quit does), and waits up to `limit` for it to stop answering, which it does once its host has gone.
-pub fn stop_and_wait(sock: &Path, limit: Duration) -> Stopped {
+/// runs as a quit does), and waits up to `limit` for the keeper to be gone: its `lock` (`keeper.lock`) free. Not its
+/// socket, which it removes first, before its host has stopped (`Keeper::shutdown`, PR 7 review); the lock goes with
+/// the keeper's process, which exits only once its host has.
+pub fn stop_and_wait(sock: &Path, lock: &Path, limit: Duration) -> Stopped {
     if !alive(sock) {
         return Stopped::NoneAnswered;
     }
     if let Err(e) = stop(sock) {
         return Stopped::Refused(e);
     }
+    // Free when the file is gone or its flock can be taken; taken only to look, and let go at once (the File drops)
+    let free = || match std::fs::File::open(lock) {
+        Err(_) => true,
+        Ok(f) => os::try_lock(&f).unwrap_or(false),
+    };
     let deadline = Instant::now() + limit;
     while Instant::now() < deadline {
-        if !alive(sock) {
+        if free() {
             return Stopped::Stopped;
         }
         thread::sleep(Duration::from_millis(250));
@@ -298,15 +305,18 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    /// #1895 step 4 PR 7: what a Linux window does to a keeper an earlier build left on its data folder
+    /// #1895 step 4 PR 7: what a Linux window does to a keeper an earlier build left on its data folder. Like a real
+    /// keeper (`Keeper::shutdown`), this one removes its socket first and holds its lock while its host still stops.
     #[test]
-    fn a_keeper_answering_is_asked_to_stop_and_waited_for() {
+    fn a_keeper_answering_is_asked_to_stop_and_waited_for_until_it_is_gone() {
         let dir = std::env::temp_dir().join(format!("cc-stop-and-wait-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let sock = dir.join("keeper.sock");
-        assert_eq!(stop_and_wait(&sock, Duration::from_secs(5)), Stopped::NoneAnswered);
+        let (sock, lock) = (dir.join("keeper.sock"), dir.join("keeper.lock"));
+        assert_eq!(stop_and_wait(&sock, &lock, Duration::from_secs(5)), Stopped::NoneAnswered);
 
+        let held = std::fs::File::create(&lock).unwrap();
+        assert!(os::try_lock(&held).unwrap());
         let listener = UnixListener::bind(&sock).unwrap();
         let gone = Arc::new(AtomicBool::new(false));
         let keeper = {
@@ -318,17 +328,18 @@ mod tests {
                     BufReader::new(conn.try_clone().unwrap()).read_line(&mut line).unwrap();
                     conn.write_all(b"{\"ok\":true}\n").unwrap();
                     if line.contains("\"stop\"") {
-                        // Gone a moment after its answer, as a keeper is once its host has stopped
-                        thread::sleep(Duration::from_millis(300));
-                        gone.store(true, Ordering::SeqCst);
                         let _ = std::fs::remove_file(&sock);
+                        // Its host takes a while to end its turns; the keeper exits, and its lock goes, after that
+                        thread::sleep(Duration::from_millis(1500));
+                        gone.store(true, Ordering::SeqCst);
+                        drop(held);
                         return;
                     }
                 }
             })
         };
-        assert_eq!(stop_and_wait(&sock, Duration::from_secs(10)), Stopped::Stopped);
-        assert!(gone.load(Ordering::SeqCst), "it waited for the keeper to go");
+        assert_eq!(stop_and_wait(&sock, &lock, Duration::from_secs(10)), Stopped::Stopped);
+        assert!(gone.load(Ordering::SeqCst), "it waited for the keeper's lock, not its socket");
         keeper.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

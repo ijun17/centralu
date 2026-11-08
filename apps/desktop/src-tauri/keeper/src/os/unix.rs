@@ -13,31 +13,6 @@ use std::process::Command;
 
 pub use super::this_unix::{code_signature_display, exe_of_pid, on_system_stop, peer_pid, peer_uid, process_started, RELAUNCH_WITHOUT_KEEPER};
 
-/// Every descriptor above stderr this process has open, except those in `keep`: what it inherited,
-/// when it is asked before it opens anything of its own. `/dev/fd` lists them on macOS and Linux
-/// (there a link to `/proc/self/fd`); the listing's own descriptor is gone once it is read.
-pub fn inherited_descriptors(keep: &[i32]) -> Vec<i32> {
-    let Ok(dir) = std::fs::read_dir("/dev/fd") else { return Vec::new() };
-    let listed: Vec<i32> = dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect();
-    listed
-        .into_iter()
-        // The listing's own descriptor is closed by now and answers EBADF
-        .filter(|&fd| fd > 2 && !keep.contains(&fd) && unsafe { libc::fcntl(fd, libc::F_GETFD) } != -1)
-        .collect()
-}
-
-/// Closes every descriptor `inherited_descriptors` names. Only for the start of a process, before any
-/// thread or library holds a descriptor of its own (lesson FI4: an AppImage's keep-alive pipe and
-/// mount descriptor, which keep it mounted for as long as anything holds them).
-pub fn close_inherited(keep: &[i32]) -> Vec<i32> {
-    let fds = inherited_descriptors(keep);
-    for &fd in &fds {
-        // SAFETY: closing a descriptor nothing in this process owns yet.
-        unsafe { libc::close(fd) };
-    }
-    fds
-}
-
 /// Sets close-on-exec on a descriptor this process made.
 pub fn set_cloexec(fd: std::os::fd::RawFd) -> io::Result<()> {
     // SAFETY: fcntl on a descriptor we own.
@@ -193,14 +168,15 @@ pub const RUNS_SH_SCRIPTS: bool = true;
  */
 pub fn stop_earlier_keeper(dev: bool) -> Option<String> {
     use crate::keeper::client::{stop_and_wait, Stopped};
-    let sock = crate::keeper::socket_path(&crate::keeper::data_dir_with(dev));
+    let data = crate::keeper::data_dir_with(dev);
+    let sock = crate::keeper::socket_path(&data);
     let wait = crate::host_proc::STOP_WAIT + crate::host_proc::STOP_GRACE + std::time::Duration::from_secs(5);
     let at = sock.display();
-    match stop_and_wait(&sock, wait) {
+    match stop_and_wait(&sock, &data.join("keeper.lock"), wait) {
         Stopped::NoneAnswered => None,
         Stopped::Stopped => Some(format!("a keeper an earlier build started on {at} was asked to stop, and has")),
         Stopped::Refused(e) => Some(format!("a keeper an earlier build started on {at} did not take the stop: {e}")),
-        Stopped::StillAnswering => Some(format!("a keeper an earlier build started on {at} still answers after {}s; starting the host anyway", wait.as_secs())),
+        Stopped::StillAnswering => Some(format!("a keeper an earlier build started on {at} is still running after {}s; starting the host anyway", wait.as_secs())),
     }
 }
 

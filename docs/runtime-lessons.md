@@ -197,7 +197,8 @@ Rule: a Linux window, release or debug, starts the host directly and ignores `CC
 #1895 step 4 PR 7; docs/plans/keeper-removal.md §2.4). Before its first host it stops a keeper an earlier build's
 `CC_USE_KEEPER=1` window left on the data folder, whose host would hold the lock. The AppImage carries no keeper.
 Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table` (the Linux rows);
-`keeper/keeper/client.rs` `a_keeper_answering_is_asked_to_stop_and_waited_for`; `tooling/keeper-executable.test.ts`
+`keeper/keeper/client.rs` `a_keeper_answering_is_asked_to_stop_and_waited_for_until_it_is_gone` (its lock, not its
+socket, which a keeper removes before its host has stopped); `tooling/keeper-executable.test.ts`
 "is bundled on macOS, and not on Windows or Linux".
 Platforms: Linux. *Changed by #458, #459.*
 
