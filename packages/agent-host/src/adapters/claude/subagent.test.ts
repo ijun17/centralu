@@ -390,7 +390,8 @@ describe('replayed from the replies stored twice (#98)', () => {
       notice(null),
       { type: 'result', subtype: 'success', is_error: true, result: LIMIT, modelUsage: {} },
     ])
-    expect(texts(events)).toBe(LIMIT)
+    // Said once, as the turn's error: the CLI's synthetic message is no bubble of the parent's (#2050)
+    expect(texts(events)).toBe('')
     // The agent's card closes as failed, and the parent's turn ends on the limit
     expect(events.filter((e) => e.type === 'tool_result' && e.callId === AGENT)).toMatchObject([{ ok: false }])
     expect(events.filter((e) => e.type === 'error')).toMatchObject([{ error: { message: LIMIT } }])

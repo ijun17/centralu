@@ -897,6 +897,14 @@ describe('resets, notices, retries and refusals (#304)', () => {
       { type: 'notice', sessionId: SID, level: 'warning', text: 'Output limit hit', from: 'Claude Code', label: 'api-error' },
       { type: 'turn_complete', sessionId: SID },
     ])
+    // A failed result keeps its own reason, and a process that ends before the result takes the words along
+    n.push(sdk(synthetic))
+    expect(n.push(sdk({ type: 'result', subtype: 'error_max_turns', is_error: true, errors: ['Reached max turns'], modelUsage: {} }))).toEqual([
+      { type: 'error', sessionId: SID, error: { code: 'internal', message: 'Reached max turns', retryable: true } },
+    ])
+    n.push(sdk(synthetic))
+    n.release('gone')
+    expect(n.push(sdk({ type: 'result', subtype: 'success', is_error: false, result: '', modelUsage: {} }))).toEqual([{ type: 'turn_complete', sessionId: SID }])
   })
 })
 

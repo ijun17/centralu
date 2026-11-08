@@ -264,10 +264,11 @@ export class ClaudeStreamNormalizer {
   /** The CLI is retrying a failed API call (`system/api_retry`, #304): the same rule as Codex's (`RetryActivity`) */
   private readonly retry: RetryActivity
   /**
-   * What the CLI said in the model's place, held until the turn's result: if the turn failed, this is its error's
-   * message (the result itself may only say *that* it failed); if not, it goes out as a notice. Two sources: a refusal
-   * no fallback ran for (`model_refusal_no_fallback`, #304), and an API error the CLI writes as an assistant message
-   * (`error` set, model "<synthetic>", #2050), which is not the agent's words and so is no bubble of its own.
+   * What the CLI said in the model's place, held until the turn's result; a turn that did not fail gets it as a notice.
+   * Two sources: a refusal no fallback ran for (`model_refusal_no_fallback`, #304), whose words become the failed
+   * turn's error (the result only says *that* it failed), and an API error the CLI writes as an assistant message
+   * (`error` set, model "<synthetic>", #2050), which is not the agent's words and so is no bubble of its own: a failed
+   * result already carries those words, or a reason of its own, which it keeps. A process that ends first drops it.
    */
   private held: { text: string; label: string } | null = null
 
@@ -491,7 +492,7 @@ export class ClaudeStreamNormalizer {
     if (!subagent) events = this.followTasks(msg.type === 'user' ? msg : undefined, events)
     if (subagent) return events
     events = this.followRetry(type, events)
-    if (msg.type === 'assistant' && msg.error !== undefined) {
+    if (msg.type === 'assistant' && msg.error) {
       const text = events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
       events = events.filter((e) => e.type !== 'message_delta')
       if (text) this.held = { text, label: 'api-error' }
@@ -500,9 +501,8 @@ export class ClaudeStreamNormalizer {
       const { text, label } = this.held
       this.held = null
       const failed = events.some((e) => e.type === 'error')
-      events = failed
-        ? events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
-        : [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label }, ...events]
+      if (failed && label === 'refusal') events = events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
+      else if (!failed) events = [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label }, ...events]
     }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
@@ -570,6 +570,7 @@ export class ClaudeStreamNormalizer {
     // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
     // A request held for its output count still counts when the process ends mid-stream (#2135), as it did before
     const out: NormalizedEvent[] = [...this.releaseRequest(), ...this.deferred.splice(0)]
+    this.held = null
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })
     this.background.clear()
     // The reason above names an agent's card; a background shell went the same way, so its ending says what happened
