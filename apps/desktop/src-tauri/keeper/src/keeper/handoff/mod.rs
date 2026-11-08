@@ -30,11 +30,11 @@
 //! | step | who | what |
 //! |---|---|---|
 //! | 1 | B → A | `hello` {protocol, pid, version, build} |
-//! | 2 | A | **freeze**: stop accepting on `keeper.sock` (connections queue), wait for requests in progress, park every front-door relay between copies, pause the host's stdout reader between lines, freeze the child table (it reaps what exited, then stops all I/O), stop copying and removing host copies (`source::Copies`) |
-//! | 3 | A → B | `state`: the snapshot (`KeeperSnap`) + every buffer as a blob + every descriptor over `SCM_RIGHTS`: `keeper.lock`, `keeper.sock`, `children.sock`, the front door's listener, the host's stdin and stdout, each child's pipes or pty master, each child-socket connection, each relayed connection (client and host side), each attached window |
-//! | 4 | B | rebuilds everything **without any I/O**: checks it really holds the lock (`flock` on the passed description), registers exit watches, builds the tables |
+//! | 2 | A | **freeze**: stop accepting on `keeper.sock` (connections queue), wait for requests in progress, park every front-door relay between copies, pause the host's stdout reader between lines, stop copying and removing host copies (`source::Copies`) |
+//! | 3 | A → B | `state`: the snapshot (`KeeperSnap`) + every buffer as a blob + every descriptor over `SCM_RIGHTS`: `keeper.lock`, `keeper.sock`, the front door's listener, the host's stdin and stdout, each relayed connection (client and host side), each attached window |
+//! | 4 | B | rebuilds everything **without any I/O**: checks it really holds the lock (`flock` on the passed description), watches the host |
 //! | 5 | B → A | `ready` (or `fail` with the reason) |
-//! | 6 | A | **commit point**: receiving `ready`. From here A never resumes. It reaps the children and host that exited during the freeze (it is still their parent), sends `commit` {reaped}, and exits without touching anything |
+//! | 6 | A | **commit point**: receiving `ready`. From here A never resumes. It sends `commit` and exits without touching anything |
 //! | 7 | B | on `commit`: starts every reader and writer, adopts the host, rewrites `keeper.json`, and serves; then runs the host switch it was handed, if any |
 //!
 //! **Rollback.** Anything before the commit point — B not starting, B failing to rebuild, B dying,
@@ -50,9 +50,8 @@
 //! `flock` is held by both until A exits, and by B after. A third keeper starting at any point is
 //! refused, as it always was.
 //!
-//! **What survives and what reconnects.** Survive, untouched: the host process and its pipes;
-//! every child; every child-socket connection (the host's control and attach streams, so the host
-//! does not notice); every front-door connection (the webview's WebSocket, app view traffic, Codex
+//! **What survives and what reconnects.** Survive, untouched: the host process and its pipes (so the
+//! host does not notice); every front-door connection (the webview's WebSocket, app view traffic, Codex
 //! bridges: the same TCP sockets, pumped by B); every attached window's control connection; and
 //! anything waiting in a listen queue. Answered with "try again": a control request (other than
 //! `status`) that arrived in the instant of the freeze. Nothing is closed.
@@ -75,7 +74,6 @@ use serde_json::{json, Value};
 use content_verify::version::{record_started, Rollback};
 
 use self::pack::{Pack, Unpack};
-use super::children::{self, Children, ExitStatus};
 use super::content;
 use super::front_door::{DoorFreeze, FrontDoor};
 use super::server::{self, Keeper, Options, State};
@@ -107,7 +105,7 @@ fn log(msg: &str) {
     eprintln!("[keeper] handoff: {msg}");
 }
 
-/// The keeper's own part of a snapshot; the child table travels as the reactor's own state.
+/// The keeper's own part of a snapshot.
 #[derive(Serialize, Deserialize)]
 struct KeeperSnap {
     protocol: u32,
@@ -129,8 +127,9 @@ struct KeeperSnap {
     keeps_agents: Option<bool>,
     door: DoorSnap,
     host: Option<HostSnap>,
-    /// The child table and where its descriptors and blobs start in the message.
-    children: Option<ChildrenSnap>,
+    /// The child table a keeper of beta.48 or older sends with the descriptors it holds: refused (`refuse_child_table`).
+    /// This keeper sends none.
+    children: Option<Value>,
     /// A host switch the incoming keeper runs once it serves (the app's "Switch to this build").
     then_switch: Option<BuildSource>,
 }
@@ -152,29 +151,18 @@ struct HostSnap {
     info: HostInfo,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ChildrenSnap {
-    state: Value,
-    fd_base: usize,
-    blob_base: usize,
-}
-
 /// What has been frozen so far, to undo in reverse on a rollback.
 #[derive(Default)]
 struct Frozen {
     keeper: bool,
     door: bool,
     host: bool,
-    children: bool,
     copies: bool,
 }
 
 fn thaw(k: &Keeper, f: &Frozen) {
     if f.copies {
         k.copies.thaw();
-    }
-    if f.children {
-        k.children.thaw();
     }
     if f.host {
         k.sup.thaw();
@@ -193,44 +181,14 @@ fn thaw(k: &Keeper, f: &Frozen) {
     }
 }
 
-/// What a handoff does with the children this keeper holds (#1895 step 3)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum HeldOnHandoff {
-    /// It holds none: nothing to decide
-    NoneHeld,
-    /// Its host can stop for an update: it does, and this keeper ends instead of handing over, so holding never passes to
-    /// a keeper whose host could have ended it
-    StopInstead,
-    /// Its host cannot (an earlier build's, or a host not up): the children go on to the next keeper with the handoff, as
-    /// before, so nothing running is cut. That keeper's next update or switch ends them
-    HandOn,
-}
-
-/// What the windows are told while a keeper that holds children stops for an update instead of handing over
-pub(in crate::keeper) const STOPS_INSTEAD: &str =
-    "this keeper stops for the update instead of handing over the processes it holds; the window then starts a keeper of its own build, whose host continues what was stopped";
-
-/// `HeldOnHandoff` from whether this keeper serves the child socket and whether its host said it stops for an update
-pub(super) fn held_children_on_handoff(holds: bool, host_stops_for_update: bool) -> HeldOnHandoff {
-    match (holds, host_stops_for_update) {
-        (false, _) => HeldOnHandoff::NoneHeld,
-        (true, true) => HeldOnHandoff::StopInstead,
-        (true, false) => HeldOnHandoff::HandOn,
+/// The refusal of a handed child table (#1895 step 4, `docs/plans/keeper-removal.md` §6): this keeper has no children
+/// service and its host takes over nothing a keeper holds, so those processes would run on with no host to read them. The
+/// outgoing keeper rolls back and carries on with them, and its window offers "Restart completely"
+pub(super) fn refuse_child_table(table: Option<&Value>) -> Result<(), String> {
+    match table {
+        None => Ok(()),
+        Some(_) => Err("this build no longer takes over the agents, terminals and commands a keeper holds; quit Centralu completely and open it again to update".into()),
     }
-}
-
-/// The refusal of a handed child table that still has a running child (#1895 step 4, `docs/plans/keeper-removal.md` §6):
-/// this build's host takes over nothing a keeper holds, so those processes would run on with no host to read them. The
-/// outgoing keeper rolls back and carries on with them, and its window offers "Restart completely". A table whose
-/// children have all exited (or that has none) is taken as before
-pub(super) fn refuse_live_children(table: &Value) -> Result<(), String> {
-    let live = table.get("children").and_then(Value::as_array).map_or(0, |c| c.iter().filter(|c| c.get("exit").is_none_or(Value::is_null)).count());
-    if live == 0 {
-        return Ok(());
-    }
-    Err(format!(
-        "this build no longer takes over the agents, terminals and commands a keeper holds ({live} running); quit Centralu completely and open it again to update"
-    ))
 }
 
 /**
@@ -250,33 +208,8 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
     if !exe.is_file() {
         return Err(format!("the new build's executable is not at {}", exe.display()));
     }
-    let held = {
-        let mut st = k.state.lock().map_err(|_| "keeper state poisoned")?;
-        if st.stopping {
-            return Err("the keeper is stopping".into());
-        }
-        let held = held_children_on_handoff(k.children.enabled(), st.host_stops_for_update);
-        if held == HeldOnHandoff::StopInstead {
-            st.stopping = true;
-            // The windows wait on "handing over" for up to the stop's bound; they are told why, and that they start a keeper next
-            if let Some(sw) = st.swap.as_mut() {
-                sw.message = Some(STOPS_INSTEAD.into());
-            }
-            k.broadcast(&mut st);
-        }
-        held
-    };
-    match held {
-        HeldOnHandoff::NoneHeld => {}
-        HeldOnHandoff::StopInstead => {
-            log("not handing over the children this keeper holds: its host stops for an update instead, and this keeper ends; the window starts a keeper of its own build, whose host continues what this one ended (#1895 step 3)");
-            k.end_for_update(crate::host_proc::STOP_FOR_UPDATE_WAIT);
-            log(&format!("stopped for an update instead of handing over (pid {})", k.info.pid));
-            super::server::exit_after_stop();
-        }
-        HeldOnHandoff::HandOn => {
-            log("handing the children this keeper holds on to the next keeper: its host cannot stop for an update (an earlier build's, or not up)");
-        }
+    if k.state.lock().map_err(|_| "keeper state poisoned")?.stopping {
+        return Err("the keeper is stopping".into());
     }
     let (mut child, mut ch) = spawn_successor(k, exe, target).map_err(|e| format!("could not start the new keeper: {e}"))?;
     log(&format!("handing over to keeper pid {} from {}", child.id(), exe.display()));
@@ -333,14 +266,7 @@ pub(super) fn give(k: &Arc<Keeper>, exe: &Path, target: &BuildSource, then_switc
 
     // 6. commit point: from here this keeper never resumes
     k.handed_over.store(true, Ordering::SeqCst);
-    let mut reaped: Vec<(i32, ExitStatus)> = k.children.reap_now(Duration::from_secs(2));
-    if let Some(pid) = k.sup.pid() {
-        if let Some(st) = children::reap_pid(pid as i32) {
-            reaped.push((pid as i32, st));
-        }
-    }
-    let reaped_json: Vec<Value> = reaped.iter().map(|(pid, st)| json!([pid, st.code, st.signal])).collect();
-    let sent = wire::send_op(&mut ch, &json!({ "op": "commit", "reaped": reaped_json }));
+    let sent = wire::send_op(&mut ch, &json!({ "op": "commit" }));
     log(&format!(
         "handed over to keeper pid {} ({}); this keeper (pid {}) exits",
         child.id(),
@@ -423,8 +349,6 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
     f.door = true;
     let host = k.sup.freeze(FREEZE_LIMIT)?;
     f.host = true;
-    let table = k.children.freeze(Duration::from_secs(5))?;
-    f.children = true;
     // No copy or cleanup of host copies from here: the incoming keeper may make and remove them as
     // soon as it commits, while this process is still on its way out (#368)
     k.copies.freeze(FREEZE_LIMIT)?;
@@ -448,10 +372,6 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
         }
         None => None,
     };
-    let children_snap = table.map(|(state, part)| {
-        let (fd_base, blob_base) = pack.absorb(part);
-        ChildrenSnap { state, fd_base, blob_base }
-    });
     let st = k.state.lock().map_err(|_| "keeper state poisoned")?;
     let mut windows = Vec::new();
     for w in &st.subscribers {
@@ -478,7 +398,7 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
         keeps_agents: st.keeps_agents,
         door: door_snap,
         host: host_snap,
-        children: children_snap,
+        children: None,
         then_switch,
     };
     drop(st);
@@ -543,20 +463,17 @@ struct Prepared {
     lock: std::fs::File,
     listener: UnixListener,
     door: super::front_door::PendingDoor,
-    children: Option<children::Pending>,
     host: Option<ForeignAdopt>,
     windows: Vec<UnixStream>,
 }
 
-fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
+fn prepare(msg: wire::Message) -> Result<Prepared, String> {
     let snap_v = msg.header.get("snap").cloned().ok_or("no snapshot in the state message")?;
     let snap: KeeperSnap = serde_json::from_value(snap_v).map_err(|e| format!("snapshot: {e}"))?;
     if snap.protocol > HANDOFF_PROTOCOL {
         return Err(format!("handoff format {} is newer than this keeper reads ({HANDOFF_PROTOCOL})", snap.protocol));
     }
-    if let Some(c) = &snap.children {
-        refuse_live_children(&c.state)?;
-    }
+    refuse_child_table(snap.children.as_ref())?;
     let mut u = Unpack::new(msg.fds, msg.blobs);
     let lock = std::fs::File::from(u.fd(snap.lock)?);
     // The lock is held through the shared open file description; taking it again on that same
@@ -579,10 +496,6 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     }
     let door = FrontDoor::adopt(DoorFreeze { listener: door_listener, target: snap.door.target, relays }, snap.door.token.clone())
         .map_err(|e| format!("front door: {e}"))?;
-    let children = match &snap.children {
-        Some(c) => Some(Children::prepare(data, &c.state, &mut u.shifted((c.fd_base, c.blob_base)))?),
-        None => None,
-    };
     let host = match &snap.host {
         Some(h) => Some(ForeignAdopt {
             pid: h.pid,
@@ -591,7 +504,7 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
             // is still the host's here. A host handed over before has init (or a subreaper) as its
             // parent, which reaps it the moment it ends: a host that ended during the freeze could
             // then have its number taken in between only if the pid space wrapped meanwhile.
-            watch: os::children::ProcessWatch::new(h.pid).map_err(|e| format!("cannot watch the host (pid {}): {e}", h.pid))?,
+            watch: os::process::ProcessWatch::new(h.pid).map_err(|e| format!("cannot watch the host (pid {}): {e}", h.pid))?,
             stdin: u.fd(h.stdin)?,
             stdout: u.fd(h.stdout)?,
             buffered: u.blob(h.buffered)?,
@@ -603,7 +516,7 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     for i in &snap.windows {
         windows.push(UnixStream::from(u.fd(*i)?));
     }
-    Ok(Prepared { snap, lock, listener, door, children, host, windows })
+    Ok(Prepared { snap, lock, listener, door, host, windows })
 }
 
 /// How long an incoming keeper whose channel closed after `ready` with no `commit` waits for the
@@ -669,7 +582,7 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
             return EXIT_ABORTED;
         }
     };
-    let prepared = match prepare(&data, msg) {
+    let prepared = match prepare(msg) {
         Ok(p) => p,
         Err(why) => {
             log(&format!("cannot take over: {why}"));
@@ -686,8 +599,8 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
         return EXIT_ABORTED;
     }
     let from = prepared.snap.from_pid;
-    let reaped = match wire::recv(&mut ch, Duration::from_secs(30)) {
-        Ok(m) if m.op() == "commit" => parse_reaped(m.header.get("reaped")),
+    match wire::recv(&mut ch, Duration::from_secs(30)) {
+        Ok(m) if m.op() == "commit" => {}
         Ok(m) if m.op() == "abort" => {
             log("the previous keeper rolled back; exiting");
             return EXIT_ABORTED;
@@ -704,39 +617,15 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
                 return EXIT_ABORTED;
             }
             log(&format!("no commit ({e}), and the previous keeper (pid {from}) is gone: taking over"));
-            Vec::new()
         }
-    };
+    }
     drop(ch);
-    start(data, build, prepared, &reaped)
-}
-
-fn parse_reaped(v: Option<&Value>) -> Vec<(i32, ExitStatus)> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|e| {
-                    let pid = e.get(0)?.as_i64()? as i32;
-                    let code = e.get(1).and_then(Value::as_i64).map(|c| c as i32);
-                    let signal = e.get(2).and_then(Value::as_i64).map(|c| c as i32);
-                    Some((pid, ExitStatus { code, signal }))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    start(data, build, prepared)
 }
 
 /// Step 7: after the commit, everything starts.
-fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitStatus)]) -> i32 {
+fn start(data: PathBuf, build: BuildSource, p: Prepared) -> i32 {
     let snap = p.snap;
-    let handed_host = p.host.as_ref().map(|h| h.pid);
-    let children = match p.children {
-        Some(c) => c.start(reaped, handed_host).unwrap_or_else(|e| {
-            log(&format!("could not start the child service ({e})"));
-            Children::disabled()
-        }),
-        None => Children::disabled(),
-    };
     let door = p.door.start();
     let now = Instant::now();
     let ago = |ms: u64| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now);
@@ -750,7 +639,6 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         data,
         sup: Supervisor::new(),
         door,
-        children,
         copies,
         state: Mutex::new(State {
             status: snap.status.clone(),
@@ -770,8 +658,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             drained: None,
             keeps_agents: snap.keeps_agents,
             // Not passed on (#1895 step 3): until the host says it again at its next start, "Apply now" asks this keeper to hold
-            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it. And a keeper that took
-            // children over here hands them on again at its next switch (`held_children_on_handoff`), unless a new host started
+            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it
             host_stops_for_update: false,
             // Not passed on: a handoff starts from an attached window's switch, which already
             // spent any relaunch grace (#352)
@@ -791,8 +678,6 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         accept_parked: AtomicBool::new(false),
         requests: AtomicUsize::new(0),
     });
-    // The child socket answers this keeper's hosts and no other process (#538)
-    super::server::answer_hosts(&keeper);
     server::record_lock_holder(&keeper.lock);
     for w in p.windows {
         server::adopt_window(&keeper, w);
@@ -802,7 +687,6 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         if let Err(e) = keeper.sup.adopt_foreign(h, server::sink(&keeper), server::launcher(&keeper)) {
             log(&format!("could not adopt the host (pid {pid}): {e}"));
         }
-        keeper.children.adopted();
     } else if !matches!(snap.status, HostStatus::Failed { .. }) {
         // No host was running and none had given up: start one, as a fresh keeper would
         keeper.sup.start(server::sink(&keeper), server::launcher(&keeper));

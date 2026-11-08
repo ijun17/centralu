@@ -318,7 +318,6 @@ pub(in crate::keeper) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_messa
         }
     };
     let prepare = |b: &BuildSource, launch: &mut host_proc::HostLaunch| prepare_host(&k, b, launch);
-    let standby = |pid: Option<u32>| k.children.set_standby(pid);
     let drained = || k.state.lock().ok().and_then(|st| st.drained.clone());
     let progress = |phase: Phase| show(view(phase));
     let adopt = |host: host_proc::Adopted, running: BuildSource| -> Result<(), String> {
@@ -341,7 +340,6 @@ pub(in crate::keeper) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_messa
         door: &k.door,
         drain_bound: swap::drain_bound(),
         prepare: &prepare,
-        standby: &standby,
         drained: &drained,
         progress: &progress,
         adopt: &adopt,

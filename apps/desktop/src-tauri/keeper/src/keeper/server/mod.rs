@@ -57,7 +57,6 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::accept::{self, AcceptErrors};
-use super::children::{self, Children};
 use super::{content, handoff, keys, limited, window_peer};
 use super::client::{self, json_line, read_line};
 use super::front_door::{self, FrontDoor};
@@ -123,13 +122,6 @@ pub(super) struct State {
     /// Every window this keeper took by its path, by pid and start, for its life (#2119, `window_peer::judge_attaching`):
     /// one that attaches again after an install, when its path reads as no window's, is still taken
     pub(super) known_windows: Vec<window_peer::Attached>,
-}
-
-/// Has the child socket answer this keeper's current host (the supervisor's, its own or handed over)
-/// and a swap's standby (`swap::Plan::standby`), and no other process of this user (#538).
-pub(in crate::keeper) fn answer_hosts(k: &Arc<Keeper>) {
-    let weak = Arc::downgrade(k);
-    k.children.answer_hosts(Arc::new(move || weak.upgrade().and_then(|k| k.sup.pid())));
 }
 
 impl State {
@@ -262,8 +254,6 @@ pub(super) struct Keeper {
     pub(super) sup: Supervisor,
     /// Where every client connects, whichever host is current (#280 step 3).
     pub(super) door: FrontDoor,
-    /// Agents, terminals and commands the keeper holds for its hosts (step 2, `children/`).
-    pub(super) children: Children,
     /// The per-build host copies and which are in use (#368, `source::Copies`).
     pub(super) copies: source::Copies,
     /// Where this keeper's own executable is: verified content (`<data>/content/<version>/`, the
@@ -503,7 +493,7 @@ impl Keeper {
     /// Stops the host and ends the keeper. Idempotent.
     fn shutdown(self: &Arc<Self>, reason: &str) {
         // A keeper that has handed over owns nothing any more: stopping now would stop the next
-        // keeper's host and children.
+        // keeper's host.
         if self.handed_over.load(Ordering::SeqCst) {
             return;
         }
@@ -518,17 +508,9 @@ impl Keeper {
         // Nobody new reaches a keeper on its way out. A new keeper waits for our lock, which
         // goes when this process does.
         let _ = fs::remove_file(&self.sock);
-        // A stop, unlike a host restart, ends the agents, terminals and commands. The host stops
-        // them first, the way it always did; whatever it could not (a host that hung or had
-        // already died) the keeper ends itself once the host is gone.
-        if self.children.enabled() {
-            self.children.ask_host_to_stop(children::HOST_STOP_WAIT);
-            self.sup.shutdown();
-        } else {
-            // No child service to say it on (#1895 step 3): the host hears it on its stdin, and notes the person quit (#1143)
-            self.sup.stop_by_line(host_proc::STOP_LINE, children::HOST_STOP_WAIT);
-        }
-        self.children.stop_all(children::STOP_GRACE);
+        // A stop, unlike a host restart, ends the agents, terminals and commands: the host stops them, told on its stdin,
+        // and notes the person quit (#1143)
+        self.sup.stop_by_line(host_proc::STOP_LINE, host_proc::STOP_WAIT);
         let _ = fs::remove_file(self.data.join("keeper.json"));
         log(&format!("stopped (pid {})", self.info.pid));
         std::process::exit(0);
@@ -561,20 +543,12 @@ impl Keeper {
             st.stopping = true;
         }
         log("stopping for an update: the host lists what it ends for the next one");
-        self.end_for_update(wait);
+        let _ = fs::remove_file(&self.sock);
+        self.sup.stop_for_update(wait);
+        let _ = fs::remove_file(self.data.join("keeper.json"));
         reply(stream, &json!({ "ok": true }));
         log(&format!("stopped for an update (pid {})", self.info.pid));
         true
-    }
-
-    /// The stop for an update itself, with the keeper already marked stopping: by the op above, and by a handoff that would
-    /// otherwise pass the children this keeper holds on to the next keeper (`handoff::give`). The process exits after it
-    pub(in crate::keeper) fn end_for_update(&self, wait: Duration) {
-        let _ = fs::remove_file(&self.sock);
-        self.sup.stop_for_update(wait);
-        // Children a holding keeper of an earlier build handed over: the host ended its own, this ends what it could not
-        self.children.stop_all(children::STOP_GRACE);
-        let _ = fs::remove_file(self.data.join("keeper.json"));
     }
 }
 
@@ -682,12 +656,8 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
         "attach" => attach(k, stream, reader, &req, guard),
-        // What the keeper holds (#538): read-only, for this user's tools and the integration scripts,
-        // which can no longer ask the child socket
-        "children" => match k.children.list(Duration::from_secs(2)) {
-            Some(list) => reply(&mut stream, &json!({ "ok": true, "children": list })),
-            None => reply(&mut stream, &json!({ "ok": false, "error": "the keeper has no child service" })),
-        },
+        // What the keeper holds (#538): nothing since #1895 step 4, said so to the tools and hosts that still ask
+        "children" => reply(&mut stream, &json!({ "ok": true, "children": [] })),
         "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
             let window = k.judge_window_for_update(&stream);
             if k.stop_for_update(&mut stream, window, host_proc::STOP_FOR_UPDATE_WAIT) {

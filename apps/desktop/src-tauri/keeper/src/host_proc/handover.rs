@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{HostInfo, HostProc, Launcher, Lines, StatusSink, Supervisor};
-use crate::os::children::ProcessWatch;
+use crate::os::process::ProcessWatch;
 
 /// A host's stdout reader that can be paused for a keeper handoff.
 pub type Gate = Arc<LineGate>;

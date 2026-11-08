@@ -14,10 +14,10 @@
 //!   - answers a user-only control socket (`server/`) through which the app attaches, learns
 //!     the host's port, token and build, and asks to stop or switch builds;
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
-//!     window detaches, as quitting the app always did; with it on they keep running;
-//!   - holds the host's long-lived children — claude, codex app-server, terminals and project
-//!     commands — on a second user-only socket (`children/`, step 2), so a host restart, crash or
-//!     build switch no longer ends them and the next host re-attaches mid-turn.
+//!     window detaches, as quitting the app always did; with it on they keep running.
+//!
+//! It no longer holds the host's agents, terminals and commands (step 2's children service, gone in
+//! #1895 step 4): the host spawns its own, and an update stops them and continues their turns.
 //!
 //! Step 3 adds two things:
 //!   - **the front door** (`front_door.rs`): one loopback port and one token for the keeper's whole
@@ -29,7 +29,7 @@
 //!
 //! Step 4 (`handoff/`) replaces the keeper itself: the new build's keeper is started from the new
 //! bundle's keeper executable, the running one freezes and passes it every descriptor it owns (the
-//! sockets, the host's pipes, every child's pipes and pty, every relayed connection) with its
+//! sockets, the host's pipes, every relayed connection) with its
 //! state, and exits once the new one has rebuilt everything. Nothing is restarted and no address
 //! changes.
 //!
@@ -39,7 +39,6 @@
 //! copy, and its hosts run from the copy as well.
 
 mod accept;
-pub mod children;
 pub mod appimage;
 pub mod carried;
 pub mod client;

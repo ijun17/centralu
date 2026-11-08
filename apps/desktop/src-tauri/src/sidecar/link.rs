@@ -88,8 +88,9 @@ fn is_news(before: Option<&(HostStatus, HostBuild)>, status: &HostStatus, after:
 }
 
 /// How long a keeper this window launched gets to answer. It waits for the data folder's lock first, which a keeper on its way
-/// out holds until it exits: after a switch that stops for an update instead of handing over, up to about 25 s (the host's
-/// 15 s, its 3 s after TERM, and up to 6 s for the children it held, `children::stop_all`). Then its own start
+/// out holds until it exits: after a switch whose keeper (one of #1895 step 3, of an earlier build) stops for an
+/// update instead of handing over, up to about 25 s (the host's 15 s, its 3 s after TERM, and up to 6 s for the children
+/// that keeper held). Then its own start
 const KEEPER_ANSWERS_WITHIN: Duration = Duration::from_secs(40);
 
 /// What "Quit completely" says while the keeper stops for an update ("Apply now", or a switch whose keeper stops instead of

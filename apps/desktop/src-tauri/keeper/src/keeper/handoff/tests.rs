@@ -1,264 +1,6 @@
-//! The child table handed from one reactor to another, in one process: the same descriptors and
-//! the same snapshot a real handoff sends, minus the process boundary (which
-//! `scripts/keeper-handoff-integration.mjs` covers with two real keepers).
+//! The keeper handoff's own rules, in one process (`scripts/keeper-handoff-integration.mjs` covers two real keepers).
 
 use super::*;
-use crate::keeper::test_support::temp_dir;
-use std::io::{Read, Write};
-
-/// The test process as the host the child socket answers (#538): the tests connect from it.
-fn this_process() -> std::sync::Arc<dyn Fn() -> Option<u32> + Send + Sync> {
-    std::sync::Arc::new(|| Some(std::process::id()))
-}
-
-fn send(s: &mut UnixStream, v: &Value) {
-    let mut l = serde_json::to_vec(v).unwrap();
-    l.push(b'\n');
-    s.write_all(&l).unwrap();
-}
-
-/// One line, read a byte at a time so nothing after it is swallowed.
-fn read_line(s: &mut UnixStream) -> Value {
-    let mut line = Vec::new();
-    let mut b = [0u8; 1];
-    loop {
-        s.read_exact(&mut b).unwrap();
-        if b[0] == b'\n' {
-            break;
-        }
-        line.push(b[0]);
-    }
-    serde_json::from_slice(&line).unwrap()
-}
-
-fn connect(d: &Path) -> UnixStream {
-    let s = UnixStream::connect(children::socket_path(d)).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
-    s
-}
-
-/// A child counting to `n` on stdout, one line every few milliseconds, held by `c`; returns the
-/// control connection and an attach stream on its stdout.
-fn counting_child(d: &Path, n: u32) -> (UnixStream, UnixStream) {
-    let mut ctl = connect(d);
-    send(&mut ctl, &json!({ "op": "hello", "protocol": 1 }));
-    assert_eq!(read_line(&mut ctl)["ok"], true);
-    let script = format!("i=0; while [ $i -lt {n} ]; do echo line$i; i=$((i+1)); sleep 0.004; done");
-    send(
-        &mut ctl,
-        &json!({ "rid": 1, "op": "spawn", "kind": "pipes", "cmd": "/bin/sh", "args": ["-c", script], "cwd": "/tmp",
-                 "env": { "PATH": "/usr/bin:/bin" }, "tag": { "kind": "test" } }),
-    );
-    let spawned = read_line(&mut ctl);
-    assert_eq!(spawned["ok"], true, "{spawned}");
-    let id = spawned["child"]["id"].as_str().unwrap().to_string();
-    let mut out = connect(d);
-    send(&mut out, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
-    assert_eq!(read_line(&mut out)["ok"], true);
-    (ctl, out)
-}
-
-fn read_until(s: &mut UnixStream, got: &mut Vec<u8>, needle: &str) {
-    let mut b = [0u8; 4096];
-    while !String::from_utf8_lossy(got).contains(needle) {
-        match s.read(&mut b) {
-            Ok(0) => panic!("stream ended before {needle:?}"),
-            Ok(n) => got.extend_from_slice(&b[..n]),
-            Err(e) => panic!("no {needle:?} ({e}); got {:?}", String::from_utf8_lossy(got).len()),
-        }
-    }
-}
-
-/// Every line from 0 to n-1 exactly once, in order.
-fn exactly_once(got: &[u8], n: u32) {
-    let text = String::from_utf8_lossy(got);
-    let lines: Vec<&str> = text.lines().collect();
-    let want: Vec<String> = (0..n).map(|i| format!("line{i}")).collect();
-    assert_eq!(lines.len(), want.len(), "lost or doubled lines across the handoff");
-    for (a, b) in lines.iter().zip(&want) {
-        assert_eq!(a, b);
-    }
-}
-
-/// The handoff's central promise for agents: the stream a host reads goes on, on the same socket,
-/// served by the next keeper, with no line lost and none sent twice; and the host's control
-/// connection keeps working.
-#[test]
-fn a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled() {
-    let d = temp_dir("table");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let (mut ctl, mut out) = counting_child(&d.0, 300);
-    let mut got = Vec::new();
-    read_until(&mut out, &mut got, "line40\n");
-
-    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    // A whole keeper of this build would refuse this table: its child is running (#1895 step 4)
-    assert!(refuse_live_children(&state).is_err(), "{state}");
-    // While frozen the child keeps writing into its pipe and nobody reads it
-    std::thread::sleep(Duration::from_millis(150));
-    let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
-    b.answer_hosts(this_process());
-
-    read_until(&mut out, &mut got, "line299\n");
-    exactly_once(&got, 300);
-    send(&mut ctl, &json!({ "rid": 2, "op": "list" }));
-    let mut list = read_line(&mut ctl);
-    while list.get("event").is_some() {
-        list = read_line(&mut ctl);
-    }
-    assert_eq!(list["rid"], 2, "the same control connection, answered by the next keeper");
-    assert_eq!(list["children"].as_array().map(|a| a.len()), Some(1));
-    b.stop_all(Duration::from_millis(200));
-}
-
-/// Output the keeper holds while no host is reading (between hosts) and output still in the
-/// child's pipe both reach the next host through the next keeper. The outgoing keeper must not go
-/// on reading after the freeze: what it read then would be stranded in a process about to exit.
-#[test]
-fn output_held_for_no_reader_reaches_the_next_keepers_reader() {
-    let d = temp_dir("unread");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let (_ctl, mut out) = counting_child(&d.0, 300);
-    let mut got = Vec::new();
-    read_until(&mut out, &mut got, "line40\n");
-    // The host detaches (half-close): it is sent the rest of its line, then the stream ends
-    out.shutdown(std::net::Shutdown::Write).unwrap();
-    out.read_to_end(&mut got).unwrap();
-    // Unread output piles up in the keeper while no host reads it
-    std::thread::sleep(Duration::from_millis(200));
-
-    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    std::thread::sleep(Duration::from_millis(150));
-    let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
-    b.answer_hosts(this_process());
-    // The outgoing keeper is frozen, not gone, as between the commit and its exit
-    std::thread::sleep(Duration::from_millis(300));
-
-    let id = state["children"][0]["n"].as_u64().map(|n| format!("c{n}")).unwrap();
-    let mut again = connect(&d.0);
-    send(&mut again, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
-    assert_eq!(read_line(&mut again)["ok"], true);
-    read_until(&mut again, &mut got, "line299\n");
-    exactly_once(&got, 300);
-    b.stop_all(Duration::from_millis(200));
-}
-
-/// A freeze that arrives in the same poll as a child's output (#368). The outgoing keeper must read
-/// none of it after its snapshot: with no host reading, what it read then would be lost with it.
-/// The hold makes the coincidence certain; under load it happened by itself (3 of 200 runs of the
-/// test above, each one line short).
-#[test]
-fn a_freeze_that_arrives_with_output_waiting_reads_none_of_it() {
-    let d = temp_dir("race");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let (_ctl, mut out) = counting_child(&d.0, 100);
-    let mut got = Vec::new();
-    read_until(&mut out, &mut got, "line10\n");
-    out.shutdown(std::net::Shutdown::Write).unwrap();
-    out.read_to_end(&mut got).unwrap();
-
-    a.hold_next_poll();
-    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
-    b.answer_hosts(this_process());
-
-    let id = state["children"][0]["n"].as_u64().map(|n| format!("c{n}")).unwrap();
-    let mut again = connect(&d.0);
-    send(&mut again, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
-    assert_eq!(read_line(&mut again)["ok"], true);
-    read_until(&mut again, &mut got, "line99\n");
-    exactly_once(&got, 100);
-    b.stop_all(Duration::from_millis(200));
-}
-
-/// A rolled-back handoff: the frozen reactor carries on where it stopped, nothing lost.
-#[test]
-fn a_thawed_child_table_carries_on_as_if_nothing_happened() {
-    let d = temp_dir("thaw");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let (_ctl, mut out) = counting_child(&d.0, 200);
-    let mut got = Vec::new();
-    read_until(&mut out, &mut got, "line20\n");
-    let frozen = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    drop(frozen);
-    std::thread::sleep(Duration::from_millis(100));
-    a.thaw();
-    read_until(&mut out, &mut got, "line199\n");
-    exactly_once(&got, 200);
-    a.stop_all(Duration::from_millis(200));
-}
-
-/// What an exited agent left in its process group, still waiting for its KILL when the keeper hands
-/// over, is killed by the next keeper: the outgoing one stays frozen until it exits.
-#[test]
-fn a_sweep_still_waiting_at_the_handoff_is_finished_by_the_next_keeper() {
-    let d = temp_dir("sweep");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let mut ctl = connect(&d.0);
-    send(&mut ctl, &json!({ "op": "hello", "protocol": 1 }));
-    assert_eq!(read_line(&mut ctl)["ok"], true);
-    // An agent whose helper ignores TERM, so only the sweep's KILL ends it.
-    send(
-        &mut ctl,
-        &json!({ "rid": 1, "op": "spawn", "kind": "pipes", "cmd": "/bin/sh",
-                 "args": ["-c", "trap '' TERM; sleep 300 & echo $!; read x"], "cwd": "/tmp",
-                 "env": { "PATH": "/usr/bin:/bin" }, "tag": { "kind": "test" } }),
-    );
-    let spawned = read_line(&mut ctl);
-    let id = spawned["child"]["id"].as_str().unwrap().to_string();
-    let mut out = connect(&d.0);
-    send(&mut out, &json!({ "op": "attach", "protocol": 1, "id": id, "stream": "out" }));
-    assert_eq!(read_line(&mut out)["ok"], true);
-    let mut got = Vec::new();
-    read_until(&mut out, &mut got, "\n");
-    let helper: i32 = String::from_utf8_lossy(&got).trim().parse().unwrap();
-    struct KillOnDrop(i32);
-    impl Drop for KillOnDrop {
-        fn drop(&mut self) {
-            // SAFETY: a plain syscall on a pid this test started.
-            unsafe { libc::kill(self.0, libc::SIGKILL) };
-        }
-    }
-    let _kill = KillOnDrop(helper);
-    let alive = || unsafe { libc::kill(helper, 0) == 0 };
-
-    send(&mut ctl, &json!({ "rid": 2, "op": "signal", "id": id, "signal": "SIGKILL" }));
-    loop {
-        let l = read_line(&mut ctl);
-        if l["event"] == "exit" {
-            break;
-        }
-    }
-    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    assert_eq!(state["sweeps"].as_array().map(|s| s.len()), Some(1), "{}", state["sweeps"]);
-    let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], None).unwrap();
-    b.answer_hosts(this_process());
-    let end = std::time::Instant::now() + Duration::from_secs(6);
-    while alive() && std::time::Instant::now() < end {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(!alive(), "the helper {helper} outlived the handoff");
-    b.stop_all(Duration::from_millis(200));
-}
-
-#[test]
-fn the_reaped_list_reads_back_as_written() {
-    let v = json!([[42, 7, null], [43, null, 15]]);
-    assert_eq!(
-        parse_reaped(Some(&v)),
-        vec![(42, ExitStatus { code: Some(7), signal: None }), (43, ExitStatus { code: None, signal: Some(15) })]
-    );
-    assert!(parse_reaped(None).is_empty());
-}
 
 /// An incoming keeper that exits before it is ready: the rollback says how it exited, not the
 /// read error the closed channel gave ("failed to fill whole buffer", #368).
@@ -320,53 +62,44 @@ fn an_outgoing_keeper_that_is_a_zombie_or_still_exiting_counts_as_gone() {
     assert!(still, "a running outgoing keeper counted as gone");
 }
 
-/// Review of #1100: the next keeper's child service accepts before the keeper is built and names its
-/// host. A host's attach in that gap was closed, and the host quietly kept its own children from then
-/// on. The host handed over is answered from the first accept, and by the supervisor once adopted.
-#[test]
-fn the_host_handed_over_is_answered_from_the_first_accept() {
-    let d = temp_dir("first");
-    let a = Children::start(&d.0).unwrap();
-    a.answer_hosts(this_process());
-    let (state, pack) = a.freeze(Duration::from_secs(5)).unwrap().unwrap();
-    let mut u = Unpack::new(pack.fds, pack.blobs);
-    let b = Children::prepare(&d.0, &state, &mut u.shifted((0, 0))).unwrap().start(&[], Some(std::process::id())).unwrap();
-    // No answer_hosts yet: the keeper is not built
-    let mut c = connect(&d.0);
-    send(&mut c, &json!({ "op": "hello", "protocol": 1 }));
-    assert_eq!(read_line(&mut c)["ok"], true, "the handed-over host, before the keeper names it");
-    // Adopted, and the supervisor names another (or none): the handed-over pid alone no longer gets in
-    b.answer_hosts(std::sync::Arc::new(|| None));
-    b.adopted();
-    let mut c2 = UnixStream::connect(children::socket_path(&d.0)).unwrap();
-    c2.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let _ = c2.write_all(b"{\"op\":\"hello\",\"protocol\":1}\n");
-    let mut buf = [0u8; 64];
-    assert_eq!(c2.read(&mut buf).unwrap_or(0), 0, "refused once the supervisor names the host");
-    b.stop_all(Duration::from_millis(200));
+/// The snapshot a keeper sends, with `children` as given
+fn snapshot(children: Value) -> wire::Message {
+    let snap = KeeperSnap {
+        protocol: HANDOFF_PROTOCOL,
+        from_pid: 1,
+        from_version: "0.1.0-beta.48".into(),
+        lock: 0,
+        sock: 1,
+        status: HostStatus::Starting,
+        source: None,
+        desired: BuildSource::default(),
+        background: false,
+        windows: Vec::new(),
+        ever_attached: false,
+        since_start_ms: 0,
+        since_detach_ms: 0,
+        busy: false,
+        since_busy_ms: 0,
+        swap: None,
+        keeps_agents: None,
+        door: DoorSnap { listener: 2, token: "t".into(), target: None, relays: Vec::new() },
+        host: None,
+        children: None,
+        then_switch: None,
+    };
+    let mut v = serde_json::to_value(&snap).unwrap();
+    v["children"] = children;
+    wire::Message { header: json!({ "op": "state", "snap": v }), blobs: Vec::new(), fds: Vec::new() }
 }
 
-
-/**
- * Review of #1895 step 3: a keeper holding children handed them on in every handoff, so holding could pass from keeper to
- * keeper for good. Now it hands them on only when its host cannot stop for an update; when it can, it stops for one and
- * ends instead, and the window starts a keeper of its own build.
- */
+/// #1895 step 4 (`docs/plans/keeper-removal.md` §6): a keeper of beta.48 or older sends its child table with the
+/// handoff; this keeper has no children service, so the handoff is refused before any descriptor is touched, and the
+/// sender rolls back and carries on with what it holds. A snapshot without one goes on to the descriptors
 #[test]
-fn held_children_go_on_only_when_the_host_cannot_stop_for_an_update() {
-    assert_eq!(held_children_on_handoff(true, true), HeldOnHandoff::StopInstead);
-    assert_eq!(held_children_on_handoff(true, false), HeldOnHandoff::HandOn);
-    assert_eq!(held_children_on_handoff(false, true), HeldOnHandoff::NoneHeld);
-    assert_eq!(held_children_on_handoff(false, false), HeldOnHandoff::NoneHeld);
-}
-
-/// #1895 step 4: a handed child table with a running child is refused (no host of this build would read it); one whose
-/// children all exited, or that has none, is taken
-#[test]
-fn a_handed_child_table_with_a_running_child_is_refused() {
-    let running = json!({ "children": [{ "pid": 10, "exit": null }, { "pid": 11, "exit": { "code": 0, "signal": null } }] });
-    let why = refuse_live_children(&running).unwrap_err();
-    assert!(why.contains("1 running") && why.contains("quit Centralu completely"), "{why}");
-    assert!(refuse_live_children(&json!({ "children": [{ "pid": 11, "exit": { "code": 0, "signal": null } }] })).is_ok());
-    assert!(refuse_live_children(&json!({ "children": [] })).is_ok());
+fn a_handoff_that_carries_a_child_table_is_refused() {
+    let table = json!({ "state": { "children": [] }, "fd_base": 3, "blob_base": 1 });
+    let why = prepare(snapshot(table)).err().expect("a child table was taken");
+    assert!(why.contains("no longer takes over") && why.contains("quit Centralu completely"), "{why}");
+    let why = prepare(snapshot(Value::Null)).err().expect("no descriptors were passed");
+    assert!(!why.contains("no longer takes over"), "a snapshot without a child table was refused for one: {why}");
 }

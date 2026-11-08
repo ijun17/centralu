@@ -186,23 +186,11 @@ pub struct Plan<'a> {
     /// Readies the launch of this build: the environment every host the keeper starts gets, and the
     /// token (`server::host::prepare_host`).
     pub prepare: &'a (dyn Fn(&BuildSource, &mut host_proc::HostLaunch) + Sync),
-    /// Told the standby host's pid while it is one (and None after), so the child socket takes it.
-    pub standby: &'a (dyn Fn(Option<u32>) + Sync),
     /// The old host's `{"drained":..}` report, once its stdout has carried one.
     pub drained: &'a (dyn Fn() -> Option<Value> + Sync),
     pub progress: &'a (dyn Fn(Phase) + Sync),
     /// Records the new host as current and hands it to the supervisor.
     pub adopt: &'a (dyn Fn(Adopted, BuildSource) -> Result<(), String> + Sync),
-}
-
-/// Tells the keeper there is no standby any more, however the swap ends: by then it was adopted (the
-/// supervisor names it) or stopped.
-struct StandbyGone<'a>(&'a (dyn Fn(Option<u32>) + Sync));
-
-impl Drop for StandbyGone<'_> {
-    fn drop(&mut self) {
-        (self.0)(None);
-    }
 }
 
 pub fn run(p: &Plan) -> Outcome {
@@ -251,9 +239,6 @@ pub fn run(p: &Plan) -> Outcome {
         forget_copy(claim);
         return Outcome::NotStarted("could not read the new host's output".into());
     };
-    // The child socket takes this host from here (#538) until the swap is over, adopted or not
-    (p.standby)(Some(child.id()));
-    let _standby = StandbyGone(p.standby);
     // A reader that can be paused, so this host can later be handed to another keeper (step 4)
     let lines = HostOut::new(stdout.into(), Vec::new());
     log(&format!("swap: standby host {} started (pid {}) from {}", next.key(), child.id(), copy.display()));

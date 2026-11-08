@@ -122,11 +122,6 @@ fn the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target() {
 
 /// A keeper with nothing running, for tests of what it does with its windows.
 fn test_keeper(data: &Path) -> Arc<Keeper> {
-    test_keeper_with(data, Children::disabled())
-}
-
-/// The same with `children` as its child service
-fn test_keeper_with(data: &Path, children: Children) -> Arc<Keeper> {
     let sock = data.join("keeper.sock");
     let _ = fs::remove_file(&sock);
     Arc::new(Keeper {
@@ -137,7 +132,6 @@ fn test_keeper_with(data: &Path, children: Children) -> Arc<Keeper> {
         data: data.to_path_buf(),
         sup: Supervisor::new(),
         door: FrontDoor::open(0, "t".into()).unwrap(),
-        children,
         copies: source::Copies::new(data, None),
         // Background on: a window leaving does not stop the test's process.
         state: Mutex::new(State::new(BuildSource::dev(), Settings { background: true, ..Default::default() })),
@@ -768,16 +762,11 @@ impl Drop for StopsTheHost {
 
 /// A fake host under the keeper's supervisor: `script` runs after it says it is ready, with `$F` a file it may write to
 fn keeper_with_a_fake_host(data: &Path, script: &str) -> (Arc<Keeper>, PathBuf, u32) {
-    keeper_with_a_fake_host_and(data, script, Children::disabled())
-}
-
-/// The same with `children` as the keeper's child service
-fn keeper_with_a_fake_host_and(data: &Path, script: &str, children: Children) -> (Arc<Keeper>, PathBuf, u32) {
     struct Quiet;
     impl host_proc::StatusSink for Quiet {
         fn status(&self, _: &HostStatus) {}
     }
-    let k = test_keeper_with(data, children);
+    let k = test_keeper(data);
     let file = data.join("told");
     let script = format!(r#"echo '{{"ready":true,"port":1,"token":"t"}}'; {script}"#);
     let f = file.to_string_lossy().to_string();
@@ -899,45 +888,5 @@ fn a_stop_for_an_update_from_a_process_that_is_not_a_window_is_refused() {
     assert!(lines.first().is_some_and(|l| l.contains("window_only")), "{lines:?}");
     assert!(crate::os::pid_alive(host) && sock.exists() && !k.state.lock().unwrap().stopping, "something stopped");
     assert_eq!(fs::read_to_string(&told).unwrap_or_default(), "");
-    let _ = fs::remove_dir_all(&data);
-}
-
-/**
- * Review of #1895 step 3: a keeper that holds children (one an earlier build's keeper handed them to) and whose host stops for
- * an update does not hand them on at a switch: it stops for an update instead and ends (`handoff::give`, `StopInstead`), and
- * the windows are told why. Here the process would exit, which the test sees as the dispatcher's panic; no handoff to the
- * named executable is tried (an empty file, which a handoff could not start).
- */
-#[test]
-fn a_switch_of_a_keeper_holding_children_whose_host_stops_for_an_update_stops_instead_of_handing_over() {
-    let data = PathBuf::from(format!("/tmp/cck-give-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&data);
-    fs::create_dir_all(&data).unwrap();
-    let (k, told, host) = keeper_with_a_fake_host_and(
-        &data,
-        r#"while read l; do case "$l" in *'"forUpdate":true'*) echo update >> "$F"; exit 0;; esac; done"#,
-        Children::start(&data).unwrap(),
-    );
-    let _stops = StopsTheHost(k.clone());
-    k.state.lock().unwrap().swap = Some(SwapView::begun(Phase::HandingOver, BuildSource::dev(), None));
-    let exe = data.join(crate::keeper::exe::KEEPER_EXE);
-    fs::write(&exe, "").unwrap();
-    let giving = {
-        let k = k.clone();
-        thread::spawn(move || crate::keeper::handoff::give(&k, &exe, &BuildSource::dev(), None))
-    };
-    let ended = giving.join();
-    let why = match &ended {
-        Err(p) => p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default(),
-        Ok(r) => panic!("the keeper did not end: give returned {r:?}"),
-    };
-    assert!(why.contains("the keeper would exit here"), "{why}");
-    assert_eq!(fs::read_to_string(&told).unwrap_or_default().trim(), "update", "the host was not told it stops for an update");
-    assert!(!crate::os::pid_alive(host) || !k.sup.is_running(), "the host is still running");
-    assert!(!k.sock.exists(), "the socket is still there: a window could reach a keeper on its way out");
-    let st = k.state.lock().unwrap();
-    assert!(st.stopping);
-    assert_eq!(st.swap.as_ref().and_then(|s| s.message.as_deref()), Some(crate::keeper::handoff::STOPS_INSTEAD));
-    drop(st);
     let _ = fs::remove_dir_all(&data);
 }

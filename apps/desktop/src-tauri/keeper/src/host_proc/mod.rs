@@ -197,9 +197,12 @@ pub const STOP_GRACE: Duration = Duration::from_secs(3);
 
 /// The line that asks a host the window or the keeper started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
-/// The line a keeper with no child service stops its host with for good: the person quit Centralu here, which the host
-/// notes for a linked hub (#1143), as it did when the child service said `stop` (#1895 step 3)
+/// The line a keeper stops its host with for good: the person quit Centralu here, which the host notes for a linked hub
+/// (#1143)
 pub const STOP_LINE: &str = r#"{"op":"stop"}"#;
+/// How long a host asked to stop for good gets to stop its agents, terminals and commands before it is stopped the usual
+/// way. The host's stop closes codex's stdin and gives claude the SDK's 2 s grace
+pub const STOP_WAIT: Duration = Duration::from_secs(6);
 
 /// The lines that tell a host the system is ending, and that it is not after all (agent-host `main.ts`, `system-ending`; #1397,
 /// #1970): said by whoever hears the end first, the window at Windows' end-session question or the keeper at launchd's stop

@@ -1,11 +1,11 @@
 //! What macOS and Linux share: the system calls the keeper and the host supervisor need that `std`
 //! does not offer. A lock the OS releases when its holder dies, a new session, the creation mask and
 //! who is on the other end of a socket (here); the host process's group, signals and the login
-//! shell probe (below); the children the keeper holds (`children`); descriptor passing for a
-//! handoff (`handles`). What differs between the two is in `macos.rs` and `linux.rs`.
+//! shell probe (below); watching a handed-over host (`process`) and descriptor passing for a
+//! handoff (`handles`), both until the handoff goes. What differs between the two is in `macos.rs` and `linux.rs`.
 
-pub mod children;
 pub mod handles;
+pub mod process;
 
 use std::fs::File;
 use std::io;
@@ -193,8 +193,7 @@ pub fn hide_console(cmd: &mut Command) {
 }
 
 /// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
-/// *runs*. Not whether its number is taken, which a zombie still does (`children::number_in_use`,
-/// the question before signalling a group by a number that may be reused).
+/// *runs*. Not whether its number is taken, which a zombie still does.
 ///
 /// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
 /// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it

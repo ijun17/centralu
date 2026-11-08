@@ -1,13 +1,12 @@
-//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, a child's exit by
-//! a `pidfd` (and a zombie's status from `/proc`), and descriptors received with
+//! What Linux does differently from macOS: the peer of a socket by `SO_PEERCRED`, a process's exit by
+//! a `pidfd`, and descriptors received with
 //! `MSG_CMSG_CLOEXEC`.
 
-use std::collections::HashMap;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 
-use super::children::{parse_proc_exit, set_cloexec, ExitStatus, Seen, Watch};
+use super::process::{set_cloexec, Watch};
 
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
@@ -59,14 +58,14 @@ pub fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
     }
 }
 
-/// A `pidfd` per child, readable once it exits (`ExitWatch`).
+/// A `pidfd`, readable once the process exits (`ProcessWatch`).
 pub struct ExitBackend {
-    pidfds: HashMap<i32, OwnedFd>,
+    pidfd: Option<OwnedFd>,
 }
 
 impl ExitBackend {
     pub fn new() -> io::Result<Self> {
-        Ok(ExitBackend { pidfds: HashMap::new() })
+        Ok(ExitBackend { pidfd: None })
     }
 
     pub fn watch(&mut self, pid: i32) -> Watch {
@@ -78,35 +77,16 @@ impl ExitBackend {
         }
         let _ = set_cloexec(fd);
         // SAFETY: the syscall just returned it.
-        self.pidfds.insert(pid, unsafe { OwnedFd::from_raw_fd(fd) });
+        self.pidfd = Some(unsafe { OwnedFd::from_raw_fd(fd) });
         Watch::Registered
     }
 
-    pub fn fds(&self) -> Vec<RawFd> {
-        self.pidfds.values().map(|f| f.as_raw_fd()).collect()
-    }
-
-    /// Every watched child: a pidfd says that something happened, not what, so each is checked.
-    pub fn seen(&mut self) -> Vec<Seen> {
-        self.pidfds.keys().map(|&pid| Seen { pid, exited: None }).collect()
-    }
-
-    /// Whether the child's pidfd reports it gone (readable), without waiting.
-    pub fn gone(&self, pid: i32) -> bool {
-        let Some(fd) = self.pidfds.get(&pid) else { return true };
+    /// Whether the watched process's pidfd reports it gone (readable), without waiting.
+    pub fn ended(&mut self, _pid: i32) -> bool {
+        let Some(fd) = &self.pidfd else { return true };
         let mut p = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         // SAFETY: one valid pollfd, no wait.
         unsafe { libc::poll(&mut p, 1, 0) == 1 }
-    }
-
-    pub fn forget(&mut self, pid: i32) {
-        self.pidfds.remove(&pid);
-    }
-
-    /// A zombie's exit status from `/proc/<pid>/stat`, while the zombie is still there.
-    pub fn zombie_status(pid: i32) -> Option<ExitStatus> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        parse_proc_exit(&stat)
     }
 }
 
@@ -120,13 +100,6 @@ impl ExitBackend {
 pub fn is_zombie(pid: u32) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
         .is_ok_and(|stat| matches!(proc_state(&stat), Some('Z' | 'X' | 'x')))
-}
-
-/// Every process id the system has now, whoever owns it (the numeric names in `/proc`). Used to
-/// find the members of a session (`children::signal_session`), which no call lists directly.
-pub fn all_pids() -> Vec<i32> {
-    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
-    dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok()).filter(|&p| p > 0).collect()
 }
 
 /// The state letter of a `/proc/<pid>/stat` line: the first field after the command name, which is
