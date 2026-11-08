@@ -1962,11 +1962,12 @@ With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and
 folder outside any signed app bundle, with the permissions the person granted to the shell. The boundary
 is **what may be started from that folder**: only files signed by a key compiled into the verifier,
 including release content and owner-approved local content (#610). The verifier is
-`apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
+`apps/desktop/content-verify` (shared by the shell and the window's diagnosis of a refusal); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
 the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
-`shell.lock` pins; until shell v1 is pinned, no release opens it. Its second is a keeper the shell started,
-which verifies the next build's content itself before handing over to it (step 5, §10.3).
+`shell.lock` pins; until shell v1 is pinned, no release opens it. Until #1895 step 4 PR 4 its second
+was a keeper the shell started, which verified the next build's content itself before handing over to it (step 5,
+§10.3).
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -2029,34 +2030,20 @@ The shell adds:
   the shell through LaunchServices with absolute paths only; an old `shell-status.json` cannot answer for a
   start, because the window matches it by a fresh nonce.
 
-The keeper adds, on a handoff (step 5, [plans/thin-shell.md](plans/thin-shell.md) §10.3):
+**The keeper verifies nothing to run it** since #1895 step 4 PR 4: a keeper runs one build, and the next build's
+content is verified and copied by the shell when the window starts it. Until then a keeper the shell started verified
+and copied the next build's content itself before handing over (step 5, [plans/thin-shell.md](plans/thin-shell.md)
+§10.3), by the shell's rules: a refusal moved nothing, a version below the floor was refused on a handoff whatever the
+window asked, and the window's `hostDir` was never read. What stays of the keeper's side:
 
-- **A keeper from verified content never starts a bundle.** A keeper whose own executable is
-  `<data>/content/<version>/centralu-keeper` (resolved, so a symlinked data folder still counts) treats the
-  keeper executable a window names only as a pointer to that bundle's `Contents/Resources/content`. It
-  verifies that content with the same verifier and the same rules as the shell (signature against
-  keys.json, platform, a listed keeper and host, the downgrade floor; not the minimum shell version, which
-  the window decides), copies it into `<data>/content/<new version>/` (or reuses a copy that verifies in
-  place with the same manifest bytes), and hands over to the keeper inside that copy, its host named in
-  that copy too. The window's `hostDir` is never read. Its hosts run from the copy's `host/`, never from a
-  copy of a bundle in `<data>/hosts/`. A content inside `<data>/content/` is refused as the source.
-- **A refusal moves nothing.** The keeper and its host stay; no partial copy is left; the window is told
-  the reason (`refused` in the swap view). A refused build only ever runs through the window's fallback,
-  the direct start under the window's own identity (§10.2), which a person reaches with Restart completely.
-- **A rollback never goes through a handoff.** A version below `<data>/content/highest-started` is refused
-  on a handoff whatever the window asks; only the shell's `--rollback` lowers the floor. The incoming keeper
-  raises the floor once it serves.
-- **What runs is never removed under it.** A version folder the keeper runs from, a host runs from or will
-  run from next, or a switch holds is never removed by the cleanup, and one that no longer verifies while
-  something runs from it is refused (`in-use`) rather than replaced.
-- **The keys are keys.json.** The keeper crate's `test-key` feature (`keeper/src/keeper/keys.rs`) is guarded
-  as the shell's is: refused without `debug_assertions`, turned on by nothing on the way to a release
-  (`tooling/keeper-executable.test.ts`). `scripts/keeper-content-integration.mts` builds the test keeper
-  and puts the plain one back in the target folder before anything else runs from it.
+- **What runs is never removed under it.** A version folder the keeper runs from, or a host runs from or will run
+  from next, is never removed by the cleanup.
+- **The keys are keys.json.** The keeper has no test key at all (`keeper/src/keeper/keys.rs`,
+  `tooling/keeper-executable.test.ts`); its verifier only words the window's diagnosis.
 
 The shell's refusal is **shown by the window itself, in a native dialog** (#634, `apps/desktop/src-tauri/src/refusal.rs`).
 The keeper's refusal of a switch's content was shown the same way until #1895 step 4 PR 3, when the window stopped asking
-for switches; a switch another process asks for was never shown, so that dialog had nothing left to show:
+for switches; PR 4 removed the switch:
 
 - **Why it is drawn there.** The build bar is drawn by the web UI, which the host feeds, and the host is the thing whose
   content failed to verify: it could hide the line or write another. The dialog is drawn by the window process, the signed
@@ -2070,9 +2057,8 @@ for switches; a switch another process asks for was never shown, so that dialog 
   at least 5 seconds apart.
 - **What it says.** That Centralu started without the permission shell, and under Details the check that failed (an
   unknown signing key, a signature that does not match, a file whose hash differs, another platform, a version below the
-  floor, a newer shell needed), the file and both hashes. The keeper still names the check and the file in a switch's
-  refusal (`check_id`, `file_of` in `keeper/content.rs`; `refusedCheck` and `refusedFile` in the swap view), which no
-  window of this build reads. The window reads its own content again (`keeper::content::diagnose`: the
+  floor, a newer shell needed), the file and both hashes. The check ids are the keeper crate's (`check_id`, `file_of` in
+  `keeper/content.rs`); the swap view that carried a switch's (`refusedCheck`, `refusedFile`) went with #1895 step 4 PR 4. The window reads its own content again (`keeper::content::diagnose`: the
   shell's checks, then every listed file's size and hash; it reads and hashes and starts, copies and changes nothing),
   because the shell's status carries one sentence and no hashes and its crate cannot change without a new shell version.
 - **Show, do not run.** The dialog only tells. It starts, trusts and unlocks nothing; what keeps running is what already ran
@@ -2098,7 +2084,7 @@ Limits:
 - The dialog is drawn by the window process, which runs as the same user as everything else here: another process of the
   user could draw over it or close it, or write `shell-status.json`; it cannot make the dialog say more than the check, the
   file, the hashes and the version, and it cannot suppress a refusal the shell made. One that reaches the keeper's socket
-  can ask for a switch to content it names, which the keeper refuses; no window shows that. What it protects against is the host hiding or rewriting a refusal, not the user's
+  cannot ask it for other content at all: `switch` and `upgrade` answer `gone` since #1895 step 4 PR 4. What it protects against is the host hiding or rewriting a refusal, not the user's
   own processes.
 - The text of the shell's refusal is the shell's (pinned) and the window's diagnosis reads the content again: a content changed
   between the shell's refusal and the diagnosis is described as it is then, or, when it verifies then, by the shell's sentence.
@@ -2389,7 +2375,7 @@ A view is an app's HTML running inside the desktop window, isolated in layers. B
 behind a 32-byte random path segment made at each launch, a different value from the WebSocket
 token (`transport/http.ts`). Under the keeper the segment is instead derived from the keeper's token
 (HMAC-SHA256 under a fixed label, base64url, 43 characters; `deriveHttpSecret`), so that every host
-the keeper starts has the same one and a view's address survives a build switch (#280 step 4). It
+the keeper starts has the same one and a view's address survives the host's restarts under one keeper (#280 step 4; a build switch too, until #1895 step 4 PR 4). It
 is still a different value from the token, and one-way from it: a leaked view address gives nothing
 toward the RPC door. The other direction was never a boundary, since whoever holds the token can
 already ask `apps.viewFrame` for an address carrying the secret. It lives as long as the keeper's

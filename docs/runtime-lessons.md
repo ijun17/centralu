@@ -119,9 +119,9 @@ nothing on descriptor 3, so such a keeper never hears `ready` and rolls back (#4
 `centralu-keeper` beside it). `centralu-keeper` accepts and ignores `--keeper`: shell v1, whose bytes are pinned, still
 passes it.
 Guard: `keeper/keeper/mod.rs` `only_the_keeper_flag_selects_keeper_mode`; `keeper/keeper/exe.rs`
-`an_old_keeper_handing_over_to_the_window_executable_gets_no_hello`; `scripts/keeper-handoff-integration.mjs` check
-"it says nothing on the channel: no hello, so the old keeper never reaches ready and rolls back"; by hand, the same script
-with `--old-keeper` against a real 0.1.0-beta.11, which rolls back.
+`an_old_keeper_handing_over_to_the_window_executable_gets_no_hello`. Until #1895 step 4 PR 4 also
+`keeper-handoff-integration.mjs`, and by hand its `--old-keeper` against a real 0.1.0-beta.11, which rolled back; the
+script went with the handoff.
 Platforms: macOS, Linux. *Changed by #461.*
 
 **ST8. The keeper starts detached and outlives the window.**
@@ -208,7 +208,7 @@ no `CENTRALU_*` except their own id and data folder; a detached remote launcher 
 Guard: `tooling/launcher-serve.test.ts` "hands the token over on stdin, never in the environment or on the command
 line"; `host/lifecycle/host-process.test.ts` "takes the token from the first line on stdin, and stdin still watches
 the parent after it (#538)"; `keeper/host_proc/tests.rs` `the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed`;
-`keeper/keeper/server/tests.rs` `a_host_gets_the_token_on_stdin_unless_its_build_is_older_than_that`;
+`keeper/keeper/server/tests.rs` `a_host_gets_the_token_on_stdin`;
 `tooling/launcher-serve.test.ts` "carries only the data folder, the host entry and the managed mark to a detached
 launcher, never the token"; `host/lifecycle/host-process.test.ts` "the first child the host spawns sees none of the
 launcher's variables, the token least of all (ST16)" (a real host whose login-shell probe records its environment);
@@ -606,11 +606,11 @@ Platforms: macOS, Linux.
 ## 5. Supervising the host
 
 **SU1. A crash loop gives up, and some refusals are final.**
-Rule: five consecutive failures give up; backoff 400 ms doubling to 5 s; 30 s of uptime resets the count; a deliberate
-bounce is not counted; a lock conflict and a too-new store are not retried.
+Rule: five consecutive failures give up; backoff 400 ms doubling to 5 s; 30 s of uptime resets the count; a lock conflict
+and a too-new store are not retried. (A deliberate bounce, which a swap's failure used, was not counted; it went with
+#1895 step 4 PR 4.)
 Guard: `keeper/host_proc.rs` `counts_consecutive_failures_and_gives_up_after_five`; `keeper/host_proc.rs`
-`a_death_after_a_stable_run_starts_the_count_over`; `keeper/host_proc.rs` `backoff_doubles_and_stops_at_five_seconds`;
-`keeper/host_proc.rs` `a_deliberate_bounce_starts_again_without_counting`.
+`a_death_after_a_stable_run_starts_the_count_over`; `keeper/host_proc.rs` `backoff_doubles_and_stops_at_five_seconds`.
 Platforms: all.
 
 **SU2. Retry after giving up starts one watcher, never two.**
@@ -661,9 +661,7 @@ Rule: a handed-over host is not the keeper's child: it is watched by a kqueue re
 (Linux) made in the handoff's `prepare`, before `ready` (`os::process::ProcessWatch`), and an end once seen stays
 seen. Only "no such process" (`ESRCH`) at registration means it has gone; any other failure, and a system with
 neither, falls back to the pid, where EPERM from `kill(pid, 0)` means alive.
-Guard: `host_proc/handover.rs` `a_handed_over_host_that_ended_stays_ended_when_its_number_is_reused`;
-`keeper/os/unix.rs` `a_process_we_may_not_signal_is_alive`; `scripts/keeper-handoff-integration.mjs` stops a
-foreign host at its end.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`). `keeper/os/unix.rs` `a_process_we_may_not_signal_is_alive` stays.
 Platforms: macOS, Linux.
 
 **SU8. The window reaps every child it starts.**
@@ -935,9 +933,8 @@ but registering on a process that is already a zombie fails with ESRCH (Darwin 2
 Rule: a handed-over host is watched by its identity, not its number (`os::process::ProcessWatch`, #840 item 8): kqueue
 on macOS, a pidfd on Linux, polling elsewhere; ESRCH alone means gone. Its exit status is not needed, so none is read
 (the children service, which needed one, went with #1895 step 4 PR 2).
-Guard: `keeper/os/unix/process.rs` `the_end_of_a_process_that_is_not_our_child_is_seen`;
-`keeper/os/unix/process.rs` `only_esrch_means_a_process_has_gone`; `keeper/host_proc/handover.rs`
-`a_watch_sees_a_running_host_end_and_a_zombie_as_ended`.
+Removed: went with #1895 step 4 PR 4 (`os/unix/process.rs`, `host_proc/handover.rs` and their guards): no keeper
+watches a host it did not start any more (SU7).
 Platforms: macOS, Linux.
 
 **CH11. A graceful stdin close is a request, not a socket end.**
@@ -1000,7 +997,7 @@ Platforms: macOS, Linux.
 
 **SW3. A relay whose peer stops reading is let go.**
 Happened: writes are blocking; a peer that stopped reading held its relay thread and blocked every handoff, since a
-freeze waits for each relay (#392).
+freeze waited for each relay (#392; the handoff went with #1895 step 4 PR 4, the limit stays).
 Rule: a 30 s write limit on both relay sockets.
 Guard: `keeper/keeper/front_door.rs` `a_client_that_stops_reading_is_let_go`.
 Platforms: macOS, Linux.
@@ -1035,9 +1032,9 @@ Platforms: macOS, Linux.
 **SW6. A swap that fails falls back to the build that served.**
 Rule: a standby failure leaves the running host untouched; a failure after the drain starts the old build again from
 its kept copy, never retries the new one; a connection that read the old target is turned away by generation.
-Guard: `keeper/keeper/swap.rs` `a_host_that_exits_before_standby_is_reported_in_its_own_words`;
-`scripts/keeper-integration.mjs` check "the failure after the drain is reported, with the previous build started
-again". The generation race is **UNGUARDED**.
+Removed: went with #1895 step 4 PR 4, which removed the keeper's swap (`keeper/swap.rs`, the `swap` scenario of
+`keeper-integration.mjs`) and its guards: an update or another build is a stop, and the keeper has no other build to
+fall back to.
 Platforms: macOS, Linux.
 
 **SW7. A host refuses a store from a newer build before writing anything.**
@@ -1123,14 +1120,16 @@ Platforms: all.
 
 ## 9. The keeper handoff
 
+The keeper handed itself over from #280 step 4 until #1895 step 4 PR 4: what was learned stays here, and each lesson
+says where its guard went.
+
 **HD1. Start the next keeper, pass every handle, let the old one exit.**
 Happened: `exec` would keep the pid and descriptors on macOS and Linux but has no Windows equivalent, so the direction
 is the same everywhere (#280 step 4).
 Rule: A starts B with a `socketpair` end at B's descriptor 3 (no path, peer uid still checked); the lock's open file
 description, every listener, every child's pipes or pty, every relayed connection and every attached window pass to B;
 nothing reconnects; keeper first, then the host, so the newer side always reads the older side's state.
-Guard: `scripts/keeper-handoff-integration.mjs` check "keeper B still holds every child"; `scripts/keeper-handoff-integration.mjs`
-check "the keeper and the host both end on build C".
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux (Windows: `DuplicateHandle`, not built).
 
 **HD2. A descriptor batch that finds no room waits for it.**
@@ -1140,24 +1139,20 @@ buffer has less room than the batch; about 8,000 bytes before a batch failed, 4,
 9d66f03c). Linux blocks: the sweep passes there at 16 KiB and 208 KiB even with the retry disabled (#458).
 Rule: EMSGSIZE, ENOBUFS and EAGAIN mean wait for room and retry, up to 30 s; a batch carries one byte, so a failed
 attempt sent nothing; at most 64 descriptors per batch, after all bytes.
-Guard: `keeper/keeper/handoff/wire.rs` `descriptors_wait_for_room_after_bytes_that_nearly_fill_the_buffer`;
-`keeper/keeper/handoff/wire.rs` `descriptors_arrive_whatever_the_bytes_before_them` (every 256 bytes to three buffers'
-worth, and each of the last 320); `keeper/keeper/handoff/wire.rs` `a_message_carries_its_header_blobs_and_working_descriptors`.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS (Linux checked by the same sweep).
 
 **HD3. A message sent just before the peer closed is still read.**
 Happened: macOS refuses `SO_RCVTIMEO` with EINVAL once the peer has closed; A sends `commit` and exits at once, so B
 lost the commit and the exit statuses in it (#387).
 Rule: `recv` ignores EINVAL from setting its timeout.
-Guard: `keeper/keeper/handoff/wire.rs` `a_message_sent_just_before_the_peer_closed_is_still_read`.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS.
 
 **HD4. Received descriptors are close-on-exec, and a truncated batch fails.**
 Rule: Linux receives with `MSG_CMSG_CLOEXEC`; elsewhere `FD_CLOEXEC` is set on each descriptor after `recvmsg`;
 `MSG_CTRUNC` is an error.
-Guard: `keeper/os/unix/handles.rs` `received_descriptors_are_close_on_exec`; `keeper/os/unix/handles.rs`
-`a_truncated_batch_is_an_error`. Writing that test found a truncated batch could own descriptor numbers past the
-room made for them (macOS keeps the sent length in `cmsg_len`) and close them; the count is now capped.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD5. The channel reaches the incoming keeper, and nothing else inherits it.**
@@ -1166,9 +1161,7 @@ hands over only to a `centralu-keeper` now.
 Rule: `dup2` to descriptor 3 and clear `FD_CLOEXEC` before `exec`; the incoming keeper sets close-on-exec on the channel
 at once. An executable not named `centralu-keeper` is refused before anything starts (`handoff::give`): a window's
 executable started without `--keeper` would open a window.
-Guard: `scripts/keeper-handoff-integration.mjs` (every handoff runs through the channel); `keeper/keeper/exe.rs`
-`only_centralu_keeper_is_a_keeper_executable`; `scripts/keeper-handoff-integration.mjs` check "the handoff fails" (asked
-with B's window executable).
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux. *Changed by #461.*
 
 **HD6. The snapshot only grows, and the newer side reads the older.**
@@ -1176,8 +1169,8 @@ Happened: the outgoing keeper is always the older build in an update.
 Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461 every snapshot field
 is required: a snapshot without one is refused and the handoff rolls back. A keeper of 0.1.0-beta.11 or earlier wrote no
 `sweeps` (#435) and rolls back; 0.1.0-beta.12 and later hand over.
-Since #1895 step 4 PR 2 a snapshot that carries a child table
-at all is refused (`keeper/keeper/handoff/tests.rs` `a_handoff_that_carries_a_child_table_is_refused`). *Manual*:
+Since #1895 step 4 PR 2 a snapshot that carried a child table
+at all was refused. *Manual*:
 `scripts/keeper-handoff-integration.mjs --old-keeper` against a real 0.1.0-beta.16 (hands over) and 0.1.0-beta.11 (rolls
 back); no CI job runs an old keeper: **UNGUARDED** in CI. *Changed by #461.*
 Platforms: macOS, Linux.
@@ -1185,8 +1178,7 @@ Platforms: macOS, Linux.
 **HD7. A rollback says how the incoming keeper ended.**
 Happened: when B exited before `ready` the read error said only "failed to fill whole buffer" (#368, #441).
 Rule: on EOF, reset or broken pipe, wait up to 2 s for B's exit and report its code or signal.
-Guard: `keeper/keeper/handoff/tests.rs` `an_incoming_keeper_that_exits_is_reported_by_how_it_exited`;
-`keeper/keeper/handoff/tests.rs` `an_incoming_keeper_that_does_not_answer_is_reported_as_silent`.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD8. The outgoing keeper freezes; it never reads ahead.**
@@ -1194,31 +1186,24 @@ Happened: a byte A read but did not deliver would be lost with A (#280).
 Rule: every reader stops between units (host lines, relay copies, child-table passes) and hands over what it holds;
 packing duplicates descriptors so a rollback finds everything open; before `ready` any failure rolls back; after it A
 never resumes and exits without running destructors; B starts no I/O until `commit`.
-Guard: `keeper/host_proc.rs` `a_frozen_host_reader_hands_over_what_it_read_and_stops_between_lines`;
-`keeper/keeper/front_door.rs` `a_relayed_connection_survives_a_handoff_of_the_door`; `keeper/keeper/handoff/tests.rs`
-`a_child_table_handed_over_carries_on_with_no_line_lost_or_doubled`; `keeper/keeper/handoff/tests.rs`
-`a_thawed_child_table_carries_on_as_if_nothing_happened`; `keeper/keeper/handoff/pack.rs`
-`packing_duplicates_so_the_original_stays_usable`; `scripts/keeper-handoff-integration.mjs` check "the terminal counter
-is continuous across the handoff".
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD9. If A dies after `ready`, B takes over only if A is gone.**
 Rule: B's failed wait for `commit` means: A alive, exit; A gone, take over (B holds the only copy of everything).
-Guard: **UNGUARDED**.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD10. The lock passes with no gap.**
 Rule: B gets the same open file description of `keeper.lock`, so `flock` is held throughout; B proves it with a
 `try_lock` on the passed descriptor; the holder record is rewritten from offset 0 (the offset is shared).
-Guard: `scripts/keeper-handoff-integration.mjs` check "a third keeper is turned away (B holds keeper.lock)";
-`scripts/keeper-handoff-integration.mjs` check "keeper.lock records keeper B".
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD11. A reaps at the commit and passes the statuses.**
 Rule: A is still the parent; children that exited during the freeze are reaped by A and their statuses sent in
 `commit` (kqueue on a zombie fails, CH10).
-Guard: `keeper/keeper/handoff/tests.rs` `the_reaped_list_reads_back_as_written` (the format only); the behaviour is
-**UNGUARDED**.
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD12. A fix in the sending keeper cannot reach an update.**
@@ -1227,17 +1212,16 @@ every try; the window kept offering "Switch to this build" (#391, dbe96997).
 Rule: ask of every compatibility fix which side runs the code during an update. A failed handoff still lets the host
 switch run. Since #1895 step 4 PR 3 the window never switches: a keeper of another build is restarted (UP7), so a
 keeper left behind on a switch cannot arise from this build's window.
-Guard: `platform/tauri/switch-plan.test.ts` "offers the restart for a host or a keeper of another build, a keeper that
-says no build of its own included (#461)". That the keeper falls through to the host swap after a rolled-back handoff
-is **UNGUARDED** in the keeper crate (it goes in PR 4).
+Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
 Platforms: macOS, Linux.
 
 **HD13. A running executable that is unlinked keeps running; one overwritten in place may not.**
 Happened: `tauri build` deletes and rewrites the bundle; `centralu install` does `rmSync` then `ditto`. A probe that
 overwrote a running keeper's file in place saw it answer for 3 s, but any page not yet loaded comes from the new file.
 Rule: nothing overwrites a running executable in place; replace by unlink or rename.
-Guard: `scripts/keeper-handoff-integration.mjs` check "keeper A keeps running and answering from its unlinked
-executable".
+The rule stays: a keeper beside the window and the window itself run from the bundle an install replaces.
+Guard: **UNGUARDED** since #1895 step 4 PR 4 (`keeper-handoff-integration.mjs` checked that keeper A kept answering
+from its unlinked executable).
 Platforms: macOS, Linux.
 
 ## 10. Files a running process depends on
@@ -1257,13 +1241,13 @@ Platforms: macOS, Linux.
 Happened: after a handoff, the cleanup set off by the adopted host's ready line deleted the copy a switch had just
 renamed into place: "Cannot find module …/hosts/handoff-C/main.mjs" (#368, fixed by #441, 573be1e9; #325 had covered
 only `.tmp-*`).
-Rule: every copy and cleanup takes `source::Copies`; a claim holds a copy until a host runs from it or the swap gives
-up; the cleanup reads what is in use when it runs; a frozen keeper neither copies nor cleans; temporary copies younger
-than 10 minutes are left alone.
-Guard: `keeper/keeper/source.rs` `a_copy_a_swap_holds_survives_the_cleanup_a_ready_host_sets_off`;
+Rule: every copy and cleanup takes `source::Copies`; a claim holds a copy until a host runs from it; the cleanup reads
+what is in use (the running host's folder and the next launch's) when it runs; temporary copies younger than 10 minutes
+are left alone. The swap's claims and the freeze went with #1895 step 4 PR 4; the launch's claim stays.
+Guard: `keeper/keeper/source.rs` `a_claimed_copy_survives_the_cleanup_a_ready_host_sets_off`;
 `keeper/keeper/source.rs` `a_claimed_copy_is_never_taken_by_a_concurrent_cleanup`; `keeper/keeper/source.rs`
-`a_frozen_keeper_neither_copies_nor_cleans`; `keeper/keeper/source.rs` `the_freeze_waits_for_a_copy_in_progress`;
-`keeper/keeper/server/tests.rs` `the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target`.
+`the_cleanup_keeps_the_copy_the_host_runs_from_when_it_runs`; `keeper/keeper/server/tests.rs`
+`the_folders_in_use_are_the_running_and_the_next`.
 Platforms: macOS, Linux.
 
 **FI3. A complete copy outlives the folder it came from.**
@@ -1279,16 +1263,14 @@ Happened: the type-2 runtime keeps the squashfs mounted while any process holds 
 descriptor; a keeper started by keeper A from a newer AppImage holds neither, so its mount went when that window quit,
 and a debug keeper then died of SIGBUS when asked to stop, most likely at a page-in (#458, spikes/2026-10-linux-keeper.md
 §6). The same holds for the host and every terminal.
-Rule: the keeper and the host run from plain files under `<data>/content/<version>/`, copied out before a keeper starts
-or a switch is asked; once nothing runs from the mount, inherited descriptors that are not the handoff channel are
-closed. The copy is not signed (the release signs Linux content only once plan §8 decision 1 says so): it is hashed
+Rule: the keeper and the host run from plain files under `<data>/content/<version>/`, copied out before a keeper starts; once
+nothing runs from the mount, inherited descriptors are closed. The copy is not signed (the release signs Linux content only once plan §8 decision 1 says so): it is hashed
 after copying, checked against the keeper and build stamp read from the source, renamed into place and made
 read-only, reused only while every file matches its manifest, and never replaced while a keeper may run from it.
 Guard: `keeper/keeper/carried/tests.rs` `the_keeper_and_host_are_copied_into_content_read_only_with_their_exec_bits`;
 `keeper/keeper/carried/tests.rs` `a_damaged_copy_is_copied_again_only_when_nothing_may_run_from_it`;
 `keeper/keeper/carried/tests.rs` `another_build_of_the_same_version_replaces_the_copy_only_when_nothing_may_run_from_it`;
-`keeper/keeper/server/tests.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content` (an unsigned copy hands
-over to the next copy; on macOS a folder without a signature still verifies first); `start_plan/tests.rs` "Linux
+`start_plan/tests.rs` "Linux
 release, CC_USE_KEEPER=1"; `scripts/keeper-integration.mjs` `from-a-copy` (the descriptors a window hands over are
 released by a keeper from content and its host, and held by one started elsewhere; `keeper e2e (linux)` runs it).
 Not covered: the window's copy step itself runs only in the real window on Linux (plan step 4b's manual run).
@@ -1316,10 +1298,15 @@ Rule: verify the ed25519 signature over the manifest's exact bytes before parsin
 `O_NOFOLLOW` descriptor; copy into a fresh folder, hash the copy, make it read-only and run only the copy; reuse a copy
 only if it verifies in place with the same manifest bytes; refuse a source inside `<data>/content`; never replace a
 folder something runs from (`in-use`).
-Guard: `keeper/keeper/content/tests.rs` `content_changed_after_signing_is_refused_and_nothing_is_left_behind`;
+Since #1895 step 4 PR 4 only the shell copies; the keeper verifies nothing to run it, and the window reads its own
+content again only to word the shell's refusal (`content::diagnose`). No caller asks `place` to leave an in-use folder
+alone any more (the shell passes `in_use: false`); the option goes with the next shell version, since the verifier is
+part of the shell's pinned bytes.
+Guard: `shell/run/tests.rs` `content_that_is_not_what_was_signed_is_refused_and_nothing_runs`;
 `keeper/keeper/content/tests.rs` `content_signed_with_a_key_this_build_does_not_trust_is_refused`;
 `keeper/keeper/content/tests.rs` `content_from_inside_the_content_folder_is_refused`;
-`keeper/keeper/content/tests.rs` `a_version_folder_in_use_that_does_not_verify_is_refused_and_left_alone`;
+`keeper/keeper/content/tests.rs` `the_window_can_find_why_its_own_content_would_be_refused_without_running_or_copying_it`;
+`apps/desktop/content-verify/tests/place.rs` `a_copy_that_no_longer_verifies_is_copied_again_unless_something_runs_from_it`;
 `shell/run/tests.rs` `starts_the_keeper_from_the_verified_copy_with_the_windows_command_line`;
 `shell/run/tests.rs` `a_second_start_of_the_same_version_uses_the_copy_once_it_verifies_again`.
 Platforms: macOS (Linux and Windows to follow, plan step 4).
@@ -1345,10 +1332,12 @@ Guard: `shell/run/tests.rs` `an_older_version_than_one_that_ran_is_refused_unles
 Platforms: macOS.
 
 **FI10. A test key cannot reach a release.**
-Rule: the extra key exists only behind the `test-key` feature, which is a `compile_error!` without `debug_assertions`.
+Rule: the shell's extra key exists only behind its `test-key` feature, which is a `compile_error!` without
+`debug_assertions`. The keeper has no test key at all since #1895 step 4 PR 4: nothing it runs is verified by it.
 Guard: `shell/keys.rs` `a_build_without_the_test_feature_trusts_exactly_keys_json`; `keeper/keeper/keys.rs`
-`a_build_without_the_test_feature_trusts_exactly_keys_json`; `tooling/shell-bundle.test.ts` "a test key exists only
-behind the test-key feature, which a release build refuses to compile".
+`the_keeper_trusts_exactly_keys_json`; `tooling/shell-bundle.test.ts` "a test key exists only
+behind the test-key feature, which a release build refuses to compile"; `tooling/keeper-executable.test.ts` "trusts
+packaging/shell/keys.json and no test key".
 Platforms: macOS.
 
 **FI11. On Windows a running program's files cannot be replaced.**
@@ -1498,10 +1487,10 @@ Guard: `window/shell/tests.rs` `each_refusal_starts_the_keeper_directly_with_the
 Platforms: macOS.
 
 **TC16. A keeper from content verifies the next content itself.**
-Rule: only a keeper whose own executable is `<data>/content/<version>/centralu-keeper` verifies and copies the next
-build before handing over; any other keeper hands over to the executable it is given.
-Guard: `keeper/keeper/server/tests.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content`;
-`scripts/keeper-content-integration.mts` check "refused: ${reason}" (run for `content` and `downgrade`).
+Rule: only a keeper whose own executable is `<data>/content/<version>/centralu-keeper` verified and copied the next
+build before handing over; any other keeper handed over to the executable it was given.
+Removed: went with #1895 step 4 PR 4 (`Verifier::place` in the keeper, `keeper-content-integration.mts`): a keeper
+hands over to nothing, so only the shell places content.
 Platforms: macOS.
 
 **TC17. A tool started under Centralu asks in Centralu's name.**
@@ -1878,16 +1867,12 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 39 | KL9: the terminal's `disposeAll` kills every tree | `host/dev-services/terminal.ts` | macOS, Linux | 8 |
 | 40 | KL14: codex gets EOF before any signal | `host/adapters/codex/client.ts` | all | 8 |
 | 41 | KL19: exit reported after stdout's end for the host's own processes | `host/adapters/local-process.ts` | all | 8 |
-| 47 | SW6: a connection that read the old target is turned away | `keeper/keeper/front_door.rs` | macOS, Linux | 5 |
 | 48 | SW12: a failed store open releases the file | `host/dev-services/store.ts` | Windows | 9 |
 | 49 | SW13: migrations log on stderr | `host/dev-services/store.ts` | all | — |
-| 51 | HD6: a handoff from an older keeper, in CI | `scripts/keeper-handoff-integration.mjs` | macOS, Linux | 5 |
-| 52 | HD9: B takes over after `ready` only if A is gone | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
-| 53 | HD11: A reaps at the commit and B completes those children | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
-| 54 | HD12: a rolled-back handoff still runs the host swap | `keeper/keeper/server/switch.rs` | macOS, Linux | 5 |
 | 56 | FI5 on the direct path: the AppImage's variables still reach the host the window starts itself | `window/sidecar/launch.rs` | Linux | 4b |
 | 57 | TC2: the responsible process (manual probe, per shell version and major macOS) | `window/shell/` | macOS | 6 |
 | 58 | TC3: a nested shell loses Screen Recording (manual) | `window/shell/` | macOS | 6 |
+| 59 | HD13: a running keeper whose executable was unlinked keeps answering | `scripts/` | macOS, Linux | — |
 | 59 | TC4: no extended attributes copied with the shell | `window/shell/install.rs` | macOS | 6 |
 | 60 | TC6: `open` bounded at 15 s | `window/shell/start.rs` | macOS | 6 |
 | 61 | TC7: a keeper exiting 3 while another answers counts as ready | `shell/run.rs` | macOS | 6 |

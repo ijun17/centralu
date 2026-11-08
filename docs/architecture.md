@@ -172,7 +172,7 @@ Forbidden anti-patterns: global mutable singletons, IO directly in UI components
 [dev machine: browser]                   [production: Tauri]
 
 Vite dev server                        Tauri app (Rust): the window, OS integration
-   │                                      │ keeper: spawn·watch·restart·swap the host (§4.1)
+   │                                      │ keeper: spawn·watch·restart the host (§4.1)
 Browser (ui)                              │
    │  WebSocket ws://127.0.0.1:PORT    Webview (ui)
    ▼                                      │  WebSocket ws://127.0.0.1:PORT (identical!)
@@ -195,7 +195,7 @@ and started detached from the app into its own session.
 
 ```
 Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
-   │                 unix socket     │ launch · watch · restart · swap
+   │                 unix socket     │ launch · watch · restart
    │                 <data>/keeper.sock, 0600
    │                                 │
    └── WebSocket ──▶ front door ─────┼─ bytes ─▶ agent-host (node, from <data>/hosts/<build>/)
@@ -209,22 +209,22 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
 | Decision | Why |
 |---|---|
 | The keeper is its own executable, `centralu-keeper`, linking no Tauri and no webview (#440) | Until 0.1.0-beta.11 it was the window's executable in a mode (`centralu --keeper`), chosen so macOS would attribute privacy permissions to Centralu. Measured since: macOS judges a process by the app that started its tree (the responsible process, [spikes/2026-10-thin-shell-tcc.md](spikes/2026-10-thin-shell-tcc.md)), not by the file it runs, so a keeper the window starts is the window's either way. A separate executable is what lets a later step start the keeper from verified content outside the bundle ([plans/thin-shell.md](plans/thin-shell.md) §5). Its code is the crate `apps/desktop/src-tauri/keeper` (`centralu-keeper-core`, no Tauri dependency), and the binary is a target of the app package, so `tauri build` bundles it next to the window's with no extra step. Measured in a release bundle (macOS arm64, 2026-10-08): `centralu-keeper` is 0.8 MB and links only `libSystem` and `libiconv`; the window's `centralu` is 5.4 MB and links WebKit and AppKit. Tauri signs it ad hoc like the window, and `codesign --verify --deep --strict` on the bundle covers it. |
-| The window's executable refuses `--keeper` at once, without a window, unless a debug window asked (#461) | Until 0.1.0-beta.16 it `exec`ed the keeper next to it, for keepers of 0.1.0-beta.11 and earlier, which hand over by starting the new build's *window* executable as `centralu --keeper --take-over-fd 3 ...`, and for windows from before #440, which started their keeper that way. Removed four releases after the first with the pinned shell. Such a keeper now never hears `ready`, the handoff's commit point, so it rolls back and serves on; the window offers "Restart completely". Checked against a real 0.1.0-beta.11 keeper (`scripts/keeper-handoff-integration.mjs --old-keeper`). Ignoring the flag instead would open a second window from a background keeper, so the branch in `main()` stays and exits with 64. A bundle with no `centralu-keeper` beside the window no longer runs the keeper in the window's executable either: it fails to start one, and says so. |
+| The window's executable refuses `--keeper` at once, without a window, unless a debug window asked (#461) | Until 0.1.0-beta.16 it `exec`ed the keeper next to it, for keepers of 0.1.0-beta.11 and earlier, which hand over by starting the new build's *window* executable as `centralu --keeper --take-over-fd 3 ...`, and for windows from before #440, which started their keeper that way. Removed four releases after the first with the pinned shell. Such a keeper now never hears `ready`, the handoff's commit point, so it rolls back and serves on; the window offers "Restart completely". Checked against a real 0.1.0-beta.11 keeper (`keeper-handoff-integration.mjs --old-keeper`, removed with the handoff in #1895 step 4 PR 4). Ignoring the flag instead would open a second window from a background keeper, so the branch in `main()` stays and exits with 64. A bundle with no `centralu-keeper` beside the window no longer runs the keeper in the window's executable either: it fails to start one, and says so. |
 | Not on Windows | The keeper is built on unix sockets, descriptor passing and `flock`. Tauri leaves a binary out of the bundle when its required feature (`keeper-exe`) is not among the build's features, and `tauri.windows.conf.json` names none. |
 | A debug window runs the keeper in its own executable | `tauri dev` and `cargo run` build only the binary they run, so a `centralu-keeper` in `target/debug` may be older code than the window, and two binaries of one build are linked in no fixed order, so file times cannot tell. A debug window that opts into the keeper (`CC_USE_KEEPER=1`) starts itself with `--keeper` and `CC_KEEPER_IN_PROCESS=1`, as before #440. |
 | The app launches it detached (`setsid`, stdin `/dev/null`) | Quitting, crashing or replacing the app sends it nothing. launchd and `SMAppService` are later options, not step 1. |
 | The host is tied to the keeper (`--watch-parent` on the keeper's pipe) | A keeper that dies, however it dies, still takes its host with it: there is never an unowned host. |
-| Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Once a host is up, the copies it does not run from are removed, except one a launch or a swap is still making or about to start: those are claimed until a host runs from them, and the cleanup reads which copy the host runs from when it runs, not when the ready line set it off (a cleanup once deleted the copy a swap had just made, #368). |
+| Every host runs from a per-build copy, `<data>/hosts/<commit>/` | A rebuild or update rewrites the bundle; a host running from it read the Codex bridge, `schema.sql` and `app-template/` on demand and could mix two builds (2026-10-03). Once a host is up, the copies it does not run from are removed, except one a launch is still making or about to start: it is claimed until a host runs from it, and the cleanup reads which copy the host runs from, and will run next, when it runs, not when the ready line set it off (a cleanup once deleted the copy a swap had just made, #368; the swap went in #1895 step 4 PR 4, the claim stays for every launch). |
 | Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. The quit question follows it: off, its main button is "Quit completely" (quitting stops everything anyway), and with a turn running "Quit and keep running" beside it turns the setting on and then quits (#1512; the keeper has no one-time keep, so the setting stays on); on, "Quit" closes the window and "Quit completely" stops the keeper, the host and every agent, terminal and running command. A Windows window on the `centralu serve` host reads as on, its "Quit completely" being `serve --stop` (#1466). The label read "Quit and stop agents" until #387, which undersold what stops. |
 | An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
-| A window of another build attaches to the running host and offers to switch | The keeper knows both builds, its own included. Switching moves the keeper to the window's build (§4.4) and then runs the blue-green swap of §4.2; the window confirms first only when something can be lost. A window started by "Apply now" switches by itself when nothing can be, and only to a newer build (§4.5). |
+| A keeper runs one build for its life; a window of another build attaches and offers to restart into its own (§4.4, §4.5) | Since #1895 step 4 PR 4. Until then switching moved the keeper to the window's build (§4.4) and ran the blue-green swap of §4.2. Since the host's children became its own (§4.3), an update stops them either way, so the swap and the handoff kept only the front door's address across builds. |
 | Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a debug build in. Non-unix targets have no keeper yet. Every case, per platform, is in [agent-host.md](agent-host.md) §4.0, decided in one place (`start_plan`). |
 
-The host's long-lived children are its own (§4.3): a host restart ends them, and an update or a swap stops them for
+The host's long-lived children are its own (§4.3): a host restart ends them, and an update stops them for
 an update, which the next host continues. The control socket, its protocol and its trust rule are in [agent-host.md](agent-host.md) §4.1 and
 [security-boundaries.md](security-boundaries.md).
 
-### 4.2 The front door and the blue-green swap (#280, option C step 3)
+### 4.2 The front door (#280, option C step 3)
 
 Clients never learn a host's own port. The keeper listens on one loopback port for its whole life, the **front
 door**, and relays every connection byte for byte to whichever host is current. The webview, a browser and every
@@ -233,38 +233,19 @@ Codex orchestrator bridge connect there.
 | Decision | Why |
 |---|---|
 | A byte relay, not a WebSocket proxy | The keeper parses no protocol (#280): a relay of bytes cannot be broken by a change to the host's frames, and the HTTP door for app views rides it unchanged. |
-| The keeper owns the token and hands it to every host (on its stdin, #538) | The host keeps checking `hello` and the browser's `Origin` itself; the token and the port stay the same across restarts and swaps, so a client never has to be told again. Measured hazard it removes: a Codex bridge gets its address and token once, when its thread starts, and a running codex keeps that bridge, so a host on a new port or token silently cut every bridge. |
+| The keeper owns the token and hands it to every host (on its stdin, #538) | The host keeps checking `hello` and the browser's `Origin` itself; the token and the port stay the same across the host's restarts for the keeper's whole life, so a client never has to be told again. Measured hazard it removes: a Codex bridge gets its address and token once, when its thread starts, and a running codex keeps that bridge, so a host on a new port or token silently cut every bridge. |
 | While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
-| A relay whose peer refuses its bytes for 30 s ends (#392) | Writes are blocking. A peer that stopped reading (a stopped bridge, a hung client) held its relay thread and descriptors until the next swap, and blocked every keeper handoff, since a freeze waits for each relay to finish its copy. A live client reads within that; the bridge reconnects on its next call. |
-| The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives a swap. The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
-| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host in a swap's drain ([agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
+| A relay whose peer refuses its bytes for 30 s ends (#392) | Writes are blocking. A peer that stopped reading (a stopped bridge, a hung client) held its relay thread and descriptors until the next swap, and blocked every keeper handoff, since a freeze waited for each relay to finish its copy (both gone since #1895 step 4 PR 4; the bound stays). A live client reads within that; the bridge reconnects on its next call. |
+| The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives its restart (`keeper-integration.mjs`, `front-door` scenario). The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
+| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances were handed to the next host in a swap's drain ([agent-host.md](agent-host.md) §4.2; #1895 step 4 PR 5 writes them on a stop for an update instead), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
-`switch` is a **blue-green swap** (`keeper/swap.rs`):
-
-1. The keeper starts host B from the new build's per-build copy with `--standby`. B loads its bundle, finds its
-   tools, reads the store without writing to it, refuses a store past what it can read, reports, and waits. It takes
-   no lock, runs no migration and attaches to nothing. Host A keeps serving.
-2. No report within 60 s, or B exits: B is stopped and its copy removed. A was never touched.
-3. The front door holds new connections; A is told to **drain**: it refuses new RPCs and tool calls, gives the
-   running ones up to 10 s, cuts the rest with an error the model can retry, stops for an update (its agents,
-   terminals and commands end, listed for B), flushes and closes the store,
-   lets go of the #278 lock and exits. An A that has not exited 15 s past the bound is sent TERM (then its group,
-   after a grace), and one that ignores that is killed with its group (#840 item 1). An A still running after
-   that holds the lock B needs: B is stopped, A's watcher starts A's build again once A ends, and until then the
-   windows are told the host failed.
-4. B is told to activate: it takes the lock, runs only expand migrations (heavy and breaking steps run after it is
-   ready, [agent-host.md](agent-host.md) §5.1), starts, listens and reports ready.
-5. The front door points at B and closes what was still relayed to A; clients reconnect to the same address and
-   resync on B's new stream epoch. A's copy is removed.
-
-| Decision | Why |
-|---|---|
-| Drain bound 10 s, then cut with a retryable error | Only calls the host serves itself need to drain: orchestrator tools took at most 0.2 s and app tools at most 5.6 s in a real store. Bash and subagents run inside the agent's process, which the stop for an update ends and B continues. Draining every tool was never an option (p99 78 s, max 4.5 h). |
-| B checks itself before A drains, and migrates only after | A failed check costs nothing: A is untouched. Expand-only steps during the swap keep the store readable by A's build. |
-| If B fails after A drained, A's build is started again | A has exited and released the lock, so it cannot resume; its build is known good and still reads the store, and its copy is kept until the swap succeeds. Retrying B was the alternative, but the build that just failed is the less likely one to start. The window shows the failure and that the previous build serves again; the person can retry. |
-| Every phase is pushed to attached windows (`view.swap`) | Until #1895 step 4 PR 3 the window showed progress and a failure's reason, and asked before switching only when something could be lost. Since then no window of this build switches or reads `view.swap`; the keeper still pushes it for an earlier build's window until PR 4. |
-| The swap's drain is a stop for an update | The agents, terminals and commands are A's own children (§4.3): A stops and lists them, and B continues the turns and opens the terminals and Run commands again ([agent-host.md](agent-host.md) §4.5). Before #1895 step 4 PR 1 a host with the keeper's children service left them in the keeper and B re-attached. The host still reports `keepsAgents`, always `false`, until the swap goes ([plans/keeper-removal.md](plans/keeper-removal.md) §4, PR 5). |
-
+**The blue-green swap, until #1895 step 4 PR 4.** `switch` started host B of the new build with `--standby` beside
+host A, had A drain and stop for an update once B had checked itself, then activated B behind the same front door, and
+started A's build again if B failed. Since the host's children became its own (§4.3), the drain stopped them for an
+update anyway, so the swap kept only the door's address across builds, and an update is now the keeper's stop instead
+(§4.5). The host still takes `--standby`, `activate` and `drain`, which no keeper sends, until PR 5
+([plans/keeper-removal.md](plans/keeper-removal.md) §4). The drain's 10 s bound came from a real store: orchestrator
+tools took at most 0.2 s and app tools at most 5.6 s, while draining every tool was never an option (p99 78 s, max 4.5 h).
 
 **App views opening during a swap (#580).** A relaunched window used to attach to the keeper's existing host, request
 its automatic switch and wait for it before opening panels, so that a home tool did not run on an older host. Since
@@ -306,76 +287,41 @@ itself over a second user-only socket, `<data>/children.sock`, so they outlived 
 swapped out, and the next host listed them and re-attached mid-turn. Step 3 stopped offering it (owner decision
 2026-11-03, option C), step 4 PR 1 removed the host's side and PR 2 the keeper's ([plans/keeper-removal.md](plans/keeper-removal.md)):
 the keeper's `children` op answers an empty list, and a handoff that carries a child table, which only a holding keeper
-of beta.48 or older sends, is refused (§4.4). What holding them took (a session per child, the keeper owning and
+of beta.48 or older sends, is refused; since PR 4 the keeper takes no handoff at all (§4.4). What holding them took (a session per child, the keeper owning and
 draining each pty, lossless whole-line agent streams, no closed connection ever signalling a child) is in
 [runtime-lessons.md](runtime-lessons.md) §7.
 
 **Leaving has one mode.** Every ending is a stop: sessions, terminals and commands stop with the host. The keeper
 asks for it by a line on the host's stdin, plain when it is stopping for good ("Quit completely", "Restart
 completely", the last window closing with background mode off, idle exit) and with `forUpdate` for an update; a
-swap's drain is a stop for an update too. The detach mode, which left the tools running in the keeper, and the
+swap's drain was a stop for an update too, until no keeper swapped (#1895 step 4 PR 4). The detach mode, which left the tools running in the keeper, and the
 re-attach of the next host went with #1895 step 4 PR 1. The measurements that made the re-attach work (claude's
 re-`initialize`, codex's `thread/resume`) are in the earlier versions of [agent-host.md](agent-host.md) §4.3.
 
-### 4.4 The keeper hands itself over (#280, option C step 4)
+### 4.4 A keeper runs one build (#1895 step 4 PR 4)
 
-A keeper update must cut nothing: not the host, not a turn in progress, not a terminal or a dev server, not a client's
-connection. `exec` would keep the pid and the descriptors on macOS and Linux but has no Windows equivalent, so the
-direction is the same on every OS: **start the new keeper, pass it every handle, and let the old one exit**
-(`keeper/handoff/`).
-
-```
-keeper A (running build)                           keeper B (new build, from its own bundle)
- 1  starts B: centralu-keeper                     ──▶  hello
-            --take-over-fd 3
- 2  freezes: accepts nothing, parks every relay,
-    pauses the host's stdout,
-    stops copying and removing host copies
- 3  state + buffers + descriptors (SCM_RIGHTS)    ──▶  4  rebuilds everything, no I/O; proves it holds the lock
- 6  commit point, on ready: sends commit         ◀──  5  ready
-    and exits without touching anything           ──▶  7  starts all I/O, adopts the host, serves;
-                                                          then swaps the host, if the switch asked for it
-```
-
-**What is passed:** `keeper.lock` (the same open file description, so the `flock` never has a gap), `keeper.sock`'s
-listener, the front door's listener and its token, the host's stdin and stdout, both sockets of every relayed
-front-door connection, every attached window's connection, and as data: the host's output read but not yet handled,
-the build records, settings, idle clocks and the last swap.
-
-**What survives and what reconnects.** Nothing reconnects. The host is the same process; it never notices, since its
-pipes are the same, now held by B, and its agents, terminals and commands are its own descendants, which go with it.
-A keeper of an earlier build that still holds children sends a child table as well; since step 4 PR 2 B refuses such a
-handoff before it touches a descriptor, and A rolls back and carries on with what it holds. A WebSocket through the front door, an
-app view's traffic and a Codex bridge's connection are the same TCP connections, pumped by B. An attached window keeps
-its control connection and hears B's next status on it. Connections waiting in a listen queue are accepted by B. The
-only thing turned away is a control request other than `status` that arrives in the instant of the freeze: it is
-answered "try again", and the app's retry reaches B.
+A keeper runs the build it was started as, with its hosts, for its whole life. An update, or a window of another
+build, stops it (for an update when its host can, §4.5), and the window starts a keeper of its own build through the
+shell. `switch` and `upgrade` answer `gone`, naming "Restart completely". A `centralu-keeper` started with
+`--take-over-fd`, as a keeper of an earlier build starts the next one when a window switches it, logs a line and exits
+with code 7 before it binds anything.
 
 | Decision | Why |
 |---|---|
-| B is the new build's keeper executable **inside its bundle**, the path the attaching window names (`centralu-keeper` beside its own executable, `keeper::exe`), never a copy | It is the file the person installed, signed with the bundle. A is handed nothing else: an executable of another name (a window from before #440 names its own) is refused before anything starts, and a keeper of 0.1.0-beta.11 or earlier, which starts the window's executable, meets its refusal and rolls back (§4.1, #461); `scripts/keeper-handoff-integration.mjs --old-keeper` runs that against a real 0.1.0-beta.11 executable, and the whole handoff against a real 0.1.0-beta.16 one. Replacing the bundle later does not disturb B: `tauri build` deletes the old `.app` and writes a new one (`bundle_project`, tauri-bundler 2.10), and `centralu install` copies the new bundle beside the old one with `ditto`, renames the old one aside, renames the new one in and then deletes the old one (`swapInto`, `packaging/npm/centralu/bin/swap.mjs`), so the running executable's file is unlinked, not overwritten, and keeps running (the integration script deletes and rewrites keeper A's executable under it, and A goes on serving and hands over). An in-place overwrite is not something to rely on: a probe that overwrote a running keeper's file in place saw it keep answering for the 3 s it watched, its code being resident, but any page not yet loaded would come from the new file. Nothing in the tree overwrites in place. |
-| The channel is a `socketpair` end at B's descriptor 3, not a socket file | It has no path, so no other process can connect at all (stronger than `0600`), and there is nothing to clean up. B still checks the peer's uid. |
-| A **freezes** rather than drains | A byte A read but did not deliver would be lost with A (the #280 measurement's rule: the outgoing keeper must not read ahead, or must forward what it read). Frozen, A reads nothing more; everything it holds is in the snapshot. A relay is stopped between two copies, the host's reader between two lines. |
-| The commit point is A receiving `ready` | Before it, any failure (B not starting, B failing to rebuild, B dying, a timeout) rolls A back: it kills B and thaws, and since it closed nothing (the snapshot holds duplicates) and read nothing, it carries on exactly where it stopped. After it, A never resumes. B treats a channel that closes after `ready` without `commit` as A having died: it takes over if A is gone, since it holds the only copy of everything, and exits if A is still there. "Gone" counts A's zombie and waits up to 5 s for A to finish exiting: A's channel closes as it exits, and a single `kill(pid, 0)` there read both as alive, so both keepers exited (#840 item 4). |
-| B rebuilds everything before `ready`, but starts no reader or writer until `commit` | A rolled-back A must be the only reader of the host's output and of every socket. |
-| A stops copying and removing host copies at the freeze, after any copy or cleanup in progress | B may copy and clean `<data>/hosts/` as soon as it commits, while A is still on its way out; a cleanup A started before could otherwise remove the copy B's swap just made (#368). A rolled-back A carries on and cleans at its host's next ready line. |
-| A rollback says how B ended, when B exited | When B exits before `ready`, the channel just ends, and the read error said only "failed to fill whole buffer". A waits up to 2 s for B's exit status and reports that (exit code, or the signal that killed it); B's own explanation, if it gave one, is in the keeper log, which both write to (#368). |
-| B watches the handed-over host by its identity | B is not the host's parent: once the host ends and its parent reaps it, its pid may be someone else's. B watches it with kqueue `NOTE_EXIT` (macOS) or a pidfd (Linux), made before A can reap it; registering on a host that is already a zombie fails with `ESRCH`, which reads as ended (#840 item 8, `os::process::ProcessWatch`). Until step 4 PR 2 A also reaped the children that exited during the freeze and passed their statuses on; no child table travels since. |
-| "Switch to this build" moved the keeper first, then the new keeper swapped the host, in one action (no window sends the switch since #1895 step 4 PR 3; §4.5) | Moving the keeper costs nothing, so it needs no question of its own, and a full update ends with keeper, host and app on one build. Keeper first means every exchange across builds is read by the newer side: B reads A's snapshot, B supervises A's host, B drains A's host and starts its own build's host. Swapping the host first would have the old keeper drive a newer host. |
-| A failed handoff still lets the host switch run | The host switch is what the person asked for; the old keeper can do it, as in step 3 (it already did in beta.10: `move_keeper` falls through to the host swap on any rolled-back handoff). Keeper↔host traffic across builds is lines the keeper does not interpret, so an older keeper supervising a newer host is the step-3 case, not a new one. |
-| Once the host runs the window's build, a keeper that stayed behind was a note, not a failure (#387; gone with #1895 step 4 PR 3) | A handoff that fails is the **sending** keeper's to fix, and in an update the sender is the old build, which the update cannot change (beta.10's keeper failed on macOS with "Message too long", the row below). The bar said the keeper moves to this build the next time it restarts and offered **Restart completely**. Since the window no longer switches, a keeper of another build is always restarted (§4.5), so this case cannot arise. |
+| A keeper's update is a stop, not a handoff | The handoff (below) let a keeper's update cut nothing. Since #1895 step 3 the host's children are its own and an update stops them for an update anyway, so the handoff kept only the front door's port and token and saved a reconnect of about 85 ms, for about 3,000 lines of descriptor passing, freezing and snapshots on two OSes, and a second verify-and-copy path beside the shell's ([plans/keeper-removal.md](plans/keeper-removal.md) §1, §4 row 4). A script holding the limited credential reads `keeper.sock` again after an update, as after any keeper restart. |
+| The take-over flag exits with code 7, not ignored with a log line | 7 is what a sending keeper of an earlier build reads as its handoff aborted (its `EXIT_ABORTED`): it rolls back and serves on with its host, and the window shows the refusal. A keeper that ignored the flag would go on as a second keeper on a lock its sender holds. |
 | "Restart completely" stops the keeper and the window starts one of its own build | It is the keeper's `stop`, the one "Quit completely" uses, so it stops what that stops (the host, every agent process, terminal and running command, said in its confirmation), but the window stays: its attach loop sees the keeper exit and launches a keeper from its own executable with its own host, then reattaches. Conversations resume through the store. The alternative, waiting for the keeper's next idle exit or quit, leaves the fixed keeper unused for days in background mode. |
-| A descriptor batch that finds no room waits for it, up to 30 s | On macOS a `sendmsg` carrying descriptors on a stream socket fails at once with `EMSGSIZE` instead of blocking when the 8 KiB send buffer (`net.local.stream.sendspace`) has less room than the batch; Linux blocks. Whether it happens depends on the exact number of bytes before each batch, so a large enough state hit it in the field (4 agents, 2 terminals, 7 app views, relayed connections; 2026-10-05) while small test states never did. A batch carries one byte, so a failed attempt sent nothing and the retry cannot duplicate or split it. The bound only matters for an incoming keeper that is alive but not reading (one that died fails the send at once); everything is frozen meanwhile, so rolling back beats waiting forever. `wire.rs` sweeps the bytes before the descriptors across three buffers' worth. |
-| The snapshot format is versioned and only grows | The outgoing keeper is the older build in an update, so the newer keeper reads the older format. A keeper from before step 4 cannot hand itself over: the first update to a step-4 build swaps only the host. |
 
-Measured with `scripts/keeper-handoff-integration.mjs` (macOS, debug build, a claude turn and a codex turn in their
-tool calls, a terminal printing every 50 ms, a dev server printing every 100 ms): the handoff took 0.5–0.8 s beyond the
-test's 1.5 s hold, the same host and child pids carried on, the counters were continuous, and every tool call was
-recorded once. A handoff killed before the commit left A serving everything.
-
-Unverified: which identity macOS holds responsible for a keeper started by a keeper (B inherits A's responsible
-process, the app that launched A); any of this on Linux end to end (the unit tests ran in Docker); Windows, which has
-no keeper (`DuplicateHandle` would be its way to pass handles).
+**Until PR 4: the keeper handed itself over (#280, option C step 4).** Keeper A started B, the new build's keeper inside
+its bundle, with a `socketpair` end at descriptor 3 (`--take-over-fd 3`), froze (accepted nothing, parked every relay,
+paused the host's stdout, stopped copying and removing host copies), and passed `keeper.lock`, both listeners, the
+front door's token, the host's pipes, every relayed and attached connection (`SCM_RIGHTS`) and its state. A's commit
+point was B's `ready`; any failure before it rolled A back. Measured on macOS with a claude and a codex turn in their
+tool calls, a terminal and a dev server counting: 0.5 to 0.8 s, the same pids, continuous counters, nothing reconnected.
+A keeper from verified content verified and copied the new build's signed content first and handed over to the keeper
+in that copy. What it took (a freeze rather than a drain, so no byte read ahead was lost; macOS failing a descriptor
+batch with `EMSGSIZE` instead of blocking; watching a handed-over host by kqueue or pidfd, since B was not its parent)
+is in this section's history before PR 4 and in [runtime-lessons.md](runtime-lessons.md).
 
 ### 4.5 Applying an update: one click, or by itself when idle (#352)
 
@@ -400,7 +346,7 @@ window (old build)                  keeper (old)                        window (
 |---|---|
 | The relaunch is Tauri's `request_restart` of the same executable path | `centralu install` replaces the bundle (`ditto` beside it, then a rename swap), so the path the running process was started from now names the new build's executable; `tauri::process::restart` (2.11.5) reads the executable's name from the bundle's new `Info.plist` and runs it. `request_restart` rather than `restart`, because a command runs on the main thread, where `restart` skips the exit events and with them the detach. |
 | "Apply now" is offered only when the build on disk differs from the window's (`relaunch_info`) | Under `pnpm app:open` the window runs the build output, which the update does not touch, and a relaunch would start the same build: the line keeps saying "restart", with the reason in its tooltip. `pnpm app:dev` and the other direct-mode builds stop their host for the update themselves before relaunching (`Supervisor::stop_host_for_update`). |
-| "Apply now" is offered only by a keeper whose view says `stopsForUpdate` | Such a keeper holds its host's stdin and can ask it to stop for an update, after which the next host continues the turns. One of an earlier build, or one that took its host over from one (a handoff passes no stdin it could write that line on), cannot: the update line says to restart it from the build bar first, or to quit Centralu completely (`KEEPER_TOO_OLD_TO_UPDATE`). Until step 4 PR 3 such a keeper was told `relaunching` (a grace of up to 300 s with no window) and the relaunched window switched it (handoff and swap); both went. |
+| "Apply now" is offered only by a keeper whose view says `stopsForUpdate` | Such a keeper holds its host's stdin and can ask it to stop for an update, after which the next host continues the turns. One of an earlier build, or one that took its host over from one (a handoff did not pass on whether its host can), cannot: the update line says to restart it from the build bar first, or to quit Centralu completely (`KEEPER_TOO_OLD_TO_UPDATE`). Until step 4 PR 3 such a keeper was told `relaunching` (a grace of up to 300 s with no window) and the relaunched window switched it (handoff and swap); both went. |
 | A keeper of another build is restarted, not switched: "Restart into this build" (or "Go back to this build" when the keeper is newer) | One path for every build pair. A keeper that can stop for an update gets `stop {forUpdate}`, so turns continue on this build; any other gets a plain `stop`, which ends them as a quit does. The window keeps attaching, and its run loop starts a keeper of its own build. The confirmation names what the stop loses and is asked when the keeper does not report itself idle (`restartPlan`, `platform/src/tauri/switch-plan.ts`): with nothing busy nothing is lost. A plain stop always asks: a keeper whose host is down reports idle, and one of beta.48 or older still holds agents and terminals then. "Switch to this build" (handoff and swap, with its progress and failure states) went with step 4 PR 3. |
 | "Automatic updates" (on unless the person turned it off, owner decision 2026-10-20; off by default only in a build run from source): the host installs as soon as a check finds a newer version; the window relaunches when idle | Installing is safe while agents work (the keeper and every host run from their own copies). Applying waits for the host's one idle rule (`hostBusy`, `agent-host/src/idle.ts`, reported to the keeper and from it to the window): no session working, waiting for an approval or a question, or running background work, no terminal, no command. A session whose turn has finished (`waiting_input`) is idle; it counted as busy until 2026-10-05, which kept every session that had ever answered in the way. Unknown counts as busy. And no keystroke in a text field for 20 s: a relaunch under someone's fingers reads as a crash. |
 | A window restarts a keeper of another build by itself only when automatic updates are on, the keeper reports itself idle and can stop for an update, and the window is newer (`autoRestart`, `isNewerBuild`, `switch-plan.ts`) | Before, "another build" was enough, so opening an older build's window (a backed-up app, an older local build) with the automatic mode on would quietly downgrade the keeper and the host. Newer means a higher app version (semver, prereleases included), and on equal versions a later `builtAt`. What cannot be ordered (no version on either side, equal versions without both build times, a host run from source) is not newer, so nothing happens by itself. Going back stays a button press: the bar says "This window is an older build (…) than the one running (…)" and offers "Go back to this build". Once per window, and not after the person dismissed the bar. |
