@@ -1,14 +1,14 @@
 /**
  * Keeper scenarios (`keeper-integration.mjs`): an update as a stop and continue, with a host crash,
- * background mode and a quit under the keeper started next (#1895); an announced relaunch ("Apply
- * now", #352); and a keeper started from a content copy that lets go of what an AppImage handed it
- * (FI4, FI5).
+ * background mode and a quit under the keeper started next (#1895); and a keeper started from a
+ * content copy that lets go of what an AppImage handed it (FI4, FI5). An announced relaunch ("Apply
+ * now" holding the keeper, #352) went with #1895 step 4 PR 3: an update stops the keeper.
  */
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, attachHere, familyOf, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
-import { attachClient, BIN, bundleInfo, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, started, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
+import { attachClient, BIN, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, started, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 /** `--claude`: the update and the crash below also cut a claude (`haiku`) turn. A few cents of model use; never in CI */
 const WITH_CLAUDE = process.argv.includes('--claude')
@@ -93,110 +93,6 @@ async function scenarioFromACopy() {
 }
 
 /**
- * "Apply now" (#352): the app announces a relaunch, its window closes, and the relaunched window
- * attaches within the grace. With background mode off, nothing may stop in between; without the
- * announcement, or once the grace has run out, the keeper stops as it always did.
- */
-async function scenarioRelaunch() {
-  log('\nan announced relaunch with background mode off (#352)')
-  const GRACE = 6
-  const data = newData()
-  const sock = join(data, 'keeper.sock')
-  // A window of this build tells `relaunching` only to a keeper whose host cannot stop for an update; it asks any other to
-  // stop for one instead (`scenarioUpdate`). What is checked here is the keeper's side of the announcement, which it honours
-  // whatever its host. The host owns the terminal: it survives because nothing stops the host. Step 4 removes the grace
-  const k = startKeeper(data, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE) } })
-  const view = await waitFor(async () => {
-    const v = await status(sock)
-    return ready(v) && v
-  }, 30_000)
-  if (!check(view, 'the keeper brings the host up')) return
-  check(view.background === false, 'background mode is off')
-  const info = bundleInfo()
-  const build = { commit: info.commit, builtAt: info.builtAt, hostDir: HOST_SRC }
-  const app1 = attachClient(sock, build)
-  const first1 = await app1.first()
-  check(first1?.ok === true && first1.relaunched === false, 'a window opened by hand is not told it was relaunched', JSON.stringify(first1?.relaunched))
-
-  const project = mkdtempSync('/tmp/ck-proj-')
-  tempDirs.push(project)
-  const host = await hostClient(view.status.port, view.status.token)
-  let shell
-  let term
-  try {
-    const p = await host.call('projects.add', { path: project })
-    term = await host.call('terminal.create', { projectId: p.id, cols: 80, rows: 24 })
-    await sleep(1500)
-    await host.call('terminal.input', { terminalId: term.terminalId, data: 'echo "P $$"\n' })
-    shell = await waitFor(() => shellPid(host.screen(term.terminalId)), 10_000)
-    check(alive(shell) && familyOf([view.hostPid]).includes(shell), "the terminal's shell is the host's own process", host.screen(term.terminalId).slice(-300))
-    if (shell) started.add(shell)
-  } catch (e) {
-    check(false, 'the host takes a project and a terminal', String(e))
-  } finally {
-    host.close()
-  }
-
-  const ann = await request(sock, { op: 'relaunching' })
-  check(ann.ok === true && ann.graceSecs === GRACE, `the keeper takes the announcement (grace ${GRACE}s)`, JSON.stringify(ann))
-  app1.kill()
-  await sleep(2500)
-  const mid = await status(sock).catch(() => null)
-  check(
-    alive(k.pid) && alive(view.hostPid) && alive(shell) && mid?.attached === 0,
-    'the window closing for the relaunch stops nothing: keeper, host and terminal run on with no window',
-    `keeper ${alive(k.pid)}, host ${alive(view.hostPid)}, terminal ${alive(shell)}, attached ${mid?.attached}`,
-  )
-
-  const app2 = attachClient(sock, build)
-  const first2 = await app2.first()
-  check(first2?.ok === true && first2.relaunched === true, 'the window that comes back is told it is the relaunched one', JSON.stringify(first2?.relaunched))
-  check(first2?.view?.hostPid === view.hostPid, 'and finds the same host', `${first2?.view?.hostPid} vs ${view.hostPid}`)
-  const host2 = await hostClient(view.status.port, view.status.token)
-  try {
-    const list = await host2.call('terminal.list', { projectId: (await host2.call('projects.list', {}))[0]?.id })
-    const t = list.terminals.find((x) => x.terminalId === term?.terminalId)
-    check(t?.alive === true && alive(shell), 'and the same terminal, still alive', JSON.stringify(list))
-  } catch (e) {
-    check(false, 'the host lists the terminal after the relaunch', String(e))
-  } finally {
-    host2.close()
-  }
-
-  // The grace was spent by that attach: a window closing now is the last window leaving, as always
-  app2.kill()
-  const stopped = await waitFor(() => !alive(k.pid) && !alive(view.hostPid), 15_000)
-  check(stopped, 'without an announcement, the last window closing stops the keeper and the host as before', `keeper ${alive(k.pid)}, host ${alive(view.hostPid)}`)
-  check(await waitFor(() => !alive(shell), 10_000), 'and the terminal with them')
-
-  log('\na relaunch nobody comes back from')
-  const data2 = newData()
-  const sock2 = join(data2, 'keeper.sock')
-  const k2 = startKeeper(data2, { env: { CC_KEEPER_RELAUNCH_SECS: String(GRACE) } })
-  const view2 = await waitFor(async () => {
-    const v = await status(sock2)
-    return ready(v) && v
-  }, 30_000)
-  if (!check(view2, 'the keeper brings the host up')) return
-  const app3 = attachClient(sock2, build)
-  await app3.first()
-  await request(sock2, { op: 'relaunching' })
-  app3.kill()
-  const closedAt = Date.now()
-  const ended = await waitFor(() => !alive(k2.pid) && !alive(view2.hostPid), (GRACE + 15) * 1000, 250)
-  const after = (Date.now() - closedAt) / 1000
-  check(
-    ended && after >= GRACE - 1,
-    `once the grace (${GRACE}s) runs out with no window back, it stops as if nothing had been announced`,
-    `ended ${!!ended} after ${after.toFixed(1)}s`,
-  )
-  check(
-    readFileSync(join(data2, 'keeper.log'), 'utf8').includes('no window came back within the relaunch grace'),
-    'and says why in keeper.log',
-  )
-}
-
-/**
  * An update is a stop and continue (#1895): `stop` with `forUpdate` stops the host, which ends its own terminal, dev server
  * and agents and lists them, and then the keeper; the keeper started next opens the terminal again, starts the dev server
  * again and (`--claude`) continues the cut turn with Centralu's note. Under that keeper a host crash ends the processes the
@@ -216,6 +112,8 @@ async function scenarioUpdate() {
   const app = attachClient(sock)
   await app.first()
   check(!existsSync(join(data, 'children.sock')), 'the keeper serves no child socket: the host spawns its own children')
+  const ann = await request(sock, { op: 'relaunching' })
+  check(ann.ok === false, 'it takes no announced relaunch: an update stops it instead (#1895 step 4)', JSON.stringify(ann))
   // Said by the host's line after its ready line, which the keeper reads on its own thread
   check(await waitFor(async () => (await status(sock))?.stopsForUpdate === true, 10_000, 100), 'its host says it stops for an update')
 
@@ -327,4 +225,4 @@ async function scenarioUpdate() {
   check((stoppedMark(data) || '').includes('"quit"'), 'and noted that the person quit, for a linked hub (#1143)', String(stoppedMark(data)))
 }
 
-export { scenarioFromACopy, scenarioRelaunch, scenarioUpdate }
+export { scenarioFromACopy, scenarioUpdate }

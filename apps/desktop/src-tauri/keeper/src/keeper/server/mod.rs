@@ -6,8 +6,7 @@
 //! | request | answer |
 //! |---|---|
 //! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and a credential (the token for a Centralu window, the limited credential for any other process, #1405, `view.rights`), build source, the last swap |
-//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?,"relaunched":bool}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. `relaunched`: this window is the one an announced relaunch started |
-//! | `{"op":"relaunching","graceSecs":n?}` | `{"ok":true,"graceSecs":n}` — the app is relaunching itself to apply an update (#352): for up to `n` s (default 60, at most 300) no window attached does not stop the keeper, whatever background mode says |
+//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. (`relaunched`, for the window an announced relaunch started, went with `relaunching` in #1895 step 4 PR 3: an earlier window reads its absence as false) |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
 //! | `{"op":"stop","forUpdate":true}` | the host is stopped for an update (it lists what it ends for the next host), then `{"ok":true}`, and the keeper exits (#1895 step 3). A window's only: anyone else gets `{"ok":false,"error":"window_only: …"}` |
 //! | `{"op":"switch","source":BuildSource,"keeper":{"exe":path}?}` | a window's only (#1405; anyone else gets `window_only`): `{"ok":true}`, then a blue-green swap to that build (`swap.rs`), its phases pushed to attached windows in `view.swap`; with no host up, a plain start. With `keeper`, and a keeper of another build, the keeper first hands itself over to that build's keeper (`handoff/`), which then runs the swap. A keeper from verified content verifies and copies the bundle's signed content and hands over to the keeper in that copy instead (`move_to_content`); a refusal ends the swap `failed` with `refused` |
@@ -63,7 +62,7 @@ use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
 use super::swap::{self, Phase, SwapView};
 use super::{
-    idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
+    idle_decision, idle_limit, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
     KEEPER_PROTOCOL, REATTACH_GRACE,
 };
 
@@ -112,12 +111,8 @@ pub(super) struct State {
     /// 3): only then is "Apply now" a stop for an update here (`view.stops_for_update`). A host of an earlier build takes
     /// them only from a window, and would be stopped as a quit
     pub(super) host_stops_for_update: bool,
-    /// Until when an announced relaunch (#352) holds the keeper with no window attached. Cleared by
-    /// the next attach, which is told it is the window that relaunch started.
-    pub(super) relaunch_until: Option<Instant>,
     /// Until when the keeper waits for a window it closed itself (it stopped taking its status) to
-    /// attach again, as for a relaunch: with no window attached, nothing stops it meanwhile. Cleared
-    /// by the next attach.
+    /// attach again: with no window attached, nothing stops it meanwhile. Cleared by the next attach.
     pub(super) reattach_until: Option<Instant>,
     /// Every window this keeper took by its path, by pid and start, for its life (#2119, `window_peer::judge_attaching`):
     /// one that attaches again after an install, when its path reads as no window's, is still taken
@@ -146,7 +141,6 @@ impl State {
             drained: None,
             keeps_agents: None,
             host_stops_for_update: false,
-            relaunch_until: None,
             reattach_until: None,
             known_windows: Vec::new(),
         }
@@ -181,11 +175,6 @@ impl State {
             }
             w.id != id
         });
-    }
-
-    /// An announced relaunch whose grace is still running.
-    pub(super) fn relaunching(&self, now: Instant) -> bool {
-        relaunch_state(self.relaunch_until, now).0
     }
 
     /// A window the keeper closed itself may still come back (`reattach_until`).
@@ -585,9 +574,6 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
         let reason = {
             let Ok(st) = k.state.lock() else { return };
             let now = Instant::now();
-            let (relaunching, relaunch_expired) = relaunch_state(st.relaunch_until, now);
-            // A window the keeper closed itself is waited for like a relaunching one.
-            let relaunching = relaunching || st.reattaching(now);
             idle_decision(
                 IdleInput {
                     background: st.settings.background,
@@ -598,8 +584,7 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
                     since_start: now.duration_since(k.started),
                     since_detach: now.duration_since(st.last_detach),
                     since_busy: now.duration_since(st.last_busy),
-                    relaunching,
-                    relaunch_expired,
+                    window_expected: st.reattaching(now),
                 },
                 k.idle,
             )
@@ -626,7 +611,7 @@ fn reply(stream: &mut UnixStream, v: &Value) {
 /// Every op `handle` answers (#1405): `ops_are_listed` checks this list against the dispatcher, so a new op
 /// is in `no_reply_carries_the_token_to_a_process_that_is_not_a_window` from the day it is added.
 #[cfg(test)]
-pub(super) const OPS: &[&str] = &["status", "attach", "children", "stop", "relaunching", "system_ending", "switch", "upgrade", "restart", "settings", "set_background"];
+pub(super) const OPS: &[&str] = &["status", "attach", "children", "stop", "system_ending", "switch", "upgrade", "restart", "settings", "set_background"];
 
 fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
     if !accept::from_this_user(&stream, log) {
@@ -670,7 +655,6 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
             drop(stream);
             k.shutdown("asked to stop (Quit completely, or Restart completely)");
         }
-        "relaunching" => relaunching(&k, &mut stream, &req),
         // The window heard the system end (macOS: the workspace's power-off notice). A process that is not a window could make a
         // false mark, so it is the window's alone
         "system_ending" if !k.may_tell_system_ending(&stream) => {

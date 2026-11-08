@@ -64,12 +64,6 @@ pub fn alive(sock: &Path) -> bool {
 // The window's requests, one function per op it sends (`server::handle` answers them), each with the
 // bound the window has always given it.
 
-/// `relaunching` (#352): the keeper holds on through the window's relaunch. Its grace, in seconds.
-pub fn relaunching(sock: &Path) -> Result<u64, String> {
-    let v = request(sock, &json!({ "op": "relaunching" }), Duration::from_secs(5))?;
-    Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
-}
-
 /// `system_ending` (#1970): tells the host, through the keeper, that the system is ending (`cancelled`: that it is not after all)
 pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
     request(sock, &json!({ "op": "system_ending", "cancelled": cancelled }), Duration::from_secs(3)).map(|_| ())
@@ -79,16 +73,6 @@ pub fn system_ending(sock: &Path, cancelled: bool) -> Result<(), String> {
 pub fn restart_host(sock: &Path) -> Result<bool, String> {
     let v = request(sock, &json!({ "op": "restart" }), Duration::from_secs(5))?;
     Ok(v.get("started").and_then(Value::as_bool).unwrap_or(false))
-}
-
-/// `switch` (#280 step 3): swaps the host to `source`, and the keeper to the executable `keeper`
-/// first when named (step 4).
-pub fn switch(sock: &Path, source: &super::source::BuildSource, keeper: Option<&Path>) -> Result<(), String> {
-    let mut req = json!({ "op": "switch", "source": source });
-    if let Some(exe) = keeper {
-        req["keeper"] = json!({ "exe": exe });
-    }
-    request(sock, &req, Duration::from_secs(10)).map(|_| ())
 }
 
 /// `settings`: whether background mode is on.
@@ -248,14 +232,12 @@ mod tests {
     /// (`server::handle`), so each function must send exactly the request the window always sent.
     #[test]
     fn each_request_sends_its_op_and_reads_its_answer() {
-        use super::super::source::BuildSource;
         let check = |name: &str, answer: &'static str, call: &dyn Fn(&Path) -> String, sent: Value, got: &str| {
             let (sock, asked) = one_answer(name, answer);
             assert_eq!(call(&sock), got, "{name}");
             assert_eq!(asked.join().unwrap(), sent, "{name}");
             let _ = std::fs::remove_file(&sock);
         };
-        check("relaunching", r#"{"ok":true,"graceSecs":30}"#, &|s| format!("{:?}", relaunching(s)), json!({ "op": "relaunching" }), "Ok(30)");
         check("restart", r#"{"ok":true,"started":true}"#, &|s| format!("{:?}", restart_host(s)), json!({ "op": "restart" }), "Ok(true)");
         check("settings", r#"{"ok":true}"#, &|s| format!("{:?}", background(s)), json!({ "op": "settings" }), "Ok(false)");
         check(
@@ -268,15 +250,6 @@ mod tests {
         check("stop", r#"{"ok":true}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), "Ok(())");
         check("stop-for-update", r#"{"ok":true}"#, &|s| format!("{:?}", stop_for_update(s)), json!({ "op": "stop", "forUpdate": true }), "Ok(())");
         check("system-ending", r#"{"ok":true}"#, &|s| format!("{:?}", system_ending(s, false)), json!({ "op": "system_ending", "cancelled": false }), "Ok(())");
-        let source = BuildSource { commit: "abc".into(), ..Default::default() };
-        check(
-            "switch",
-            r#"{"ok":true}"#,
-            &|s| format!("{:?}", switch(s, &source, Some(Path::new("/A.app/Contents/MacOS/centralu-keeper")))),
-            json!({ "op": "switch", "source": { "commit": "abc" }, "keeper": { "exe": "/A.app/Contents/MacOS/centralu-keeper" } }),
-            "Ok(())",
-        );
-        check("switch-bare", r#"{"ok":true}"#, &|s| format!("{:?}", switch(s, &source, None)), json!({ "op": "switch", "source": { "commit": "abc" } }), "Ok(())");
         check("refused", r#"{"ok":false,"error":"no"}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), r#"Err("no")"#);
     }
 

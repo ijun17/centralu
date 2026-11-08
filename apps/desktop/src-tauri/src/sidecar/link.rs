@@ -21,9 +21,9 @@ pub(crate) fn keeper_same_build(keeper: Option<&BuildSource>, app: &BuildSource)
     keeper.is_some_and(|b| b.same_build(app))
 }
 
-/// Why "Apply now" is not offered with a keeper of an earlier build than #1895 step 3, which cannot stop for an update
-pub(crate) const KEEPER_TOO_OLD_TO_UPDATE: &str =
-    "The background keeper is of an earlier build that cannot stop for an update. Restart it into this build from the bar at the top first.";
+/// Why "Apply now" is not offered with a keeper that cannot stop for an update: one of an earlier build than #1895 step 3, or
+/// one that took its host over from another keeper (it does not hold that host's stdin)
+pub(crate) const KEEPER_TOO_OLD_TO_UPDATE: &str = "The background keeper cannot stop the agent host for an update (it is of an earlier build, or took the host over from one). Restart it from the bar at the top, or quit Centralu completely and open it again.";
 
 /**
  * "Apply now" with a keeper (#1895 step 4, PR 3): the keeper stops the host for an update and exits, and the relaunched window

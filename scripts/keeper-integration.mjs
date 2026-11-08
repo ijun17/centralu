@@ -19,11 +19,8 @@
  *   - background on: killing it leaves both running, a new client re-attaches to the same host,
  *     a switch moves the host to another build and removes the old copy, and the keeper
  *     ends itself after the idle limit with nothing attached — but not while a terminal is open;
- *   - an announced relaunch ("Apply now", #352) with background off: the window closing stops
- *     nothing, the window that attaches within the grace is told it is the relaunched one and finds
- *     the same host and the same terminal, which the host owns; without an announcement, or once the
- *     grace has run out with no window back, the keeper stops as before;
- *   - an update is a stop and continue (#1895): the keeper serves no child socket; `stop` with
+ *   - an update is a stop and continue (#1895): the keeper serves no child socket and takes no
+ *     announced relaunch (`relaunching`, gone with step 4 PR 3); `stop` with
  *     `forUpdate` ends the host, every process it started and the keeper, and the host hears it on
  *     its stdin and leaves no quit mark; the keeper started next opens the terminal again and starts
  *     the dev server again; a host crash under it ends the processes the host started and reopens no
@@ -65,7 +62,7 @@ import { join } from 'node:path'
 import { cleanupOnExit } from './keeper-test-processes.mjs'
 import { BIN, buildKeeper, cleanup, countFailure, failures, HOST_SRC, log } from './keeper-integration-harness.mjs'
 import { scenarioBackgroundOff, scenarioBackgroundOn, scenarioBusyHoldsIdle, scenarioKeeperDies, scenarioStop } from './keeper-integration-lifecycle.mjs'
-import { scenarioFromACopy, scenarioRelaunch, scenarioUpdate } from './keeper-integration-relaunch.mjs'
+import { scenarioFromACopy, scenarioUpdate } from './keeper-integration-relaunch.mjs'
 import { scenarioDrainCutsSlowCall, scenarioSwap } from './keeper-integration-swap.mjs'
 
 // The clients here are this Node process, not a Centralu window: a debug keeper started with this also accepts its
@@ -83,7 +80,6 @@ async function main() {
     'background-off': scenarioBackgroundOff,
     'background-on': scenarioBackgroundOn,
     stop: scenarioStop,
-    relaunch: scenarioRelaunch,
     update: scenarioUpdate,
     'busy-holds-idle': scenarioBusyHoldsIdle,
     'keeper-dies': scenarioKeeperDies,

@@ -88,17 +88,6 @@ pub const DEFAULT_IDLE: Duration = Duration::from_secs(30 * 60);
 /// between launching it and attaching.
 pub const STARTUP_GRACE: Duration = Duration::from_secs(60);
 
-/// How long a keeper waits for a window to come back after the app announced it is relaunching
-/// itself to apply an update (#352), whatever background mode says. The relaunch itself takes a
-/// second or two (the old window exits, the new binary starts and attaches); a minute leaves room
-/// for a slow first start of a freshly replaced bundle without keeping a keeper nobody returns to
-/// for long.
-pub const RELAUNCH_GRACE: Duration = Duration::from_secs(60);
-
-/// The longest grace a request may ask for. A relaunch that has not attached in five minutes has
-/// failed, and a keeper with background mode off should not outlive its window by more than that.
-pub const MAX_RELAUNCH_GRACE: Duration = Duration::from_secs(300);
-
 /// How long a keeper that closed a window itself (it stopped taking its status, #840 item 5)
 /// waits for that window to attach again before the idle rule applies as usual. A window that was
 /// only stalled (suspended, in a debugger, its reader blocked) attaches again once it runs.
@@ -213,8 +202,8 @@ pub struct KeeperView {
      */
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rights: Option<String>,
-    /// `stop` with `forUpdate` stops the host for an update and ends the keeper (#1895 step 3): what "Apply now" asks of
-    /// it. A keeper without it is asked to hold on through the relaunch (`relaunching`) and switched after.
+    /// `stop` with `forUpdate` stops the host for an update and ends the keeper (#1895 step 3): what "Apply now" and a restart
+    /// into another window's build ask of it. A keeper without it gets a plain stop from a window of #1895 step 4 PR 3.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stops_for_update: bool,
 }
@@ -267,22 +256,18 @@ pub struct IdleInput {
     pub since_start: Duration,
     pub since_detach: Duration,
     pub since_busy: Duration,
-    /// The app announced a relaunch (#352) and its grace has not run out: no window is expected
-    /// for a moment, and that is not "the last window left".
-    pub relaunching: bool,
-    /// The app announced a relaunch and the grace ran out with no window back. Only changes the
-    /// reason given, so the log says why a keeper stopped a minute after its window closed.
-    pub relaunch_expired: bool,
+    /// A window the keeper closed itself (it stopped taking its status) may still attach again (`REATTACH_GRACE`): no
+    /// window for a moment is not "the last window left".
+    pub window_expected: bool,
 }
 
 /**
  * Whether a keeper with no window should end itself now, and why.
  *
  * - A window attached: never.
- * - A relaunch announced (#352) and its grace still running: not yet, whatever the mode. The app
- *   is replacing its own window to apply an update, and the new window will attach in a moment.
- *   Once the grace runs out with no window back, the rules below apply as if it had never been
- *   announced.
+ * - A window expected back (`window_expected`): not yet, whatever the mode. Once its grace runs out,
+ *   the rules below apply. (An announced relaunch, #352, held a keeper the same way until #1895 step 4
+ *   PR 3: an update now stops the keeper.)
  * - No window has attached since start: after `STARTUP_GRACE`, whatever the mode. The app that
  *   launched it died before attaching, and nobody else knows it is there.
  * - Background mode off: at once. Detaching already stops it; this catches a detach that raced
@@ -293,16 +278,13 @@ pub struct IdleInput {
  *   takes. That is the point of background mode.
  */
 pub fn idle_decision(i: IdleInput, idle: Duration) -> Option<&'static str> {
-    if i.stopping || i.attached > 0 || i.relaunching {
+    if i.stopping || i.attached > 0 || i.window_expected {
         return None;
     }
     if !i.ever_attached {
         return (i.since_start >= STARTUP_GRACE).then_some("no window attached since the keeper started");
     }
     if !i.background {
-        if i.relaunch_expired {
-            return Some("no window came back within the relaunch grace and background mode is off");
-        }
         return Some("the last window closed and background mode is off");
     }
     if i.busy {
@@ -314,33 +296,11 @@ pub fn idle_decision(i: IdleInput, idle: Duration) -> Option<&'static str> {
 
 /**
  * Whether a window detaching should stop the keeper at once: the last one gone, background mode
- * off, and no relaunch announced (#352). With a relaunch pending the idle rule decides instead,
- * once its grace runs out.
+ * off, and no window expected back. With one expected the idle rule decides instead, once its
+ * grace runs out.
  */
-pub fn stop_on_detach(attached: usize, background: bool, relaunching: bool) -> bool {
-    attached == 0 && !background && !relaunching
-}
-
-/// Where an announced relaunch stands at `now`: `(pending, expired)`. Pending until its deadline,
-/// expired after it; neither when none was announced (or the next window already spent it).
-pub fn relaunch_state(until: Option<std::time::Instant>, now: std::time::Instant) -> (bool, bool) {
-    match until {
-        Some(u) if now < u => (true, false),
-        Some(_) => (false, true),
-        None => (false, false),
-    }
-}
-
-/// The relaunch grace a request asked for, bounded: the default when it named none, never more
-/// than `MAX_RELAUNCH_GRACE`, and never zero (a zero grace would be today's stop with an extra
-/// step). `CC_KEEPER_RELAUNCH_SECS` replaces the default `RELAUNCH_GRACE`, for tests.
-pub fn relaunch_grace(asked_secs: Option<u64>) -> Duration {
-    let default = std::env::var("CC_KEEPER_RELAUNCH_SECS")
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(RELAUNCH_GRACE);
-    asked_secs.map(Duration::from_secs).unwrap_or(default).clamp(Duration::from_secs(1), MAX_RELAUNCH_GRACE)
+pub fn stop_on_detach(attached: usize, background: bool, window_expected: bool) -> bool {
+    attached == 0 && !background && !window_expected
 }
 
 /// The idle limit: `CC_KEEPER_IDLE_SECS` (for tests), else 30 minutes.
@@ -366,8 +326,7 @@ mod tests {
             since_start: Duration::from_secs(3600 * 5),
             since_detach: Duration::from_secs(minutes * 60),
             since_busy: Duration::from_secs(minutes * 60),
-            relaunching: false,
-            relaunch_expired: false,
+            window_expected: false,
         }
     }
 
@@ -426,45 +385,17 @@ mod tests {
         assert!(idle_decision(i, DEFAULT_IDLE).is_some());
     }
 
-    /// #352: "Apply now" closes the window to relaunch it from the updated bundle. With background
-    /// mode off, that window closing must not stop the keeper and cut every turn.
+    /// A window the keeper closed itself may attach again: with background mode off, its going must not stop the keeper
     #[test]
-    fn an_announced_relaunch_holds_a_keeper_with_background_off() {
+    fn a_window_expected_back_holds_a_keeper_with_background_off() {
         let mut i = quiet(0);
         i.background = false;
-        i.relaunching = true;
+        i.window_expected = true;
         assert_eq!(idle_decision(i, DEFAULT_IDLE), None);
         assert!(!stop_on_detach(0, false, true), "the detach itself does not stop it either");
-    }
-
-    /// When the grace runs out with no window back, it is today's behaviour again.
-    #[test]
-    fn a_relaunch_nobody_came_back_from_falls_back_to_stopping() {
-        let announced = std::time::Instant::now();
-        let deadline = announced + RELAUNCH_GRACE;
-        assert_eq!(relaunch_state(Some(deadline), announced), (true, false), "within the grace");
-        assert_eq!(relaunch_state(Some(deadline), deadline), (false, true), "the grace has run out");
-        assert_eq!(relaunch_state(None, deadline), (false, false), "nothing announced");
-        let mut i = quiet(1);
-        i.background = false;
-        (i.relaunching, i.relaunch_expired) = relaunch_state(Some(deadline), deadline + Duration::from_secs(1));
-        assert_eq!(
-            idle_decision(i, DEFAULT_IDLE),
-            Some("no window came back within the relaunch grace and background mode is off")
-        );
         assert!(stop_on_detach(0, false, false));
         assert!(!stop_on_detach(1, false, false), "a window still attached keeps it");
         assert!(!stop_on_detach(0, true, false), "background mode keeps it");
-    }
-
-    #[test]
-    fn the_relaunch_grace_is_bounded() {
-        if std::env::var("CC_KEEPER_RELAUNCH_SECS").is_err() {
-            assert_eq!(relaunch_grace(None), RELAUNCH_GRACE);
-        }
-        assert_eq!(relaunch_grace(Some(0)), Duration::from_secs(1));
-        assert_eq!(relaunch_grace(Some(10)), Duration::from_secs(10));
-        assert_eq!(relaunch_grace(Some(86_400)), MAX_RELAUNCH_GRACE);
     }
 
     #[test]

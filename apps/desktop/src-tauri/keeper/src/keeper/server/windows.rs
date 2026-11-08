@@ -1,5 +1,5 @@
-//! Windows: attaching, the detach when a window's connection ends, an announced relaunch, and a
-//! window another keeper handed over.
+//! Windows: attaching, the detach when a window's connection ends, and a window another keeper
+//! handed over.
 
 use super::*;
 
@@ -28,17 +28,8 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
             return reply(&mut stream, &json!({ "ok": false, "error": "the keeper is stopping" }));
         }
         let id = st.count_window();
-        // The window an announced relaunch started (#352): it is told so, and the grace is spent
-        let relaunched = st.relaunching(Instant::now());
         if st.reattach_until.take().is_some() {
             log("a window attached after the keeper had closed one that stopped taking its status");
-        }
-        if st.relaunch_until.take().is_some() {
-            log(if relaunched {
-                "a window attached after the announced relaunch"
-            } else {
-                "a window attached after the relaunch grace had run out"
-            });
         }
         let same = match (&client, &st.source) {
             (Some(c), Some(s)) => Some(c.same_build(s)),
@@ -59,7 +50,7 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
             return;
         };
         // Its own view: the token only for a window (#1405, `Window::full`)
-        let answer = json!({ "ok": true, "view": k.view(&st, w.full), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched });
+        let answer = json!({ "ok": true, "view": k.view(&st, w.full), "sameBuild": same, "keeperSameBuild": keeper_same });
         w.push.answer(json_line(&answer));
         st.subscribers.push(w);
         k.broadcast(&mut st);
@@ -86,43 +77,15 @@ pub(in crate::keeper) fn watch_window(k: Arc<Keeper>, id: u64, mut reader: BufRe
         let now = Instant::now();
         st.last_detach = now;
         k.broadcast(&mut st);
-        if st.attached == 0 && st.relaunching(now) {
-            log("the last window closed for an announced relaunch; waiting for it to come back");
-        }
         if st.attached == 0 && st.reattaching(now) {
             log(&format!("the last window was closed for not taking its status; waiting up to {}s for it to attach again", REATTACH_GRACE.as_secs()));
         }
-        stop_on_detach(st.attached, st.settings.background, st.relaunching(now) || st.reattaching(now))
+        stop_on_detach(st.attached, st.settings.background, st.reattaching(now))
     };
     // Frozen: the decision waits for the thaw, when the idle rule sees no window either.
     if stop && !k.frozen.load(Ordering::SeqCst) {
         k.shutdown("the last window closed and background mode is off");
     }
-}
-
-/**
- * `relaunching` (#352): the app is about to close its window and start again from its updated
- * bundle ("Apply now"). Until the grace runs out, no window attached is not "the last window
- * left", even with background mode off, so the update cuts nothing because of that setting. The
- * next window to attach spends the grace and is told it is the relaunched one (`relaunched` in its
- * attach answer), so it can apply the switch by itself. If none comes back in time, the idle rule
- * applies as if nothing had been announced: with background mode off, the keeper stops.
- *
- * Peer-uid checked like every request (`handle`); it changes nothing a process of this user could
- * not do with `set_background` anyway, and only for a bounded time.
- */
-pub(super) fn relaunching(k: &Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
-    let grace = relaunch_grace(req.get("graceSecs").and_then(Value::as_u64));
-    {
-        let Ok(mut st) = k.state.lock() else { return };
-        if st.stopping {
-            drop(st);
-            return reply(stream, &json!({ "ok": false, "error": "the keeper is stopping" }));
-        }
-        st.relaunch_until = Some(Instant::now() + grace);
-    }
-    log(&format!("the app announced a relaunch; holding for up to {}s with no window", grace.as_secs()));
-    reply(stream, &json!({ "ok": true, "graceSecs": grace.as_secs() }));
 }
 
 /// Registers a window connection another keeper handed over (step 4) and watches it.

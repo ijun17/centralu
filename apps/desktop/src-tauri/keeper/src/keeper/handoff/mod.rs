@@ -659,12 +659,9 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared) -> i32 {
             swapping: snap.then_switch.is_some(),
             drained: None,
             keeps_agents: snap.keeps_agents,
-            // Not passed on (#1895 step 3): until the host says it again at its next start, "Apply now" asks this keeper to hold
-            // on through the relaunch, as an earlier keeper is asked, and the relaunched window switches it
+            // Not passed on (#1895 step 3): a handed-over host's stdin stayed with the keeper that started it, so until this
+            // keeper starts the host again "Apply now" is not offered here, and a window's restart is a plain stop
             host_stops_for_update: false,
-            // Not passed on: a handoff starts from an attached window's switch, which already
-            // spent any relaunch grace (#352)
-            relaunch_until: None,
             // Not passed on either: the handoff's own windows are attached
             reattach_until: None,
             // Not passed on (#2119): the windows handed over are judged by their path again here, and one an install
