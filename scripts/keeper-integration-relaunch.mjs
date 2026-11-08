@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { alive, attachHere, familyOf, hostClient, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
-import { attachClient, BIN, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, started, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
+import { attachClient, BIN, check, HOST_SRC, hostsFor, log, newData, ready, readyView, session, startKeeper, STEPS, tempDirs, toolResults, transcript } from './keeper-integration-harness.mjs'
 
 /** `--claude`: the update and the crash below also cut a claude (`haiku`) turn. A few cents of model use; never in CI */
 const WITH_CLAUDE = process.argv.includes('--claude')
@@ -16,9 +16,6 @@ const WITH_CLAUDE = process.argv.includes('--claude')
 const CONTINUED = 'Centralu was updated during this turn'
 const stoppedMark = (data) => existsSync(join(data, 'stopped.json')) && readFileSync(join(data, 'stopped.json'), 'utf8')
 const hostLog = (data) => readFileSync(join(data, 'host.log'), 'utf8')
-
-/** The pid a terminal's shell printed as `P <pid>`, unanchored: a shell may write a mode change and a carriage return first */
-const shellPid = (screen) => Number(screen.match(/P (\d+)\r?$/m)?.[1]) || undefined
 
 /** Resolves once every process holding the other end of `stream` has closed it */
 function released(stream) {
