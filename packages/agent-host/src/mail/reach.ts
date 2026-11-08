@@ -101,7 +101,7 @@ export function mailReach(host: ReachHost): MailReach {
       if (!sessionOf(from)?.info?.here) return 'gone'
       if (!receiver) return null
       const assistant = host.assistantId()
-      return asRequest && receiver.id === assistant && f.sessionId !== assistant && !host.assistantAsks() ? 'orchestrator_asks' : null
+      return asRequest && receiver.id === assistant && f.sessionId !== assistant && !host.assistantAsks() ? 'assistant_asks' : null
     },
 
     holdFor(m, recipient) {

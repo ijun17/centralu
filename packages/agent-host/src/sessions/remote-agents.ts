@@ -14,7 +14,7 @@ import { ANSWER_READ_MAX_CHARS, ASK_WAIT_MS, clipAnswer, NO_WORDS, taskLine } fr
 import { answersFrom, cardCall, cardHandle, cardNotice } from './delegated-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
-import { HUB_SENDER } from './hub-sender.js'
+import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS, UNTRUSTED_START } from './start-agent-terms.js'
@@ -1440,7 +1440,7 @@ export class RemoteAgents {
    * instruction of this link's. Two hubs linked to one machine record the same sender; the text (`sent`) tells them apart
    */
   private fromHubHere(rec: RemoteAgent, from: unknown): boolean {
-    return (from as { sessionId?: unknown } | null)?.sessionId === `${rec.machineId}.${HUB_SENDER}`
+    return isQualifiedHubSender((from as { sessionId?: unknown } | null)?.sessionId, rec.machineId)
   }
 
   /** The instruction the hub is about to send the child, kept so its turn can be told from another's (`messageTaken`, `verify`) */

@@ -1,5 +1,5 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
-import type { MailboxRecords } from '../dev-services/store/mailbox.js'
+import { isRoleVia, ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
@@ -140,7 +140,7 @@ export class MailTool {
     if (t.toLowerCase() === 'assistant') {
       const id = this.host.assistantId()
       if (!id) throw refuse('no_mailbox', 'there is no Assistant to ask yet: write to the person instead')
-      return { address: this.service.sessionAddress(id), via: 'orchestrator' }
+      return { address: this.service.sessionAddress(id), via: ROLE_VIA }
     }
     if (t.toLowerCase() === 'parent') {
       // #1987: started from a linked computer, its parent is a session of that computer's hub, which mail does not reach yet; "person" would stay unseen here too
@@ -179,7 +179,7 @@ export class MailTool {
    * (the mail still goes where it was addressed: nothing is rerouted). Silent when the parent is the Assistant itself.
    */
   private parentHint(sessionId: string, me: { askedBy: string | null }, to: { via?: string }): string {
-    if (to.via !== 'orchestrator' || !me.askedBy || me.askedBy === this.host.assistantId() || this.hinted.has(sessionId)) return ''
+    if (!isRoleVia(to.via) || !me.askedBy || me.askedBy === this.host.assistantId() || this.hinted.has(sessionId)) return ''
     this.hinted.add(sessionId)
     return ` It went to the Assistant, not to your parent ${JSON.stringify(oneLineText(this.reach.labelOf(this.service.sessionAddress(me.askedBy)), 80))}. If you meant your parent, use to: "parent".`
   }

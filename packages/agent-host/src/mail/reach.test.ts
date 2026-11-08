@@ -80,7 +80,7 @@ describe('who may write to whom (§7.1)', () => {
   it('refuses a request to the Assistant while its tool cannot put each step to the person, but not an answer or the Assistant’s own word', () => {
     const { reach, state } = world()
     state.asks = false
-    expect(reach.mayWrite(A, ORC)).toBe('orchestrator_asks')
+    expect(reach.mayWrite(A, ORC)).toBe('assistant_asks')
     expect(reach.mayWrite(A, ORC, false)).toBeNull()
     expect(reach.mayWrite(ORC, A)).toBeNull()
     expect(reach.mayWrite(A, B)).toBeNull()

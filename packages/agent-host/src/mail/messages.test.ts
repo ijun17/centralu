@@ -150,7 +150,7 @@ describe('the guards', () => {
     const w = world()
     const q = w.send(ORC, { to: [B], text: 'which?' }).message
     w.state.asks = false
-    expect(refusedFor(() => w.send(B, { to: [ORC], text: 'may I?' }))).toBe('orchestrator_asks')
+    expect(refusedFor(() => w.send(B, { to: [ORC], text: 'may I?' }))).toBe('assistant_asks')
     expect(refusedFor(() => w.send(B, { replyTo: q.id, text: 'this one' }))).toBe('NOT REFUSED')
     // The Assistant itself writes to whomever it likes
     expect(refusedFor(() => w.send(ORC, { to: [B], text: 'carry on' }))).toBe('NOT REFUSED')

@@ -44,7 +44,7 @@ const REFUSALS = [
   'not_yours',
   'repeat',
   'ask_rate',
-  'orchestrator_asks',
+  'assistant_asks',
   'removed',
   'untrusted_project',
 ] as const
@@ -161,7 +161,7 @@ export const REFUSAL_TEXT = {
   not_yours: (id: string) => `you were not sent ${id} and did not send it.`,
   repeat: (name: string) => `you sent the same text to ${name} less than ${REPEAT_WINDOW_MS / 60_000} minutes ago.`,
   ask_rate: () => `your project's sessions asked the Assistant ${ASKS_PER_HOUR} times in the last hour; wait, or write to the person.`,
-  orchestrator_asks: () =>
+  assistant_asks: () =>
     'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead',
   untrusted_project: (project: string, target: string) =>
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,

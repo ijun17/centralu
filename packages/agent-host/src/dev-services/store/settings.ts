@@ -92,6 +92,21 @@ export function listSetting(
   }
 }
 
+/**
+ * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md) gives a new key, by their old key. Callers
+ * name the old key. Until step 4 the old key is read first and the new one only when the old one was never written,
+ * and a write or delete reaches both: every build that can open the store writes the old key, so the old key is never
+ * the stale one, also after a person goes back a release and forward again. The new key is kept equal so step 4 can
+ * read it first once the store's reader floor keeps out the builds that write only the old key.
+ * `orchestrator_mcp_servers` keeps its name: no build since M4 A-7 writes it, it is only read to be moved into apps.
+ */
+export const RENAMED_SETTINGS: ReadonlyMap<string, string> = new Map([
+  ['orchestrator_tool', 'assistant_tool'],
+  ['orchestrator_mcp_proposals', 'assistant_mcp_proposals'],
+  ['orchestrator_skill_proposals', 'assistant_skill_proposals'],
+  ['orchestrator_skills', 'assistant_skills'],
+])
+
 /** What belongs to this install: its settings, the workspace snapshot and the cache of a tool's commands */
 export class SettingsRecords {
   constructor(private readonly db: Database.Database) {}
@@ -155,17 +170,21 @@ export class SettingsRecords {
    * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
    */
   appSetting(key: string): string | null {
-    const row = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)
-    return row?.value ?? null
+    const read = (k: string) => this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(k)?.value ?? null
+    const renamed = RENAMED_SETTINGS.get(key)
+    return read(key) ?? (renamed === undefined ? null : read(renamed))
   }
 
   setAppSetting(key: string, value: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO app_settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      )
-      .run(key, value)
+    const write = this.db.prepare(
+      `INSERT INTO app_settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    )
+    const renamed = RENAMED_SETTINGS.get(key)
+    this.db.transaction(() => {
+      write.run(key, value)
+      if (renamed !== undefined) write.run(renamed, value)
+    })()
   }
 
   /**
@@ -179,6 +198,11 @@ export class SettingsRecords {
 
   /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
-    this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)
+    const remove = this.db.prepare(`DELETE FROM app_settings WHERE key = ?`)
+    const renamed = RENAMED_SETTINGS.get(key)
+    this.db.transaction(() => {
+      remove.run(key)
+      if (renamed !== undefined) remove.run(renamed)
+    })()
   }
 }

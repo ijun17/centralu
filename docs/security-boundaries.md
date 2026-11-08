@@ -481,7 +481,7 @@ whose tool called, the person for the window's `mail.*` calls, Centralu for its 
 mail is messages without threads, and who may write to whom, which project is trusted and what is held is one module, `mail/reach.ts`:
 every session may write to every session here, the person and the Assistant; a send is refused only for a receiver whose seat has no `mail`
 tool (`no_mailbox`: a coordinator, a builder, an app's agent), one that is gone, `centralu`, one on another computer (`elsewhere`), a request to an
-assistant whose tool cannot put each step to the person (`orchestrator_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
+assistant whose tool cannot put each step to the person (`assistant_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
 from a session whose project is untrusted now (read live: no project is trusted, an unknown project is not) to a party outside that project
 (another project's session, the Assistant) is held `policy` until the person trusts the project; mail into an untrusted project, within one
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer

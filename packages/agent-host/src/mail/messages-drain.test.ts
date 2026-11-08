@@ -236,6 +236,15 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.records.pendingFor(A, w.clock.t + 10_000)).toHaveLength(1)
   })
 
+  it('partyGone leaves a row sent to the role for the next Assistant, under either name (#2133)', () => {
+    const w = world()
+    const old = w.send(A, { to: [ORC], via: ['orchestrator'], text: 'to the role' }).message
+    const renamed = w.send(B, { to: [ORC], via: ['assistant'], text: 'to the role, as a later build writes it' }).message
+    w.mail.partyGone(ORC)
+    expect(w.rowOf(old.id, ORC).settled).toBeNull()
+    expect(w.rowOf(renamed.id, ORC).settled).toBeNull()
+  })
+
   it('handOver moves unsettled watched rows to the heir undelivered unless read; the heir’s own row wins; the heir is told of each, and a preview lists them first', () => {
     const w = world()
     const m1 = w.send(A, { to: [W], text: 'unread question\nsecond line' }).message

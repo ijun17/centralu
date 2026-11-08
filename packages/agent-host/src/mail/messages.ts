@@ -5,6 +5,7 @@ import { asObj } from '../json-value.js'
 import {
   HIDDEN_HOLDS,
   MailTargetMissing,
+  isRoleVia,
   type HandOverScope,
   type MailFacts,
   type MailKind,
@@ -790,7 +791,7 @@ export class MessageService {
     this.releaseAndTell((now, senders) => {
       for (const row of this.records.watchedTo(address)) {
         // Mail sent to the Assistant's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
-        if (row.via === 'orchestrator') continue
+        if (isRoleVia(row.via)) continue
         const m = this.records.message(row.messageId)
         this.records.settle(row.messageId, address, 'gone', now)
         if (m?.needsReply && this.records.markReleased(row.messageId, address, now, 'gone')) senders.add(m.sender)
@@ -1023,7 +1024,7 @@ export class MessageService {
       gone: REFUSAL_TEXT.gone(to),
       no_mailbox: REFUSAL_TEXT.no_mailbox(),
       elsewhere: REFUSAL_TEXT.elsewhere(to),
-      orchestrator_asks: REFUSAL_TEXT.orchestrator_asks(),
+      assistant_asks: REFUSAL_TEXT.assistant_asks(),
       not_allowed: REFUSAL_TEXT.not_allowed(),
     }
     return text[why] ?? why

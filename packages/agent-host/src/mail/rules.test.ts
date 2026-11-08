@@ -121,7 +121,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
     expect(REFUSAL_TEXT.untrusted_project('Pex', 'session c')).toBe(
       'your project Pex is not trusted, so work you give outside it (to session c) waits for the person to trust Pex. Nothing was started. Centralu shows the person how, and tells you when Pex is trusted; give it again then.',
     )
-    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'repeat', 'ask_rate', 'orchestrator_asks', 'removed', 'untrusted_project']) {
+    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'repeat', 'ask_rate', 'assistant_asks', 'removed', 'untrusted_project']) {
       expect(refusalReason(refuse(reason as never, 'x')), reason).toBe(reason)
     }
   })

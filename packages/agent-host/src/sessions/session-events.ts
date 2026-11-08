@@ -17,7 +17,8 @@ import { ContextMeter } from './context-meter.js'
 import { scriptMessageFrame } from './script-messages.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia } from './app-messages.js'
 import type { ChildReports } from './child-reports.js'
-import { HUB_SENDER, type DelegationHost } from './delegation-flow.js'
+import { type DelegationHost } from './delegation-flow.js'
+import { isHubSender } from './hub-sender.js'
 import { truncate } from './external-conversations.js'
 import type { InterruptionWatch } from './interruption-watch.js'
 import type { OverloadRetry } from './overload-retry.js'
@@ -736,7 +737,7 @@ export class SessionEvents {
       : fromScript ? scriptMessageFrame(fromScript.credential, text)
       // A hub's Assistant directs as this host's own does (`sendFromHub`)
       : relayed && from && relayedText !== undefined ? relayedText
-      : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
+      : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && !isHubSender(from.sessionId)))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -746,7 +747,7 @@ export class SessionEvents {
     const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    const hubInput = from?.sessionId === HUB_SENDER
+    const hubInput = isHubSender(from?.sessionId)
     this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })

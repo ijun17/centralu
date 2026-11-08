@@ -1,7 +1,7 @@
 import { stamped } from '../log-file.js'
 import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
-import { HUB_SENDER } from './hub-sender.js'
+import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE, NO_WORDS } from './ask-project.js'
@@ -74,8 +74,7 @@ function saidTurn(raw: unknown): TurnStarter | undefined {
 
 /** Whether a relayed message was sent by this hub's Assistant: the machine records it as from `HUB_SENDER`, qualified */
 function fromHub(from: unknown): boolean {
-  const id = (from as { sessionId?: unknown } | null)?.sessionId
-  return typeof id === 'string' && id.endsWith(`.${HUB_SENDER}`)
+  return isQualifiedHubSender((from as { sessionId?: unknown } | null)?.sessionId)
 }
 
 /** A machine's event as the hub relays it to its windows (qualified, links.ts): only the fields read here */

@@ -213,6 +213,18 @@ const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') A
 /** Held for a reason the person acts on */
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
+/**
+ * The `via` of a recipient row sent to the Assistant's role rather than to one session (§7.7). This build writes
+ * `ROLE_VIA`; a later one writes `'assistant'` (#2133, docs/plans/assistant-rename.md), and a row keeps the one it was
+ * written with, so every reader takes both
+ */
+export const ROLE_VIA = 'orchestrator'
+const ROLE_VIA_WORDS = [ROLE_VIA, 'assistant'] as const
+/** Whether a row's `via` is the Assistant's role, under either name */
+export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly unknown[]).includes(via)
+/** The same, as an SQL list */
+const ROLE_VIAS = `(${ROLE_VIA_WORDS.map((w) => `'${w}'`).join(', ')})`
+
 export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
@@ -867,14 +879,14 @@ export class MailboxRecords {
   }
 
   /**
-   * The Assistant's role is `to`'s (§7.7): rows sent to the role (`via = 'orchestrator'`) and held by any other session (trashed, deleted, or
+   * The Assistant's role is `to`'s (§7.7): rows sent to the role (`isRoleVia`) and held by any other session (trashed, deleted, or
    * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
    * message ids moved
    */
   moveRole(to: string): string[] {
     return this.transaction(() => {
       const rows = this.rows(
-        `r.recipient <> ? AND r.via = 'orchestrator' AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING}) OR (r.settled = 'legacy' AND r.read_at IS NULL))
+        `r.recipient <> ? AND r.via IN ${ROLE_VIAS} AND ((r.settled IS NULL AND ${WATCHED}) OR (r.delivered_at IS NULL AND ${WAITING}) OR (r.settled = 'legacy' AND r.read_at IS NULL))
           ORDER BY m.created_at, m.id`,
         to,
       )
@@ -1025,7 +1037,7 @@ export class MailboxRecords {
   openParties(): string[] {
     return this.db
       .prepare<[], { a: string }>(
-        `SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND COALESCE(r.via, '') <> 'orchestrator' AND ${WATCHED}
+        `SELECT r.recipient AS a FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE r.settled IS NULL AND COALESCE(r.via, '') NOT IN ${ROLE_VIAS} AND ${WATCHED}
          UNION SELECT m.sender FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE r.settled IS NULL AND ${WATCHED}`,
       )
       .all()

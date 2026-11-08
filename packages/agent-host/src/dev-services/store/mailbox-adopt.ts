@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { parseAddress } from '../../mail/address.js'
 import { wakes } from '../../mail/rules.js'
 import { DELEGATION_ORIGINS, toMessage, type MessageKind, type MessageRow, type MessageSql } from './mail-types.js'
-import { factsFrom, RECIPIENT_HOLD_WORDS, type MailFacts, type MailKind } from './mailbox.js'
+import { factsFrom, RECIPIENT_HOLD_WORDS, ROLE_VIA, type MailFacts, type MailKind } from './mailbox.js'
 
 /*
  * The v61 thread tables read by the build that has the v65 ones (docs/plans/mailbox.md §6.3): mail an older build left
@@ -117,7 +117,7 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         recipients += insertRow.run({
           messageId: m.id,
           recipient: p.r_recipient,
-          via: p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? 'orchestrator' : null,
+          via: p.r_recipient === p.t_assignee && to?.assistant === 1 && p.t_owner !== p.r_recipient ? ROLE_VIA : null,
           settled: kind === 'task' && to?.trashed === 1 ? 'gone' : 'legacy',
           dueAt: p.r_due_at,
           attemptAt: p.r_attempt_at,

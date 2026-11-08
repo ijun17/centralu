@@ -320,9 +320,10 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     expect(delivered[1]?.preview).not.toContain('last words of')
   })
 
-  it("row 2: the hub's instruction starts the turn: the work's, reported", async () => {
+  // The machine may be of a later release, which records the hub's sender under the Assistant's new name (#2133)
+  it.each([HUB_SENDER, '_hub-assistant'])("row 2: the hub's instruction starts the turn: the work's, reported (sender %s)", async (sender) => {
     ask('m1.w1')
-    reports.observe({ ...person({ from: { sessionId: `m1.${HUB_SENDER}`, name: 'Assistant' } }, 'go'), seq: 1 })
+    reports.observe({ ...person({ from: { sessionId: `m1.${sender}`, name: 'Assistant' } }, 'go'), seq: 1 })
     turn('m1.w1')
     await flush()
     expect(delivered).toHaveLength(1)
@@ -520,6 +521,21 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     await paused()
     gateAnswer = 'withhold'
     reports.observe(person({ intent: 'takeover' }))
+    await flush()
+    expect(delivered).toHaveLength(1)
+  })
+})
+
+describe("a wait set for the hub's instruction (#1082)", () => {
+  // A machine of a later release records the hub's sender under the Assistant's new name (#2133)
+  it.each([HUB_SENDER, '_hub-assistant'])('starts at the instruction the machine recorded from the hub (sender %s)', async (sender) => {
+    children.setLinkedReport('m1.w1', { assistantId: 'o1', busy: false, instruction: 'go' })
+    // A turn that ended before the machine recorded the instruction is an earlier one's
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(0)
+    reports.observe({ type: 'user_message', sessionId: 'm1.w1', seq: 3, text: 'go', from: { sessionId: `m1.${sender}`, name: 'Assistant' } })
+    turn('m1.w1')
     await flush()
     expect(delivered).toHaveLength(1)
   })

@@ -6,7 +6,7 @@ import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj, tryParseJson } from '../json-value.js'
-import { HUB_SENDER } from './hub-sender.js'
+import { isHubSender } from './hub-sender.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -141,7 +141,7 @@ function entryOf(row: StoredMessage): (Entry & { id: string }) | undefined {
   return {
     id: p.inputId, seq: row.seq, by: work ? 'work' : 'person', ...(p.intent === 'task' ? { added: true as const } : {}),
     source: p.relayed === true ? 'report' : p.fromApp !== undefined ? 'app' : 'caller', joined: false,
-    ...(hub.success && hub.data.from.sessionId === HUB_SENDER ? { origin: hub.data } : {}),
+    ...(hub.success && isHubSender(hub.data.from.sessionId) ? { origin: hub.data } : {}),
   }
 }
 /**

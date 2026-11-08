@@ -411,6 +411,16 @@ describe('handoff and trash', () => {
     expect(box.recipient(done, ORC)).toBeDefined()
   })
 
+  it('moveRole and openParties take a row sent to the role under the Assistant’s new name too (#2133)', () => {
+    const { box, send } = world()
+    const NEW = 'session:h1/orc2'
+    // A later build writes via 'assistant'; the row waits for the role, not for the session that held it
+    const renamed = send({ sender: A, needsReply: true }, to(ORC, { via: 'assistant' }))
+    expect(box.openParties()).not.toContain(ORC)
+    expect(box.moveRole(NEW)).toEqual([renamed])
+    expect(box.recipient(renamed, NEW)).toMatchObject({ via: 'assistant' })
+  })
+
   it('purgeParty removes a party’s rows', () => {
     const { box, send } = world()
     const onlyA = send({ sender: B }, A)
