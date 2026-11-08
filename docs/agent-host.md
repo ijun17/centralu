@@ -4074,6 +4074,10 @@ step against:
 2. **Contract, one release later.** A step that drops or renames a table, column or index, or leaves data an older
    build cannot read or would silently lose, lands one release after the code stopped reading and writing what it
    removes, and declares `breaksOlderReaders: true`. Dropping something an older `schema.sql` creates counts (v13).
+   A rename is both: an expand step adds the new form, and the build that adds it writes both forms and reads the old
+   one first, since the previous build writes only that one (a person who goes back and forward leaves the new form
+   stale). Only a build whose floor keeps out every build writing the old form alone may read the new form first
+   ([plans/assistant-rename.md](plans/assistant-rename.md) §3.1, §3.2, #2133).
 3. **The store records the lowest schema version that can still read it:** the `min_reader_version` row in
    `app_settings`. A breaking step raises it to its own version before it runs. A store from before #292 gets it
    computed once from the steps it has already run (32 for every store migrated to date). On open, before `schema.sql`
