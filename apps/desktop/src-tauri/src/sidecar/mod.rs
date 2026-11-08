@@ -49,39 +49,27 @@ pub struct HostBuild {
     #[cfg(unix)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<crate::keeper::source::BuildSource>,
-    /// False when the running host is from a different build than this window: the UI offers to
-    /// switch. None when it cannot be told (direct mode, or not attached yet).
+    /// False when the running host is from a different build than this window: the UI offers a
+    /// restart into this build. None when it cannot be told (direct mode, or not attached yet).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_build: Option<bool>,
     /// The build of the keeper itself (#280 step 4). Absent for a keeper older than step 4.
     #[cfg(unix)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keeper: Option<crate::keeper::source::BuildSource>,
-    /// False when the keeper is from another build than this window. Switching moves the keeper
-    /// over too, without stopping anything. None when it cannot be told.
+    /// False when the keeper is from another build than this window: the UI offers a restart into
+    /// this build. None when it cannot be told.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keeper_same_build: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<bool>,
-    /// The current or last blue-green swap (#280 step 3), as the keeper reports it.
-    #[cfg(unix)]
+    /// The keeper stops for an update (#1895 step 3), so a restart into this build continues the turns it
+    /// cuts; an earlier keeper gets a plain stop (`KeeperLink::restart_keeper`). Absent before a view.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub swap: Option<crate::keeper::swap::SwapView>,
-    /// Whether that swap went to this window's build, by the keeper's rule (`SwapView::is_to`). Absent
-    /// without a swap.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub swap_to_this_build: Option<bool>,
-    /// Whether a swap hands agents over (step 2) or stops them, as the running host says.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keeps_agents: Option<bool>,
-    /// A session working or waiting, a terminal or a command running: what a switch could cost.
+    pub stops_for_update: Option<bool>,
+    /// A session working or waiting, a terminal or a command running: what a restart could cost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub busy: Option<bool>,
-    /// This window was started by "Apply now" (#352): the keeper held on through the relaunch and
-    /// said so when this window attached. The window then applies the switch by itself when
-    /// nothing can be lost.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub relaunched: bool,
     /// How the last keeper start this window made went through the macOS shell (thin-shell plan §6):
     /// absent when it never tried (a keeper already answered, debug builds, Linux).
     #[cfg(unix)]
@@ -105,14 +93,9 @@ pub struct RelaunchInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle_path: Option<String>,
     /// Applying the update stops the host and the next one continues what it ended (#1895): this window before the relaunch
-    /// where it starts the host, the keeper (which then exits) where it is of #1895 step 3, and with an older keeper the
-    /// switch the relaunched window makes. False only while an older keeper's host hands its agents to it.
+    /// where it starts the host, the keeper (which then exits) otherwise. False where the window cannot tell
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub restarts_host: bool,
-    /// The one case where running agents, terminals and commands keep going through the update: an older keeper whose host
-    /// hands them to it. Said only then, so a window that cannot tell (Windows, Linux, no keeper attached yet) never claims it
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub keeps_agents: bool,
     /// The keeper reports whether the host is busy, so "Automatic updates" can wait for idle and apply by itself.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub idle_reported: bool,
@@ -298,16 +281,6 @@ impl Supervisor {
         }
     }
 
-    /// Switches the host to this window's build with the keeper's blue-green swap (#280 step 3).
-    /// Progress and failure arrive in `host-build` (`swap`).
-    pub fn switch_build(&self) -> Result<(), String> {
-        match self.choice() {
-            #[cfg(unix)]
-            Choice::Keeper => self.link()?.switch_build(),
-            _ => Err("the host is not held by a keeper in this build".into()),
-        }
-    }
-
     pub fn background(&self) -> Result<bool, String> {
         match self.choice() {
             #[cfg(unix)]
@@ -325,8 +298,8 @@ impl Supervisor {
         }
     }
 
-    /// Whether "Apply now" can relaunch this window into the update just installed (#352). With the
-    /// keeper, which holds the host and every agent through it. Where this window starts the host
+    /// Whether "Apply now" can relaunch this window into the update just installed (#352). With a
+    /// keeper that stops the host for it and exits (`link::with_keeper`). Where this window starts the host
     /// itself (`os::RELAUNCH_WITHOUT_KEEPER`), the relaunch stops the host for an update first and the next one continues what
     /// it ended (#1895). Elsewhere a relaunch would only be the quit the update is meant to avoid.
     pub fn relaunch_info(&self) -> RelaunchInfo {
@@ -356,10 +329,9 @@ impl Supervisor {
 
     /**
      * What "Apply now" does before the relaunch (#352, #1895): Ok once the relaunch may go on, else why not, as the update line
-     * shows it. Where this window starts its host itself, it stops it for an update. A keeper of #1895 step 3 is asked to do
-     * that and exit; a refusal stops nothing and keeps the window, whatever background mode says, and gives the keeper's own
-     * reason. An older keeper is told to hold on through the relaunch; one that cannot is acceptable only with background mode
-     * on, where a window closing never stopped anything.
+     * shows it. Where this window starts its host itself, it stops it for an update. A keeper is asked to do that and exit; a
+     * refusal stops nothing and keeps the window, whatever background mode says, and gives the keeper's own reason. A keeper of
+     * an earlier build than #1895 step 3 cannot (`relaunch_info` does not offer it): the build bar's restart comes first.
      */
     pub fn before_relaunch(&self) -> Result<(), String> {
         if self.stop_host_for_update() {
@@ -369,16 +341,10 @@ impl Supervisor {
             #[cfg(unix)]
             Choice::Keeper => {
                 let link = self.link().map_err(|e| format!("Not relaunched: {e}."))?;
-                if link.stops_for_update() {
-                    return link.stop_for_update().map_err(|e| format!("Not relaunched: {e}."));
+                if link.stops_for_update() != Some(true) {
+                    return Err(format!("Not relaunched: {}", link::KEEPER_TOO_OLD_TO_UPDATE));
                 }
-                match link.announce_relaunch() {
-                    Ok(_) => Ok(()),
-                    Err(_) if link.background() == Ok(true) => Ok(()),
-                    Err(e) => Err(format!(
-                        "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
-                    )),
-                }
+                link.stop_for_update().map_err(|e| format!("Not relaunched: {e}."))
             }
             _ => Err("Not relaunched: the host is not held by a keeper in this build.".into()),
         }
@@ -396,10 +362,8 @@ impl Supervisor {
         }
     }
 
-    /// "Restart completely" (#387): stops the keeper as "Quit completely" does, but this window
-    /// stays and starts a keeper of its own build. For a keeper of an older build that could not
-    /// hand itself over: the fix for a failing handoff is in the sending keeper, which an update
-    /// does not replace while it runs.
+    /// The build bar's restart into this build (#387, #1895 step 4 PR 3): stops the keeper, for an update
+    /// when it can (`KeeperLink::restart_keeper`), and this window stays and starts a keeper of its own build.
     pub fn restart_keeper(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]

@@ -42,7 +42,7 @@ const NOT_YET: &[(&str, usize)] = &[
     // The window's start and quit (step 7). Its own OS integration (the badge, the trash, app links,
     // the Quit menu item) is in `WINDOW_INTEGRATION`'s files, so what is left here is runtime.
     ("src/lib.rs", 14),
-    ("src/sidecar/mod.rs", 27),
+    ("src/sidecar/mod.rs", 25),
 ];
 
 const OS_WORDS: &[&str] = &["unix", "windows", "target_os", "target_family", "target_vendor", "target_env"];
