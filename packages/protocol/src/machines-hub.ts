@@ -61,6 +61,7 @@ export const HubMailParams = z.object({
   sessionId: z.string().min(1).max(200),
   // The hub checks the length as for its own sessions, and refuses it in its words
   text: z.string().min(1).max(200_000),
+  // Read by no hub yet: the hub writes the message as a note until a reply can reach the machine (#2067 item 2)
   needsReply: z.boolean().optional(),
   urgent: z.boolean().optional(),
 })

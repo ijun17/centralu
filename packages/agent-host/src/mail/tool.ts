@@ -104,7 +104,7 @@ export class MailTool {
     try {
       const r = await hubParent(sessionId, { text: this.need(args.text, 'text'), needsReply: args.kind !== 'note', ...(args.urgent ? { urgent: true } : {}) })
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
-      return { text: `Sent ${r.messageId} to your parent ${JSON.stringify(r.to)} on ${r.hub}. Its answer reaches you as a new turn, not as mail.` }
+      return { text: `Sent ${r.messageId} to your parent ${JSON.stringify(r.to)} on ${r.hub}, as a note, which asks for no reply there. Its answer reaches you as a new turn, not as mail.` }
     } catch (e) {
       return failed(e)
     }

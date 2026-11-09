@@ -400,7 +400,8 @@ session was created (`started_from_hub_by:`, from the connection `agents.createS
 session with no record is refused (`elsewhere`). That hub offered mail (`host.hubOffer`'s `mail`, sent whatever the
 asks switch says), and writes the message
 with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
-labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names. Nothing
+labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names, and
+always as a note: no reply or "no longer watched" notice reaches the child before item 2, so none is awaited. Nothing
 is written on this host. A link that is down, a hub from before it (`older`), no hub that started it, or a refusal of
 the hub's own rules is said at once with its reason and written nowhere, so the same text may be sent again; only a
 call that fails mid-way says it is not known whether the message arrived.

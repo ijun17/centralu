@@ -29,7 +29,11 @@ export function mailFromMachine(o: {
       const sent = o.service.send(o.service.sessionAddress(qualified), {
         to: [parent],
         text: p.text,
-        needsReply: p.needsReply ?? true,
+        // Always a note, whatever the machine asks (#2067 item 1; docs/plans/linked-mail.md §3 step 3): no reply and no
+        // "no longer watched" notice reaches the child on its machine before item 2, and a watched message would leave
+        // that notice undelivered here for good and promise the parent reminders for a reply it cannot send. A note is
+        // never released or reminded (`releasedUntold` reads needsReply rows only)
+        needsReply: false,
         ...(p.urgent ? { urgent: true } : {}),
       })
       return { ok: true, messageId: sent.message.id, to: oneLineText(o.service.labelOf(parent), 120) }

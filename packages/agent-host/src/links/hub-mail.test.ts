@@ -31,11 +31,21 @@ describe('the hub takes mail from a session it started on a linked machine (#206
     expect(hub.machine().asks).toEqual({ on: false, note: null })
     const r = (await call({ sessionId: 'c1', text: 'the build is green', urgent: true })) as { ok: true; messageId: string; to: string }
     expect(r).toEqual({ ok: true, messageId: expect.any(String), to: 'h1' })
-    expect(hub.store.mailbox.message(r.messageId)).toMatchObject({ sender: addressOf('m1.c1'), body: 'the build is green', needsReply: true })
+    expect(hub.store.mailbox.message(r.messageId)).toMatchObject({ sender: addressOf('m1.c1'), body: 'the build is green', needsReply: false })
     expect(hub.store.mailbox.recipient(r.messageId, addressOf('h1'))).toBeTruthy()
     // The parent reads it from the child by its name on its machine
     expect(hub.mail!.service.labelOf(addressOf('m1.c1'))).toBe('c1 on Remote box')
     expect(await call({ sessionId: 'c1', text: 'fyi', needsReply: false })).toMatchObject({ ok: true })
+  })
+
+  it('writes it as a note, so the parent going leaves no notice for the child that could never reach it', async () => {
+    const { hub, call } = await rig()
+    // The machine asks for a reply; until item 2 neither a reply nor the "no longer watched" notice reaches the child there
+    const r = (await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })) as { ok: true; messageId: string }
+    expect(hub.store.mailbox.message(r.messageId)).toMatchObject({ needsReply: false })
+    hub.mail!.service.partyGone(addressOf('h1'))
+    // Only its own message: nothing from Centralu waits for the child in the hub's mailbox
+    expect(hub.store.mailbox.feedOf(addressOf('m1.c1'), { limit: 10 }).map((m) => m.id)).toEqual([r.messageId])
   })
 
   it('answers not_yours for a session it did not start there, and writes nothing', async () => {

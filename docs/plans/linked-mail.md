@@ -58,8 +58,14 @@ machine to a hub is such a call (`hub.mail`); mail from a hub to a machine is a 
    parent in its own record of linked children (`RemoteAgents`, `callerId`), and sends with `MessageService.send` from
    the child's address to the parent's. The parent reads the sender as `<name> on <machine>`. A refusal there (the
    parent gone, a guard) comes back as the answer, with its reason and text, and nothing is written.
-4. **The answer.** The child's tool (`MailTool.call`) says `Sent <hub's message id> to your parent "<name>" on <hub>.
-   Its answer reaches you as a new turn, not as mail.` Until item 2 the parent answers with `agent_session send`; a
+   **Always a note** (`needsReply: false`, whatever the call's `needsReply` says): until item 2 neither a reply nor the
+   "no longer watched" notice (`tellUnanswered`) can reach the child on its machine. A watched message would leave
+   that notice in the hub's mailbox, addressed to the child and undelivered for good, when the parent stops or goes
+   without answering, and would tell the parent that a reply is awaited and reminded, while its `mail reply` is
+   refused. A note is never released, told or reminded (`releasedUntold` reads `needsReply` rows only). Item 2 may let
+   the call's `needsReply` through once a reply and the notice reach the machine.
+4. **The answer.** The child's tool (`MailTool.call`) says `Sent <hub's message id> to your parent "<name>" on <hub>,
+   as a note, which asks for no reply there. Its answer reaches you as a new turn, not as mail.` Until item 2 the parent answers with `agent_session send`; a
    `mail reply` to the child's message is refused `elsewhere` with the text slice 1 gives, which names that way.
 
 **Which hubs offer mail.** The hub already tells the machine who it is at every connect (`host.hubOffer`, with `on`
