@@ -91,6 +91,21 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     expect(received(hub).map((m) => m.body)).toEqual(['are you there?'])
   })
 
+  it('a body over the mailbox limit is refused here in its words and never crosses; an error the hub answers is its refusal, not a lost link', async () => {
+    const { machine, hub } = await rig()
+    expect(await send(machine, 'x'.repeat(250_000))).toEqual({ text: 'Refused (too_long): a body from this sender is at most 16000 characters', isError: true })
+    expect(await send(machine, 'y'.repeat(16_001))).toMatchObject({ text: expect.stringMatching(/^Refused \(too_long\)/) })
+    expect(hub.heard).toEqual([])
+    expect(await send(machine, 'z'.repeat(16_000))).toMatchObject({ text: expect.stringMatching(/^Sent /) })
+    // The hub was there and answered an error of its own (here a call it does not read): it took nothing, and says why
+    expect(await machine.hubs.mail('c1', { id: hub.id, name: hub.name }, { text: '' })).toEqual({
+      ok: false,
+      why: 'refused',
+      text: 'Hub mac refused the message: Not a message this computer reads. Nothing was written there.',
+    })
+    expect(received(hub).map((m) => m.body.length)).toEqual([16_000])
+  })
+
   it('a session the hub did not start is refused, and nothing is written on either side', async () => {
     const { machine, hub } = await rig({ records: false })
     expect(await send(machine, 'hello parent')).toEqual({

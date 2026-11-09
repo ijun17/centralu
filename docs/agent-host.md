@@ -402,9 +402,10 @@ asks switch says), and writes the message
 with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
 labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names, and
 always as a note: no reply or "no longer watched" notice reaches the child before item 2, so none is awaited. Nothing
-is written on this host. A link that is down, a hub from before it (`older`), no hub that started it, or a refusal of
-the hub's own rules is said at once with its reason and written nowhere, so the same text may be sent again; only a
-call that fails mid-way says it is not known whether the message arrived.
+is written on this host. A body over local mail's limit (`too_long`, refused here before the call), a link that is down,
+a hub from before it (`older`), no hub that started it, an error the hub answered (`refused`, told from a lost call by
+the server's `peerAnswer` mark) or a refusal of the hub's own rules is said at once with its reason and written nowhere,
+so the same text may be sent again; only a call that gets no answer says it is not known whether the message arrived.
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 

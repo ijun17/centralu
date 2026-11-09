@@ -77,12 +77,14 @@ withdraws the offer (`on: false` without `mail`) whatever its switch, so the mac
 
 | Case | Refusal |
 |---|---|
+| A body longer than the mailbox takes from a session (`bodyLimit`, 16,000 characters) | `too_long`: `a body from this sender is at most 16000 characters`, the words local mail says (`tooLongText`), and the hub is not called |
 | No hub recorded for the session | `elsewhere`: `your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: …` |
 | The recorded hub has not offered since this host started | `link_down`: `<hub>, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.` |
 | The recorded hub has no live connection | `link_down`: `<hub> is not reachable right now, so nothing was sent. Send it again once the link is back.` |
 | The hub answers "Unknown method" (it offered asks, not mail: a release from before this) | `older`: `<hub> runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` |
 | The hub answers `not_yours` | `unknown`: `<hub> does not know this session as one it started, so nothing was sent. End your turn with the answer: …` |
-| The call fails (link dropped mid-call, 30 s without an answer) | `link_down`: `the link to <hub> failed during the send (<error>), so it is not known whether the message arrived. If you send it again and it did, <hub> refuses the second one as a repeat.` |
+| The hub answers an error of its own (too many calls at once, a call it does not read) | `refused`: `<hub> refused the message: <its words>. Nothing was written there.` The server marks an answered error (`peerAnswer`), so it is told from a lost call, which has the same code |
+| The call fails with no answer (link dropped mid-call, 30 s without an answer) | `link_down`: `the link to <hub> failed during the send (<error>), so it is not known whether the message arrived. If you send it again and it did, <hub> refuses the second one as a repeat.` |
 | The hub refuses it (its own rules: the parent gone, `repeat`, a body too long) | The hub's reason and words |
 
 The last case is the one where a resend may meet the `repeat` guard on the hub: the message did arrive. The refusal
@@ -95,7 +97,8 @@ message is dropped without a word:
 
 - **A machine with this, a hub without:** a hub from before this does not offer mail. While its asks switch is on it
   is called and answers "Unknown method": refused `older`, naming the cause. With its switch off it is not known to
-  the machine at all: refused `elsewhere` with the text above, which names both causes.
+  the machine at all: refused `link_down` with "not linked to this computer right now (or runs a Centralu from before
+  mail crossed computers)", which names both causes.
 - **A hub with this, a machine without:** the machine drops the offer's `mail` field. Its sessions keep today's
   refusal for `parent` ("on another computer"). Nothing reaches the hub, so nothing is lost there.
 - **Item 2 (`host.mail`) to a machine without it:** "Unknown method", refused `older` on the hub with the machine's

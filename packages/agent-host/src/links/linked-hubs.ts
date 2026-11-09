@@ -1,5 +1,7 @@
 import { HubAskResult, HubMailResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
+import { bodyLimit, tooLongText } from '../mail/rules.js'
+import { isPeerAnswer } from '../rpc-error.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -147,6 +149,8 @@ export class LinkedHubs {
    * may be sent again (docs/plans/linked-mail.md §3's table).
    */
   async mail(sessionId: string, started: { id: string; name: string } | null, input: { text: string; needsReply?: boolean; urgent?: boolean }): Promise<HubParentMail> {
+    // The mailbox's own limit for a session, said in its words, before anything crosses the link
+    if (input.text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
     if (!started) {
       return {
         ok: false,
@@ -169,6 +173,8 @@ export class LinkedHubs {
       raw = await this.deps.call(h.client, 'hub.mail', { sessionId, ...input }, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
     } catch (err) {
       if (older(err)) return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
+      // The hub answered with an error of its own (too many calls, a call it does not read): it was there and took nothing
+      if (isPeerAnswer(err)) return { ok: false, why: 'refused', text: `${name} refused the message: ${oneLineText(errorMessage(err), 500).replace(/\.$/, '')}. Nothing was written there.` }
       const why = oneLineText(errorMessage(err), 300)
       return { ok: false, why: 'link_down', text: `the link to ${name} failed during the send (${why}), so it is not known whether the message arrived. If you send it again and it did, ${name} refuses the second one as a repeat.` }
     }

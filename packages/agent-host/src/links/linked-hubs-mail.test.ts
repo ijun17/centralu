@@ -4,6 +4,7 @@ import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { startingHub } from '../sessions/hub-preset.js'
+import { peerAnswer, rpcError } from '../rpc-error.js'
 
 /**
  * The machine's side of `hub.mail` (#2067 item 1, docs/plans/linked-mail.md §3): which hubs it keeps for mail, and what
@@ -97,6 +98,20 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
       why: 'link_down',
       text: 'the link to Hub mac failed during the send (the connection closed), so it is not known whether the message arrived. If you send it again and it did, Hub mac refuses the second one as a repeat.',
     })
+    // An error the hub answered itself: it was there and took nothing, so it is its refusal and not a lost link
+    answer.fn = () => Promise.reject(peerAnswer(rpcError('Too many calls at once; try again shortly', 'internal', { retryable: true })))
+    expect(await hubs.mail('c1', MAC, { text: 'hello' })).toEqual({
+      ok: false,
+      why: 'refused',
+      text: 'Hub mac refused the message: Too many calls at once; try again shortly. Nothing was written there.',
+    })
+    // The same error that no one answered (a timeout, a closed connection) stays a lost link
+    answer.fn = () => Promise.reject(rpcError('The other side did not answer hub.mail in time', 'internal', { retryable: true }))
+    expect(await hubs.mail('c1', MAC, { text: 'hello' })).toMatchObject({ ok: false, why: 'link_down' })
+    // Over the mailbox's limit for a session: refused here, in its words, and the hub is not called
+    calls.length = 0
+    expect(await hubs.mail('c1', MAC, { text: 'x'.repeat(16_001) })).toEqual({ ok: false, why: 'too_long', text: 'a body from this sender is at most 16000 characters' })
+    expect(calls).toEqual([])
     // Its connection gone, the hub is not called at all
     calls.length = 0
     hubs.gone(7)
