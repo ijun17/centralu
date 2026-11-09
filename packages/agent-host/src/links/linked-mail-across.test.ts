@@ -359,6 +359,21 @@ describe('a send that arrived but whose answer was lost (#2067 review)', () => {
     expect(hub.store.mailbox.recipient(idOf(again), at(hub, 'm1.w1'))).toBeDefined()
   })
 
+  it('a send again that is now urgent, or no longer asks for a reply, is not taken as the one that may have arrived', async () => {
+    const { machine, hub } = await rig()
+    losesNextAnswer(hub)
+    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?' })).isError).toBe(true)
+    const [first] = machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })
+    // Under the first's id the machine would answer with the message it has: sent, with the urgency or the note lost
+    for (const changed of [{ urgent: true }, { kind: 'note' }]) {
+      const r = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?', ...changed })
+      expect(r.text).toMatch(/^Refused \(repeat\)/)
+    }
+    expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })).toEqual([expect.objectContaining({ id: first!.id })])
+    // The same send again is still the one that may have arrived
+    expect(idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?' }))).toBe(first!.id)
+  })
+
   it("the recipient's reply goes through, and the sender keeps its copy of what it answers", async () => {
     const { machine, hub } = await rig()
     losesNextAnswer(hub)

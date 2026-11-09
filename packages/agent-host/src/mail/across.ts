@@ -100,6 +100,10 @@ const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 /** A send whose answer did not come back: it may have been written on the other side (`MailAcross.unsure`) */
 type Unsure = { sender: string; to: string; fields: { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }; computer: string; at: number }
 
+/** Whether two sends say the same: a send again of an unsure one goes under its id only then (`idFor`) */
+const sameMessage = (a: Unsure['fields'], b: Unsure['fields']): boolean =>
+  a.text === b.text && a.replyTo === b.replyTo && a.needsReply === b.needsReply && (a.urgent ?? false) === (b.urgent ?? false)
+
 /** How long, and how many, unsure sends are kept: a copy is kept for one only while it is likely to be heard of */
 const UNSURE_MS = 24 * 60 * 60_000
 const UNSURE_MAX = 500
@@ -226,14 +230,16 @@ export class MailAcross {
   }
 
   /**
-   * The id a send to `to` goes under: the one of an unsure send of the same words by the same sender, so the other side
-   * takes it as the message it may have, else a new one, kept as unsure until the other side answers
+   * The id a send to `to` goes under: the one of an unsure send of the same message by the same sender (its words, what it
+   * answers, whether it is urgent and wants a reply), so the other side takes it as the message it may have, else a new
+   * one, kept as unsure until the other side answers. A send again that changes any of them is another message: under the
+   * same id the other side would keep the first, and its urgency or question would be lost (#2067 re-check)
    */
   private idFor(sender: string, to: string, fields: Unsure['fields'], computer: string): string {
     const now = this.now()
     for (const [id, u] of this.unsure) {
       if (now - u.at > UNSURE_MS) this.unsure.delete(id)
-      else if (u.sender === sender && u.to === to && u.fields.text === fields.text && u.fields.replyTo === fields.replyTo) return id
+      else if (u.sender === sender && u.to === to && sameMessage(u.fields, fields)) return id
     }
     const id = this.d.service.mintId()
     this.unsure.set(id, { sender, to, fields, computer, at: now })
