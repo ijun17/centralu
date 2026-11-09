@@ -12,11 +12,27 @@ const tipOf = async (page: Page, el: Locator) => {
 async function start(page: Page) {
   await page.goto('/?demo')
   await expect(page.getByTestId('open-settings')).toBeVisible()
+  /*
+   * The window's own check on connecting (`checkUpdate(false)`, store/connection.ts) is not waited for, so on WebKit it can
+   * be asked after the screen is up (#2149): it then landed in a test's list of checks, and its answer replaced the state a
+   * test had just set ("Update failed", "Updating…"). Wait for it to be asked; the mock answers in microtasks, so one timer
+   * turn later the store holds its answer, and the test starts from there
+   */
+  await expect.poll(() => checks(page)).toContain(false)
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 0)))
   await page.evaluate(() => { (window as any).__mock.updateChecks = [] })
 }
 
 async function checks(page: Page) {
   return page.evaluate(() => (window as any).__mock.updateChecks)
+}
+
+/**
+ * The page's own time. The page stamps `checkedAt` with its clock, which on WebKit runs up to ~10 ms ahead of this process's
+ * (#2149, measured): "60 001 ms after" Node's `Date.now()` was then under a minute after the stamp, and the banner not stale
+ */
+async function pageNow(page: Page): Promise<number> {
+  return page.evaluate(() => Date.now())
 }
 
 async function focus(page: Page) {
@@ -73,7 +89,7 @@ test('opening Updates and returning to the window preserve a failed install (#63
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-tab-background').click()
   await expect(page.getByTestId('update-state')).toHaveText('Update failed: EACCES: install denied')
-  await page.clock.setFixedTime(Date.now() + 3600_001)
+  await page.clock.setFixedTime((await pageNow(page)) + 3600_001)
   await focus(page)
   await expect(page.getByTestId('update-state')).toHaveText('Update failed: EACCES: install denied')
   await page.evaluate(() => { (window as any).__mock.updateFails = null })
@@ -83,7 +99,7 @@ test('opening Updates and returning to the window preserve a failed install (#63
 
 test('focus checks sweep the one-hour boundary and throttle failures and paired visibility events (#635)', async ({ page }) => {
   await start(page)
-  const base = Date.now()
+  const base = await pageNow(page)
   await page.clock.setFixedTime(base)
   await page.evaluate((at) => {
     const store = (window as any).__store
@@ -160,7 +176,7 @@ test('one install and apply reaches the newest release after the banner became s
     m.offerUpdate('9.9.1')
     m.registryVersion = '9.9.2'
   })
-  await page.clock.setFixedTime(Date.now() + 60_001)
+  await page.clock.setFixedTime((await pageNow(page)) + 60_001)
   await expect(page.getByTestId('update-line')).toHaveText('Update')
   await expect(await tipOf(page, page.getByTestId('update-line'))).toContainText('9.9.1 is out')
   await page.getByTestId('update-line').click()
