@@ -85,6 +85,12 @@ export type MailAcrossDeps = {
   log?: (line: string) => void
 }
 
+/**
+ * How far before the kept mark (`toldAt`) crossing rows are read again: a row's `settled_at` can be the other side's
+ * time, merged from its rows, and a clock behind this one would put a row settled after the mark before it (#2067 re-check)
+ */
+const TOLD_SLACK_MS = 10 * 60_000
+
 /** Where an address is, from this host: here, a machine this hub links, or a hub's side */
 type Route = { kind: 'here' } | { kind: 'machine'; machineId: string; sessionId: string } | { kind: 'hub'; hubId: string }
 
@@ -464,7 +470,8 @@ export class MailAcross {
     // Read before the rows: a row that changes after is newer, and its change runs this again
     const at = this.now()
     let all = true
-    for (const row of this.d.records.acrossRows(this.d.hostId, this.d.toldAt?.get() ?? 0)) {
+    const mark = this.d.toldAt?.get() ?? null
+    for (const row of this.d.records.acrossRows(this.d.hostId, mark === null ? 0 : Math.max(0, mark - TOLD_SLACK_MS))) {
       const copy = this.foreign(row.recipient)
       // The copy's side tells only a withdrawal; the recipient's side tells everything else
       if (copy && row.settled !== 'withdrawn') continue

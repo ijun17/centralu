@@ -301,6 +301,30 @@ describe('what became of crossing mail is told after the link or the host was aw
     await later.sync()
     expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, recipient: at(hub, 'm1.w1'), settled: 'done' })] } }])
   })
+
+  it('a row whose time is behind the kept mark by a clock\'s difference is still told after a restart', async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is the build green?' }))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
+    expect((await tool(machine, 'w1', { action: 'handled', thread: id })).isError).toBeFalsy()
+    const settledAt = machine.store.mailbox.recipient(id, at(machine, 'w1'))!.settledAt!
+    // The mark was set 5 minutes after the row's time: as when that time came from a side whose clock runs 5 minutes behind
+    const told: unknown[] = []
+    const mail = machine.mail!
+    const later = new MailAcross({
+      hostId: machine.id,
+      service: mail.service,
+      records: mail.records,
+      reach: mail.reach,
+      ownEntries: () => [],
+      toldAt: { get: () => settledAt + 5 * 60_000, set: () => {} },
+    })
+    const peer = { id: hub.id, name: hub.name, reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
+    later.usePeers({ selfName: () => 'Remote box', hub: () => peer, hubs: () => [peer] })
+    await later.sync()
+    expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, settled: 'done' })] } }])
+  })
 })
 
 describe('a send that arrived but whose answer was lost (#2067 review)', () => {
