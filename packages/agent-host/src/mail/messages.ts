@@ -41,6 +41,7 @@ import {
   postsPerMinute,
   quietAnswer,
   refuse,
+  tooLongText,
   wakesMessage,
   type SenderClass,
 } from './rules.js'
@@ -1015,7 +1016,7 @@ export class MessageService {
   private checkText(cls: SenderClass, text: unknown): string {
     if (typeof text !== 'string') throw refuse('bad_value', 'a body is text')
     if (text.trim() === '') throw refuse('empty', 'a post says something')
-    if (text.length > bodyLimit(cls)) throw refuse('too_long', `a body from ${cls === 'app' ? 'an app' : 'this sender'} is at most ${bodyLimit(cls)} characters`)
+    if (text.length > bodyLimit(cls)) throw refuse('too_long', tooLongText(cls))
     return text
   }
 

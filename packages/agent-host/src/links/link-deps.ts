@@ -86,6 +86,11 @@ export type LinkDeps = {
    */
   hubSelf?: () => { id: string; name: string }
   /**
+   * Whether `reverse` takes mail from the sessions this hub started on a machine to their parents (`hub.mail`, #2067):
+   * said to every machine in the offer (`mail: true`), whatever its switch for asks says
+   */
+  hubMail?: boolean
+  /**
    * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
    * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told
    */

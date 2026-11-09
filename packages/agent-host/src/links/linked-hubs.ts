@@ -1,5 +1,7 @@
-import { HubAskResult, HubMethods, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
+import { HubAskResult, HubMailResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
+import { bodyLimit, tooLongText } from '../mail/rules.js'
+import { isPeerAnswer } from '../rpc-error.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -13,12 +15,26 @@ import { NOT_REACHABLE } from '../adapters/contract.js'
  *     projects cannot be named. One that offered and then said off is forgotten at once.
  *   - **What a hub answers is someone else's words**: names on one line, and an answer that does not read as one is a
  *     refusal, never passed on as it came.
+ *   - **Mail** (#2067 item 1, docs/plans/linked-mail.md §3): a hub that says it takes mail is kept whatever its switch
+ *     for asks says, and a session it started here mails its parent there through it (`mail`), through that hub only.
+ *     Its projects are listed and asked only while that switch is on.
  */
 
 /** How long a list of a hub's projects may take before that hub counts as away for the call (as `LOOKUP_MS`, #984) */
 const LOOKUP_MS = 4000
 
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null }
+/** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
+type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean }
+
+/** How long a message to a hub may take before the send is refused as not known to have arrived */
+const MAIL_MS = 30_000
+
+/**
+ * What a message to a parent on a hub came to (`mail`): sent, with the hub's message id, the parent's name there and
+ * the hub's; or refused, with the reason and the words the session reads, and nothing written on either side, except
+ * where the words say it is not known
+ */
+export type HubParentMail = { ok: true; messageId: string; to: string; hub: string } | { ok: false; why: string; text: string }
 
 /** A hub's project as an ask_project names it here: its id qualified by the hub's (`<hub id>.<project id>`) */
 export type HubProjectRef = { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string }
@@ -29,24 +45,33 @@ export type LinkedHubsDeps = {
   lookupMs?: number
   /** How long one ask may wait for the hub's answer, its card included; the transport's bound when absent. For tests */
   askTimeoutMs?: number
+  /** How long one message may wait for the hub's answer (30 s when absent). For tests */
+  mailTimeoutMs?: number
 }
 
 /** The words a call that failed for an older hub says (it has no such method) */
-const older = (err: unknown) => /Unknown method/i.test((err as Error)?.message ?? '')
+const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 
 export class LinkedHubs {
   private hubs = new Map<string, Hub>()
 
   constructor(private readonly deps: LinkedHubsDeps) {}
 
-  /** A hub's offer, on the connection it came in on. Off forgets it */
+  /** A hub's offer, on the connection it came in on. Off, and without mail, forgets it */
   offer(client: number, o: HubOffer): void {
-    if (!o.on) {
+    const mail = o.mail === true
+    if (!o.on && !mail) {
       this.hubs.delete(o.hub.id)
       return
     }
     const prev = this.hubs.get(o.hub.id)
-    this.hubs.set(o.hub.id, { id: o.hub.id, name: oneLineText(o.hub.name, 120) || o.hub.id, client, projects: prev?.projects ?? null })
+    const projects = o.on ? (prev?.projects ?? null) : null
+    this.hubs.set(o.hub.id, { id: o.hub.id, name: oneLineText(o.hub.name, 120) || o.hub.id, client, projects, asks: o.on, mail })
+  }
+
+  /** The hubs whose switch for this machine is on: the ones whose projects its sessions may ask */
+  private asking(): Hub[] {
+    return [...this.hubs.values()].filter((h) => h.asks)
   }
 
   /** A connection ended: a hub it carried is not reachable until it offers again */
@@ -54,9 +79,9 @@ export class LinkedHubs {
     for (const h of this.hubs.values()) if (h.client === client) h.client = null
   }
 
-  /** Whether any hub offered (a session's project list says nothing of hubs otherwise) */
+  /** Whether any hub offered its projects (a session's project list says nothing of hubs otherwise) */
   get any(): boolean {
-    return this.hubs.size > 0
+    return this.asking().length > 0
   }
 
   /**
@@ -67,7 +92,7 @@ export class LinkedHubs {
     const projects: HubProjectRef[] = []
     const away: { hubId: string; hub: string; why: string }[] = []
     await Promise.all(
-      [...this.hubs.values()].map(async (h) => {
+      this.asking().map(async (h) => {
         let why: string | null = null
         if (h.client === null) why = NOT_REACHABLE
         else {
@@ -92,7 +117,7 @@ export class LinkedHubs {
   /** One ask into a hub's project (`hub.askProject`), waited on until the hub answers or `signal` withdraws it */
   async ask(hubId: string, params: HubAskParams, signal?: AbortSignal): Promise<HubAskResult> {
     const h = this.hubs.get(hubId)
-    if (!h) return { ok: false, error: 'That computer no longer lets this machine ask its projects.' }
+    if (!h?.asks) return { ok: false, error: 'That computer no longer lets this machine ask its projects.' }
     if (h.client === null) return { ok: false, error: `${h.name} is ${NOT_REACHABLE}. Try again once its link is back.` }
     let raw: unknown
     try {
@@ -100,7 +125,7 @@ export class LinkedHubs {
     } catch (err) {
       if (signal?.aborted) return { ok: false, error: 'The call was cancelled.' }
       if (older(err)) return { ok: false, error: `${h.name} runs a Centralu from before this, so it cannot be asked. Update it there.` }
-      return { ok: false, error: `${h.name} could not be asked: ${oneLineText((err as Error).message, 500)}` }
+      return { ok: false, error: `${h.name} could not be asked: ${oneLineText(errorMessage(err), 500)}` }
     }
     const parsed = HubAskResult.safeParse(raw)
     if (!parsed.success) return { ok: false, error: `${h.name} answered in a form this machine does not read.` }
@@ -108,5 +133,57 @@ export class LinkedHubs {
     // A refusal may list sessions one per line: kept as lines, and cut to size
     if (!r.ok) return { ok: false, error: r.error.length > 4000 ? `${r.error.slice(0, 4000)}…` : r.error }
     return { ...r, project: oneLineText(r.project, 120), sessionName: oneLineText(r.sessionName, 120) }
+  }
+
+  /** The hub that offered on this connection, if one did (`startedByHub`: the hub a session it creates here records) */
+  on(client: number): { id: string; name: string } | undefined {
+    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name }
+    return undefined
+  }
+
+  /**
+   * A message of a session a hub started here to the session that started it (`hub.mail`, #2067 item 1), sent to `started`,
+   * the hub recorded when it created the session (`startingHub`), and to no other: no other computer reads the text.
+   * Without a record (a session started by a build from before it) nothing is sent, as nothing says which computer that
+   * was. Nothing is written here: the hub writes it, and a refusal is said at once and written nowhere, so the same text
+   * may be sent again (docs/plans/linked-mail.md §3's table).
+   */
+  async mail(sessionId: string, started: { id: string; name: string } | null, input: { text: string; needsReply?: boolean; urgent?: boolean }): Promise<HubParentMail> {
+    // The mailbox's own limit for a session, said in its words, before anything crosses the link
+    if (input.text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
+    if (!started) {
+      return {
+        ok: false,
+        why: 'elsewhere',
+        text: 'your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
+      }
+    }
+    const h = this.hubs.get(started.id)
+    const name = h?.name ?? (oneLineText(started.name, 120) || 'the computer that started this session')
+    if (!h) {
+      return {
+        ok: false,
+        why: 'link_down',
+        text: `${name}, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.`,
+      }
+    }
+    if (h.client === null) return { ok: false, why: 'link_down', text: `${name} is ${NOT_REACHABLE}, so nothing was sent. Send it again once the link is back.` }
+    let raw: unknown
+    try {
+      raw = await this.deps.call(h.client, 'hub.mail', { sessionId, ...input }, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
+    } catch (err) {
+      if (older(err)) return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
+      // The hub answered with an error of its own (too many calls, a call it does not read): it was there and took nothing
+      if (isPeerAnswer(err)) return { ok: false, why: 'refused', text: `${name} refused the message: ${oneLineText(errorMessage(err), 500).replace(/\.$/, '')}. Nothing was written there.` }
+      const why = oneLineText(errorMessage(err), 300)
+      return { ok: false, why: 'link_down', text: `the link to ${name} failed during the send (${why}), so it is not known whether the message arrived. If you send it again and it did, ${name} refuses the second one as a repeat.` }
+    }
+    const parsed = HubMailResult.safeParse(raw)
+    if (!parsed.success) return { ok: false, why: 'link_down', text: `${name} answered in a form this computer does not read, so it is not known whether the message arrived.` }
+    const r = parsed.data
+    // The hub this computer recorded as the starter no longer knows the session: its parent there went (archived or deleted)
+    if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'gone', text: `${name} no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.` }
+    if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
+    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), hub: name }
   }
 }

@@ -1,17 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { APP_VERSION, PROTOCOL_VERSION, type SessionInfo } from '@cc/protocol'
-import { Store } from '../dev-services/store.js'
-import { SessionManager } from '../sessions/manager.js'
-import { createRpcHandler } from '../rpc.js'
-import { HostServer } from '../transport/server.js'
-import { Links, type LinkDeps } from './links.js'
 import { LinkedHubs } from './linked-hubs.js'
-import { reverseCalls } from './reverse-calls.js'
-import { Router } from './router.js'
-import { DirectTunnel } from './tunnel.js'
-import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
-import { scriptedAdapters } from './scripted-agent.test-helpers.js'
-import { TOKEN, cleanups, folder, lineFor, runCleanups, seedSession } from './links-world.test-helpers.js'
+import { runCleanups } from './links-world.test-helpers.js'
+import { hubHost, machineHost, rig } from './reverse-link.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -21,119 +11,6 @@ import { eventually } from '../../../../tooling/test-timing.js'
  */
 
 afterEach(runCleanups)
-
-/** An RPC handler without these methods, as a build from before them answers */
-function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly string[]): ReturnType<typeof createRpcHandler> {
-  return (method, ...rest) => {
-    if (methods.includes(method)) return Promise.reject(new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`))
-    return handler(method, ...rest)
-  }
-}
-
-/** The machine: a trusted project with an ordinary session (the caller), and the hubs that offer it the reverse direction */
-async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number } = {}) {
-  const store = new Store()
-  store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
-  for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
-  const adapters = scriptedAdapters()
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}) })
-  mgr.useLinkedHubs(hubs)
-  const server: HostServer = new HostServer({
-    port: 0,
-    token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, { hubs }), o.without ?? []),
-    onClientGone: (client) => hubs.gone(client),
-    build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
-  })
-  const port = await server.listen()
-  mgr.setProjectTrusted('p-remote', true)
-  let closed = false
-  const close = async () => {
-    if (closed) return
-    closed = true
-    await mgr.tenure.disposeAll()
-    await server.close()
-  }
-  cleanups.push(close)
-  const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
-  return { store, mgr, server, hubs, port, close, ask }
-}
-
-/** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
-async function hubHost(machinePort: number, o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset'] } = {}) {
-  const store = new Store()
-  const projectName = o.project ?? 'hub-project'
-  store.projects.addProject({ id: 'p-hub', path: folder(), name: projectName })
-  seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
-  const adapters = scriptedAdapters()
-  const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const name = o.name ?? 'Hub mac'
-  mgr.useHubName(() => name)
-  const registry = storeRegistry(store)
-  registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
-  const reverse: Partial<LinkDeps> =
-    o.reverse === false
-      ? {}
-      : {
-          hubSelf: () => ({ id: hubSelfId(store), name }),
-          reverse: reverseCalls({
-            allowed: (id) => store.machines.linkedMachineAsks(id),
-            projects: () => mgr.projectsForMachines(),
-            ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
-            selfName: () => name,
-          }),
-        }
-  const links = new Links({
-    hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
-    broadcast: (e) => {
-      server.broadcast(e)
-      mgr.linkedHost.observeLinked(e)
-    },
-    terminal: (f) => server.pushTerminal(f),
-    mirror: storeMirror(store),
-    registry,
-    tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
-    retryMs: [50, 200],
-    client: { maxBackoffMs: 100 },
-    ...reverse,
-  })
-  const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
-  const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
-  await server.listen()
-  links.start()
-  let stopped = false
-  const stop = async () => {
-    if (stopped) return
-    stopped = true
-    await links.stop()
-    await mgr.tenure.disposeAll()
-    await server.close()
-  }
-  cleanups.push(stop)
-  const card = () => mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval
-  const answer = async (decision: 'allow' | 'deny') => {
-    await eventually(() => !!card())
-    const c = card()!
-    await mgr.inputs.respondApproval('h1', c.requestId, decision)
-    await eventually(() => card()?.requestId !== c.requestId)
-    return c
-  }
-  const machine = () => links.list()[0]!
-  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName }
-}
-
-/** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise */
-async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
-  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs })
-  const hub = await hubHost(machine.port, { preset: o.preset })
-  await eventually(() => hub.machine().status === 'connected')
-  if (o.on !== false) {
-    await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
-    await eventually(() => machine.hubs.any)
-  }
-  return { machine, hub }
-}
 
 const lastWords = (r: unknown) => (r as { answer?: string }).answer ?? ''
 

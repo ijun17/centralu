@@ -11,7 +11,7 @@ import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
-import { presetFromHub, startedFromHubKey } from './hub-preset.js'
+import { presetFromHub, startedByHubKey, startedFromHubKey } from './hub-preset.js'
 import { adoptOpenedSettings } from './opened-settings.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
@@ -181,6 +181,11 @@ export class SessionStarts {
       onSetupProblems?: (problems: string[]) => void
       /** Where the new worktree forked from (#1484), as a sentence naming the commit and what could not be done to make it current */
       onWorktreeBase?: (note: string) => void
+      /**
+       * The hub whose connection asked for this session with `fromHub` (#2067): the session's mail to `parent` goes to that hub
+       * and no other. Not in the RPC contract: the host sets it from the connection the call came in on (`LinkedHubs.on`)
+       */
+      startedByHub?: { id: string; name: string }
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.host.meta.get(params.askedBy)?.projectId !== params.projectId) {
@@ -381,6 +386,7 @@ export class SessionStarts {
     // Started by another machine's session (#1038): that depth is this session's own, kept as one started here keeps its
     if (params.agentDepth) this.host.store.settings.setAppSetting(agentDepthKey(id), String(params.agentDepth))
     if (params.fromHub) this.host.store.settings.setAppSetting(startedFromHubKey(id), 'true')
+    if (params.fromHub && params.startedByHub) this.host.store.settings.setAppSetting(startedByHubKey(id), JSON.stringify(params.startedByHub))
     this.host.launches.rememberToolPrefix(id)
     this.host.launches.rememberLaunchSettings(info, cwd)
     this.host.store.sessions.setSessionCwd(id, cwd)

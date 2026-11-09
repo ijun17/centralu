@@ -69,6 +69,11 @@ export function bodyLimit(sender: SenderClass): number {
   return sender === 'app' ? 4_000 : 16_000
 }
 
+/** The words of a `too_long` refusal, as the mailbox says them (`MessageService` and a mail to a parent on a hub, #2067) */
+export function tooLongText(sender: SenderClass): string {
+  return `a body from ${sender === 'app' ? 'an app' : 'this sender'} is at most ${bodyLimit(sender)} characters`
+}
+
 /** A sender's posts a minute (§7.9): 30 from a session, 10 from an app. The person and Centralu are not limited */
 export function postsPerMinute(sender: SenderClass): number {
   return sender === 'session' ? 30 : sender === 'app' ? 10 : Infinity

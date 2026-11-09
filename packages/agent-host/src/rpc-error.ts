@@ -19,6 +19,22 @@ export function rpcError(message: string, code: RpcErrorCode = 'internal', more?
   return Object.assign(new Error(message), { code, ...more })
 }
 
+const answeredByPeer = new WeakSet<object>()
+
+/**
+ * The error the other side of a link answered to one of this host's calls (transport/server.ts `answered`), marked so a
+ * caller tells it from a call that never got an answer (a connection gone, a timeout), which carry the same code
+ */
+export function peerAnswer(err: RpcError): RpcError {
+  answeredByPeer.add(err)
+  return err
+}
+
+/** Whether the other side answered this error itself (`peerAnswer`): it was there and refused, rather than lost */
+export function isPeerAnswer(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && answeredByPeer.has(err)
+}
+
 /** The answer for a session id this host does not know */
 export function sessionNotFound(sessionId: string): RpcError {
   return rpcError(`Session not found: ${sessionId}`, 'session_not_found')

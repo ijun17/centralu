@@ -25,7 +25,7 @@ import { isFullCredential, isHandoverCredential, type CredentialsRead, type Full
 import { LINK_AUTH_MARKER } from './link-keys.js'
 import { answerKeyProve, HostSigningKey, linkAddressOf, verifyKeyHello, type KeyProve } from './link-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
-import { rpcError } from '../rpc-error.js'
+import { peerAnswer, rpcError } from '../rpc-error.js'
 
 /**
  * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
@@ -974,7 +974,7 @@ export class HostServer {
     if (!call) return
     if (a.ok) return call.resolve(a.result)
     const e = a.error
-    call.reject(rpcError(e?.message ?? 'The other side refused the call', e?.code ?? 'internal', { retryable: e?.retryable === true, ...(e?.data !== undefined ? { data: e.data } : {}) }))
+    call.reject(peerAnswer(rpcError(e?.message ?? 'The other side refused the call', e?.code ?? 'internal', { retryable: e?.retryable === true, ...(e?.data !== undefined ? { data: e.data } : {}) })))
   }
 
   /** Every call still waiting on a socket that is gone gets its answer: its outcome there is unknown */

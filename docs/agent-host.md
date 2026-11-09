@@ -391,7 +391,22 @@ project of a hub that turned the machine's switch on (Settings → Machines ther
 the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
 ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
 answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
-machine (`reverseCalls`).
+machine (`reverseCalls`) but mail from the sessions it started there.
+
+**Mail to the parent on a hub** (#2067 item 1, [plans/linked-mail.md](plans/linked-mail.md)). A session a hub started
+here (`startedFromHub`, no parent of its own) that sends `mail` to `parent` reaches the session there that started it:
+the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on the hub recorded when the
+session was created (`started_from_hub_by:`, from the connection `agents.createSession` came in on) and on no other; a
+session with no record is refused (`elsewhere`). That hub offered mail (`host.hubOffer`'s `mail`, sent whatever the
+asks switch says), and writes the message
+with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
+labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names, and
+always as a note: no reply or "no longer watched" notice reaches the child before item 2, so none is awaited. Nothing
+is written on this host. A send with `cite` (refused: the hub cannot check the person's message here), a body over
+local mail's limit (`too_long`, refused here before the call), a link that is down,
+a hub from before it (`older`), no hub that started it, an error the hub answered (`refused`, told from a lost call by
+the server's `peerAnswer` mark) or a refusal of the hub's own rules is said at once with its reason and written nowhere,
+so the same text may be sent again; only a call that gets no answer says it is not known whether the message arrived.
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 

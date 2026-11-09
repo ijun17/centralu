@@ -13,7 +13,7 @@ import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { HOUR_MS, REFUSAL_TEXT, WARNING_TEXT, firstLineOf } from './rules.js'
-import { MailTool } from './tool.js'
+import { MailTool, type MailToolHost } from './tool.js'
 import { MailTurns } from './turns.js'
 
 /**
@@ -45,8 +45,10 @@ export type HostMailSessions = {
   readsSession?(readerId: string, targetId: string): boolean
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
-  /** Whether the id is a child this host started on a linked machine (`MailSessionsView.onLinkedMachine`, #2067) */
-  onLinkedMachine?(id: string): boolean
+  /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
+  onLinkedMachine?(id: string): { name: string } | undefined
+  /** A message of a session a linked hub started here to its parent there (`MailSessionsView.toHubParent`, #2067 item 1) */
+  hubParent?: MailToolHost['hubParent']
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
@@ -71,6 +73,7 @@ export function mailSessionsOf(
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
+    hubParent: (id, input) => mgr.mail.toHubParent(id, input),
   }
 }
 
@@ -109,8 +112,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     session: (id) => {
       const s = sessions.sessionInfo(id)
       if (s) return { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
-      // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link
-      return sessions.onLinkedMachine?.(id) ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere' } : undefined
+      // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link. Its
+      // mail to its parent here (item 1) shows it by its name on that machine
+      const linked = sessions.onLinkedMachine?.(id)
+      return linked ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere', name: linked.name } : undefined
     },
     assistantId: () => sessions.assistantId(),
     assistantAsks: () => sessions.assistantAsks() === null,
@@ -202,6 +207,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
+    ...(sessions.hubParent ? { hubParent: sessions.hubParent } : {}),
   })
   const owedOld = (sender: string, recipient: string): boolean => {
     const owner = parseAddress(sender)
@@ -228,7 +234,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: `compactcycles:${addressOf(id)}:${hour}` })
     },
     sessionEvent: (e, ended) => mailTurns.observe(e, ended),
-    tool: (id, args) => tool.run(id, args),
+    tool: (id, args) => tool.call(id, args),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
     waitingOn,
