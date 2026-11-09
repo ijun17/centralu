@@ -79,4 +79,18 @@ describe('finding the recipient (#2067 item 3)', () => {
     expect(cost.map((c) => c.tokens).every((t) => t <= 300)).toBe(true)
     expect(cost[2]!.chars - cost[0]!.chars).toBeLessThan(80)
   })
+
+  it('stays as small with the longest names and 30 computers that could not be searched (#2067 review)', () => {
+    const long = (what: string, n: number) => `${what} `.repeat(n).slice(0, n)
+    const all = directory(200).map((e, i) => ({ ...e, name: long(`${e.name} with a long name`, 120), project: long(`project ${i}`, 80), machine: e.machine === null ? null : long(`machine ${e.machine}`, 80) }))
+    const away = Array.from({ length: 30 }, (_, i) => ({ name: long(`Computer ${i}`, 80), why: long('it runs an older Centralu; update it there', 160) }))
+    const found = ranked(all, '')
+    const text = findAnswer({ query: long('a query', 200), found, matched: found.length, total: all.length, away })
+    const lines = text.split('\n')
+    expect(lines.filter((l) => l.startsWith('Not searched'))).toHaveLength(4)
+    expect(lines.at(-1)).toBe('Not searched either: 27 more computers.')
+    // The measurement in docs/plans/linked-mail.md §8
+    expect(text.length).toBeLessThanOrEqual(2_000)
+    expect(tokens(text)).toBeLessThanOrEqual(500)
+  })
 })

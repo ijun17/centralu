@@ -252,7 +252,9 @@ machine (absent for this computer), role and state:
     ...
     38 more: add a word (a project, a machine or a role) to narrow it.
 
-A machine that did not answer is named on one line at the end, with why; its sessions are not listed. A hub that is
+A machine that did not answer is named on one line at the end, with why; its sessions are not listed. At most three are
+named so; the rest are counted on one more line. Each part of a line is cut short (a name at 40 characters, a project
+and a machine at 30), except the address. A hub that is
 down makes a machine's search say so at once and list this computer's sessions only.
 
 **Names in `to`.** `mail send` with a name looks across too: on a hub, the mirrors (no call); on a machine, each hub's
@@ -262,16 +264,21 @@ left out of it, and the refusal for a name found nowhere says which computers co
 When a session here has the name, a hub is waited for only as long as a reachable one answers (0.6 s), not the 4 s a
 search waits: one that does not answer by then leaves the send to the session here.
 
-**Cost.** The answer is capped, so its size does not grow with the number of sessions. Measured with the repository's
-token estimate (characters ÷ 4) on generated directories, for a query that matches every session:
+**Cost.** The answer is capped, so its size does not grow with the number of sessions, the length of their names or the
+number of computers that could not be searched. Measured with the repository's token estimate (characters ÷ 4) on
+generated directories, for a query that matches every session:
 
-| Sessions | Characters | Tokens (estimate) |
-|---|---|---|
-| 10 | 996 | 249 |
-| 50 | 1,030 | 258 |
-| 200 | 1,031 | 258 |
+| Sessions | Names | Computers not searched | Characters | Tokens (estimate) |
+|---|---|---|---|---|
+| 10 | short | 0 | 996 | 249 |
+| 200 | short | 0 | 1,031 | 258 |
+| 200 | short | 30 | 1,227 | 307 |
+| 200 | 120 characters | 0 | 1,201 | 301 |
+| 200 | 120 characters | 30 | 1,397 | 350 |
 
-A test pins the ceiling (`mail/find.test.ts`).
+Before the caps, the last row was 3,412 characters (853 tokens). With every field at its longest (names of 120
+characters, projects and machines of 80, 30 computers with long names and reasons) the answer is 1,980 characters
+(495 tokens). Tests pin both ceilings (`mail/find.test.ts`).
 
 ## 9. Pull requests
 
