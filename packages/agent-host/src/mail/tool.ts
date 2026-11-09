@@ -158,7 +158,7 @@ export class MailTool {
     if (far.found.length === 0 && local.length === 0 && far.away.length > 0) {
       throw refuse(
         'unknown',
-        `no session on this computer or on the computers asked has the id or name ${JSON.stringify(oneLineText(t, 80))}. Not asked: ${far.away.slice(0, 3).map((a) => `${oneLineText(a.name, 40)} (${a.why})`).join(', ')}${far.away.length > 3 ? `, and ${far.away.length - 3} more` : ''}. A session there cannot be found by name until it answers: try again later.`,
+        `no session on this computer or on the computers asked has the id or name ${JSON.stringify(oneLineText(t, 80))}. Not asked: ${far.away.slice(0, 3).map((a) => `${oneLineText(a.name, 40)} (${oneLineText(a.why, 60)})`).join(', ')}${far.away.length > 3 ? `, and ${far.away.length - 3} more` : ''}. A session there cannot be found by name until it answers: try again later.`,
       )
     }
     if (far.found.length === 0) return null
