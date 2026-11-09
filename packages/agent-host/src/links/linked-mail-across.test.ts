@@ -136,6 +136,15 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.recipients(hub.store.mailbox.feedOf(at(hub, 'm1.c1'), { limit: 10 })[0]?.id ?? '').map((r) => r.deliveredAt !== null)).toEqual([true])
   })
 
+  it('a session gone from its computer is refused by the address the sender used, and the computer it was on', async () => {
+    const { machine, hub } = await rig()
+    await machine.mgr.trash.trashSession('w1')
+    expect(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'still there?' })).toEqual({
+      text: `Refused (gone): ${at(hub, 'm1.w1')} is gone from Remote box: it is in the session archive there or deleted, so nothing was written.`,
+      isError: true,
+    })
+  })
+
   it("a session of an untrusted project is refused across at once: nothing waits for the person over a link", async () => {
     const { machine, hub } = await rig()
     await machine.mgr.setProjectTrusted('p-remote', false)

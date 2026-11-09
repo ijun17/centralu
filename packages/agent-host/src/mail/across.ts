@@ -367,16 +367,22 @@ export class MailAcross {
     // The hub names the sender with its computer (`<name> on <computer>`)
     if (from !== CENTRALU) this.names.set(from, p.name ? oneLineText(p.name, 200) : `a session on ${hub.name}`)
     const to = this.d.service.sessionAddress(p.to)
-    return this.write(from, to, p)
+    return this.write(from, to, p, this.asHubNames(hub.id, to))
   }
 
   /**
    * The message written here, by this host's one send and its guards; or its refusal, nothing written. Only `from` set to
    * Centralu, which `fromHub` alone passes (a hub writes its own notices on the machines it links), is written as a notice
    * of Centralu's. A notice from the other side's session or machine is that side's message, never Centralu's, and is
-   * taken only for a session here that mailed that side: the "no longer watched" notice it passes on is about such mail
+   * taken only for a session here that mailed that side: the "no longer watched" notice it passes on is about such mail.
+   * `seen`: `to` as the sender's side names it, which a refusal names
    */
-  private write(from: string, to: string, p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined }): HubMailResult & { address?: string } {
+  private write(
+    from: string,
+    to: string,
+    p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined },
+    seen = to,
+  ): HubMailResult & { address?: string } {
     if (p.id !== undefined) {
       if (!FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is not an id another computer may give a message.` }
       // Sent again after its answer was lost: the message written then is this one
@@ -402,7 +408,10 @@ export class MailAcross {
       const why = refusalReason(e)
       // A reply to a message this side never kept: one that arrived there while the link failed during its send
       const lost = why === 'unknown_message' && p.replyTo !== undefined && !this.d.records.message(p.replyTo)
-      const text = lost
+      const text = why === 'gone'
+        ? // The service names the session by this host's address, which the sender never used
+          `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
+        : lost
         ? `${this.selfName()} has no record of ${oneLineText(p.replyTo ?? '', 200)}: it most likely reached you while the link failed during its sending, so ${this.selfName()} never kept its copy, and nothing was written. Send your answer again as a new message (without replying to that one), saying what it answers.`
         : why
           ? errorMessage(e)

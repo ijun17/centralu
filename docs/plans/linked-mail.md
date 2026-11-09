@@ -213,7 +213,7 @@ Each is said at once, and nothing is written on either side:
 | The other host answered an error of its own | `refused`, with its words and that it may or may not have taken the message (an error raised after it wrote cannot be told apart) |
 | The call failed with no answer | `link_down`, saying it is not known whether the message arrived |
 | A machine's session addresses a session on its own machine through the hub | `bad_address`, with the session's own id to write to instead |
-| The recipient host's own rules (gone, `repeat`, too long, the Assistant's asks) | its reason and words |
+| The recipient host's own rules (gone, `repeat`, too long, the Assistant's asks) | its reason and words; `gone` names the session by the address the sender used, and the computer it was on |
 | `cite` | `field_not_allowed`, as for `parent` |
 | The sender's project is not trusted | `untrusted_project` (§5) |
 
