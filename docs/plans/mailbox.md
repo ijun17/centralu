@@ -1935,6 +1935,9 @@ section when it is briefed:
 
 ## 14. Linked machines
 
+The owner's decisions of 2026-11-08 (#2067) replace the outline below where they differ: nothing is held while a link
+is down, so there is no outbox. The plan is [linked-mail.md](linked-mail.md).
+
 Old §11 stays: one mailbox per host, store-and-forward, the hub pulls, the receiving host wakes its own session, and
 §11.9's chains and declines. Without threads, these parts go: a thread's home host, `seq` and `home_seq`; task-field
 proposals and their conflicts (old §11.6); the thread-headers mirror (old §11.8), replaced by counts per host in the
