@@ -102,6 +102,7 @@ import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { MachineAsks } from './machine-asks.js'
 import type { HubsReader } from './ask-project-flow.js'
+import type { LinkedHubs } from '../links/linked-hubs.js'
 
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
@@ -625,9 +626,13 @@ export class SessionManager {
     this.linkedReader = reader
   }
 
-  /** The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts) */
-  useLinkedHubs(hubs: HubsReader): void {
+  /**
+   * The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts), and take mail from
+   * the sessions they started here to their parents (#2067 item 1)
+   */
+  useLinkedHubs(hubs: HubsReader & Partial<Pick<LinkedHubs, 'mail'>>): void {
     this.askProjectFlow.hubs = hubs
+    if (hubs.mail) this.mail.hubs = { mail: hubs.mail.bind(hubs) }
   }
 
   /** This computer's name, as a linked machine's session reads it in an answer or a refusal (#550) */
@@ -845,7 +850,7 @@ export class SessionManager {
         return self.adapters
       },
       agentSession: (...a) => self.agentSession(...a),
-      mailTool: (id, args) => self.mail.hooks?.tool?.(id, args) ?? { text: 'The mailbox is not available.', isError: true },
+      mailTool: async (id, args) => (await self.mail.hooks?.tool?.(id, args)) ?? { text: 'The mailbox is not available.', isError: true },
       refusesDelegation: (callerId, target, call) => self.mail.hooks?.refusesDelegation?.(callerId, target, call) ?? null,
       roleMoved: (toId) => self.mail.hooks?.roleMoved?.(toId),
       whenAsked: (id, call, signal, run, refused) => self.askedGate.when(id, call, signal, run, refused),

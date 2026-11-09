@@ -38,9 +38,9 @@ afterEach(async () => {
 })
 
 describe('mail to a child on a linked machine (#2067)', () => {
-  it('by its id or address is refused as elsewhere, naming what does reach it', () => {
+  it('by its id or address is refused as elsewhere, naming what does reach it', async () => {
     for (const to of [CHILD.sessionId, addr(CHILD.sessionId)]) {
-      const sent = m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
+      const sent = await m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
       expect(sent).toMatchObject({ isError: true, text: REFUSED })
     }
   })
@@ -49,7 +49,7 @@ describe('mail to a child on a linked machine (#2067)', () => {
     expect(() => m.service.send(addr('h1'), { to: [addr(CHILD.sessionId)], text: 'one more thing' })).toThrow(REFUSED.slice('Refused (elsewhere): '.length))
   })
 
-  it('a session this hub never had is still unknown', () => {
-    expect(m.hooks.tool!('h1', { action: 'send', to: 'm1.never', text: 'hello' }).text).toMatch(/^Refused \(unknown\)/)
+  it('a session this hub never had is still unknown', async () => {
+    expect((await m.hooks.tool!('h1', { action: 'send', to: 'm1.never', text: 'hello' })).text).toMatch(/^Refused \(unknown\)/)
   })
 })

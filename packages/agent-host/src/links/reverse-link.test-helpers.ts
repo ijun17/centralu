@@ -15,6 +15,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import { mailFromMachine } from '../mail/from-machine.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
+import { startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
 
 /**
@@ -32,14 +33,17 @@ export function without(handler: ReturnType<typeof createRpcHandler>, methods: r
 }
 
 /** The machine: a trusted project with an ordinary session (the caller), and the hubs that offer it the reverse direction */
-export async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number } = {}) {
+/** `fromHub`: sessions a hub started here (#1273's mark, read when the manager loads them); `mail`: this host's mail wired (`wireHostMail`) */
+export async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean } = {}) {
   const store = new Store()
   store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
   for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
+  for (const id of o.fromHub ?? []) store.settings.setAppSetting(startedFromHubKey(id), 'true')
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}) })
+  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}), ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}) })
   mgr.useLinkedHubs(hubs)
+  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store) : null
   const server: HostServer = new HostServer({
     port: 0,
     token: TOKEN,
@@ -58,7 +62,7 @@ export async function machineHost(o: { without?: readonly string[]; sessions?: r
   }
   cleanups.push(close)
   const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
-  return { store, mgr, server, hubs, port, close, ask }
+  return { store, mgr, server, hubs, port, close, ask, mail }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */

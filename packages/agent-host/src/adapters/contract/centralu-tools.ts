@@ -716,7 +716,7 @@ export type CentraluTools = {
    */
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** The mailbox for the session that has these tools (#1347, mail): an ordinary session's alone; absent where there is none */
-  mail?(args: MailToolArgs): { text: string; isError?: boolean }
+  mail?(args: MailToolArgs): { text: string; isError?: boolean } | Promise<{ text: string; isError?: boolean }>
   /**
    * Runs one tool or command of this seat, asking the person first when a session's request is what the Assistant's turn is (#1447, §9.7). The
    * runner calls it around every tool; absent, or in a turn that is not a session's request, it just runs

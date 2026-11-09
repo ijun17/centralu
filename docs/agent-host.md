@@ -391,7 +391,17 @@ project of a hub that turned the machine's switch on (Settings → Machines ther
 the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
 ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
 answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
-machine (`reverseCalls`).
+machine (`reverseCalls`) but mail from the sessions it started there.
+
+**Mail to the parent on a hub** (#2067 item 1, [plans/linked-mail.md](plans/linked-mail.md)). A session a hub started
+here (`startedFromHub`, no parent of its own) that sends `mail` to `parent` reaches the session there that started it:
+the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on each hub that offered mail
+(`host.hubOffer`'s `mail`, sent whatever the asks switch says), and the hub that started the session writes the message
+with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
+labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names. Nothing
+is written on this host. A link that is down, a hub from before it (`older`), no hub that started it, or a refusal of
+the hub's own rules is said at once with its reason and written nowhere, so the same text may be sent again; only a
+call that fails mid-way says it is not known whether the message arrived.
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 

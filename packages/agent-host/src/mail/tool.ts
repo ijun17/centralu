@@ -31,6 +31,9 @@ export type MailToolArgs = {
 
 export type MailToolResult = { text: string; isError?: boolean }
 
+/** What a message to a parent on the hub that started the session came to (`LinkedHubs.mail`, links/linked-hubs.ts) */
+export type HubParentMail = { ok: true; messageId: string; to: string; hub: string } | { ok: false; why: string; text: string }
+
 /** What the host knows of a session that asked the Assistant (§7.6): the facts the person decides on, which the session cannot write */
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
 
@@ -50,6 +53,11 @@ export type MailToolHost = {
   personMessage(sessionId: string, seq: number): string | null
   /** What `reader` was shown of an old thread before a message moved from it, read-only (§6.3, `Store.legacyChainFor`) */
   legacyChain(threadId: string, messageId: string, reader: string): MessageRow[]
+  /**
+   * A message of a session a linked hub started here to the session there that started it (#2067 item 1): the hub writes
+   * it, or refuses it and nothing is written. Absent on a host no hub links to
+   */
+  hubParent?(sessionId: string, input: { text: string; needsReply: boolean; urgent?: boolean }): Promise<HubParentMail>
   now?: () => number
 }
 
@@ -81,8 +89,24 @@ export class MailTool {
       if (!me) throw refuse('gone', 'this session is not here')
       return { text: this.dispatch(sessionId, me, args, mailCalls(1, this.host.form(sessionId))) }
     } catch (e) {
-      const reason = refusalReason(e)
-      return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }
+      return failed(e)
+    }
+  }
+
+  /**
+   * The tool as a session calls it: `run`, but a send to `parent` from a session a linked hub started (#2067 item 1) goes to
+   * that hub, which writes it or refuses it. Nothing is written here either way (docs/plans/linked-mail.md §2)
+   */
+  async call(sessionId: string, args: MailToolArgs): Promise<MailToolResult> {
+    const me = this.host.caller(sessionId)
+    const hubParent = this.host.hubParent?.bind(this.host)
+    if (!me || !hubParent || args.action !== 'send' || args.to?.trim().toLowerCase() !== 'parent' || me.askedBy || !me.fromHub) return this.run(sessionId, args)
+    try {
+      const r = await hubParent(sessionId, { text: this.need(args.text, 'text'), needsReply: args.kind !== 'note', ...(args.urgent ? { urgent: true } : {}) })
+      if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
+      return { text: `Sent ${r.messageId} to your parent ${JSON.stringify(r.to)} on ${r.hub}. Its answer reaches you as a new turn, not as mail.` }
+    } catch (e) {
+      return failed(e)
     }
   }
 
@@ -319,4 +343,10 @@ export class MailTool {
     if (s < 36 * 3600) return `${Math.round(s / 3600)}h`
     return `${Math.round(s / 86400)}d`
   }
+}
+
+/** A call the tool could not do: a refusal with its reason, or a fault */
+function failed(e: unknown): MailToolResult {
+  const reason = refusalReason(e)
+  return { text: reason ? `Refused (${reason}): ${errorMessage(e)}` : `The mailbox could not do that: ${errorMessage(e)}`, isError: true }
 }

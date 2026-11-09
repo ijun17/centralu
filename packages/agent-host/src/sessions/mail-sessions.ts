@@ -3,7 +3,8 @@ import { errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
-import type { MailToolArgs } from '../mail/tool.js'
+import type { HubParentMail, MailToolArgs } from '../mail/tool.js'
+import type { LinkedHubs } from '../links/linked-hubs.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
@@ -43,7 +44,7 @@ export type MailHooks = {
   sessionChanged(sessionId: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
-  tool?(sessionId: string, args: MailToolArgs): { text: string; isError?: boolean }
+  tool?(sessionId: string, args: MailToolArgs): Promise<{ text: string; isError?: boolean }>
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
   /** How many threads a session handed on in the work it does for another are still going (§6) */
@@ -99,6 +100,15 @@ export class MailSessionsView {
   /** A child this host started on a linked machine, by its name there (#2067): mail refuses it as elsewhere, not as gone */
   onLinkedMachine(sessionId: string): { name: string } | undefined {
     return this.host.linkedChild(sessionId)
+  }
+
+  /** The hubs linked to this host, which take mail from the sessions they started here to their parents (#2067 item 1); none until main.ts gives them */
+  hubs: Pick<LinkedHubs, 'mail'> | null = null
+
+  /** A message of a session a linked hub started here to the session there that started it: refused when no hub links to this host */
+  toHubParent(sessionId: string, input: { text: string; needsReply: boolean; urgent?: boolean }): Promise<HubParentMail> {
+    if (!this.hubs) return Promise.resolve({ ok: false, why: 'elsewhere', text: 'your parent is a session on another computer, and this host takes no link from it. End your turn with the answer: that is how your parent hears from you.' })
+    return this.hubs.mail(sessionId, input)
   }
 
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
