@@ -201,12 +201,11 @@ describe('processes in memory', () => {
       await os.clock.advance(3000)
       const r = await run
       expect(r.ended).toBe('timeout')
-      expect(r).toMatchObject(
-        family === 'windows' ? { code: 1, signal: null } : { code: null, signal: 'SIGTERM' },
-      )
+      // Windows too: the child is ended first, by Node's kill (#2142)
+      expect(r).toMatchObject({ code: null, signal: 'SIGTERM' })
     })
 
-    it(`${family}: stop ends the tree: at once on Windows, TERM then KILL after the grace elsewhere`, async () => {
+    it(`${family}: stop ends the tree: at once on Windows (the child first, #2142), TERM then KILL after the grace elsewhere`, async () => {
       const os = memoryOs({ as: family })
       const kid = family === 'windows' ? 'C:\\bin\\kid.exe' : '/usr/bin/kid'
       const root = family === 'windows' ? 'C:\\bin\\root.exe' : '/usr/bin/root'
@@ -227,8 +226,8 @@ describe('processes in memory', () => {
       const stopped = os.processes.stop(child, 3000)
       const exit = await stopped
       if (family === 'windows') {
-        expect(exit).toEqual({ code: 1, signal: null })
-        expect(kidRow().alive).toBe(false)
+        expect(exit).toEqual({ code: null, signal: 'SIGTERM' })
+        expect(kidRow().exit).toEqual({ code: 1, signal: null })
       } else {
         expect(exit).toEqual({ code: null, signal: 'SIGTERM' })
         expect(kidRow().alive).toBe(true)

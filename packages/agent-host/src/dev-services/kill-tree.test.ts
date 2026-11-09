@@ -387,6 +387,21 @@ describe('leftovers of an ended process on Windows', () => {
     logged.mockRestore()
   })
 
+  // #2142: taskkill /T ends a tree in no order, and a program it ends reports success to an MSYS shell still running
+  it('ends parents before their children, each parent alone, and a process with nothing found under it with its tree', async () => {
+    const calls: [number, boolean | undefined][] = []
+    // Listed children first, as the table may come
+    const rows = table('400 300 2600\n300 200 2000\n250 100 1600\n200 100 1500\n')
+    const os = { listProcesses: async () => rows, taskkill: (pid: number, alone?: boolean) => void calls.push([pid, alone]) }
+    expect(await collectOrphansWindows(root, os)).toEqual([250, 200, 300, 400])
+    expect(calls).toEqual([
+      [250, false],
+      [200, true],
+      [300, true],
+      [400, false],
+    ])
+  })
+
   // #1773: PowerShell took over 10 s to answer on a starved machine, and the listing given up on left the leftovers running
   it('waits for a table that a starved machine takes 20 s to give, and ends the leftovers in it', async () => {
     const ended: number[] = []

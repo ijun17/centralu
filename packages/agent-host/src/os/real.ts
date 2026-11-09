@@ -351,15 +351,30 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
   return asChild(() => spawnGrouped(command, args, options))
 }
 
+/**
+ * Windows (#2142): the child itself is ended first, alone (`kill`, which terminates it there), and what it started is
+ * ended by the sweep after its exit, parents before children (`collectOrphansWindows`). `taskkill /T /F` on the child
+ * ends the tree in no order: a program ended by taskkill reports success to an MSYS shell (Git for Windows' `sh` sees
+ * status 0 from a `sleep` ended so), so a parent still running could take a stopped script's success and go on, as git
+ * made the commit a stop was meant to prevent (#2141). With the child gone first, nothing above a process outlives it.
+ *
+ * The price: once the child has ended, `taskkill /T` no longer finds its tree by it, so the sweep always runs on
+ * Windows, `sweep: false` included, and what the child started runs on until the process listing answers (0.4–0.75 s,
+ * over 10 s on a machine starved of CPU, #1773).
+ */
 async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}): Promise<OsExit> {
   if (!(child instanceof RealChild))
     throw new TypeError('realOs().processes.stop: a child the real OS started')
   const node = child.node
   const running = () => node !== null && node.exitCode === null && node.signalCode === null
-  if (node?.pid !== undefined && running()) stopTree(killHandle(node), graceMs, running)
+  const groups = traits.hasProcessGroups
+  if (node?.pid !== undefined && running()) {
+    if (groups) stopTree(killHandle(node), graceMs, running)
+    else node.kill()
+  }
   const exit = await child.exited
   // What it left, created between its spawn and its exit as seen then: never up to now, when its pid may be another's
-  if (child.started && o.sweep !== false) await sweepLeftovers(child.started)
+  if (child.started && (o.sweep !== false || !groups)) await sweepLeftovers(child.started)
   return { code: exit.code, signal: exit.signal }
 }
 

@@ -80,7 +80,8 @@ import { runChild } from './run.js'
  * - **Processes.** Programs are functions a test adds (`programs.add`); a start finds them as the OS would (PATH, and on
  *   Windows PATHEXT, `.exe`/`.com` and a batch file refused with `EINVAL`). Windows: only TERM, KILL, INT and QUIT
  *   end a process (exit `null` and the signal), any other name Node knows is `ENOSYS`, one it does not is
- *   `ERR_UNKNOWN_SIGNAL` (`signalRefusal`), and `stop` ends a tree at once (code 1, as `taskkill /F`). POSIX: groups, a signal a program
+ *   `ERR_UNKNOWN_SIGNAL` (`signalRefusal`), and `stop` ends the child first (as Node's `kill`: `SIGTERM`), then its tree,
+ *   parents first (code 1, as `taskkill /F`). POSIX: groups, a signal a program
  *   may trap, `stop` sends TERM and KILL after the grace on the clock. Output closes before `'exit'`, `'close'` follows.
  * - **Time** moves only by `clock.advance(ms)`: timers, grace periods and file times read it.
  *
@@ -1471,8 +1472,10 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     }
     const tree = [root, ...descendants(root.row.pid)]
     if (windows) {
-      // taskkill /T /F: the tree at once, code 1
-      for (const p of tree) p.terminate({ code: 1, signal: null })
+      // The child alone first (Node's kill: exit null and SIGTERM), then what it started, parents first, as taskkill
+      // ends a process (code 1) (#2142)
+      root.terminate({ code: null, signal: 'SIGTERM' })
+      for (const p of tree.slice(1)) p.terminate({ code: 1, signal: null })
     } else {
       // TERM to every group in the tree but the host's, then KILL to what is left of it after the grace
       const groups = new Set(tree.map((p) => p.row.pgid).filter((g) => g !== HOST_PID))

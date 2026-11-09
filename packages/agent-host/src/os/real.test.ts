@@ -209,6 +209,33 @@ describe('the real OS is made of the layer modules', () => {
     30_000 * SLOW,
   )
 
+  /*
+   * #2142: on Windows the child is ended first, by itself (Node's kill: `SIGTERM` in its exit; `taskkill /F` gives code 1
+   * and no signal), so nothing it started can report back to it; what it started goes with the sweep after, which runs
+   * whatever `sweep` says, since `taskkill /T` no longer finds the tree by an ended child.
+   */
+  it.runIf(process.platform === 'win32')(
+    'Windows: stop ends the child itself first, and then what it started, without a sweep asked for too',
+    async () => {
+      // Outside the child's job (detached), so only the stop can end it
+      const grandchild = 'setInterval(() => {}, 1000)'
+      const parent = `const c = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore', detached: true }); c.unref(); process.stdout.write(String(c.pid)); setInterval(() => {}, 1000)`
+      const child = os.processes.start(process.execPath, ['-e', parent], { stdio: ['ignore', 'pipe', 'ignore'] })
+      let out = ''
+      child.stdout?.on('data', (d: Buffer) => (out += String(d)))
+      for (let i = 0; i < 300 && out === ''; i++) await new Promise((r) => setTimeout(r, 100))
+      const pid = Number(out)
+      expect(pid).toBeGreaterThan(0)
+      try {
+        expect(await os.processes.stop(child, 1000, { sweep: false })).toEqual({ code: null, signal: 'SIGTERM' })
+        expect(os.processes.alive(pid)).toBe(false)
+      } finally {
+        if (os.processes.alive(pid)) os.processes.signal(pid, 'SIGKILL')
+      }
+    },
+    60_000 * SLOW,
+  )
+
   it(
     'a run whose grandchild holds its output ends soon after the program exits',
     async () => {

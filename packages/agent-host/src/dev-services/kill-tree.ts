@@ -148,8 +148,8 @@ function snapshot(): ProcRow[] {
  */
 export type KillOs = {
   platform: NodeJS.Platform
-  /** Ends a process and every process under it, forcibly */
-  taskkill: (pid: number) => void
+  /** Ends a process and every process under it, forcibly; with `alone`, that process only (`/T` left out) */
+  taskkill: (pid: number, alone?: boolean) => void
 }
 
 /**
@@ -171,10 +171,10 @@ export function hasProcessGroups(platform: NodeJS.Platform = process.platform): 
  */
 const REAL_OS: KillOs = {
   platform: process.platform,
-  taskkill: (pid) => {
+  taskkill: (pid, alone = false) => {
     const exe = systemTool(['taskkill.exe'])
     // stderr is kept: the message of a failure says why (`collectOrphansWindows` prints it)
-    execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000, windowsHide: true })
+    execFileSync(exe, ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000, windowsHide: true })
   },
 }
 
@@ -386,8 +386,8 @@ export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProc
 /** What collecting an ended process's leftovers needs from Windows, as a parameter so it can be tested on any OS */
 export type LeftoverOs = {
   listProcesses: () => Promise<WinProcRow[]>
-  /** Ends a process and every process under it, forcibly */
-  taskkill: (pid: number) => void
+  /** Ends a process and every process under it, forcibly; with `alone`, that process only */
+  taskkill: (pid: number, alone?: boolean) => void
 }
 
 /*
@@ -424,6 +424,13 @@ const REAL_LEFTOVER_OS = leftoverOs(runFile)
  * stayed). What is left is everything started outside such a job — by a Python or other non-Node app, or `detached`
  * from Node — and with its parent gone, `taskkill /T` on the parent's number reaches none of it. One forceful shot, as
  * everywhere on Windows. Never throws: a table that cannot be read leaves things as they were.
+ *
+ * **Parents before children** (#2142): what was found is in the order of its parent links (`orphansOf`), and each
+ * process that has children of its own among them is ended alone, before them. `taskkill /T` ends a tree in no order,
+ * and a program it ends reports success to an MSYS shell (Git for Windows' `sh` sees status 0), so a script still
+ * running could take a stopped step's success and go on to the next. A process with none found under it is ended with
+ * `/T`, which also takes what it started after the listing. What a parent ended alone started after the listing (a
+ * window of the listing's own length) is not found.
  */
 export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
   let rows: WinProcRow[]
@@ -442,10 +449,11 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
     console.error(`[agent-host] process ${root.pid} ran from ${root.spawnedAt} to ${root.exitedAt}; its children created outside that were left alone: ${list}`)
   }
   const ended: number[] = []
+  const parents = new Set(found.map((r) => r.ppid))
   for (const r of found) {
     if (r.pid === process.pid) continue // never ourselves
     try {
-      os.taskkill(r.pid)
+      os.taskkill(r.pid, parents.has(r.pid))
       ended.push(r.pid)
     } catch (e) {
       // taskkill's 128: no such process, i.e. already gone or ended by the /T of one before it. Anything else left it running
