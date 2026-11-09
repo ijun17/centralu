@@ -4,7 +4,7 @@ import { newSession, setup } from './project-screen.js'
 /**
  * The sidebar says which project is on screen (user request, 2026-10-01). The open project's whole group is tinted —
  * `data-selected` on its section — and the open row inside it is marked with `aria-current="page"`: the project's
- * name row for its screen, the session's row for one of its sessions. The grid and the orchestrator tint nothing;
+ * name row for its screen, the session's row for one of its sessions. The grid and the Assistant tint nothing;
  * they light their own buttons.
  *
  * Asserted through those attributes, never through pixels: the colours are the palette's to adjust.
@@ -119,7 +119,7 @@ export function sidebarSelectionTests(): void {
       await expect(marked(page)).toHaveCount(1)
     })
 
-    test('the grid and the orchestrator tint nothing, whichever project was open before them', async ({ page }) => {
+    test('the grid and the Assistant tint nothing, whichever project was open before them', async ({ page }) => {
       await setup(page, ['/tmp/alpha'])
       await newSession(page, 'alpha')
       // A session of alpha is open — alpha is tinted, so what follows is a tint going away, not one never drawn
@@ -132,8 +132,8 @@ export function sidebarSelectionTests(): void {
 
       await page.getByTestId('project-header-alpha').click()
       await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-selected', 'true')
-      await page.getByTestId('orchestrator-button').click()
-      await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
+      await page.getByTestId('assistant-button').click()
+      await expect(page.getByTestId('assistant-button')).toHaveAttribute('aria-pressed', 'true')
       await expect(tinted(page)).toHaveCount(0)
       await expect(marked(page)).toHaveCount(0)
     })
@@ -188,7 +188,7 @@ export function sidebarSelectionTests(): void {
 
     /*
      * A user-folder app's sessions have no project, so no project's list holds them. They stand under the app's row in
-     * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the orchestrator row, and since
+     * "Your apps" (2026-10-05), which replaced the "No app" list that used to hang under the Assistant row, and since
      * #1141 in "Other apps": an app made now is a project of its own, so a user-folder app here is a linked machine's on
      * an older build, or one this host could not move into a project. An agent
      * its `run_agent` started can still wait on the person (a question, a card Centralu raises), so it needs a row to be found by.

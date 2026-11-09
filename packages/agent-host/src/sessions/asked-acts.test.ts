@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ORCHESTRATOR_TOOLS, AGENT_TOOLS, APP_ACCESS_TOOLS, TOOL_ARGS } from './tool-definitions.js'
+import { CENTRALU_TOOLS, AGENT_TOOLS, APP_ACCESS_TOOLS, TOOL_ARGS } from './tool-definitions.js'
 import { askedAct, askedQuestion, CLASSIFIED, stepKind } from './asked-acts.js'
 
 const THREAD = 'hub-aaaaaaaa.t_01'
@@ -12,7 +12,7 @@ function line(name: string, args: Record<string, unknown>, thread = THREAD): str
   return step.act
 }
 
-describe('which steps of the orchestrator ask the person when a session asked for them (§9.7)', () => {
+describe('which steps of the Assistant ask the person when a session asked for them (§9.7)', () => {
   it('reading needs no card', () => {
     for (const name of ['list_sessions', 'read_session', 'recall', 'usage_history', 'get_preferences', 'list_machines', 'list_projects', 'project_git_status', 'list_app_runs', 'find_apps', 'centralu_commands', 'centralu_help']) {
       expect(askedAct(name, {}, THREAD), name).toBeNull()
@@ -41,9 +41,9 @@ describe('which steps of the orchestrator ask the person when a session asked fo
     expect(line('some_command_added_later', {})).toMatch(/^run some_command_added_later/)
   })
 
-  it('every tool the orchestrator is shown is either on the reading list or asks, and nothing that only reads was left asking by mistake', () => {
-    const reads = [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).filter((n) => askedAct(n, {}, THREAD) === null)
-    // The reading list, as the orchestrator is given the tools (a new reading tool is added here on purpose)
+  it('every tool the Assistant is shown is either on the reading list or asks, and nothing that only reads was left asking by mistake', () => {
+    const reads = [...CENTRALU_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).filter((n) => askedAct(n, {}, THREAD) === null)
+    // The reading list, as the Assistant is given the tools (a new reading tool is added here on purpose)
     expect([...new Set(reads)].sort()).toEqual(
       ['agent_models', 'agent_status', 'app_guide', 'app_usage', 'find_apps', 'get_preferences', 'list_app_errors', 'list_app_grants', 'list_app_runs', 'list_app_versions', 'list_approval_rules', 'list_archive', 'list_machines', 'list_projects', 'list_sessions', 'list_ssh_hosts', 'machine_activity', 'project_git_status', 'read_session', 'recall', 'search_project_files', 'usage_history'].sort(),
     )
@@ -109,7 +109,7 @@ describe('which steps of the orchestrator ask the person when a session asked fo
 
   it('the question names the session and its project, and says when the project is not trusted', () => {
     expect(askedQuestion({ name: 'Fix login', project: 'Acme', trusted: true }, 'run rename_session {}')).toBe(
-      `Session "Fix login" in project "Acme" asked the orchestrator to run rename_session {}. It is the session's request, not yours.`,
+      `Session "Fix login" in project "Acme" asked the Assistant to run rename_session {}. It is the session's request, not yours.`,
     )
     expect(askedQuestion({ name: 'Fix login', project: 'Wild', trusted: false }, 'x')).toContain('in project "Wild" (not trusted) asked')
     expect(askedQuestion({ name: 'S', project: null, trusted: false }, 'x')).toContain('Session "S" with no project asked')

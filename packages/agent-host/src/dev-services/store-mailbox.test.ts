@@ -328,7 +328,7 @@ describe('guards and counts', () => {
     expect(box.sameBody(A, B, 'old', NOW - 1000)).toBe(false)
   })
 
-  it('requestsSince leaves out replies to the orchestrator’s needsReply messages and tasks, and clarifications', () => {
+  it('requestsSince leaves out replies to the Assistant’s needsReply messages and tasks, and clarifications', () => {
     const { box, send } = world()
     const since = NOW - 1000
     const ask = send({ sender: ORC, needsReply: true }, A)
@@ -409,6 +409,16 @@ describe('handoff and trash', () => {
     expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, via: 'orchestrator' })
     expect(box.recipient(direct, ORC)).toBeDefined()
     expect(box.recipient(done, ORC)).toBeDefined()
+  })
+
+  it('moveRole and openParties take a row sent to the role under the Assistant’s new name too (#2133)', () => {
+    const { box, send } = world()
+    const NEW = 'session:h1/orc2'
+    // A later build writes via 'assistant'; the row waits for the role, not for the session that held it
+    const renamed = send({ sender: A, needsReply: true }, to(ORC, { via: 'assistant' }))
+    expect(box.openParties()).not.toContain(ORC)
+    expect(box.moveRole(NEW)).toEqual([renamed])
+    expect(box.recipient(renamed, NEW)).toMatchObject({ via: 'assistant' })
   })
 
   it('purgeParty removes a party’s rows', () => {

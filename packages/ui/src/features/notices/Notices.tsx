@@ -17,7 +17,7 @@ export function Notices() {
   const view = useStore((s) => s.view)
   const appFocused = useStore((s) => s.appFocused)
   const focusedSessionId = useStore((s) => s.focusedSessionId)
-  const orchestratorId = useStore((s) => s.orchestratorId)
+  const assistantId = useStore((s) => s.assistantId)
   // Joined for the same reason as below — the grid's sessions, derived from its panels (#288)
   const gridSessions = useStore((s) => gridSessionIds(s.gridPanels).join(' '))
   const builderPaneSessionId = useStore((s) => s.builderPaneSessionId)
@@ -49,7 +49,7 @@ export function Notices() {
       appFocused &&
       isOnScreen(view, id, {
         focusedSessionId,
-        orchestratorId,
+        assistantId,
         gridSessions: gridSessions ? gridSessions.split(' ') : [],
         builderPaneSessionId,
         projectScreen: projectScreen ? projectScreen.split(' ') : [],
@@ -77,7 +77,7 @@ export function Notices() {
         })
         .map((n) => n.sessionId),
     )
-  }, [notices, sessions, tick, appFocused, view, focusedSessionId, orchestratorId, gridSessions, builderPaneSessionId, projectScreen, dismiss])
+  }, [notices, sessions, tick, appFocused, view, focusedSessionId, assistantId, gridSessions, builderPaneSessionId, projectScreen, dismiss])
 
   /*
    * The cards that stood here in the top right are gone (owner, 2026-10-18): they covered the conversation, and the

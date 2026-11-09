@@ -251,7 +251,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * exactly the lie we are trying to fix. The same rule the Claude adapter uses for `result`.
      *
      * An interrupted turn is not a finished one either (#698). It went out as `turn_complete`, so a turn Codex cut
-     * short told the orchestrator that gave it that the work was done ("finished", as the report then read). It ends as the person's Stop ends a turn,
+     * short told the Assistant that gave it that the work was done ("finished", as the report then read). It ends as the person's Stop ends a turn,
      * `waiting_input` with `interrupted`; the adapter tells a Stop of ours from an interrupt it did not ask for
      * (`INTERRUPTED_BY_TOOL`).
      */
@@ -382,7 +382,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * An MCP server that failed to start (#304). Measured (codex-cli 0.160.0): every server reports `starting`, then
      * `ready` or `failed {error: "MCP client for \`<name>\` failed to start: MCP startup failed: No such file or
      * directory (os error 2)"}`, and a failing one goes through `starting` → `failed` **twice** on one thread start.
-     * Centralu's own orchestrator and app bridges are MCP servers too, and a failed start used to be silent: the model
+     * Centralu's own assistant and app bridges are MCP servers too, and a failed start used to be silent: the model
      * simply had no such tools. The adapter keeps one line per server until it starts again (index.ts).
      */
     case 'mcpServer/startupStatus/updated': {

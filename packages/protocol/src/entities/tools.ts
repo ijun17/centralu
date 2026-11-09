@@ -177,7 +177,7 @@ export const AdapterCapabilities = z.object({
   midTurnInput: z.boolean().optional(),
   /**
    * Whether the adapter can put every step of the CLI's own that is not a read to the host's card in a turn the host names, whatever the session's
-   * preset (#1447, a session's request to the orchestrator). Claude: a `PreToolUse` hook, which sees every tool call in every permission mode
+   * preset (#1447, a session's request to the Assistant). Claude: a `PreToolUse` hook, which sees every tool call in every permission mode
    * (measured: a narrower mode alone leaves out the tools that need no permission). Absent is false: a session of the tool cannot be asked for by
    * another session
    */
@@ -221,7 +221,7 @@ export const AdapterCapabilities = z.object({
   keepsRepoFilesOut: z.boolean().optional(),
   /**
    * Whether the tool takes Centralu's role text (`systemPromptAppend`). Absent: true. False: it cannot be a session that
-   * is given one (the orchestrator, a coordinator, an app's agent), nor one that must read no setting files.
+   * is given one (the Assistant, a coordinator, an app's agent), nor one that must read no setting files.
    */
   roleText: z.boolean().optional(),
 })
@@ -237,8 +237,8 @@ export type LaunchDemands = {
   roleText?: boolean
 }
 
-/** What the orchestrator asks of its tool: Normal, no project's files, and Centralu's role text (`OrchestratorSlot`) */
-export const ORCHESTRATOR_DEMANDS: LaunchDemands = {
+/** What the Assistant asks of its tool: Normal, no project's files, and Centralu's role text (`AssistantSlot`) */
+export const ASSISTANT_DEMANDS: LaunchDemands = {
   permissionPreset: 'normal',
   projectTrusted: false,
   noSettingFiles: true,
@@ -255,7 +255,7 @@ export function launchRefusal(
   demands: LaunchDemands,
 ): string | null {
   if (caps.roleText === false && (demands.roleText || demands.noSettingFiles)) {
-    return `${label} cannot take Centralu's role instructions yet, so it cannot run the orchestrator, a coordinator or an app's agent.`
+    return `${label} cannot take Centralu's role instructions yet, so it cannot run the Assistant, a coordinator or an app's agent.`
   }
   if (caps.keepsRepoFilesOut === false && !demands.projectTrusted) {
     return `${label} cannot be kept from reading a project's own files (such as AGENTS.md and its rules), so it runs only in trusted projects.`

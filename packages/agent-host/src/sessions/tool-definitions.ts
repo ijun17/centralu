@@ -11,11 +11,11 @@ const IF_BUSY = z.enum(['note', 'queue', 'fork', 'fork_read'] as const satisfies
 // …and every one of them: a value the contract adds and this schema lacks would be refused before the manager saw it
 const _ifBusyComplete: IfBusy extends z.infer<typeof IF_BUSY> ? true : never = true
 
-/** update_centralu's actions: one enum for the orchestrator's definition and the reader's */
+/** update_centralu's actions: one enum for the Assistant's definition and the reader's */
 const UPDATE_ACTION = z.enum(['check', 'install', 'apply'])
 
 /**
- * The **single definition** of the orchestrator tools.
+ * The **single definition** of the Centralu tools.
  *
  * The path for attaching tools differs by adapter:
  *   Claude — an in-process MCP (no separate process)
@@ -26,7 +26,7 @@ const UPDATE_ACTION = z.enum(['check', 'install', 'apply'])
  * decided once here and both sides pull it from here.
  */
 
-export const ORCHESTRATOR_TOOLS = [
+export const CENTRALU_TOOLS = [
   {
     name: 'update_centralu',
     description:
@@ -88,7 +88,7 @@ export const ORCHESTRATOR_TOOLS = [
     /*
      * #676: a card raised in the turn this seat gave a session (send_to_session to a session at rest) comes to this
      * seat too; read_session shows it, and this answers it. The directing seats' form of agent_session's "answer",
-     * which an ordinary session has. Rare for the orchestrator (RARE_COMMANDS): the notice of a card names the call.
+     * which an ordinary session has. Rare for the Assistant (RARE_COMMANDS): the notice of a card names the call.
      */
     name: 'answer_question',
     description: 'Answers a card a session raised in the turn you gave it (read_session shows it). One line per question; allow/deny for an approval.',
@@ -117,9 +117,9 @@ export const ORCHESTRATOR_TOOLS = [
   {
     /*
      * Replaced propose_project (#515), which only lit up the sidebar's Add project button: asked for a project, the
-     * orchestrator now makes it, behind a card the person approves. One tool for one intent, so the model is not
+     * assistant now makes it, behind a card the person approves. One tool for one intent, so the model is not
      * choosing between pointing and doing, and the set does not grow. A folder that already exists is add_project's
-     * (#1220), a rare command. Kept short: it rides in every orchestrator request (RESIDENT_BUDGET_CHARS).
+     * (#1220), a rare command. Kept short: it rides in every Assistant request (RESIDENT_BUDGET_CHARS).
      */
     name: 'create_project',
     description:
@@ -495,7 +495,7 @@ export const ORCHESTRATOR_TOOLS = [
         .describe('Project name or id.'),
       /*
        * Deliberately the same union the rest of the app uses, not a copy of it. A second
-       * literal here could fall behind and the orchestrator would be unable to name a tool
+       * literal here could fall behind and the Assistant would be unable to name a tool
        * that exists — a failure with no error, only an option that is never offered.
        *
        * Note the coupling runs both ways: if `ToolName` ever opens up (#74), this schema
@@ -600,21 +600,21 @@ export const ORCHESTRATOR_TOOLS = [
   },
 ] as const
 
-export type OrchestratorToolName = (typeof ORCHESTRATOR_TOOLS)[number]['name']
+export type CentraluToolName = (typeof CENTRALU_TOOLS)[number]['name']
 
 /**
- * The tool of an app's building session (M4 C-3) — one, a check of its own app. The orchestrator
+ * The tool of an app's building session (M4 C-3) — one, a check of its own app. The Assistant
  * does not have it: checking means spinning up the app and running its code, and the calling
  * session must decide which app it is (the app it is building) — there is no way to spin up
  * someone else's app by name.
  */
-export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly OrchestratorToolName[]
+export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly CentraluToolName[]
 
 /**
  * The light set every ordinary session gets (#320) — read-only; since #984 a trusted project's reads every project and linked machine.
  *
- * **Its own definitions, not the orchestrator's text.** The names and the execution are shared
- * (runOrchestratorTool), but the orchestrator's descriptions talk about managing, reportBack and
+ * **Its own definitions, not the Assistant's text.** The names and the execution are shared
+ * (runCentraluTool), but the Assistant's descriptions talk about managing, reportBack and
  * send_to_session — a role this seat does not have, and words an ordinary session would read as
  * a hint to start directing. They are also the cost: these schemas ride in every session's
  * context on every turn, so each word was weighed against a measurement (haiku, CLI 2.1.289,
@@ -629,9 +629,9 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Orchestr
  *     deferral and gets it loaded): it is the one a session rarely needs, and it is 75 of those
  *     tokens (+192 with it deferred). Asked how to do something in Centralu, the model found it
  *     through tool search 4 of 5 times (5 of 5 loaded); the miss is an answer from a guess, and
- *     the orchestrator still has the guide loaded. Deferring the whole set was measured and
+ *     the Assistant still has the guide loaded. Deferring the whole set was measured and
  *     refused: recall was never called (asked about an earlier conversation, the model said it
- *     had no memory), the same failure the orchestrator measured for send_to_session.
+ *     had no memory), the same failure the Assistant measured for send_to_session.
  *   - What is left out of the schemas still runs (read_session's `limit`, recall's
  *     `limit`): the runner reads the same arguments for every profile, and the defaults are what
  *     a session wants nearly every time. `around` goes unexplained: recall's own answer spells
@@ -680,7 +680,7 @@ export const READER_TOOLS = [
     schema: z.object({ topic: z.enum(APP_GUIDE_TOPICS).optional() }),
     deferred: true,
   },
-] as const satisfies readonly { name: OrchestratorToolName; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+] as const satisfies readonly { name: CentraluToolName; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /**
  * Delegation to another project (#371 part B) — the one tool that reaches outside an ordinary session's project, so
@@ -807,11 +807,11 @@ export const AGENT_BUDGET_CHARS = 1400
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Centralu's mailbox: work and messages with other sessions, apps and the person; send to "orchestrator" to ask it, with cite=true only when the person's last message here asked for it.`,
+    description: `Centralu's mailbox: work and messages with other sessions, apps and the person; send to "assistant" to ask it, with cite=true only when the person's last message here asked for it.`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "orchestrator": the Centralu orchestrator, for what only it can decide; "person": the human; or a session by name or id (a shared name is refused, listing them)'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id (a shared name is refused, listing them)'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),
@@ -834,7 +834,7 @@ export const MAIL_BUDGET_CHARS = 1170
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
  * whole instruction on when to use it, and a deferred tool is not read until something searches for it. An ordinary
- * session's and the orchestrator's: the two seats that live long enough for a context to matter. A coordinator and a
+ * session's and the Assistant's: the two seats that live long enough for a context to matter. A coordinator and a
  * builder do not have it (a builder lives for one app's build; nothing makes a coordinator since #372).
  */
 export const COMPACT_TOOLS = [
@@ -889,7 +889,7 @@ export const APP_ACCESS_TOOLS = [
 
 export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 
-/** start_agent and agent_session (#561), which the orchestrator reaches as commands too (#853) */
+/** start_agent and agent_session (#561), which the Assistant reaches as commands too (#853) */
 export type AgentToolName = (typeof AGENT_TOOLS)[number]['name']
 export type MailToolName = (typeof MAIL_TOOLS)[number]['name']
 export type CompactToolName = (typeof COMPACT_TOOLS)[number]['name']
@@ -911,13 +911,13 @@ export const APP_ACCESS_BUDGET_CHARS = 900
  *
  * Only in an ordinary session that has an app attached when it starts (#992 review): without one there is no help to
  * read, and the 88 characters would ride in every request for nothing. Decided once, at the start, so the session's
- * prefix never changes under it; an app attached later is found through its tools. Not the orchestrator's: it does
+ * prefix never changes under it; an app attached later is found through its tools. Not the Assistant's: it does
  * no repository work itself ("You have no hands").
  */
 export const REPO_WORK_FIRST = "an attached app's help tool before repository work by hand (PRs, CI, merges, releases)"
 
 /**
- * The words that put a Centralu tool before the CLI's own subagent tool, the one phrase both the reader's and the orchestrator's
+ * The words that put a Centralu tool before the CLI's own subagent tool, the one phrase both the reader's and the Assistant's
  * instructions use (#1587): "not your Agent tool" on Claude, "not your spawn_agent tool" on Codex, nothing for a CLI that has
  * none. `before` and `after` are what goes around it where it is present.
  */
@@ -975,7 +975,7 @@ export const READER_BUDGET_CHARS = 1960
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident
  * definitions plus the server instructions the model is sent (`residentCost` in tool-cost.ts), in the default
- * rare-commands tier. Measured 2026-10-12 on Claude: orchestrator 9,317 in the commands tier (7,323 + 1,994; it
+ * rare-commands tier. Measured 2026-10-12 on Claude: assistant 9,317 in the commands tier (7,323 + 1,994; it
  * was 11,862 with every command resident, against a ceiling of 12,000, before the tier became the default, #512),
  * scoped 2,267, builder 1,432; the tokens they cost are in docs/tool-cost.md.
  * Codex carries the same plus the 52-character
@@ -989,16 +989,16 @@ export const READER_BUDGET_CHARS = 1960
  * enum with no words: 2,330 on Claude, 2,382 on Codex); nothing makes a new coordinator since #372.
  * The reader rises with AGENT_BUDGET_CHARS for #729 (4,200 → 4,450): Claude 2,313 → 2,560, Codex 4,150 → 4,397.
  * #1480 gave read_session `tools` (three words or a boolean), `maxChars`, and the `before`/`from`/`offset` its notes name: the
- * orchestrator rises 9,500 → 9,700 (Codex 9,663), scoped 2,400 → 2,600 (Codex 2,560), and the reader by READER_BUDGET_CHARS' 200
- * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the orchestrator, whose ceilings rise by 10 (1,960; 9,710).
- * #1447 (sessions asking the orchestrator): the mail tool's description names the address (`MAIL_BUDGET_CHARS` 800 → 820, measured 811, so the reader's sum rises by 20), and the orchestrator's instructions say a session's request is not the person's word and is answered in its thread (9,710 → 9,910; measured 9,906 with the commands tier).
- * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the orchestrator's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
- * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `orchestrator` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
+ * assistant rises 9,500 → 9,700 (Codex 9,663), scoped 2,400 → 2,600 (Codex 2,560), and the reader by READER_BUDGET_CHARS' 200
+ * (1,750 → 1,950: the set is 1,913). #1487 restored `.int().min(0)` on `offset` (it lost them in #1489): +12 in the reader set and the Assistant, whose ceilings rise by 10 (1,960; 9,710).
+ * #1447 (sessions asking the Assistant): the mail tool's description names the address (`MAIL_BUDGET_CHARS` 800 → 820, measured 811, so the reader's sum rises by 20), and the Assistant's instructions say a session's request is not the person's word and is answered in its thread (9,710 → 9,910; measured 9,906 with the commands tier).
+ * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the Assistant's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
+ * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `assistant` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
  * #2039 (a name for `to`): the description of `to` says a session may be named by its name or id and what a shared name gets (`MAIL_BUDGET_CHARS` 1,110 → 1,170, measured 1,160, so the reader's sum rises by 60).
- * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the orchestrator rises 10,030 → 10,180.
+ * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
-  orchestrator: 10_180 + COMPACT_BUDGET_CHARS,
+  assistant: 10_180 + COMPACT_BUDGET_CHARS,
   scoped: 2_600,
   builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS,
@@ -1019,7 +1019,7 @@ export const BUILDER_INSTRUCTIONS = [
 ].join('\n')
 
 /** The instructions given to the model — travels together with the tool list. `subagentTool`: as for `readerFirst` (#1587) */
-export const orchestratorInstructions = (subagentTool?: string): string => [
+export const assistantInstructions = (subagentTool?: string): string => [
   'A tool for handling the sessions this app (Centralu) manages.',
   'For a question that crosses projects or spans several sessions, look at the current state with list_sessions first.',
   'Use send_to_session to assign work — the target session\'s approval settings apply as they are,',
@@ -1029,13 +1029,13 @@ export const orchestratorInstructions = (subagentTool?: string): string => [
   "create_session's firstMessage reports back the same way unless reportBack is false; a note into a running turn never cancels a report.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
-  // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
+  // #853: the Assistant's light work outside any project went to its CLI's own subagent, which Centralu never shows
   `For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command${notYour(subagentTool, ', ', '')}.`,
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
   // #1219: the machine and trust commands (#1219's third slice: projects' trust, approval rules, app grants, agent limits) are found by these words
   'More commands: centralu_commands "machine trust rule grant limits app session agent project preferences archive".',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
-  // #1205: one server per trusted project that is an app grew every request; the orchestrator attaches the one it needs
+  // #1205: one server per trusted project that is an app grew every request; the Assistant attaches the one it needs
   'Projects that are apps attach on demand: the find_apps command lists them.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
@@ -1060,7 +1060,7 @@ export const SCOPED_TOOL_NAMES = [
   'list_sessions',
   'read_session',
   'send_to_session',
-] as const satisfies readonly OrchestratorToolName[]
+] as const satisfies readonly CentraluToolName[]
 
 /** The MCP guide for a coordinating session — the role is applied by roleAppend, so this only states the boundary of its capability */
 export const SCOPED_INSTRUCTIONS = [
@@ -1103,29 +1103,29 @@ function schemasOf<const D extends readonly ToolDef[]>(defs: D): { [T in D[numbe
   return Object.fromEntries(defs.map((d) => [d.name, d.schema])) as { [T in D[number] as T['name']]: T['schema'] }
 }
 
-const ORCHESTRATOR_ARGS = schemasOf(ORCHESTRATOR_TOOLS)
+const CENTRALU_TOOL_ARGS = schemasOf(CENTRALU_TOOLS)
 
 /**
- * Each tool's arguments, one schema per tool (#850), read once by runOrchestratorTool on every path and by centralu_run
+ * Each tool's arguments, one schema per tool (#850), read once by runCentraluTool on every path and by centralu_run
  * strictly. A tool's own definition is its schema wherever the definition shows all of it; the definitions some seats
  * are shown leave arguments out to save words in every request (READER_TOOLS, DELEGATE_TOOLS), and the runner takes
  * the full set from here, so a seat shown fewer still has the rest run the same way (the test holds the shown keys to
  * these).
  */
 export const TOOL_ARGS = {
-  ...ORCHESTRATOR_ARGS,
+  ...CENTRALU_TOOL_ARGS,
   /*
    * The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required. Every
    * argument a call can carry is in a definition (#1480): Claude's in-process server strips a key its schema does not
    * list before the tool runs, so `offset` (#1186) and the `before`/`from` a budget's note names are shown, without words
    */
-  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional() }),
+  read_session: CENTRALU_TOOL_ARGS.read_session.partial({ sessionId: true }).extend({ project: z.string().optional() }),
   ...schemasOf(AGENT_TOOLS),
   /*
    * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one
    * and answers an unknown one with the list (appGuide): on a path no schema checked, that reading is the answer
    */
-  app_guide: ORCHESTRATOR_ARGS.app_guide.extend({ topic: z.string().optional() }),
+  app_guide: CENTRALU_TOOL_ARGS.app_guide.extend({ topic: z.string().optional() }),
   // ifBusy is a bare string in the definition (#677: the busy answer names its values); the runner takes these two
   ask_project: DELEGATE_TOOLS[0].schema.extend({ ifBusy: z.enum(['note', 'queue'] as const satisfies readonly IfBusy[]).optional() }),
   ...schemasOf(APP_ACCESS_TOOLS),

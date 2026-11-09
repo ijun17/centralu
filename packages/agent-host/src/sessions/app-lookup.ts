@@ -3,7 +3,7 @@ import { plainQuoted } from './tool-answers.js'
 import { callWindow, type WindowRpc } from './window-rpc.js'
 
 /**
- * How the orchestrator's commands find a project or an app by the words the model gives (#1219): the window's own lists
+ * How the Assistant's commands find a project or an app by the words the model gives (#1219): the window's own lists
  * (`projects.list`, `machines.list`, `apps.list`) and the refusals that name the way to list them. Shared by the trust
  * commands and the app upkeep commands, so one name means the same thing to both.
  */

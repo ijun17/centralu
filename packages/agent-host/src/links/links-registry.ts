@@ -99,7 +99,7 @@ export class Links {
   }
 
   /**
-   * What ssh would connect to for a target (`ssh -G`, which opens no connection and loads no key): the orchestrator's
+   * What ssh would connect to for a target (`ssh -G`, which opens no connection and loads no key): the Assistant's
    * add_machine card shows it before anything connects (#1219)
    */
   resolve(sshTarget: string): Promise<ResolvedHost> {
@@ -118,7 +118,7 @@ export class Links {
     return m.info()
   }
 
-  /** Why no host is started on the machine just now, or null (#1143): what the orchestrator's card is gated on */
+  /** Why no host is started on the machine just now, or null (#1143): what the Assistant's card is gated on */
   startHeldBack(id: string): string | null {
     return this.need(id).startHeldBack
   }

@@ -120,6 +120,25 @@ export class StepsV65 extends MigrationRange {
           this.db.exec(`CREATE TABLE IF NOT EXISTS mail_numbers (n INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL UNIQUE)`)
         },
       },
+      {
+        to: 68,
+        breaksOlderReaders: false,
+        /**
+         * The Assistant's marker under the role's new name (#2133 step 3, docs/plans/assistant-rename.md): `sessions.is_assistant`,
+         * copied once from `is_orchestrator`.
+         *
+         * **Expand only (#292's rule).** One defaulted column. Nothing in this build reads it: every build that can open this
+         * store writes `is_orchestrator`, and the build before this one writes only that, so `is_orchestrator` is the one
+         * that is never stale and the one read. This build writes both on every upsert (`SessionRecords.upsertSession`), so the
+         * new column is right whenever this build wrote last; a later build that reads it copies it again first (step 4).
+         */
+        run: () => {
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
+          if (cols.length === 0) return
+          this.addColumn('sessions', 'is_assistant', 'INTEGER NOT NULL DEFAULT 0')
+          if (cols.some((c) => c.name === 'is_orchestrator')) this.db.exec(`UPDATE sessions SET is_assistant = is_orchestrator`)
+        },
+      },
     ]
   }
 

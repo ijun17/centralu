@@ -20,7 +20,7 @@ import { ReplyImage } from './ReplyImage.jsx'
  * and spacing, not color.
  *
  * `projectRoot` is the session's project directory, or null when it has none (the
- * orchestrator). It is what decides whether a backticked path is a file the person can open —
+ * assistant). It is what decides whether a backticked path is a file the person can open —
  * see `parseFileRef`.
  *
  * `sessionId` is given for an agent's reply, and only there: a local image in it is read by that session's host,

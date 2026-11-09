@@ -923,7 +923,7 @@ test('Deleting a project from a host without the call: the list\'s mark decides,
  *
  * A status indicator that takes up space when everything is normal is decoration, not a
  * dashboard. But a disconnect cannot stay quiet — at that point the rest of the screen can turn
- * into a lie (the orchestrator screen incident of 2026-09-07).
+ * into a lie (the Assistant screen incident of 2026-09-07).
  */
 test('Being connected stays quiet, and a disconnect states itself where the donuts would be', async ({
   page,

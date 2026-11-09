@@ -17,7 +17,7 @@ import { COMPACT_FLOOR_TOKENS } from './self-compaction.js'
  *    Centralu's, the tool's own, the person's `/compact`) or a fresh conversation starts the cycle again, so the shares are told
  *    again when the context grows back. A request that crosses both shares at once says it once. The counters are in memory: a host
  *    that starts tells a session already over a share again, once.
- *  - **Only where it can be acted on.** A session that has `compact_self` (an ordinary session and the orchestrator), with Centralu's
+ *  - **Only where it can be acted on.** A session that has `compact_self` (an ordinary session and the Assistant), with Centralu's
  *    control on (`autoCompact.controlled`) and the notices on, over the compaction floor (a smaller context would be refused), and
  *    under the tool's own share (a share at or above it is never told). A note the tool does not take now (Codex between turns, or
  *    in a compact turn) waits and goes with a later request of a running turn.

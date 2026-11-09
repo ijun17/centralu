@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import type { OrchestratorTools } from '../contract.js'
+import type { CentraluTools } from '../contract.js'
 import { callOrder, codexCodec, loadRecording, of, recordedFolders, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { centraluInputId } from '../input-receipts.js'
 import { drive, type Driver, type Scenario } from '../frames/scenarios.test-helpers.js'
@@ -85,8 +85,8 @@ async function replay(name: string) {
     session: {
       ...CODEX_REPLAY_SESSION,
       processSource: { spawn },
-      orchestratorTools: {} as OrchestratorTools,
-      orchestratorBridge: { url: 'ws://127.0.0.1:1', token: 'replay' },
+      centraluTools: {} as CentraluTools,
+      centraluBridge: { url: 'ws://127.0.0.1:1', token: 'replay' },
     },
     replay: state,
   }).finally(() => folder.remove())

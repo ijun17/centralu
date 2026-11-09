@@ -80,7 +80,7 @@ test('Send key: once enabled, Enter inserts a newline and the modifier+Enter sen
 test("Settings: the sessions' read-only tools have no switch and read as on", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
-  for (const tab of ['orchestrator', 'agents']) {
+  for (const tab of ['assistant', 'agents']) {
     await page.getByTestId(`settings-tab-${tab}`).click()
     await expect(page.getByTestId(`settings-tab-${tab}`)).toHaveAttribute('aria-current', 'page')
     await expect(page.getByTestId('settings-session-tools')).toHaveCount(0)

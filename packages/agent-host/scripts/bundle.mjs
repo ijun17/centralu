@@ -10,7 +10,7 @@
  * linked machine lands straight in the version folder `pnpm remote-dev` makes there, #1036):
  *   main.mjs                     — the bundled host (only better-sqlite3 kept external)
  *   schema.sql                   — the store looks for this next to the bundle
- *   codex-orchestrator-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
+ *   codex-centralu-bridge.mjs — codex launches this directly with node (bundled with `ws` inside)
  *   pty-broker.mjs               — the terminal broker the host starts with node on Windows (#1067), as is: it needs only node-pty
  *   node_modules/better-sqlite3  — the native addon (only the files needed)
  *   remote-runtime.json          — the Node a remote this host installs runs, pinned (scripts/node-pin.mjs)
@@ -67,20 +67,20 @@ cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.
 // resolves against the host folder's node_modules, as main.mjs's does
 cpSync(join(ROOT, 'packages/agent-host/src/dev-services/pty-broker.mjs'), join(OUT, 'pty-broker.mjs'))
 /*
- * The stdio bridge for the Codex orchestrator. Codex launches it directly with `node <path>`, so it
+ * The stdio bridge for the Codex assistant. Codex launches it directly with `node <path>`, so it
  * stays one plain `.mjs` file next to the host, but it is **bundled**, with `ws` inside.
  *
  * It used to be copied as is, and its `import { WebSocket } from 'ws'` then had nothing to resolve
  * against: the host folder carries `node_modules` only for the two native addons. Measured while
- * building #280 step 3: `node resources/host/codex-orchestrator-bridge.mjs` died at once with
+ * building #280 step 3: `node resources/host/codex-centralu-bridge.mjs` died at once with
  * `ERR_MODULE_NOT_FOUND: Cannot find package 'ws'`. From source it worked, because the workspace's
  * `node_modules` was up the tree, which is why nothing caught it; in the app (and in the keeper's
- * per-build copy) every Codex orchestrator tool call would have failed to start its bridge.
+ * per-build copy) every Codex assistant tool call would have failed to start its bridge.
  * `ws`'s two optional speed-ups are left out: it loads them in a try/catch and runs without them.
  */
 await build({
-  entryPoints: [join(ROOT, 'packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs')],
-  outfile: join(OUT, 'codex-orchestrator-bridge.mjs'),
+  entryPoints: [join(ROOT, 'packages/agent-host/src/adapters/codex/centralu-bridge.mjs')],
+  outfile: join(OUT, 'codex-centralu-bridge.mjs'),
   bundle: true,
   platform: 'node',
   target: 'node22',
@@ -101,7 +101,7 @@ await build({
 {
   const keep = ['PATH', 'SystemRoot', 'SystemDrive', 'windir', 'TEMP', 'TMP']
   const env = Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]))
-  const r = spawnSync(process.execPath, [join(OUT, 'codex-orchestrator-bridge.mjs')], {
+  const r = spawnSync(process.execPath, [join(OUT, 'codex-centralu-bridge.mjs')], {
     cwd: OUT,
     env,
     encoding: 'utf8',

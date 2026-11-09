@@ -1,7 +1,7 @@
 import type { HookCallback, HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk'
 import { isRecord } from '@cc/protocol'
 import type { CreateSessionOpts } from '../contract.js'
-import { appToolOf, isOrchestratorTool } from './permissions.js'
+import { appToolOf, isCentraluToolName } from './permissions.js'
 
 /**
  * How long the person may take over a card before the CLI gives up on the hook. A card waits for a person; the CLI's own default would end the
@@ -47,7 +47,7 @@ export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn' | '
     try {
       // The person's own turn: the CLI's own flow decides. The person's answer to a question is theirs, with no card of this gate
       if (!request.active() || name === 'AskUserQuestion') return {}
-      if (isOrchestratorTool(name) && ownServer()) return {}
+      if (isCentraluToolName(name) && ownServer()) return {}
       // An attached app's tool asks in the call itself (`SessionApps.call`), naming the session: allowed here so the CLI does not put a card of its own first
       const app = appToolOf(name)
       if (app && opts.apps?.current().some((a) => a.server === app.server)) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }

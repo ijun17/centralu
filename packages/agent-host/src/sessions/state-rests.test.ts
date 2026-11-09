@@ -8,12 +8,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, Question, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, CentraluTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { hostBusy } from '../idle.js'
 import { SessionManager } from './manager.js'
 import { ASK_WINDOW_MS, CARD_RESTS_KEY } from './card-rest.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 
 const QUESTION: Question[] = [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }]
 
@@ -234,7 +234,7 @@ describe('a session at rest stays at rest (#428)', () => {
   it('an agent reading the list is told the card is a question, not an approval', async () => {
     const { mgr, claude, h } = await session()
     const orch = await mgr.createSession({ projectId: null, cwd: root, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
-    const tools = claude.handles.get(orch.id)!.opts.orchestratorTools!
+    const tools = claude.handles.get(orch.id)!.opts.centraluTools!
     h.send()
     h.ev({ type: 'question_request', requestId: 'q1', questions: QUESTION })
     expect((await tools.listSessions()).find((r) => r.sessionId === h.sessionId)).toMatchObject({ state: 'waiting_approval', waitingOn: 'question' })
@@ -244,8 +244,8 @@ describe('a session at rest stays at rest (#428)', () => {
 
   it('list_sessions prints an open question as one', async () => {
     const row = { sessionId: 'w1', name: 'Worker', project: 'p', state: 'waiting_approval', waitingOn: 'question' as const, tool: 'claude', preview: '' }
-    const tools = { listSessions: async () => [row] } as unknown as OrchestratorTools
-    const { text } = await runOrchestratorTool(tools, 'list_sessions', {}, { sessionId: 'o', profile: 'orchestrator' } as Parameters<typeof runOrchestratorTool>[3])
+    const tools = { listSessions: async () => [row] } as unknown as CentraluTools
+    const { text } = await runCentraluTool(tools, 'list_sessions', {}, { sessionId: 'o', profile: 'assistant' } as Parameters<typeof runCentraluTool>[3])
     expect(text).toContain('· claude · waiting on a question')
     expect(text).not.toContain('waiting_approval')
   })

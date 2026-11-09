@@ -5,17 +5,18 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { PAUSED_REPORT_SETTLE_MS } from '../sessions/child-ownership.js'
 import { SessionManager } from '../sessions/manager.js'
-import { runOrchestratorTool } from '../sessions/orchestrator-tools.js'
+import { runCentraluTool } from '../sessions/centralu-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
-import { NOT_CONNECTED_PHRASE, type LinkedSessions, type OrchestratorTools } from '../adapters/contract.js'
+import { NOT_CONNECTED_PHRASE, type LinkedSessions, type CentraluTools } from '../adapters/contract.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
+import { hiddenKind } from './linked-machine-connection.js'
 import { linkedSessions } from './linked-sessions.js'
 import { Qualifier } from './qualifier.js'
 import type { RoutedMachine } from './router.js'
 
 /**
  * The hub's side of reading a linked machine (#82 phase 4, plan §12): what a machine answers is fenced before the
- * hub's orchestrator reads it. The machine here is a stand-in that answers whatever the test says, as a compromised
+ * hub's Assistant reads it. The machine here is a stand-in that answers whatever the test says, as a compromised
  * or older one could; links.test.ts runs the real one.
  */
 
@@ -34,7 +35,8 @@ function machine(answers: Record<string, unknown>, o: { reachable?: boolean; wai
     },
     lastKnown: (kind) => (o.mirror?.[kind] as unknown[] | undefined) ?? null,
     observe: () => {},
-    hides: (s) => typeof s === 'object' && s !== null && ['orchestrator', 'coordinator'].includes(String((s as { kind?: string }).kind)),
+    // The rule a real machine connection hides by
+    hides: hiddenKind,
   }
 }
 
@@ -43,32 +45,33 @@ const find = async (reader: LinkedSessions, ref: string) => (await reader.projec
 
 const row = (over: Record<string, unknown> = {}) => ({ sessionId: 'w1', name: 'Worker', project: 'api', state: 'idle', tool: 'claude', preview: 'ok', ...over })
 
-/** The orchestrator's text for list_sessions over only this machine */
+/** The Assistant's text for list_sessions over only this machine */
 async function listText(m: RoutedMachine): Promise<string> {
   const reader = linkedSessions(() => [m])
-  return (await runOrchestratorTool({ listSessions: () => reader.list() } as OrchestratorTools, 'list_sessions', {})).text
+  return (await runCentraluTool({ listSessions: () => reader.list() } as CentraluTools, 'list_sessions', {})).text
 }
 
-describe('reading a linked machine for the hub’s orchestrator', () => {
-  it('says the orchestrator is the one changing a machine’s session settings (#659)', async () => {
+describe('reading a linked machine for the hub’s assistant', () => {
+  it('says the Assistant is the one changing a machine’s session settings (#659)', async () => {
     const calls: [string, unknown][] = []
     const reader = linkedSessions(() => [machine({ 'sessions.list': [{ id: 'w1', kind: 'worker' }] })], async (method, params) => {
       calls.push([method, params])
       return { id: 'm1.w1', applied: 'saved' }
     })
     await reader.updateSettings('m1.w1', { model: 'opus' })
-    // The machine broadcasts the change as the orchestrator's, so the hub's window still raises its toast
+    // The machine broadcasts the change as the Assistant's, so the hub's window still raises its toast
     expect(calls).toEqual([['agents.updateSettings', expect.objectContaining({ model: 'opus', by: 'orchestrator' })]])
   })
 
   it("changes no setting of a session the machine hides, though the machine would (#1941 review)", async () => {
     const calls: string[] = []
-    const rows = [{ id: 'orch', kind: 'orchestrator' }, { id: 'coord', kind: 'coordinator' }]
+    // `asst`: the Assistant of a machine of a later release, which sends the kind under the role's new name (#2133)
+    const rows = [{ id: 'orch', kind: 'orchestrator' }, { id: 'coord', kind: 'coordinator' }, { id: 'asst', kind: 'assistant' }]
     const reader = linkedSessions(() => [machine({ 'sessions.list': rows })], async (method) => {
       calls.push(method)
       return { id: 'm1.orch', applied: 'saved' }
     })
-    for (const id of ['m1.orch', 'm1.coord']) expect(await reader.updateSettings(id, { model: 'opus' })).toEqual({ ok: false, error: `Not a session Box shares: ${id}` })
+    for (const id of ['m1.orch', 'm1.coord', 'm1.asst']) expect(await reader.updateSettings(id, { model: 'opus' })).toEqual({ ok: false, error: `Not a session Box shares: ${id}` })
     expect(calls).toEqual([])
   })
 
@@ -105,7 +108,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await reader.hubAuto('m1')).toEqual({ ok: false, error: 'did not answer within 30 ms' })
   })
 
-  // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
+  // The Assistant's cap goes with the request (#838): a safe seat never starts a normal session on a machine
   it('creates a machine’s session under the preset the caller gives, normal when it gives none', async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
     const calls: [string, unknown][] = []
@@ -381,7 +384,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(await linkedSessions(() => [lines]).read('m1.w1', 40, { around: 3, offset: 2000 })).toEqual({ ok: true, state: 'idle', lines: plain })
   })
 
-  it('lists an away machine from the mirror without its orchestrator, and does not ask it', async () => {
+  it('lists an away machine from the mirror without its Assistant, and does not ask it', async () => {
     let asked = 0
     const away = machine(
       {},
@@ -389,7 +392,7 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
         reachable: false,
         mirror: {
           sessions: [
-            { id: 'orch', name: 'Orchestrator', projectId: null, state: 'idle', tool: 'claude', kind: 'orchestrator' },
+            { id: 'orch', name: 'Assistant', projectId: null, state: 'idle', tool: 'claude', kind: 'orchestrator' },
             { id: 'w1', name: 'Worker', projectId: 'gone', state: 'working', tool: 'claude', kind: 'worker' },
           ],
         },
@@ -443,7 +446,7 @@ describe("a linked machine in every session's list and search (#984)", () => {
     expect(notSearched).toEqual(['Slow box (did not answer within 30 ms)'])
   })
 
-  it("tells a reader from the mirror whether a machine's session's project is trusted, and nothing of its orchestrator (#1941)", () => {
+  it("tells a reader from the mirror whether a machine's session's project is trusted, and nothing of its Assistant (#1941)", () => {
     const m = machine(
       {},
       {
@@ -460,7 +463,7 @@ describe("a linked machine in every session's list and search (#984)", () => {
       },
     )
     const reader = linkedSessions(() => [m])
-    // An app's agent reads as its project does, a builder with no project as trusted; the orchestrator, one not held and a bare id as nothing
+    // An app's agent reads as its project does, a builder with no project as trusted; the Assistant, one not held and a bare id as nothing
     expect(['m1.w1', 'm1.w2', 'm1.ag', 'm1.bu', 'm1.or', 'm1.gone', 'w1'].map((id) => reader.readerFacts(id))).toEqual([
       { trusted: true },
       { trusted: false },
@@ -519,7 +522,7 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
     async function seat() {
       const store = new Store()
       store.sessions.upsertSession({
-        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Assistant', autoNamed: false,
         state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
         serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
         roleAppend: null, appId: null, ...sessionLiveDefaults(),
@@ -548,19 +551,19 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
     it('waits no longer than the lookup bound, and refuses a name that is also on the machine that did not answer', async () => {
       const { mgr, asked } = await seat()
       const t0 = Date.now()
-      const r = await mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })
+      const r = await mgr.runCentraluTool('orch', 'create_session', { project: 'site' })
       expect(Date.now() - t0).toBeLessThan(2000)
       expect(r.isError).toBe(true)
       expect(r.text).toContain('More than one project is called that; give its id: site [p-here] on this computer; site [m1.p-far] on Slow box (which could not be asked just now (did not answer within 30 ms))')
       // Its id settles it, and this computer's own id asks no machine at all
       const before = asked.length
-      expect(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'p-here' })).toMatchObject({ isError: false })
+      expect(await mgr.runCentraluTool('orch', 'create_session', { project: 'p-here' })).toMatchObject({ isError: false })
       expect(asked).toHaveLength(before)
     })
 
     it('names the machine that did not answer for a project only there, and sends it no create', async () => {
       const { mgr, asked } = await seat()
-      const r = await mgr.runOrchestratorTool('orch', 'create_session', { project: 'far' })
+      const r = await mgr.runCentraluTool('orch', 'create_session', { project: 'far' })
       expect(r).toMatchObject({ isError: true, text: 'Could not create it — far [m1.p-only] is on Slow box, which could not be asked just now (did not answer within 30 ms). Try again once its link is back.' })
       expect(asked).toEqual(['projects.list'])
     })
@@ -789,7 +792,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
     it('takes a project of this computer without waiting on a machine that is down, nor on an attempt to it', async () => {
       const store = new Store()
       store.sessions.upsertSession({
-        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+        id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Assistant', autoNamed: false,
         state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
         serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
         roleAppend: null, appId: null, ...sessionLiveDefaults(),
@@ -800,7 +803,7 @@ describe('a project lookup connects only the machine the act needs (#1532)', () 
       mgr.useLinkedReader(linkedSessions(() => [far]))
       try {
         const t0 = Date.now()
-        expect(await mgr.runOrchestratorTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
+        expect(await mgr.runCentraluTool('orch', 'create_session', { project: 'site' })).toMatchObject({ isError: false })
         expect(Date.now() - t0).toBeLessThan(400 * SLOW)
         expect(tried.count).toBe(0)
       } finally {
@@ -833,11 +836,11 @@ describe('takeInTurns', () => {
 })
 
 describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
-  /** A hub with its orchestrator, and links that accept every send and say the session finished with "all done" */
+  /** A hub with its Assistant, and links that accept every send and say the session finished with "all done" */
   async function hub() {
     const store = new Store()
     store.sessions.upsertSession({
-      id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
+      id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Assistant', autoNamed: false,
       state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
       roleAppend: null, appId: null, ...sessionLiveDefaults(),
@@ -871,11 +874,11 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       while (reports().length < n && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10))
       await new Promise((r) => setTimeout(r, 50))
     }
-    const send = (reportBack: boolean) => mgr.runOrchestratorTool('orch', 'send_to_session', { sessionId: 'm1.w1', text: 'go', reportBack })
+    const send = (reportBack: boolean) => mgr.runCentraluTool('orch', 'send_to_session', { sessionId: 'm1.w1', text: 'go', reportBack })
     cleanup.push(() => mgr.tenure.disposeAll())
     return {
       mgr, reports, settle, send,
-      /** What the orchestrator's agent answered: "echo: <what its model read>" for the scripted agent */
+      /** What the Assistant's agent answered: "echo: <what its model read>" for the scripted agent */
       messages: () => store.messages.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('echo: ') && t.includes('sourceSessionId: m1.w1')),
       failNext: () => (failSend = true),
       whileSending: (f: () => void) => (duringSend = f),
@@ -888,11 +891,11 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
   const cleanup: (() => Promise<void>)[] = []
 
   /*
-   * #1186 review: a machine's error event is whatever that machine sends, and it reached the hub orchestrator's input as
+   * #1186 review: a machine's error event is whatever that machine sends, and it reached the hub Assistant's input as
    * "Its tool's error (as JSON)". Only its kind does now. The scripted agent answers "echo: <what it was given>", so the
-   * orchestrator's reply is exactly what its model read
+   * Assistant's reply is exactly what its model read
    */
-  it("names a machine's error by its kind only in what the orchestrator's model reads", async () => {
+  it("names a machine's error by its kind only in what the Assistant's model reads", async () => {
     const h = await hub()
     await h.send(true)
     h.mgr.linkedHost.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
@@ -946,7 +949,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
   it("another instruction's record, or one this hub did not send, does not start the wait (#1082)", async () => {
     const h = await hub()
     h.whileSending(() => {
-      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'something else', from: { sessionId: 'm1._hub-orchestrator', name: 'Orchestrator' } })
+      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'something else', from: { sessionId: 'm1._hub-orchestrator', name: 'Assistant' } })
       h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', text: 'go' })
       h.mgr.linkedHost.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
     })
@@ -1032,7 +1035,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
 
   /*
    * A session there that ends its turn while its own background work runs has not finished (#723, as #721 here): the
-   * orchestrator hears that the work paused, once, and its report comes at the turn end with none of that work left.
+   * assistant hears that the work paused, once, and its report comes at the turn end with none of that work left.
    */
   describe('work that waits on its own background tasks there (#723)', () => {
     const verify = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
@@ -1059,7 +1062,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(1)
       expect(h.reports()[0]).toContain('[Centralu] The assigned work paused: its turn ended while its own background work is still running (pnpm verify).')
       expect(h.reports()[0]).toContain('A final report follows only if that work ends.')
-      // The orchestrator has no agent_session to stop it with
+      // The Assistant has no agent_session to stop it with
       expect(h.reports()[0]).not.toContain('agent_session')
       // A turn that ends while the work still runs says nothing more
       turn(h)
@@ -1116,7 +1119,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(2)
       expect(h.reports()[1]).toContain('[Centralu] The person took this session over; its later turns are theirs, and none of them will be reported to you.')
       expect(h.reports()[1]).toContain('no final report follows')
-      // What the orchestrator's model reads is Centralu's words with the id, never the task's own description
+      // What the Assistant's model reads is Centralu's words with the id, never the task's own description
       await eventually(() => h.messages().length === 2)
       expect(h.messages()[1]).toContain('The person took this session over')
       expect(h.messages()[1]).not.toContain('pnpm verify')

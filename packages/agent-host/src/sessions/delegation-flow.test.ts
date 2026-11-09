@@ -9,7 +9,7 @@ import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import type { AgentRunWait } from './app-agents.js'
 import { ChildOwnership, pausedReportKey, type Delegation } from './child-ownership.js'
 import { DelegationFlow, type DelegationHost } from './delegation-flow.js'
-import { ORCHESTRATOR_PLACE } from './start-agent-terms.js'
+import { ASSISTANT_PLACE } from './start-agent-terms.js'
 
 /*
  * The delegation flow over a host it reaches only through `DelegationHost` (#428). The host here is a proxy that fails
@@ -107,13 +107,13 @@ describe('the place a start holds', () => {
     expect(ceiling('caller', 'p1')).toBeNull()
   })
 
-  // #850: the orchestrator reaches agent_session only through centralu_run, and a bare call it copied from here was refused
-  it('names the wait in the form the orchestrator calls it', () => {
+  // #850: the Assistant reaches agent_session only through centralu_run, and a bare call it copied from here was refused
+  it('names the wait in the form the Assistant calls it', () => {
     meta.set('orch', session('orch', { kind: 'orchestrator', projectId: null }))
     meta.set('kid', session('kid', { projectId: null }))
     children.setDelegation('orch>kid', { callerId: 'orch', sessionId: 'kid', agent: true, settled: false } as unknown as Delegation)
-    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 1 }) as never, toolProfileOf: () => 'orchestrator' }))
-    expect(flow.starts.agentCeilingError('orch', ORCHESTRATOR_PLACE)).toBe(
+    const flow = new DelegationFlow(hostWith({ meta, children, store, uiPreferences: () => ({ agentCeiling: 1 }) as never, toolProfileOf: () => 'assistant' }))
+    expect(flow.starts.agentCeilingError('orch', ASSISTANT_PLACE)).toBe(
       '1 agents you started are already working, the most at once. ' +
         'Wait for one (centralu_run(command="agent_session", args={sessionId: …, action: "wait"})) or stop one, then try again.',
     )
@@ -328,9 +328,9 @@ describe("a child's turn and the call waiting on it", () => {
     expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
   })
 
-  // #850: the stop it names is one the caller can make; the orchestrator reaches agent_session only through centralu_run
+  // #850: the stop it names is one the caller can make; the Assistant reaches agent_session only through centralu_run
   it('names the stop of the held work in the form the caller calls it', async () => {
-    const flow = flowWith({ toolProfileOf: () => 'orchestrator' })
+    const flow = flowWith({ toolProfileOf: () => 'assistant' })
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const waiting = flow.awaitAgent('caller>child', d)
     running = [{ id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }]

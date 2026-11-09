@@ -45,7 +45,7 @@ export type NotificationsSlice = {
   dismissNotices(sessionIds: string[]): void
   /**
    * Sets the notification switches (#1306): shown at once, saved through the host's preferences (only the switches that
-   * changed, so the orchestrator's change to another one is not undone), and still written to the workspace snapshot for a
+   * changed, so the Assistant's change to another one is not undone), and still written to the workspace snapshot for a
    * build that reads it there.
    */
   setNotifyPolicy(p: NotifyPolicy): void

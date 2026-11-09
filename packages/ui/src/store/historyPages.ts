@@ -224,7 +224,7 @@ export function trimWindow(items: ChatItem[]): { items: ChatItem[]; oldestSeq: n
 /**
  * How long an off-screen conversation may grow before it is cut back to the window.
  *
- * Losing focus is not the only way a conversation grows out of sight: a worker the orchestrator
+ * Losing focus is not the only way a conversation grows out of sight: a worker the Assistant
  * started, a session an app asked for, a grid panel that is not the focused one — none of them is
  * ever focused and then left, so the trim in `focusSession` never reached them, and every event
  * (screenshots included, base64 and all) stayed in memory for the life of the window. Twice the

@@ -843,7 +843,7 @@ Platforms: all.
 Happened: Windows refuses to move a folder that is some process's cwd (EBUSY); a process stops answering
 `kill(pid, 0)` a few ms before it releases that handle (#360, #415).
 Rule: stop the process and wait for its tree before moving or removing its folder.
-Guard: `host/sessions/mcp-apps.test.ts` "removing a user-folder app drops it from the list and the orchestrator, and its
+Guard: `host/sessions/mcp-apps.test.ts` "removing a user-folder app drops it from the list and the Assistant, and its
 folder goes to app-trash" (catches EBUSY only on the Windows CI job).
 Platforms: Windows.
 
@@ -1029,7 +1029,7 @@ folder").
 Platforms: macOS, Linux.
 
 **SW5. Draining is bounded by what was measured.**
-Happened: measured 2026-10-04: orchestrator tools took at most 0.2 s and app tools at most 5.6 s over 88 calls; all
+Happened: measured 2026-10-04: Centralu tools took at most 0.2 s and app tools at most 5.6 s over 88 calls; all
 tool calls: p99 78 s, longest 4.5 h.
 Rule: drain only calls the host serves itself, 10 s, then cut with a retryable error. Since #1895 step 4 PR 5 only
 `host.stop {ifIdle}` drains (the swap's drain, and its rule to release the lock even if detach threw, went with it).

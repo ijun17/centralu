@@ -34,7 +34,7 @@ export class DelegationWaits {
   constructor(private readonly host: DelegationHost) {}
 
   /**
-   * "Working": the caller is told when the turn ends (#561), through the report the orchestrator's reportBack uses, unless
+   * "Working": the caller is told when the turn ends (#561), through the report the Assistant's reportBack uses, unless
    * a call is waiting on it by then (`awaitAgent` takes the marker down while it waits)
    */
   agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {

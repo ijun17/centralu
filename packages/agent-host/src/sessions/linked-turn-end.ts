@@ -28,7 +28,7 @@ export type LinkedTurnStep =
 
 /**
  * The one reading of a linked machine's turn (#428), for an ask_project task there (`AskProjectFlow.observeLinkedAsk`)
- * and the orchestrator's report from there (`LinkedReports`). Both used to classify on their own and had drifted: a
+ * and the Assistant's report from there (`LinkedReports`). Both used to classify on their own and had drifted: a
  * deleted session never settled the ask, an interrupted turn settled it as finished, and only one read a question as a
  * running turn. `busy` is whether the wait has seen the turn running, so a state the machine reports before the turn
  * starts is not taken for its end.

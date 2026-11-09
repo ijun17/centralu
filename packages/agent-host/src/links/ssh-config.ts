@@ -207,7 +207,7 @@ export function readSshConfig(opts: { file: string; home: string }): ConfigRead 
 
 /**
  * What `ssh -G <alias>` resolves: the three fields the dialog shows, and the proxy ssh would go through, which the
- * orchestrator's add_machine card shows too (#1219; null when none is set)
+ * Assistant's add_machine card shows too (#1219; null when none is set)
  */
 export type ResolvedHost = {
   hostName: string | null

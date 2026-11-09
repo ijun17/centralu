@@ -50,11 +50,11 @@ test('Centralu update consent offers session-only always by keyboard and click (
   expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null, 'session'])
 })
 
-test("the orchestrator's handoff card keeps its always to the asking session, by keyboard and click (#694)", async ({ page }) => {
+test("the Assistant's handoff card keeps its always to the asking session, by keyboard and click (#694)", async ({ page }) => {
   const sid = await sessionTyping(page)
   const card = page.getByTestId('approval-card')
   const handoff = (requestId: string) => page.evaluate(
-    ([sessionId, id]) => (window as any).__mock.requestApproval(sessionId, { kind: 'other', about: 'session_handoff', raw: 'Allow the orchestrator to hand off "Long run" to a fresh codex session?' }, id),
+    ([sessionId, id]) => (window as any).__mock.requestApproval(sessionId, { kind: 'other', about: 'session_handoff', raw: 'Allow the Assistant to hand off "Long run" to a fresh codex session?' }, id),
     [sid, requestId] as const,
   )
   await handoff('ho-key')

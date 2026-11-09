@@ -1,6 +1,6 @@
 
 /** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
-import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
+import { CENTRALU_MCP_NAME } from '../../sessions/centralu-tools.js'
 import type { ApprovalDecision, ApprovalDetail, ApprovalScope } from '@cc/protocol'
 import type { EventSink } from '../contract.js'
 import type { ServerRequest } from './client.js'
@@ -149,7 +149,7 @@ export class CodexRequests {
         return
       }
       // Only the server we loaded: without it, a `centralu` server could come from the person's own config.toml (#382)
-      const ours = p.serverName === ORCHESTRATOR_MCP_NAME && this.host.ownServer()
+      const ours = p.serverName === CENTRALU_MCP_NAME && this.host.ownServer()
       this.host.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
       return
     }

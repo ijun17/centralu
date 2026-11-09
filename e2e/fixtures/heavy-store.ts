@@ -159,7 +159,7 @@ const WORDS = (
   'the host keeps conversation window draws again after every restart session store event panel grid focus ' +
   'approval agent tool result call output message reasoning keeper relay socket token buffer memory trim ' +
   'virtual scroller row height measure layout render commit react state selector reducer migration index ' +
-  'search query worker orchestrator project branch worktree merge review test fails passes because when ' +
+  'search query worker assistant project branch worktree merge review test fails passes because when ' +
   'while before after only never always which where that this those these with without into from over ' +
   'under between page history cursor offset seq frame queue drain flush write read close open launch'
 ).split(' ')

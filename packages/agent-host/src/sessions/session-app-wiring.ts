@@ -1,6 +1,6 @@
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, appKeyOf, type AppReach, type NormalizedEvent, type PermissionPreset, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import type { SessionApps } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
@@ -11,7 +11,7 @@ import type { WhenAsked } from './asked-gate.js'
 import type { AppSessions, AppSessionsHost } from './app-sessions.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HostCards } from './host-cards.js'
-import type { OrchestratorProposals } from './orchestrator-proposals.js'
+import type { AssistantProposals } from './assistant-proposals.js'
 import type { RestartHost } from './restart-policy.js'
 import type { RoutedCardsHost } from './routed-cards.js'
 import { APP_NAMES_PREFIX, SessionAppsHub } from './session-apps.js'
@@ -19,10 +19,10 @@ import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueriesHost } from './tool-queries.js'
 import { isAppAgent } from './tool-profiles.js'
 
-/** `orchestrator_apps_notice:<session id>`: set once an orchestrator's first turn by a build since #1205 has gone in (purged with the session) */
+/** `orchestrator_apps_notice:<session id>`: set once an Assistant's first turn by a build since #1205 has gone in (purged with the session) */
 export const ROOT_APPS_NOTICE_PREFIX = 'orchestrator_apps_notice:'
 
-/** The line an orchestrator that had root apps attached reads once, on its first turn since #1205 */
+/** The line an Assistant that had root apps attached reads once, on its first turn since #1205 */
 export const ROOT_APPS_NOTICE =
   'Project apps are no longer attached by default: find them with the find_apps command (centralu_run) and attach the one you need.'
 
@@ -42,7 +42,7 @@ export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBounda
     /** An app's notice into a session that called it (#1161 item 1) — `TurnInputs.appNotice` */
     appNotice: (sessionId: string, text: string, app: { appId: string; projectId: string | null; name: string }) => Promise<void>
     readonly hostCards: Pick<HostCards, 'askCapability'>
-    migrateApprovedMcpServers: OrchestratorProposals['migrateApprovedMcpServers']
+    migrateApprovedMcpServers: AssistantProposals['migrateApprovedMcpServers']
     /** An app tool's call, asked about when a session's request is the session's turn (§9.7, #1447) */
     whenAsked: WhenAsked
   }
@@ -107,12 +107,12 @@ export class SessionAppWiring {
         /*
          * Only while the session holds the reader set (#382): attach_app and detach_app are part of it, so a
          * session the person turned the set off for (or that became a manager) would keep tools it can no
-         * longer detach. The records stay; they count again once the set is back. The orchestrator holds them
+         * longer detach. The records stay; they count again once the set is back. The Assistant holds them
          * as commands (#1205), for the root apps it attaches.
          */
         allowed: (session, app) => {
           const profile = this.host.toolProfileOf(session.id) ?? this.starting.get(session.id)?.profile ?? null
-          return (profile === 'reader' || (profile === 'orchestrator' && session.kind === 'orchestrator')) && (this.appAccess?.allowed(session, app) ?? false)
+          return (profile === 'reader' || (profile === 'assistant' && isAssistantKind(session.kind))) && (this.appAccess?.allowed(session, app) ?? false)
         },
       },
     })
@@ -143,7 +143,7 @@ export class SessionAppWiring {
     // filled in here
     rt.attachBrokerHost(this.brokerHost())
     // Migrates a previously approved MCP server into an app (A-7) — this runs before any session comes up, so
-    // the orchestrator has it from the very start
+    // the Assistant has it from the very start
     this.host.migrateApprovedMcpServers(rt)
   }
 
@@ -215,16 +215,16 @@ export class SessionAppWiring {
   }
 
   /**
-   * The line an orchestrator reads once, on its first turn since #1205, when it had root apps attached before: its earlier
+   * The line an Assistant reads once, on its first turn since #1205, when it had root apps attached before: its earlier
    * turns used `mcp__app-<id>__*` names that are gone now, and nothing else tells it why. Asked on every turn delivered;
-   * the first one for an orchestrator marks it (`ROOT_APPS_NOTICE_PREFIX`), whether or not there was anything to say,
-   * so a new orchestrator, or one that attaches a root app later, never reads it. "Had root apps" is read from the names
-   * it has seen (`session_app_names:<id>`, #1141): a project's key there, for an orchestrator, was a root app given to
+   * the first one for an Assistant marks it (`ROOT_APPS_NOTICE_PREFIX`), whether or not there was anything to say,
+   * so a new Assistant, or one that attaches a root app later, never reads it. "Had root apps" is read from the names
+   * it has seen (`session_app_names:<id>`, #1141): a project's key there, for an Assistant, was a root app given to
    * it, unless it is attached now (one carried through an adoption, `UserAppAdoptionRecords.carry`).
    */
   rootAppsNotice(sessionId: string): string | null {
     const m = this.host.meta.get(sessionId)
-    if (!m || m.kind !== 'orchestrator') return null
+    if (!m || !isAssistantKind(m.kind)) return null
     const settings = this.host.store.settings
     const key = `${ROOT_APPS_NOTICE_PREFIX}${sessionId}`
     if (settings.appSetting(key) !== null) return null
@@ -273,7 +273,7 @@ export class SessionAppWiring {
      * piece of text the app handed it.
      */
     if (this.isAppAgentSession(m)) return undefined
-    // A builder session receives its own app (C-3) — a user-folder app only ever goes to the orchestrator
+    // A builder session receives its own app (C-3) — a user-folder app only ever goes to the Assistant
     // under decision 4, so it is added here
     return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.host.builderRefOf(m) }) ?? undefined
   }

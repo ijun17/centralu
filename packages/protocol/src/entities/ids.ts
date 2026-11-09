@@ -100,7 +100,7 @@ export type PermissionPreset = z.infer<typeof PermissionPreset>
 /**
  * The preset a new session gets when none is named: `auto` in a trusted project, on this computer or a linked one, and
  * `normal` in an untrusted one, where the person approves each step (owner decision 2026-11-05; it was `edits` in a
- * trusted local project, #1525). The window reads it for the person's own start and the host for the orchestrator's
+ * trusted local project, #1525). The window reads it for the person's own start and the host for the Assistant's
  * `create_session`. It is only a default: a preset named at the start, in the settings menu, in a handoff or a fork wins,
  * and a session that exists keeps the preset it has.
  *

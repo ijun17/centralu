@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
@@ -62,10 +62,10 @@ export type MailHooks = {
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
-  /** The orchestrator's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
+  /** The Assistant's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
   roleMoved?(toSessionId: string): void
-  /** The session whose request the orchestrator's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
-  askedBy?(orchestratorId: string): Asker | null
+  /** The session whose request the Assistant's turn is, if a session asked for it (#1447, §9.7): its steps that change something ask the person, naming it */
+  askedBy?(assistantId: string): Asker | null
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
@@ -249,32 +249,32 @@ export class MailSessionsView {
   }
 
   /**
-   * Whether the session's seat has the mail tool (§9.1): `reader` and `orchestrator`. This is the receive rule (who may be written to, and who
+   * Whether the session's seat has the mail tool (§9.1): `reader` and `assistant`. This is the receive rule (who may be written to, and who
    * is woken by mail, and told of a child's report by mail), and it does not look at the process: a process the keeper handed over after a
    * swap is still the session's, and mail is for the session
    */
   canReadMail(sessionId: string): boolean {
     const profile = this.host.tools.toolProfileOf(sessionId)
-    return profile === 'reader' || profile === 'orchestrator'
+    return profile === 'reader' || profile === 'assistant'
   }
 
-  /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the orchestrator's `centralu_run` */
-  mailSeats(orchestratorHasMailCommand: () => boolean): { mailTool(id: string): boolean; mailCommand(id: string): boolean } {
+  /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the Assistant's `centralu_run` */
+  mailSeats(assistantHasMailCommand: () => boolean): { mailTool(id: string): boolean; mailCommand(id: string): boolean } {
     return {
       mailTool: (id) => this.canReadMail(id),
-      mailCommand: (id) => this.host.tools.toolProfileOf(id) === 'orchestrator' && orchestratorHasMailCommand(),
+      mailCommand: (id) => this.host.tools.toolProfileOf(id) === 'assistant' && assistantHasMailCommand(),
     }
   }
 
   /**
-   * Why sessions may not ask the orchestrator now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
-   * person's card; that needs the orchestrator's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
-   * the orchestrator run a command or write a file unasked, so it is not taken
+   * Why sessions may not ask the Assistant now, or null when they may (§9.7, #1447). A request is run with every step that is not a read behind the
+   * person's card; that needs the Assistant's tool to put each step of its own to the host (`gatesSteps`). Where it cannot, a request could have
+   * the Assistant run a command or write a file unasked, so it is not taken
    */
-  orchestratorAsks(): string | null {
-    const orchestrator = [...this.host.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (!orchestrator || this.host.adapters.get(orchestrator.tool)?.capabilities.gatesSteps === true) return null
-    return 'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
+  assistantAsks(): string | null {
+    const assistant = [...this.host.meta.values()].find((m) => isAssistantKind(m.kind))
+    if (!assistant || this.host.adapters.get(assistant.tool)?.capabilities.gatesSteps === true) return null
+    return 'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead'
   }
 
   /** `ChildOwnership.latestTurnInputs`: who gave what may have entered the session's latest turn, which a stop notice quotes only to its one asker */

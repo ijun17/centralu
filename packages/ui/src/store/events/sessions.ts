@@ -22,7 +22,7 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
   }
 
   /*
-   * The orchestrator changed this session's settings (#30).
+   * The Assistant changed this session's settings (#30).
    *
    * The toast is the point — if a setting changed by a hand other than the person's quietly seeped
    * into the screen, the next person to open the menu would be baffled by a value they never chose.
@@ -59,7 +59,7 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
        * nothing from the person. The same for a change a client made through `agents.updateSettings` (#659): the
        * caller's own toast says what it did, and the values here are the ones it chose.
        */
-      ...(what && e.by !== 'tool' && !e.person ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
+      ...(what && e.by !== 'tool' && !e.person ? { toast: `Assistant changed ${cur0.name}: ${what}` } : {}),
     }))
     /*
      * Fields a list that is still out must not write back over (#642): the merge keeps a value that differs from the
@@ -77,7 +77,7 @@ export function sessionEvent(e: NormalizedEvent, sessionId: string, set: StoreSe
 /** `session_created`, `session_owner` and `session_deleted` */
 export function sessionListEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): boolean {
   /*
-   * The only notice for a session the host created on its own (#69) — the orchestrator's
+   * The only notice for a session the host created on its own (#69) — the Assistant's
    * `create_session`, or a manager set up by worktree adoption. Without this, such a session did
    * not appear until after a reconnect, and any event that arrived before that stayed stuck in the
    * holding pen forever (its release condition was "once registered," and nothing was there to

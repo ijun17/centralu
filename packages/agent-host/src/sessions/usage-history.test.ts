@@ -31,9 +31,9 @@ describe('historyRows (docs/agent-host.md §6.2)', () => {
     expect(hours.map((r) => r.period)).toEqual([DAY + 9 * HOUR, DAY + 10 * HOUR, DAY + 30 * HOUR].map((t) => new Date(t).toISOString()))
   })
 
-  it('groups by project, model or tool, naming the orchestrator and the default model', () => {
+  it('groups by project, model or tool, naming the Assistant and the default model', () => {
     const rows = (by: 'project' | 'model' | 'tool') => historyRows(buckets, { groupBy: 'day', by }, names).map((r) => [r.key, r.name])
-    expect(rows('project')).toEqual([['p1', 'Project One'], [NO_PROJECT_KEY, 'Orchestrator']])
+    expect(rows('project')).toEqual([['p1', 'Project One'], [NO_PROJECT_KEY, 'Assistant']])
     expect(rows('model')).toEqual([['opus', 'opus'], ['sonnet', 'sonnet']])
     expect(rows('tool')).toEqual([['claude', 'claude'], ['codex', 'codex']])
     expect(historyRows([bucket({ model: '' })], { groupBy: 'day', by: 'model' }, names)[0]!.name).toBe('Default model')

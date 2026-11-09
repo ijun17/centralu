@@ -40,7 +40,7 @@ centralu/
 │  │     ├─ events.ts           # the NormalizedEvent family
 │  │     ├─ commands.ts         # request/response RPC (RpcMethods), spread from commands/methods/; re-exports commands/
 │  │     ├─ commands/           # the shapes its methods carry: sessions (SessionInfo), projects, files; methods/
-│  │     │                      #   holds the methods by concept: sessions, orchestrator, projects, terminal, apps,
+│  │     │                      #   holds the methods by concept: sessions, assistant, projects, terminal, apps,
 │  │     │                      #   host, settings, mail. Each concept's schemas the host alone parses are in
 │  │     │                      #   <concept>.params.ts, the answers a window reads in .results.ts (methodsOf joins
 │  │     │                      #   them in <concept>.ts)
@@ -95,7 +95,7 @@ centralu/
 │  │     ├─ features/           # vertical split by feature (§2 below)
 │  │     │  ├─ inbox/  session/  approval/  notices/  sidebar/  grid/  palette/
 │  │     │  ├─ git/  files/  viewer/  evidence/  project/
-│  │     │  ├─ orchestrator/     # the orchestrator's screen and proposals
+│  │     │  ├─ assistant/     # the Assistant's screen and proposals
 │  │     │  ├─ app-frame/  pinned-app/  app-share/   # external apps' views and their sharing
 │  │     │  ├─ machines/         # machine tags, adding a folder on a linked machine
 │  │     │  └─ usage/  settings/  onboarding/
@@ -103,7 +103,7 @@ centralu/
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     │                      #   store.ts builds the one store out of these parts (#428):
 │  │     │  └─ state.ts (the types: `AppState` is the intersection of the per-concept types in state/)
-│  │     │     state/ (one type per concept: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, orchestrator)
+│  │     │     state/ (one type per concept: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, assistant)
 │  │     │     historyPages.ts (history pages merged with the screen)
 │  │     │     screens.ts (which screen is on)  appKeys.ts (how an app and its views are named)
 │  │     │     sessionList.ts (the sessions it holds: host lists merged in, events held for one not yet listed)
@@ -114,7 +114,7 @@ centralu/
 │  │     │     connection.ts (attaching to the host, reconnect recovery, the workspace snapshot)
 │  │     │     history.ts (reading a conversation's history pages and a launch card's steps)
 │  │     │     updates.ts (Centralu's update and the agent CLIs' versions)  machines.ts (linked machines)
-│  │     │     orchestrator.ts (the orchestrator and its proposals)
+│  │     │     assistant.ts (the Assistant and its proposals)
 │  │     │     layout.ts (how the window is arranged)  navigation.ts (which screen, back and forward)
 │  │     │     selectors.ts (derived state)  transcript.ts (a conversation's rows)  layers.ts (open layers)
 │  │     │     navHistory.ts  panelLayout.ts  foldGroups.ts  reloadBudget.ts  viewReconnect.ts  app-catalog.ts
@@ -126,8 +126,8 @@ centralu/
 │        ├─ lifecycle/          # a start's steps, the readiness gate, shutdown and endings
 │        ├─ transport/          # WS server, session handshake, the event log
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract (contract.ts); each tool's usage
-│        │                      #   reader (usage.ts) and the orchestrator's MCP server (claude/orchestrator-mcp.ts,
-│        │                      #   codex/orchestrator-bridge.mjs)
+│        │                      #   reader (usage.ts) and the Assistant's MCP server (claude/centralu-mcp.ts,
+│        │                      #   codex/centralu-bridge.mjs)
 │        │                      #   each tool's index.ts is the adapter, session.ts its session, with the session's
 │        │                      #   parts beside it (#850): claude/ session-cards, session-servers, permissions, sdk-query,
 │        │                      #   refresh-race, tracked-input, schedule-look;
@@ -135,13 +135,13 @@ centralu/
 │        │                      #   launch-config, thread-open, turns, background-resume. codex/normalize.ts maps notifications, with what it reads beside
 │        │                      #   it: items, approvals, thread-settings, token-readings, child-tracker,
 │        │                      #   known-notifications. claude/normalize.ts maps messages, one family per file:
-│        │                      #   cli-messages, model-messages, turn-ending. contract.ts re-exports contract/: orchestrator,
+│        │                      #   cli-messages, model-messages, turn-ending. contract.ts re-exports contract/: assistant,
 │        │                      #   session-apps, process, surface. Shared by both: tool-result, file-changes, images, plan,
 │        │                      #   token-usage, tool-titles, retry-activity, session-kit, subagent-steps,
 │        │                      #   history-events, background-events (#843); surface-read and surface-drift read and
 │        │                      #   compare what a tool offers (#270): each tool's surface.ts fills the contract in, with
 │        │                      #   its surface-baseline.ts beside it, and surface-fixtures/ holds the recorded inputs
-│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, with its gates in agent-start-gates, the consent card in agent-consents, the model, effort and worktree-branch checks in agent-choices, requests that wait on the person or on memory in agent-start-requests, and what they share in start-agent-terms; agent_session in agent-session-actions, observed turns in observed-turns, forks in delegation-forks, the waits and their answers in delegation-waits, stopping a child's background work in background-stops, a child on a linked machine in remote-agents; what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes, session-start, session-events, tool-registry, approval-rules, project-registry, launch-inputs, session-layout, orchestrator-slot, linked-host, session-settings (#1143); the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
+│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, with its gates in agent-start-gates, the consent card in agent-consents, the model, effort and worktree-branch checks in agent-choices, requests that wait on the person or on memory in agent-start-requests, and what they share in start-agent-terms; agent_session in agent-session-actions, observed turns in observed-turns, forks in delegation-forks, the waits and their answers in delegation-waits, stopping a child's background work in background-stops, a child on a linked machine in remote-agents; what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, assistant-seat, restart-policy, worktree-sessions, transcript-view, assistant-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes, session-start, session-events, tool-registry, approval-rules, project-registry, launch-inputs, session-layout, assistant-slot, linked-host, session-settings (#1143); the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the Centralu tools' runner (centralu-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ mail/               # the mailbox's model (#1347, plans/mailbox.md): messages.ts is MessageService (send, read, settle, hold,
 │        │                      #   drain, sweep) over the message tables; host-mail.ts wires it with reach, turns, delivery and the tool;
 │        │                      #   person.ts is the person's window; frame.ts is the wake frame; rules, address and ids are what they stand on
@@ -199,4 +199,4 @@ features/inbox/
 
 - ui and agent-host have to share protocol **as the same types** — in separate repos version drift starts immediately.
 - 5 packages is not too much for solo development: each boundary gets build isolation through tsconfig `references` and becomes the unit for lint rules. Split the same thing into folders under one src/ instead and the boundaries become convention, and convention collapses in front of a deadline.
-- A build orchestrator like Turborepo is **not added now** — pnpm scripts are enough at this scale. Add it when the build gets slow (YAGNI).
+- A build assistant like Turborepo is **not added now** — pnpm scripts are enough at this scale. Add it when the build gets slow (YAGNI).

@@ -1,9 +1,10 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { APP_ARRIVAL_ID_PREFIX, appKeyOf, gridSessionIds, isAppArrivalId, isProposalId } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { foldGroupsHiding } from '../foldGroups.js'
 import { trimWindow, withoutClosedSteps } from '../historyPages.js'
 import { omitKey } from '../patch.js'
-import { orchestratorScreen } from '../orchestrator.js'
+import { assistantScreen } from '../assistant.js'
 
 /**
  * Picking the session the person looks at: `focusSession`, the one door a dozen call sites go
@@ -37,8 +38,8 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
   },
 
   openWaiting(id, opts) {
-    // A proposal's card only stands on the orchestrator's own screen, so `preferGrid` does not apply to it
-    if (isProposalId(id)) void get().openOrchestrator()
+    // A proposal's card only stands on the Assistant's own screen, so `preferGrid` does not apply to it
+    if (isProposalId(id)) void get().openAssistant()
     else if (isAppArrivalId(id)) {
       // An app a trusted project gained (#1141): its screen, and the notice is read
       const key = id.slice(APP_ARRIVAL_ID_PREFIX.length)
@@ -63,22 +64,22 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
      * Deselecting (`null`) leaves the view untouched, because that is not "look at this."
      */
     /*
-     * **The orchestrator goes to its own screen, not 'focus'** (a dogfooding bug).
+     * **The Assistant goes to its own screen, not 'focus'** (a dogfooding bug).
      *
-     * Turning on `view: 'focus'` unconditionally here meant clicking the orchestrator from the top
-     * bar's "waiting for response" list opened the orchestrator's conversation **inside the frame of
+     * Turning on `view: 'focus'` unconditionally here meant clicking the Assistant from the top
+     * bar's "waiting for response" list opened the Assistant's conversation **inside the frame of
      * the session screen.** Two symptoms came from that: the right-hand evidence lane came along
-     * (`App`'s `hasEvidenceLane` decides by `view` — the orchestrator has no repository to view), and
-     * the sidebar's orchestrator button looked unpressed (`active` also decides by `view`).
+     * (`App`'s `hasEvidenceLane` decides by `view` — the Assistant has no repository to view), and
+     * the sidebar's assistant button looked unpressed (`active` also decides by `view`).
      *
      * The fix belongs here for the same reason as the comment above: this function has a dozen call
      * sites (inbox, notification card, palette, approval banner, shortcuts, …). Even one of them
-     * meeting the orchestrator reproduces the same symptom, so the decision has to live in this one
+     * meeting the Assistant reproduces the same symptom, so the decision has to live in this one
      * place, not at each caller.
      */
     // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
     const onGrid = !!id && !!opts?.preferGrid && gridSessionIds(get().gridPanels).includes(id)
-    const orchestrator = !!id && (id === get().orchestratorId || get().sessions[id]?.kind === 'orchestrator')
+    const assistant = !!id && (id === get().assistantId || isAssistantKind(get().sessions[id]?.kind))
     /*
      * If the picked session's project is folded, it is unfolded (#205) — a picked session must also
      * be visible in the sidebar. The inbox, palette, notification card, next-waiting (⌘⇧A) and
@@ -115,22 +116,22 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       ...(get().composerFocusFor !== null && get().composerFocusFor !== id ? { composerFocusFor: null } : {}),
       ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== rowProject) } : {}),
       /*
-       * The orchestrator's screen shows the session `orchestratorId` names, and a run learns that id only by opening the
+       * The Assistant's screen shows the session `assistantId` names, and a run learns that id only by opening the
        * screen itself. A pick that arrives by another way (a mail, a notice, the waiting list) knows the session, so it
        * names it here, in the state change the sidebar's button makes (#1647); left unset, the screen showed its empty
        * start state over a conversation that exists, until the person went to the grid and back.
        */
-      ...(id && orchestrator && !onGrid && !picked?.machine ? orchestratorScreen(id) : {}),
+      ...(id && assistant && !onGrid && !picked?.machine ? assistantScreen(id) : {}),
       ...(id
         ? {
             /*
-             * The orchestrator can be placed on the grid too. If clicking its panel's composer or
+             * The Assistant can be placed on the grid too. If clicking its panel's composer or
              * notification got hijacked into the dedicated screen, "view side by side" would break
              * immediately. `preferGrid` is only ever the explicit intent `GridView` gives, so it is
              * the only case where the grid outranks the dedicated screen. A normal pick, like from
-             * the sidebar or the palette, still goes to the orchestrator's dedicated screen.
+             * the sidebar or the palette, still goes to the Assistant's dedicated screen.
              */
-            view: onGrid ? ('grid' as const) : orchestrator ? ('orchestrator' as const) : ('focus' as const),
+            view: onGrid ? ('grid' as const) : assistant ? ('assistant' as const) : ('focus' as const),
           }
         : {}),
       ...(projectId ? { focusedProjectId: projectId } : {}),

@@ -12,7 +12,7 @@ import type { PreferencesSlice } from './state/preferences.js'
 import type { AppsSlice } from './state/apps.js'
 import type { AppViewsSlice } from './state/appViews.js'
 import type { NavigationSlice } from './state/navigation.js'
-import type { OrchestratorSlice } from './state/orchestrator.js'
+import type { AssistantSlice } from './state/assistant.js'
 import type { MailSlice } from './state/mail.js'
 
 /**
@@ -49,5 +49,5 @@ export type AppState = ConnectionSlice &
   AppsSlice &
   AppViewsSlice &
   NavigationSlice &
-  OrchestratorSlice &
+  AssistantSlice &
   MailSlice

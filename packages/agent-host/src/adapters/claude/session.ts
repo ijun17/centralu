@@ -15,7 +15,7 @@ import { adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js
 import { MidTurnLedger } from '../core/mid-turn-ledger.js'
 import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
-import { appToolOf, editAskRuleExists, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
+import { appToolOf, editAskRuleExists, isCentraluToolName, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
 import type { ClaudeMessage } from './json.js'
 import { requestTurnHooks } from './request-hook.js'
@@ -101,7 +101,7 @@ export class ClaudeSession implements SessionHandle {
   private readonly stream: ClaudeStreamNormalizer
   /** The approval and question cards (see `ClaudeCards`) */
   private readonly cards: ClaudeCards
-  /** The orchestrator's server and the attached apps' proxies (see `ClaudeServers`) */
+  /** The Assistant's server and the attached apps' proxies (see `ClaudeServers`) */
   private readonly servers: ClaudeServers
   private stopAppWatch: (() => void) | null = null
   /**
@@ -164,7 +164,7 @@ export class ClaudeSession implements SessionHandle {
       query: () => this.query,
       warn: (text) => this.emit({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'apps', text }),
     })
-    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null, livePreset: () => this.livePreset })
+    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.centraluToolsServer !== null, livePreset: () => this.livePreset })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
       model: opts.model ?? null,
@@ -224,7 +224,7 @@ export class ClaudeSession implements SessionHandle {
       : {}
 
     /*
-     * Spaced out on Windows, so processes started together (the orchestrator waking its sessions, a
+     * Spaced out on Windows, so processes started together (the Assistant waking its sessions, a
      * grid) do not all refresh an expired sign-in at once (#353). An adopted process is already running.
      */
     if (!this.opts.processSource?.adopt) await this.launch.gate.turn()
@@ -243,7 +243,7 @@ export class ClaudeSession implements SessionHandle {
         codeIntelligence,
         spawn: (o) => (this.opts.processSource ? this.spawnProcess(o) : (this.proc = startToolProcess(o, { sessionId: this.sessionId }))),
         canUseTool: (toolName, toolInput, options) => this.cards.canUseTool(preset, toolName, toolInput, options),
-        hooks: requestTurnHooks(this.opts, () => this.servers.orchestratorServer !== null),
+        hooks: requestTurnHooks(this.opts, () => this.servers.centraluToolsServer !== null),
       }),
     }))
     // A usage probe (#726) is not a session anyone else may borrow: a model list asked meanwhile would use a query about to close
@@ -500,7 +500,7 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /**
-   * A call to one of our in-process servers (the orchestrator's tools, an app proxy) that was in
+   * A call to one of our in-process servers (the Centralu tools, an app proxy) that was in
    * flight when the previous host went away: the CLI asked that host, nobody will ever answer, and
    * the turn would wait forever. Measured (CLI 2.1.282, SDK 0.3.263, haiku, 2026-10-04): the
    * adopted claude sat silent for 8 s with the call open; `interrupt()` from the new owner ended
@@ -510,7 +510,7 @@ export class ClaudeSession implements SessionHandle {
    */
   private releaseLostCalls(q: QueryHandle): void {
     const open = this.opts.processSource?.adopt?.openCalls ?? []
-    const lost = open.filter((c) => isOrchestratorTool(c.tool) || appToolOf(c.tool) !== null)
+    const lost = open.filter((c) => isCentraluToolName(c.tool) || appToolOf(c.tool) !== null)
     if (lost.length === 0) return
     this.ledger.turnStarted(CLAUDE_TURN)
     this.stream.stopped()

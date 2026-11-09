@@ -5,7 +5,7 @@
  * behind a lock. When the access token has expired, every Claude process that starts refreshes it,
  * and one that finds another process mid-refresh ends its turn with "Failed to refresh OAuth token:
  * another Claude Code process is refreshing it". A terminal starts one process; Centralu can start
- * several in the same second (the orchestrator waking its sessions, a grid, app builders). Spacing
+ * several in the same second (the Assistant waking its sessions, a grid, app builders). Spacing
  * the starts lets the first refresh finish before the next process looks.
  *
  * Each call reserves the next free slot at once, so callers start in the order they asked; the

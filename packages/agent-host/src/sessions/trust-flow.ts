@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_DEPTH, ORCHESTRATOR_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
+import { DEFAULT_AGENT_DEPTH, ASSISTANT_CHANGE, UiPreferencesPatch, usesLines, type ExternalAppInfo, type ProjectInfo, type RpcResult, type UiPreferences } from '@cc/protocol'
 import type { AgentLimitChanges, TrustRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { appLabel, awayLine, findApp, findProject, onMachine, readProjects, shown, whereText, type Projects } from './app-lookup.js'
@@ -53,7 +53,7 @@ function appLines(a: ExternalAppInfo): string[] {
   const title = a.name?.trim() ? a.name : a.appId
   const description = a.description?.trim() ? `: ${plainQuoted(a.description.trim(), 2000)}` : ''
   const out = [`- ${shown(title)} (id ${shown(a.appId)})${description}`]
-  if (a.root) out.push('  This project is this app: the orchestrator and your other projects can use it.')
+  if (a.root) out.push('  This project is this app: the Assistant and your other projects can use it.')
   out.push(...asksLines(a, '  ', 'May ask to: '))
   return out
 }
@@ -95,13 +95,13 @@ const appsKey = (apps: readonly ExternalAppInfo[]): string =>
   JSON.stringify(apps.map((a) => [a.appId, !!a.root, a.uses ?? null]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))))
 
 /**
- * The orchestrator's trust commands (#1219, third slice): what changes what agents and apps may do. Each is the window's
+ * The Assistant's trust commands (#1219, third slice): what changes what agents and apps may do. Each is the window's
  * own call through the router (`projects.list`, `projects.setTrusted`, ...), so the host checks it as it checks the
  * window, and a linked machine's project is reached the way the window reaches it.
  *
  * **Widening waits for the person; narrowing does not.** Trusting a project lets its apps run and its setting files
  * apply, so it raises a card naming the project, its folder and each app with what it may ask for (the window's trust
- * card's words), every time, allow or deny only (`ORCHESTRATOR_CHANGE`). After Allow the project is read again: one
+ * card's words), every time, allow or deny only (`ASSISTANT_CHANGE`). After Allow the project is read again: one
  * removed, already trusted, or whose apps changed while the card stood (a pull brought a manifest) is not what the card
  * named, and nothing is trusted. Taking trust away asks too: the project's own deny rules and blocking hooks stop
  * applying with it (`untrust`).
@@ -403,7 +403,7 @@ export class TrustFlow {
   // ── The limits on agents ──
   //
   // How many agents may run per project, and how many levels of sessions may start agents. ("Let sessions look at other
-  // sessions" is not a setting any more, owner decision 2026-10-20: always on, so this has no field for it.) They bound what agents do and cost, the orchestrator's own children included, so every
+  // sessions" is not a setting any more, owner decision 2026-10-20: always on, so this has no field for it.) They bound what agents do and cost, the Assistant's own children included, so every
   // change asks, either way: the card names each limit with what it is and what it becomes, and after Allow the host
   // reads them again and changes nothing when one moved while the card stood.
 
@@ -437,9 +437,9 @@ export class TrustFlow {
 
   // ── The card ──
 
-  /** The trust card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
+  /** The trust card, allow or deny only (`ASSISTANT_CHANGE`): the refusal the Assistant reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal: AbortSignal | undefined, notDone: string): Promise<string | null> {
-    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return `The person did not approve it, so nothing was ${notDone}. Do not ask again unless they tell you to.`
     if (decision === null) return `The card was withdrawn before the person answered, so nothing was ${notDone}.`
     return null

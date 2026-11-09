@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { SessionInfo, type ToolName } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
-import { orchestratorHome } from './orchestrator-home.js'
+import { assistantHome } from './assistant-home.js'
 
 /**
  * Puts a coordinator in the store the way a build from before #372 left one (the control app's task foremen):
- * no project, its members in `scopeSessionIds`, its role text, the orchestrator's home as its folder, and no process.
+ * no project, its members in `scopeSessionIds`, its role text, the Assistant's home as its folder, and no process.
  * Nothing in this build creates a coordinator any more, so a test of how one reads, wakes and reports starts from the
  * row, and a `SessionManager` opened over the store afterwards finds it like any other session.
  */
@@ -39,6 +39,6 @@ export function plantOldCoordinator(
       appId: o.appId ?? null,
     }),
   )
-  store.sessions.setSessionCwd(id, orchestratorHome())
+  store.sessions.setSessionCwd(id, assistantHome())
   return id
 }

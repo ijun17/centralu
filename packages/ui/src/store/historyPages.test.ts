@@ -109,7 +109,7 @@ describe('mergePage: the newest page against the rows already on screen', () => 
 
   it('a message with the same words from another session is not taken for the person\'s unconfirmed one', () => {
     const rows = [said(1, 'go')]
-    rows[0]!.payload = { text: 'go', from: { sessionId: 'orch', name: 'Orchestrator' } }
+    rows[0]!.payload = { text: 'go', from: { sessionId: 'orch', name: 'Assistant' } }
     const merged = mergePage([live({ kind: 'user', text: 'go', pending: true })], read(rows), rows)
     expect(merged.map(text)).toEqual(['go', 'go'])
   })

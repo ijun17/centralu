@@ -15,7 +15,7 @@ module.exports = {
           // The bridge codex launches **directly** with `node <path>`. Having no import is
           // normal — the path is found at runtime by bridge-path.ts and copied into the bundle
           // by bundle.mjs.
-          'adapters/codex/orchestrator-bridge\\.mjs$',
+          'adapters/codex/centralu-bridge\\.mjs$',
           // The screen-side entry point of the app runtime — esbuild bundles it out to the app
           // template's runtime/mcp-app.js (build-app-runtime.mjs).
           'agent-host/app-runtime/src/view\\.mjs$',
@@ -39,8 +39,8 @@ module.exports = {
       name: 'host-app-guest-pass',
       comment: 'The host app contract does not lean on the layers that call it (#81, #97).',
       severity: 'error',
-      // The exception where contract.ts borrowed types from the orchestrator disappeared in
-      // #97 — those types are now defined by contract.ts, and the orchestrator takes them from
+      // The exception where contract.ts borrowed types from the Assistant disappeared in
+      // #97 — those types are now defined by contract.ts, and the Assistant takes them from
       // there instead. The built-in apps this rule was written for (control) are gone too; the
       // contract it still guards is the one the adapters and the runtime share.
       from: { path: '^packages/agent-host/src/apps/', pathNot: ['^packages/agent-host/src/apps/external/'] },

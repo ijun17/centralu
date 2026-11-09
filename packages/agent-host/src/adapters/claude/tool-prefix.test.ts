@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
-import type { OrchestratorTools, SessionHandle } from '../contract.js'
+import type { CentraluTools, SessionHandle } from '../contract.js'
 
 /**
  * The tool prefix of a Claude session does not move while the session lives (#513).
@@ -67,7 +67,7 @@ async function start(): Promise<void> {
       permissionPreset: 'normal',
       projectTrusted: true,
       apps: hub.attach(READER),
-      orchestratorTools: {} as OrchestratorTools,
+      centraluTools: {} as CentraluTools,
       toolProfile: 'reader',
     },
     () => {},

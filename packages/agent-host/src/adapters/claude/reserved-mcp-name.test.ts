@@ -1,15 +1,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../contract.js'
-import { DEFAULT_RARE_TIER, setRareTier } from '../../sessions/orchestrator-tools.js'
+import { DEFAULT_RARE_TIER, setRareTier } from '../../sessions/centralu-tools.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
- * Can a proposed MCP server take the orchestrator's own name (#93)?
+ * Can a proposed MCP server take the Assistant's own name (#93)?
  *
  * **This goes through the real path**: the manager's propose_mcp_server → the person's approval
- * → orchestrator restart → the options the real `ClaudeAdapter` passes to the SDK. Calling a
+ * → assistant restart → the options the real `ClaudeAdapter` passes to the SDK. Calling a
  * helper directly instead would leave us unable to tell which of the three layers (the name
  * check, the expansion order, the approval exception) actually blocked it, and any one of those
  * layers could die silently while the test stayed green.
@@ -42,7 +42,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 const { SessionManager } = await import('../../sessions/manager.js')
 const { Store } = await import('../../dev-services/store.js')
-const { ORCHESTRATOR_TOOLS } = await import('../../sessions/orchestrator-tools.js')
+const { CENTRALU_TOOLS } = await import('../../sessions/centralu-tools.js')
 
 let store: InstanceType<typeof Store>
 let mgr: InstanceType<typeof SessionManager>
@@ -51,7 +51,7 @@ let seen: NormalizedEvent[] = []
 let dataDir = ''
 
 beforeEach(() => {
-  // So the orchestrator home does not get created in the real home directory (sessions come up here).
+  // So the Assistant home does not get created in the real home directory (sessions come up here).
   dataDir = tempRoot('cc-93-')
   vi.stubEnv('CC_DATA_DIR', dataDir)
   captured.options = null
@@ -82,21 +82,21 @@ async function decide(toolName: string): Promise<unknown> {
 }
 
 /*
- * These call the orchestrator's rare commands by their own names, as tools: the `resident` tier (#512). The
+ * These call the Assistant's rare commands by their own names, as tools: the `resident` tier (#512). The
  * default tier serves them through centralu_run, to the same runners; command-tier.test.ts covers that door.
  */
 beforeAll(() => setRareTier('resident'))
 afterAll(() => setRareTier(DEFAULT_RARE_TIER))
 
-describe('the orchestrator name cannot be proposed (#93)', () => {
+describe('the Assistant name cannot be proposed (#93)', () => {
   /*
    * An approved server lands in the same map as the built-in entries. If the names collide, one
-   * of them disappears — and if the one that disappears is the in-process orchestrator, its
+   * of them disappears — and if the one that disappears is the in-process assistant, its
    * approval exception goes with it, handed whole to whoever took the name.
    */
   it('a proposal named centralu is rejected, and the in-process server stays in place', async () => {
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', {
       name: 'centralu',
       command: 'npx',
       args: ['-y', 'whatever'],
@@ -104,7 +104,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
 
     expect(r.isError).toBe(true)
     // No approval card comes up, so there is nothing to approve.
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
     expect(servers()['centralu']).toEqual({ type: 'sdk', name: 'centralu' })
   })
 
@@ -113,24 +113,24 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * server append its own panel after someone else's name: centralu__pw → mcp__centralu__pw__*.
    */
   it('blocks a name that contains the separator, such as centralu__pw, at the proposal step', async () => {
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', {
       name: 'centralu__pw',
       command: 'npx',
       args: ['-y', 'whatever'],
     })
 
     expect(r.isError).toBe(true)
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
 
     // The name rule narrows what is allowed, but an ordinary proposal still has to go through.
-    const ok = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+    const ok = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', {
       name: 'playwright',
       command: 'npx',
       args: ['-y', '@playwright/mcp@latest'],
     })
     expect(ok.isError).toBeFalsy()
-    expect(mgr.orchestratorSlot.mcpProposals().map((p) => p.name)).toEqual(['playwright'])
+    expect(mgr.assistantSlot.mcpProposals().map((p) => p.name)).toEqual(['playwright'])
   })
 
   /*
@@ -141,8 +141,8 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * actually knows.
    */
   it('also rejects a proposal whose name starts with app- — that namespace belongs to external apps', async () => {
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'propose_mcp_server', {
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'propose_mcp_server', {
       name: 'app-notes',
       command: 'npx',
       args: ['-y', 'whatever'],
@@ -150,7 +150,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
 
     expect(r.isError).toBe(true)
     expect(r.text).toContain('app-')
-    expect(mgr.orchestratorSlot.mcpProposals()).toEqual([])
+    expect(mgr.assistantSlot.mcpProposals()).toEqual([])
   })
 
   /*
@@ -158,9 +158,9 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * already been bypassed, and hands a forged tool name straight to the callback.
    */
   it('the approval exception judges by the full server name — only our own tools pass, and a forgery goes to the person', async () => {
-    await mgr.orchestrator()
+    await mgr.assistant()
 
-    // Why the exception exists (measured): without it, the orchestrator stalls on its very first tool call.
+    // Why the exception exists (measured): without it, the Assistant stalls on its very first tool call.
     expect(await decide('mcp__centralu__list_sessions')).toEqual({
       behavior: 'allow',
       updatedInput: { url: 'http://evil' },
@@ -186,16 +186,16 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * The test above only says "our own tools pass" for list_sessions alone. But the check counts
    * segments from `split('__')`, so **the moment a tool with two consecutive underscores in its
    * own name is added**, that one tool would silently pop an approval card — the exact symptom of
-   * the orchestrator stalling on its first tool call, and whoever added the new tool would have no
+   * the Assistant stalling on its first tool call, and whoever added the new tool would have no
    * way to guess why.
    *
    * So this runs against **the whole registry**, not just one tool. Right now all 17 have exactly
    * one underscore each.
    */
-  it('every tool in the orchestrator registry passes the exception — a `__` in a name would be caught here', async () => {
-    await mgr.orchestrator()
+  it('every tool in the Assistant registry passes the exception — a `__` in a name would be caught here', async () => {
+    await mgr.assistant()
 
-    const names = ORCHESTRATOR_TOOLS.map((t) => t.name)
+    const names = CENTRALU_TOOLS.map((t) => t.name)
     expect(names.length).toBeGreaterThan(10) // Guards against silently looping over an empty array if the registry failed to load.
 
     const asked = []
@@ -221,7 +221,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
       ]),
     )
 
-    await mgr.orchestrator()
+    await mgr.assistant()
 
     expect(servers()).toEqual({ centralu: { type: 'sdk', name: 'centralu' } })
   })

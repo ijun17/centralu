@@ -261,7 +261,7 @@ export function ChatStream({
   /*
    * The conversation fades in as it opens (owner, 2026-10-18), started by hand when the list stops hiding. A CSS
    * transition on the class was not enough: when the list settled within one frame (already at the bottom), the hidden
-   * state was never painted, so there was nothing to transition from, and some opens (the orchestrator's, often) just
+   * state was never painted, so there was nothing to transition from, and some opens (the Assistant's, often) just
    * appeared.
    */
   const wasSettling = useRef(false)
@@ -276,7 +276,7 @@ export function ChatStream({
     wasSettling.current = settling
   }, [settling, fadeIn])
   /*
-   * An open that never settles (nothing to land on, or a screen such as the orchestrator's that shows a conversation
+   * An open that never settles (nothing to land on, or a screen such as the Assistant's that shows a conversation
    * already in place) fades in too: one frame after it opens, unless a landing has started by then, whose end fades it.
    */
   useLayoutEffect(() => {

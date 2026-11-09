@@ -201,7 +201,7 @@ describe('purging a session for good', () => {
 })
 
 describe('restoring a session', () => {
-  function restoring(session: Partial<SessionInfo>, orchestratorId: string | null = null) {
+  function restoring(session: Partial<SessionInfo>, assistantId: string | null = null) {
     const upserted: SessionInfo[] = []
     const meta = new Map<string, SessionInfo>()
     const base = { id: 's', kind: 'session', worktree: null, ...session } as SessionInfo
@@ -215,7 +215,7 @@ describe('restoring a session', () => {
       store: {
         projects: { listProjects: () => [] },
         trash: { trashedSession: () => ({ session: base, record: { projectId: null } }), restoreSession: async () => base },
-        sessions: { orchestratorId: () => orchestratorId, upsertSession: (s: SessionInfo) => upserted.push(s) },
+        sessions: { assistantId: () => assistantId, upsertSession: (s: SessionInfo) => upserted.push(s) },
         // A session started from a linked computer keeps its mark here (#1273); none of these was
         settings: { appSetting: () => null },
       },
@@ -240,9 +240,9 @@ describe('restoring a session', () => {
     expect(upserted).toEqual([])
   })
 
-  it('refuses an orchestrator while another one is in place, and restores it when none is', async () => {
+  it('refuses an Assistant while another one is in place, and restores it when none is', async () => {
     const taken = restoring({ kind: 'orchestrator', state: 'idle' }, 'other')
-    await expect(taken.trash.restoreSession('s')).rejects.toThrow('Another orchestrator is in place')
+    await expect(taken.trash.restoreSession('s')).rejects.toThrow('Another assistant is in place')
     expect(taken.meta.size).toBe(0)
     const free = restoring({ kind: 'orchestrator', state: 'idle' }, null)
     await expect(free.trash.restoreSession('s')).resolves.toBeDefined()

@@ -91,7 +91,7 @@ export type AppResourceResult = { contents: ({ uri: string } & Record<string, un
 /**
  * One new app (M4 C-1) — `projectId` null means a new project of its own (#1141): a folder `<parent>/<id>`, in
  * `~/Centralu` without `parent`, whose root is the app. `tool` is the builder session's tool; if absent the host picks
- * one (the project's default tool, or the orchestrator's tool for a new app project).
+ * one (the project's default tool, or the Assistant's tool for a new app project).
  */
 export type NewAppSpec = { projectId: string | null; id: string; name: string; description?: string; tool?: ToolName; parent?: string }
 
@@ -202,7 +202,7 @@ export interface AppsPort {
   remove(appId: AppId, projectId: string | null, machine?: MachineRef): Promise<void>
   /**
    * Creates a new app from a template (M4 C-1) — called by the "New app" window. The same
-   * door as the orchestrator's `create_app`. The host validates the name, trust and any
+   * door as the Assistant's `create_app`. The host validates the name, trust and any
    * existing id; a rejection carries the reason as the error message (the window stays open
    * as it was). Does not start the app.
    */

@@ -24,6 +24,7 @@ packages/agent-host/src/adapters/codex/app-bridge.test.ts
 packages/agent-host/src/adapters/codex/apps.test.ts
 packages/agent-host/src/adapters/codex/bridge-reconnect.test.ts
 packages/agent-host/src/adapters/codex/bridge-utf8.test.ts
+packages/agent-host/src/adapters/codex/centralu-bridge.mjs
 packages/agent-host/src/adapters/codex/client.test.ts
 packages/agent-host/src/adapters/codex/detect.test.ts
 packages/agent-host/src/adapters/codex/edit-grants.test.ts
@@ -38,7 +39,6 @@ packages/agent-host/src/adapters/codex/native.ts
 packages/agent-host/src/adapters/codex/not-installed.test.ts
 packages/agent-host/src/adapters/codex/notices.test.ts
 packages/agent-host/src/adapters/codex/notices.ts
-packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs
 packages/agent-host/src/adapters/codex/project-trust.test.ts
 packages/agent-host/src/adapters/codex/rollout.test.ts
 packages/agent-host/src/adapters/codex/rollout.ts
@@ -264,6 +264,9 @@ packages/agent-host/src/sessions/app-sessions.ts
 packages/agent-host/src/sessions/app-upkeep-commands.test.ts
 packages/agent-host/src/sessions/ask-project.test.ts
 packages/agent-host/src/sessions/ask-project.ts
+packages/agent-host/src/sessions/assistant-asked.test.ts
+packages/agent-host/src/sessions/assistant-home.ts
+packages/agent-host/src/sessions/assistant-seat.test.ts
 packages/agent-host/src/sessions/auto-boundaries.test.ts
 packages/agent-host/src/sessions/auto-compact.test.ts
 packages/agent-host/src/sessions/background-tasks-swap.test.ts
@@ -296,9 +299,9 @@ packages/agent-host/src/sessions/mail-delivery.test.ts
 packages/agent-host/src/sessions/mail-readback.test.ts
 packages/agent-host/src/sessions/mail-trash.test.ts
 packages/agent-host/src/sessions/mail-turn-swap.test.ts
+packages/agent-host/src/sessions/manager-assistant.test.ts
 packages/agent-host/src/sessions/manager-handoff.test.ts
 packages/agent-host/src/sessions/manager-messages.test.ts
-packages/agent-host/src/sessions/manager-orchestrator.test.ts
 packages/agent-host/src/sessions/manager-projects.test.ts
 packages/agent-host/src/sessions/manager-resume.test.ts
 packages/agent-host/src/sessions/manager-updates.test.ts
@@ -309,9 +312,6 @@ packages/agent-host/src/sessions/mcp-apps.test.ts
 packages/agent-host/src/sessions/memory-gate.ts
 packages/agent-host/src/sessions/message-image.test.ts
 packages/agent-host/src/sessions/opened-settings.test.ts
-packages/agent-host/src/sessions/orchestrator-asked.test.ts
-packages/agent-host/src/sessions/orchestrator-home.ts
-packages/agent-host/src/sessions/orchestrator-seat.test.ts
 packages/agent-host/src/sessions/preferences-commands.test.ts
 packages/agent-host/src/sessions/project-creation.ts
 packages/agent-host/src/sessions/project-registry.ts

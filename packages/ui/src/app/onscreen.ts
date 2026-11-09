@@ -13,11 +13,11 @@
  * This animation's whole job is to tell the body, and only the body, the single fact that "what
  * is being looked at right now has finished".
  */
-export type View = 'focus' | 'grid' | 'orchestrator' | 'app'
+export type View = 'focus' | 'grid' | 'assistant' | 'app'
 
 export type Onscreen = {
   focusedSessionId: string | null
-  orchestratorId: string | null
+  assistantId: string | null
   /** The sessions on the grid (#288: the grid also holds apps, which never finish a turn) */
   gridSessions: readonly string[]
   /** The builder session whose conversation is open beside the visible pinned screen (M4 B-2)
@@ -34,7 +34,7 @@ export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolea
    * person is watching finish, the way the builder pane's turns did before `builderPaneSessionId`.
    */
   if (view === 'focus') return ctx.focusedSessionId ? ctx.focusedSessionId === sessionId : !!ctx.projectScreen?.includes(sessionId)
-  if (view === 'orchestrator') return ctx.orchestratorId === sessionId
+  if (view === 'assistant') return ctx.assistantId === sessionId
   /*
    * The pinned screen (M4 B-2) occupies the main area — the only visible conversation is the one
    * builder session opened beside it (BuilderPane). While that one was also counted as "not

@@ -38,7 +38,7 @@ export type QueryHandle = AsyncIterable<ClaudeMessage> &
      * **Replaces the whole set** of dynamically attached MCP servers (sdk.d.ts). The in-process
      * server originally passed via `mcpServers` is also part of this set (measured in the
      * installed sdk.mjs from 0.3.263: the initial SDK server sits in the same map) — so every call
-     * has to carry the orchestrator server along with everything else.
+     * has to carry the Assistant server along with everything else.
      */
     setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ added: string[]; removed: string[]; errors: Record<string, string> }>
   }
@@ -49,7 +49,7 @@ export type ClaudeQueryInputs = {
   opts: CreateSessionOpts
   /** The `claude` to run (`ClaudeLinks.prepare`), or undefined for the SDK's own lookup */
   executablePath: string | undefined
-  /** The orchestrator's server and the attached apps' (`ClaudeServers.mcpServers`) */
+  /** The Assistant's server and the attached apps' (`ClaudeServers.mcpServers`) */
   servers: Record<string, McpServerConfig>
   /** The permission mode the CLI starts in (`permissionOptionsFor`) */
   permissionOptions: { permissionMode: PermissionMode }
@@ -171,14 +171,14 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * version's SDK already passes it); an older CLI refuses an unknown option and would not start.
      */
     extraArgs: { 'thinking-display': 'summarized' },
-    // MCP servers — the orchestrator's tools and any attached external apps (including approved MCP servers). See mcpServers().
+    // MCP servers — the Centralu tools and any attached external apps (including approved MCP servers). See mcpServers().
     ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
     /*
-     * Which settings files get read (settingSourcesFor) — orchestrator/coordination sessions
+     * Which settings files get read (settingSourcesFor) — assistant/coordination sessions
      * **never read instructions from a file.**
      *
      * A worker session only has permissions in its own project, but it can still write files.
-     * If it wrote an instruction into the orchestrator's own folder, the orchestrator — which
+     * If it wrote an instruction into the Assistant's own folder, the Assistant — which
      * can instruct every session — would read that as its own instruction: a path from low
      * privilege to high privilege.
      *
@@ -195,7 +195,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     ...settingSourcesFor(opts),
     // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
     ...(opts.readableDirs?.length ? { additionalDirectories: opts.readableDirs } : {}),
-    ...(opts.orchestratorTools
+    ...(opts.centraluTools
       ? {
           /*
            * The role is guaranteed here, not by a file. AGENTS.md is a file the person can

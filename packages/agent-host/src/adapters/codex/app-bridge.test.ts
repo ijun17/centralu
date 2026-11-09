@@ -51,7 +51,7 @@ class NullAdapter implements AgentAdapter {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }
   async createSession(opts: CreateSessionOpts) {
-    if (opts.orchestratorBridge) handedBridge.set(opts.sessionId, opts.orchestratorBridge)
+    if (opts.centraluBridge) handedBridge.set(opts.sessionId, opts.centraluBridge)
     return new Handle(opts.sessionId)
   }
 }
@@ -163,7 +163,7 @@ describe('app bridge — end to end, seen from Codex\'s own spot', () => {
 
   it('the bridge of an app not attached to that session cannot call anything — the host decides this, not the bridge', async () => {
     const s = await worker()
-    // A user-folder app is only attached to the orchestrator
+    // A user-folder app is only attached to the Assistant
     const { request } = bridge(s.id, 'app-helper')
     await request('initialize', {})
     const list = await request('tools/list')

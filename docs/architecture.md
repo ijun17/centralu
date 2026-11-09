@@ -228,7 +228,7 @@ an update, which the next host continues. The control socket, its protocol and i
 
 Clients never learn a host's own port. The keeper listens on one loopback port for its whole life, the **front
 door**, and relays every connection byte for byte to whichever host is current. The webview, a browser and every
-Codex orchestrator bridge connect there.
+Codex Centralu tools bridge connect there.
 
 | Decision | Why |
 |---|---|
@@ -245,7 +245,7 @@ started A's build again if B failed. Since the host's children became its own (�
 update anyway, so the swap kept only the door's address across builds, and an update is now the keeper's stop instead
 (§4.5). Since PR 5 a host started with `--standby` exits before it touches the data folder, so a keeper of an earlier
 build that still swaps fails with its running host untouched, and `activate` and `drain` get no answer
-([plans/keeper-removal.md](plans/keeper-removal.md) §4). The drain's 10 s bound came from a real store: orchestrator
+([plans/keeper-removal.md](plans/keeper-removal.md) §4). The drain's 10 s bound came from a real store: assistant
 tools took at most 0.2 s and app tools at most 5.6 s, while draining every tool was never an option (p99 78 s, max 4.5 h).
 
 **App views opening during a swap (#580).** A relaunched window used to attach to the keeper's existing host, request

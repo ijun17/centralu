@@ -16,7 +16,7 @@ export class StepsV41ToV47 extends MigrationRange {
          *                   `output` included (#221)
          *
          * **A table of its own, not a column on `messages`.** Every reader of a session reads `messages`: a history
-         * page, unread (`MAX(seq)`), the handoff record, `read_session`, `recall`, the orchestrator's memory, the
+         * page, unread (`MAX(seq)`), the handoff record, `read_session`, `recall`, the Assistant's memory, the
          * preview, history sync. With a column, each of them would have to filter it, and the one that forgot would
          * hand a subagent's tool output to another session's prompt (#73) or count it as unread. Here they skip it by
          * reading what they read today, and the only way in is `loadSubagentMessages`, which names one launch card.

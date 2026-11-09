@@ -278,7 +278,7 @@ describe('a session stops without answering a question', () => {
     expect(notices[1]).toContain(`gamma stopped with an error before it answered ${yours.id}`)
   })
 
-  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered; a request to the orchestrator is one', () => {
+  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered; a request to the Assistant is one', () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
     // Even a task that were marked as needing a reply is the report path's, not this one's
@@ -300,7 +300,7 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(C)).toHaveLength(1)
   })
 
-  it.each(CAUSES)("$why: a request to the orchestrator is released with that cause and its sender told, as a crash's turnsLost tells it 'lost'", ({ why }) => {
+  it.each(CAUSES)("$why: a request to the Assistant is released with that cause and its sender told, as a crash's turnsLost tells it 'lost'", ({ why }) => {
     const w = stopWorld()
     const request = w.ask(A, ORC, 'can you look at CI?')
     const quiet = why === 'quit' || why === 'shutdown'

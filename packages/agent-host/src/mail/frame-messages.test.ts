@@ -143,7 +143,7 @@ describe('the calls a wake names (§11.3)', () => {
     ])
   })
 
-  it('writes the orchestrator’s calls as the command behind centralu_run, which cannot be called bare (#850)', () => {
+  it('writes the Assistant’s calls as the command behind centralu_run, which cannot be called bare (#850)', () => {
     const v2 = mailCalls(2, 'command')
     expect([v2.read(), v2.read('X'), v2.answer('X'), v2.done('X'), v2.inbox(), v2.sessions()]).toEqual([
       'centralu_run(command="mail", args={action: "read"})',

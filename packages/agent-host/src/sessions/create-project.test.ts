@@ -13,7 +13,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import { itSymlink } from '../link.test-helpers.js'
 
 /**
- * Making a new project (#515): `projects.create` from a dialog, and the orchestrator's create_project behind an approval
+ * Making a new project (#515): `projects.create` from a dialog, and the Assistant's create_project behind an approval
  * card. Every folder here is under a temp root; the "home" is a folder in it handed to the manager, so nothing is
  * ever made in the home of whoever runs the tests.
  */
@@ -133,12 +133,12 @@ describe('projects.create', () => {
   })
 })
 
-describe('create_project (the orchestrator)', () => {
+describe('create_project (the Assistant)', () => {
   it.each(['auto', 'safe', 'normal'] as const)('%s: create_project follows the caller preset on every call', async (preset) => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await mgr.updateSettings(orc.id, { permissionPreset: preset })
     for (const name of ['first', 'second']) {
-      const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name })
+      const call = mgr.runCentraluTool(orc.id, 'create_project', { name })
       if (preset !== 'auto') {
         await eventually(() => !!card(orc.id))
         expect(existsSync(join(centralu, name))).toBe(false)
@@ -152,8 +152,8 @@ describe('create_project (the orchestrator)', () => {
   })
 
   it('raises a card with the full path, makes nothing until the person approves, then makes and registers it', async () => {
-    const orc = await mgr.orchestrator()
-    const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })
+    const orc = await mgr.assistant()
+    const call = mgr.runCentraluTool(orc.id, 'create_project', { name: 'shop' })
     await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail).toEqual({ kind: 'project_create', name: 'shop', path: join(centralu, 'shop') })
     expect(mgr.listSessions().find((s) => s.id === orc.id)?.state).toBe('waiting_approval')
@@ -173,8 +173,8 @@ describe('create_project (the orchestrator)', () => {
   })
 
   it('makes nothing when the person denies it', async () => {
-    const orc = await mgr.orchestrator()
-    const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })
+    const orc = await mgr.assistant()
+    const call = mgr.runCentraluTool(orc.id, 'create_project', { name: 'shop' })
     await eventually(() => !!card(orc.id))
     mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     const r = await call
@@ -186,13 +186,13 @@ describe('create_project (the orchestrator)', () => {
 
   it('refuses a taken name before any card, and a name taken while the card stood, after it', async () => {
     mkdirSync(join(centralu, 'old'), { recursive: true })
-    const orc = await mgr.orchestrator()
-    const early = await mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'old' })
+    const orc = await mgr.assistant()
+    const early = await mgr.runCentraluTool(orc.id, 'create_project', { name: 'old' })
     expect(early.isError).toBe(true)
     expect(early.text).toMatch(/already in/)
     expect(card(orc.id)).toBeUndefined()
 
-    const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'late' })
+    const call = mgr.runCentraluTool(orc.id, 'create_project', { name: 'late' })
     await eventually(() => !!card(orc.id))
     mkdirSync(join(centralu, 'late'))
     writeFileSync(join(centralu, 'late', 'keep.txt'), 'mine')
@@ -204,9 +204,9 @@ describe('create_project (the orchestrator)', () => {
   })
 
   it('withdraws the card when the call is stopped, and makes nothing', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const stop = new AbortController()
-    const tools = (mgr as unknown as { orchestratorToolsFor(id: string): { createProject: (s: { name: string }, signal?: AbortSignal) => Promise<{ ok: boolean }> } }).orchestratorToolsFor(orc.id)
+    const tools = (mgr as unknown as { centraluToolsFor(id: string): { createProject: (s: { name: string }, signal?: AbortSignal) => Promise<{ ok: boolean }> } }).centraluToolsFor(orc.id)
     const call = tools.createProject({ name: 'shop' }, stop.signal)
     await eventually(() => !!card(orc.id))
     stop.abort()
@@ -216,12 +216,12 @@ describe('create_project (the orchestrator)', () => {
   })
 
   it('"always" on the card makes this one folder and remembers nothing', async () => {
-    const orc = await mgr.orchestrator()
-    const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'one' })
+    const orc = await mgr.assistant()
+    const call = mgr.runCentraluTool(orc.id, 'create_project', { name: 'one' })
     await eventually(() => !!card(orc.id))
     mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'always')
     expect((await call).isError).toBeFalsy()
-    const second = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'two' })
+    const second = mgr.runCentraluTool(orc.id, 'create_project', { name: 'two' })
     // Asked again: nothing was remembered
     await eventually(() => !!card(orc.id))
     mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')

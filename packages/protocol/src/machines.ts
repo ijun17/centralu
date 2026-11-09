@@ -396,9 +396,9 @@ export function turnsRunning(a: HostActivity | null | undefined): number {
 }
 
 /*
- * What a hub's orchestrator reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).
- * The machine answers with the orchestrator's own code, in its own terms (its ids, its project names), over the view
- * the hub's window has: every session but its orchestrator and coordinators. The hub qualifies the ids and names the
+ * What a hub's Assistant reads about a linked machine's sessions (docs/plans/remote-hub.md §12, phase 4 step 1).
+ * The machine answers with the Assistant's own code, in its own terms (its ids, its project names), over the view
+ * the hub's window has: every session but its Assistant and coordinators. The hub qualifies the ids and names the
  * machine. Text fields are the machine's words; the hub fences them before a model reads them
  */
 

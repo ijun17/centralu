@@ -44,7 +44,7 @@ const EFFECTS: Record<string, (p: Record<string, unknown>) => string> = {
   'agents.archiveIfAtRest': () => 'The session moves to the session archive if that loses nothing it holds.',
   'agents.deleteAgentChild': (p) =>
     `The session moves to the session archive, and the worktree on the branch ${plainQuoted(str(p.worktreeBranch), 120)} is deleted when nothing in it would be lost.`,
-  'agents.deleteOrchestratorSkill': (p) => `The orchestrator skill ${plainQuoted(str(p.name), 120)} is deleted.`,
+  'agents.deleteOrchestratorSkill': (p) => `The Assistant skill ${plainQuoted(str(p.name), 120)} is deleted.`,
   'projects.delete': () => "Centralu's records of the project are erased: its sessions, their conversations, its search index and approval rules. Its folder stays.",
   'apps.remove': () => "The app's folder moves to app-trash in the data folder, and it is taken off every session it was attached to.",
   'machines.remove': () => "The machine is unlinked: its sessions and projects leave this computer's lists.",

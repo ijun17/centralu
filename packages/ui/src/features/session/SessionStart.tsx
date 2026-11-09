@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { useEffect, useMemo, useState } from 'react'
 import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
@@ -61,7 +62,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   // Asked with the session's own preset and role (#1562 review): the switch keeps both, so a tool must keep them too
   const preset = useStore((s) => s.sessions[sessionId]?.permissionPreset ?? 'normal')
   // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
-  const roleText = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator' || s.sessions[sessionId]?.kind === 'coordinator')
+  const roleText = useStore((s) => isAssistantKind(s.sessions[sessionId]?.kind) || s.sessions[sessionId]?.kind === 'coordinator')
   const demands = useMemo(() => ({ permissionPreset: preset, projectTrusted: trusted, roleText }), [preset, trusted, roleText])
   const refusal = useRefusals(list, demands, machine ?? undefined)
 

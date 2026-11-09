@@ -138,7 +138,7 @@ export type MessageCalls = {
 
 /**
  * The calls in the form a receiver makes them (§11.3): `version` is the tool schema its process was started with (2: `send` and `done` by `id`; 1: `reply`
- * and `handled` by `thread`), `form` the tool itself or `centralu_run` for the orchestrator, which cannot call a command bare (#850). Version 1 has no
+ * and `handled` by `thread`), `form` the tool itself or `centralu_run` for the Assistant, which cannot call a command bare (#850). Version 1 has no
  * `sessions` action; it is told the version-2 call
  */
 export function mailCalls(version: 1 | 2, form: 'plain' | 'command'): MessageCalls {

@@ -44,7 +44,7 @@ const REFUSALS = [
   'not_yours',
   'repeat',
   'ask_rate',
-  'orchestrator_asks',
+  'assistant_asks',
   'removed',
   'untrusted_project',
 ] as const
@@ -74,7 +74,7 @@ export function postsPerMinute(sender: SenderClass): number {
   return sender === 'session' ? 30 : sender === 'app' ? 10 : Infinity
 }
 
-/** A session's new requests to the orchestrator an hour (§9.7, #1447) */
+/** A session's new requests to the Assistant an hour (§9.7, #1447) */
 export const ASKS_PER_HOUR = 5
 
 /** The same words from the same sender in the same thread within this long are one post (§7.9) */
@@ -151,7 +151,7 @@ export const REMINDER = {
 /** The words of the refusals mail itself raises (§15, S9 and S15), without the `Refused (<reason>): ` the tool puts in front. `name` is the address until the tool resolves names */
 export const REFUSAL_TEXT = {
   gone: (address: string) => `${address} is gone: it is in the session archive or deleted.`,
-  no_mailbox: () => 'that session cannot read mail: only an ordinary session in a project, or the orchestrator, has the mail tool',
+  no_mailbox: () => 'that session cannot read mail: only an ordinary session in a project, or the Assistant, has the mail tool',
   elsewhere: (address: string) => `${address} is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.`,
   unknown_message: (id: string) => `there is no message ${id} you can read; check the id with mail(action="inbox").`,
   own_message: (id: string) => `${id} is your own message; say who it is for with to="…".`,
@@ -160,9 +160,9 @@ export const REFUSAL_TEXT = {
   withheld: (id: string) => `${id} is a request: its words are shown in the turn it starts, and it is marked done there.`,
   not_yours: (id: string) => `you were not sent ${id} and did not send it.`,
   repeat: (name: string) => `you sent the same text to ${name} less than ${REPEAT_WINDOW_MS / 60_000} minutes ago.`,
-  ask_rate: () => `your project's sessions asked the orchestrator ${ASKS_PER_HOUR} times in the last hour; wait, or write to the person.`,
-  orchestrator_asks: () =>
-    'the orchestrator runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead',
+  ask_rate: () => `your project's sessions asked the Assistant ${ASKS_PER_HOUR} times in the last hour; wait, or write to the person.`,
+  assistant_asks: () =>
+    'the Assistant runs on a tool that cannot ask the person for each step of a request yet, so a session cannot ask it: write to the person instead',
   untrusted_project: (project: string, target: string) =>
     `your project ${project} is not trusted, so work you give outside it (to ${target}) waits for the person to trust ${project}. Nothing was started. Centralu shows the person how, and tells you when ${project} is trusted; give it again then.`,
 } as const
@@ -206,7 +206,7 @@ export function wakesMessage(m: Pick<MailRow, 'facts'>): boolean {
  * Whether an answer is delivered quietly (D3): it needs no reply, to a message that needed none, and nothing about its sender or its words says the
  * receiver must act. It wakes when it is `urgent`, from the person, from the receiver's parent, or from a session with an unsettled task to the receiver
  * (`owesTask`, which the caller reads with `newestTask`); and an answer to a task or to a `needsReply` message always wakes. An answer that is a
- * request to the orchestrator (`request`, §7.6) is work for it, so it never is quiet: D3 and §7.6 meet here
+ * request to the Assistant (`request`, §7.6) is work for it, so it never is quiet: D3 and §7.6 meet here
  */
 export function quietAnswer(
   m: Pick<MailRow, 'kind' | 'sender' | 'needsReply' | 'urgent'>,
@@ -219,12 +219,12 @@ export function quietAnswer(
   )
 }
 
-/** One group of the receiver's work due now: a task, or for the orchestrator one asker's requests (`key`) */
+/** One group of the receiver's work due now: a task, or for the Assistant one asker's requests (`key`) */
 export type WorkPick = {
   key: string
   /** The person's words, or urgent mail: they decide */
   decides: boolean
-  /** A request to the orchestrator that waits for an answer (a task has no `needsReply`) */
+  /** A request to the Assistant that waits for an answer (a task has no `needsReply`) */
   needsReply: boolean
   dueAt: number
 }
@@ -260,11 +260,11 @@ export function pickWork(candidates: readonly WorkPick[], now: number): string |
 
 /**
  * Whether a body is inline in the wake (§8.2 step 4), after the frame and quoted: the person's words; a `task` from a session to a session that is
- * not the orchestrator; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the orchestrator. Everything else is pulled
- * with `mail read`: a session's words to the orchestrator never flow down, whatever their kind
+ * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant. Everything else is pulled
+ * with `mail read`: a session's words to the Assistant never flow down, whatever their kind
  */
-export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toOrchestrator: boolean; fromParent: boolean }): boolean {
+export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean }): boolean {
   if (f.fromPerson) return true
-  if (!f.fromSession || f.toOrchestrator) return false
+  if (!f.fromSession || f.toAssistant) return false
   return f.kind === 'task' || (f.kind === 'message' && f.fromParent)
 }

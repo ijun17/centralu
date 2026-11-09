@@ -117,9 +117,11 @@ export const UpdateSettingsParams = z.object({
   permissionPreset: PermissionPreset.optional(),
   /**
    * Whose hand makes the call (#659). Absent means a person's client, which is announced without a toast. The
-   * orchestrator's settings tool on a linked machine sends `orchestrator`, so the machine broadcasts the change as the
-   * orchestrator's and the window still toasts it. A host from before this field strips it, and then says nothing.
+   * Assistant's settings tool on a linked machine sends `orchestrator` (the wire value keeps its old name,
+   * docs/plans/assistant-rename.md), so the machine broadcasts the change as the Assistant's and the window still
+   * toasts it. A host from before this field strips it, and then says nothing. `assistant` is the same hand under the
+   * role's new name, which a hub of a later release sends (#2133 step 4); this build accepts both and sends the old one.
    */
-  by: z.literal('orchestrator').optional(),
+  by: z.enum(['orchestrator', 'assistant']).optional(),
 })
 export type UpdateSettingsParams = z.infer<typeof UpdateSettingsParams>

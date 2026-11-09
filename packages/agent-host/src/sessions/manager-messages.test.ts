@@ -154,7 +154,7 @@ describe('approvals, read state, and messages', () => {
     const gone = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
-    // What its turn's end would have consumed: an orchestrator's report, a restart for an app change
+    // What its turn's end would have consumed: an Assistant's report, a restart for an app change
     internals.children.adoptReport(gone.id, 'orchestrator', null)
     internals.restartPolicy.appsRestartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
@@ -459,7 +459,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
  * A tool's whole record (#221) — a call's `input`, a result's `output` — is kept in the store and goes nowhere else.
  *
  * Not to the UI: one `cat` of a large file would ride the broadcast and every history page. And not to another session
- * (#73): `read_session`, `recall`, the handoff record, `list_sessions` and the orchestrator's memory read the card at
+ * (#73): `read_session`, `recall`, the handoff record, `list_sessions` and the Assistant's memory read the card at
  * most. The secrets below sit where the card does not reach — past the result's first 300 characters, and in an input
  * field the title does not show — so any of them turning up means the record leaked.
  */
@@ -503,10 +503,10 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
     expect(leaks(store.messages.loadMessages(a.id, 50))).toEqual([])
     expect(leaks(store.messages.loadMessagesFrom(a.id, 0, 50))).toEqual([])
 
-    const orc = await mgr.orchestrator()
-    const tools = adapter.lastOrchestratorTools!
+    const orc = await mgr.assistant()
+    const tools = adapter.lastCentraluTools!
     expect(leaks(await tools.readSession(a.id, 40, { tools: true }))).toEqual([])
-    expect(leaks(await mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
+    expect(leaks(await mgr.runCentraluTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
     for (const q of [INPUT_SECRET, OUTPUT_SECRET, 'npm run build']) {
       expect((await tools.recall(q)).hits).toEqual([])
       expect(await rpc('messages.search', { query: q })).toEqual([])
@@ -518,7 +518,7 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
     expect(leaks(record.text)).toEqual([]) // …and the record is not
     expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
 
-    // The orchestrator's own tool calls are not carried into its next process's prompt either
+    // The Assistant's own tool calls are not carried into its next process's prompt either
     adapter.handleOf(orc.id)!.emitToolRecord('c-orc', 'npm run build', input, output)
     await mgr.processes.switchTool(orc.id, 'codex')
     await mgr.processes.resumeSession(orc.id)
@@ -531,7 +531,7 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
  * card's steps.
  *
  * Every reader of a session reads its conversation: a history page, unread, the handoff record and note, `read_session`,
- * `recall`, search, `list_sessions`, the orchestrator's memory. None of them may see a subagent's steps — its tool
+ * `recall`, search, `list_sessions`, the Assistant's memory. None of them may see a subagent's steps — its tool
  * output reaching another session's prompt is the path #73 closed — and none may count them. The subagent's words may go
  * to the screen that opens its card (the broadcast, `messages.subagent`); its tool input and output go nowhere.
  */
@@ -620,10 +620,10 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 
   it('another session never reads them: read_session, recall, search, list_sessions, the handoff record and note, the memory', async () => {
     const { a, h } = await setup()
-    const orc = await mgr.orchestrator()
-    const tools = adapter.lastOrchestratorTools!
+    const orc = await mgr.assistant()
+    const tools = adapter.lastCentraluTools!
     expect(leaks(await tools.readSession(a.id, 40, { tools: true }))).toEqual([])
-    expect(leaks(await mgr.runOrchestratorTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
+    expect(leaks(await mgr.runCentraluTool(orc.id, 'read_session', { sessionId: a.id, tools: true }))).toEqual([])
     for (const q of [INPUT_SECRET, OUTPUT_SECRET, WORDS, THOUGHT]) {
       expect((await tools.recall(q)).hits).toEqual([])
       expect(await rpc('messages.search', { query: q })).toEqual([])
@@ -646,7 +646,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     expect(note).toMatch(/NOTE: the boundaries test holds\.$/)
     expect(leaks(note)).toEqual([])
 
-    // The orchestrator's own subagent is not carried into its next process's prompt either
+    // The Assistant's own subagent is not carried into its next process's prompt either
     for (const e of subagentWork(orc.id)) adapter.handleOf(orc.id)!.emitEvent(e)
     await mgr.processes.switchTool(orc.id, 'codex')
     await mgr.processes.resumeSession(orc.id)

@@ -78,7 +78,7 @@ export class HostCards {
   readonly answeredApprovals = new Map<string, string>()
 
   /**
-   * The Allow the person just gave for one call (#1447, `AskedGate`): the orchestrator, in a turn a session's request started, runs a step the person
+   * The Allow the person just gave for one call (#1447, `AskedGate`): the Assistant, in a turn a session's request started, runs a step the person
    * allowed on that session's behalf, and the cards that step raises itself are not raised a second time. It belongs to the call, not to the session:
    * it travels with the call's own async work (a card of another call, or of the same session raised from elsewhere, is not covered), and it ends
    * when the call returns or its signal fires, so a step that outlives its turn does not answer the person's later cards

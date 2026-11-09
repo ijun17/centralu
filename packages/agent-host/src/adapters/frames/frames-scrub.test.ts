@@ -142,7 +142,7 @@ describe('scrubbing Codex’s frames', () => {
         params: {
           cwd: MAC_CWD,
           config: {
-            mcp_servers: { centralu: { command: '/opt/homebrew/Cellar/node/26.1.0/bin/node', args: ['/Users/alice/work/packages/agent-host/src/adapters/codex/orchestrator-bridge.mjs'], env: { CC_HOST_URL: 'ws://127.0.0.1:55501', CC_BRIDGE_TOKEN: 'ccb1:5f87ace6-4f22-4f28-a061-ce47a1ce47a1:FSTY7D4gMKh9Gu3w6VXv3rP-Jfox', CC_SESSION_ID: '988fabc8-f6d7-4ba3-950a-7db6e6ab3792' } } },
+            mcp_servers: { centralu: { command: '/opt/homebrew/Cellar/node/26.1.0/bin/node', args: ['/Users/alice/work/packages/agent-host/src/adapters/codex/centralu-bridge.mjs'], env: { CC_HOST_URL: 'ws://127.0.0.1:55501', CC_BRIDGE_TOKEN: 'ccb1:5f87ace6-4f22-4f28-a061-ce47a1ce47a1:FSTY7D4gMKh9Gu3w6VXv3rP-Jfox', CC_SESSION_ID: '988fabc8-f6d7-4ba3-950a-7db6e6ab3792' } } },
             projects: { [MAC_CWD]: { trust_level: 'untrusted' }, '/private/var/folders/ab/cdef123456': { trust_level: 'untrusted' }, '/private/var/folders/ab': { trust_level: 'untrusted' } },
           },
         },

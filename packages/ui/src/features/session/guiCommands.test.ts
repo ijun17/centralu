@@ -7,7 +7,7 @@ describe('which text is a GUI command', () => {
     expect(guiCommandFor('/usage summarize last week')).toBeNull()
   })
 
-  // #1143 U17: the box before the orchestrator exists has no session to open a menu for
+  // #1143 U17: the box before the Assistant exists has no session to open a menu for
   it('leaves out a command that acts on a session when there is none', () => {
     expect(guiCommandFor('/model')?.name).toBe('model')
     expect(guiCommandFor('/model', false)).toBeNull()

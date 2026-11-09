@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import { liveHeirOf } from './handoff-heirs.js'
@@ -8,7 +9,7 @@ import { plainQuoted } from './tool-answers.js'
  * handoff): was it deleted (the archive keeps the row), which live session took over from it by a handoff (the same generation
  * walk as the delete's, `liveHeirOf`), and which live sessions of the same project now carry its name, so the caller can retry
  * at once. Only names the candidates; nothing is ever done to one for the caller. Every tool that takes a session id to send to
- * or read goes through this (orchestrator-seat's scope and read errors, agent_session's). Names are another session's text, so
+ * or read goes through this (assistant-seat's scope and read errors, agent_session's). Names are another session's text, so
  * they are quoted as plain text.
  */
 export function staleSessionHint(
@@ -16,20 +17,20 @@ export function staleSessionHint(
   id: string,
   /** The sessions this caller may name: the ones its tools would accept */
   visible: (s: SessionInfo) => boolean,
-  /** The caller sees every project (the central orchestrator, which lists the archive anyway); else only those of the sessions it can name */
+  /** The caller sees every project (the Assistant, which lists the archive anyway); else only those of the sessions it can name */
   seesAll = false,
   /** What the caller was doing, for the closing sentence */
   doing: 'send' | 'read' | 'act' = 'act',
 ): string {
   // A live session that is out of this caller's view is not a stale id: say nothing that would tell it more
   if (host.meta.has(id)) return ''
-  const live = [...host.meta.values()].filter((s) => s.kind !== 'orchestrator' && visible(s))
+  const live = [...host.meta.values()].filter((s) => !isAssistantKind(s.kind) && visible(s))
   // An archived session of a project the caller cannot see is refused as a missing one: its name is not for it
   const found = host.store.trash.trashedSession(id)
   const trashed = found && (seesAll || live.some((s) => s.projectId === found.record.projectId)) ? found : null
   const heirId = liveHeirOf(host.store, id, (h) => {
     const s = host.meta.get(h)
-    return !!s && s.kind !== 'orchestrator' && visible(s)
+    return !!s && !isAssistantKind(s.kind) && visible(s)
   })
   const heir = heirId ? host.meta.get(heirId) : undefined
   // Not in the archive and no heir: nothing is known of the id, so nothing is added

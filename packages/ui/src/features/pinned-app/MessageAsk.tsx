@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { useMemo } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -14,9 +15,9 @@ import { projectLabelOf, useToolMeta } from '../../store/selectors.js'
  *
  * The text about to be sent is shown exactly as it is. The person reading that text and choosing is
  * the entirety of this confirmation. A non-text part (an image, etc.) is not sent, and that fact is
- * stated. The list ranks this app's own project sessions first, then the orchestrator and other
- * projects' sessions. A user-folder app has no project, so the orchestrator comes first (decision 4:
- * a user-folder app belongs to the orchestrator).
+ * stated. The list ranks this app's own project sessions first, then the Assistant and other
+ * projects' sessions. A user-folder app has no project, so the Assistant comes first (decision 4:
+ * a user-folder app belongs to the Assistant).
  */
 export type MessageAskState = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
@@ -91,17 +92,17 @@ function Target({ session, project, onPick }: { session: SessionSummary; project
       <span className="readout flex size-[14px] shrink-0 items-center justify-center rounded-sm border border-line-strong text-2xs text-ink">
         {meta.mark}
       </span>
-      <span className="truncate">{session.kind === 'orchestrator' ? 'Orchestrator' : session.name}</span>
+      <span className="truncate">{isAssistantKind(session.kind) ? 'Assistant' : session.name}</span>
       {project && <span className="ml-auto shrink-0 truncate text-2xs text-ink-faint">{project}</span>}
     </button>
   )
 }
 
-/** Sessions it can be sent to, nearest first — this app's project, the orchestrator, then the rest */
+/** Sessions it can be sent to, nearest first — this app's project, the Assistant, then the rest */
 export function messageTargets(all: SessionSummary[], projectId: string | null): SessionSummary[] {
   const rank = (s: SessionSummary) => {
     if (projectId && s.projectId === projectId) return 0
-    if (s.kind === 'orchestrator') return 1
+    if (isAssistantKind(s.kind)) return 1
     return 2
   }
   return [...all].sort((a, b) => rank(a) - rank(b))

@@ -3,7 +3,7 @@ import { PermissionPreset, type ToolName } from '@cc/protocol'
 import { recordedScenarios, recordingFile, REPLAYED } from '../../packages/agent-host/src/adapters/frames/replay-agent.test-helpers.js'
 import { inFolder, loadRecording, type Recording } from '../../packages/agent-host/src/adapters/frames/replay.test-helpers.js'
 import { scenariosFor } from '../../packages/agent-host/src/adapters/frames/scenarios.test-helpers.js'
-import { ORCHESTRATOR_MCP_NAME } from '../../packages/agent-host/src/apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../../packages/agent-host/src/apps/contract.js'
 import { openFolds } from './folds.js'
 import { openSession, type ReplayHost, type ReplayRun, startReplayHost } from './replay-host.js'
 
@@ -39,7 +39,7 @@ export type Held = {
 }
 
 /** Whether the MCP server's calls are drawn with a mark of their own: Centralu's own tools and an attached app's */
-const marked = (server: string): boolean => server === ORCHESTRATOR_MCP_NAME || server.startsWith('app-')
+const marked = (server: string): boolean => server === CENTRALU_MCP_NAME || server.startsWith('app-')
 
 /** The tool's frames, read for `Held`; one per recorded tool */
 const HELD: Record<string, (recording: Recording) => Held> = {

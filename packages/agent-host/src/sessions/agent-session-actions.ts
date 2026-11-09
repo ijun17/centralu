@@ -1,4 +1,4 @@
-import { liveBackgroundTasks } from '@cc/protocol'
+import { liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { ASK_WAIT_MS } from './ask-project.js'
@@ -116,11 +116,11 @@ export class AgentSessionActions {
     }
     const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
     const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
-    // The orchestrator works on the children it started outside any project (#853), and on no other session
-    const seat = caller?.projectId ? 'project' : caller?.kind === 'orchestrator' ? 'orchestrator' : null
-    const owns = seat === 'orchestrator' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
+    // The Assistant works on the children it started outside any project (#853), and on no other session
+    const seat = caller?.projectId ? 'project' : isAssistantKind(caller?.kind) ? 'assistant' : null
+    const owns = seat === 'assistant' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
     if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
-      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'orchestrator' || s.askedBy === callerId))}` }
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.${child ? '' : staleSessionHint(this.host, opts.sessionId, (s) => s.projectId === caller?.projectId && s.id !== callerId && (seat !== 'assistant' || s.askedBy === callerId))}` }
     }
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')

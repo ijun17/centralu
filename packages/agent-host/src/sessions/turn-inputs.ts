@@ -63,7 +63,7 @@ export class TurnInputs {
     attachments?: Attachment[],
     /*
      * Who sent this (FR-11). Empty when the person sent it — that is the default, so no migration was
-     * needed. Only the orchestrator's send_to_session and a reportBack reply ever fill this in. The
+     * needed. Only the Assistant's send_to_session and a reportBack reply ever fill this in. The
      * screen uses it to draw "what the person said" and "what another session instructed" differently.
      */
     from?: { sessionId: string; name: string },
@@ -95,7 +95,7 @@ export class TurnInputs {
    * the delegation report it owes, here or (a linked session's, asked of this hub) on a machine. `null` when it owes none.
    */
   reportOwed(sessionId: string): { callerId: string; callerName: string } | null {
-    const callerId = this.host.children.awaitingReport.get(sessionId) ?? this.host.children.linkedReports.get(sessionId)?.orchestratorId
+    const callerId = this.host.children.awaitingReport.get(sessionId) ?? this.host.children.linkedReports.get(sessionId)?.assistantId
     const caller = callerId ? this.host.meta.get(callerId) : undefined
     return callerId && caller ? { callerId, callerName: caller.name } : null
   }

@@ -17,7 +17,7 @@ export class StepsV62 extends MigrationRange {
          *
          * `usage_buckets`: the requests the cache ledger counts, summed per hour (`hour`, the start of the hour
          * in ms) and per session, project, tool, model and machine. `project_id`, `model` and `machine` are ''
-         * when there is none (the orchestrator has no project; the host's own requests have no machine). The
+         * when there is none (the Assistant has no project; the host's own requests have no machine). The
          * `cache_write_5m` and `cache_write_1h` columns are the part of `cache_write` the API said how long it
          * stays cached. `causes` is the JSON of the rebuilds by cause. A flush adds to a row (one upsert per
          * bucket), so a restart or a swap midway through an hour only adds.

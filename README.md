@@ -24,7 +24,7 @@ Centralu shows them together and points at the one that needs you.
 - Get a sound and a dock badge when something starts waiting, even with the app buried behind your editor
 - See "blocked on approval" apart from "finished, waiting on you" — the first is costing you time, the second can sit all afternoon
 - Search anything anyone ever said, including from before the last restart
-- Run an orchestrator session that reads your other sessions and hands them work
+- Run an Assistant session that reads your other sessions and hands them work
 
 It doesn't write code. And it won't approve anything on your behalf — the moment
 something needs approval is exactly the moment a person should be looking.

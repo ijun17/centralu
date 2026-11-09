@@ -21,8 +21,8 @@
     "summary": {
      "definitions": {
       "claude": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "claude",
         "tools": 12,
         "residentTools": 12,
@@ -73,8 +73,8 @@
        }
       },
       "codex": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "codex",
         "tools": 12,
         "residentTools": 12,
@@ -140,7 +140,7 @@
         "toolsChars": 47361,
         "systemChars": 137
        },
-       "orchestrator": {
+       "assistant": {
         "runs": [
          22693,
          22693,
@@ -158,7 +158,7 @@
      "selection": {
       "claude": {
        "rare-app-project": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -247,7 +247,7 @@
         ]
        },
        "rare-app-user": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -330,7 +330,7 @@
         ]
        },
        "rare-skill": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_skill"
         ],
@@ -410,7 +410,7 @@
         ]
        },
        "rare-browser": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_mcp_server"
         ],
@@ -499,7 +499,7 @@
         ]
        },
        "rare-branch": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_worktree_session"
         ],
@@ -579,7 +579,7 @@
         ]
        },
        "core-overview": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "list_sessions",
          "read_session"
@@ -649,7 +649,7 @@
         ]
        },
        "core-delegate": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "send_to_session"
         ],
@@ -731,7 +731,7 @@
         ]
        },
        "core-recall": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "recall"
         ],
@@ -807,7 +807,7 @@
         ]
        },
        "core-new-session": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_session"
         ],
@@ -906,8 +906,8 @@
     "summary": {
      "definitions": {
       "claude": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "claude",
         "tools": 12,
         "residentTools": 8,
@@ -958,8 +958,8 @@
        }
       },
       "codex": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "codex",
         "tools": 12,
         "residentTools": 12,
@@ -1025,7 +1025,7 @@
         "toolsChars": 47361,
         "systemChars": 137
        },
-       "orchestrator": {
+       "assistant": {
         "runs": [
          21486,
          21486,
@@ -1043,7 +1043,7 @@
      "selection": {
       "claude": {
        "rare-app-project": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -1134,7 +1134,7 @@
         ]
        },
        "rare-app-user": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -1220,7 +1220,7 @@
         ]
        },
        "rare-skill": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_skill"
         ],
@@ -1306,7 +1306,7 @@
         ]
        },
        "rare-browser": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_mcp_server"
         ],
@@ -1398,7 +1398,7 @@
         ]
        },
        "rare-branch": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_worktree_session"
         ],
@@ -1469,7 +1469,7 @@
         ]
        },
        "core-overview": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "list_sessions",
          "read_session"
@@ -1538,7 +1538,7 @@
         ]
        },
        "core-delegate": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "send_to_session"
         ],
@@ -1623,7 +1623,7 @@
         ]
        },
        "core-recall": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "recall"
         ],
@@ -1701,7 +1701,7 @@
         ]
        },
        "core-new-session": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_session"
         ],
@@ -1800,8 +1800,8 @@
     "summary": {
      "definitions": {
       "claude": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "claude",
         "tools": 11,
         "residentTools": 11,
@@ -1852,8 +1852,8 @@
        }
       },
       "codex": {
-       "orchestrator": {
-        "profile": "orchestrator",
+       "assistant": {
+        "profile": "assistant",
         "cli": "codex",
         "tools": 11,
         "residentTools": 11,
@@ -1919,7 +1919,7 @@
         "toolsChars": 47361,
         "systemChars": 137
        },
-       "orchestrator": {
+       "assistant": {
         "runs": [
          21779,
          21779,
@@ -1937,7 +1937,7 @@
      "selection": {
       "claude": {
        "rare-app-project": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -2023,7 +2023,7 @@
         ]
        },
        "rare-app-user": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_app"
         ],
@@ -2106,7 +2106,7 @@
         ]
        },
        "rare-skill": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_skill"
         ],
@@ -2185,7 +2185,7 @@
         ]
        },
        "rare-browser": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_mcp_server"
         ],
@@ -2272,7 +2272,7 @@
         ]
        },
        "rare-branch": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "propose_worktree_session"
         ],
@@ -2343,7 +2343,7 @@
         ]
        },
        "core-overview": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "list_sessions",
          "read_session"
@@ -2412,7 +2412,7 @@
         ]
        },
        "core-delegate": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "send_to_session"
         ],
@@ -2494,7 +2494,7 @@
         ]
        },
        "core-recall": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "recall"
         ],
@@ -2572,7 +2572,7 @@
         ]
        },
        "core-new-session": {
-        "profile": "orchestrator",
+        "profile": "assistant",
         "expect": [
          "create_session"
         ],
@@ -2672,8 +2672,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -2724,8 +2724,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -2791,7 +2791,7 @@
        "toolsChars": 47361,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         22693,
         22693,
@@ -2809,7 +2809,7 @@
     "selection": {
      "claude": {
       "rare-app-project": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -2889,7 +2889,7 @@
        ]
       },
       "rare-app-user": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -2972,7 +2972,7 @@
        ]
       },
       "rare-skill": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_skill"
        ],
@@ -3052,7 +3052,7 @@
        ]
       },
       "rare-browser": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_mcp_server"
        ],
@@ -3141,7 +3141,7 @@
        ]
       },
       "rare-branch": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_worktree_session"
        ],
@@ -3219,7 +3219,7 @@
        ]
       },
       "core-overview": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "list_sessions",
         "read_session"
@@ -3289,7 +3289,7 @@
        ]
       },
       "core-delegate": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "send_to_session"
        ],
@@ -3371,7 +3371,7 @@
        ]
       },
       "core-recall": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "recall"
        ],
@@ -3448,7 +3448,7 @@
        ]
       },
       "core-new-session": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_session"
        ],
@@ -3547,8 +3547,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 9,
@@ -3599,8 +3599,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -3666,7 +3666,7 @@
        "toolsChars": 47361,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         21677,
         21677,
@@ -3684,7 +3684,7 @@
     "selection": {
      "claude": {
       "rare-app-project": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -3776,7 +3776,7 @@
        ]
       },
       "rare-app-user": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -3862,7 +3862,7 @@
        ]
       },
       "rare-skill": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_skill"
        ],
@@ -3924,7 +3924,7 @@
        ]
       },
       "rare-browser": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_mcp_server"
        ],
@@ -4013,7 +4013,7 @@
        ]
       },
       "rare-branch": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_worktree_session"
        ],
@@ -4093,7 +4093,7 @@
        ]
       },
       "core-overview": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "list_sessions",
         "read_session"
@@ -4162,7 +4162,7 @@
        ]
       },
       "core-delegate": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "send_to_session"
        ],
@@ -4243,7 +4243,7 @@
        ]
       },
       "core-recall": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "recall"
        ],
@@ -4320,7 +4320,7 @@
        ]
       },
       "core-new-session": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_session"
        ],
@@ -4419,8 +4419,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -4471,8 +4471,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -4538,7 +4538,7 @@
        "toolsChars": 47361,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         21983,
         21983,
@@ -4556,7 +4556,7 @@
     "selection": {
      "claude": {
       "rare-app-project": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -4643,7 +4643,7 @@
        ]
       },
       "rare-app-user": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -4732,7 +4732,7 @@
        ]
       },
       "rare-skill": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_skill"
        ],
@@ -4794,7 +4794,7 @@
        ]
       },
       "rare-browser": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_mcp_server"
        ],
@@ -4893,7 +4893,7 @@
        ]
       },
       "rare-branch": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_worktree_session"
        ],
@@ -4972,7 +4972,7 @@
        ]
       },
       "core-overview": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "list_sessions",
         "read_session"
@@ -5042,7 +5042,7 @@
        ]
       },
       "core-delegate": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "send_to_session"
        ],
@@ -5123,7 +5123,7 @@
        ]
       },
       "core-recall": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "recall"
        ],
@@ -5200,7 +5200,7 @@
        ]
       },
       "core-new-session": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_session"
        ],
@@ -5301,8 +5301,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -5353,8 +5353,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -5415,7 +5415,7 @@
        "median": 17872,
        "delta": 0
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         18553,
         18553
@@ -5428,7 +5428,7 @@
     "selection": {
      "codex": {
       "rare-app-project": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -5481,7 +5481,7 @@
        ]
       },
       "rare-app-user": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -5534,7 +5534,7 @@
        ]
       },
       "rare-skill": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_skill"
        ],
@@ -5583,7 +5583,7 @@
        ]
       },
       "rare-browser": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_mcp_server"
        ],
@@ -5631,7 +5631,7 @@
        ]
       },
       "rare-branch": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_worktree_session"
        ],
@@ -5681,7 +5681,7 @@
        ]
       },
       "core-overview": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "list_sessions",
         "read_session"
@@ -5732,7 +5732,7 @@
        ]
       },
       "core-delegate": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "send_to_session"
        ],
@@ -5782,7 +5782,7 @@
        ]
       },
       "core-recall": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "recall"
        ],
@@ -5834,7 +5834,7 @@
        ]
       },
       "core-new-session": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_session"
        ],
@@ -5905,8 +5905,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 11,
        "residentTools": 11,
@@ -5957,8 +5957,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 11,
        "residentTools": 11,
@@ -6019,7 +6019,7 @@
        "median": 17874,
        "delta": 0
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         18590,
         18590
@@ -6032,7 +6032,7 @@
     "selection": {
      "codex": {
       "rare-app-project": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -6089,7 +6089,7 @@
        ]
       },
       "rare-app-user": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_app"
        ],
@@ -6146,7 +6146,7 @@
        ]
       },
       "rare-skill": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_skill"
        ],
@@ -6197,7 +6197,7 @@
        ]
       },
       "rare-browser": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_mcp_server"
        ],
@@ -6247,7 +6247,7 @@
        ]
       },
       "rare-branch": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "propose_worktree_session"
        ],
@@ -6301,7 +6301,7 @@
        ]
       },
       "core-overview": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "list_sessions",
         "read_session"
@@ -6352,7 +6352,7 @@
        ]
       },
       "core-delegate": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "send_to_session"
        ],
@@ -6402,7 +6402,7 @@
        ]
       },
       "core-recall": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "recall"
        ],
@@ -6451,7 +6451,7 @@
        ]
       },
       "core-new-session": {
-       "profile": "orchestrator",
+       "profile": "assistant",
        "expect": [
         "create_session"
        ],

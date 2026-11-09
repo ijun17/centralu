@@ -17,15 +17,15 @@ import { isUnread, type ReadTracked } from '../unread/unread.js'
  * finished turn, while unread, with the urgency of an error; the line Centralu writes for a quit makes it unread.
  * A tool reconnecting for too long is listed while it lasts, though the session is still working.
  *
- * **A pending orchestrator proposal (an MCP server or a skill, #703) is listed like an approval.** It is not a session
- * state: the orchestrator went on talking, but a card waits for the person's answer. `proposalCandidates` turns the
+ * **A pending assistant proposal (an MCP server or a skill, #703) is listed like an approval.** It is not a session
+ * state: the Assistant went on talking, but a card waits for the person's answer. `proposalCandidates` turns the
  * pending proposals into candidates in the `waiting_approval` state, so every function below counts, orders and cycles
  * through them without a second rule.
  */
 
 export type InboxCandidate = {
   id: string
-  /** An orchestrator has no project */
+  /** An Assistant has no project */
   projectId: string | null
   name: string
   state: SessionState
@@ -36,7 +36,7 @@ export type InboxCandidate = {
   interruption?: Interruption | null
   /** The wait is a question the agent asked, which the person answers rather than allows (listed as an approval is) */
   asking?: boolean
-  /** Set on a pending orchestrator proposal (#703): this row is the proposal, not a session, and `id` is not a session id */
+  /** Set on a pending assistant proposal (#703): this row is the proposal, not a session, and `id` is not a session id */
   proposal?: PendingProposal
   /** Set on an app a trusted project gained (#1141): this row is the notice, not a session, and `id` is not a session id */
   arrival?: AppArrival
@@ -93,7 +93,7 @@ export function noteAppArrivals(
   return { seen: next, arrived }
 }
 
-/** An orchestrator proposal waiting for the person's answer, by the name it was proposed under */
+/** An Assistant proposal waiting for the person's answer, by the name it was proposed under */
 export type PendingProposal = { kind: 'mcp' | 'skill'; name: string }
 
 /** The id prefix of a row that stands for a pending proposal: `proposal:<kind>:<name>`. No session id has it. */

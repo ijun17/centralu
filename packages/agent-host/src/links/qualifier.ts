@@ -305,6 +305,7 @@ export class Qualifier {
       case 'mail_changed':
       case 'external_app_questions_changed':
       case 'orchestrator_proposals_changed':
+      case 'assistant_proposals_changed':
         return null
       case 'error':
         return sid === undefined ? null : base
@@ -349,7 +350,7 @@ export class Qualifier {
       case 'external_apps_changed':
       case 'project_consents_changed':
         return base
-      // `added` (#1220): a project that machine's orchestrator added, named as the hub's windows know it
+      // `added` (#1220): a project that machine's assistant added, named as the hub's windows know it
       case 'projects_changed':
         return typeof e.added === 'string' ? { ...base, added: this.maybeId(e.added) } : base
       default:

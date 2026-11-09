@@ -234,7 +234,7 @@ describe('a fork of a busy session', () => {
     expect(bodies(read.tasks(addr(requester), busy))).toEqual(['first job'])
   })
 
-  it('the orchestrator’s fork, too: one task, once', async () => {
+  it('the Assistant’s fork, too: one task, once', async () => {
     askAgents()
     const worker = await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })
     handleOf(worker.id)!.externalId = 'ext-worker'
@@ -242,15 +242,15 @@ describe('a fork of a busy session', () => {
     const claude = w.adapters.get('claude') as unknown as { forkConversation?: (id: string) => Promise<string>; readExternalHistory?: () => Promise<unknown[]> }
     claude.forkConversation = async (id) => `fork-of-${id}`
     claude.readExternalHistory = async () => []
-    const orchestrator = (await w.mgr.orchestrator()).id
+    const assistant = (await w.mgr.assistant()).id
     await w.mgr.setProjectTrusted(w.caller.id, true)
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): import('../adapters/contract.js').OrchestratorTools }).orchestratorToolsFor(orchestrator)
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): import('../adapters/contract.js').CentraluTools }).centraluToolsFor(assistant)
     const r = await tools.sendToSession(worker.id, 'read the logs', false, 'fork_read')
     const forkId = r.ok && r.busy?.state === 'forked' ? r.busy.sessionId : ''
-    const tasks = read.tasks(addr(orchestrator), forkId)
+    const tasks = read.tasks(addr(assistant), forkId)
     expect(tasks.map((t) => [t.origin, t.body])).toEqual([['send_to_session', 'read the logs']])
     expect(read.taskRow(tasks[0]!.id, forkId)).toMatchObject({ settled: null })
-    expect(read.tasks(addr(orchestrator), worker.id)).toEqual([])
+    expect(read.tasks(addr(assistant), worker.id)).toEqual([])
   })
 })
 
@@ -338,32 +338,32 @@ describe('ask_project', () => {
   })
 })
 
-describe('the orchestrator’s send_to_session and create_session', () => {
+describe('the Assistant’s send_to_session and create_session', () => {
   const setup = async () => {
     const p = { id: w.caller.id, path: w.caller.path }
     const worker = await w.mgr.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
-    const orchestrator = (await w.mgr.orchestrator()).id
-    return { worker, orchestrator }
+    const assistant = (await w.mgr.assistant()).id
+    return { worker, assistant }
   }
 
-  it('with reportBack the instruction is a task from the orchestrator; without it nothing is owed and nothing is written', async () => {
-    const { worker, orchestrator } = await setup()
-    await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: worker.id, text: 'just a note' })
-    expect(tasksFrom(orchestrator)).toEqual([])
+  it('with reportBack the instruction is a task from the Assistant; without it nothing is owed and nothing is written', async () => {
+    const { worker, assistant } = await setup()
+    await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: worker.id, text: 'just a note' })
+    expect(tasksFrom(assistant)).toEqual([])
     handleOf(worker.id)!.answer('ok')
-    await w.mgr.runOrchestratorTool(orchestrator, 'send_to_session', { sessionId: worker.id, text: 'fix the test and tell me', reportBack: true })
-    const tasks = read.tasks(addr(orchestrator), worker.id)
-    expect(tasks.map((t) => [t.origin, t.sender, t.body])).toEqual([['send_to_session', addr(orchestrator), 'fix the test and tell me']])
+    await w.mgr.runCentraluTool(assistant, 'send_to_session', { sessionId: worker.id, text: 'fix the test and tell me', reportBack: true })
+    const tasks = read.tasks(addr(assistant), worker.id)
+    expect(tasks.map((t) => [t.origin, t.sender, t.body])).toEqual([['send_to_session', addr(assistant), 'fix the test and tell me']])
     expect(read.taskRow(tasks[0]!.id, worker.id)).toMatchObject({ settled: null })
   })
 
   it('create_session with a first message and reportBack, too', async () => {
-    const { orchestrator } = await setup()
-    const made = await w.mgr.runOrchestratorTool(orchestrator, 'create_session', { project: w.caller.id, firstMessage: 'start on the docs', reportBack: true })
+    const { assistant } = await setup()
+    const made = await w.mgr.runCentraluTool(assistant, 'create_session', { project: w.caller.id, firstMessage: 'start on the docs', reportBack: true })
     expect(made.isError).not.toBe(true)
-    const tasks = tasksFrom(orchestrator)
-    expect(tasks.map((t) => [t.origin, t.sender, t.body])).toEqual([['create_session', addr(orchestrator), 'start on the docs']])
-    const child = w.mgr.listSessions().find((s) => read.tasks(addr(orchestrator), s.id).length > 0)!
+    const tasks = tasksFrom(assistant)
+    expect(tasks.map((t) => [t.origin, t.sender, t.body])).toEqual([['create_session', addr(assistant), 'start on the docs']])
+    const child = w.mgr.listSessions().find((s) => read.tasks(addr(assistant), s.id).length > 0)!
     expect(read.taskRow(tasks[0]!.id, child.id)).toMatchObject({ recipientProject: w.caller.id, settled: null })
   })
 })

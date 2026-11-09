@@ -1,0 +1,54 @@
+import type {
+  ToolName,
+} from '@cc/protocol/client'
+
+/** The Assistant screen and its proposals (MCP servers, skills). */
+export type AssistantSlice = {
+  /**
+   * The Assistant's MCP server suggestion (`propose_mcp_server` → the person's one-click approval
+   * → the app registers it and restarts the Assistant). The list here is a copy; the host holds
+   * the truth.
+   */
+  mcpProposals: { name: string; command: string; args: string[]; why?: string }[]
+  refreshMcpProposals(): Promise<void>
+  resolveMcpProposal(name: string, approve: boolean): Promise<void>
+  /** The Assistant's skill suggestion (#71) — the same suggest-then-one-click-approve rail */
+  skillProposals: { name: string; content: string; why?: string }[]
+  refreshSkillProposals(): Promise<void>
+  resolveSkillProposal(name: string, approve: boolean): Promise<void>
+  /** The Assistant session id (`null` if never created — the screen shows an empty conversation plus suggested questions) */
+  assistantId: string | null
+  /** A session is being created for the first question (#63) — a flag so the empty screen does not look dead */
+  assistantWaking: boolean
+  /**
+   * Whether the intro screen (assistant plus tool cards) has been passed (#63).
+   * Kept in the workspace snapshot — this screen appears exactly once, on first run.
+   */
+  introSeen: boolean
+  /**
+   * Opens the Assistant **screen**. Does not create a session (#63, deferred startup) — attaches
+   * to one if it already exists, otherwise an empty conversation waits for the first question.
+   * `askAssistant` is what creates it.
+   */
+  openAssistant(): Promise<void>
+  /**
+   * Asks the Assistant something. **If there is no session, one is created at this moment** —
+   * both the suggested-question cards and the empty screen's composer go through this door (#63).
+   */
+  /** Whether the first message reached the Assistant — `false` means it was never born (the caller puts the text back, #180) */
+  askAssistant(text: string): Promise<boolean>
+  /**
+   * The tool chosen for the Assistant before it had a session (the intro's card, or Settings), kept here because the host
+   * holds it write-only (`orchestrator.configure`). Once a session exists, its own tool is the truth.
+   */
+  assistantTool: ToolName | null
+  /** Passes the intro screen (#63): records the tool choice with the host, and goes to the Assistant screen */
+  completeIntro(tool: ToolName): Promise<void>
+  /**
+   * Runs the Assistant on `tool` (Settings). With a session, the session is switched in place (`switchTool`); without
+   * one, the choice is recorded for the first question to be born with. A failure is toasted and answers `false`, so
+   * the screen does not show a choice that was not made. The session is looked for on the host when this run has not
+   * opened it; when that look fails, nothing is recorded (the host ignores a recorded choice once a session exists).
+   */
+  chooseAssistantTool(tool: ToolName): Promise<boolean>
+}

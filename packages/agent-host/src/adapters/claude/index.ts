@@ -22,7 +22,7 @@ import { ClaudeSession, type ClaudeLaunch } from './session.js'
 import { launchPreset } from '../edit-grant.js'
 import { personsDefaultMode } from './permissions.js'
 import { CLAUDE_SURFACE } from './surface.js'
-import { CLAUDE_SUBAGENT_TOOL } from './orchestrator-mcp.js'
+import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { STOP_CONFIRM_MS } from '../core/ledger.js'
 
 export { personsDefaultMode }
@@ -56,7 +56,7 @@ const PROBE_EXIT_WAIT_MS = 10_000
  *     the opposite. Measured: omitting it actually ran three global hooks.) This is intentional —
  *     this app does not force a workflow. Settings a person tuned for their own tool have to keep
  *     working the same way inside this app.
- *     There are two exceptions (`settingSourcesFor`): orchestrator/coordination sessions
+ *     There are two exceptions (`settingSourcesFor`): assistant/coordination sessions
  *     (`settingSources: []` — an instruction arriving through a file is itself a privilege-
  *     escalation channel) and untrusted projects (`['user']` — files from the repo must not be
  *     able to decide approvals, #92).

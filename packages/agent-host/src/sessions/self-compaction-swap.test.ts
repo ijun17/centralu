@@ -48,7 +48,7 @@ function host() {
 async function asking(a: ReturnType<typeof host>, until: 'asked' | 'sent' | 'compacted') {
   const p = (await a.rpc('projects.add', { path: dir('compact-then-') })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: dir('compact-then-cwd-'), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
-  const tools = a.claude.lastOrchestratorTools!
+  const tools = a.claude.lastCentraluTools!
   const h = a.claude.last!
   await a.mgr.inputs.send(s.id, 'hello')
   h.emitContext(150_000, 200_000)

@@ -173,7 +173,7 @@ export class StepsV48ToV54 extends MigrationRange {
         /**
          * Why a session's last turn did not run to its end (#698): `sessions.interruption`, the JSON of
          * `SessionInfo.interruption` (`network`, `quit`, `interrupted`), null when nothing stopped it. Stored so the
-         * inbox and the orchestrator's list still say it after a restart: a quit is exactly when it is written, and the
+         * inbox and the Assistant's list still say it after a restart: a quit is exactly when it is written, and the
          * person reads it on the next start.
          *
          * **Expand only (#292's rule).** A nullable column; an older host neither reads nor writes it, so a session it

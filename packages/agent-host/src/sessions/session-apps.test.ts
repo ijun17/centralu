@@ -11,7 +11,7 @@ import { FIXTURE_APP, attachWorld, type AttachWorld } from './session-apps.test-
  * real app processes.
  *
  *   a project's session    that project's apps, only if the project is trusted
- *   orchestrator           only the user-folder apps
+ *   assistant           only the user-folder apps
  *   an unattached app      an invalid manifest, an untrusted project, an app halted after repeated failures
  *
  * And when that set changes (an app comes or goes, trust flips, the tool list changes), the
@@ -42,15 +42,15 @@ afterEach(async () => {
 })
 
 describe('decision 4 — which apps attach', () => {
-  it('a project session receives only its own trusted project\'s apps, and the orchestrator receives only user-folder apps', () => {
+  it('a project session receives only its own trusted project\'s apps, and the Assistant receives only user-folder apps', () => {
     expect(servers(worker('p1'))).toEqual(['app-notes', 'app-tasks'])
     // A coordinating session is a project session too — the split is by project, not by kind
     expect(servers({ id: 'c1', kind: 'coordinator', projectId: 'p1' })).toEqual(['app-notes', 'app-tasks'])
     // An untrusted project's apps do not attach to that project's sessions either
     expect(servers(worker('p2'))).toEqual([])
-    // User-folder apps go only to the orchestrator — a project's apps never go to the orchestrator
+    // User-folder apps go only to the Assistant — a project's apps never go to the Assistant
     expect(servers(ORCH)).toEqual(['app-helper'])
-    // A session with no project (and that is not the orchestrator) receives nothing
+    // A session with no project (and that is not the Assistant) receives nothing
     expect(servers(worker(null))).toEqual([])
   })
 
@@ -73,7 +73,7 @@ describe('decision 4 — which apps attach', () => {
     expect(a.current().map((x) => x.server)).toEqual(['app-broken', 'app-notes'])
   })
 
-  it('an imported app does not attach to the orchestrator before the person turns it on, calling it by name is refused, and turning it on attaches it (M4 E-3)', async () => {
+  it('an imported app does not attach to the Assistant before the person turns it on, calling it by name is refused, and turning it on attaches it (M4 E-3)', async () => {
     const source = kit.plantApp(join(w.root, 'src'), 'imp', { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } })
     const { token, review } = await w.rt.prepareImport(source)
     w.rt.commitImport(token, { enable: false })
@@ -263,7 +263,7 @@ describe('calling', () => {
   })
 
   /*
-   * A session's request to the orchestrator (docs/plans/mailbox.md §9.7, #1447): an attached app's tool is a step that changes something, and under
+   * A session's request to the Assistant (docs/plans/mailbox.md §9.7, #1447): an attached app's tool is a step that changes something, and under
    * auto the CLI never asks about it. Every call of an agent passes through `Attachment.call`, on both CLIs, so the host's gate sits there.
    */
   it('in a session’s request an app tool that is not a read goes through the host’s gate and does not run when the gate refuses; a read is not asked about', async () => {

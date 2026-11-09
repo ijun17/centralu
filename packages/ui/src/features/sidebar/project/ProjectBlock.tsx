@@ -115,11 +115,11 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       the row mark inside it. A row mark alone says "this row"; with several projects open in the list the eye then
       has to walk up to find whose row it is, and a folded project has no row to mark at all.
 
-      The tint is the selected Grid and Orchestrator buttons' surface-hover, at the strength of a row's hover rather than
+      The tint is the selected Grid and Assistant buttons' surface-hover, at the strength of a row's hover rather than
       a button's fill: it covers a dozen rows, and at full strength the group would outshine the row that is open in
       it. It stays well under that row's own mark (surface-hover/40 plus the ink-muted bar), which is what keeps the two layers
       reading as "this project, and this row in it". It is drawn only for the focus lane (openProjectOf) — the grid
-      and the orchestrator light their own buttons.
+      and the Assistant light their own buttons.
 
       The divider is the section's own bottom border. A colour change adds no size, so selecting a project moves
       nothing in the list.

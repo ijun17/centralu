@@ -157,7 +157,7 @@ export type ThemePreset = { id: string; name: string; base: 'dark' | 'light' }
 
 /**
  * The presets the stylesheet defines (`packages/ui/src/styles/index.css`), here so the host can name them too: the
- * orchestrator's `set_preferences` picks a theme by id or name (#1219), and the screen reads this same list
+ * Assistant's `set_preferences` picks a theme by id or name (#1219), and the screen reads this same list
  * (`THEME_PRESETS` in app/theme.ts). The first preset of each base is that side's default.
  */
 export const THEME_PRESETS: readonly ThemePreset[] = [

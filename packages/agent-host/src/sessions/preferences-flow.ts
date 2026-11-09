@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ORCHESTRATOR_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { DEFAULT_NOTIFY_POLICY, ASSISTANT_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import { themeSlug } from '../themes.js'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
@@ -40,7 +40,7 @@ function autoCompactText(c: AutoCompact): string {
 }
 
 /**
- * The orchestrator's preference commands (#1219, second slice): `get_preferences` reads every setting Settings shows,
+ * The Assistant's preference commands (#1219, second slice): `get_preferences` reads every setting Settings shows,
  * `set_preferences` changes the reversible ones the window offers. Each is the call the window makes (`prefs.set`,
  * `agents.setSleepPolicy`, `updates.setAuto`, ...) through the router, so the host checks it as it checks the window:
  * the method's own schema, and the same handler. What the window keeps for itself, or that widens what agents may do
@@ -224,7 +224,7 @@ export class PreferencesFlow {
     // The notification switches (#1306): only those named change, merged into the host's record one by one
     const switches: Record<string, boolean> = Object.fromEntries(Object.entries(changes.notifications ?? {}).filter(([, v]) => v !== undefined))
     /*
-     * Turning off what tells the person a card waits asks first: the orchestrator would be choosing what the person stops
+     * Turning off what tells the person a card waits asks first: the Assistant would be choosing what the person stops
      * hearing about. That is the notification for an approval, and the sound, which is how it reaches someone who is away
      * (notices.ts alerts through the sound; the OS banner path does not reach them), so turning the sound off counts while an
      * approval would still notify. Turning them on, and every other switch, asks nothing. A denial keeps them as they were,
@@ -458,9 +458,9 @@ export class PreferencesFlow {
     return `No theme is called ${plainQuoted(wanted)}. Choose one of: ${choices.map((c) => `${plainQuoted(c.name)} [${c.id}]`).join(', ')}.`
   }
 
-  /** The preferences card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
+  /** The preferences card, allow or deny only (`ASSISTANT_CHANGE`): the refusal the Assistant reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal, stays = 'it stays off'): Promise<string | null> {
-    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return `The person did not approve it, so ${stays}. Do not ask again unless they tell you to.`
     if (decision === null) return 'The card was withdrawn before the person answered, so that change was not made.'
     return null

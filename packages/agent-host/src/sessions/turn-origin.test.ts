@@ -268,3 +268,54 @@ describe('what is kept for the turns a hub may be owed', () => {
     expect(spans(id)).toBeNull()
   })
 })
+
+/*
+ * #2133 step 3 (docs/plans/assistant-rename.md): a machine of a later release records the hub's sender under the
+ * Assistant's new name, and this build reads it as the hub's in each place it reads the sender
+ */
+describe("the hub's sender under the Assistant's new name (#2133)", () => {
+  let w: CrossWorld
+  const RENAMED = { sessionId: '_hub-assistant', name: 'Parent' }
+  beforeEach(async () => {
+    w = await crossWorld()
+  })
+  afterEach(() => w.dispose())
+  const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
+  const rowOf = (id: string, text: string) => w.store.messages.loadMessages(id, 50).find((m) => m.role === 'user' && (m.payload as { text?: string }).text === text)!.seq
+  function opens(id: string, inputs: readonly string[]) {
+    const h = handleOf(id)
+    h.turnStartInputs = () => inputs
+    h.event({ type: 'state_change', sessionId: id, state: 'working' })
+    h.turnStartInputs = () => null
+  }
+  const opened = () => w.events.filter((e) => e.type === 'state_change' && e.state === 'working').at(-1)
+
+  it('reaches a session that directs others as the hub’s own words, not as an untrusted source', async () => {
+    // The Assistant directs every other session
+    const id = (await w.mgr.assistant()).id
+    expect(w.mgr.tools.directs(id)).toBe(true)
+    await w.mgr.inputs.send(id, 'an instruction', undefined, RENAMED)
+    expect(handleOf(id).sent.at(-1)).toBe('an instruction')
+    // A control: another sender's words to the same session are framed as an untrusted source
+    handleOf(id).answer('done')
+    await w.mgr.inputs.send(id, 'from elsewhere', undefined, { sessionId: 'a-local-session', name: 'Local' })
+    expect(handleOf(id).sent.at(-1)).not.toBe('from elsewhere')
+  })
+
+  it('names the turn the tool opens for its message as the hub’s', async () => {
+    const id = await w.callerSession()
+    await w.mgr.inputs.send(id, 'the task', undefined, RENAMED)
+    opens(id, [handleOf(id).ids.at(-1)!])
+    expect(opened()).toMatchObject({ origin: { seq: rowOf(id, 'the task'), from: RENAMED } })
+  })
+
+  it('names it from the stored row after a swap, when nothing in memory says so', async () => {
+    const id = await w.callerSession()
+    await w.mgr.inputs.send(id, 'the task', undefined, RENAMED)
+    const inputId = handleOf(id).ids.at(-1)!
+    // A new owner of the turns over the store the old one wrote
+    ;(w.mgr as unknown as { children: ChildOwnership }).children = new ChildOwnership(w.store)
+    opens(id, [inputId])
+    expect(opened()).toMatchObject({ origin: { seq: rowOf(id, 'the task'), from: RENAMED } })
+  })
+})

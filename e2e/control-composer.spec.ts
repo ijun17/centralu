@@ -728,7 +728,7 @@ test('A message sent with an attachment renders only once', async ({ page }) => 
   // same as the real host
   await page.evaluate(async () => {
     const store = (window as any).__store.getState()
-    const sid = Object.keys(store.sessions).find((id: string) => store.sessions[id].name !== 'Orchestrator')
+    const sid = Object.keys(store.sessions).find((id: string) => store.sessions[id].name !== 'Assistant')
     await store.send(sid, 'take a look at this image', [
       { kind: 'image', path: '/tmp/att/shot.png', name: 'shot.png', mime: 'image/png', bytes: 10 },
     ])

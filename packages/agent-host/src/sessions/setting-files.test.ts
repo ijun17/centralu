@@ -17,14 +17,14 @@ import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
  * The setting files a tool receives per session (M4 decision 3, #92/#152) — kind × project trust ×
  * preset, both when created and when woken up.
  *
- *   orchestrator, coordinating session          no files at all (Claude's `settingSources: []`, Codex
+ *   assistant, coordinating session          no files at all (Claude's `settingSources: []`, Codex
  *                                                turns off its store layer)
  *   worker, worktree agent, a project app's building    exactly that project's trust
  *   session, an agent a project app assigned (D-1)
  *   a user-folder app's building session         trusted — that folder is the user's own
  *   an agent a user-folder app assigned (D-1)    only the person's own settings — the text was
  *                                                written by the app, and the folder
- *                                                (orchestratorHome) can be written by a worker
+ *                                                (assistantHome) can be written by a worker
  *
  * A real manager spins up a real adapter. Only the tool is mocked: for Claude, the SDK's `query`
  * records what it received, and for Codex, the app-server client does — what this test checks is
@@ -148,7 +148,7 @@ afterEach(async () => {
 })
 
 type Kind =
-  | 'orchestrator'
+  | 'assistant'
   | 'coordinator'
   | 'worker'
   | 'worktree agent'
@@ -162,7 +162,7 @@ type Created = { app: ExternalAppInfo; builder: SessionInfo | null; builderError
 
 /** Decision 3's table — the entire contract this file holds */
 const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
-  orchestrator: () => 'none',
+  assistant: () => 'none',
   coordinator: () => 'none',
   worker: (t) => (t ? 'all' : 'user'),
   'worktree agent': (t) => (t ? 'all' : 'user'),
@@ -175,9 +175,9 @@ const FILES: Record<Kind, (projectTrusted: boolean) => Files> = {
 
 /** Stands up a session of that kind through the same path the product uses — right up through the tool's first launch */
 const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
-  orchestrator: async (tool) => {
-    mgr.orchestratorSlot.configureOrchestrator(tool)
-    return (await mgr.orchestrator()).id
+  assistant: async (tool) => {
+    mgr.assistantSlot.configureAssistant(tool)
+    return (await mgr.assistant()).id
   },
   // Nothing creates one since the control app went (#372): one an older build left is opened by a new host and woken
   coordinator: async (tool) => {

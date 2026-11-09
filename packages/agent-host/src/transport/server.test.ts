@@ -837,7 +837,7 @@ describe("the Codex bridge's credential (#382)", () => {
     c.ws.close()
   })
 
-  it("cannot call for another session, nor list the full orchestrator set by naming none", async () => {
+  it("cannot call for another session, nor list the full assistant set by naming none", async () => {
     const { calls, onRpc } = recorder()
     const { port } = await start(onRpc)
     const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))

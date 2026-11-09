@@ -15,7 +15,7 @@ export function appReachNotice(r: Unreachable, app: string, project: string | nu
   switch (r.reason) {
     case 'other-project':
       return project === null
-        ? `${cannot}: it is one of your apps, which only the orchestrator can use.`
+        ? `${cannot}: it is one of your apps, which only the Assistant can use.`
         : `${cannot}: the app belongs to ${project}. Ask in a session of ${project} to use them.`
     case 'untrusted':
       return `${cannot}: ${project ?? 'its project'} is not trusted. Trust the project to attach its apps.`

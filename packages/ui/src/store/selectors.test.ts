@@ -26,8 +26,8 @@ describe('projectLabelOf', () => {
     expect(projectLabelOf(projects, 'p1')).toBe('alpha')
   })
 
-  it('names the orchestrator, which has no project', () => {
-    expect(projectLabelOf(projects, null)).toBe('Orchestrator')
+  it('names the Assistant, which has no project', () => {
+    expect(projectLabelOf(projects, null)).toBe('Assistant')
   })
 
   it('says nothing for a project the list does not hold yet', () => {

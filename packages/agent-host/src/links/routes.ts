@@ -10,7 +10,7 @@ import type { Qualifier } from './qualifier.js'
  * hub one that names a remote session, would both be silent.
  *
  *   hub        Served by the hub's own host whatever its parameters say: the person's layout,
- *              preferences, themes, updates, the orchestrator, app imports, screen questions
+ *              preferences, themes, updates, the Assistant, app imports, screen questions
  *   internal   The callbacks of the hub's own agents (the Codex bridge). A remote's bridge talks
  *              to its own host; these never cross a link
  *   session    The machine named by `sessionId`'s prefix; the hub's own session when unprefixed
@@ -305,6 +305,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'orchestrator.get': HUB,
   'orchestrator.peek': HUB,
   'orchestrator.configure': HUB,
+  'assistant.get': HUB,
+  'assistant.peek': HUB,
+  'assistant.configure': HUB,
   'workspace.save': HUB,
   'workspace.load': HUB,
   // The mailbox is the hub's: a linked machine's mail reaches it there (slice 4 of #1347)
@@ -366,7 +369,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.hubOffer': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
-  // The hub's own sessions; the hub's orchestrator asks each machine's directly (links/linked-sessions.ts, plan §12)
+  // The hub's own sessions; the hub's Assistant asks each machine's directly (links/linked-sessions.ts, plan §12)
   'host.sessions': HUB,
   'host.readSession': HUB,
   'host.recall': HUB,
@@ -379,6 +382,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
   'orchestrator.tools': INTERNAL,
   'orchestrator.tool': INTERNAL,
+  'assistant.tools': INTERNAL,
+  'assistant.tool': INTERNAL,
   'apps.sessionTools': INTERNAL,
   'apps.sessionCall': INTERNAL,
 }

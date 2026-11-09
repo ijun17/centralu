@@ -1,7 +1,7 @@
 /**
  * A probe measuring **how AskUserQuestion is actually received, and how an answer can reach the model**.
  *
- * In the orchestrator window, this tool leaked through as raw JSON with no choice UI, and the
+ * In the Assistant window, this tool leaked through as raw JSON with no choice UI, and the
  * tool came back as "the user did not answer." Before fixing it, the first question was how many
  * paths there are (2026-08-18):
  *

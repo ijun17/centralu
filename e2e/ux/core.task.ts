@@ -530,10 +530,10 @@ uxTask({
 })
 
 uxPending({
-  id: 'create-project.orchestrator',
-  task: 'Create a new project by asking the orchestrator',
+  id: 'create-project.assistant',
+  task: 'Create a new project by asking the Assistant',
   path: 'mouse',
   access: 'discoverable',
-  waitingOn: 'a scripted orchestrator reply in the demo',
-  reason: "the mock's orchestrator does not call create_project, so the card can only be raised by a test handle, not by a person",
+  waitingOn: 'a scripted assistant reply in the demo',
+  reason: "the mock's assistant does not call create_project, so the card can only be raised by a test handle, not by a person",
 })

@@ -1,5 +1,5 @@
 import { bridgePath } from '../bridge-path.js'
-import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
+import { CENTRALU_MCP_NAME } from '../../sessions/centralu-tools.js'
 import type { CreateSessionOpts } from '../contract.js'
 import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, followsPersonsPolicy, repoFilesConfig, type AppApprovalMode } from './launch-config.js'
 
@@ -49,7 +49,7 @@ export class CodexServers {
    *
    * The app bridge is an stdio process that Codex starts (one of the three in plan S-3). HTTP
    * (`url`) never received a single request in 0.147.0, and we could not re-check in 0.153.4.
-   * The bridge is the same file as the orchestrator's (they are split by `CC_APP_SERVER`).
+   * The bridge is the same file as the Assistant's (they are split by `CC_APP_SERVER`).
    */
   /**
    * The approval policy the person's own Codex settings resolve to, for an app bridge under normal (#382, decision
@@ -65,7 +65,7 @@ export class CodexServers {
    *   unset                          person's         person's            person's
    *
    * and with `repoFilesConfig`'s per-thread `untrusted` the thread reports the person's in every row. So a session
-   * whose repository files are kept out (an untrusted project, the orchestrator and coordinators) reads without a
+   * whose repository files are kept out (an untrusted project, the Assistant and coordinators) reads without a
    * folder, and a trusted project's session reads from its folder, as Claude's normal reads the project's settings
    * there. Should the two still differ (a layer this read does not see), the thread's own report is compared
    * afterwards (`checkAppMode`) and the difference logged. A Codex without `config/read`, or one that fails, keeps
@@ -103,18 +103,18 @@ export class CodexServers {
   }
 
   async mcpConfig(): Promise<Record<string, unknown>> {
-    const bridge = this.host.opts.orchestratorBridge
+    const bridge = this.host.opts.centraluBridge
     const servers: Record<string, unknown> = {}
-    const orchestrator = !!(this.host.opts.orchestratorTools && bridge)
-    this.ownServer = orchestrator
-    if (orchestrator) {
-      servers[ORCHESTRATOR_MCP_NAME] = {
+    const assistant = !!(this.host.opts.centraluTools && bridge)
+    this.ownServer = assistant
+    if (assistant) {
+      servers[CENTRALU_MCP_NAME] = {
         command: process.execPath,
         args: [bridgePath()],
         env: { CC_HOST_URL: bridge!.url, CC_BRIDGE_TOKEN: bridge!.token, CC_SESSION_ID: this.host.opts.sessionId },
         /*
          * Our own tools are never asked about, under any preset — the same as Claude, where they
-         * skip canUseTool (isOrchestratorTool). Without this, auto (`approvalPolicy: never`) made
+         * skip canUseTool (isCentraluToolName). Without this, auto (`approvalPolicy: never`) made
          * Codex refuse every one of them on its own: "MCP tool call requires approval, but approval
          * policy is never" (measured, codex-cli 0.160.0, #320). Under safe and normal the
          * elicitation it raised was answered `accept` by us anyway (onServerRequest, `ours`).
@@ -164,11 +164,11 @@ export class CodexServers {
      * Whether to read the folder's document (AGENTS.md) is not decided here — repoFilesConfig
      * decides it from what the session is.
      *
-     * This used to load `project_doc_max_bytes: 0` here whenever the orchestrator tool bridge was
-     * present, because the orchestrator followed a planted AGENTS.md verbatim (measured: it
+     * This used to load `project_doc_max_bytes: 0` here whenever the Assistant tool bridge was
+     * present, because the Assistant followed a planted AGENTS.md verbatim (measured: it
      * started answering with "infiltration-success-9142" once one was planted). But the worktree
      * manager and the session that creates the worktree also receive this bridge, so they lost
-     * AGENTS.md even in trusted projects (#152). The rule for orchestrator and coordination
+     * AGENTS.md even in trusted projects (#152). The rule for assistant and coordination
      * sessions is unchanged — they arrive as `noSettingFiles`, and repoFilesConfig loads the same
      * value for them.
      */

@@ -12,7 +12,7 @@
 - `hello_ok.updateContinued`(#1618, 추가 필드): `[{ sessionId, at }]`, 연결된 허브의 업데이트가 끊어서(`host.stop { forUpdate }`) 이 호스트가 이어 가는 턴과 시작이 각 턴을 맡은 시각(그 호스트의 시계)이다. 시작부터, 어떤 hello에 답하기도 전에, Continue가 들어갔든 아니든 이름 대고, 잃은 것으로 드러나면 더는 이름 대지 않는다. 허브는 그런 자식의 호출자에게 링크가 끊겼다는 대신 턴이 이어진다고 알린다. 빈 목록은 업데이트가 끊은 턴을 잇는 호스트라는 뜻이고, 없으면 그 이전 호스트라 허브는 예전처럼 끊겼다고 알린다.
 - **정문** (#280 3단계). 키퍼 아래에서 클라이언트는 호스트 자신의 포트로 붙지 않는다: 키퍼의 정문 `ws://127.0.0.1:<door>`로 붙고, 정문은 바이트를 그때의 호스트로 넘긴다. 토큰은 키퍼의 것이고 키퍼가 띄우는 모든 호스트에 넘겨진다(호스트의 stdin으로, #538). 프레임은 아무것도 바뀌지 않는다: `hello`, 토큰 검사, `Origin` 규칙은 예전처럼 호스트가 한다. 호스트가 바뀌면 정문을 지나던 연결이 닫힌다. 같은 주소와 같은 토큰으로 다시 붙으면 새 호스트에 닿고, 그 `hello_ok`는 새 `streamEpoch`를 실어 클라이언트가 다시 맞춘다. 준비된 호스트가 없는 동안 연 연결은 실패하지 않고 정문에서 기다린다(최대 45초).
 - **Codex 브리지의 자격 증명** (#382). `hello.token`에는 대신 한 세션의 브리지 자격 증명(`ccb1:<sessionId>:<mac>`, 토큰을 키로 한 세션 id의 HMAC; `transport/bridge-token.ts`)이 올 수 있다. Codex 브리지는 이것을 받고 시작한다. 브리지의 환경은 같은 사용자의 어떤 프로세스든 읽을 수 있기 때문이다([security-boundaries.md](security-boundaries.md), "The front door"). 그 소켓은 `hello_ok`만 받고, 재생도, 그 뒤의 이벤트도, 터미널 프레임도 받지 않는다. `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools`, `apps.sessionCall`이 아닌 RPC, 또는 `sessionId`가 자격 증명의 세션이 아닌 RPC는 실행되지 않고 `ok: false`(`internal`)로 답을 받는다. 키퍼 아래에서 키는 정문의 토큰이라서, 자격 증명은 정문 뒤의 모든 호스트에서 통한다.
-- **제한 자격 증명** (#1405). `hello.token`에는 대신 제한 자격 증명(`ccl1:<mac>`, 토큰을 키로 한 레이블 `centralu limited token v1`의 HMAC; `transport/limited-token.ts`)이 올 수 있다. 창이 아닌, 그 사람 사용자의 다른 모든 프로세스(에이전트, 에이전트가 쓴 스크립트, 도구)를 위한 것이다. 이 소켓은 창처럼 클라이언트다(재생, 이벤트, 터미널 프레임). 다만 RPC마다 먼저 `transport/method-rights.ts`가 판단한다. 일상 메서드는 실행된다. 그 밖의 것(되돌릴 수 없거나 묻지 않고 실행되는 범위를 넓히는 것, 그 사람 자신의 답, 허브의 `host.*` 호출, 브리지의 통로, 모르는 이름)은 실행되지 않고 `ok: false`, `code: 'internal'`, `data: { refused: 'rights', rights: 'asks' | 'window' | 'link' | 'bridge' | 'unknown' }`로 답한다. 라우터보다 먼저 판단하므로, 연결된 기기의 세션을 가리키는 호출도 중계되지 않는다. 이 소켓의 `res` 프레임은 호스트 자신의 호출에 답하지 않는다(역방향은 허브의 것이다). 핸들러의 `RpcContext.rights`는 `full` 또는 `limited`다. `asks` 호출은 호스트가 물을 수 있으면 대신 그 사람을 기다린다(#1405 3번째 조각, `host-requests.ts`): 호스트가 `host_request`(카드의 질문 전체, 메서드, 프로그램이 `hello.client`에서 스스로 밝힌 이름을 따옴표로 60자까지)를 올리고, 토큰을 가진 창이 `requests.answer { requestId, decision: 'allow' | 'deny' }`로 답하면 그 메서드 자신의 결과로 답한다. 실행되지 않고 끝나면 `ok: false`이고 `data.refused`는 `no_window`(`hello.shows: ['host_requests']`라고 말한 창이 토큰을 들고 붙어 있지 않음: 바로 거절), `too_many_requests`(8개가 기다림), `denied`, `withdrawn`(프로그램의 소켓이 닫혔거나 호스트가 멈춤), `expired`(15분), `not_done`(카드가 서 있는 동안 휴지통이 바뀌었거나, 지울 것이 없거나, 매개변수가 메서드의 스키마에 맞지 않거나, id가 이 컴퓨터에 없는 것을 가리키거나, Allow 전에 카드가 이름 붙인 대상이 바뀌었거나, 매개변수가 너무 길어 통째로 보여 줄 수 없음: 2,000자 초과. 스키마가 받지 않는 필드는 카드 전에 버려지고, 호출은 파싱된 매개변수로 실행된다) 중 하나다. 요청을 보여 주는 창이 30초 동안 없어도 `withdrawn`으로 끝난다. `trash.empty`는 지우지 못한 세션을 `failed`에 담아 답한다. `requests.list`는 다시 연결한 창을 위해 기다리는 요청을 준다. 휴지통 삭제는 오케스트레이터 자신의 휴지통 카드로 묻고 Allow 뒤에 휴지통을 다시 읽는다. 그래서 `trash.empty`는 카드가 나열한 행만 지운다. 키퍼 아래에서 키는 정문의 토큰이므로, 이 자격 증명은 정문 뒤의 모든 호스트에서 통한다. #1405 이전의 호스트는 hello에서 거절한다(4001). 세션의 자격 증명 `ccs1:<sessionId>:<mac>`(토큰을 키로 한 `centralu session token v1` 레이블과 세션 id의 HMAC; `transport/session-token.ts`)은 같은 권한에 세션 이름을 더한다: `RpcContext.session`, 그리고 그 호출이 올린 카드의 `HostRequest.session`(그 세션 이름을 따옴표로, 보통 제한 자격 증명이면 null). 호스트가 시작하는 모든 에이전트는 `CC_HOST_CREDENTIAL`에 이것을, `CC_HOST_URL`에 호스트 주소를 갖는다. 이 호스트에 없는 세션을 가리키면 hello에서 거절된다(4001).
+- **제한 자격 증명** (#1405). `hello.token`에는 대신 제한 자격 증명(`ccl1:<mac>`, 토큰을 키로 한 레이블 `centralu limited token v1`의 HMAC; `transport/limited-token.ts`)이 올 수 있다. 창이 아닌, 그 사람 사용자의 다른 모든 프로세스(에이전트, 에이전트가 쓴 스크립트, 도구)를 위한 것이다. 이 소켓은 창처럼 클라이언트다(재생, 이벤트, 터미널 프레임). 다만 RPC마다 먼저 `transport/method-rights.ts`가 판단한다. 일상 메서드는 실행된다. 그 밖의 것(되돌릴 수 없거나 묻지 않고 실행되는 범위를 넓히는 것, 그 사람 자신의 답, 허브의 `host.*` 호출, 브리지의 통로, 모르는 이름)은 실행되지 않고 `ok: false`, `code: 'internal'`, `data: { refused: 'rights', rights: 'asks' | 'window' | 'link' | 'bridge' | 'unknown' }`로 답한다. 라우터보다 먼저 판단하므로, 연결된 기기의 세션을 가리키는 호출도 중계되지 않는다. 이 소켓의 `res` 프레임은 호스트 자신의 호출에 답하지 않는다(역방향은 허브의 것이다). 핸들러의 `RpcContext.rights`는 `full` 또는 `limited`다. `asks` 호출은 호스트가 물을 수 있으면 대신 그 사람을 기다린다(#1405 3번째 조각, `host-requests.ts`): 호스트가 `host_request`(카드의 질문 전체, 메서드, 프로그램이 `hello.client`에서 스스로 밝힌 이름을 따옴표로 60자까지)를 올리고, 토큰을 가진 창이 `requests.answer { requestId, decision: 'allow' | 'deny' }`로 답하면 그 메서드 자신의 결과로 답한다. 실행되지 않고 끝나면 `ok: false`이고 `data.refused`는 `no_window`(`hello.shows: ['host_requests']`라고 말한 창이 토큰을 들고 붙어 있지 않음: 바로 거절), `too_many_requests`(8개가 기다림), `denied`, `withdrawn`(프로그램의 소켓이 닫혔거나 호스트가 멈춤), `expired`(15분), `not_done`(카드가 서 있는 동안 휴지통이 바뀌었거나, 지울 것이 없거나, 매개변수가 메서드의 스키마에 맞지 않거나, id가 이 컴퓨터에 없는 것을 가리키거나, Allow 전에 카드가 이름 붙인 대상이 바뀌었거나, 매개변수가 너무 길어 통째로 보여 줄 수 없음: 2,000자 초과. 스키마가 받지 않는 필드는 카드 전에 버려지고, 호출은 파싱된 매개변수로 실행된다) 중 하나다. 요청을 보여 주는 창이 30초 동안 없어도 `withdrawn`으로 끝난다. `trash.empty`는 지우지 못한 세션을 `failed`에 담아 답한다. `requests.list`는 다시 연결한 창을 위해 기다리는 요청을 준다. 휴지통 삭제는 어시스턴트 자신의 휴지통 카드로 묻고 Allow 뒤에 휴지통을 다시 읽는다. 그래서 `trash.empty`는 카드가 나열한 행만 지운다. 키퍼 아래에서 키는 정문의 토큰이므로, 이 자격 증명은 정문 뒤의 모든 호스트에서 통한다. #1405 이전의 호스트는 hello에서 거절한다(4001). 세션의 자격 증명 `ccs1:<sessionId>:<mac>`(토큰을 키로 한 `centralu session token v1` 레이블과 세션 id의 HMAC; `transport/session-token.ts`)은 같은 권한에 세션 이름을 더한다: `RpcContext.session`, 그리고 그 호출이 올린 카드의 `HostRequest.session`(그 세션 이름을 따옴표로, 보통 제한 자격 증명이면 null). 호스트가 시작하는 모든 에이전트는 `CC_HOST_CREDENTIAL`에 이것을, `CC_HOST_URL`에 호스트 주소를 갖는다. 이 호스트에 없는 세션을 가리키면 hello에서 거절된다(4001).
 - **멈추기 전에 드레인하는 호스트** (`host.stop {ifIdle}`. #1895 4단계 PR 5까지는 스왑의 드레인도)는 새 RPC를 거절하고, 한도(10초)가 지나도록 도는 RPC에는 `internal`과 `retryable: true`로 답한다: 거절된 호출은 돈 적이 없고, 끊긴 호출은 끝났을 수도 있다고 메시지에 적혀 있으니 호출한 쪽이 확인한 뒤 되풀이한다. 클라이언트는 모르는 코드의 프레임을 버리므로 코드는 `internal`로 둔다.
 - **`hello_ok` 전에는 hello 말고 아무것도 나가지 않는다** (#82). 클라이언트는 `hello_ok`가 온 뒤에야 `connected`를 알리고 쌓아 둔 호출을 만든 순서대로 보낸다. 그 전에 온 다른 프레임은 무시한다. 열렸는데 답이 없는 소켓은 10초 뒤 버리고 다시 시도하며, 호스트는 10초 안에 올바른 hello를 보내지 않은 소켓을 닫는다(4001). #82 전에는 소켓이 열리는 순간 큐를 쏟아, 거절된 핸드셰이크가 호스트가 실행한 적 없는 호출을 "연결이 끊김, 호스트에 닿았을 수 있음"으로 만들었다.
 - 방향에 따라 두 종류: **RPC**(요청/응답, UI→host)와 **이벤트 스트림**(host→UI, 단방향 푸시).
@@ -152,9 +152,9 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
   바꾼 경우. 대화의 알림이 무엇이 왜 바뀌었는지 말하고, 이벤트는 표시된 모델을 갱신한다.
 - 저장된 `agents.updateSettings`는 모두 전체 스냅숏(`permissionPreset` 포함)을 실은 `settings_changed`로 방송된다(#659). 부른 쪽은
   응답도 받지만, 다른 창과 연결된 기계, 에이전트가 불렀을 때의 사람 창은 이 이벤트로만 새 값을 안다. `person: true`는 클라이언트의
-  호출을 뜻하며 "Orchestrator changed" 토스트 없이 표시된 값만 갱신한다(`by`의 새 단어가 아니라 플래그다: 그 단어를 모르는 빌드는
-  프레임을 해석하지 못해 통째로 버린다). 오케스트레이터의 호출은 연결된 기계에도 RPC에 `by: 'orchestrator'`를 실어 보내고, 변경은
-  오케스트레이터의 것으로 방송되므로 토스트가 남는다.
+  호출을 뜻하며 "Assistant changed" 토스트 없이 표시된 값만 갱신한다(`by`의 새 단어가 아니라 플래그다: 그 단어를 모르는 빌드는
+  프레임을 해석하지 못해 통째로 버린다). 어시스턴트의 호출은 연결된 기계에도 RPC에 `by: 'orchestrator'`를 실어 보내고, 변경은
+  어시스턴트의 것으로 방송되므로 토스트가 남는다.
 - RPC로 저장한 프로젝트별 설정은 `projects_changed`로 알린다(#719): `projects.setTrusted`, `projects.setCommands`,
   `projects.setWorktreeSetup`, `projects.setAgentInstructions`(#1161), `worktrees.setTrunk`, 그리고 세션이 기록하는 기본 도구와 도구별 모델·노력. 모든 창이 프로젝트 목록을
   다시 읽어 이 필드들은 호스트의 값을 받으므로(목록의 행은 자리와 `git`을 그대로 둔다) ⋯ 메뉴, 신뢰 표시, 프로젝트의 앱이 호스트와
@@ -168,7 +168,7 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
 | 설명은 호스트가 쓰고 화면은 그리기만 한다 | 알림을 알아보려면 도구의 문구를 알아야 하고, 그것은 어댑터의 지식이다(`adapters/codex/notices.ts`). UI는 도구를 모르는 채로 남고, 저장된 알림은 나중의 어떤 창에서도 똑같이 읽힌다 |
 | Centralu에게 하는 알림도 대화에 남기고 `for Centralu`로 표시한다 | host.log로 보내는 대신 오너가 정했다(#342, 2026-10-05): 사람은 도구가 한 말을 보고, 표시가 그것을 고쳐야 할 문제로 보이지 않게 한다 |
 | `oncePerSession`은 호스트가 저장소를 보고 정한다 | 되풀이는 프로세스 수명을 넘나든다(Codex 세션은 깨어날 때마다 되풀이한다). 그 사이를 기억하는 것은 저장소뿐이다 |
-| `by: 'tool'` 전환은 적용하지 않고 기록한다 | 프로세스는 이미 새 값으로 돈다. 호스트는 자신이 띄운 값과 다른 필드만 받아들이고, 띄운 기록을 함께 옮겨(아직 할 변경으로 읽히지 않게) 사람이 턴 도중 저장한 선택은 지키며, 프로젝트가 기억하는 기본값은 건드리지 않는다. `by`가 없으면 예전처럼 오케스트레이터를 뜻한다 |
+| `by: 'tool'` 전환은 적용하지 않고 기록한다 | 프로세스는 이미 새 값으로 돈다. 호스트는 자신이 띄운 값과 다른 필드만 받아들이고, 띄운 기록을 함께 옮겨(아직 할 변경으로 읽히지 않게) 사람이 턴 도중 저장한 선택은 지키며, 프로젝트가 기억하는 기본값은 건드리지 않는다. `by`가 없으면 예전처럼 어시스턴트를 뜻한다 |
 | 시작 중인 세션이 보낸 이벤트는 등록될 때까지 붙잡아 둔다 | 새 세션은 어댑터가 답한 뒤에야 등록되는데, Codex의 `configWarning`은 `thread/start`가 답해지는 동안 도착한다(측정). 예전에는 번호 없이 저장되지 않은 채 나갔다 |
 
 **에이전트의 백그라운드 작업은 가장자리 한 쌍이 아니라 수준 신호 하나다** ([#290](https://github.com/ijun17/centralu/issues/290)).
@@ -334,7 +334,7 @@ npm을 기다리는 동안(`waiting_for_npm`) 오는 `update_status`를 모두 �
 | `projects_changed` | beta.16 | 다른 창이나 에이전트가 더하거나 뺀 프로젝트를 다음에 새로 읽을 때 본다 |
 | `session_live` | beta.18 | 세션이 잠들고 깨는 것(#568)을 보지 못한다. 다음에 목록을 읽을 때 반영된다 |
 | `update_apply_request`, `update_apply_go` | beta.23 | 에이전트의 적용 카드가 보낸 요청(#665)에 답하지 않는다. 5초 뒤 에이전트의 호출은 "No Centralu window answered"로 끝나고, 사람에게 업데이트 줄의 Apply now를 누르라고 부탁하게 한다 |
-| `interruption`, `session_owner`, `orchestrator_proposals_changed` | beta.24 | 중단 줄(#698)을 보이지 않고, 목록을 다시 읽기 전까지 옮겨 간 자식을 이전 주인 밑에 두고 오케스트레이터의 제안을 새로 고치지 않는다 |
+| `interruption`, `session_owner`, `orchestrator_proposals_changed` | beta.24 | 중단 줄(#698)을 보이지 않고, 목록을 다시 읽기 전까지 옮겨 간 자식을 이전 주인 밑에 두고 어시스턴트의 제안을 새로 고치지 않는다 |
 
 **이전 호스트가 떼어 내는 필드.** 더 새로운 창이 보낸 필드를 이전 호스트가 선언하지 않았으면 거기에서 버려진다(§4).
 그 때문에 일어나는 일이 달라지는 경우:
@@ -409,9 +409,9 @@ type ProtocolError = {
   `approvals.deleteRule`은 그 기기에 닿는다. 로컬 규칙 id는 음수가 아니므로, 기기를 모르는 UI가 그
   값으로 로컬 규칙을 지울 수는 없다. 프로세스 id는 오가지 않는다: `processes.strays`와
   `processes.stop`은 같은 `machine`을 받는다.
-- **1단계에서 허브에 남는 것.** 오케스트레이터와 그 도구, 저장소에 이미 있는
+- **1단계에서 허브에 남는 것.** 어시스턴트와 그 도구, 저장소에 이미 있는
   코디네이터, 레이아웃, 그리드, 설정, 테마, 업데이트, 앱 가져오기, 화면 질문. 원격 기기 자신의
-  오케스트레이터와 코디네이터는 목록에 없고 그 이벤트도 전달되지 않는다. `fs.resolve`(이 컴퓨터의
+  어시스턴트와 코디네이터는 목록에 없고 그 이벤트도 전달되지 않는다. `fs.resolve`(이 컴퓨터의
   OS가 쓸 경로)와 앱 화면 호출(`apps.viewFrame`, `apps.openView`, `apps.readResource`,
   `apps.invoke`, `apps.inlineReopen`, `apps.viewMessage`)은 다른 기기의 프로젝트나 세션이면 거절된다.
   화면의 주소는 그 호스트의 포트를 담고 있어서, 2단계에서 허브를 거치는 프록시로 연다.

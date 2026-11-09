@@ -95,8 +95,8 @@ export type SessionsSlice = {
    */
   focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean; targetSeq?: number }): void
   /**
-   * Goes to one thing that waits on the person (#703): a session, or a pending orchestrator proposal (an id from
-   * `isProposalId`), whose card stands on the orchestrator's screen. The waiting list and "next waiting" use it.
+   * Goes to one thing that waits on the person (#703): a session, or a pending assistant proposal (an id from
+   * `isProposalId`), whose card stands on the Assistant's screen. The waiting list and "next waiting" use it.
    */
   openWaiting(id: string, opts?: { preferGrid?: boolean }): void
   /** Opens a search result at its stored conversation row. */

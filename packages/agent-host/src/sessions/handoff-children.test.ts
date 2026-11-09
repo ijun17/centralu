@@ -190,7 +190,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const stranger = (await h.mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const heir = await handOff(h, project, parent, false)
 
-    const listed = (await h.mgr.runOrchestratorTool(heir, 'agent_session', { action: 'list' })).text
+    const listed = (await h.mgr.runCentraluTool(heir, 'agent_session', { action: 'list' })).text
     for (const id of [working, ...finished]) expect(listed).toContain(id)
     expect(listed).not.toContain(stranger)
     expect(await h.mgr.agentSession(heir, { sessionId: finished[0]!, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
@@ -495,7 +495,7 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
 })
 
 /**
- * A settled child is often still in use: finished, reported, and waiting for its orchestrator's next instruction. Left
+ * A settled child is often still in use: finished, reported, and waiting for its Assistant's next instruction. Left
  * with an original that goes, it belonged to nobody (#738), so when the original goes every child moves.
  */
 describe('a handoff whose original goes takes the settled children too (#738)', () => {
@@ -509,7 +509,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
   }
 
   /**
-   * agent_session send as an orchestrator makes it: the call waits up to its bound and answers "working", and the
+   * agent_session send as an Assistant makes it: the call waits up to its bound and answers "working", and the
    * child's report comes later, to the session the child now belongs to
    */
   async function sendPastBound(h: ReturnType<typeof host>, caller: string, child: string, text: string) {
@@ -572,7 +572,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(note).toContain('- 1 finished session — finished; waiting for more work. agent_session(action="list") lists it')
     expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you.`)
     // The list gives what the folded line does not: its name, its handle and its state
-    expect((await h.mgr.runOrchestratorTool(heir, 'agent_session', { action: 'list' })).text).toContain(`- Release notes [${settled}] · claude · finished`)
+    expect((await h.mgr.runCentraluTool(heir, 'agent_session', { action: 'list' })).text).toContain(`- Release notes [${settled}] · claude · finished`)
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
     expect(marker(heir)?.note).toBe(note)
     expect(owner(live)).toBe(heir)

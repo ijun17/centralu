@@ -78,7 +78,7 @@ describe('the rules for public text', () => {
   })
 
   it.each([
-    'feat(ui): let the orchestrator join grid',
+    'feat(ui): let the Assistant join grid',
     'fix(agent-host): gate ask_project on trust',
     'docs: define conventional commit messages',
     'feat(protocol)!: rename turn status',

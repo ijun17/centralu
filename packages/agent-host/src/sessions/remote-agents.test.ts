@@ -80,9 +80,9 @@ describe('what is owed of a child on a linked machine, across a hub restart (#10
   it('keeps in the record whether its report is owed and what it is paused over, as the report changes', () => {
     // As the host starts: restored, which also hooks the record to its report
     agents().restore()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     expect(stored()[0]!.owed).toEqual({})
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false, paused: [task] })
     expect(stored()[0]!.owed).toEqual({ paused: [task] })
     children.dropLinkedReport(child.sessionId)
     expect(stored()[0]!.owed).toBeUndefined()
@@ -223,10 +223,10 @@ describe("the turn on the child's machine, read as the caller's only on evidence
 
   it("leaves a turn the person starts there while the caller's report waits on its background work to the person", async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
     // The caller's turn completed with its own background work running there: its report is held over that work
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false, paused: [task] })
     // The person types there; their turn runs and asks a question
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: 'my own thing', from: PERSON })
     ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
@@ -243,9 +243,9 @@ describe("the turn on the child's machine, read as the caller's only on evidence
 
   it("takes neither a paused report's caller nor anyone else for the turn's owner before a message settles it", async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false, paused: [task] })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false, paused: [task] })
     // Held over its work, the turn is over: no card of what runs there is the caller's
     ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
     expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
@@ -273,7 +273,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
 
   it("does not take the person's turn for the caller's when a note arrives after the caller's turn ended", async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
     ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
     let release!: () => void
@@ -338,7 +338,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
   // RV13-C: after the notice that it ended unwatched, status at rest read the person's words
   it('reads none of the words of a turn that ended unwatched after the person spoke there', async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: true })
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
     state = 'idle'
     lastUser = { text: 'my own thing', from: PERSON }
@@ -376,7 +376,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
   // RV13 LOW, the rule chosen: once the person speaks into the caller's running turn, nothing more of it is the caller's
   it("ends what is owed of the caller's turn once the person speaks into it, and tells the caller", async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
     ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 2, text: 'my own thing', from: PERSON })
@@ -406,7 +406,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     /** The caller's turn took its task and a note (row 2) as the tool read them; the turn ends and its report goes as the linked reports send it */
     async function afterNote(): Promise<RemoteAgents> {
       const ra = following()
-      children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+      children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
       ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'TASK', from: HUB })
       opens(ra)
       expect(await act(ra, 'send', { text: 'use the staging data' })).toMatchObject({ ok: true, state: 'working' })
@@ -688,7 +688,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
 
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {
     const ra = following()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 7, text: 'TASK', from: HUB })
     ra.observe({ type: 'turn_complete', sessionId: child.sessionId })
     children.dropLinkedReport(child.sessionId)
@@ -707,7 +707,7 @@ describe('a child read at rest when the link is back after a missed end', () => 
     lastUser = last
     const ra = agents()
     ra.restore()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: true })
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
     state = 'idle'
     ra.observe({ type: 'machine_resync', machineId: 'm1' })
@@ -750,7 +750,7 @@ describe('a child on a linked machine, as the hub follows it (#1038 review)', ()
   // A drop before the first event of the turn left it unseen as busy, and its end while the link was down never reported
   it('reports a turn that ended while the link was down, when a call was waiting on it and had not seen it start', async () => {
     const ra = agents()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: false })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: false })
     const waiting = ra.agentSession('h1', ra.of(child.sessionId)!, { sessionId: child.sessionId, action: 'wait' })
     await eventually(() => !children.linkedReports.has(child.sessionId))
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'unreachable' } })
@@ -773,7 +773,7 @@ describe('a paused report whose turn end was deferred', () => {
   it('is read when the link is back, and reported if the child is at rest', async () => {
     const ra = agents()
     ra.restore()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: true, paused: [task] })
     state = 'idle'
     ra.observe({ type: 'machine_resync', machineId: 'm1' })
     await eventually(() => settled.includes(child.sessionId))
@@ -781,7 +781,7 @@ describe('a paused report whose turn end was deferred', () => {
 
   it('is read after the gate deferred its turn end, and reported if the child is at rest', async () => {
     const ra = agents()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true, paused: [task] })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: true, paused: [task] })
     // Whose the turn is cannot be told yet: the turn's end is deferred and read from the machine
     expect(ra.reportGate(child.sessionId)).toBe('defer')
     state = 'idle'
@@ -793,7 +793,7 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
   /** This hub's update of the machine holds the link: its stop ends the child's turn */
   const update = (ra: RemoteAgents) => {
     ra.restore()
-    children.setLinkedReport(child.sessionId, { orchestratorId: 'h1', busy: true })
+    children.setLinkedReport(child.sessionId, { assistantId: 'h1', busy: true })
     ra.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'updating', operation: { kind: 'update', step: 'stop', target: null, at: 1 } } })
   }
   const continued = () => told.filter((t) => t.includes('cut the turn') || t.includes('continued it there'))

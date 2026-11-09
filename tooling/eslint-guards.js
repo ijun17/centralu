@@ -14,6 +14,7 @@
  * spelling that needs types (a `Reflect` call, an alias of an imported function).
  */
 import { guard, keyOf, nameOf, plain, stringNodes, unwrap } from './eslint-guard-kit.js'
+import { variableOf } from './eslint-const-init.js'
 import { tsConfigs, tsRules } from './eslint-guards-ts.js'
 
 /** `.split('/')` and `.join('/')`: a path taken apart on a hardcoded separator (#47) */
@@ -293,6 +294,80 @@ const noSleeps = guard('no-sleeps', { sleep: '{{what}} waits for time: wait for 
   },
 }))
 
+/**
+ * The Assistant's kind as this build sends it, and the constant naming it (#2133). Not `'assistant'`: a chat row's and a
+ * message's `kind` say that too, and without types the rule cannot tell them apart; nothing compares a session's kind to
+ * the new value but `isAssistantKind`, which this rule sends every reader to
+ */
+const ASSISTANT_KIND_VALUES = new Set(['orchestrator'])
+/** Whether `id` names what was taken out of an object's `kind`: `({ kind }) => …`, `const { kind: k } = s` */
+const isDestructuredKind = (sourceCode, id) => {
+  const variable = variableOf(sourceCode, id)
+  if (variable?.defs.length !== 1) return false
+  const property = variable.defs[0].name.parent
+  return property?.type === 'Property' && property.parent?.type === 'ObjectPattern' && !property.computed && keyOf(property) === 'kind'
+}
+/** A read of a session's kind: `x.kind`, `x?.kind`, or a name destructured from an object's `kind` */
+const isKindRead = (sourceCode, node) => {
+  const u = unwrap(node)
+  // `s?.kind` is a chain around the member
+  const n = u?.type === 'ChainExpression' ? u.expression : u
+  if (n?.type === 'Identifier') return isDestructuredKind(sourceCode, n)
+  return n?.type === 'MemberExpression' && nameOf(n) === 'kind'
+}
+const isAssistantKindValue = (node) => {
+  const n = unwrap(node)
+  return ASSISTANT_KIND_VALUES.has(plain(n)) || (n?.type === 'Identifier' && n.name === 'ASSISTANT_KIND')
+}
+/** The Assistant value among a list written in place (`['orchestrator', …]`), or undefined */
+const assistantValueIn = (node) => {
+  const n = unwrap(node)
+  return n?.type === 'ArrayExpression' ? n.elements.find((e) => e && isAssistantKindValue(e)) : undefined
+}
+const valueName = (node) => plain(unwrap(node)) ?? 'ASSISTANT_KIND'
+
+/**
+ * A session's kind is compared to one Assistant value by hand (#2133): `x.kind === 'orchestrator'` misses the
+ * `'assistant'` a later release sends, so every reader asks `isAssistantKind` (@cc/protocol). Read as a comparison, a
+ * `case`, `[…].includes(kind)`, `new Set([…]).has(kind)` and `{ orchestrator: … }[kind]`, where the list, set or object
+ * is written in place. Known gaps: a list, set or object held in a name (`KINDS.includes(s.kind)`), and a kind passed
+ * on under another name than `kind` before it is compared
+ */
+const assistantKind = guard('assistant-kind', { hand: "a session's kind is compared to {{value}} by hand: ask isAssistantKind(…) from @cc/protocol, which knows both of the Assistant's kind values (#2133)" }, (context, add) => {
+  const kindRead = (node) => isKindRead(context.sourceCode, node)
+  return {
+    BinaryExpression(node) {
+      if (!['===', '!==', '==', '!='].includes(node.operator)) return
+      const [kind, value] = kindRead(node.left) ? [node.left, node.right] : [node.right, node.left]
+      if (kindRead(kind) && isAssistantKindValue(value)) add(node, 'hand', { value: valueName(value) })
+    },
+    SwitchStatement(node) {
+      if (!kindRead(node.discriminant)) return
+      for (const c of node.cases) if (c.test && isAssistantKindValue(c.test)) add(c, 'hand', { value: valueName(c.test) })
+    },
+    // `['orchestrator', 'coordinator'].includes(s.kind)`, `new Set(['orchestrator']).has(s.kind)`
+    CallExpression(node) {
+      const callee = unwrap(node.callee)
+      if (callee?.type !== 'MemberExpression' || node.arguments.length !== 1 || !kindRead(node.arguments[0])) return
+      const method = nameOf(callee)
+      const list = unwrap(callee.object)
+      const found =
+        method === 'includes' ? assistantValueIn(list)
+        : method === 'has' && list?.type === 'NewExpression' && nameOf(list.callee) === 'Set' ? assistantValueIn(list.arguments[0])
+        : undefined
+      if (found) add(node, 'hand', { value: valueName(found) })
+    },
+    // `({ orchestrator: … })[s.kind]`
+    MemberExpression(node) {
+      if (!node.computed || !kindRead(node.property)) return
+      const object = unwrap(node.object)
+      if (object?.type !== 'ObjectExpression') return
+      const key = object.properties.find((p) => p.type === 'Property' && !p.computed && ASSISTANT_KIND_VALUES.has(keyOf(p)))
+      if (key) add(node, 'hand', { value: keyOf(key) })
+    },
+  }
+})
+
 /** The plugin eslint.config.js registers as `guard` */
 export const guards = {
   rules: {
@@ -309,6 +384,7 @@ export const guards = {
     'import-boundary': importBoundary,
     'no-tool-names': noToolNames,
     'no-sleeps': noSleeps,
+    'assistant-kind': assistantKind,
     ...tsRules,
   },
 }
@@ -340,7 +416,7 @@ export const guardConfigs = [
   // The app runtime does not lean on what carries it; the external app runtime borrows only the named physics modules
   {
     files: [`${HOST_SRC}/apps/**/*.{ts,tsx}`],
-    rules: { 'guard/import-boundary': ['error', { forbidden: ['(^|/)sessions(/|$)'], why: 'the orchestrator is one caller of the runtime, and the runtime must not lean on it the other way around (#97)' }] },
+    rules: { 'guard/import-boundary': ['error', { forbidden: ['(^|/)sessions(/|$)'], why: 'the Assistant is one caller of the runtime, and the runtime must not lean on it the other way around (#97)' }] },
   },
   {
     files: [`${HOST_SRC}/apps/external/**/*.{ts,tsx}`],
@@ -371,6 +447,8 @@ export const guardConfigs = [
     },
   },
   { files: [`${HOST_SRC}/adapters/{acp,frames,cursor-agent}/*.test.ts`], rules: { 'guard/no-sleeps': 'error' } },
+  // Every shipped reader of a session's kind, on both sides of the wire (#2133)
+  { files: ['packages/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'], ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'], rules: { 'guard/assistant-kind': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))
 

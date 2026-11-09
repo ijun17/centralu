@@ -13,7 +13,7 @@ import type {
   ToolSetup,
 } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
-import type { OrchestratorTools } from './contract/orchestrator.js'
+import type { CentraluTools } from './contract/centralu-tools.js'
 import type { ProcessSource } from './contract/process.js'
 import type { SessionApps } from './contract/session-apps.js'
 import type { AdapterSurface } from './contract/surface.js'
@@ -33,8 +33,8 @@ import type { AdapterSurface } from './contract/surface.js'
  * have actually hit this).
  */
 
-// The contract's parts, one file per concept (#843): the orchestrator's tools, the apps a session has, the tool's process
-export * from './contract/orchestrator.js'
+// The contract's parts, one file per concept (#843): the Centralu tools, the apps a session has, the tool's process
+export * from './contract/centralu-tools.js'
 export * from './contract/session-apps.js'
 export * from './contract/process.js'
 export * from './contract/surface.js'
@@ -42,7 +42,7 @@ export * from './contract/surface.js'
 /**
  * The `state_change` reason an adapter gives a turn the tool interrupted when nobody here asked it to (#698): Codex's
  * `turn/completed` with `interrupted` that no `turn/interrupt` of ours preceded. The manager reads it as an
- * interruption the person and the orchestrator are told of. A Stop of ours ends a turn with `interrupted`.
+ * interruption the person and the Assistant are told of. A Stop of ours ends a turn with `interrupted`.
  */
 export const INTERRUPTED_BY_TOOL = 'interrupted_by_tool'
 
@@ -52,7 +52,7 @@ export const INTERRUPTED_BY_TOOL = 'interrupted_by_tool'
  */
 export type RequestTurnAnswer = { allowed: true; asked: boolean } | { allowed: false; message: string }
 
-/** What the adapter reaches of the host for the orchestrator's turn that a session's request is (`CreateSessionOpts.requestTurn`) */
+/** What the adapter reaches of the host for the Assistant's turn that a session's request is (`CreateSessionOpts.requestTurn`) */
 export type RequestTurn = {
   /** Whether the session's turn that is going is a session's request: read at every step of the CLI's own */
   active(): boolean
@@ -109,17 +109,17 @@ export type CreateSessionOpts = {
    */
   projectTrusted?: boolean
   /**
-   * A session that reads **no** settings files at all (#92) — the orchestrator and coordination
+   * A session that reads **no** settings files at all (#92) — the Assistant and coordination
    * sessions. Takes precedence over `projectTrusted`.
    *
-   * Those sessions have no project, and their working folder (orchestratorHome) is a spot a
+   * Those sessions have no project, and their working folder (assistantHome) is a spot a
    * worker can write into. If a session that can instruct many other sessions read instructions
    * from there, it would become a path from low privilege to high privilege — its role is instead
    * given through `systemPromptAppend` rather than a file. Claude turns off even the user's own
    * settings (`settingSources: []`). Codex turns off the repository layer (`.codex/`, AGENTS.md)
    * per thread, while the user's own `~/.codex` is still read as usual.
    *
-   * This is independent of whether the session receives tools (`orchestratorTools`) — the worktree
+   * This is independent of whether the session receives tools (`centraluTools`) — the worktree
    * manager and the session that creates the worktree also receive tools, but since they belong to
    * a project, they follow `projectTrusted` instead.
    */
@@ -157,7 +157,7 @@ export type CreateSessionOpts = {
    */
   mayRead?: (path: string) => boolean
   /**
-   * Given to the orchestrator: whether its turn that is going is a session's request (docs/plans/mailbox.md §9.7, #1447), and the person's card for a
+   * Given to the Assistant: whether its turn that is going is a session's request (docs/plans/mailbox.md §9.7, #1447), and the person's card for a
    * step of the CLI's own. In such a turn every step that is not a read reaches `ask` (which names who asked, and is Allow or Deny only), whatever the
    * session's preset and whatever the person once allowed "always": the adapter puts it in front of every tool call the CLI makes
    */
@@ -178,10 +178,10 @@ export type CreateSessionOpts = {
    */
   knownGoal?: SessionGoal
   /** If given, this session receives app tools — each adapter attaches them its own way */
-  orchestratorTools?: OrchestratorTools
+  centraluTools?: CentraluTools
   /**
    * External apps attached to this session (M4 A-5). Separate from Centralu's own tools
-   * (`orchestratorTools`) — an ordinary worker receives these too (decision 4 changes #81's "a
+   * (`centraluTools`) — an ordinary worker receives these too (decision 4 changes #81's "a
    * worker has no tools" only for external apps).
    */
   /*
@@ -203,8 +203,8 @@ export type CreateSessionOpts = {
    */
   outputSchema?: Record<string, unknown>
   /**
-   * Which bundle of tools is received (#69). 'orchestrator' gets all of them; 'reader' is an ordinary
-   * session's light set (#320), with ask_project and start_agent beside it. Only meaningful when orchestratorTools is present. Both exposure and execution use the same decision
+   * Which bundle of tools is received (#69). 'assistant' gets all of them; 'reader' is an ordinary
+   * session's light set (#320), with ask_project and start_agent beside it. Only meaningful when centraluTools is present. Both exposure and execution use the same decision
    * (profileAllows) — narrowing only the exposure would let a caller who already knows the name
    * just call it anyway.
    */
@@ -222,13 +222,13 @@ export type CreateSessionOpts = {
    *
    * Claude does not need this (a function simply becomes a tool). Codex can only attach an stdio
    * server through per-thread config, so a separate process starts, and that process calls back to
-   * this address. The bridge for orchestrator tools and the bridge for an external app (M4 A-5)
+   * this address. The bridge for Centralu tools and the bridge for an external app (M4 A-5)
    * both use the same path — the name follows whichever one existed first.
    *
    * `token` is this session's bridge credential, not the host's token: it opens only this
    * session's bridge calls (`transport/bridge-token.ts`, #382).
    */
-  orchestratorBridge?: { url: string; token: string }
+  centraluBridge?: { url: string; token: string }
   /**
    * The host's address and this session's credential (#1405, `transport/session-token.ts`), put in the environment of
    * the agent's process (`CC_HOST_URL`, `CC_HOST_CREDENTIAL`; `hostAccessEnv`), so a script the agent writes can call

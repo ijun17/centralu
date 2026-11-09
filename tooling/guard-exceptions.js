@@ -100,7 +100,7 @@ export const EXCEPTIONS = {
         capsule: "Answer, #1160's capsule action (owner, 2026-10-18); Button has no capsule shape yet, the next step for these",
       },
     },
-    'packages/ui/src/features/orchestrator/OrchestratorView.tsx': {
+    'packages/ui/src/features/assistant/AssistantView.tsx': {
       counts: { button: 3 },
       reason: {
         button: "two approve buttons brighter than primary on purpose (a proposal waits on the person), and the suggestion tiles",
@@ -118,7 +118,7 @@ export const EXCEPTIONS = {
         button: "a sidebar navigation tile (rounded-lg), lit while its screen is open",
       },
     },
-    'packages/ui/src/features/sidebar/OrchestratorButton.tsx': {
+    'packages/ui/src/features/sidebar/AssistantButton.tsx': {
       counts: { button: 1 },
       reason: {
         button: "a sidebar navigation tile (rounded-lg), lit while its screen is open",

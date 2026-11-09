@@ -1,6 +1,6 @@
 import type { SessionInfo } from '@cc/protocol'
 import type { MailToolArgs } from '../mail/tool.js'
-import type { OrchestratorTools } from '../adapters/contract.js'
+import type { CentraluTools } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import type { AskProjectFlow } from './ask-project-flow.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
@@ -17,8 +17,8 @@ import type { SelfCompaction } from './self-compaction.js'
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
-  /** The tools given to an orchestrator (FR-11), built over the manager (orchestrator-seat.ts) */
-  orchestratorToolsFor: (orchestratorId: string, scopeIds?: string[], ownProject?: boolean, hubView?: boolean) => OrchestratorTools
+  /** The tools given to an Assistant (FR-11), built over the manager (assistant-seat.ts) */
+  centraluToolsFor: (assistantId: string, scopeIds?: string[], ownProject?: boolean, hubView?: boolean) => CentraluTools
   updateCentraluAsked: UpdatesAsked['updateCentraluAsked']
   askProject: AskProjectFlow['askProject']
   startAgent: AgentStartFlow['startAgent']
@@ -29,7 +29,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta'> & {
   mailTool: (sessionId: string, args: MailToolArgs) => { text: string; isError?: boolean }
   /** The `compact_self` tool of a session (#1451) */
   readonly selfCompaction: Pick<SelfCompaction, 'request'>
-  /** One step of the orchestrator, asked about when a session's request is its turn (#1447) */
+  /** One step of the Assistant, asked about when a session's request is its turn (#1447) */
   whenAsked: WhenAsked
 }
 
@@ -71,29 +71,29 @@ export class SessionTools {
   toolChoice(
     m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'scopeSessionIds'>,
     builder?: boolean,
-  ): { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined } {
+  ): { profile: ToolProfile | null; tools: () => CentraluTools | undefined } {
     const profile = toolProfileFor(this.profileFacts(m, builder))
     return { profile, tools: () => this.toolBundleOf(m.id, profile, m) }
   }
 
   /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
-  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined {
+  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): CentraluTools | undefined {
     return toolBundleFor(profile, m.scopeSessionIds, {
-      orchestrator: () => this.orchestratorToolsFor(sessionId),
-      scoped: (ids) => this.host.orchestratorToolsFor(sessionId, ids),
+      assistant: () => this.centraluToolsFor(sessionId),
+      scoped: (ids) => this.host.centraluToolsFor(sessionId, ids),
       reader: () => this.readerToolsFor(sessionId),
     })
   }
 
   /**
-   * The central orchestrator's set, with the root apps it attaches on demand (#1205): `find_apps`, `attach_app` and
+   * The Assistant's set, with the root apps it attaches on demand (#1205): `find_apps`, `attach_app` and
    * `detach_app`, which it runs as commands. AppAccess holds it to the user folder's and trusted projects' root apps.
    */
-  private orchestratorToolsFor(sessionId: string): OrchestratorTools {
+  private centraluToolsFor(sessionId: string): CentraluTools {
     return {
-      ...this.host.orchestratorToolsFor(sessionId),
+      ...this.host.centraluToolsFor(sessionId),
       ...this.appAndMailTools(sessionId),
-      // A session may have asked for the turn the orchestrator is in (#1447): its steps that change something ask the person first
+      // A session may have asked for the turn the Assistant is in (#1447): its steps that change something ask the person first
       whenAsked: (call, signal, run) => this.host.whenAsked(sessionId, call, signal, run, (text) => ({ text, isError: true })),
     }
   }
@@ -108,7 +108,7 @@ export class SessionTools {
   }
 
   /**
-   * Whether `readerId` can read `targetId` with read_session: its profile has the tool and its seat's read rule lets it (`OrchestratorTools.mayRead`).
+   * Whether `readerId` can read `targetId` with read_session: its profile has the tool and its seat's read rule lets it (`CentraluTools.mayRead`).
    * What a stop notice may quote of a stopped session to it (security-boundaries.md): nothing it could not read anyway
    */
   readsSession(readerId: string, targetId: string): boolean {
@@ -127,8 +127,8 @@ export class SessionTools {
    * bridge's calls, but a read-only seat should not be holding a working sendToSession behind one
    * check — the object itself cannot act.
    */
-  private readerToolsFor(sessionId: string): OrchestratorTools {
-    const view = this.host.orchestratorToolsFor(sessionId, undefined, true)
+  private readerToolsFor(sessionId: string): CentraluTools {
+    const view = this.host.centraluToolsFor(sessionId, undefined, true)
     const error = 'This session can only read other sessions'
     const refuse = async () => ({ ok: false, error })
     return {
@@ -161,7 +161,7 @@ export class SessionTools {
    * What both seats share: another project's apps on demand (#371 part A, #1205), the one thing the reader seat may change and only
    * for itself; the mailbox (#1347), whose tool runs as a command; and `compact_self` (#1451)
    */
-  private appAndMailTools(sessionId: string): Pick<OrchestratorTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
+  private appAndMailTools(sessionId: string): Pick<CentraluTools, 'findApps' | 'attachApp' | 'detachApp' | 'mail' | 'compactSelf'> {
     return {
       findApps: async (query) => this.host.apps.requireAppAccess().find(sessionId, query),
       attachApp: async (app) => this.host.apps.requireAppAccess().attach(sessionId, app),

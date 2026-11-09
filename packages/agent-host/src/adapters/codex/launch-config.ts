@@ -32,7 +32,7 @@ export function permissionOptionsFor(preset: PermissionPreset): Record<string, u
 /**
  * Keeps files in the repository from being able to alter this thread (M4 decision 3, #92, #152) —
  * for untrusted projects, and for sessions that must not read any files at all (`noSettingFiles`:
- * orchestrator and coordination sessions — that folder is a spot a worker can write into). This
+ * assistant and coordination sessions — that folder is a spot a worker can write into). This
  * mirrors Claude's `settingSources: ['user']` versus `[]`. In a trusted folder (a trusted project,
  * or a user-folder app) nothing is loaded here — same as before. The manager decides which case
  * applies from the session kind and the project, and passes that down: it is not decided by
@@ -64,7 +64,7 @@ export function permissionOptionsFor(preset: PermissionPreset): Record<string, u
  *
  * `project_doc_max_bytes: 0` is loaded alongside it. We could not confirm from the binary whether
  * installed 0.153.4 has the line that filters AGENTS.md by trust. This key is here because it was
- * measured on the orchestrator (a planted AGENTS.md that had been followed stopped being followed).
+ * measured on the Assistant (a planted AGENTS.md that had been followed stopped being followed).
  * The user's own `~/.codex/AGENTS.md` is read through a different path and is unaffected.
  *
  * What remains: repository skills (`.codex/skills`, `.agents/skills`) are read regardless of trust

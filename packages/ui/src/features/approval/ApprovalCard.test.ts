@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, ORCHESTRATOR_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
+import { ApprovalDetail, NO_PATH, MACHINE_CHANGE, ASSISTANT_CHANGE, UNKNOWN_CARD } from '@cc/protocol'
 import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
@@ -213,14 +213,14 @@ describe('offersAlways', () => {
     expect(offersAlways({ kind: 'other', raw: 'Link this computer?', about: UNKNOWN_CARD })).toBe(false)
   })
 
-  // The orchestrator's change to a linked machine (#1219): each is asked on its own, and the host remembers nothing
-  it("is off for the orchestrator's change to a linked machine", () => {
+  // The Assistant's change to a linked machine (#1219): each is asked on its own, and the host remembers nothing
+  it("is off for the Assistant's change to a linked machine", () => {
     expect(offersAlways({ kind: 'other', raw: 'Remove the linked machine Laptop (me@laptop)?', about: MACHINE_CHANGE })).toBe(false)
   })
 
-  // The orchestrator's change to its settings or the session archive (#1219): asked every time, nothing remembered
-  it("is off for the orchestrator's change to its settings or the session archive", () => {
-    expect(offersAlways({ kind: 'other', raw: 'Delete 2 sessions in the session archive for good?', about: ORCHESTRATOR_CHANGE })).toBe(false)
+  // The Assistant's change to its settings or the session archive (#1219): asked every time, nothing remembered
+  it("is off for the Assistant's change to its settings or the session archive", () => {
+    expect(offersAlways({ kind: 'other', raw: 'Delete 2 sessions in the session archive for good?', about: ASSISTANT_CHANGE })).toBe(false)
   })
 })
 
@@ -230,7 +230,7 @@ describe('agentStartScope — how far "always" on a start-agent card reaches', (
     expect(agentStartScope({ project: { id: 'p1' } }, false)).toBe('session')
   })
 
-  // The orchestrator's child works in no project (#853): ⌥a used to send `project` for it, and the toast said so
+  // The Assistant's child works in no project (#853): ⌥a used to send `project` for it, and the toast said so
   it('stays the session for a child that works in no project', () => {
     expect(agentStartScope({ project: { id: '' } }, true)).toBe('session')
   })
@@ -239,7 +239,7 @@ describe('agentStartScope — how far "always" on a start-agent card reaches', (
 describe('keyScope — the scope a key answers with', () => {
   const start = (id: string) => ({ kind: 'agent_start', project: { id, name: 'x' }, tool: 'Codex', preset: 'normal', text: 't' }) as ApprovalDetail
 
-  // ⌥a on the orchestrator's card: the key asks for the project, the card has none to give
+  // ⌥a on the Assistant's card: the key asks for the project, the card has none to give
   it('keeps ⌥a to the session on a start-agent card that has no project', () => {
     expect(keyScope(start(''), { decision: 'always', scope: 'project' })).toBe('session')
     expect(keyScope(start('p1'), { decision: 'always', scope: 'project' })).toBe('project')

@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { AgentListRow } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
@@ -18,9 +19,9 @@ export type OwnAgentsHost = Pick<DelegationHost, 'children' | 'meta' | 'trashing
  */
 export function ownAgents(host: OwnAgentsHost, callerId: string): SessionInfo[] {
   const caller = host.meta.get(callerId)
-  // The orchestrator's children have no project (#853): its own place is none
-  const projectId = caller?.kind === 'orchestrator' ? null : caller?.projectId
-  if (projectId === undefined || (projectId === null && caller?.kind !== 'orchestrator')) return []
+  // The Assistant's children have no project (#853): its own place is none
+  const projectId = isAssistantKind(caller?.kind) ? null : caller?.projectId
+  if (projectId === undefined || (projectId === null && !isAssistantKind(caller?.kind))) return []
   return [...host.meta.values()]
     .filter((s) => s.id !== callerId && s.askedBy === callerId && s.projectId === projectId && !host.trashing.has(s.id))
     .sort((a, b) => a.createdAt - b.createdAt)

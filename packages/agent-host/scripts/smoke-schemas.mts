@@ -228,12 +228,12 @@ const ok: string[] = []
 const bad: { m: string; issues: string }[] = []
 const failed: { m: string; why: string }[] = []
 
-// orchestrator.tool can only be called by the orchestrator itself — get its id first
+// orchestrator.tool can only be called by the Assistant itself — get its id first
 try {
   const orc = (await rpc('orchestrator.get', {})) as { id: string }
   CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
 } catch {
-  SKIP['orchestrator.tool'] = 'could not create the orchestrator'
+  SKIP['orchestrator.tool'] = 'could not create the Assistant'
 }
 
 // git.commitDetail fills in a sha once one is obtained

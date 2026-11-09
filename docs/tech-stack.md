@@ -69,7 +69,7 @@ and the copies drifted in padding, hover and the disabled fade. the lint rule
 | dev store | **better-sqlite3** | The synchronous API is the simplest and fastest at this scale. Dev-only, replaced by rusqlite in prod | node:sqlite (still experimental) |
 | dev git | **a git CLI spawn wrapper written here** (parsing `--porcelain=v2`) | A temporary implementation to be replaced by git2 (Rust) in prod — the thinner, the easier to throw away | simple-git (adding a dependency to code we will throw away) |
 | File watcher | **chokidar** | Dev-only, combined with debounce | — |
-| MCP server | **@modelcontextprotocol/sdk** | The official SDK, for the orchestrator (FR-11) | Writing one (the cost of tracking the spec) |
+| MCP server | **@modelcontextprotocol/sdk** | The official SDK, for the Assistant (FR-11) | Writing one (the cost of tracking the spec) |
 
 ## 4. The Tauri side (apps/desktop/src-tauri — after M1)
 

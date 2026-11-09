@@ -9,11 +9,11 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, profileAllows, RARE_TIERS } from './orchestrator-tools.js'
+import { commandsFor, profileAllows, RARE_TIERS } from './centralu-tools.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
- * The orchestrator's add_project and list_machines (#1220), on this computer: a folder that already exists becomes a
+ * The Assistant's add_project and list_machines (#1220), on this computer: a folder that already exists becomes a
  * project only after the person's card, which shows what was found there; a missing path, a file or an existing
  * project is refused before any card; Allow registers it as the sidebar's Add project does. The linked-machine side is
  * in links/links.test.ts, with two real hosts.
@@ -47,9 +47,9 @@ function card(sessionId: string) {
   return pending?.detail.kind === 'project_add' ? { requestId: pending.requestId, detail: pending.detail } : undefined
 }
 
-/** add_project as the orchestrator reaches it in the default tier: a command behind centralu_run */
+/** add_project as the Assistant reaches it in the default tier: a command behind centralu_run */
 function addProject(orcId: string, args: Record<string, unknown>) {
-  return mgr.runOrchestratorTool(orcId, 'centralu_run', { command: 'add_project', args })
+  return mgr.runCentraluTool(orcId, 'centralu_run', { command: 'add_project', args })
 }
 
 function gitRepo(path: string, origin?: string): string {
@@ -62,7 +62,7 @@ function gitRepo(path: string, origin?: string): string {
 describe('add_project on this computer', () => {
   it('shows the card with the path, that it is a folder, and the git repository with its origin; nothing is added before Allow', async () => {
     const site = gitRepo(join(root, 'code', 'site'), 'git@github.com:me/site.git')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const call = addProject(orc.id, { path: site })
     await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail).toEqual({
@@ -91,7 +91,7 @@ describe('add_project on this computer', () => {
   it('registers it exactly as the sidebar does: the same spelling and trust that projects.add gives the same folder', async () => {
     const plain = join(root, 'Plain')
     mkdirSync(plain)
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     // A trailing separator, as a person or a model may type it
     const call = addProject(orc.id, { path: `${plain}/` })
     await eventually(() => !!card(orc.id))
@@ -107,7 +107,7 @@ describe('add_project on this computer', () => {
   it('adds nothing when the person denies it', async () => {
     const plain = join(root, 'plain')
     mkdirSync(plain)
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
     mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
@@ -123,7 +123,7 @@ describe('add_project on this computer', () => {
     const kept = join(root, 'kept')
     mkdirSync(kept)
     await rpc('projects.add', { path: kept })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     for (const [path, reason] of [
       [join(root, 'nowhere'), /Nothing is at/],
       [join(root, 'notes.txt'), /is a file, not a folder/],
@@ -141,7 +141,7 @@ describe('add_project on this computer', () => {
   it('asks under auto too: an existing folder is never added without the person', async () => {
     const plain = join(root, 'plain')
     mkdirSync(plain)
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     await mgr.updateSettings(orc.id, { permissionPreset: 'auto' })
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
@@ -153,7 +153,7 @@ describe('add_project on this computer', () => {
   it('reads the folder again after Allow: one gone while the card stood is not added', async () => {
     const plain = join(root, 'plain')
     mkdirSync(plain)
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const call = addProject(orc.id, { path: plain })
     await eventually(() => !!card(orc.id))
     rmSync(plain, { recursive: true })
@@ -169,7 +169,7 @@ describe('add_project on this computer', () => {
     vi.stubEnv('USERPROFILE', root)
     const site = join(root, 'Desktop', 'site')
     mkdirSync(site, { recursive: true })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const call = addProject(orc.id, { path: '~/Desktop/site' })
     await eventually(() => !!card(orc.id))
     expect(card(orc.id)!.detail.path).toBe(site)
@@ -178,7 +178,7 @@ describe('add_project on this computer', () => {
   })
 
   it('refuses a machine that is not linked, before any card', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await addProject(orc.id, { path: root, machine: 'laptop' })
     expect(r).toEqual({ text: 'No project was added: No machine is linked to this computer; leave machine out', isError: true })
     expect(card(orc.id)).toBeUndefined()
@@ -217,8 +217,8 @@ describe('list_machines', () => {
       machine({ id: 'm3', name: 'studio', shell: 'wsl', wslDistro: 'Ubuntu', status: 'disconnected', autoReconnect: false }),
     ]
     mgr.useMachineList(() => list)
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
     expect(r.isError).toBeFalsy()
     expect(r.text.split('\n').slice(0, 3)).toEqual([
       '- "laptop" [m1]: connected; Windows, PowerShell; auto reconnect on',
@@ -228,16 +228,16 @@ describe('list_machines', () => {
   })
 
   it('says when no machine is linked', async () => {
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })
     expect(r.text).toMatch(/No machine is linked/)
   })
 })
 
 describe('who may call them', () => {
-  it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
+  it('only the Assistant, as rare commands in the default tier; no other seat in any tier', () => {
     for (const name of ['add_project', 'list_machines']) {
-      expect(commandsFor('orchestrator', 'commands')).toContain(name)
+      expect(commandsFor('assistant', 'commands')).toContain(name)
       for (const tier of RARE_TIERS) {
         for (const profile of ['scoped', 'builder', 'reader'] as const) {
           expect(profileAllows(profile, name, tier), `${profile} ${tier} ${name}`).toBe(false)
@@ -247,7 +247,7 @@ describe('who may call them', () => {
     }
   })
 
-  it("runs for the orchestrator, and refuses an ordinary session's call by name and through centralu_run", async () => {
+  it("runs for the Assistant, and refuses an ordinary session's call by name and through centralu_run", async () => {
     const dir = join(root, 'proj')
     mkdirSync(dir)
     const project = (await rpc('projects.add', { path: dir })) as { id: string }
@@ -255,17 +255,17 @@ describe('who may call them', () => {
     const s = (await rpc('agents.createSession', { projectId: project.id, cwd: dir, tool: 'claude' })) as { id: string }
     const other = join(root, 'other')
     mkdirSync(other)
-    await expect(mgr.runOrchestratorTool(s.id, 'add_project', { path: other })).rejects.toThrow(/Not a tool of this session: add_project/)
-    await expect(mgr.runOrchestratorTool(s.id, 'list_machines', {})).rejects.toThrow(/Not a tool of this session: list_machines/)
-    await expect(mgr.runOrchestratorTool(s.id, 'centralu_run', { command: 'add_project', args: { path: other } })).rejects.toThrow(/Not a tool of this session/)
+    await expect(mgr.runCentraluTool(s.id, 'add_project', { path: other })).rejects.toThrow(/Not a tool of this session: add_project/)
+    await expect(mgr.runCentraluTool(s.id, 'list_machines', {})).rejects.toThrow(/Not a tool of this session: list_machines/)
+    await expect(mgr.runCentraluTool(s.id, 'centralu_run', { command: 'add_project', args: { path: other } })).rejects.toThrow(/Not a tool of this session/)
     expect(card(s.id)).toBeUndefined()
     expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(1)
-    // The same calls from the orchestrator run: its card stands, and the machine list answers
-    const orc = await mgr.orchestrator()
+    // The same calls from the Assistant run: its card stands, and the machine list answers
+    const orc = await mgr.assistant()
     const call = addProject(orc.id, { path: other })
     await eventually(() => !!card(orc.id))
     mgr.inputs.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
     expect((await call).isError).toBe(true)
-    expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })).isError).toBeFalsy()
+    expect((await mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'list_machines', args: {} })).isError).toBeFalsy()
   })
 })

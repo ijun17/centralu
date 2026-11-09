@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import type { Question } from '@cc/protocol'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
 import type { CreateSessionOpts } from '../contract.js'
-import { ORCHESTRATOR_MCP_NAME } from './orchestrator-mcp.js'
+import { CENTRALU_MCP_NAME } from './centralu-mcp.js'
 
 /**
  * AskUserQuestion's arguments to our own `Question[]`.
@@ -51,9 +51,9 @@ export function parseQuestions(input: unknown): Question[] {
  * (`mcpServerNameError`), but a place that grants trust must not rely on another layer's check —
  * it has to be correct on its own.
  */
-export function isOrchestratorTool(toolName: string): boolean {
+export function isCentraluToolName(toolName: string): boolean {
   const parts = toolName.split('__')
-  return parts.length === 3 && parts[0] === 'mcp' && parts[1] === ORCHESTRATOR_MCP_NAME
+  return parts.length === 3 && parts[0] === 'mcp' && parts[1] === CENTRALU_MCP_NAME
 }
 
 /**
@@ -130,7 +130,7 @@ const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', '
 /**
  * The person's own default mode, for a session that reads no settings files (#382, owner decision 2026-10-11).
  *
- * The orchestrator and coordinators read no files (`settingSourcesFor`: `[]`), so under normal the CLI found no
+ * The Assistant and coordinators read no files (`settingSourcesFor`: `[]`), so under normal the CLI found no
  * `defaultMode` and the person's global bypass did not reach them: app tools and their own commands asked. On Codex
  * the same sessions load `~/.codex` and the bypass applies. The owner chose the direction of decision 1 (the person's
  * policy applies), so the two now agree: the person's mode is carried, and nothing else is. Their `CLAUDE.md`, hooks
@@ -155,19 +155,19 @@ export async function personsDefaultMode(): Promise<PermissionMode | null> {
  * Which settings files get read (M4 decision 3, #92, #152) — **so that a file committed to the
  * repo cannot be able to decide an approval.**
  *
- *   orchestrator/coordination sessions (noSettingFiles)   []        reads no files at all (see the comment on the query option below)
+ *   assistant/coordination sessions (noSettingFiles)   []        reads no files at all (see the comment on the query option below)
  *   trusted project / a user-folder app's session          omitted   user, project and local, all of it — the CLI's own default
  *   untrusted project                                       ['user'] only the user's own settings (~/.claude)
  *
  * **Which row applies is decided by the manager, based on the session's kind and project, and
  * passed down** (launch-inputs.ts `settingFilesFor`). This must never be inferred from whether the
- * session receives tools — it once was: `orchestratorTools` being set used to mean `[]`, but the
+ * session receives tools — it once was: `centraluTools` being set used to mean `[]`, but the
  * worktree manager and builder sessions also receive those tools. A builder session in a trusted
  * project could then read neither CLAUDE.md nor the user's own ~/.claude (the global bypass),
  * which popped an approval card the person had turned off everywhere else. Measured (launching a
  * builder session through this adapter and having it run `touch`, normal, CLI 2.1.282, haiku,
  * 2026-09-25): before (`[]`) — card popped up, project hooks did not run, CLAUDE.md was not read;
- * now (omitted) — no card (the user's own bypass), hooks ran, CLAUDE.md was read. The orchestrator
+ * now (omitted) — no card (the user's own bypass), hooks ran, CLAUDE.md was read. The Assistant
  * still reads nothing; since #382 it is given the person's own mode instead (`personsDefaultMode`), so it
  * no longer pops a card the person turned off everywhere else.
  *

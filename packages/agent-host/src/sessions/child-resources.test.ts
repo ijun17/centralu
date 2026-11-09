@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
-import type { HistoryMessage, OrchestratorTools } from '../adapters/contract.js'
+import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import { crossWorld, type CrossAdapter, type CrossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 
 /**
  * What a child session costs the machine (#686, owner decision 2026-10-15):
@@ -63,7 +63,7 @@ describe('child sessions and the machine (#686)', () => {
       allowProject()
       const s = await session()
       const startAgent = (opts: Parameters<typeof w.mgr.startAgent>[1]) => w.mgr.startAgent(s, opts)
-      const out = await runOrchestratorTool({ startAgent } as OrchestratorTools, 'start_agent', { task: 'rename the store API', wait: false, lsp: true }, { sessionId: s, profile: 'reader' })
+      const out = await runCentraluTool({ startAgent } as CentraluTools, 'start_agent', { task: 'rename the store API', wait: false, lsp: true }, { sessionId: s, profile: 'reader' })
       expect(out.isError).not.toBe(true)
       const [child] = childrenOf(s)
       expect(handleOf(child!.id).opts.noCodeIntelligence).toBeUndefined()
@@ -94,7 +94,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(childrenOf(s)).toEqual([])
       // The person reads why in the caller's session; the model reads "queued: low memory" and the handle
       expect(w.events).toContainEqual(expect.objectContaining({ type: 'notice', sessionId: s, label: 'waiting for memory' }))
-      const text = (await runOrchestratorTool({ startAgent: async () => r } as unknown as OrchestratorTools, 'start_agent', { task: 'x' }, { sessionId: s, profile: 'reader' })).text
+      const text = (await runCentraluTool({ startAgent: async () => r } as unknown as CentraluTools, 'start_agent', { task: 'x' }, { sessionId: s, profile: 'reader' })).text
       expect(text).toMatch(/^queued: low memory/)
       expect(text).toContain(handle)
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
@@ -175,7 +175,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(r).toMatchObject({ ok: true, state: 'queued', sessionId: a, position: 1, lowMemory: expect.stringContaining('1.0 GB free') })
       expect(forks).toBe(0)
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
-      const text = (await runOrchestratorTool({ agentSession: async () => r } as unknown as OrchestratorTools, 'agent_session', { sessionId: a, action: 'send', text: 'x' }, { sessionId: b, profile: 'reader' })).text
+      const text = (await runCentraluTool({ agentSession: async () => r } as unknown as CentraluTools, 'agent_session', { sessionId: a, action: 'send', text: 'x' }, { sessionId: b, profile: 'reader' })).text
       expect(text).toMatch(/^Not forked: memory is low/)
 
       // With memory, the fork goes ahead, and the copy starts without code intelligence

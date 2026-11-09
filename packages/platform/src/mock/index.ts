@@ -22,7 +22,7 @@ import { KeeperMock } from './keeper.js'
 import { MachinesMock } from './machines.js'
 import { MailMock } from './mail.js'
 export { mockSessionParty } from './mail.js'
-import { OrchestratorMock } from './orchestrator.js'
+import { AssistantMock } from './assistant.js'
 import { PreferencesMock } from './preferences.js'
 import { ProjectStore } from './project-store.js'
 import { ProjectsMock } from './projects.js'
@@ -66,8 +66,8 @@ export class MockPlatform implements Platform {
   private readonly sessionsMock = new SessionsMock(this.clock, this.forward, this.store, this.projectStore, this.externalSessionsMock, this.trashMock)
   private readonly agentVersionsMock = new AgentVersionsMock(this.clock, this.forward, this.store, this.toolsMock, this.backgroundMock, this.sessionsMock)
   private readonly registry = new AppRegistry(this.forward)
-  private readonly orchestratorMock = new OrchestratorMock(this.clock, this.store, this.toolsMock)
-  private readonly appBuilderMock = new AppBuilderMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.orchestratorMock)
+  private readonly assistantMock = new AssistantMock(this.clock, this.store, this.toolsMock)
+  private readonly appBuilderMock = new AppBuilderMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.assistantMock)
   private readonly appImportsMock = new AppImportsMock(this.clock, this.forward, this.registry)
   private readonly appSettingsMock = new AppSettingsMock(this.forward, this.registry)
   private readonly rulesMock = new RulesMock(this.forward)
@@ -92,7 +92,7 @@ export class MockPlatform implements Platform {
   readonly agents: AgentPort = {
     ...this.sessionsMock.agents,
     ...this.approvalsMock.agents,
-    ...this.orchestratorMock.agents,
+    ...this.assistantMock.agents,
     ...this.gridMock.agents,
     ...this.toolsMock.agents,
     ...this.backgroundMock.agents,
@@ -233,9 +233,9 @@ export class MockPlatform implements Platform {
   get approvalAnswers() { return this.approvalsMock.approvalAnswers }
   get approvalScopes() { return this.approvalsMock.approvalScopes }
 
-  // orchestrator.ts
-  get orchestratorTool() { return this.orchestratorMock.orchestratorTool }
-  set orchestratorTool(value: OrchestratorMock['orchestratorTool']) { this.orchestratorMock.orchestratorTool = value }
+  // assistant.ts
+  get assistantTool() { return this.assistantMock.assistantTool }
+  set assistantTool(value: AssistantMock['assistantTool']) { this.assistantMock.assistantTool = value }
 
   // proposals.ts
   get mcpProposalList() { return this.proposalsMock.mcpProposalList }

@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import {
@@ -119,7 +120,7 @@ export const Composer = memo(function Composer({
    */
   const alive = useStore((s) => !!s.sessions[sessionId])
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')
-  const isOrchestrator = useStore((s) => s.sessions[sessionId]?.kind === 'orchestrator')
+  const isAssistant = useStore((s) => isAssistantKind(s.sessions[sessionId]?.kind))
   const send = useStore((s) => s.send)
   const wake = useStore((s) => s.wake)
   // Pulls out just this one setting — subscribing to the whole preferences record would
@@ -332,9 +333,9 @@ export const Composer = memo(function Composer({
     // Not while composing (#12) — a half-formed syllable is not a query. Closing the menu also
     // hands the arrow keys back: the branch below that spends them on the list is behind `open`.
     enabled: alive && caret >= 0 && !composing,
-    // The orchestrator's `@` picks a session — what it targets is a session, not a file.
-    // Judged by an explicit marker (kind): the orchestrator has no file tree to pick from
-    atSource: isOrchestrator ? 'sessions' : 'files',
+    // The Assistant's `@` picks a session — what it targets is a session, not a file.
+    // Judged by an explicit marker (kind): the Assistant has no file tree to pick from
+    atSource: isAssistant ? 'sessions' : 'files',
   })
 
   const pick = (item: Suggestion) => {

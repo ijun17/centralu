@@ -34,7 +34,7 @@ export type ChatItem =
   /**
    * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
    * (`user_message`).
-   * from: a message that another session sent, not the person (FR-11 — orchestrator instructions,
+   * from: a message that another session sent, not the person (FR-11 — assistant instructions,
    * worker reports).
    */
   /**
@@ -329,12 +329,12 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
     case 'user_message': {
       /*
        * If I sent it, it is already drawn — this only confirms it.
-       * If someone else sent it (the orchestrator's `send_to_session`), this is the only path by
+       * If someone else sent it (the Assistant's `send_to_session`), this is the only path by
        * which it appears on screen at all. Before this branch existed, an injected message was only
        * stored, never shown.
        *
        * A message carrying `from` is excluded from confirmation matching (FR-11) — if the person
-       * happened to have the same sentence sitting pending, the orchestrator's instruction would be
+       * happened to have the same sentence sitting pending, the Assistant's instruction would be
        * absorbed into that bubble and its origin marker would quietly disappear. Matching by text is
        * an assumption that only holds among my own messages.
        */

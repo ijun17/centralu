@@ -6,7 +6,7 @@ import type { HostAskAnswer } from './host-cards.js'
 import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
 
 /*
- * The orchestrator's handoff_session on its own (#694): the steps a handoff takes, in order, and what each failure on
+ * The Assistant's handoff_session on its own (#694): the steps a handoff takes, in order, and what each failure on
  * the way leaves (nothing handed off, and the session free to be handed off again). The tool's behaviour over the real
  * manager (the card, the note file, the children it moves) is in handoff-session.test.ts.
  */
@@ -35,7 +35,7 @@ beforeEach(() => {
   store.projects.addProject({ id: 'p1', path: '/work/p1', name: 'P1' })
   const t = target()
   store.sessions.upsertSession(t)
-  meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' })]])
+  meta = new Map([['t1', t], ['orch', target({ id: 'orch', name: 'Assistant', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' })]])
   turnObservers = new Map()
   steps = []
   created = []
@@ -104,7 +104,7 @@ describe('from the record', () => {
     expect(steps).toEqual(['toolProblem claude', 'card other', 'record t1 claude', 'create', 'rename heir Long run', 'notice t1'])
     expect(created[0]).toMatchObject({
       projectId: 'p1', cwd: '/work/p1', tool: 'claude', model: 'opus', effort: 'high', verbosity: 'low', serviceTier: 'priority', permissionPreset: 'normal',
-      initialFrom: { sessionId: 'orch', name: 'Orchestrator' },
+      initialFrom: { sessionId: 'orch', name: 'Assistant' },
       handoff: { from: 'Long run', note: 'the record', fromSessionId: 't1' },
     })
     expect(created[0]!.initialPrompt).toContain('keep the tests green')
@@ -146,12 +146,12 @@ describe('from the record', () => {
   })
 })
 
-// #1509 (owner, 2026-10-24): the card guards nothing for a session at rest whose preset the orchestrator has itself
+// #1509 (owner, 2026-10-24): the card guards nothing for a session at rest whose preset the Assistant has itself
 describe('no card when the handoff guards nothing', () => {
   const callerWith = (permissionPreset: SessionInfo['permissionPreset']) =>
-    meta.set('orch', target({ id: 'orch', name: 'Orchestrator', kind: 'orchestrator', projectId: null, permissionPreset }))
+    meta.set('orch', target({ id: 'orch', name: 'Assistant', kind: 'orchestrator', projectId: null, permissionPreset }))
 
-  it('hands off without a card when the successor\'s preset (the original\'s) is within the orchestrator\'s', async () => {
+  it('hands off without a card when the successor\'s preset (the original\'s) is within the Assistant\'s', async () => {
     quiet()
     callerWith('normal')
     expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: true, state: 'done' })
@@ -162,7 +162,7 @@ describe('no card when the handoff guards nothing', () => {
     expect(steps).not.toContain('card other')
   })
 
-  it('asks when the original\'s preset is above the orchestrator\'s, or the orchestrator cannot be read', async () => {
+  it('asks when the original\'s preset is above the Assistant\'s, or the Assistant cannot be read', async () => {
     quiet()
     callerWith('safe')
     await flowOf().handoff('orch', meta.get('t1')!, {})
@@ -183,7 +183,7 @@ describe('no card when the handoff guards nothing', () => {
     callerWith('normal')
     const flow = flowOf()
     const call = flow.handoff('orch', meta.get('t1')!, { mode: 'agent' })
-    await vi.waitFor(() => expect(steps).toContain('send t1 from Orchestrator (the handoff prompt)'))
+    await vi.waitFor(() => expect(steps).toContain('send t1 from Assistant (the handoff prompt)'))
     meta.set('t1', target({ permissionPreset: 'auto' }))
     turnEvent({ type: 'turn_complete' })
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('changed before the successor started') })
@@ -211,12 +211,12 @@ describe('no card when the handoff guards nothing', () => {
     expect(created).toEqual([])
   })
 
-  it('a card-free call grants no "always": a session above the orchestrator asks next', async () => {
+  it('a card-free call grants no "always": a session above the Assistant asks next', async () => {
     quiet()
     callerWith('normal')
     const flow = flowOf()
     await flow.handoff('orch', meta.get('t1')!, {})
-    // A session above the orchestrator asks: nothing carried over from the card-free call
+    // A session above the Assistant asks: nothing carried over from the card-free call
     meta.set('t1', target({ permissionPreset: 'auto' }))
     steps = []
     await flow.handoff('orch', meta.get('t1')!, {})
@@ -246,7 +246,7 @@ describe('the checks and the card', () => {
     expect(steps).toContain('card other')
   })
 
-  it('"always" lasts for that orchestrator only, once a call passed every check', async () => {
+  it('"always" lasts for that Assistant only, once a call passed every check', async () => {
     quiet()
     const flow = flowOf()
     answer = 'always'
@@ -254,7 +254,7 @@ describe('the checks and the card', () => {
     steps = []
     await flow.handoff('orch', meta.get('t1')!, {})
     expect(steps).not.toContain('card other')
-    meta.set('orch2', target({ id: 'orch2', name: 'Other orchestrator', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' }))
+    meta.set('orch2', target({ id: 'orch2', name: 'Other assistant', kind: 'orchestrator', projectId: null, permissionPreset: 'safe' }))
     answer = 'allow'
     await flow.handoff('orch2', meta.get('t1')!, {})
     expect(steps).toContain('card other')
@@ -277,7 +277,7 @@ describe('the checks and the card', () => {
     expect(created).toEqual([])
   })
 
-  it('an orchestrator moved off auto while the call was checked gets nothing, and the session is free again', async () => {
+  it('an Assistant moved off auto while the call was checked gets nothing, and the session is free again', async () => {
     quiet()
     const flow = flowOf()
     let reads = 0
@@ -297,7 +297,7 @@ describe('from a note the session writes', () => {
     store.messages.appendMessages([{ sessionId: 't1', seq: 7, role: 'assistant', kind: 'text', payload: { text: 'earlier work' }, ts: 7 }])
   })
 
-  it("asks the session as the orchestrator, reads the note written after the ask, and stops reading the session's turn", async () => {
+  it("asks the session as the Assistant, reads the note written after the ask, and stops reading the session's turn", async () => {
     quiet()
     host.send = async (id, text, _a, from) => {
       steps.push(`send ${id} from ${from.name}${text === handoffPrompt() ? ' (the handoff prompt)' : ''}`)
@@ -307,7 +307,7 @@ describe('from a note the session writes', () => {
     const r = await flowOf().handoff('orch', meta.get('t1')!, { mode: 'agent' })
     expect(r).toMatchObject({ ok: true, state: 'done', sessionId: 'heir', mode: 'agent' })
     expect(steps.filter((s) => !s.startsWith('auto') && !s.startsWith('toolProblem'))).toEqual([
-      'send t1 from Orchestrator (the handoff prompt)', 'note t1 after 7', 'create', 'rename heir Long run', 'notice t1',
+      'send t1 from Assistant (the handoff prompt)', 'note t1 after 7', 'create', 'rename heir Long run', 'notice t1',
     ])
     expect(created[0]!.handoff.note).toBe('the note it wrote')
     expect(turnObservers.size).toBe(0)

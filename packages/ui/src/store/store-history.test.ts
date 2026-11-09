@@ -474,7 +474,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     expect(await readAll('raced')).toEqual(L(450))
   })
 
-  it.each(['orchestrator', 'grid'] as const)(
+  it.each(['assistant', 'grid'] as const)(
     'the focused session keeps everything it loaded while the %s is on screen',
     async (view) => {
       const mock = new MockPlatform()

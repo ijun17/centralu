@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { setup } from './fixtures/project-screen.js'
 
 /**
- * The settings' selects with an "Other…" choice (fonts in Appearance, models in Orchestrator) share one
+ * The settings' selects with an "Other…" choice (fonts in Appearance, models in Assistant) share one
  * implementation. Choosing "Other…" opens a text field that takes the keyboard, so the name can be typed at once;
  * a field that is open from the start (the current value is not listed) must not pull focus when Settings opens.
  */

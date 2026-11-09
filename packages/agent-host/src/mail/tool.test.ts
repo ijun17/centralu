@@ -24,14 +24,14 @@ const world = () => {
 }
 
 describe('send (§11.3: needsReply unless kind "note")', () => {
-  it('sends a message that waits for a reply, says so, and names the receiver; to "orchestrator" goes to the role', () => {
+  it('sends a message that waits for a reply, says so, and names the receiver; to "assistant" goes to the role', () => {
     const w = world()
     const r = w.run('a', { action: 'send', to: 'b', text: 'Is #12 still open?' })
     expect(r.isError).toBeUndefined()
     const [sent] = w.store.mailbox.feedOf(A, { limit: 1 })
     expect(sent).toMatchObject({ kind: 'message', needsReply: true, body: 'Is #12 still open?' })
     expect(r.text).toBe(`Sent ${sent!.id} to beta (${B}). It waits for a reply; the reply will reach you as mail. What comes back arrives in your mailbox, and wakes you if you are at rest.`)
-    w.run('a', { action: 'send', to: 'orchestrator', text: 'help please', kind: 'question' })
+    w.run('a', { action: 'send', to: 'assistant', text: 'help please', kind: 'question' })
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
   })
 
@@ -47,23 +47,23 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     w.run('w', { action: 'send', to: 'parent', text: 'which branch?' })
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]!.recipient).toBe(A)
     expect(w.run('b', { action: 'send', to: 'parent', text: 'x' })).toEqual({
-      text: 'Refused (unknown): this session was not started by another session; write to "orchestrator" or "person".',
+      text: 'Refused (unknown): this session was not started by another session; write to "assistant" or "person".',
       isError: true,
     })
   })
 
-  // #1984: a child told to write to its parent mailed the orchestrator, the one role it could see
-  it('a session with a parent that mails "orchestrator" is told once that it went there, not to the parent; the mail is not rerouted', () => {
+  // #1984: a child told to write to its parent mailed the Assistant, the one role it could see
+  it('a session with a parent that mails "assistant" is told once that it went there, not to the parent; the mail is not rerouted', () => {
     const w = world()
-    const first = w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 1' })
-    expect(first.text).toContain('It went to the orchestrator, not to your parent "alpha". If you meant your parent, use to: "parent".')
+    const first = w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 1' })
+    expect(first.text).toContain('It went to the Assistant, not to your parent "alpha". If you meant your parent, use to: "parent".')
     expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
-    expect(w.run('w', { action: 'send', to: 'orchestrator', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
+    expect(w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
     // To the parent, or from a session with none, there is nothing to say
     expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')
-    expect(world().run('b', { action: 'send', to: 'orchestrator', text: 'help' }).text).not.toContain('not to your parent')
-    // A child the orchestrator started has it for its parent: nothing to correct
-    expect(world().run('o', { action: 'send', to: 'orchestrator', text: 'done' }).text).not.toContain('not to your parent')
+    expect(world().run('b', { action: 'send', to: 'assistant', text: 'help' }).text).not.toContain('not to your parent')
+    // A child the Assistant started has it for its parent: nothing to correct
+    expect(world().run('o', { action: 'send', to: 'assistant', text: 'done' }).text).not.toContain('not to your parent')
   })
 
   // #1987: a child started from a linked computer has no parent here; "person" would stay unseen on this computer
@@ -88,7 +88,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
 
 describe('"to" as a name (#2039)', () => {
   const sentTo = (w: ReturnType<typeof world>, from: string) => w.store.mailbox.recipients(w.store.mailbox.feedOf(at(from), { limit: 1 })[0]!.id)[0]!.recipient
-  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>. Mail does not reach sessions on other computers yet.'
+  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Mail does not reach sessions on other computers yet.'
 
   it("a session's name, in any case, reaches it as its id does; so does the address with the name in it", () => {
     const w = world()
@@ -102,6 +102,11 @@ describe('"to" as a name (#2039)', () => {
     const w = world()
     expect(w.run('a', { action: 'send', to: 'nobody', text: 'x' })).toEqual({
       text: `Refused (unknown): no session on this computer has the id or name "nobody" (${TEXT}`,
+      isError: true,
+    })
+    // #2133: the role's old address has no alias; it is refused as any unknown name is, and the refusal names the role's address
+    expect(w.run('a', { action: 'send', to: 'orchestrator', text: 'x' })).toEqual({
+      text: `Refused (unknown): no session on this computer has the id or name "orchestrator" (${TEXT}`,
       isError: true,
     })
     // The expanded form of a name, and a name with a space or a colon in it (which no address holds)

@@ -64,7 +64,7 @@ export function decisionFrom(text: string): ApprovalDecision | null {
 
 /**
  * The call that reads and answers a card, as the caller's seat has it: an ordinary session through agent_session, the
- * orchestrator through answer_question (a rare command, so through centralu_run in that tier). A coordinator (#80),
+ * assistant through answer_question (a rare command, so through centralu_run in that tier). A coordinator (#80),
  * which nothing makes any more, only reads it: `canAnswer` is false.
  */
 export function cardCall(profile: ToolProfile | null, sessionId: string): { call: string; canAnswer: boolean } {

@@ -1,6 +1,6 @@
 import { isAbsolute, join } from 'node:path'
 import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
-import { ORCHESTRATOR_MCP_NAME } from '../../apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
 import { alwaysAllowKey } from '../always-allow.js'
@@ -335,11 +335,11 @@ class AcpWire implements ToolWire {
 
   /** Centralu's own tools through the same stdio bridge Codex starts (§6). Apps are not attached to an ACP agent yet */
   private mcpServers(): unknown[] {
-    const bridge = this.opts.orchestratorBridge
-    if (!this.opts.orchestratorTools || !bridge) return []
+    const bridge = this.opts.centraluBridge
+    if (!this.opts.centraluTools || !bridge) return []
     return [
       {
-        name: ORCHESTRATOR_MCP_NAME,
+        name: CENTRALU_MCP_NAME,
         command: process.execPath,
         args: [bridgePath()],
         env: [

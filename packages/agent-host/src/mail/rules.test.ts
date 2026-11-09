@@ -53,7 +53,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
       expect(quietAnswer(m(), { kind: 'message', needsReply: false }, none)).toBe(true)
     })
 
-    it('is never quiet when the answer is a request to the orchestrator (§7.6)', () => {
+    it('is never quiet when the answer is a request to the Assistant (§7.6)', () => {
       expect(quietAnswer(m(), { kind: 'message', needsReply: false }, { ...none, request: true })).toBe(false)
     })
 
@@ -82,16 +82,16 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
   })
 
   describe('flowsDownTo (§8.2 step 4)', () => {
-    const f = (over: Partial<Parameters<typeof flowsDownTo>[0]> = {}) => flowsDownTo({ fromPerson: false, fromSession: true, kind: 'message', toOrchestrator: false, fromParent: false, ...over })
+    const f = (over: Partial<Parameters<typeof flowsDownTo>[0]> = {}) => flowsDownTo({ fromPerson: false, fromSession: true, kind: 'message', toAssistant: false, fromParent: false, ...over })
 
-    it('is the person’s words, a task from a session, and a parent’s message; never a session’s words to the orchestrator', () => {
+    it('is the person’s words, a task from a session, and a parent’s message; never a session’s words to the Assistant', () => {
       expect(f({ fromPerson: true, fromSession: false })).toBe(true)
-      expect(f({ fromPerson: true, fromSession: false, toOrchestrator: true })).toBe(true)
+      expect(f({ fromPerson: true, fromSession: false, toAssistant: true })).toBe(true)
       expect(f({ kind: 'task' })).toBe(true)
       expect(f({ fromParent: true })).toBe(true)
       expect(f()).toBe(false)
-      expect(f({ kind: 'task', toOrchestrator: true })).toBe(false)
-      expect(f({ fromParent: true, toOrchestrator: true })).toBe(false)
+      expect(f({ kind: 'task', toAssistant: true })).toBe(false)
+      expect(f({ fromParent: true, toAssistant: true })).toBe(false)
       expect(f({ kind: 'report', fromSession: false })).toBe(false)
       expect(f({ kind: 'notice', fromParent: true })).toBe(false)
     })
@@ -115,13 +115,13 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
 
   it('says its refusals in the words of the design (S9, S15), and has a reason for each', () => {
     expect(REFUSAL_TEXT.repeat('beta')).toBe('you sent the same text to beta less than 10 minutes ago.')
-    expect(REFUSAL_TEXT.ask_rate()).toBe("your project's sessions asked the orchestrator 5 times in the last hour; wait, or write to the person.")
+    expect(REFUSAL_TEXT.ask_rate()).toBe("your project's sessions asked the Assistant 5 times in the last hour; wait, or write to the person.")
     expect(REFUSAL_TEXT.recipients()).toBe('at most 10 recipients.')
     expect(REFUSAL_TEXT.own_message('h1.m_1')).toBe('h1.m_1 is your own message; say who it is for with to="…".')
     expect(REFUSAL_TEXT.untrusted_project('Pex', 'session c')).toBe(
       'your project Pex is not trusted, so work you give outside it (to session c) waits for the person to trust Pex. Nothing was started. Centralu shows the person how, and tells you when Pex is trusted; give it again then.',
     )
-    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'repeat', 'ask_rate', 'orchestrator_asks', 'removed', 'untrusted_project']) {
+    for (const reason of ['gone', 'ambiguous', 'unknown', 'elsewhere', 'unknown_message', 'own_message', 'recipients', 'not_yours', 'repeat', 'ask_rate', 'assistant_asks', 'removed', 'untrusted_project']) {
       expect(refusalReason(refuse(reason as never, 'x')), reason).toBe(reason)
     }
   })

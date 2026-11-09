@@ -871,7 +871,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(board).toContainText('Board')
     // The whole description, not its first line only
     await expect(board.getByTestId('trust-card-app-description')).toHaveText('The team board\nwith more lines')
-    await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the orchestrator and your other projects can use it.')
+    await expect(board.getByTestId('trust-ask-app-reach')).toHaveText('This project is this app: the Assistant and your other projects can use it.')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: run your default agent in a new session')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText('May ask to: call other apps: notes')
     await expect(board.getByTestId('trust-ask-app-uses')).toContainText("the names and states of its project's sessions (sessions.list)")

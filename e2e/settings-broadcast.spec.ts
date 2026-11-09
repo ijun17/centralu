@@ -24,6 +24,6 @@ test('a model and permission preset changed from outside show in the header and 
   await expect(page.getByTestId('settings-model-opus')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('settings-preset-auto')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('settings-preset-normal')).toHaveAttribute('aria-checked', 'false')
-  // Nobody else's hand was involved on this screen, so nothing is announced as the orchestrator's
+  // Nobody else's hand was involved on this screen, so nothing is announced as the Assistant's
   await expect(page.getByTestId('toast')).toHaveCount(0)
 })

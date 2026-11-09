@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import type { SessionInfo } from '@cc/protocol'
 import { agentListText, agentRunText } from './tool-answers.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 import { agentState, cleanUpDue, ownAgents, type OwnAgentsHost } from './own-agents.js'
 
 /**
@@ -35,7 +35,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
       .messages.loadMessages(parent, 50)
       .filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
       .map((m) => (m.payload as { text: string }).text)
-  const list = async (s: string) => (await w.mgr.runOrchestratorTool(s, 'agent_session', { action: 'list' })).text
+  const list = async (s: string) => (await w.mgr.runCentraluTool(s, 'agent_session', { action: 'list' })).text
 
   it("a finished child's report names its delete, and how many of the parent's other children are at rest", async () => {
     const s = await session()
@@ -69,7 +69,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(reportOf(s, c)[0]).toContain('2 other sessions you started have ended their turns and remain: agent_session(action="list") shows them.')
   })
 
-  it("an orchestrator's report names the delete and the list as it calls them: through centralu_run (#850)", async () => {
+  it("an Assistant's report names the delete and the list as it calls them: through centralu_run (#850)", async () => {
     const orch = (await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto', kind: 'orchestrator' })).id
     const one = await startRunning(orch, 'first job')
     const two = await startRunning(orch, 'second job')
@@ -119,9 +119,9 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     handleOf(c)!.answer('their job done')
     await w.until(() => reportOf(other, c).length === 1)
     expect(reportOf(other, c)[0]).toContain('action="delete"')
-    // The orchestrator gives the same child more work with a report: that report is of a session it did not start
+    // The Assistant gives the same child more work with a report: that report is of a session it did not start
     const directing = await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
-    await handleOf(directing.id)!.opts.orchestratorTools!.sendToSession(c, 'one more thing', true)
+    await handleOf(directing.id)!.opts.centraluTools!.sendToSession(c, 'one more thing', true)
     await w.until(() => handleOf(c)!.sent.length === 2)
     handleOf(c)!.answer('one more thing done')
     await w.until(() => reportOf(directing.id, c).length === 1)
@@ -148,9 +148,9 @@ describe('a parent is told to clean up the children whose answers it used (#690)
   it('list keeps answering after an older window sent the session tools off: they are always on (2026-10-20)', async () => {
     const s = await session()
     await startRunning(s, 'a job')
-    const tools = handleOf(s)!.opts.orchestratorTools!
+    const tools = handleOf(s)!.opts.centraluTools!
     w.mgr.prefs.setUiPreferences({ sessionTools: false })
-    const r = await runOrchestratorTool(tools, 'agent_session', { action: 'list' }, { sessionId: s, profile: 'reader' })
+    const r = await runCentraluTool(tools, 'agent_session', { action: 'list' }, { sessionId: s, profile: 'reader' })
     expect(r.isError).toBeFalsy()
     expect(r.text).not.toContain('Turned off in Settings')
   })

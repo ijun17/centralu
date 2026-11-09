@@ -342,7 +342,7 @@ describe('a session put to sleep, on the manager', () => {
     return Object.fromEntries(
       Object.entries(o).map(([k, v]) => [
         k,
-        typeof v === 'function' ? 'function' : k === 'orchestratorTools' && v ? Object.keys(v as object).sort() : v,
+        typeof v === 'function' ? 'function' : k === 'centraluTools' && v ? Object.keys(v as object).sort() : v,
       ]),
     )
   }

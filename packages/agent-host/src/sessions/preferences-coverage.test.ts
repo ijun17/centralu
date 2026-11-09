@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { UiPreferences, UiPreferencesPatch } from '@cc/protocol'
 import type { z } from 'zod'
-import { ORCHESTRATOR_TOOLS } from './tool-definitions.js'
+import { CENTRALU_TOOLS } from './tool-definitions.js'
 import { NOTIFY_SWITCHES_RETIRED, PREFERENCE_COVERAGE } from './preferences-coverage.js'
 
 const fieldsOf = (tool: string): z.ZodObject<Record<string, z.ZodTypeAny>> => {
-  const t = ORCHESTRATOR_TOOLS.find((x) => x.name === tool)
+  const t = CENTRALU_TOOLS.find((x) => x.name === tool)
   if (!t) throw new Error(`no tool ${tool}`)
   return t.schema
 }
 const unwrap = (s: z.ZodTypeAny): z.ZodTypeAny => ('unwrap' in s && typeof s.unwrap === 'function' ? unwrap(s.unwrap()) : s)
 
-describe('the orchestrator reaches every preference the person can set (#1978)', () => {
+describe('the Assistant reaches every preference the person can set (#1978)', () => {
   const stored = Object.keys(UiPreferences.shape)
 
   it('names every stored preference, and nothing that is not one', () => {

@@ -3,7 +3,7 @@
  * whether a thread with no turn can be resumed (#524).
  *
  * #525: Claude gets a seat's role instructions from the in-process MCP server's `instructions`
- * (adapters/claude/orchestrator-mcp.ts). Codex reaches the same tools through a stdio bridge, which could answer
+ * (adapters/claude/centralu-mcp.ts). Codex reaches the same tools through a stdio bridge, which could answer
  * `initialize` with the same field, or the text could ride in the thread's `developerInstructions`. This starts a
  * thread with a tiny stdio MCP server whose `initialize` carries a marked `instructions`, and marked developer
  * instructions next to it, asks the model for a phrase from each, and looks for both markers in the thread's rollout

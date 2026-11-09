@@ -1,7 +1,7 @@
 import { bytesText } from '../bytes-text.js'
 import { scriptLabel } from '../mail/script-label.js'
 import type { StoredMessage } from '@cc/protocol'
-import { trustedJsonText } from './orchestrator-tools.js'
+import { trustedJsonText } from './centralu-tools.js'
 
 /**
  * The handoff record (#78) — **a handoff with no summarizer**, and its result **is a file**
@@ -146,7 +146,7 @@ function toEntries(rows: StoredMessage[]): Entry[] {
 
 /**
  * A user row as the successor reads it (#694 review). Only the person's own words are `[user]`: a row another session
- * sent (`from`: a child's report, an orchestrator's or parent's instruction, a Centralu notice) or an app sent
+ * sent (`from`: a child's report, an Assistant's or parent's instruction, a Centralu notice) or an app sent
  * (`fromApp`) says whose it is and carries its text as one JSON string, as read_session does (#120, #121), so a line in
  * it cannot pose as the person or as a line of this record.
  */

@@ -239,7 +239,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: 'centralu-mail',
     tools: ['claude', ...ACP_TOOLS, 'antigravity'],
-    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    session: () => ({ centraluTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the mail tool of the centralu server to read your inbox, then send a message to "Docs worker" saying: use LICENSE. Then say done.')
     },
@@ -247,7 +247,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: 'centralu-agents',
     tools: ['claude', ...ACP_TOOLS, 'antigravity'],
-    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    session: () => ({ centraluTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Use the recall tool of the centralu server to search for "naming". Then use its read_session tool on the session it found. Then use its start_agent tool with the task "list the notes". Then summarise all three in two sentences.')
     },
@@ -255,7 +255,7 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: 'centralu-compact',
     tools: ['claude'],
-    session: () => ({ orchestratorTools: fakeCentraluTools(), toolProfile: 'reader' }),
+    session: () => ({ centraluTools: fakeCentraluTools(), toolProfile: 'reader' }),
     async run(d) {
       await turn(d, 'Call the compact_self tool of the centralu server with the focus "the naming decision", and tell me what it answered.')
     },

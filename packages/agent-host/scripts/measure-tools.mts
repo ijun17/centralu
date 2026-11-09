@@ -13,7 +13,7 @@
  *
  * Options: --cli claude,codex  --reps 2  --model haiku  --codex-model <id>  --change-model <id|none>
  *          --phases resident,cache,results,selection  --prompts <file>  --out <file>  --keep
- *          --kinds none,reader,orchestrator,builder (the session kinds the resident phase starts; the worktree manager
+ *          --kinds none,reader,assistant,builder (the session kinds the resident phase starts; the worktree manager
  *          went with its role, #561 part 3)
  *          --only <id,id> (run only these prompts of the set)
  *
@@ -26,8 +26,8 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { ORCHESTRATOR_TOOLS, commandsFor, instructionsFor, toolDefsFor } from '../src/sessions/orchestrator-tools.js'
-import { CLAUDE_SUBAGENT_TOOL } from '../src/adapters/claude/orchestrator-mcp.js'
+import { CENTRALU_TOOLS, commandsFor, instructionsFor, toolDefsFor } from '../src/sessions/centralu-tools.js'
+import { CLAUDE_SUBAGENT_TOOL } from '../src/adapters/claude/centralu-mcp.js'
 import { CODEX_SUBAGENT_TOOL } from '../src/adapters/codex/thread-open.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
@@ -48,7 +48,7 @@ const { values: opt, positionals } = parseArgs({
     out: { type: 'string' },
     keep: { type: 'boolean', default: false },
     only: { type: 'string' },
-    kinds: { type: 'string', default: 'none,reader,orchestrator,builder' },
+    kinds: { type: 'string', default: 'none,reader,assistant,builder' },
   },
   allowPositionals: true,
 })
@@ -78,8 +78,8 @@ const PROMPTS = JSON.parse(readFileSync(PROMPTS_FILE, 'utf8')) as {
    * tools (and the person's skills) to a declined card while Centralu's run under every preset
    */
   preset?: 'safe' | 'normal' | 'auto'
-  /** fresh: the orchestrator's prompt runs in a new orchestrator every repetition, with nothing it made before left over */
-  selection: { id: string; profile: 'reader' | 'orchestrator'; prompt: string; expect: string[]; fresh?: boolean }[]
+  /** fresh: the Assistant's prompt runs in a new Assistant every repetition, with nothing it made before left over */
+  selection: { id: string; profile: 'reader' | 'assistant'; prompt: string; expect: string[]; fresh?: boolean }[]
 }
 // What the recorder takes out of a request to count Centralu's own tokens: the instructions each seat can be sent
 // (each CLI's is worded with its own subagent tool, #1587)
@@ -160,8 +160,8 @@ async function world(cli: Cli, recorder: ApiRecorder | null) {
   // The account's claude.ai connectors come up at different moments run to run and moved the baseline (#320's probe)
   env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false'
   /*
-   * Claude Code's auto memory off (#512): asked to keep a procedure, a trial's orchestrator wrote it to
-   * ~/.claude/projects/<the scratch folder>/memory, and every later orchestrator of the run starts in the same
+   * Claude Code's auto memory off (#512): asked to keep a procedure, a trial's assistant wrote it to
+   * ~/.claude/projects/<the scratch folder>/memory, and every later assistant of the run starts in the same
    * folder and would read it, so one repetition answered the next
    */
   env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1'
@@ -205,10 +205,10 @@ class Driver {
     return this.w.host
   }
 
-  async session(kind: 'none' | 'reader' | 'orchestrator' | 'builder'): Promise<Json> {
+  async session(kind: 'none' | 'reader' | 'assistant' | 'builder'): Promise<Json> {
     const { host, pHere, pThere, here } = this.w
     let s: Json
-    if (kind === 'orchestrator') {
+    if (kind === 'assistant') {
       await host.rpc('orchestrator.configure', { tool: this.cli })
       s = await host.rpc('orchestrator.get', {})
     } else if (kind === 'builder') {
@@ -248,7 +248,7 @@ class Driver {
       /*
        * The CLI's own errands (a title) are left out; a request that failed has no usage. So are other sessions':
        * every Claude session of the host goes through the recorder, and a turn can start one (#512: create_app's
-       * builder, handed work by send_to_session, made its requests inside the orchestrator's window)
+       * builder, handed work by send_to_session, made its requests inside the Assistant's window)
        */
       const window = this.recorder.requests.slice(since).filter((r) => r.main)
       const listed = ((await this.host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]).find((x) => x.id === sessionId)
@@ -301,7 +301,7 @@ function rowOf(r: RecordedRequest): RequestRow {
 
 /** Resident context: a fresh session of each kind, one short turn, its first request */
 async function residentPhase(d: Driver): Promise<void> {
-  const kinds = (['none', 'reader', 'orchestrator', 'builder'] as const).filter((k) => KINDS.includes(k))
+  const kinds = (['none', 'reader', 'assistant', 'builder'] as const).filter((k) => KINDS.includes(k))
   const out: NonNullable<Summary['resident']>[Cli] = {}
   const walk: RequestRow[] = []
   for (const kind of kinds) {
@@ -468,14 +468,14 @@ function resolveCalls(calls: Call[], runs: { command: string; outcome: string }[
 }
 
 /**
- * Leaves the world as a fresh orchestrator prompt found it (#512): every session but the seed, every app but the
+ * Leaves the world as a fresh assistant prompt found it (#512): every session but the seed, every app but the
  * counter, and every proposal waiting on the person go. What one run made (an app id, a skill name) would
  * otherwise turn the next run's first call into a refusal.
  */
 async function tidy(d: Driver, keep: string[]): Promise<void> {
   const host = d.host
   /*
-   * Stopped before they are deleted: a builder create_app stood up and the orchestrator handed work to runs on the
+   * Stopped before they are deleted: a builder create_app stood up and the Assistant handed work to runs on the
    * CLI's default model under the person's own settings, and in the first runs one went on working after its turn
    */
   const others = ((await host.rpc('sessions.list', {}).catch(() => [])) as unknown as Json[]).filter((s) => !keep.includes(s.id))
@@ -505,7 +505,7 @@ async function selectionPhase(d: Driver, seed: Json): Promise<void> {
   const fill = (t: string) => t.replaceAll('{project}', d.w.pHere.name).replaceAll('{other}', d.w.pThere.name).replaceAll('{seed}', seed.name)
   // Nothing a selection turn asks for is carried out beyond the tool call itself: consent and other approvals are declined
   d.host.approvals = () => 'deny'
-  let orchestrator: Json | null = null
+  let assistant: Json | null = null
   for (const p of PROMPTS.selection) {
     // Every name the seat can reach, whichever arm: a command behind centralu_run is still the seat's
     const defs = toolDefsFor(p.profile, 'resident')
@@ -514,11 +514,11 @@ async function selectionPhase(d: Driver, seed: Json): Promise<void> {
     const runs: SelectionRun[] = []
     for (let rep = 0; rep < REPS; rep++) {
       let s: Json
-      if (p.profile === 'orchestrator' && p.fresh && orchestrator) {
-        await d.remove(orchestrator.id)
-        orchestrator = null
+      if (p.profile === 'assistant' && p.fresh && assistant) {
+        await d.remove(assistant.id)
+        assistant = null
       }
-      if (p.profile === 'orchestrator') s = orchestrator ??= await d.session('orchestrator')
+      if (p.profile === 'assistant') s = assistant ??= await d.session('assistant')
       else s = await d.session('reader')
       if (PROMPTS.preset && s.permissionPreset !== PROMPTS.preset) {
         await d.host.rpc('agents.updateSettings', { sessionId: s.id, permissionPreset: PROMPTS.preset })
@@ -530,7 +530,7 @@ async function selectionPhase(d: Driver, seed: Json): Promise<void> {
       const mine = calls.filter((c) => isOurs(c.name) && !DISCOVERY.has(c.bare))
       const firstExpected = calls.findIndex((c) => p.expect.includes(c.bare))
       const first = firstExpected >= 0 ? calls[firstExpected]! : null
-      const schema = first ? (defs.find((t) => t.name === first.bare)?.schema ?? ORCHESTRATOR_TOOLS.find((t) => t.name === first.bare)?.schema) : undefined
+      const schema = first ? (defs.find((t) => t.name === first.bare)?.schema ?? CENTRALU_TOOLS.find((t) => t.name === first.bare)?.schema) : undefined
       const verdict: SelectionRun['verdict'] =
         p.expect.length === 0 ? (mine.length ? 'wrong' : 'right') : !mine.length ? 'none' : p.expect.includes(mine[0]!.bare) ? 'right' : 'wrong'
       const lossy = withLoss(rows)
@@ -565,12 +565,12 @@ async function selectionPhase(d: Driver, seed: Json): Promise<void> {
         rebuilds: lossy.filter((r, i) => i > 0 && r.lost !== null && r.lost > REBUILD_TOKENS).length,
       })
       log(`${d.cli} select ${p.id} #${rep + 1}: ${verdict} [${calls.map((c) => (c.viaRun ? `run:${c.bare}` : c.bare)).join(' > ')}]`)
-      if (p.profile !== 'orchestrator') await d.remove(s.id)
+      if (p.profile !== 'assistant') await d.remove(s.id)
       else if (p.fresh) await tidy(d, [seed.id as string, s.id as string])
     }
     out[p.id] = { profile: p.profile, expect: p.expect, runs }
   }
-  if (orchestrator && PROMPTS.selection.some((p) => p.fresh)) await d.remove(orchestrator.id)
+  if (assistant && PROMPTS.selection.some((p) => p.fresh)) await d.remove(assistant.id)
   ;(summary.selection ??= {})[d.cli] = out
 }
 

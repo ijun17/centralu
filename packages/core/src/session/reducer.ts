@@ -20,14 +20,14 @@ import { stepSessionState } from './state-machine.js'
  */
 export type SessionSummary = {
   id: string
-  /** Null only for the central orchestrator: a session that spans projects belongs to none of them */
+  /** Null only for the Assistant: a session that spans projects belongs to none of them */
   projectId: string | null
   /**
-   * Whether this is a worker or an orchestrator (#13). The six places that used to decide it from projectId
-   * were gathered into this one field. The orchestrator that belongs to a project (#13) has since been
+   * Whether this is a worker or an Assistant (#13). The six places that used to decide it from projectId
+   * were gathered into this one field. The Assistant that belongs to a project (#13) has since been
    * dropped, but deciding it in one place is still better.
    */
-  kind: 'worker' | 'orchestrator' | 'coordinator'
+  kind: 'worker' | 'orchestrator' | 'coordinator' | 'assistant'
   /**
    * The tool this session uses.
    *

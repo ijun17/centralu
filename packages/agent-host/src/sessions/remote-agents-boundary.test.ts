@@ -541,7 +541,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     await followUp()
     expect(await hub.act('send', note)).toMatchObject({ ok: true, state: 'working' })
     expect(notes()).toHaveLength(1)
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     expect(await hub.act('status')).toMatchObject({ ok: true, state: 'working' })
     // The pause notice went at the first turn's end; this turn's end is the final report, once
     expect(hub.delivered).toHaveLength(1)
@@ -572,7 +572,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(notes()).toHaveLength(1)
     expect(machine.fromHub.filter((t) => t.includes('a second note'))).toHaveLength(0)
     // The person's message does not close the report (#1386): this turn is still the work's, and its end is reported
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     machine.selfTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(2)
@@ -581,7 +581,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
 
   it('does not blame the person when another session owes the report: it names that', async () => {
     await paused()
-    hub.children.setLinkedReport(CHILD, { orchestratorId: 'h2', busy: false, paused: [build] as never })
+    hub.children.setLinkedReport(CHILD, { assistantId: 'h2', busy: false, paused: [build] as never })
     await followUp()
     const r = await hub.act('send', note)
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('another session') })
@@ -620,7 +620,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     machine.hold = null
     await Promise.all([first, second])
     await flush()
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     expect(hub.told.join(' ')).not.toContain('you did not send')
     expect(machine.fromHub.filter((t) => t.includes('note'))).toHaveLength(2)
   })
@@ -690,7 +690,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       await flush()
       expect(notes()).toHaveLength(1)
       expect(machine.turn).toBe('hub')
-      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+      expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
       machine.callerTurnEnds()
       await flush()
       expect(hub.delivered).toHaveLength(3)
@@ -707,7 +707,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       machine.selfTurnEnds()
       await linkUp()
       expect(notes()).toHaveLength(1)
-      expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+      expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     })
 
     it("holds it behind the person's turn there too, and nothing of their turn reaches the caller", async () => {
@@ -1024,7 +1024,7 @@ describe("a person's message on the child's machine does not close the report (#
     await started()
     machine.personSays()
     await flush()
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     expect(hub.told.join(' ')).not.toContain('you did not give it')
     // Not the caller's to add to while the person is in it
     expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
@@ -1052,7 +1052,7 @@ describe("a person's message on the child's machine does not close the report (#
     expect(await hub.act('wait')).toMatchObject({ ok: true, state: 'working' })
     expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false })
     expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(0)
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     machine.selfTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(2)
@@ -1066,7 +1066,7 @@ describe("a person's message on the child's machine does not close the report (#
     await flush()
     machine.personSays()
     expect(await waiting).toMatchObject({ ok: true, state: 'working' })
-    expect(hub.children.linkedReports.get(CHILD)?.orchestratorId).toBe('h1')
+    expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     machine.callerTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(1)
@@ -1169,20 +1169,20 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
     })
   })
 
-  // The orchestrator's place is no project (`''`), and a caller of a linked machine's agent is a project's session: one that
-  // reads as the orchestrator by the time its card is answered, or when it sends, has no project registered, not the
-  // orchestrator's place to start from (`|| null`, not `?? null`)
-  const turnsOrchestrator = () => hub.meta.set(caller.id, { ...caller, kind: 'orchestrator', projectId: '' } as unknown as SessionInfo)
+  // The Assistant's place is no project (`''`), and a caller of a linked machine's agent is a project's session: one that
+  // reads as the Assistant by the time its card is answered, or when it sends, has no project registered, not the
+  // Assistant's place to start from (`|| null`, not `?? null`)
+  const turnsAssistant = () => hub.meta.set(caller.id, { ...caller, kind: 'orchestrator', projectId: '' } as unknown as SessionInfo)
 
-  it('does not read a caller that became the orchestrator while its card stood as the orchestrator starting an agent', async () => {
-    boot({ hostCards: { askHost: async () => (turnsOrchestrator(), 'allow') } })
+  it('does not read a caller that became the Assistant while its card stood as the Assistant starting an agent', async () => {
+    boot({ hostCards: { askHost: async () => (turnsAssistant(), 'allow') } })
     expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining('no longer registered') })
     expect(machine.sends).toBe(0)
   })
 
-  it('does not send a caller that became the orchestrator to its child as the orchestrator', async () => {
+  it('does not send a caller that became the Assistant to its child as the Assistant', async () => {
     await started()
-    turnsOrchestrator()
+    turnsAssistant()
     expect(await hub.act('send', { text: 'a note' })).toMatchObject({ ok: false, error: expect.stringContaining('no longer registered') })
   })
 

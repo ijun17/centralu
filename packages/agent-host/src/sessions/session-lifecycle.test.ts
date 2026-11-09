@@ -369,7 +369,7 @@ describe('a setting changed while waking or restarting still reaches the process
 })
 
 /*
- * A report the orchestrator asked for (#166). Neither adapter emits turn_complete for a failed
+ * A report the Assistant asked for (#166). Neither adapter emits turn_complete for a failed
  * turn, only error — so the manager, which used to report only on turn_complete, never reported
  * the failure, and the leftover flag then reported an unrelated later turn as "finished."
  */
@@ -379,9 +379,9 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 
   async function setup() {
     const worker = await newSession()
-    const orc = await mgr.orchestrator()
-    const tools = claude.asked.find((o) => o.sessionId === orc.id)!.orchestratorTools!
-    /** The reports stored in the orchestrator's conversation — the text the UI and the record read */
+    const orc = await mgr.assistant()
+    const tools = claude.asked.find((o) => o.sessionId === orc.id)!.centraluTools!
+    /** The reports stored in the Assistant's conversation — the text the UI and the record read */
     const reports = () =>
       store
         .messages.loadMessages(orc.id, 100)
@@ -413,7 +413,7 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
 
   /*
    * #1233: words sent while that turn still runs are a note into the same work, and keep the report asked for. They
-   * used to clear it (this test said so), and the orchestrator never heard the end of work it had asked to hear of.
+   * used to clear it (this test said so), and the Assistant never heard the end of work it had asked to hear of.
    */
   it('keeps the report asked for when more words go into the running turn without one', async () => {
     const { worker, tools, w, reports } = await setup()
@@ -428,7 +428,7 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
     const { worker, tools, reports } = await setup()
     // A mark that outlived its turn, as one paused over background work does (#721)
     const children = (mgr as unknown as { children: { markReport(id: string, caller: string): void; awaitingReport: ReadonlyMap<string, string> } }).children
-    children.markReport(worker, (await mgr.orchestrator()).id)
+    children.markReport(worker, (await mgr.assistant()).id)
     await tools.sendToSession(worker, 'a new task, quietly', false)
     expect(children.awaitingReport.has(worker)).toBe(false)
     handleOf(worker).emit({ type: 'turn_complete', sessionId: worker })

@@ -30,14 +30,14 @@ export function oldThread(
   }
 }
 
-/** A session row as the store keeps it, the orchestrator or not, trashed or not: what the move asks of a recipient */
-export function oldSession(store: Store, id: string, s: { orchestrator?: boolean; trashedAt?: number; projectId?: string | null }): void {
+/** A session row as the store keeps it, the Assistant or not, trashed or not: what the move asks of a recipient */
+export function oldSession(store: Store, id: string, s: { assistant?: boolean; trashedAt?: number; projectId?: string | null }): void {
   const db = (store as unknown as { db: Database.Database }).db
   db.prepare(`INSERT INTO sessions (id, project_id, tool, name, is_orchestrator, created_at, deleted_at) VALUES (?, ?, 'claude', ?, ?, 0, ?)`).run(
     id,
     s.projectId ?? null,
     id,
-    s.orchestrator ? 1 : 0,
+    s.assistant ? 1 : 0,
     s.trashedAt ?? null,
   )
 }

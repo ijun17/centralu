@@ -62,7 +62,7 @@ export type HubsReader = {
 export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
-    /** The orchestrator's and the askers' reports from linked machines' sessions (linked-reports.ts) */
+    /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
     readonly linkedReports: Pick<LinkedReports, 'oweAsker' | 'releaseAsker'>
   }
 
@@ -577,7 +577,7 @@ export class AskProjectFlow {
         readable: [],
         outside: pathsIn(answer),
         // Still paused only while that report is owed: collected after the work's report went out, these are its final words
-        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.orchestratorId === ask.callerId ? { paused: pausedWords(ask.paused ?? [], ask.sessionId, ' there') } : {}),
+        ...(ask.paused && this.host.children.linkedReports.get(ask.sessionId)?.assistantId === ask.callerId ? { paused: pausedWords(ask.paused ?? [], ask.sessionId, ' there') } : {}),
       }
     } finally {
       if (wake) ask.wake.delete(wake)

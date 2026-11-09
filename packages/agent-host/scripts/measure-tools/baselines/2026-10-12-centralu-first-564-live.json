@@ -83,8 +83,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -135,8 +135,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -215,7 +215,7 @@
          "toolsChars": 48534,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           22054,
           22054,
@@ -790,8 +790,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -842,8 +842,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -922,7 +922,7 @@
          "toolsChars": 48534,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           22010,
           22010,
@@ -1535,8 +1535,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -1587,8 +1587,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -1667,7 +1667,7 @@
          "toolsChars": 48534,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           22054,
           22054,
@@ -2523,8 +2523,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -2575,8 +2575,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -3001,8 +3001,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -3053,8 +3053,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -3668,8 +3668,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -3720,8 +3720,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -4370,8 +4370,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -4422,8 +4422,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -5299,8 +5299,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -5351,8 +5351,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -5760,8 +5760,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -5812,8 +5812,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -5892,7 +5892,7 @@
          "toolsChars": 33623,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           20699,
           20699,
@@ -6481,8 +6481,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -6533,8 +6533,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -6613,7 +6613,7 @@
          "toolsChars": 33623,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           20640,
           20640,
@@ -7239,8 +7239,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -7291,8 +7291,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -7371,7 +7371,7 @@
          "toolsChars": 33623,
          "systemChars": 137
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           20698,
           20698,
@@ -8245,8 +8245,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -8297,8 +8297,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -8744,8 +8744,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -8796,8 +8796,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -9422,8 +9422,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -9474,8 +9474,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -10134,8 +10134,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -10186,8 +10186,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -11090,8 +11090,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -11142,8 +11142,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -11582,8 +11582,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -11634,8 +11634,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -11704,7 +11704,7 @@
          "median": 14315,
          "delta": 67
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           15000,
           15000
@@ -12127,8 +12127,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -12179,8 +12179,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -12249,7 +12249,7 @@
          "median": 16960,
          "delta": 0
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           17676,
           17676
@@ -12709,8 +12709,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -12761,8 +12761,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -12831,7 +12831,7 @@
          "median": 17028,
          "delta": 70
         },
-        "orchestrator": {
+        "assistant": {
          "runs": [
           17711,
           17711
@@ -13435,8 +13435,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -13487,8 +13487,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -13827,8 +13827,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -13879,8 +13879,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -14344,8 +14344,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -14396,8 +14396,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -14894,8 +14894,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -14946,8 +14946,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -15591,8 +15591,8 @@
      "summary": {
       "definitions": {
        "claude": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "claude",
          "tools": 12,
          "residentTools": 12,
@@ -15643,8 +15643,8 @@
         }
        },
        "codex": {
-        "orchestrator": {
-         "profile": "orchestrator",
+        "assistant": {
+         "profile": "assistant",
          "cli": "codex",
          "tools": 12,
          "residentTools": 12,
@@ -15949,8 +15949,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -16001,8 +16001,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -16261,8 +16261,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -16313,8 +16313,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -16571,8 +16571,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -16623,8 +16623,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -16886,8 +16886,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -16938,8 +16938,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -17247,7 +17247,7 @@
       },
       {
        "id": "orch-overview",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Which sessions are there in {project}, and what is each one doing?",
        "expect": [
         "list_sessions",
@@ -17256,7 +17256,7 @@
       },
       {
        "id": "orch-delegate",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
        "expect": [
         "send_to_session"
@@ -17268,8 +17268,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -17320,8 +17320,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -17396,7 +17396,7 @@
        "toolsChars": 48534,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         22054
        ],
@@ -17507,7 +17507,7 @@
       },
       {
        "id": "orch-overview",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Which sessions are there in {project}, and what is each one doing?",
        "expect": [
         "list_sessions",
@@ -17516,7 +17516,7 @@
       },
       {
        "id": "orch-delegate",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
        "expect": [
         "send_to_session"
@@ -17528,8 +17528,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -17580,8 +17580,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -17656,7 +17656,7 @@
        "toolsChars": 48534,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         22010
        ],
@@ -17767,7 +17767,7 @@
       },
       {
        "id": "orch-overview",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Which sessions are there in {project}, and what is each one doing?",
        "expect": [
         "list_sessions",
@@ -17776,7 +17776,7 @@
       },
       {
        "id": "orch-delegate",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
        "expect": [
         "send_to_session"
@@ -17788,8 +17788,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -17840,8 +17840,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -17916,7 +17916,7 @@
        "toolsChars": 33623,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         20699
        ],
@@ -18027,7 +18027,7 @@
       },
       {
        "id": "orch-overview",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Which sessions are there in {project}, and what is each one doing?",
        "expect": [
         "list_sessions",
@@ -18036,7 +18036,7 @@
       },
       {
        "id": "orch-delegate",
-       "profile": "orchestrator",
+       "profile": "assistant",
        "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
        "expect": [
         "send_to_session"
@@ -18048,8 +18048,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -18100,8 +18100,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -18176,7 +18176,7 @@
        "toolsChars": 33623,
        "systemChars": 137
       },
-      "orchestrator": {
+      "assistant": {
        "runs": [
         20638
        ],
@@ -18237,8 +18237,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -18289,8 +18289,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -18561,8 +18561,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -18613,8 +18613,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -18884,8 +18884,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -18936,8 +18936,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -19208,8 +19208,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -19260,8 +19260,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -19535,8 +19535,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -19587,8 +19587,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -19871,8 +19871,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -19923,8 +19923,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -20225,8 +20225,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -20277,8 +20277,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -20739,8 +20739,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -20791,8 +20791,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,
@@ -21422,8 +21422,8 @@
    "summary": {
     "definitions": {
      "claude": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "claude",
        "tools": 12,
        "residentTools": 12,
@@ -21474,8 +21474,8 @@
       }
      },
      "codex": {
-      "orchestrator": {
-       "profile": "orchestrator",
+      "assistant": {
+       "profile": "assistant",
        "cli": "codex",
        "tools": 12,
        "residentTools": 12,

@@ -40,7 +40,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   installResponder(mock)
 
   // Skips the intro screen — the point of the scene is the screen after it
-  mock.orchestratorTool = 'claude'
+  mock.assistantTool = 'claude'
 
   const centralu = await mock.projects.add('/Users/you/code/centralu')
   const site = await mock.projects.add('/Users/you/code/landing-site')

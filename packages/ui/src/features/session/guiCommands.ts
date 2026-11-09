@@ -18,7 +18,7 @@ export type GuiCommand = {
   name: string
   description: string
   run: (ctx: { sessionId: string | null }) => void
-  /** It acts on a session (its menu), so it cannot run where there is none: before the orchestrator exists */
+  /** It acts on a session (its menu), so it cannot run where there is none: before the Assistant exists */
   needsSession?: boolean
 }
 

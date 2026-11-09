@@ -51,7 +51,7 @@ export type AppProjectTarget = { path: string; isDefault: boolean }
  * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
  * one single function (`newAppIdProblem`, @cc/protocol) — only the wording is attached here. The new
  * app dialog attaches its own wording to the same validation result (`appIdHint`), while the
- * orchestrator's `create_app` reads this wording as-is.
+ * Assistant's `create_app` reads this wording as-is.
  */
 const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   shape: `an app id is lowercase letters, digits and hyphens (up to ${APP_ID_MAX_LENGTH}), starting with a letter or digit — no underscores: "__" separates names in a session's tool names`,
@@ -68,7 +68,7 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
  * attach path would both be duplicated. That server's calls never went through the broker, were
  * never recorded, and could not even be removed from a list. Becoming an app puts it on the same one
  * path every other app takes (audience, the run ledger, starting only when first needed, stopping
- * when idle). Since it is a user-folder app, it attaches to the orchestrator (decision 4 — the same
+ * when idle). Since it is a user-folder app, it attaches to the Assistant (decision 4 — the same
  * place a previously approved server used to attach).
  *
  * Validation is the same single set discovery uses: a manifest is built and passed through
@@ -135,7 +135,7 @@ export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAp
 }
 
 /**
- * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the orchestrator's
+ * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the Assistant's
  * `create_app` use the same door.
  *
  *   project app     `<project>/.centralu/apps/<id>/` — committed to the repository and shared with

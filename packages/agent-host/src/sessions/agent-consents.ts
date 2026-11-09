@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ApprovalDetail } from '@cc/protocol'
 import type { DelegationHost } from './delegation-host.js'
 import type { HostAskAnswer } from './host-cards.js'
-import { ASK_THE_PERSON, ORCHESTRATOR_PLACE } from './start-agent-terms.js'
+import { ASK_THE_PERSON, ASSISTANT_PLACE } from './start-agent-terms.js'
 
 /** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
 type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
@@ -54,8 +54,8 @@ export class AgentConsents {
 
   /** The person's answer on a start_agent card, as consent (remembered where they chose "always") or a refusal */
   agentConsentFrom(callerId: string, projectId: string, decision: HostAskAnswer): AgentConsent {
-    // The orchestrator's place is no project to remember it for (#853): always for the project is always for this session
-    if (decision === 'always_project' && projectId === ORCHESTRATOR_PLACE) {
+    // The Assistant's place is no project to remember it for (#853): always for the project is always for this session
+    if (decision === 'always_project' && projectId === ASSISTANT_PLACE) {
       this.agentConsents.add(callerId)
       return { ok: true }
     }

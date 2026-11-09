@@ -14,10 +14,10 @@ export type NavigationSlice = {
    * What is being viewed right now.
    *   focus        a single session (default)
    *   grid         the grid — controlling by eye
-   *   orchestrator the orchestrator — controlling by talking
+   *   assistant the Assistant — controlling by talking
    */
-  view: 'focus' | 'grid' | 'orchestrator' | 'app'
-  setView(view: 'focus' | 'grid' | 'orchestrator'): void
+  view: 'focus' | 'grid' | 'assistant' | 'app'
+  setView(view: 'focus' | 'grid' | 'assistant'): void
   /**
    * Back and forward between screens, like a web browser (#374). Every screen change is recorded by one subscriber
    * at the bottom of this file (`recordScreen`), whichever action made it, so a new way of jumping somewhere gets

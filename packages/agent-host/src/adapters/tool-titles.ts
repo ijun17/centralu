@@ -1,5 +1,5 @@
 import { APP_SERVER_PREFIX, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
-import { ORCHESTRATOR_MCP_NAME } from '../apps/contract.js'
+import { CENTRALU_MCP_NAME } from '../apps/contract.js'
 import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
 /**
@@ -9,8 +9,8 @@ import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
  * same name was titled and re-read as Centralu's.
  */
 export function isCentraluTool(call: { name: string } | { server: string; tool: string }, tool: string): boolean {
-  if ('name' in call) return call.name === `mcp__${ORCHESTRATOR_MCP_NAME}__${tool}`
-  return call.tool === tool && (!call.server || call.server === ORCHESTRATOR_MCP_NAME)
+  if ('name' in call) return call.name === `mcp__${CENTRALU_MCP_NAME}__${tool}`
+  return call.tool === tool && (!call.server || call.server === CENTRALU_MCP_NAME)
 }
 
 /**

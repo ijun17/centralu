@@ -1,5 +1,5 @@
 import type { SessionKind } from '@cc/protocol'
-import { RESERVED_APP_IDS } from '@cc/protocol'
+import { RESERVED_APP_IDS, isAssistantKind } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 
 /**
@@ -13,7 +13,7 @@ import type { ToolProfile } from '../apps/contract.js'
  */
 export type ToolProfileFacts = {
   kind: SessionKind
-  /** null for a session with no project (the orchestrator, a user-folder app's builder) */
+  /** null for a session with no project (the Assistant, a user-folder app's builder) */
   projectId: string | null
   /** The app that created this session (#81): a builder's own app, or the app that asked for an agent (M4 D-1) */
   appId: string | null
@@ -46,12 +46,12 @@ export function readsOwnProject(f: ToolProfileFacts): boolean {
 }
 
 /**
- * The profile this session gets, or null for no tools. The orchestrator and a coordinator (#80) are
+ * The profile this session gets, or null for no tools. The Assistant and a coordinator (#80) are
  * told apart by their kind; among workers the builder is checked before the reader, and an app's
  * agent and a session outside a project get nothing.
  */
 export function toolProfileFor(f: ToolProfileFacts): ToolProfile | null {
-  if (f.kind === 'orchestrator') return 'orchestrator'
+  if (isAssistantKind(f.kind)) return 'assistant'
   if (f.kind === 'coordinator') return 'scoped'
   if (f.builder) return 'builder'
   return readsOwnProject(f) ? 'reader' : null
@@ -86,7 +86,7 @@ export function isChildSession(f: CodeIntelligenceFacts): boolean {
  * and a final typecheck, so a child starts without it unless its caller asks (`lsp: true`, for refactors and large
  * cross-file changes). The caller chooses per task; Centralu does not guess the kind of task from its words.
  *
- * Sessions the person starts keep the person's own setting, whatever they are; so does the orchestrator. Only the
+ * Sessions the person starts keep the person's own setting, whatever they are; so does the Assistant. Only the
  * adapter knows what code intelligence is for its CLI (Claude: the plugins that declare `lspServers`); an adapter whose
  * CLI starts no language server (Codex) has nothing to turn off.
  */
@@ -102,12 +102,12 @@ export function codeIntelligenceOff(f: CodeIntelligenceFacts): boolean {
 export const codeIntelligenceKey = (sessionId: string) => `code_intelligence:${sessionId}`
 
 /**
- * Where each bundle comes from. The orchestrator and the builder share one object (the builder's
+ * Where each bundle comes from. The Assistant and the builder share one object (the builder's
  * profile blocks everything but `check` through `profileAllows`); a coordinator's object sees only
  * its members; the reader's object refuses directing calls.
  */
 export type ToolBundleSources<T> = {
-  orchestrator: () => T
+  assistant: () => T
   scoped: (scopeSessionIds: string[]) => T
   reader: () => T
 }
@@ -125,9 +125,9 @@ export function toolBundleFor<T>(
   sources: ToolBundleSources<T>,
 ): T | undefined {
   switch (profile) {
-    case 'orchestrator':
+    case 'assistant':
     case 'builder':
-      return sources.orchestrator()
+      return sources.assistant()
     case 'scoped':
       return sources.scoped(scopeSessionIds ?? [])
     case 'reader':

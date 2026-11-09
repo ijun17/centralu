@@ -29,7 +29,7 @@ export type FolderAdded = { ok: true; projectId: string; name: string; path: str
 
 /**
  * A project registered or made on this machine (#515, #655): an existing folder added, a new folder made empty or
- * cloned, where it would go, and the orchestrator's create_project behind the person's card, here or on a linked
+ * cloned, where it would go, and the Assistant's create_project behind the person's card, here or on a linked
  * machine (#82 phase 4). Moved out of the session manager as it was (#428); what it reaches of the manager is
  * `ProjectCreationHost`.
  */
@@ -56,7 +56,7 @@ export class ProjectCreation {
   }
 
   /**
-   * The orchestrator's add_project once the person allowed it (#1220), as the sidebar's Add project (`projects.add`)
+   * The Assistant's add_project once the person allowed it (#1220), as the sidebar's Add project (`projects.add`)
    * registers a folder: the same checks and registration (`addProject`, untrusted when new), then the apps list read
    * again, since the folder may hold apps. The RPC handler refreshes the runtime it was given rather than this one, which
    * is the same runtime in a running host (main.ts).
@@ -136,9 +136,9 @@ export class ProjectCreation {
   }
 
   /**
-   * add_project's card (#1220): the person's refusal or a withdrawn card as the error the orchestrator reads, or null
+   * add_project's card (#1220): the person's refusal or a withdrawn card as the error the Assistant reads, or null
    * once allowed. Asked under every preset (`alwaysAsk`), auto included: an existing folder can be anything on that
-   * disk, and once it is a project the orchestrator can start sessions in it.
+   * disk, and once it is a project the Assistant can start sessions in it.
    */
   private async askFolderAdd(sessionId: string, facts: FolderFacts, machine: string | undefined, signal?: AbortSignal): Promise<string | null> {
     const card = { name: folderName(facts.path), path: facts.path, ...(machine ? { machine } : {}), exists: facts.exists, folder: facts.folder, git: facts.git, origin: facts.origin }
@@ -244,7 +244,7 @@ export class ProjectCreation {
     // A folder made empty here holds only what Centralu and the person write, so it starts trusted (#655). A clone
     // holds what a stranger's repository put there (an agent can ask for any URL), so the person decides, as today.
     const info = await this.addProject(target.path, { trusted: !source })
-    // Every window learns of it, the one that asked included: the orchestrator's card answers no list (#515)
+    // Every window learns of it, the one that asked included: the Assistant's card answers no list (#515)
     this.host.emit({ type: 'projects_changed' })
     return info
   }
@@ -269,7 +269,7 @@ export class ProjectCreation {
   }
 
   /**
-   * The orchestrator's create_app without a project (#1141) makes a folder and a project, so it asks on create_project's
+   * The Assistant's create_app without a project (#1141) makes a folder and a project, so it asks on create_project's
    * card first, naming the folder; null once allowed, else why not (a refusal, a withdrawn card, a name taken).
    */
   async askAppProject(sessionId: string, spec: { id: string; parent?: string }, signal?: AbortSignal): Promise<string | null> {
@@ -283,7 +283,7 @@ export class ProjectCreation {
   }
 
   /**
-   * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path (and
+   * create_project (#515): the Assistant's request becomes a card in its own approval slot, with the full path (and
    * the repository, for a clone) on it, and the folder is made only when the person allows it. Checked before the card
    * (a refusal costs the person nothing) and again after it (a folder of that name may have appeared while the card
    * stood). A clone says so in the conversation while it runs, since it can take minutes.
@@ -310,7 +310,7 @@ export class ProjectCreation {
   }
 
   /**
-   * The orchestrator's create_project on a linked machine (#82 phase 4): the same card as here, naming the machine,
+   * The Assistant's create_project on a linked machine (#82 phase 4): the same card as here, naming the machine,
    * with the path that machine would make (`projects.createPreview` there, in its own path terms); on Create, the
    * machine makes and registers it (`projects.create` there). Nothing is made on either machine before the answer.
    */
@@ -331,7 +331,7 @@ export class ProjectCreation {
 
   /**
    * create_project's card (#515), here or for a linked machine: the person's refusal or a withdrawn card as the error
-   * the orchestrator reads, or null once allowed. A clone says so in the conversation while it runs (into `where`),
+   * the Assistant reads, or null once allowed. A clone says so in the conversation while it runs (into `where`),
    * since it can take minutes.
    */
   private async askProjectCreate(

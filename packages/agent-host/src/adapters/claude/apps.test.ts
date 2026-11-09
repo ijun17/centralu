@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
-import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
+import type { CreateSessionOpts, CentraluTools, SessionHandle } from '../contract.js'
 import { answerOrCard } from '../approval-outcome.test-helpers.js'
-import { REPO_WORK_FIRST } from '../../sessions/orchestrator-tools.js'
+import { REPO_WORK_FIRST } from '../../sessions/centralu-tools.js'
 
 /**
  * An external app attached to a Claude session (M4 A-5) — one in-process proxy server per app.
@@ -148,7 +148,7 @@ describe('one in-process proxy server per app', () => {
     await start(WORKER)
     expect(Object.keys(servers()).sort()).toEqual(['app-notes', 'app-tasks'])
     expect(servers()['app-notes']).toMatchObject({ type: 'sdk', name: 'app-notes' })
-    // Only the orchestrator turns off reading settings files — an app being attached (in a trusted project) never changes a worker's own settings load.
+    // Only the Assistant turns off reading settings files — an app being attached (in a trusted project) never changes a worker's own settings load.
     expect(captured.options).not.toHaveProperty('settingSources')
   })
 
@@ -238,7 +238,7 @@ describe('the conversation-view card id — Claude', () => {
 describe("Centralu's instructions name an app's help only with an app attached", () => {
   const instructions = () => (servers()['centralu'] as unknown as { instance: { server: { _instructions?: string } } }).instance.server._instructions ?? ''
   it('an ordinary session that starts with apps gets the line; one that starts with none does not', async () => {
-    const reader = { orchestratorTools: {} as OrchestratorTools, toolProfile: 'reader' as const }
+    const reader = { centraluTools: {} as CentraluTools, toolProfile: 'reader' as const }
     await start(WORKER, reader)
     expect(instructions()).toContain(REPO_WORK_FIRST)
     await handle?.dispose()
@@ -316,11 +316,11 @@ describe('an attached app changing is followed without a restart', () => {
    * exactly that app, right after approval. No server is ever loaded raw; the set contains only
    * centralu and app proxy servers.
    */
-  it('when the orchestrator\'s set changes, centralu stays the original object, alongside the user-folder apps', async () => {
-    const tools = {} as OrchestratorTools
+  it('when the Assistant\'s set changes, centralu stays the original object, alongside the user-folder apps', async () => {
+    const tools = {} as CentraluTools
     await start({ id: 'orch-1', kind: 'orchestrator', projectId: null }, {
-      orchestratorTools: tools,
-      toolProfile: 'orchestrator',
+      centraluTools: tools,
+      toolProfile: 'assistant',
     })
     const centralu = servers()['centralu']
     expect(Object.keys(servers()).sort()).toEqual(['app-helper', 'centralu'])
@@ -329,7 +329,7 @@ describe('an attached app changing is followed without a restart', () => {
     w.rt.refresh()
     await kit.until(() => last(), (s) => s !== null && 'app-second' in s)
     expect(Object.keys(last()!).sort()).toEqual(['app-helper', 'app-second', 'centralu'])
-    // Omitting it would make the SDK drop the orchestrator server — the same object has to be included every time.
+    // Omitting it would make the SDK drop the Assistant server — the same object has to be included every time.
     expect(last()!['centralu']).toBe(centralu)
   })
 
@@ -503,7 +503,7 @@ describe('approval of app tools — declared risk x preset x whose app it is', (
       expect(await decide('mcp__app-userboard__note')).toEqual(allowed())
     })
 
-    it('the orchestrator is not the owner of an app, even one of the project it is recorded under', async () => {
+    it('the Assistant is not the owner of an app, even one of the project it is recorded under', async () => {
       attachOnDemand({ projectId: 'p1', appId: 'board' }, 'app-board')
       const h = await start({ id: 'claude-orch', kind: 'orchestrator', projectId: 'p1' }, { permissionPreset: 'normal' })
       await (h as unknown as { opts: CreateSessionOpts }).opts.apps!.tools('app-board')

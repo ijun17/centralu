@@ -69,7 +69,7 @@ describe('launching a tool that declares limits', () => {
     expect(world.codexAdapter.lastOpts).toBeNull()
   })
 
-  it('refuses a tool that takes no role text as the orchestrator, and keeps the one chosen', async () => {
+  it('refuses a tool that takes no role text as the Assistant, and keeps the one chosen', async () => {
     const world = limitedWorld()
     await world.rpc('orchestrator.configure', { tool: 'claude' })
     await expect(world.rpc('orchestrator.configure', { tool: 'codex' })).rejects.toThrow(/Limited.*role instructions/)

@@ -51,7 +51,7 @@ export {
 } from './layout.js'
 import { PANEL_DEFAULT, SIDEBAR_DEFAULT } from './layout.js'
 import { navigationActions, navigating } from './navigation.js'
-import { orchestratorActions } from './orchestrator.js'
+import { assistantActions } from './assistant.js'
 import { machineActions } from './machines.js'
 import { updateActions } from './updates.js'
 import { mailActions } from './mail.js'
@@ -149,7 +149,7 @@ export function usageTools(s: AppState): ToolName[] {
     return out
   }
 
-  // Focus (and the orchestrator) still look at one conversation — unchanged behaviour
+  // Focus (and the Assistant) still look at one conversation — unchanged behaviour
   const session = s.focusedSessionId ? s.sessions[s.focusedSessionId] : undefined
   if (session) return [session.tool]
   add(s.focusedProjectId ? (s.projects[s.focusedProjectId]?.defaultTool ?? undefined) : undefined)
@@ -236,7 +236,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     wakeLocked: {},
     panelOpen: true,
     panelLayout: defaultLayout(),
-    view: 'focus' as 'focus' | 'grid' | 'orchestrator' | 'app',
+    view: 'focus' as 'focus' | 'grid' | 'assistant' | 'app',
     focusedApp: null as { projectId: string | null; appId: string; machine?: string | null } | null,
     nav: EMPTY_NAV,
     pinnedViews: [] as PinnedView[],
@@ -246,9 +246,9 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     builderPaneSessionId: null,
     builderPaneFor: null as string | null,
     runsPanelFor: null as string | null,
-    orchestratorId: null as string | null,
-    orchestratorWaking: false,
-    orchestratorTool: null as ToolName | null,
+    assistantId: null as string | null,
+    assistantWaking: false,
+    assistantTool: null as ToolName | null,
     introSeen: false,
     trustAsk: null as string | null,
     panelSplit: 0.5,
@@ -405,7 +405,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     ...updateActions(set, get),
     ...machineActions(set, get),
     ...mailActions(set, get),
-    ...orchestratorActions(set, get),
+    ...assistantActions(set, get),
     ...navigationActions(set, get),
     ...layoutActions(set, get),
   }

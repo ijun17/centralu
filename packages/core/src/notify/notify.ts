@@ -7,7 +7,7 @@ import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy, type Sessio
  * (The "all done" notification was retired on 2026-10-20, #1429.)
  */
 
-/** The policy moved to the protocol with the preferences (#1306): the host keeps it, the screen and the orchestrator share it */
+/** The policy moved to the protocol with the preferences (#1306): the host keeps it, the screen and the Assistant share it */
 export { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy }
 
 export type NotifyRequest = { kind: 'approval' | 'error' | 'all_done'; sessionId?: string; title: string; body: string }

@@ -157,7 +157,7 @@ describe('approval rules persist (C-2)', () => {
   })
 
   /*
-   * A session outside any project (an orchestrator, #994) has no project to remember for: ⌥ Always there used to be
+   * A session outside any project (an Assistant, #994) has no project to remember for: ⌥ Always there used to be
    * stored as a project rule with no project, which `rulesFor` then matched for every other session with no project.
    */
   it('a project-scoped answer in a session with no project stays with that session', async () => {

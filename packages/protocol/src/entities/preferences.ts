@@ -286,7 +286,7 @@ export const UiPreferences = z.object({
   foldedGroups: z.array(z.string().max(300)).max(500),
   /**
    * The notification switches (#1306): which events notify, and whether they make a sound. They lived in the window's
-   * workspace snapshot, which the window writes whole and the host cannot change; here the window and the orchestrator
+   * workspace snapshot, which the window writes whole and the host cannot change; here the window and the Assistant
    * share one record. **Optional**, like `agentCeiling`: a record from before it has none, and a host from before it
    * answers without it (the window then keeps the snapshot's). The host fills it once on the first read, from the
    * snapshot's `notifyPolicy` or the defaults (`UiPreferenceStore`), so it is there from then on. Read field by field

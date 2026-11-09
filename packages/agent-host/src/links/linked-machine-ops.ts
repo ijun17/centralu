@@ -26,7 +26,7 @@ const linkError = (message: string) => rpcError(message)
 const ACTIVITY_POLL_MS = 15_000
 /**
  * How long the machine's own "Allow auto" may take to read before the row says it did not answer. A person waits on the
- * row, not a model on a tool call (the orchestrator's read is `LOOKUP_MS`, 4 s), so it is longer. The set is not bound: a
+ * row, not a model on a tool call (the Assistant's read is `LOOKUP_MS`, 4 s), so it is longer. The set is not bound: a
  * change the machine applies after the row said it did not would leave the row showing the old state
  */
 const HUB_AUTO_READ_MS = 15_000
@@ -567,7 +567,7 @@ export class LinkedMachine extends LinkedMachineConnection {
   /**
    * Why an install, update or another operation on the machine would be refused before it starts, or null: this
    * computer installs nothing, a development hub has nothing published to install, or the machine runs a command of
-   * its own. `operate` refuses with it; the orchestrator's install_machine says it before its card (#1219)
+   * its own. `operate` refuses with it; the Assistant's install_machine says it before its card (#1219)
    */
   operationRefusal(kind: MachineOperation['kind']): string | null {
     if (!this.deps.installer || !this.tunnel.exec) return `This computer cannot install on ${this.name}`

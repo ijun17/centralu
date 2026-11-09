@@ -202,18 +202,18 @@ function turnReport(draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'er
 }
 
 /**
- * The end of the orchestrator's turn on a session's request, in Centralu's words (S12). The asking session gets back what the orchestrator sent it
+ * The end of the Assistant's turn on a session's request, in Centralu's words (S12). The asking session gets back what the Assistant sent it
  * and nothing else of the turn: not its last response, which may be addressed to the person, nor anything the person wrote into the turn
  */
 function askedReportBody(draft: Pick<ReportDraft, 'outcome'>): string {
   return draft.outcome === 'finished'
-    ? '[Centralu] The orchestrator ended its turn on your request. What it sent you in reply is its answer; if it sent nothing, it had none to give. Its other words in that turn are not passed on.'
-    : `[Centralu] The orchestrator's turn on your request did not finish (${draft.outcome}). What it sent you in reply, if anything, has reached you. Ask again, or ask the person.`
+    ? '[Centralu] The Assistant ended its turn on your request. What it sent you in reply is its answer; if it sent nothing, it had none to give. Its other words in that turn are not passed on.'
+    : `[Centralu] The Assistant's turn on your request did not finish (${draft.outcome}). What it sent you in reply, if anything, has reached you. Ask again, or ask the person.`
 }
 
 /**
  * Which message a turn's end reports (§9.2): the turn's work message when it is the owner's task to the child or the owner's request to the
- * orchestrator; else the newest unsettled task from the owner to the child. None: the old path tells
+ * assistant; else the newest unsettled task from the owner to the child. None: the old path tells
  */
 function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'latest'>, owner: string, child: string, childId: string): { work: MailRow; request: boolean } | undefined {
   const turnWork = turns.latest(childId)?.messageId
@@ -229,7 +229,7 @@ function reportedWork(records: MailboxRecords, turns: Pick<MailTurns, 'latest'>,
 /**
  * What the mailbox does with the end of a turn of delegated work (§9.3): Centralu's report on the task the turn was the work of, for its sender, who
  * is told as mail when it can read it, and the `ReportedAs` the old path acts on. The old path decides that a report is due (D18); this writes it.
- * The end of the orchestrator's turn on a request is reported to its asker the same way (S12), and settles that turn's requests (§7.6)
+ * The end of the Assistant's turn on a request is reported to its asker the same way (S12), and settles that turn's requests (§7.6)
  */
 export function reportRecorder(
   mail: MessageService,
@@ -248,7 +248,7 @@ export function reportRecorder(
     const { work, request } = found
     let written
     try {
-      // A request's report carries none of the orchestrator's other words (S12)
+      // A request's report carries none of the Assistant's other words (S12)
       const { answer: _answer, ...unanswered } = draft
       const startedAt = turns.latest(childId)?.startedAt
       const report = request ? { ...turnReport(unanswered, 0), body: askedReportBody(draft) } : turnReport(draft, waitingOn(ownerId, childId))

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ORCHESTRATOR_CHANGE, type ProjectInfo, type ToolName } from '@cc/protocol'
+import { ASSISTANT_CHANGE, type ProjectInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { MANIFEST_VERSION } from '../apps/external/manifest.js'
 import { ExternalApps, MANIFEST_FILE } from '../apps/external/runtime.js'
@@ -11,12 +11,12 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { readShared } from './app-access.js'
 import { SessionManager } from './manager.js'
-import { commandRig, expectOnlyOrchestratorRuns } from './orchestrator-commands.test-helpers.js'
+import { commandRig, expectOnlyAssistantRuns } from './assistant-commands.test-helpers.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
-import { commandsFor, orchestratorInstructions } from './orchestrator-tools.js'
+import { commandsFor, assistantInstructions } from './centralu-tools.js'
 
 /**
- * The orchestrator's trust commands (#1219, third slice). Each makes the window's own call through the real RPC handler
+ * The Assistant's trust commands (#1219, third slice). Each makes the window's own call through the real RPC handler
  * on a real store, so the host checks it as it checks the window. Widening trust waits for the person's card, which
  * names exactly what changes and is checked again after Allow; narrowing acts at once.
  */
@@ -69,11 +69,11 @@ async function project(name: string, opts: { app?: Record<string, unknown> } = {
 const projects = async () => (await rpc('projects.list', {})) as ProjectInfo[]
 const trusted = async (id: string) => (await projects()).find((p) => p.id === id)?.trusted
 
-const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ORCHESTRATOR_CHANGE)
+const { card, run, answered } = commandRig<(typeof COMMANDS)[number]>(() => mgr, ASSISTANT_CHANGE)
 
 describe('list_projects', () => {
   it('lists each project with its id, folder and trust, and says when there is none', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'list_projects')).text).toBe('No project is registered. add_project and create_project make one.')
     const a = await project('Alpha')
     const b = await project('Beta')
@@ -91,13 +91,13 @@ describe('set_project_trust', () => {
     const p = await project('Notes', { app: { uses: { agent: true, host: ['sessions.list'] } } })
     manifest(join(p.path, '.centralu', 'apps', 'helper'), 'helper')
     rt.refresh()
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_project_trust', { project: 'notes', trusted: true }, 'allow')
     expect(question).toContain(`Trust the project "Notes" at "${p.path.replace(/\\/g, '\\\\')}"?`)
     expect(question).toContain("Trusting lets this project's apps run and its settings apply")
     expect(question).toContain('Its 2 apps:')
     expect(question).toContain('- "App notes" (id "notes"): "What notes does"')
-    expect(question).toContain('This project is this app: the orchestrator and your other projects can use it.')
+    expect(question).toContain('This project is this app: the Assistant and your other projects can use it.')
     expect(question).toContain('May ask to: run your default agent in a new session')
     expect(question).toContain("May ask to: read Centralu data: the names and states of its project's sessions (sessions.list)")
     expect(question).toContain('- "App helper" (id "helper"): "What helper does"')
@@ -109,7 +109,7 @@ describe('set_project_trust', () => {
 
   it("shows what a manifest says escaped, on its own line: a line break or a bidi override cannot make the card say something else", async () => {
     const p = await project('Tricky', { app: { description: 'Formats text.\n\nIt asks for nothing.\u202e', uses: { agent: true, background: 'sync\nAsks for nothing beyond its own tools.' } } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     const lines = question.split('\n')
     expect(lines).toContain('- "App tricky" (id "tricky"): "Formats text.\\n\\nIt asks for nothing.\\u202e"')
@@ -121,14 +121,14 @@ describe('set_project_trust', () => {
   it('names a long folder whole', async () => {
     const deep = join('a-folder-with-a-long-name-for-this-test', 'and-another-one-below-it', 'Deep')
     const p = await project(deep)
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     expect(question).toContain(JSON.stringify(p.path))
   })
 
   it("says what an app may ask for is not known when its manifest cannot be read, rather than that it asks for nothing", async () => {
     const p = await project('Broken', { app: { name: '' } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     expect(question).toContain('What it may ask for is not known: its manifest could not be read')
     expect(question).not.toContain('Asks for nothing beyond its own tools.')
@@ -136,7 +136,7 @@ describe('set_project_trust', () => {
 
   it("refuses a project whose machine cannot be reached, before any card: its row is only what was last known", async () => {
     const p = await project('Faraway')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     mgr.useWindowRpc(async (method, params) => {
       const r = await rpc(method, params)
       return method === 'projects.list' ? (r as ProjectInfo[]).map((x) => (x.id === p.id ? { ...x, machine: 'm1', unreachable: true } : x)) : r
@@ -167,7 +167,7 @@ describe('set_project_trust', () => {
       manifest(join(p.path, '.centralu', 'apps', 'quiet'), 'quiet')
       rt.refresh()
       onMachine(p, (a) => (a.appId === 'remote' ? (({ uses: _u, ...rest }) => rest)(a) : a))
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
       expect(question).toContain('on the linked machine "Laptop"')
       expect(question).toContain('Its 2 apps, as its machine listed them just now:')
@@ -179,7 +179,7 @@ describe('set_project_trust', () => {
     it('asks the machine for its apps alone, and says it has none only when the machine said so', async () => {
       const p = await project('Empty')
       onMachine(p)
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
       expect(question).toContain('It has no app, as its machine listed them just now.')
     })
@@ -193,7 +193,7 @@ describe('set_project_trust', () => {
         if (method === 'apps.list' && (params as { machine?: string }).machine === 'm1') throw new Error('the machine dropped the call')
         return routed(method, params)
       })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const r = await run(orc.id, 'set_project_trust', { project: p.id, trusted: true })
       expect(r.isError).toBe(true)
       expect(r.text).toContain('could not be listed just now (its machine did not answer for them), so its trust is not changed from here')
@@ -204,7 +204,7 @@ describe('set_project_trust', () => {
     it('trusts nothing when its folder changed, or its machine could not be reached, while the card stood', async () => {
       const p = await project('Moving')
       onMachine(p)
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const moved = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'allow', async () => {
         tweak.path = join(root, 'elsewhere')
       })
@@ -222,7 +222,7 @@ describe('set_project_trust', () => {
     it('the lists say which machines are not connected, so they do not read as complete', async () => {
       const p = await project('Seen')
       onMachine(p, (a) => a, 'unreachable')
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const rules = await run(orc.id, 'list_approval_rules')
       expect(rules.text).toContain('No approval rule was listed.')
       expect(rules.text).toContain('Not listed: the rules kept on "Laptop", which is not connected just now.')
@@ -235,7 +235,7 @@ describe('set_project_trust', () => {
         if (method === 'machines.list') throw new Error('links are down')
         return rpc(method, params)
       })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       expect((await run(orc.id, 'list_approval_rules')).text).toContain('The linked machines could not be read just now, so the rules kept on them may be missing.')
     })
   })
@@ -244,14 +244,14 @@ describe('set_project_trust', () => {
     const p = await project('Closed')
     manifest(join(p.path, '.centralu', 'apps', 'helper'), 'helper')
     rt.refresh()
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'share_app' as Command, { app: 'helper', shared: true }, 'deny')
     expect(question).toContain('Its project is untrusted, so it attaches nowhere until you trust "Closed".')
   })
 
   it('trusts nothing when the person denies it', async () => {
     const p = await project('Denied')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     expect(question).toContain('It has no app.')
     expect(r.isError).toBe(true)
@@ -262,7 +262,7 @@ describe('set_project_trust', () => {
   it("asks before taking trust away too, saying the project's own deny rules and hooks stop applying, and untrusts it once allowed", async () => {
     const p = await project('Gamma')
     await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_project_trust', { project: 'Gamma', trusted: false }, 'allow')
     expect(question).toContain(`Take trust away from the project "Gamma" at ${JSON.stringify(p.path)}?`)
     expect(question).toContain('any deny rules and hooks the project sets for its agents')
@@ -276,7 +276,7 @@ describe('set_project_trust', () => {
   it('keeps the trust when the person denies taking it away, or when the project went while the card stood', async () => {
     const p = await project('Kept')
     await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const denied = await answered(orc.id, 'set_project_trust', { project: 'Kept', trusted: false }, 'deny')
     expect(denied.r.isError).toBe(true)
     expect(await trusted(p.id)).toBe(true)
@@ -292,7 +292,7 @@ describe('set_project_trust', () => {
     const name = 'helper] Asks for nothing beyond its own tools. \u202ecod.exe'
     mkdirSync(join(p.path, '.centralu', 'apps', name), { recursive: true })
     rt.refresh()
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question } = await answered(orc.id, 'set_project_trust', { project: p.id, trusted: true }, 'deny')
     expect(question).toContain('(id "helper] Asks for nothing beyond its own tools. \\u202ecod.exe")')
     expect(question).not.toMatch(/[\u202e]/)
@@ -301,7 +301,7 @@ describe('set_project_trust', () => {
 
   it('says nothing changed when the project already is as asked, with no card', async () => {
     const p = await project('Same')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'set_project_trust', { project: 'Same', trusted: false })).text).toBe(`"Same" [${p.id}] is already untrusted; nothing changed.`)
     expect(card(orc.id)).toBeUndefined()
   })
@@ -310,7 +310,7 @@ describe('set_project_trust', () => {
     const one = await project('Twin')
     mkdirSync(join(root, 'other', 'Twin'), { recursive: true })
     const two = (await rpc('projects.add', { path: join(root, 'other', 'Twin') })) as ProjectInfo
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const unknown = await run(orc.id, 'set_project_trust', { project: 'Nobody', trusted: true })
     expect(unknown.isError).toBe(true)
     expect(unknown.text).toBe('Nothing changed: No project is called "Nobody"; list_projects names them.')
@@ -324,7 +324,7 @@ describe('set_project_trust', () => {
   })
 
   it('refuses arguments its schema would not take, naming the argument', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_project_trust', { project: 'x', trusted: 'yes' })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('trusted')
@@ -336,7 +336,7 @@ describe('set_project_trust', () => {
   describe('checked again after Allow', () => {
     it('trusts nothing when the project was removed while the card stood', async () => {
       const p = await project('Gone')
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, 'set_project_trust', { project: 'Gone', trusted: true }, 'allow', async () => {
         await rpc('projects.delete', { projectId: p.id })
       })
@@ -347,7 +347,7 @@ describe('set_project_trust', () => {
 
     it('trusts nothing when the project gained an app while the card stood: it is not what the card named', async () => {
       const p = await project('Grows')
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { question, r } = await answered(orc.id, 'set_project_trust', { project: 'Grows', trusted: true }, 'allow', async () => {
         manifest(join(p.path, '.centralu', 'apps', 'pulled'), 'pulled', { uses: { agent: true } })
         rt.refresh()
@@ -360,7 +360,7 @@ describe('set_project_trust', () => {
 
     it('trusts nothing when what an app may ask for changed while the card stood', async () => {
       const p = await project('Asks', { app: { uses: {} } })
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, 'set_project_trust', { project: 'Asks', trusted: true }, 'allow', async () => {
         manifest(p.path, 'asks', { uses: { agent: true } })
         rt.refresh()
@@ -371,7 +371,7 @@ describe('set_project_trust', () => {
 
     it('says so when the person trusted it in the window while the card stood', async () => {
       const p = await project('Raced')
-      const orc = await mgr.orchestrator()
+      const orc = await mgr.assistant()
       const { r } = await answered(orc.id, 'set_project_trust', { project: 'Raced', trusted: true }, 'allow', async () => {
         await rpc('projects.setTrusted', { projectId: p.id, trusted: true })
       })
@@ -386,7 +386,7 @@ describe('approval rules', () => {
   const rules = async () => (await rpc('approvals.rules', {})) as Rule[]
 
   it('lists each rule with what it allows and what it belongs to, all or one project\'s, and says when there is none', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'list_approval_rules')).text).toBe('No approval rule: every action that asks, asks.')
     const a = await project('Alpha')
     const b = await project('Beta')
@@ -413,7 +413,7 @@ describe('approval rules', () => {
     store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm test', decision: 'allow' })
     store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm run lint', decision: 'allow' })
     const [one] = (await rules()).filter((r) => r.matcher === 'Bash:npm test')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'remove_approval_rule', { id: one!.id })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
@@ -425,7 +425,7 @@ describe('approval rules', () => {
   it('refuses an id no rule has, removing nothing', async () => {
     const a = await project('Alpha')
     store.permissions.addApprovalRule({ scope: 'project', projectId: a.id, matcher: 'Bash:npm test', decision: 'allow' })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'remove_approval_rule', { id: 987654 })
     expect(r.isError).toBe(true)
     expect(r.text).toBe('Nothing changed: No approval rule has the id 987654; list_approval_rules shows them.')
@@ -433,7 +433,7 @@ describe('approval rules', () => {
   })
 
   it('has no command that adds or widens a rule', () => {
-    expect(commandsFor('orchestrator', 'commands').filter((n) => /rule/.test(n))).toEqual(['list_approval_rules', 'remove_approval_rule'])
+    expect(commandsFor('assistant', 'commands').filter((n) => /rule/.test(n))).toEqual(['list_approval_rules', 'remove_approval_rule'])
   })
 })
 
@@ -456,7 +456,7 @@ describe('app grants', () => {
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('deny', 'app:other'))
     store.permissions.setProjectConsent(b.id, a.id, 'apps')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'list_app_grants')
     expect(r.isError).toBeFalsy()
     expect(r.text).toContain(`- "App helper" (id "helper") of the project "Alpha": trusted; not shared`)
@@ -474,7 +474,7 @@ describe('app grants', () => {
     const a = await inner('Alpha', 'helper')
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow'))
     store.permissions.putAppPermission(`${a.id}/helper`, a.id, answer('allow', 'app:other'))
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'forget_app_answer', { app: 'App helper', capability: 'agent:claude' })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
@@ -497,7 +497,7 @@ describe('app grants', () => {
       if (method === 'apps.list') return (r as Record<string, unknown>[]).map((x) => (x.projectId === a.id ? { ...x, machine: 'm1' } : x))
       return r
     })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     expect((await run(orc.id, 'list_projects')).text).toContain(`- "Alpha" [${a.id}] on the linked machine "Laptop": `)
     expect((await run(orc.id, 'list_app_grants')).text).toContain('of the project "Alpha" on the linked machine "Laptop": ')
     expect(asked).toEqual([{ method: 'apps.permissions', machine: 'm1' }])
@@ -515,7 +515,7 @@ describe('app grants', () => {
     const b = await project('Beta')
     store.permissions.setProjectConsent(b.id, a.id, 'delegate')
     store.permissions.setProjectConsent(b.id, a.id, 'apps')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'revoke_project_consent', { from: 'Beta', to: a.id, kind: 'delegate' })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
@@ -527,7 +527,7 @@ describe('app grants', () => {
 
   it('asks before sharing a project app, naming what it may ask for, and shares it once allowed; stops sharing at once', async () => {
     await inner('Alpha', 'helper', { uses: { agent: true } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow')
     expect(question).toContain('Share the app "App helper" (id "helper") of the project "Alpha" with your other projects?')
     expect(question).toContain('after you allow that pair of projects once')
@@ -542,7 +542,7 @@ describe('app grants', () => {
 
   it('shares nothing when the person denies it', async () => {
     await inner('Alpha', 'helper')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'deny')
     expect(r.isError).toBe(true)
     expect(r.text).toContain('nothing was shared')
@@ -551,7 +551,7 @@ describe('app grants', () => {
 
   it('refuses a root app, which follows its project\'s trust, before any card', async () => {
     await project('Rooted', { app: {} })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'share_app', { app: 'rooted', shared: true })
     expect(r.isError).toBe(true)
     expect(r.text).toContain("is its project's root app: it is reached through its project's trust")
@@ -560,7 +560,7 @@ describe('app grants', () => {
 
   it('shares nothing when what the app may ask for changed while the card stood', async () => {
     const p = await inner('Alpha', 'helper')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow', async () => {
       manifest(join(p.path, '.centralu', 'apps', 'helper'), 'helper', { uses: { agent: true } })
       rt.refresh()
@@ -572,7 +572,7 @@ describe('app grants', () => {
 
   it('shares nothing when the app was removed while the card stood', async () => {
     const p = await inner('Alpha', 'helper')
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { r } = await answered(orc.id, 'share_app', { app: 'helper', shared: true }, 'allow', async () => {
       rmSync(join(p.path, '.centralu', 'apps', 'helper'), { recursive: true, force: true })
       rt.refresh()
@@ -587,7 +587,7 @@ describe('set_agent_limits', () => {
   const prefs = async () => (await rpc('prefs.get', {})) as Prefs
 
   it('asks before any change, naming each limit as it is and as it becomes, and changes them once allowed', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_agent_limits', { agentCeiling: 8, agentDepth: 2 }, 'allow')
     expect(question).toContain('Change the limits on what agents may do?')
     expect(question).toContain('- Running agents per project: by preset (auto unlimited, otherwise 4) → 8.')
@@ -601,7 +601,7 @@ describe('set_agent_limits', () => {
 
   it('asks for a change that narrows too, and changes nothing when the person denies it', async () => {
     await rpc('prefs.set', { patch: { agentDepth: 2 } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_agent_limits', { agentDepth: 1 }, 'deny')
     expect(question).toContain('- Levels of sessions that may start agents: 2 → 1.')
     expect(r.isError).toBe(true)
@@ -610,7 +610,7 @@ describe('set_agent_limits', () => {
   })
 
   it('has no field for "let sessions look at other sessions", which is not a setting any more (2026-10-20): refused by name', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_agent_limits', { sessionTools: false })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('sessionTools')
@@ -620,7 +620,7 @@ describe('set_agent_limits', () => {
 
   it('puts the ceiling back to the preset\'s own with "preset"', async () => {
     await rpc('prefs.set', { patch: { agentCeiling: 0 } })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { question, r } = await answered(orc.id, 'set_agent_limits', { agentCeiling: 'preset' }, 'allow')
     expect(question).toContain('- Running agents per project: unlimited → by preset (auto unlimited, otherwise 4).')
     expect(r.isError).toBeFalsy()
@@ -628,7 +628,7 @@ describe('set_agent_limits', () => {
   })
 
   it('asks nothing when the limits already are as asked', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_agent_limits', { agentCeiling: 'preset', agentDepth: 1 })
     expect(card(orc.id)).toBeUndefined()
     expect(r.isError).toBeFalsy()
@@ -636,7 +636,7 @@ describe('set_agent_limits', () => {
   })
 
   it('refuses a value the window would not take, before any card', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const r = await run(orc.id, 'set_agent_limits', { agentDepth: 4 })
     expect(r.isError).toBe(true)
     expect(r.text).toContain('agentDepth')
@@ -646,7 +646,7 @@ describe('set_agent_limits', () => {
   })
 
   it('changes nothing when the person changed a limit in Settings while the card stood', async () => {
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const { r } = await answered(orc.id, 'set_agent_limits', { agentDepth: 3 }, 'allow', async () => {
       await rpc('prefs.set', { patch: { agentDepth: 2 } })
     })
@@ -656,26 +656,26 @@ describe('set_agent_limits', () => {
   })
 
   it('is the one way: set_preferences still has no field for them, and get_preferences names this command', async () => {
-    const orc = await mgr.orchestrator()
-    const r = await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { agentDepth: 3 } })
+    const orc = await mgr.assistant()
+    const r = await mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'set_preferences', args: { agentDepth: 3 } })
     expect(r.isError).toBe(true)
     expect((await prefs()).agentDepth ?? 1).toBe(1)
-    expect((await mgr.runOrchestratorTool(orc.id, 'centralu_run', { command: 'get_preferences', args: {} })).text).toContain('set_agent_limits changes them')
+    expect((await mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'get_preferences', args: {} })).text).toContain('set_agent_limits changes them')
   })
 })
 
 describe('who may run them', () => {
   it('are found through centralu_commands with the words the instructions give', async () => {
-    const orc = await mgr.orchestrator()
-    const query = /centralu_commands "([^"]+)"/.exec(orchestratorInstructions().split('\n').find((l) => l.startsWith('More commands'))!)![1]
-    const found = (await mgr.runOrchestratorTool(orc.id, 'centralu_commands', { query })).text
+    const orc = await mgr.assistant()
+    const query = /centralu_commands "([^"]+)"/.exec(assistantInstructions().split('\n').find((l) => l.startsWith('More commands'))!)![1]
+    const found = (await mgr.runCentraluTool(orc.id, 'centralu_commands', { query })).text
     for (const name of COMMANDS) expect(found, name).toContain(`- ${name}:`)
     // The machine commands are found by the same words
     expect(found).toContain('- add_machine:')
   })
 
-  it('only the orchestrator, as rare commands in the default tier; no other seat in any tier', () => {
-    expectOnlyOrchestratorRuns(COMMANDS)
+  it('only the Assistant, as rare commands in the default tier; no other seat in any tier', () => {
+    expectOnlyAssistantRuns(COMMANDS)
   })
 
   it("refuses an ordinary session's calls by name and through centralu_run, and trusts nothing", async () => {
@@ -697,14 +697,14 @@ describe('who may run them', () => {
               : name === 'revoke_project_consent'
               ? { from: target.id, to: p.id, kind: 'apps' }
               : { project: target.id, trusted: true }
-      await expect(mgr.runOrchestratorTool(caller.id, name, args), name).rejects.toThrow(`Not a tool of this session: ${name}`)
-      await expect(mgr.runOrchestratorTool(caller.id, 'centralu_run', { command: name, args }), name).rejects.toThrow(/Not a tool of this session/)
+      await expect(mgr.runCentraluTool(caller.id, name, args), name).rejects.toThrow(`Not a tool of this session: ${name}`)
+      await expect(mgr.runCentraluTool(caller.id, 'centralu_run', { command: name, args }), name).rejects.toThrow(/Not a tool of this session/)
     }
     expect(await trusted(target.id)).toBe(false)
     expect((await rpc('approvals.rules', {})) as unknown[]).toHaveLength(1)
     expect(((await rpc('prefs.get', {})) as { agentDepth?: number }).agentDepth ?? 1).toBe(1)
-    // What the ordinary session was refused, the orchestrator does (listing asks nothing)
-    const orc = await mgr.orchestrator()
+    // What the ordinary session was refused, the Assistant does (listing asks nothing)
+    const orc = await mgr.assistant()
     const listed = await run(orc.id, 'list_projects')
     expect(listed.isError).toBeFalsy()
     expect(listed.text).toContain(`"Target" [${target.id}]`)

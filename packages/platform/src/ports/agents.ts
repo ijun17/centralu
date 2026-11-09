@@ -68,18 +68,18 @@ export interface AgentPort {
   /** Sidebar order (the person sets it by dragging). Sends the whole order at once */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
   /**
-   * The app's one and only orchestrator. **Calling it creates one if it does not exist.**
+   * The app's one and only assistant. **Calling it creates one if it does not exist.**
    * It does not belong to a project, so projectId is null.
    */
-  orchestrator(): Promise<SessionInfo>
+  assistant(): Promise<SessionInfo>
   /**
    * Returns it if it exists, and **does not create one if it does not** (#63). Used by
-   * whichever screen is opening — creation happens in orchestrator(), at the moment the
+   * whichever screen is opening — creation happens in assistant(), at the moment the
    * person asks the first question (lazy startup).
    */
-  orchestratorPeek(): Promise<SessionInfo | null>
-  /** The tool the central orchestrator runs on (#63, the card choice on the intro screen). Only meaningful before it is created */
-  configureOrchestrator(tool: ToolName): Promise<void>
+  assistantPeek(): Promise<SessionInfo | null>
+  /** The tool the Assistant runs on (#63, the card choice on the intro screen). Only meaningful before it is created */
+  configureAssistant(tool: ToolName): Promise<void>
   /**
    * Grid layout — sessions and apps, in order (#288). Adding, removing and reordering all come
    * through this one call; the answer is the list as stored (unknown sessions left out).
@@ -126,17 +126,17 @@ export interface AgentPort {
    * Null means "not yet": either a turn is running, or there is no answer.
    */
   exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
-  /** The orchestrator's list of proposed MCP servers (propose_mcp_server → the ones waiting for approval) */
+  /** The Assistant's list of proposed MCP servers (propose_mcp_server → the ones waiting for approval) */
   mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
-  /** The person's answer to a proposal — if approved, the app registers it and restarts the orchestrator */
+  /** The person's answer to a proposal — if approved, the app registers it and restarts the Assistant */
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
-  /** The orchestrator's list of proposed skills (#71 — propose_skill → the ones waiting for approval) */
+  /** The Assistant's list of proposed skills (#71 — propose_skill → the ones waiting for approval) */
   skillProposals(): Promise<{ proposals: { name: string; content: string; why?: string }[] }>
-  /** The person's answer to a skill proposal — if approved, saves it to the DB and restarts the orchestrator */
+  /** The person's answer to a skill proposal — if approved, saves it to the DB and restarts the Assistant */
   resolveSkillProposal(name: string, approve: boolean): Promise<void>
   /** The list of approved skills — viewed and deleted from Settings (a skill that cannot be deleted is worse than none) */
-  orchestratorSkills(): Promise<{ skills: { name: string; content: string }[] }>
-  deleteOrchestratorSkill(name: string): Promise<void>
+  assistantSkills(): Promise<{ skills: { name: string; content: string }[] }>
+  deleteAssistantSkill(name: string): Promise<void>
   /**
    * Previous sessions the tool has kept (including ones created from the terminal).
    * If supported=false, a reason comes with it — even an older tool version does not block

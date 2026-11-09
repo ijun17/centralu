@@ -10,8 +10,8 @@ import { ExternalApps } from '../apps/external/runtime.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
-import { ORCHESTRATOR_ROLE, orchestratorRole } from './orchestrator-home.js'
-import { codexToolInstructionsFor, instructionsFor, readerInstructions } from './orchestrator-tools.js'
+import { ASSISTANT_ROLE, assistantRole } from './assistant-home.js'
+import { codexToolInstructionsFor, instructionsFor, readerInstructions } from './centralu-tools.js'
 
 /**
  * A Codex session through the real manager and the real adapter, with only the app-server faked, and faked the way
@@ -141,15 +141,15 @@ describe('a Codex session whose settings change before its first message (#524)'
 describe('a Codex seat gets its tools\' instructions in the thread\'s developer instructions (#525)', () => {
   const developerInstructions = () => String(sent('thread/start').at(-1)!.params.developerInstructions ?? '')
 
-  it('the orchestrator: its role, then the same instructions Claude gets from the server', async () => {
-    mgr.orchestratorSlot.configureOrchestrator('codex')
-    const o = await mgr.orchestrator()
+  it('the Assistant: its role, then the same instructions Claude gets from the server', async () => {
+    mgr.assistantSlot.configureAssistant('codex')
+    const o = await mgr.assistant()
     await mgr.processes.resumeSession(o.id)
     const text = developerInstructions()
     // The role as the session is given it: the preamble (on by default, #564), then the role
-    expect(text.startsWith(orchestratorRole())).toBe(true)
-    expect(orchestratorRole().endsWith(ORCHESTRATOR_ROLE)).toBe(true)
-    expect(text).toContain(instructionsFor('orchestrator', undefined, false, 'spawn_agent')!)
+    expect(text.startsWith(assistantRole())).toBe(true)
+    expect(assistantRole().endsWith(ASSISTANT_ROLE)).toBe(true)
+    expect(text).toContain(instructionsFor('assistant', undefined, false, 'spawn_agent')!)
     // #1587: its light-work line names Codex's own subagent tool, not Claude's
     expect(text).toContain('with the start_agent command, not your spawn_agent tool.')
     expect(text).not.toContain('Agent tool.')

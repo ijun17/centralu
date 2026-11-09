@@ -1,5 +1,5 @@
 /**
- * The asked gate's asker, read from the request rows of the orchestrator's open turn (docs/plans/turn-owned-by-no-one.md §4.2, C11), over the
+ * The asked gate's asker, read from the request rows of the Assistant's open turn (docs/plans/turn-owned-by-no-one.md §4.2, C11), over the
  * host's wiring: each row of §4.2's table, "It is not weaker", and the fail-closed invariant when a turn ever holds two askers' requests.
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,7 +19,7 @@ const started = (w = hostWorld()) => {
   stops.push(w.stop)
   return w
 }
-/** The orchestrator in the turn `a`'s request opened */
+/** The Assistant in the turn `a`'s request opened */
 async function requestTurn(w = started()) {
   const request = w.mail.send(A, { to: [ORC], text: 'please check CI', needsReply: true }).message
   await w.advance(2_000)
@@ -100,7 +100,7 @@ describe('the asker is read from the turn’s request rows (§4.2)', () => {
     expect(askerOf(w)).toMatchObject({ sessionId: 'a' })
   })
 
-  it('a request held from the orchestrator is never in a turn: held for trust, or told of quietly and held', async () => {
+  it('a request held from the Assistant is never in a turn: held for trust, or told of quietly and held', async () => {
     const w = started()
     const held = w.mail.send(X, { to: [ORC], text: 'from px' }).message
     await w.advance(2_000)

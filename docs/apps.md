@@ -67,8 +67,8 @@ visibility is not read as the default: the side that is wrong stays closed.
 | | Folder | Whose tools | Removing it |
 |---|---|---|---|
 | Project app | `<project>/.centralu/apps/<id>/`: committed with the repository, so it is shared with the team once pushed | The project's sessions, if the project is trusted (§3, §9); another project's session that attaches it, if the person shares it (§9.4) | Through git. Centralu has no button for it |
-| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9); the orchestrator and another project's session that attach it (§9.4) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
-| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The orchestrator; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
+| Root app | `<project>/centralu.app.json`: the project is the app (#1141) | Its project's sessions, if the project is trusted (§3, §9); the Assistant and another project's session that attach it (§9.4) | Remove the manifest: the app goes, and what is kept under its key (data, secrets, grants, runs, builder) stays for when the manifest comes back. Deleting the project takes its runs, grants and secrets with it |
+| User-folder app | `<data folder>/apps/<id>/` (`~/.centralu/`, or `~/.centralu-dev/` in development): for apps used across projects, and apps imported from elsewhere (§12) | The Assistant; a project's session that attaches it (§9.4) | Settings > Apps, after one confirmation. A running app is stopped, and waited for, before its folder moves to `<data folder>/app-trash/` (Windows will not move a folder a process is working in, #14); runs, data, secrets and kept versions stay, an imported app's mark goes |
 
 - Only the **registered project root** is scanned, never a worktree. A worktree carries its own copy
   of the folder, but the app runs once per project and worktree sessions use the root's app.
@@ -137,8 +137,8 @@ visibility is not read as the default: the side that is wrong stays closed.
 - The proposal itself waits in `orchestrator_mcp_proposals` until the person answers. Every change to
   that list (and to the skill proposal list) is announced by the host with
   `orchestrator_proposals_changed`, sent after the write, and the screen re-reads on it: not on the
-  orchestrator's `tool_call`, which arrives before anything is saved (#703). A pending proposal
-  counts as waiting on the person: the orchestrator's sidebar row, the top-bar count, the waiting
+  Assistant's `tool_call`, which arrives before anything is saved (#703). A pending proposal
+  counts as waiting on the person: the Assistant's sidebar row, the top-bar count, the waiting
   list and the next-waiting jump carry it like an approval. Two re-reads cover a missed broadcast:
   the reconnect recovery reads both lists (a gap such as sleep or a host swap), and the `tool_result`
   of a proposal call (`propose_mcp_server`, `propose_skill`, `centralu_run`; matched by session and
@@ -201,7 +201,7 @@ either to act.
   what trusting covers: each of the project's apps (its root app and those in `.centralu/apps`) with
   its name, the first line of its description and what its manifest's `uses` declares, in plain words
   (`uses` is on the app list for this, a protocol addition), and says that the project's own root
-  app then reaches the orchestrator and other projects. A long list scrolls inside the card, and each
+  app then reaches the Assistant and other projects. A long list scrolls inside the card, and each
   description is shown whole. When the project has apps, the menu's "Trust this project…" opens that
   card instead of trusting at once, and so does every other "Trust this project…" (an untrusted app's
   screen, its row in Settings, the New app dialog), in place (`TrustCard`).
@@ -404,8 +404,8 @@ app's sessions have no project and stand indented under its row in "Other apps".
 turn awaiting another message does not set that mark. A session with no project that no listed
 app claims (a coordinator the control app left behind, #372; a session of a user-folder app since
 removed) has no sidebar row. Search, the command palette and the inbox still reach it. The
-"No app" list that used to hang under the orchestrator
-row and catch all of these is gone (#372 follow-up): nothing stands under the orchestrator.
+"No app" list that used to hang under the Assistant
+row and catch all of these is gone (#372 follow-up): nothing stands under the Assistant.
 
 - `home` must declare a `ui://` view and be visible to `app`. Otherwise opening is refused **before
   anything is called**, so nobody sees the app's state change behind a screen that never appeared.
@@ -652,7 +652,7 @@ live agent:
 
 | `reason` | When | The line says |
 |---|---|---|
-| `other-project` | Another project's app, a user-folder app outside the orchestrator, or a session an app stood up | Ask in a session of that project (or: only the orchestrator can use your apps) |
+| `other-project` | Another project's app, a user-folder app outside the Assistant, or a session an app stood up | Ask in a session of that project (or: only the Assistant can use your apps) |
 | `untrusted` | The app's project, which is this session's or that of an app it attached, is not trusted | Trust the project |
 | `app-unusable` | The app is `invalid`, `unconfirmed` or `failed` (`status`) | Fix the manifest, turn it on, or restart it |
 | `restart` | A Codex thread started before the app was attached: Codex keeps the servers a thread started with (§9.2). The adapter answers from the servers it configured (`appAttachment`) | Restart the session |
@@ -685,7 +685,7 @@ The first promise of apps is that the place a tool is built is the place it is u
 The host side exists (#155), and so does the UI side: New app, the "fix it here" bar under a view,
 and "Send to builder".
 
-- **Making an app**: the orchestrator's `create_app` and the RPC `apps.create` (the New app button's
+- **Making an app**: the Assistant's `create_app` and the RPC `apps.create` (the New app button's
   call) go through one function. Everything is refused **before a folder exists**: an id failing the
   proposed-server rule (#93 plus no `app-` prefix), a reserved id, an untrusted project, a folder
   that already exists. Parent folders are made one level at a time through the path guard (a
@@ -697,7 +697,7 @@ and "Send to builder".
   missing, a chosen parent must exist, nothing of that name may be there), the template written
   there through a dot-named sibling, then registered as a **trusted** project (Centralu made it, as
   an empty project folder, #655) whose root is the app. A folder that fails to register is removed.
-  The builder works in that project, at its root. The orchestrator's `create_app` without `project`
+  The builder works in that project, at its root. The Assistant's `create_app` without `project`
   raises create_project's card for the folder first, since it is the one thing it makes outside a
   project.
 - **New app** (the UI's door to the same function): "New app…" in each project's menu, and the app
@@ -738,14 +738,14 @@ and "Send to builder".
   failing to make it does not undo the app). A project app's builder works in the **project root**,
   because file links and history catch-up assume it; a user-folder app's builder
   works in the app folder. The app's rules come as the session's role text, fixed when it is made.
-  Preset `auto`, the default every new session gets (owner decision 2026-11-05; `normal` before). Tool: the project's default, or the orchestrator's for a user-folder app. It is
+  Preset `auto`, the default every new session gets (owner decision 2026-11-05; `normal` before). Tool: the project's default, or the Assistant's for a user-folder app. It is
   attached to its own app's tools, and gets one more tool, `check`. Carrying Centralu's own tools
   does not change which files it reads (#152): like any other session of its project, a Claude
   builder in a trusted project loads the project's `.claude/` and `CLAUDE.md` and the person's
   `~/.claude`, a global bypass included, and a Codex builder reads `AGENTS.md`. Once the project's
   trust is withdrawn, it reads only the person's own settings from its next start. A user-folder
   app's builder counts as trusted, since that folder is the person's own (decision 3). Only the
-  orchestrator and coordinators read no settings files; under `normal` they still follow the person's
+  assistant and coordinators read no settings files; under `normal` they still follow the person's
   own default mode, a global bypass included (#382).
 - **`check`**: reads the manifest again; restarts the app **from the files on disk** (waiting up to
   30 s for calls in progress; past that it inspects the running process and says so); calls
@@ -790,14 +790,14 @@ and "Send to builder".
 
 | Session | Apps |
 |---|---|
-| Orchestrator | User-folder apps. The root apps of trusted projects it attaches when it needs one (§9.4, #1205); an untrusted project's root app reaches it under no preset. Two of one id are named apart, and a name once seen stays with its app (below) |
+| Assistant | User-folder apps. The root apps of trusted projects it attaches when it needs one (§9.4, #1205); an untrusted project's root app reaches it under no preset. Two of one id are named apart, and a name once seen stays with its app (below) |
 | A project's sessions, worktree sessions included | That project's apps, if the project is trusted |
 | A builder | The above, and its own app (a user-folder app's builder has no project) |
 | Any other | None |
 
 Beyond this table, a project's session can attach an app **itself** for as long as it needs it: an
 app another project shares, a user-folder app, or another project's root app; and so can the
-orchestrator, a trusted project's root app (§9.4). Apps that are `invalid`, `untrusted` or
+assistant, a trusted project's root app (§9.4). Apps that are `invalid`, `untrusted` or
 `failed` are not attached. The rule is checked again **at every call**, not only when attaching:
 Codex cannot change a running thread's servers, so the per-call check is what actually stops an app
 that was detached.
@@ -814,16 +814,16 @@ longer applies, and the runtime refuses them for every caller.
 
 **A session's tool list does not grow with the projects the person trusts** (#1205). Every attached
 app is a server whose tools ride in each request: Claude defers them behind tool search, so their names
-still cost; Codex loads them. Until #1205 the orchestrator was given every trusted project's root app
+still cost; Codex loads them. Until #1205 the Assistant was given every trusted project's root app
 (#1141), so with ten projects that are apps it carried ten servers it mostly never called. A rule that
 gives a session apps by a count that grows on its own (projects, shares) is not added to decision 4;
 such apps are reached on demand (§9.4), and the session pays for the ones it attached. What it is given
 is bounded by things the person set up for that session: its own project's apps, its own app as a
-builder, and for the orchestrator the user folder, where an MCP server the person approved for it lands
+builder, and for the Assistant the user folder, where an MCP server the person approved for it lands
 (A-7). Measured with the app `create_app` makes (two agent tools and the host's `run_status`), with 0, 3
 and 10 trusted root apps: before, Codex 6,800 / 9,179 / 14,733 characters and 11 / 20 / 41 tools, Claude
 6,800 / 7,004 / 7,483 (the names alone); after, 6,800 and 11 tools in every case, plus 75 characters of
-instructions once (`sessions/orchestrator-app-cost.test.ts`, [tool-cost.md](tool-cost.md) §12).
+instructions once (`sessions/assistant-app-cost.test.ts`, [tool-cost.md](tool-cost.md) §12).
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
 and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
@@ -833,7 +833,7 @@ and updates the list when the app answers. A session's apps and `attach_app` wai
 
 | | Claude | Codex |
 |---|---|---|
-| Attachment | An in-process proxy server per app | A stdio bridge process per app (`orchestrator-bridge.mjs` with `CC_APP_SERVER`); none for a session with no apps |
+| Attachment | An in-process proxy server per app | A stdio bridge process per app (`centralu-bridge.mjs` with `CC_APP_SERVER`); none for a session with no apps |
 | Apps come or go | `setMcpServers`, without a restart; visible from the next turn. The whole set goes every time, because the SDK drops a server left out, `centralu` included | Not within a thread: Codex ignores `tools/list_changed`. Applied from the next thread. `thread/resume` carries the same MCP configuration as `thread/start` |
 | An app's tools change | The proxy sends `tools/list_changed` | From the next thread |
 | Approval | `canUseTool`, then our approval card | Codex asks through an elicitation marked `codex_approval_kind: "mcp_tool_call"` (`codex/approval_kind` in newer source; both are read). For our app servers it becomes our approval card, where it used to be declined automatically |
@@ -855,7 +855,7 @@ has no rule key, so nothing it remembers reaches the next call. A tool may say, 
 | `_meta["centralu/risk"]` | Means | No card when |
 |---|---|---|
 | `"local"` | Writes only this app's own data on this computer, and can be undone | Always, under every preset and in any attached app. Only next to `annotations.destructiveHint: false` (the MCP default is `true`), so a tool that is silent about it still asks |
-| `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request). Not one that merges or releases: leave those undeclared, so a card stays the check on them | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the orchestrator, or `safe` |
+| `"routine"` | An ordinary write its own project would do anyway (a comment, a pull request). Not one that merges or releases: leave those undeclared, so a card stays the check on them | The app belongs to the session's own project (a trusted project: an untrusted project's apps do not attach), under `normal`. Not for a user-folder app, an app attached from another project, the Assistant, or `safe` |
 | absent | Anything else | Never: it asks as before |
 
 `_meta["centralu/askWhen"]`, an object such as `{ "push": true, "path": "*" }`, makes a `routine` tool ask when any
@@ -922,7 +922,7 @@ Decision 4 keeps a session to its own project's apps. The owner's decision for #
 lets a session reach further only while it needs to: it **finds** an app it could attach,
 **attaches** it (the app's tools join this session) and **detaches** it (they leave), so another
 project's tools cost no context when they are not in use. Code: `sessions/app-access.ts`, the hub's
-`OnDemandApps` port in `session-apps.ts`, the tools in `orchestrator-tools.ts`.
+`OnDemandApps` port in `session-apps.ts`, the tools in `centralu-tools.ts`.
 
 **What can be attached**, decided when the session asks and again every time the hub counts the
 session's apps (and so at every call):
@@ -936,10 +936,10 @@ session's apps (and so at every call):
 
 A session in an **untrusted** project attaches nothing: its repository's text could be the one
 asking, and an untrusted project runs none of its own apps either. A project's ordinary session has
-the tools (they ride with the reader set, below), and so does the orchestrator (#1205, below); a
+the tools (they ride with the reader set, below), and so does the Assistant (#1205, below); a
 coordinator, a builder and an agent an app stood up do not.
 
-**The orchestrator** (#1205) is given the user-folder apps and attaches the root apps of trusted
+**The Assistant** (#1205) is given the user-folder apps and attaches the root apps of trusted
 projects here, the one it needs when it needs it, under the same name book (`app-<id>`, a name once
 seen stays with its app). Nothing else: a project's inner app, shared or not, is that project's
 (`find_apps` does not list it and `attach_app` refuses it, naming `send_to_session`), and no card is
@@ -947,12 +947,12 @@ asked, as for any root app. The three are among its rare commands, behind `centr
 (`RARE_COMMANDS` in `tool-seats.ts`): as tools they would not fit its ceiling, and its instructions
 name `find_apps` in one line. Each answer names the next call in the form the seat makes it
 (`centralu_run(command="attach_app", …)`). The attachment is kept per session like any other, so it
-lasts across restarts until `detach_app`; a Codex orchestrator's thread restarts when the turn ends,
+lasts across restarts until `detach_app`; a Codex Assistant's thread restarts when the turn ends,
 as a project session's does. `apps.reach` answers `reachable` for a root app it could attach and has
 not: its agent attaches it with nothing for the person to do; and `untrusted` for one it attached whose
 project has since lost trust (so for a project session's too), since trusting the project again is the fix.
-An orchestrator that had root apps attached before #1205 reads, once, before its first turn since, that
-they are no longer attached by default and how to find them (`rootAppsNotice`, [tool-cost.md](tool-cost.md) §12). A user-folder app the orchestrator had
+An Assistant that had root apps attached before #1205 reads, once, before its first turn since, that
+they are no longer attached by default and how to find them (`rootAppsNotice`, [tool-cost.md](tool-cost.md) §12). A user-folder app the Assistant had
 seen, when its folder becomes a project in place (#1141), stays attached to it as an attachment of its
 own, under the name it called it by (`UserAppAdoptionRecords.carry`).
 
@@ -964,7 +964,7 @@ Attachments count only while the session holds the reader set, which every ordin
 Settings switch that took it away, and with it the attached apps and the ones allowed "once" (#382), is gone (owner
 decision 2026-10-20, always on).
 
-**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1; the orchestrator's as commands):
+**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1; the Assistant's as commands):
 
 | Tool | Does | Result names |
 |---|---|---|
@@ -1060,7 +1060,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   undeclared is refused before anything runs. Declaring is not permission.
 - **`run_agent { prompt, tool?, schema? }`.** Each request starts a new, visible session under the
   app: a project app's in its project (working folder: the project root), a user-folder app's like
-  a coordinator (no project, the orchestrator's empty folder). The preset is `auto`, the default
+  a coordinator (no project, the Assistant's empty folder). The preset is `auto`, the default
   every new session gets, never above the lowest preset among the sessions with a call open into
   the app now, whatever run id the app cites: while a `safe` session's call is open (directly, through
   `call_app`, or from a view inline in its conversation) every agent the app starts is `safe`. Only a
@@ -1069,8 +1069,8 @@ gate happens in one place, the broker desk (`desk.ts`).
   stopped at an approval card). Nothing it does waits for the
   person, though its text is the app's; the person may lower its preset in the session. Settings files: a project app's agent follows the
   project's trust like a worker; a user-folder app's agent reads only the person's own settings,
-  never the orchestrator folder's files. The tool is `tool` if declared, else the default (the
-  project's default tool; for a user-folder app, the orchestrator's). A tool that is not installed
+  never the Assistant folder's files. The tool is `tool` if declared, else the default (the
+  project's default tool; for a user-folder app, the Assistant's). A tool that is not installed
   or not logged in is refused before a session is created, in the tool's words. The prompt reaches
   the agent framed as the app's text (security-boundaries.md, "Text an app sends"). The request
   waits for the turn and returns the final answer: the agent's text after its last tool call. With
@@ -1321,7 +1321,7 @@ from there it is an ordinary import, turned off unless the person enables it.
 - The broker answers only while the app handles a call, except `busy` and `notify`: an app cannot
   run an agent, call an app or read host data by itself (a timer, a watcher). The host data list has
   two names.
-- Attaching another project's app (§9.4) is a project session's: the orchestrator, a worktree
+- Attaching another project's app (§9.4) is a project session's: the Assistant, a worktree
   manager and a coordinator cannot. Codex gets an attached app only from its next turn, so the
   person has to send another message for the model to use it.
 - Export (plan E-2) and sharing through a team server are not built: an app is shared by sending

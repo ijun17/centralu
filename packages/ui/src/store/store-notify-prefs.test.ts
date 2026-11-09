@@ -8,7 +8,7 @@ import { resetStore } from './store.test-helpers.js'
 
 /**
  * The notification switches are the host's (#1306): the window reads them from the preferences, saves only the switches
- * that changed through them, hears a change another writer made (the orchestrator, another window), and falls back to the
+ * that changed through them, hears a change another writer made (the Assistant, another window), and falls back to the
  * workspace snapshot's copy only for a host that has none.
  */
 const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -54,7 +54,7 @@ describe('the notification switches live in the host (#1306)', () => {
     expect(save).toHaveBeenCalledWith({ notifyPolicy: { sound: false } })
     // The snapshot's copy is still written, for a build that reads the switches there
     expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false })
-    // The orchestrator turned another one off meanwhile; this window turns a third off
+    // The Assistant turned another one off meanwhile; this window turns a third off
     await mock.prefs.save({ notifyPolicy: { error: false } })
     await tick()
     useStore.getState().setNotifyPolicy({ ...useStore.getState().notifyPolicy, allDone: false })
@@ -71,7 +71,7 @@ describe('the notification switches live in the host (#1306)', () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     await tick()
-    // The orchestrator's set_preferences: the host's record changes and every window is told
+    // The Assistant's set_preferences: the host's record changes and every window is told
     await mock.prefs.save({ notifyPolicy: { whenFocused: true, approval: false } })
     await tick()
     await tick()
@@ -84,7 +84,7 @@ describe('the notification switches live in the host (#1306)', () => {
     expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
   })
 
-  it('also follow another setting the orchestrator changed (the theme), without a reload', async () => {
+  it('also follow another setting the Assistant changed (the theme), without a reload', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     await tick()

@@ -59,6 +59,9 @@ With the limited credential: runs.
 - `apps.sendError`
 - `apps.usage`
 - `apps.versions`
+- `assistant.configure`
+- `assistant.get`
+- `assistant.peek`
 - `attachments.save`
 - `commands.log`
 - `commands.resize`
@@ -250,5 +253,7 @@ With the limited credential: refused: a session's own tool channel, which a Code
 
 - `apps.sessionCall`
 - `apps.sessionTools`
+- `assistant.tool`
+- `assistant.tools`
 - `orchestrator.tool`
 - `orchestrator.tools`

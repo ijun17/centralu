@@ -25,7 +25,7 @@ import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
  * the screen. Removing a panel leaves the session or app itself untouched.
  *
  * This project's sidebar session and app rows can be dropped here: an absent panel is added
- * where it lands, a visible one moves there (drop.ts). Other projects and the orchestrator
+ * where it lands, a visible one moves there (drop.ts). Other projects and the Assistant
  * are refused during the drag. The global grid keeps its own list across projects.
  *
  * Unlike the grid, the evidence panel stays beside it. The grid dropped it because its sessions
@@ -131,7 +131,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       data-testid="project-view"
       onDragOver={(e) => {
         /*
-          Another project's session or app, or the orchestrator: no drop cursor anywhere on this
+          Another project's session or app, or the Assistant: no drop cursor anywhere on this
           screen. The window's floor (App.tsx) has already said yes to every drag, so saying
           nothing here would still show one. A drag the page answers 'none' is not dropped at all.
         */

@@ -41,7 +41,7 @@ describe('making the folder', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-pfold-')))
     try {
       const target = projectFolderTarget({ name: 'race' }, join(root, 'Centralu'))
-      // Someone makes it after the check (or while the orchestrator's card stood)
+      // Someone makes it after the check (or while the Assistant's card stood)
       mkdirSync(target.path, { recursive: true })
       writeFileSync(join(target.path, 'keep.txt'), 'mine')
       expect(() => makeProjectFolder(target)).toThrow(/already in/)

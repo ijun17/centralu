@@ -47,9 +47,9 @@ export class StepsV13ToV27 extends MigrationRange {
            * The directory a session was created in. Stored, not recomputed. (issue #28)
            *
            * Until now every start derived the cwd again — the project's path, or
-           * `orchestratorHome()` (= `dataRoot()/orchestrator`) for the orchestrator. Then the
+           * `assistantHome()` (= `dataRoot()/orchestrator`) for the Assistant. Then the
            * data directory was renamed to `~/.centralu` from the folder named just below, and
-           * the orchestrator's cwd moved with it. Claude Code keys its session store **by
+           * the Assistant's cwd moved with it. Claude Code keys its session store **by
            * working directory**, so the tool went looking in a project slug that had never
            * existed and answered "not found". The 821KB transcript sat untouched under the old
            * slug the whole time, and the app told its owner the conversation had been deleted.
@@ -65,8 +65,8 @@ export class StepsV13ToV27 extends MigrationRange {
            * its history was never written to. So we write it down once and read it back.
            *
            * Backfill is what SQL can prove: a worktree session's worktree, otherwise the
-           * project's path. Orchestrator rows (no project, no worktree) stay NULL — resolving
-           * them here would mean calling `orchestratorHome()`, which creates a directory, and
+           * project's path. Assistant rows (no project, no worktree) stay NULL — resolving
+           * them here would mean calling `assistantHome()`, which creates a directory, and
            * a migration that touches the user's home on every open is how `pnpm verify` once
            * blocked the real data move (see data-dir.ts). The manager fills those in the first
            * time it actually needs the path, and from then on they are stored too.
@@ -175,7 +175,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * Guarantee is_orchestrator here too (#13). It is present in the new database's DDL
            * and in the v10 rebuild, but **a database where v10 returned early** (an old schema
            * where project_id was already nullable) reached v17 without this column — a mine
-           * waiting to go off the moment orchestratorId() read it, which surfaced once
+           * waiting to go off the moment assistantId() read it, which surfaced once
            * listSessions started reading it too (#13).
            */
           if (!cols.some((c) => c.name === 'is_orchestrator')) {
@@ -294,7 +294,7 @@ export class StepsV13ToV27 extends MigrationRange {
         breaksOlderReaders: false,
         run: () => {
           /*
-           * Retiring the project orchestrator (2026-09-01, reverting #13).
+           * Retiring the project assistant (2026-09-01, reverting #13).
            *
            * **There is a reason the data has to be fixed first.** Once the project-scoped
            * tier is gone from the code, a session that still carries the marker is not
@@ -303,7 +303,7 @@ export class StepsV13ToV27 extends MigrationRange {
            * a silent privilege escalation, and nothing on screen shows it.
            *
            * So the marker is cleared. All that is lost is a handful of tools; the conversation
-           * is untouched. The central orchestrator (project_id IS NULL) is left alone.
+           * is untouched. The Assistant (project_id IS NULL) is left alone.
            */
           this.db.exec(
             `UPDATE sessions SET is_orchestrator = 0 WHERE is_orchestrator = 1 AND project_id IS NOT NULL`,

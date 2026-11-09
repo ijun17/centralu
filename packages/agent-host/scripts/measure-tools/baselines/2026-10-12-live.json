@@ -70,7 +70,7 @@
     },
     {
      "id": "orch-overview",
-     "profile": "orchestrator",
+     "profile": "assistant",
      "prompt": "Which sessions are there in {project}, and what is each one doing?",
      "expect": [
       "list_sessions",
@@ -79,7 +79,7 @@
     },
     {
      "id": "orch-delegate",
-     "profile": "orchestrator",
+     "profile": "assistant",
      "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
      "expect": [
       "send_to_session"
@@ -103,8 +103,8 @@
  "summary": {
   "definitions": {
    "claude": {
-    "orchestrator": {
-     "profile": "orchestrator",
+    "assistant": {
+     "profile": "assistant",
      "cli": "claude",
      "tools": 12,
      "residentTools": 12,
@@ -155,8 +155,8 @@
     }
    },
    "codex": {
-    "orchestrator": {
-     "profile": "orchestrator",
+    "assistant": {
+     "profile": "assistant",
      "cli": "codex",
      "tools": 12,
      "residentTools": 12,
@@ -235,7 +235,7 @@
      "toolsChars": 48230,
      "systemChars": 137
     },
-    "orchestrator": {
+    "assistant": {
      "runs": [
       25661,
       25513,
@@ -292,7 +292,7 @@
      "median": 17872,
      "delta": 0
     },
-    "orchestrator": {
+    "assistant": {
      "runs": [
       18146,
       18146
@@ -4763,7 +4763,7 @@
      ]
     },
     "orch-overview": {
-     "profile": "orchestrator",
+     "profile": "assistant",
      "expect": [
       "list_sessions",
       "read_session"
@@ -4803,7 +4803,7 @@
      ]
     },
     "orch-delegate": {
-     "profile": "orchestrator",
+     "profile": "assistant",
      "expect": [
       "send_to_session"
      ],
@@ -5040,7 +5040,7 @@
      ]
     },
     "orch-overview": {
-     "profile": "orchestrator",
+     "profile": "assistant",
      "expect": [
       "list_sessions",
       "read_session"
@@ -5073,7 +5073,7 @@
      ]
     },
     "orch-delegate": {
-     "profile": "orchestrator",
+     "profile": "assistant",
      "expect": [
       "send_to_session"
      ],

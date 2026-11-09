@@ -18,25 +18,37 @@ import { machineField } from './machine-fields.js'
 /**
  * A session's role (#13).
  *
- * The judgment that `projectId === null` means orchestrator used to be scattered across six
+ * The judgment that `projectId === null` means assistant used to be scattered across six
  * places, and this field gathers that scattering into a single marker. Once the project
- * orchestrator was discontinued (2026-09-01), the two judgments became equivalent again, but the
+ * assistant was discontinued (2026-09-01), the two judgments became equivalent again, but the
  * marker stays — having the judgment live in one place is still better, and a migration to
  * revert it would carry risk with nothing to gain.
  */
-export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator'])
+export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'assistant'])
 export type SessionKind = z.infer<typeof SessionKind>
+
+/**
+ * Whether a session of this kind is the Assistant (#2133). The kind is sent as `'orchestrator'`, the value every
+ * release before the rename knows; a later release sends `'assistant'` (docs/plans/assistant-rename.md, step 4), and a
+ * linked machine or a window may meet either. Every reader asks this, never the literal (lint: `guard/assistant-kind`).
+ */
+export function isAssistantKind(kind: unknown): boolean {
+  return kind === 'orchestrator' || kind === 'assistant'
+}
+
+/** The Assistant's kind as this build sends and stores it: the old value, which every supported release parses (#2133) */
+export const ASSISTANT_KIND = 'orchestrator' satisfies SessionKind
 
 export const SessionInfo = z.object({
   id: z.string(),
   /**
-   * The project this session belongs to. Null for a session that belongs to none: the orchestrator
+   * The project this session belongs to. Null for a session that belongs to none: the Assistant
    * (it crosses projects, and attached to one it would die along with that project when the
    * project is deleted), a coordinator, the builder and agent sessions of a user-folder app, and a
    * session in the trash (its project is kept in the trash record). docs/domain-model.md §2.1.
    */
   projectId: z.string().nullable(),
-  /** Whether this is a worker or an orchestrator. Defaults to worker — old frames do not have this field */
+  /** Whether this is a worker or an Assistant. Defaults to worker — old frames do not have this field */
   kind: SessionKind.default('worker'),
   tool: ToolName,
   externalId: z.string().nullable(),
@@ -134,7 +146,7 @@ export const SessionInfo = z.object({
   /**
    * A coordinating session's view allowlist (#80, #81 — unnamed core handle #1).
    *
-   * The sessions visible to the orchestrator tool of a session with kind='coordinator'. The host
+   * The sessions visible to the Assistant tool of a session with kind='coordinator'. The host
    * enforces this (enforcement does not live in app code, which can be turned off). There is no
    * concept of "task" in the core — this is purely the physical fact of visibility.
    */
@@ -336,7 +348,7 @@ export const SUBAGENT_STEPS_PAGE = 500
  * the names `Trashed*` and `trash.*` stay because the protocol only grows. Say "archive" in anything a person or an
  * agent reads.
  *
- * Archiving a session moves it here instead of destroying it; only Settings deletes it for good (or the orchestrator, after the person's card, #1219). The list says what
+ * Archiving a session moves it here instead of destroying it; only Settings deletes it for good (or the Assistant, after the person's card, #1219). The list says what
  * each one still holds and what goes with it, because an archive that shows names but not contents is the hidden store
  * the retired hide-a-session feature was (FR-20): it had a way in and no way out, and nobody could see what it kept.
  */

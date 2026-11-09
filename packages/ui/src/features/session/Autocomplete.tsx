@@ -105,7 +105,7 @@ export function useAutocomplete({
   /**
    * What `@` points to.
    *
-   * Files mean nothing to the orchestrator — it has no hands, so it does not touch files.
+   * Files mean nothing to the Assistant — it has no hands, so it does not touch files.
    * Instead `@` picks a **session**: naming one by voice can point at the wrong name, and if
    * work goes to the wrong session, that project is actually changed.
    */
@@ -119,7 +119,7 @@ export function useAutocomplete({
   const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
 
   /*
-   * The session list already lives in the store — the orchestrator's `@` picks from it here.
+   * The session list already lives in the store — the Assistant's `@` picks from it here.
    *
    * **Only subscribed while `@` is being typed.** `s.sessions` is a map that becomes an
    * entirely new object even if a single session so much as breathes, so subscribing to it

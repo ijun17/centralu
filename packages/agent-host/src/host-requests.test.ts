@@ -33,7 +33,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     emit: (e) => events.push(e),
     canShow: () => canShow,
     // The host's sessions by name: "named" has one, "unnamed" has none, "long" is all format characters
-    sessionName: (id) => ({ named: 'Orchestrator', long: String.fromCharCode(0x202e).repeat(200) })[id] ?? null,
+    sessionName: (id) => ({ named: 'Assistant', long: String.fromCharCode(0x202e).repeat(200) })[id] ?? null,
     limits: opts.limits,
     rpc: async (method, params, ctx) => {
       if (!Object.hasOwn(lists, method)) { rights.set(method, ctx?.rights); labels.set(method, ctx?.label) }
@@ -280,7 +280,7 @@ describe('a host request (#1405)', () => {
     ]
     for (let i = 0; i < 200 && h.requests.list().length < 4; i++) await new Promise((r) => setTimeout(r, 5))
     const cards = h.requests.list()
-    expect(cards.map((c) => c.session?.slice(0, 19) ?? null)).toEqual(['"Orchestrator"', '"unnamed"', '"\\u202e\\u202e\\u202e', null])
+    expect(cards.map((c) => c.session?.slice(0, 19) ?? null)).toEqual(['"Assistant"', '"unnamed"', '"\\u202e\\u202e\\u202e', null])
     for (const card of cards) expect(HostRequestSchema.safeParse(card).success).toBe(true)
     for (const card of cards) h.requests.answer(card.requestId, 'deny')
     for (const asked of asks) await caught(asked)

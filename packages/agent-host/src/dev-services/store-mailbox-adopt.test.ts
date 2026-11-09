@@ -8,7 +8,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
-import { sessionLiveDefaults } from '@cc/protocol'
 import { sessionAddress } from '../mail/address.js'
 import { Store } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
@@ -177,11 +176,9 @@ describe('v65 on a store the v64 build served', () => {
         { session_id: 's2', turn_seq: 1, thread_id: ids.thread, started_by: 'mail', started_at: NOW, ended_at: NOW + 1, outcome: 'finished' },
       ])
       store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'alpha' })
-      store.sessions.upsertSession({
-        id: 's9', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'nine', autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
-        createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal',
-        importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
-      })
+      // The v64 build's insert names its own columns: this build's upsert also writes `is_assistant` (v68, #2133), which a v65 store lacks
+      store.raw.prepare(`INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, created_at, permission_preset)
+        VALUES ('s9', 'p1', 'claude', NULL, 'nine', 0, 'idle', 0, 0, 1, 'normal')`).run()
       expect(store.sessions.listSessions().map((x) => x.name)).toEqual(['nine'])
     } finally {
       store.close()

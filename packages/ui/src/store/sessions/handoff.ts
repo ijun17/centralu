@@ -8,7 +8,7 @@ import { EMPTY_DRAFT } from '../state.js'
  * the record, the successor's first message, and the grid slot it takes over.
  */
 
-/** The prompt asking the agent for its note, now in the protocol (#694: the orchestrator's handoff_session asks with it too) */
+/** The prompt asking the agent for its note, now in the protocol (#694: the Assistant's handoff_session asks with it too) */
 export { handoffPrompt }
 
 /** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */

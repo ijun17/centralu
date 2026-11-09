@@ -55,25 +55,25 @@ test('grid: a file link opens from the project of the panel it was clicked in â€
 })
 
 /**
- * Once the orchestrator becomes a live session too, it can be viewed as a panel in the grid.
+ * Once the Assistant becomes a live session too, it can be viewed as a panel in the grid.
  *
  * Before, GridView could render that ID, but the sidebar had no drag handle, and clicking the
  * panel had focusSession snatch it away to the dedicated screen. This check ties both rules
  * together: it can only be dragged after the first message, and picking it from inside the grid
  * keeps it in the grid.
  */
-test('an orchestrator session can also be placed in the grid to view side by side', async ({ page }) => {
+test('an Assistant session can also be placed in the grid to view side by side', async ({ page }) => {
   await setup(page)
   await page.evaluate(async () => {
     const st = (window as never as { __store: any }).__store.getState()
-    await st.openOrchestrator()
-    await st.askOrchestrator('view it together in the grid')
+    await st.openAssistant()
+    await st.askAssistant('view it together in the grid')
   })
 
-  const id: string = await page.evaluate(() => (window as never as { __store: any }).__store.getState().orchestratorId)
-  await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('draggable', 'true')
+  const id: string = await page.evaluate(() => (window as never as { __store: any }).__store.getState().assistantId)
+  await expect(page.getByTestId('assistant-button')).toHaveAttribute('draggable', 'true')
 
-  await page.dragAndDrop('[data-testid="orchestrator-button"]', '[data-testid="grid-button"]')
+  await page.dragAndDrop('[data-testid="assistant-button"]', '[data-testid="grid-button"]')
   await expect(page.getByTestId(`grid-panel-${id}`)).toBeVisible()
 
   await page.evaluate((sessionId: string) => {

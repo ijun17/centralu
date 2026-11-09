@@ -106,7 +106,7 @@ describe('project trust (M4)', () => {
     expect(useStore.getState().projects[p.id]?.fromUserFolder).toBe(true)
   })
 
-  it('a folder the person let the orchestrator add is asked about once, as one added from the sidebar (#1220)', async () => {
+  it('a folder the person let the Assistant add is asked about once, as one added from the sidebar (#1220)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     // A project the host only changed, or one already trusted, is not asked about
@@ -120,8 +120,8 @@ describe('project trust (M4)', () => {
     expect(useStore.getState().projects[trusted.id]).toBeDefined()
     expect(useStore.getState().trustAsk).toBeNull()
 
-    // Registered by the host after the person's Allow on the orchestrator's card, not by this window
-    const added = await mock.projects.add('/tmp/trust-orchestrator')
+    // Registered by the host after the person's Allow on the Assistant's card, not by this window
+    const added = await mock.projects.add('/tmp/trust-assistant')
     useStore.getState().dispatchEvent({ type: 'projects_changed', added: added.id } as NormalizedEvent)
     await vi.waitFor(() => expect(useStore.getState().trustAsk).toBe(added.id))
     expect(useStore.getState().projects[added.id]?.trusted).toBe(false)
@@ -209,12 +209,12 @@ describe('a project\'s default model follows the tool (#107)', () => {
 
 /** A new project (#515): made from this window it joins at once; made by the host on its own, the event brings it */
 describe('new projects', () => {
-  it('a project the host made (the orchestrator, once approved) joins the list on projects_changed, after the ones there', async () => {
+  it('a project the host made (the Assistant, once approved) joins the list on projects_changed, after the ones there', async () => {
     const mock = new MockPlatform()
     await mock.projects.add('/tmp/old')
     await useStore.getState().attach(mock)
     const before = useStore.getState().projects
-    // Made behind the window's back, as the orchestrator's card does
+    // Made behind the window's back, as the Assistant's card does
     const made = await mock.projects.create('shop')
     expect(Object.keys(useStore.getState().projects)).not.toContain(made.id)
 

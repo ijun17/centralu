@@ -243,7 +243,7 @@ Pending:
 
 | Task | Access | Path | Waiting on |
 |---|---|---|---|
-| Create a new project by asking the orchestrator | discoverable | mouse | The demo's orchestrator does not call `create_project`, so only a test handle raises its card |
+| Create a new project by asking the Assistant | discoverable | mouse | The demo's assistant does not call `create_project`, so only a test handle raises its card |
 
 What the baseline shows:
 

@@ -40,7 +40,7 @@ export function migrateLegacyDataDir(from: string, to: string): boolean {
 }
 
 /**
- * The root of the data folder — attachments, the orchestrator home, and worktrees all live under
+ * The root of the data folder — attachments, the Assistant home, and worktrees all live under
  * this.
  *
  * **Why it can be overridden by an environment variable:** otherwise tests would write into the

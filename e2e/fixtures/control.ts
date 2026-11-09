@@ -13,21 +13,21 @@ import { openSessionDialog, startSession } from './new-session.js'
  */
 export async function setup(page: Page, opts: { projects?: string[]; trusted?: boolean } = {}) {
   await page.goto('/?mock=1')
-  // On first run the intro screen comes first (#63) — pick one tool card for the orchestrator to run
+  // On first run the intro screen comes first (#63) — pick one tool card for the Assistant to run
   await expect(page.getByTestId('intro')).toBeVisible()
   await page.getByTestId('intro-card-claude').click()
-  // Clicking the card leads to the orchestrator screen (empty conversation + suggested questions)
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
+  // Clicking the card leads to the Assistant screen (empty conversation + suggested questions)
+  await expect(page.getByTestId('assistant-suggestions')).toBeVisible()
   for (const [i, path] of (opts.projects ?? []).entries()) {
     if (i === 0) {
       /*
-        Register the first project as the **escape hatch** from the empty orchestrator screen
+        Register the first project as the **escape hatch** from the empty assistant screen
         (#63 — do not force a conversation). With zero projects there is no + button in the sidebar.
       */
       await page.evaluate((p: string) => {
         ;(window as any).__mock.nextPickedDirectory = p
       }, path)
-      await page.getByTestId('orchestrator-pick-folder').click()
+      await page.getByTestId('assistant-pick-folder').click()
       // The first registration leads straight into creating a session — here only the project is
       // needed, so close it
       await page.getByTestId('new-session-dialog').waitFor()

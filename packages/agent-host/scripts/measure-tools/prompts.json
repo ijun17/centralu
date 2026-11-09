@@ -58,13 +58,13 @@
     },
     {
       "id": "orch-overview",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "prompt": "Which sessions are there in {project}, and what is each one doing?",
       "expect": ["list_sessions", "read_session"]
     },
     {
       "id": "orch-delegate",
-      "profile": "orchestrator",
+      "profile": "assistant",
       "prompt": "Ask the session \"{seed}\" to reply with the single word DONE.",
       "expect": ["send_to_session"]
     }

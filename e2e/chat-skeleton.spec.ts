@@ -9,7 +9,7 @@ import { startSession } from './fixtures/new-session.js'
  */
 
 /**
- * A session the screen heard of but has not read (made elsewhere: the orchestrator, another window); its history read
+ * A session the screen heard of but has not read (made elsewhere: the Assistant, another window); its history read
  * waits for `__releaseHistory()`, or forever. `stored`: the host holds two messages for it, else it is brand new.
  */
 async function storedSession(page: Page, stored = true): Promise<string> {

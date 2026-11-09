@@ -291,7 +291,7 @@ export class ChildReports {
     this.host.children.settleAfter(sessionId, timer)
   }
   /**
-   * Notifies the orchestrator when the work it assigned finishes — **the other half of "one window".**
+   * Notifies the Assistant when the work it assigned finishes — **the other half of "one window".**
    *
    * Without this, giving the instruction happens in one window and seeing the result means going to
    * that session. That leaves exactly the pain of hopping between windows in place — the thing this
@@ -299,7 +299,7 @@ export class ChildReports {
    *
    * Pushing a notification is risky, so it only ever happens **when it was asked for**:
    *  - Only work that had reportBack turned on when it was assigned comes back this way
-   *  - Once notified, the marker is cleared. Otherwise that session would wake the orchestrator on
+   *  - Once notified, the marker is cleared. Otherwise that session would wake the Assistant on
    *    every turn it runs on its own afterward — which would become a loop of waking each other
    *  - **Except at a turn that ends with the session's own background work still running** (#721): a child that
    *    backgrounded its `pnpm verify` and ended its turn "waiting for verify" has not finished. Its caller is told once
@@ -315,8 +315,8 @@ export class ChildReports {
     /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed */
     turn?: TurnStarter,
   ): Promise<string | undefined> {
-    const orchestratorId = this.host.children.awaitingReport.get(sessionId)
-    if (!orchestratorId) return undefined
+    const assistantId = this.host.children.awaitingReport.get(sessionId)
+    if (!assistantId) return undefined
     if (turn?.by === 'person' && !settled) {
       // Their turn changes nothing of the report. The paused work may have ended meanwhile, with no turn to follow: its wait starts again
       if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
@@ -329,7 +329,7 @@ export class ChildReports {
     const paused = running.length > 0
     const toldPaused = paused && this.host.children.pausedReports.has(sessionId)
     // Work it handed on that is still going (§6): the turn is not the work's end, and the report stays owed for the turn that ends it
-    const waiting = !paused && ending.type === 'turn_complete' ? this.host.children.waitingOn(orchestratorId, sessionId) : 0
+    const waiting = !paused && ending.type === 'turn_complete' ? this.host.children.waitingOn(assistantId, sessionId) : 0
     if (paused) this.pauseReport(sessionId, running)
     else if (waiting === 0) this.host.children.clearReport(sessionId)
     // Its own background work has ended (settled) and what it handed on has not: the pause on tasks is over, the one on threads is not
@@ -337,7 +337,7 @@ export class ChildReports {
     if (toldPaused) return undefined
 
     const target = this.host.meta.get(sessionId)
-    if (!target || !this.host.meta.has(orchestratorId)) return undefined
+    if (!target || !this.host.meta.has(assistantId)) return undefined
 
     /*
      * The store and UI keep identifying information and a preview of the last response, as before.
@@ -346,9 +346,9 @@ export class ChildReports {
      * raw report is record/screen provenance, and the vendor turn is the trust boundary.
      */
     const { name, project } = this.reportedAs(target)
-    const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled } : undefined
+    const work = paused ? { paused: running, stoppable: target.askedBy === assistantId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled } : undefined
     const preview = theirs ? NOT_READ : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
-    return (await this.deliverReport(orchestratorId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)) ? orchestratorId : undefined
+    return (await this.deliverReport(assistantId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)) ? assistantId : undefined
   }
 
   /**
@@ -467,9 +467,9 @@ export class ChildReports {
     )
   }
 
-  /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
+  /** Reports the end of a turn the Assistant asked to hear about, as one message in its session (#166) */
   async deliverReport(
-    orchestratorId: string,
+    assistantId: string,
     sessionId: string,
     name: string,
     project: string,
@@ -489,7 +489,7 @@ export class ChildReports {
   ): Promise<boolean> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
-     * both the person and the orchestrator read it as a success. On failure, the error message is
+     * both the person and the Assistant read it as a success. On failure, the error message is
      * included too. The error is not the agent's last response, so it never shows up in the preview.
      */
     /*
@@ -503,7 +503,7 @@ export class ChildReports {
       : work && 'swapped' in work ? swappedReportLine()
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
-      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(orchestratorId, { action: 'stop' }) : undefined, name)
+      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(assistantId, { action: 'stop' }) : undefined, name)
       : work && 'settled' in work ? settledReportLine(work.settled, name)
       : work && 'waitingOn' in work ? waitingReportLine(work.waitingOn)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
@@ -520,7 +520,7 @@ export class ChildReports {
     const resume = cutShort
       ? `It keeps its conversation: send it a message to go on${stop?.reason === 'network' ? ', once the network is back' : ''}, the same one the person's Continue sends: "Continue where you stopped. Check what already happened before repeating a step."\n`
       : ''
-    const cleanUp = !work && !stop && ending.type === 'turn_complete' ? this.cleanUpWords(orchestratorId, sessionId) : ''
+    const cleanUp = !work && !stop && ending.type === 'turn_complete' ? this.cleanUpWords(assistantId, sessionId) : ''
     const read = `read_session(sessionId="${sessionId}"${answerSeq !== undefined ? `, around=${answerSeq}` : ''})`
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
@@ -566,7 +566,7 @@ export class ChildReports {
     const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
     // Or held over the work it handed on and waits for (§6)
     const handedOn = !!work && 'waitingOn' in work
-    const reported = this.toMailbox(orchestratorId, sessionId, {
+    const reported = this.toMailbox(assistantId, sessionId, {
       outcome: outcomeWord(work, stop, ending),
       body: forModel(true),
       ...(answered ? { answer: preview } : {}),
@@ -578,7 +578,7 @@ export class ChildReports {
     // Whether the owner was told now: by the mail, by the relayed notice, or by the report the mailbox delivers if the notice cannot be (a stop notice reads it, #1948)
     if (reported === 'mailed' || reported === 'closed') return reported === 'mailed'
     const relayed = await this.tellSession(
-      orchestratorId,
+      assistantId,
       stored,
       // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
       // source
@@ -609,7 +609,7 @@ export class ChildReports {
   }
 
   /**
-   * An agent_session call a report names, in the form its receiver calls it (#850): the orchestrator reaches agent_session
+   * An agent_session call a report names, in the form its receiver calls it (#850): the Assistant reaches agent_session
    * only through centralu_run in the `commands` tier, where the bare call it would copy from the report is refused. A
    * seat without the tool keeps the bare form the reports always named.
    */

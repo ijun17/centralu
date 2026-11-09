@@ -3,21 +3,21 @@ import { APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, serverNamePro
 /*
  * The host's tool contract (#97) — what a session's tools are and who called one.
  *
- * These used to be defined in sessions/orchestrator-tools.ts, which left the source of truth for
- * "what can be called, by whom" with one of its callers (the orchestrator) instead of with the
- * layer the adapters, the orchestrator tools and the app runtime all stand on. They were moved
+ * These used to be defined in sessions/centralu-tools.ts, which left the source of truth for
+ * "what can be called, by whom" with one of its callers (the Assistant) instead of with the
+ * layer the adapters, the Centralu tools and the app runtime all stand on. They were moved
  * here, and stayed here when the built-in app framework that also used them (HostAppModule, the
  * control app) was removed in #372.
  */
 
 /**
- * The set of tools a session receives (#69). The orchestrator gets all of them, a coordination session
+ * The set of tools a session receives (#69). The Assistant gets all of them, a coordination session
  * gets the three within its scope, and an app's building session (M4 C-3) gets exactly one, `check`, to
  * check its own app. Every other session gets the light `reader` set (#320): it reads its own project's
  * sessions, and directs only the agents it started itself (#561). The worktree manager's seat went with
  * the role (#561 part 3).
  */
-export type ToolProfile = 'orchestrator' | 'scoped' | 'builder' | 'reader'
+export type ToolProfile = 'assistant' | 'scoped' | 'builder' | 'reader'
 
 /** Whoever called a tool — sessionId=null means a person (the UI) */
 export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'human' }
@@ -25,7 +25,7 @@ export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'hum
 export type ToolOutput = { text: string; isError?: boolean }
 
 /**
- * The name of the orchestrator MCP server.
+ * The name of the Assistant MCP server.
  *
  * **This is both the name shown on screen and the key trust is checked against** — it shows up on a
  * tool call card as `mcp__centralu__list_sessions`, and both the claude adapter's approval exception
@@ -37,10 +37,10 @@ export type ToolOutput = { text: string; isError?: boolean }
  * fix to only one copy is an accident waiting to happen — it is written once here, and everything
  * else imports it (#93).
  *
- * **Why it lives here, in the app contract (M4 A-1)**: it used to sit next to the orchestrator's tool
+ * **Why it lives here, in the app contract (M4 A-1)**: it used to sit next to the Assistant's tool
  * definitions. An external app's id has to follow the same rule (the server name attached to a
  * session is `app-<id>`), but the app runtime cannot import the sessions layer — if the rule stayed
- * with a passenger (the orchestrator), the runtime would end up with two copies of it. This is the
+ * with a passenger (the Assistant), the runtime would end up with two copies of it. This is the
  * same direction #97 moved the central types in, into this file.
  *
  * **The value and its validation moved once more, into `app-id.ts` in `@cc/protocol` (M4 C-1).** The
@@ -48,7 +48,7 @@ export type ToolOutput = { text: string; isError?: boolean }
  * package is the only place the UI can reach. This file only attaches the host's name and the reason
  * text an agent or a log reads — validation travels together with the dialog.
  */
-export const ORCHESTRATOR_MCP_NAME = RESERVED_NAME_PREFIX
+export const CENTRALU_MCP_NAME = RESERVED_NAME_PREFIX
 
 /**
  * Whether a proposed MCP server name is safe to use (#93). Returns a reason a person can read if it
@@ -57,7 +57,7 @@ export const ORCHESTRATOR_MCP_NAME = RESERVED_NAME_PREFIX
  * **This is blocked at the point where the name comes in.** An approved server's name becomes a tool
  * prefix, and that tool prefix is what the approval exception judges. Two holes found by measurement:
  *
- *   centralu      **completely replaced** the in-process orchestrator server (the approved server
+ *   centralu      **completely replaced** the in-process assistant server (the approved server
  *                 expands after the built-in entry — the same key ends up belonging to someone else)
  *   centralu__pw  the tool name became `mcp__centralu__pw__*`, which passed the prefix check →
  *                 skipped canUseTool entirely
@@ -83,7 +83,7 @@ export function mcpServerNameError(name: string): string | null {
   // Reserved words are checked first — the order of validation is enforced by protocol's serverNameProblem
   switch (serverNameProblem(name)) {
     case 'reserved':
-      return `A name starting with "${ORCHESTRATOR_MCP_NAME}" is the name this app uses — suggest a different name`
+      return `A name starting with "${CENTRALU_MCP_NAME}" is the name this app uses — suggest a different name`
     case 'shape':
       return 'A name must be lowercase letters, digits, and hyphens, 32 characters or fewer (underscores cannot be used — they separate parts of a tool name)'
     case null:

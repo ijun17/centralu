@@ -1063,7 +1063,7 @@ describe('resumes from the original it was imported from when there is no identi
 
 /**
  * When a message arrives at a sleeping session **twice at once** (a common combination: the
- * person + the orchestrator), both saw "no process" and each revived it separately — two
+ * person + the Assistant), both saw "no process" and each revived it separately — two
  * processes started, and the one that started first got pushed out of the handle map and
  * orphaned forever, with no dispose ever called (TOCTOU).
  */
@@ -1091,11 +1091,11 @@ describe('resuming happens once even with simultaneous messages', () => {
 
     await Promise.all([
       call('agents.send', { sessionId: s.id, text: 'words from the person' }),
-      call('agents.send', { sessionId: s.id, text: 'words from the orchestrator' }),
+      call('agents.send', { sessionId: s.id, text: 'words from the Assistant' }),
     ])
 
     expect(a.creations).toBe(1)
-    expect(a.handleOf(s.id)!.sent).toEqual(expect.arrayContaining(['words from the person', 'words from the orchestrator']))
+    expect(a.handleOf(s.id)!.sent).toEqual(expect.arrayContaining(['words from the person', 'words from the Assistant']))
   })
 })
 
@@ -1157,7 +1157,7 @@ describe('catches up even from history accumulated as deltas', () => {
  * The tool files a conversation under the working directory it was started in, and looks for it
  * there and nowhere else. Deriving that directory again on every start is therefore a promise
  * we cannot keep: rename the data folder, move a project, and a live session is suddenly
- * pointed at a place its history was never written to. That happened — the orchestrator's cwd
+ * pointed at a place its history was never written to. That happened — the Assistant's cwd
  * followed a data-directory rename, the tool answered "not found", and the app reported a
  * deletion while an 821KB transcript sat untouched under the old path.
  */
@@ -1185,13 +1185,13 @@ describe('resuming returns to where it was created', () => {
 
   /*
    * Rows created before v14 have no stored path — the migration deliberately leaves the
-   * orchestrator NULL rather than touching the user's home. The first time we need the path we
+   * assistant NULL rather than touching the user's home. The first time we need the path we
    * derive it once and write it down, so the next rename cannot move it either.
    */
   it('an old session is decided once the first time it is needed, and is a fact from then on', async () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
     // Exactly how every pre-v14 row was written: upsertSession does not carry a cwd, so the
-    // column is NULL — the same state the migration leaves the orchestrator in.
+    // column is NULL — the same state the migration leaves the Assistant in.
     store.sessions.upsertSession({
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: 'Old session',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,

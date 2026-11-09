@@ -142,7 +142,7 @@ export async function dragPanel(page: Page, from: string, to: string, side: 'bef
 /** Where a sidebar row is dropped: one half of a panel, or the screen's own padding (the empty screen's middle) */
 export type RowTarget = { panel: string; side: 'before' | 'after' } | 'padding'
 
-/** Drags a sidebar row (or the orchestrator's) onto the project screen with the mouse, and lets go */
+/** Drags a sidebar row (or the Assistant's) onto the project screen with the mouse, and lets go */
 export async function dragRow(page: Page, row: Locator, to: RowTarget) {
   const from = (await row.boundingBox())!
   let x: number
@@ -322,7 +322,7 @@ export function sidebarDropTests(): void {
       expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
     })
 
-    test('another project’s session and the orchestrator are refused while dragged, and a drop that comes anyway changes nothing', async ({
+    test('another project’s session and the Assistant are refused while dragged, and a drop that comes anyway changes nothing', async ({
       page,
     }) => {
       await setup(page, ['/tmp/alpha', '/tmp/beta'])
@@ -331,10 +331,10 @@ export function sidebarDropTests(): void {
       const other = await newSession(page, 'beta')
       await page.evaluate(async () => {
         const st = (window as any).__store.getState()
-        await st.openOrchestrator()
-        await st.askOrchestrator('hello')
+        await st.openAssistant()
+        await st.askAssistant('hello')
       })
-      await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('draggable', 'true')
+      await expect(page.getByTestId('assistant-button')).toHaveAttribute('draggable', 'true')
       const pid = await projectIdOf(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
       await addSessionPanels(page, [a])
@@ -344,7 +344,7 @@ export function sidebarDropTests(): void {
 
       await dragRow(page, page.getByTestId(`session-row-${other}`), { panel: `session:${a}`, side: 'before' })
       expect(await seenDrags(page)).toEqual({ effect: 'none', drops: 0 })
-      await dragRow(page, page.getByTestId('orchestrator-button'), 'padding')
+      await dragRow(page, page.getByTestId('assistant-button'), 'padding')
       expect(await seenDrags(page)).toEqual({ effect: 'none', drops: 0 })
       expect(await panels(page)).toEqual([`session:${a}`])
 

@@ -219,14 +219,14 @@ export function askProjectTests(): void {
     })
 
     /*
-     * #853: the orchestrator starts sessions outside any project. Its card names no project and offers no project-wide
+     * #853: the Assistant starts sessions outside any project. Its card names no project and offers no project-wide
      * always, and the session it started hangs under its row, the one place a session with no project and no app has.
      */
-    test("the orchestrator's card names no project, and its child hangs under its row", async ({ page }) => {
+    test("the Assistant's card names no project, and its child hangs under its row", async ({ page }) => {
       await setup(page, ['/tmp/consumer'])
-      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
-      await page.getByTestId('orchestrator-button').click()
-      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBe(orc.id)
+      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.assistant()) as Record<string, unknown>)
+      await page.getByTestId('assistant-button').click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().assistantId)).toBe(orc.id)
       await emit(page, orc.id as string, {
         type: 'approval_request',
         requestId: 'ag-orc',
@@ -246,8 +246,8 @@ export function askProjectTests(): void {
         ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
       }, orc)
       // The children fold under the button and open on a mouse rest (#1591)
-      await page.getByTestId('orchestrator-button').hover()
-      const row = page.getByTestId('orchestrator-children').getByTestId('orchestrator-child-row-orc-child-1')
+      await page.getByTestId('assistant-button').hover()
+      const row = page.getByTestId('assistant-children').getByTestId('assistant-child-row-orc-child-1')
       await expect(row).toContainText('Look up the release notes')
       await row.click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('orc-child-1')
@@ -259,17 +259,17 @@ export function askProjectTests(): void {
       await expect(page.getByTestId('confirm-delete')).toBeVisible()
     })
 
-    // #994 review: a child whose orchestrator was replaced kept no row
-    test('a child whose orchestrator is gone keeps a row, among the earlier ones', async ({ page }) => {
+    // #994 review: a child whose assistant was replaced kept no row
+    test('a child whose assistant is gone keeps a row, among the earlier ones', async ({ page }) => {
       await setup(page, ['/tmp/consumer'])
-      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
+      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.assistant()) as Record<string, unknown>)
       await page.evaluate((o) => {
         const child = { ...o, id: 'orc-child-2', kind: 'worker', name: 'An older lookup', askedBy: 'orc-gone' }
         ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
       }, orc)
-      await page.getByTestId('orchestrator-button').hover()
-      await expect(page.getByTestId('orchestrator-children-earlier')).toHaveText('Started by an earlier orchestrator')
-      await expect(page.getByTestId('orchestrator-child-row-orc-child-2')).toContainText('An older lookup')
+      await page.getByTestId('assistant-button').hover()
+      await expect(page.getByTestId('assistant-children-earlier')).toHaveText('Started by an earlier assistant')
+      await expect(page.getByTestId('assistant-child-row-orc-child-2')).toContainText('An older lookup')
     })
 
     /*

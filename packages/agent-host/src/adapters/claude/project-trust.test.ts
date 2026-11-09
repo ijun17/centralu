@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
-import type { OrchestratorTools } from '../contract.js'
+import type { CentraluTools } from '../contract.js'
 
 /**
  * Files from an untrusted project must not be able to decide approvals (M4 decision 3, #92).
@@ -236,10 +236,10 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
   }
 
   for (const preset of ['safe', 'normal', 'auto'] as const) {
-    it(`${preset}: a session that reads no files at all (noSettingFiles — orchestrator/coordination sessions) always gets [] regardless of trust — the permission options stay the same`, async () => {
+    it(`${preset}: a session that reads no files at all (noSettingFiles — assistant/coordination sessions) always gets [] regardless of trust — the permission options stay the same`, async () => {
       for (const projectTrusted of [true, false, undefined]) {
         const h = await new ClaudeAdapter().createSession(
-          { sessionId: 'o', cwd: root, permissionPreset: preset, projectTrusted, noSettingFiles: true, orchestratorTools: {} as OrchestratorTools, toolProfile: 'orchestrator' },
+          { sessionId: 'o', cwd: root, permissionPreset: preset, projectTrusted, noSettingFiles: true, centraluTools: {} as CentraluTools, toolProfile: 'assistant' },
           () => {},
         )
         await h.dispose()
@@ -256,8 +256,8 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
   }
 
   /*
-   * Receiving orchestrator tools alone does not disable file reading (#152). The worktree manager
-   * and builder sessions also receive orchestrator tools, but they are still sessions of the
+   * Receiving Centralu tools alone does not disable file reading (#152). The worktree manager
+   * and builder sessions also receive Centralu tools, but they are still sessions of the
    * project — previously, having tools meant settingSources was always [], so a builder session
    * in a trusted project could not read CLAUDE.md, nor the user's own ~/.claude (the global
    * bypass).
@@ -266,7 +266,7 @@ describe('settings files and permissions the adapter passes to the CLI (#92)', (
     for (const toolProfile of ['reader', 'builder'] as const) {
       for (const projectTrusted of [true, false]) {
         const h = await new ClaudeAdapter().createSession(
-          { sessionId: 'b', cwd: root, permissionPreset: 'normal', projectTrusted, orchestratorTools: {} as OrchestratorTools, toolProfile },
+          { sessionId: 'b', cwd: root, permissionPreset: 'normal', projectTrusted, centraluTools: {} as CentraluTools, toolProfile },
           () => {},
         )
         await h.dispose()
@@ -328,17 +328,17 @@ describe('does a .claude/ planted in the repo disable the approval card? (#92, s
 })
 
 /*
- * Owner decision 2026-10-11 (#382, question 5): the orchestrator and coordinators follow the person's bypass on both
+ * Owner decision 2026-10-11 (#382, question 5): the Assistant and coordinators follow the person's bypass on both
  * CLIs. On Codex they load `~/.codex`, so the person's `approval_policy` already applied; on Claude they read no files
  * (`[]`), so the person's `defaultMode` never reached them and normal asked. Now the mode is carried, and only the mode:
  * the session still reads no file, and a folder's own settings cannot set it.
  */
-describe("the orchestrator and coordinators follow the person's own mode under normal (#382)", () => {
-  const orchestrator = { noSettingFiles: true }
+describe("the Assistant and coordinators follow the person's own mode under normal (#382)", () => {
+  const assistant = { noSettingFiles: true }
 
   it("the person's bypass reaches a session that reads no files: no card under normal, and still no files read", async () => {
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
-    expect(await askedIn(root, 'normal', false, orchestrator)).toBe(false)
+    expect(await askedIn(root, 'normal', false, assistant)).toBe(false)
     expect(state.options[0]).toMatchObject({ settingSources: [], permissionMode: 'bypassPermissions' })
     expect(state.verdicts).toEqual(['mode-allowed'])
   })
@@ -351,18 +351,18 @@ describe("the orchestrator and coordinators follow the person's own mode under n
 
   it('safe still asks and auto still allows whatever the person set; without a mode of their own, normal asks as before', async () => {
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
-    expect(await askedIn(root, 'safe', false, orchestrator)).toBe(true)
+    expect(await askedIn(root, 'safe', false, assistant)).toBe(true)
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'acceptEdits' } }))
-    expect(await askedIn(root, 'auto', false, orchestrator)).toBe(false)
+    expect(await askedIn(root, 'auto', false, assistant)).toBe(false)
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'not-a-mode' } }))
-    expect(await askedIn(root, 'normal', false, orchestrator)).toBe(true)
+    expect(await askedIn(root, 'normal', false, assistant)).toBe(true)
     expect(state.verdicts).toEqual(['ask', 'mode-allowed', 'ask'])
     expect(state.options.map((o) => o.permissionMode)).toEqual(['default', 'bypassPermissions', 'default'])
   })
 
-  it("a bypass planted in the orchestrator's own folder does not count: only the person's own settings do", async () => {
+  it("a bypass planted in the Assistant's own folder does not count: only the person's own settings do", async () => {
     const dir = repo({ local: { permissions: { defaultMode: 'bypassPermissions' } }, settings: { permissions: { defaultMode: 'bypassPermissions' } } })
-    expect(await askedIn(dir, 'normal', true, orchestrator)).toBe(true)
+    expect(await askedIn(dir, 'normal', true, assistant)).toBe(true)
   })
 
   it("a project's ordinary session follows the same trusted settings mode explicitly", async () => {

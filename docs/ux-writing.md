@@ -131,13 +131,13 @@ screen unless the person can act on them. "swap", "sidecar", "RPC", "adapter" an
 These are:
 
 - "agent host": "Connecting to the agent host…", "Not connected to the agent host — nothing can start
-  until it is back." (`orchestrator/OrchestratorView.tsx`), "…they run in the agent host, not in this
+  until it is back." (`assistant/AssistantView.tsx`), "…they run in the agent host, not in this
   window. Reloading rebuilds the screen from the host." (`app/ErrorBoundary.tsx`), "The host kept
   disconnecting while opening this screen" (`store/viewReconnect.ts`), "Not connected to the host"
   (`store/apps.ts`), "The agent host switches to it from the bar above." (`settings/apply-update.ts`).
 - "keeper": "…a desktop app whose agent host is not held by the background keeper" (`settings/apply-offer.ts`).
 - "manifest", "bridge": "the app's manifest is not valid", "the app's bridge did not start in this session"
-  (`session/appReachNotice.ts`). "MCP": "Dismissed MCP proposal: <name>" (`store/orchestrator.ts`). A tool
+  (`session/appReachNotice.ts`). "MCP": "Dismissed MCP proposal: <name>" (`store/assistant.ts`). A tool
   name, "(update_centralu with action install)" (`settings/apply-offer.ts`).
 - "<session id>" in a hint (`project/NewSessionDialog.tsx`). "host" also means an ssh host
   (`settings/AddMachineForm.tsx`), which is the person's own word there.

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ORCHESTRATOR_MCP_NAME, type ToolProfile } from '../apps/contract.js'
+import { CENTRALU_MCP_NAME, type ToolProfile } from '../apps/contract.js'
 import type { GuideSeats, GuideTool } from './app-guide.js'
 import { trustedJsonText } from './tool-answers.js'
 import {
@@ -12,8 +12,8 @@ import {
   DELEGATE_TOOLS,
   MAIL_TOOLS,
   COMPACT_TOOLS,
-  orchestratorInstructions,
-  ORCHESTRATOR_TOOLS,
+  assistantInstructions,
+  CENTRALU_TOOLS,
   READER_TOOLS,
   readerInstructions,
   SCOPED_INSTRUCTIONS,
@@ -22,15 +22,15 @@ import {
   type AppAccessToolName,
   type CompactToolName,
   type MailToolName,
-  type OrchestratorToolName,
+  type CentraluToolName,
 } from './tool-definitions.js'
 
 /** A command a seat may reach through centralu_run */
-export type CommandName = OrchestratorToolName | AgentToolName | AppAccessToolName | MailToolName | CompactToolName
+export type CommandName = CentraluToolName | AgentToolName | AppAccessToolName | MailToolName | CompactToolName
 
 /**
  * How a seat's rarely used commands reach the model (#512; the comparison is in docs/tool-cost.md §9). The host runs
- * the `commands` tier (the owner's decision of 2026-10-12: no loss on Sonnet, 835 tokens fewer per orchestrator request,
+ * the `commands` tier (the owner's decision of 2026-10-12: no loss on Sonnet, 835 tokens fewer per assistant request,
  * and a tool list that does not grow with the commands). The `resident` tier, every tool in every request as before #512, still serves the guide (`toolsFor`) and
  * the tests that call a command by its own name (`setRareTier`, for tests only).
  *
@@ -52,19 +52,19 @@ export function setRareTier(tier: RareTier): void {
 }
 
 /**
- * Which commands are rare, per seat. The orchestrator's alone: the other directing seats carry a few tools
+ * Which commands are rare, per seat. The Assistant's alone: the other directing seats carry a few tools
  * each, all of them their reason to exist.
  *
  * In: create_app, propose_skill and propose_mcp_server (1,462, 1,144 and 1,098 characters, a third of the
- * orchestrator's every request, asked for a few times in a seat's life). The instructions name each of them
+ * Assistant's every request, asked for a few times in a seat's life). The instructions name each of them
  * and say when, which is what a model that cannot see them goes looking with.
  * Out: propose_worktree_session, before it went with the worktree manager (#561 part 3): asked for a branch, the
- * orchestrator reached it 3 of 3 times as a tool and 0 of 3 deferred or behind centralu_run (tool-cost.md §9).
- * In since #853: start_agent and agent_session. The orchestrator hands light work outside any project (a web search, a
+ * assistant reached it 3 of 3 times as a tool and 0 of 3 deferred or behind centralu_run (tool-cost.md §9).
+ * In since #853: start_agent and agent_session. The Assistant hands light work outside any project (a web search, a
  * lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its
  * every request over its ceiling, and the instructions name start_agent.
  * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
- * the instructions; the first of the orchestrator's window functions to come as commands (#1219). In since #1219's
+ * the instructions; the first of the Assistant's window functions to come as commands (#1219). In since #1219's
  * second slice: the six machine commands, which the instructions name in one line. In since the preferences (#1219):
  * get_preferences and set_preferences; the machine commands are found by their name (centralu_commands "machine") and the line names three more (30 characters less).
  * In since #1219's third slice: the trust commands (list_projects, set_project_trust, list_approval_rules,
@@ -75,11 +75,11 @@ export function setRareTier(tier: RareTier): void {
  * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
  * Out: app_guide. It answers the person's own questions about the app, which come often and
  * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
- * too: everything the instructions tell the orchestrator to reach for first (list, read, recall, send, create
+ * too: everything the instructions tell the Assistant to reach for first (list, read, recall, send, create
  * a session or a project).
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>> = {
-  orchestrator: [
+  assistant: [
     'create_app',
     'propose_skill',
     'propose_mcp_server',
@@ -174,7 +174,7 @@ export function callForm(
 
 /**
  * `callForm`, or the plain call when the seat is not known or not given the tool: what an answer that tells its reader
- * to make a call writes. The orchestrator reaches start_agent and agent_session only through centralu_run in the
+ * to make a call writes. The Assistant reaches start_agent and agent_session only through centralu_run in the
  * `commands` tier, so an answer that named them bare sent it to a refusal first (#850).
  */
 export function namedCall(
@@ -235,17 +235,17 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       COMPACT_TOOLS.some((t) => t.name === name)
     )
   }
-  // The mailbox is an ordinary session's and the orchestrator's, which owns the threads send_to_session opens and runs it as a command;
+  // The mailbox is an ordinary session's and the Assistant's, which owns the threads send_to_session opens and runs it as a command;
   // a coordinator, a builder and an app's agent are not parties of it (#1347)
-  if (MAIL_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  if (MAIL_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   // compact_self (#1451): the two long-lived seats; the reader branch above has it
-  if (COMPACT_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  if (COMPACT_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
-  // the orchestrator's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
+  // the Assistant's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
   // root apps it attaches when it needs one
-  if (AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  if (AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   if (DELEGATE_TOOLS.some((t) => t.name === name)) return false
-  if (profile === 'orchestrator') return !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
+  if (profile === 'assistant') return !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
   return (BUILDER_TOOL_NAMES as readonly string[]).includes(name)
 }
@@ -253,7 +253,7 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
 /**
  * The built-in tool definitions this profile is given — the one list the in-process MCP, the
  * bridge's schemas and the guide all read. The reader set (#320) has its own words; every other
- * profile is a filter over the orchestrator's.
+ * profile is a filter over the Assistant's.
  */
 export function toolDefsFor(
   profile: ToolProfile,
@@ -261,7 +261,7 @@ export function toolDefsFor(
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS]
   return [
-    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)),
+    ...[...CENTRALU_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS, ...MAIL_TOOLS, ...COMPACT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }
@@ -278,7 +278,7 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
     // With an app attached at the start, the line on repository work (#957, #992 review)
     case 'reader': return readerInstructions(subagentTool, appsAttached)
     default: {
-      const text = orchestratorInstructions(subagentTool)
+      const text = assistantInstructions(subagentTool)
       return commandsFor(profile, tier).length ? `${text}\n${COMMANDS_INSTRUCTION}` : text
     }
   }
@@ -297,7 +297,7 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
  */
 export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false, subagentTool?: string): string | undefined {
   const text = instructionsFor(profile, tier, appsAttached, subagentTool)
-  return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
+  return text ? `# How to use the ${CENTRALU_MCP_NAME} tools (mcp__${CENTRALU_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
 /** The adapter decides the channel; this module only owns the shared wording. */
@@ -312,7 +312,7 @@ export function toolInstructionsFor(
 
 /**
  * The tools this profile can call **right now** — the same decision as the exposure logic
- * (orchestratorToolSchemas). The guide uses this when it states what each seat can do (M4 P-4):
+ * (centraluToolSchemas). The guide uses this when it states what each seat can do (M4 P-4):
  * writing the list out by hand would let the guide fall behind every time a tool is added or
  * removed. Read in the `resident` tier: the guide says what a seat can do, not how its tools are packed (#512).
  */
@@ -321,11 +321,11 @@ function toolsFor(profile: ToolProfile): GuideTool[] {
 }
 
 export function guideSeats(): GuideSeats {
-  return { orchestrator: toolsFor('orchestrator'), scoped: toolsFor('scoped'), reader: toolsFor('reader') }
+  return { assistant: toolsFor('assistant'), scoped: toolsFor('scoped'), reader: toolsFor('reader') }
 }
 
-export function orchestratorToolSchemas(
-  profile: ToolProfile = 'orchestrator',
+export function centraluToolSchemas(
+  profile: ToolProfile = 'assistant',
 ): { name: string; description: string; inputSchema: unknown }[] {
   return toolDefsFor(profile).map((t) => ({
     name: t.name,

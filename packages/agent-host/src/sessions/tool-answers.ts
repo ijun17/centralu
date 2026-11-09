@@ -1,5 +1,5 @@
 import { frameField } from '@cc/protocol'
-import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
+import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, CentraluTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
 
@@ -30,7 +30,7 @@ export function plainQuoted(value: string, max = 60): string {
  */
 export const READER_LIST_CAP = 40
 
-export async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller, project?: string): Promise<ToolOutput> {
+export async function listSessionsText(tools: CentraluTools, caller: ToolCaller, project?: string): Promise<ToolOutput> {
   const all = await tools.listSessions(project ? { project } : undefined)
   if (all.length === 0) {
     if (project) return { text: `No session in a project called ${frameField(project)}. Leave project out to list every one.` }

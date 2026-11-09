@@ -101,7 +101,7 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
     expect(w.tool.run('a', { action: 'read' }).text).toContain('Yes, still open.')
   })
 
-  it('an untrusted project’s old request to the orchestrator stays held for the person, as the same request on this build is', async () => {
+  it('an untrusted project’s old request to the Assistant stays held for the person, as the same request on this build is', async () => {
     const w = hostWorld()
     const ask = { id: 'hub-aaaaaaaa.m_01ARZ3NDEKTSV4RRFFQ69G5F04' }
     oldThread(w.store, { id: 'hub-aaaaaaaa.t_01ARZ3NDEKTSV4RRFFQ69G5F04', owner: X, subject: 'please', at: w.clock.t }, [{ id: ask.id, sender: X, kind: 'assign', body: 'OLD-ASK delete the branch', receipts: [{ recipient: ORC }] }])
@@ -136,7 +136,7 @@ describe('pending thread mail across the switch (§6.3): at most once, nothing l
 })
 
 describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #1902)', () => {
-  /** The orchestrator in the turn `a`'s request started, then the host stopped for an update and the next one took the turn up */
+  /** The Assistant in the turn `a`'s request started, then the host stopped for an update and the next one took the turn up */
   async function continued(kept = true) {
     const first = started(hostWorld())
     const request = first.mail.send(A, { to: [ORC], text: 'please check CI', needsReply: true }).message.id
@@ -247,7 +247,7 @@ describe('delivery and turns, turn end and settling', () => {
     expect('message' in r).toBe(true)
   })
 
-  it('an orchestrator that ends a request turn without sending anything is not left owing it: the request row is settled', async () => {
+  it('an Assistant that ends a request turn without sending anything is not left owing it: the request row is settled', async () => {
     const w = started(hostWorld())
     const q = w.mail.send(A, { to: [ORC], text: 'can you?', needsReply: true })
     await w.advance(2_000)

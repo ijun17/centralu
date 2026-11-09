@@ -167,7 +167,7 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
     action: z.enum(['check', 'install']),
   }),
   /**
-   * The orchestrator asks to make a new project (#515, create_project) — raised by **the host** in the orchestrator's
+   * The Assistant asks to make a new project (#515, create_project) — raised by **the host** in the Assistant's
    * session. Nothing exists until the person allows it: then the folder at `path` is made (empty) and registered as
    * the project `name`. Allow or deny only; there is no "always".
    */
@@ -186,8 +186,8 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
     machine: z.string().optional(),
   }),
   /**
-   * The orchestrator asks to add a folder that already exists as a project (#1220, its add_project command), raised
-   * by **the host** in the orchestrator's session. The facts are read on the folder's machine before the card: a path
+   * The Assistant asks to add a folder that already exists as a project (#1220, its add_project command), raised
+   * by **the host** in the Assistant's session. The facts are read on the folder's machine before the card: a path
    * that is missing, a file or already a project is refused without one, so `exists` and `folder` say what was found.
    * On Allow the folder is registered as the sidebar's Add project registers it (untrusted when new). Allow or deny
    * only; there is no "always". `text` is the whole question, which a window that does not know this kind shows (#844).
@@ -340,7 +340,7 @@ export function isCentraluApply(d: ApprovalDetail): boolean {
 }
 
 /**
- * The `about` of the orchestrator's handoff card (#694, handoff_session), on an `other` detail: the question is the
+ * The `about` of the Assistant's handoff card (#694, handoff_session), on an `other` detail: the question is the
  * whole card in every build, and a window that knows the name keeps its "always" to the asking session, as an apply
  * card's is (the host remembers it for that session while it serves it, never for a project).
  */
@@ -368,7 +368,7 @@ export const ProjectConsent = z.object({
 export type ProjectConsent = z.infer<typeof ProjectConsent>
 
 /**
- * The question the orchestrator's add-folder card asks (#1220), carried whole as the card's `text`, which is what a
+ * The question the Assistant's add-folder card asks (#1220), carried whole as the card's `text`, which is what a
  * window that does not know the kind shows (#844). Here rather than with the other questions in core: the host raises
  * this card, and the host does not import core. It names every fact the card shows.
  */
@@ -389,27 +389,27 @@ export function projectAddQuestion(d: {
 }
 
 /**
- * The `about` of the orchestrator's card for a change to a linked machine (#1219: adding, installing on, updating,
+ * The `about` of the Assistant's card for a change to a linked machine (#1219: adding, installing on, updating,
  * removing one, or turning its start at boot on or off), on an `other` detail: the question is whole in `raw`, so a
  * window of any build reads it. Allow or deny only: a window that knows the name offers no "always", and the host
  * remembers nothing for one (an older window's "always" is read as allow, once).
  */
 export const MACHINE_CHANGE = 'machine_change'
 
-/** The orchestrator's card for a change to a linked machine (#1219) */
+/** The Assistant's card for a change to a linked machine (#1219) */
 export function isMachineChange(d: ApprovalDetail): boolean {
   return d.kind === 'other' && d.about === MACHINE_CHANGE
 }
 
 /**
- * The `about` of the orchestrator's card for a change to its settings or the trash that the person must allow (#1219:
+ * The `about` of the Assistant's card for a change to its settings or the trash that the person must allow (#1219:
  * turning on "apply updates when idle", deleting from the trash for good, emptying it), on an `other`
  * detail like `MACHINE_CHANGE`: the question is whole in `raw`, so a window of any build reads it. Allow or deny only,
  * and the host remembers nothing for one.
  */
-export const ORCHESTRATOR_CHANGE = 'orchestrator_change'
+export const ASSISTANT_CHANGE = 'orchestrator_change'
 
-/** The orchestrator's card for a change to its settings or the trash (#1219) */
-export function isOrchestratorChange(d: ApprovalDetail): boolean {
-  return d.kind === 'other' && d.about === ORCHESTRATOR_CHANGE
+/** The Assistant's card for a change to its settings or the trash (#1219); `assistant_change` is its `about` under the role's new name, which a host of a later release sends (#2133) */
+export function isAssistantChange(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && (d.about === ASSISTANT_CHANGE || d.about === 'assistant_change')
 }

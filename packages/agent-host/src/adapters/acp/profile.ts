@@ -38,7 +38,7 @@ export type AcpProfile = {
   detect(): Promise<DetectResult>
   installedVersion(): Promise<string | null>
   /**
-   * Which of Centralu's own tools a call is (the stdio bridge's, `ORCHESTRATOR_MCP_NAME`), by the way this tool names an
+   * Which of Centralu's own tools a call is (the stdio bridge's, `CENTRALU_MCP_NAME`), by the way this tool names an
    * MCP call, or null. Such a call is answered without a card, as Claude and Codex take the bridge: each tool there carries
    * its own rights (#1562 review)
    */

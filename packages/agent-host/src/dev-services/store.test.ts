@@ -118,7 +118,7 @@ describe('v10 migration — allows a session with no project', () => {
 
     // And now a session with no project is inserted
     store.sessions.upsertSession({
-      id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
+      id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Assistant',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
@@ -785,11 +785,11 @@ describe('remembered consents between projects across builds (#384)', () => {
 })
 
 /**
- * There is one marker, kind (#13). There used to be a separate markOrchestrator, which meant
- * "two write paths." With the project orchestrator retired (v26), the marked session is once
+ * There is one marker, kind (#13). There used to be a separate markAssistant, which meant
+ * "two write paths." With the project assistant retired (v26), the marked session is once
  * again unique to the app.
  */
-describe('the orchestrator marker (kind)', () => {
+describe('the Assistant marker (kind)', () => {
   const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
     s.sessions.upsertSession({
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
@@ -798,23 +798,23 @@ describe('the orchestrator marker (kind)', () => {
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
 
-  it('the central orchestrator is null when there is no marker', () => {
-    expect(seeded().sessions.orchestratorId()).toBeNull()
+  it('the Assistant is null when there is no marker', () => {
+    expect(seeded().sessions.assistantId()).toBeNull()
   })
 
   it('kind round-trips through upsert — there is one write path', () => {
     const s = seeded()
     mk(s, 'orc', null, 'orchestrator')
-    expect(s.sessions.orchestratorId()).toBe('orc')
+    expect(s.sessions.assistantId()).toBe('orc')
     expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
     // A demotion persists through the same path
     mk(s, 'orc', null, 'worker')
-    expect(s.sessions.orchestratorId()).toBeNull()
+    expect(s.sessions.assistantId()).toBeNull()
     s.close()
   })
 
   /**
-   * v26 — the safeguard for retiring the project orchestrator (2026-09-01).
+   * v26 — the safeguard for retiring the project assistant (2026-09-01).
    *
    * **This was about to become a promotion, not a demotion.** Once the project-scoped tier is
    * gone from the code, a session that still carries the marker gets, the next time it wakes, a
@@ -825,7 +825,7 @@ describe('the orchestrator marker (kind)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v26-'))
     const file = join(dir, 'store.db')
 
-    // Build a v25 state: one project orchestrator plus one central orchestrator
+    // Build a v25 state: one project assistant plus one Assistant
     const before = newestStore(file)
     before.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     mk(before, 'proj-orc', 'p1', 'orchestrator')
@@ -839,8 +839,8 @@ describe('the orchestrator marker (kind)', () => {
     expect(after.schemaVersion).toBe(LATEST_SCHEMA)
     // The marker with a project disappears — the conversation is untouched
     expect(after.sessions.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
-    // The central one is untouched — the app's only orchestrator
-    expect(after.sessions.orchestratorId()).toBe('central')
+    // The central one is untouched — the app's only assistant
+    expect(after.sessions.assistantId()).toBe('central')
     after.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -904,7 +904,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
 /**
  * v14: a session's cwd stops being recomputed. (issue #28)
  *
- * The whole failure was a derived path. Renaming the data directory moved the orchestrator's
+ * The whole failure was a derived path. Renaming the data directory moved the Assistant's
  * cwd, Claude Code files conversations by working directory, and the tool went looking under a
  * slug that had never existed. So this runs against a real v13-shaped database — a migration
  * that is only assumed to work is exactly the kind that quietly orphans someone's history.
@@ -938,7 +938,7 @@ describe('v14 migration — remembers the directory a session was created in', (
     )
     add.run('plain', 'p1', 'claude', 'Project session', 1, 0, null, null)
     add.run('wt', 'p1', 'claude', 'Worktree session', 1, 0, '/tmp/wt/feature', 'feature')
-    add.run('orc', null, 'claude', 'Orchestrator', 1, 1, null, null)
+    add.run('orc', null, 'claude', 'Assistant', 1, 1, null, null)
     old.pragma('user_version = 13')
     old.close()
   }
@@ -959,13 +959,13 @@ describe('v14 migration — remembers the directory a session was created in', (
   })
 
   /*
-   * The orchestrator is the one row SQL cannot answer for: it has no project and no worktree,
-   * and the only source left is `orchestratorHome()`, which creates a directory under the
+   * The Assistant is the one row SQL cannot answer for: it has no project and no worktree,
+   * and the only source left is `assistantHome()`, which creates a directory under the
    * user's home. A migration that does that on every open is how `pnpm verify` once created
    * `~/.centralu/orchestrator` and blocked the real data move (see data-dir.ts). So it stays
    * NULL here and the manager resolves it the first time it actually needs a path.
    */
-  it('the orchestrator stays NULL — the migration does not touch the home directory', () => {
+  it('the Assistant stays NULL — the migration does not touch the home directory', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v14-orc-'))
     const file = join(dir, 'store.db')
     v13Db(file)
@@ -1862,13 +1862,13 @@ describe('the session archive (#204)', () => {
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
-    expect(s.sessions.orchestratorId()).toBe('orch')
+    expect(s.sessions.assistantId()).toBe('orch')
 
     expect(await s.trash.trashSession('s1', KEEP_ALL)).toBe(true)
     await s.trash.trashSession('orch', { ...KEEP_ALL, projectId: null })
 
     expect(s.sessions.listSessions()).toEqual([])
-    expect(s.sessions.orchestratorId()).toBeNull()
+    expect(s.sessions.assistantId()).toBeNull()
     expect(s.grid.listGridView()).toEqual([])
     expect(s.messages.searchMessages('galaxy')).toEqual([])
     expect(s.messages.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index

@@ -72,7 +72,7 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'Codex\'s launch trust', paths: ['packages/agent-host/src/adapters/codex/launch-config.ts'], tier: 'deep', rule: 'trust' },
   {
     name: 'the trust code split out of the session manager (#1143)',
-    paths: ['packages/agent-host/src/sessions/orchestrator-slot.ts', 'packages/agent-host/src/sessions/session-settings.ts', 'packages/agent-host/src/sessions/approval-rules.ts', 'packages/agent-host/src/sessions/launch-inputs.ts', 'packages/agent-host/src/sessions/project-registry.ts', 'packages/agent-host/src/dev-services/project-files.ts'],
+    paths: ['packages/agent-host/src/sessions/assistant-slot.ts', 'packages/agent-host/src/sessions/session-settings.ts', 'packages/agent-host/src/sessions/approval-rules.ts', 'packages/agent-host/src/sessions/launch-inputs.ts', 'packages/agent-host/src/sessions/project-registry.ts', 'packages/agent-host/src/dev-services/project-files.ts'],
     tier: 'deep',
     rule: 'trust',
   },

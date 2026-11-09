@@ -28,11 +28,11 @@ test('a session that owes nothing shows no choice, and sends no intent', async (
 
 test('a session that owes a report shows who waits, defaults to Just asking, and sends the choice once', async ({ page }) => {
   const sid = await typing(page)
-  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Orchestrator' }), sid)
+  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Assistant' }), sid)
   // Nothing is shown until the person types
   await expect(page.getByTestId('report-choice')).toHaveCount(0)
   await page.keyboard.type('quick question')
-  await expect(page.getByTestId('report-choice-for')).toContainText('Working for Orchestrator')
+  await expect(page.getByTestId('report-choice-for')).toContainText('Working for Assistant')
   await expect(page.getByTestId('report-choice-ask')).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('Enter')
   await expect.poll(async () => (await sent(page)).map((m) => m.intent)).toEqual(['ask'])
@@ -57,7 +57,7 @@ test('a session that owes a report shows who waits, defaults to Just asking, and
 
 test('taking it over closes the choice at once: the next message asks nothing', async ({ page }) => {
   const sid = await typing(page)
-  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Orchestrator' }), sid)
+  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Assistant' }), sid)
   await page.keyboard.type('mine now')
   await page.getByTestId('report-choice-takeover').click()
   await page.keyboard.press('Enter')

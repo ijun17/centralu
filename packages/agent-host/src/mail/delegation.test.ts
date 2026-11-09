@@ -206,7 +206,7 @@ describe('a turn’s end (§9.3): each case answers the ReportedAs the table giv
     expect(w.store.mailbox.reportsOn(t2.id)[0]!.facts.covers).toEqual([t1.id])
   })
 
-  it('the orchestrator’s request turn: S12 replies to the request, carries none of its other words, and settles that turn’s requests', () => {
+  it('the Assistant’s request turn: S12 replies to the request, carries none of its other words, and settles that turn’s requests', () => {
     const w = turnWorld()
     w.clock.t += 10
     const request = w.mail.send(A, { to: [ORC], text: 'please check CI', needsReply: true })
@@ -215,7 +215,7 @@ describe('a turn’s end (§9.3): each case answers the ReportedAs the table giv
     w.end('orc')
     expect(reportRecorder(w.mail, w.store.mailbox, w.turns)('a', 'orc', draft({ answer: 'what I told the person' }))).toBe('mailed')
     const [r] = w.store.mailbox.reportsOn(request.message.id)
-    expect(r!.body).toContain('The orchestrator ended its turn on your request.')
+    expect(r!.body).toContain('The Assistant ended its turn on your request.')
     expect(r!.facts.answer).toBeUndefined()
     expect(w.rowOf(request.message.id, ORC).settled).toBe('reported')
   })

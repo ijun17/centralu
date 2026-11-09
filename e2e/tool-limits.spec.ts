@@ -37,14 +37,14 @@ test('in a trusted project it starts, and the preset it cannot keep is greyed wi
   await expect(page.getByTestId('settings-preset-normal')).toBeEnabled()
 })
 
-test('a tool that takes no role text cannot be picked for the orchestrator, and says why', async ({ page }) => {
+test('a tool that takes no role text cannot be picked for the Assistant, and says why', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await limitCodex(page)
   await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-tab-orchestrator').click()
-  await expect(page.getByTestId('orchestrator-tool-codex')).toBeDisabled()
-  await expect(page.getByTestId('orchestrator-tool-codex')).toHaveAttribute('title', /cannot run the orchestrator/)
-  await expect(page.getByTestId('orchestrator-tool-claude')).toBeEnabled()
+  await page.getByTestId('settings-tab-assistant').click()
+  await expect(page.getByTestId('assistant-tool-codex')).toBeDisabled()
+  await expect(page.getByTestId('assistant-tool-codex')).toHaveAttribute('title', /cannot run the Assistant/)
+  await expect(page.getByTestId('assistant-tool-claude')).toBeEnabled()
 })
 
 test("the empty session's tool switch offers only the tools that keep the session's own preset", async ({ page }) => {

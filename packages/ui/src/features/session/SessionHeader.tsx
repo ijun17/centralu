@@ -1,3 +1,4 @@
+import { isAssistantKind } from '@cc/protocol/client'
 import type { DragEvent, ReactNode } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { formatClock } from '../../app/format.js'
@@ -55,10 +56,10 @@ export function SessionHeader({
       {/*
         A status dot is already told by the sidebar's tool marker and the grid's
         while-responding border. A tiny dot is barely visible while saying the same thing a
-        third time, so it is left out of the header. Only the orchestrator gets a crown to the
+        third time, so it is left out of the header. Only the Assistant gets a crown to the
         left of its title, marking not status but a **role**.
       */}
-      {session.kind === 'orchestrator' && (
+      {isAssistantKind(session.kind) && (
         <span className="flex shrink-0 text-ink-muted" data-testid="session-header-crown">
           <CrownIcon size={14} />
         </span>
@@ -132,7 +133,7 @@ export function SessionHeader({
           The project's saved shell commands (issue #44). Before restart because it is the
           everyday one — restart is a repair.
 
-          The orchestrator has no project, and with no project there is no directory to run
+          The Assistant has no project, and with no project there is no directory to run
           in and no terminal to run it in. So it gets no button rather than an empty menu:
           an entry that could never have anything in it is a worse answer than no entry.
         */}

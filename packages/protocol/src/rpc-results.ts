@@ -2,7 +2,7 @@ import type { RpcMethodName, RpcResult } from './commands.js'
 import { appsResults } from './commands/methods/apps.results.js'
 import { hostResults } from './commands/methods/host.results.js'
 import { mailResults } from './commands/methods/mail.results.js'
-import { orchestratorResults } from './commands/methods/orchestrator.results.js'
+import { assistantResults } from './commands/methods/assistant.results.js'
 import { projectsResults } from './commands/methods/projects.results.js'
 import { sessionsResults } from './commands/methods/sessions.results.js'
 import { settingsResults } from './commands/methods/settings.results.js'
@@ -15,7 +15,7 @@ import { parseTolerant } from './tolerant.js'
  */
 const RpcResults = {
   ...sessionsResults,
-  ...orchestratorResults,
+  ...assistantResults,
   ...projectsResults,
   ...terminalResults,
   ...appsResults,

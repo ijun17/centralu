@@ -154,7 +154,7 @@ export function DotsIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * The crown — the marker for an orchestrator's role, directing other sessions.
+ * The crown — the marker for an Assistant's role, directing other sessions.
  *
  * It speaks a role, not a state, so it does not compete for the same spot with the border that
  * spins while responding. If the sidebar and the session header used different drawings, the
@@ -397,7 +397,7 @@ export function RestartIcon({ size = 14 }: { size?: number }) {
  *
  * A branch drawn with three dots and lines is nearly a universal symbol, so even as a button
  * never seen in this app before, it reads immediately as "something git". There is no risk of
- * confusion with the crown (orchestrator) either: one speaks a role, the other a branching, so
+ * confusion with the crown (assistant) either: one speaks a role, the other a branching, so
  * what the shapes say is entirely different.
  */
 export function BranchIcon({ size = 13 }: { size?: number }) {

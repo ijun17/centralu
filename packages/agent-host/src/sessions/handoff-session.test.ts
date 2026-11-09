@@ -10,8 +10,8 @@ import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
- * The orchestrator's handoff_session (#694) over the real manager: who may hand off what, the person's card unless
- * the orchestrator is `auto`, the note from the record by default or written by the session, the original kept and its
+ * The Assistant's handoff_session (#694) over the real manager: who may hand off what, the person's card unless
+ * the Assistant is `auto`, the note from the record by default or written by the session, the original kept and its
  * children moved (#693) and its apps copied (#1638). The window's own handoff is the UI store's (`handoffSession`); this is the tool's path.
  */
 
@@ -111,8 +111,8 @@ const info = (id: string): SessionInfo => mgr.listSessions().find((s) => s.id ==
 const named = (name: string) => mgr.listSessions().filter((s) => s.name === name)
 
 /**
- * A project with one ordinary session that has said something (under `targetPreset`), and the orchestrator under `preset`.
- * A target within the orchestrator's preset goes without a card (#1509); one above it, or any under a `safe` orchestrator
+ * A project with one ordinary session that has said something (under `targetPreset`), and the Assistant under `preset`.
+ * A target within the Assistant's preset goes without a card (#1509); one above it, or any under a `safe` assistant
  * that is above `safe`, asks
  */
 async function world(preset: 'safe' | 'normal' | 'auto' = 'normal', targetPreset: 'safe' | 'normal' | 'auto' = 'normal') {
@@ -122,18 +122,18 @@ async function world(preset: 'safe' | 'normal' | 'auto' = 'normal', targetPreset
   mgr.rename(target, 'Long run')
   await mgr.inputs.send(target, 'Build the parser')
   claude.handles.get(target)!.answer('Parser half done; tests in parser.test.ts')
-  const orch = (await mgr.orchestrator()).id
+  const orch = (await mgr.assistant()).id
   if (preset !== 'normal') await mgr.updateSettings(orch, { permissionPreset: preset })
   return { project: project.id, target, orch }
 }
 
-/** handoff_session as the orchestrator calls it by default: through centralu_run (the commands tier, #512) */
-const handoff = (orch: string, args: Record<string, unknown>) => mgr.runOrchestratorTool(orch, 'centralu_run', { command: 'handoff_session', args })
+/** handoff_session as the Assistant calls it by default: through centralu_run (the commands tier, #512) */
+const handoff = (orch: string, args: Record<string, unknown>) => mgr.runCentraluTool(orch, 'centralu_run', { command: 'handoff_session', args })
 
 describe('handoff_session (#694)', () => {
   it('called by its bare name, as the bridge can, is refused with the call that runs it (#850)', async () => {
     const { target, orch } = await world('auto')
-    await expect(mgr.runOrchestratorTool(orch, 'handoff_session', { sessionId: target })).rejects.toThrow(
+    await expect(mgr.runCentraluTool(orch, 'handoff_session', { sessionId: target })).rejects.toThrow(
       'Not a tool of this session: handoff_session. It is one of this session\'s commands: centralu_run(command="handoff_session", args={…}) runs it',
     )
     expect(named('Long run')).toHaveLength(1)
@@ -176,7 +176,7 @@ describe('handoff_session (#694)', () => {
     expect(readFileSync(path, 'utf8')).toContain(`handle: ${child}`)
   })
 
-  it('for a session above the orchestrator\'s preset: a card in the orchestrator asks the person; a refusal starts nothing, an allowance hands off', async () => {
+  it('for a session above the Assistant\'s preset: a card in the Assistant asks the person; a refusal starts nothing, an allowance hands off', async () => {
     const { target, orch } = await world('normal', 'auto')
     const call = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
@@ -199,9 +199,9 @@ describe('handoff_session (#694)', () => {
     expect(heir).toMatchObject({ tool: 'claude', model: 'opus' })
   })
 
-  // #1509 (owner, 2026-10-24): a handoff of a session at rest, into a preset the orchestrator itself has, guards nothing
+  // #1509 (owner, 2026-10-24): a handoff of a session at rest, into a preset the Assistant itself has, guards nothing
   it.each([['normal', 'normal'], ['normal', 'safe'], ['safe', 'safe']] as const)(
-    'a session at rest within the orchestrator\'s preset is handed off with no card (orchestrator %s, session %s), and the original stays',
+    'a session at rest within the Assistant\'s preset is handed off with no card (assistant %s, session %s), and the original stays',
     async (preset, targetPreset) => {
       const { target, orch } = await world(preset, targetPreset)
       const r = await handoff(orch, { sessionId: target })
@@ -215,7 +215,7 @@ describe('handoff_session (#694)', () => {
   )
 
   it.each([['normal', 'auto'], ['safe', 'normal'], ['safe', 'auto']] as const)(
-    'still asks when the session is above the orchestrator\'s preset (orchestrator %s, session %s), so a card-free call hands over no power',
+    'still asks when the session is above the Assistant\'s preset (assistant %s, session %s), so a card-free call hands over no power',
     async (preset, targetPreset) => {
       const { target, orch } = await world(preset, targetPreset)
       const call = handoff(orch, { sessionId: target })
@@ -236,7 +236,7 @@ describe('handoff_session (#694)', () => {
     expect(named('Long run')).toHaveLength(1)
   })
 
-  it('"always" lasts for that orchestrator: the next handoff raises no card', async () => {
+  it('"always" lasts for that Assistant: the next handoff raises no card', async () => {
     const { target, orch } = await world('normal', 'auto')
     const first = handoff(orch, { sessionId: target })
     await eventually(() => !!info(orch).pendingApproval)
@@ -281,11 +281,11 @@ describe('handoff_session (#694)', () => {
     const { project, target } = await world('auto')
     const other = (await mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'auto' })).id
     for (const name of ['handoff_session', 'centralu_run']) {
-      await expect(mgr.runOrchestratorTool(other, name, { sessionId: target, command: 'handoff_session' })).rejects.toThrow('Not a tool of this session')
+      await expect(mgr.runCentraluTool(other, name, { sessionId: target, command: 'handoff_session' })).rejects.toThrow('Not a tool of this session')
     }
   })
 
-  it('mode agent: the session is asked, by the orchestrator, and its reply is the note', async () => {
+  it('mode agent: the session is asked, by the Assistant, and its reply is the note', async () => {
     const { target, orch } = await world('auto')
     const call = handoff(orch, { sessionId: target, mode: 'agent' })
     const h = claude.handles.get(target)!
@@ -413,7 +413,7 @@ describe('handoff_session (#694)', () => {
     expect((await next).text).toContain('did not allow')
   })
 
-  it("the opening is stored as the orchestrator's message, never the person's (#694 review)", async () => {
+  it("the opening is stored as the Assistant's message, never the person's (#694 review)", async () => {
     const { target, orch } = await world('auto')
     await handoff(orch, { sessionId: target, instructions: 'Finish it.' })
     const heir = named('Long run').find((s) => s.id !== target)!

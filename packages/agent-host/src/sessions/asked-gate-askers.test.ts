@@ -57,7 +57,7 @@ describe('a turn with two askers fails closed (§4.2)', () => {
   it('the card names every asker, and a step done is recorded in each asking session', async () => {
     const w = world()
     await w.gate.when('orc', { name: 'delete_session', args: { sessionId: 's' } }, undefined, run, refused)
-    expect(w.asked[0]).toContain('Sessions "Fix login" in project "Acme" and "Docs" with no project each asked the orchestrator for something in this turn')
+    expect(w.asked[0]).toContain('Sessions "Fix login" in project "Acme" and "Docs" with no project each asked the Assistant for something in this turn')
     expect(w.asked[0]).toContain('run delete_session')
     expect(w.records.map((r) => [r.asker, r.seq])).toEqual([
       ['asker', 7],

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { AdapterCapabilities } from '@cc/protocol'
 import { z } from 'zod'
 import type { ToolProfile } from '../apps/contract.js'
-import { ORCHESTRATOR_MCP_NAME, toolInstructionsFor, toolDefsFor } from './orchestrator-tools.js'
+import { CENTRALU_MCP_NAME, toolInstructionsFor, toolDefsFor } from './centralu-tools.js'
 
 /**
  * What a session's Centralu tools cost before a word is said (#513): the definitions as each CLI
@@ -16,7 +16,7 @@ import { ORCHESTRATOR_MCP_NAME, toolInstructionsFor, toolDefsFor } from './orche
 export type ToolServingCapabilities = Pick<AdapterCapabilities, 'toolDeferral' | 'instructionChannel' | 'subagentTool'>
 
 /** Every profile, in the order tables list them */
-export const TOOL_PROFILES = ['orchestrator', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
+export const TOOL_PROFILES = ['assistant', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
 
 export type ServedDefinition = {
   /** The name the model sees: `mcp__<server>__<tool>` on both CLIs */
@@ -25,7 +25,7 @@ export type ServedDefinition = {
   inputSchema: unknown
   /**
    * In every request (`true`) or a name behind tool search until the model loads it. Claude defers
-   * what the in-process server does not mark `alwaysLoad` (adapters/claude/orchestrator-mcp.ts).
+   * what the in-process server does not mark `alwaysLoad` (adapters/claude/centralu-mcp.ts).
    * Centralu cannot mark anything for Codex, so here every Codex tool counts as resident: the most
    * Codex could load. What it does load is Codex's own choice, and a live run measures it (codex-cli
    * 0.160.0 kept MCP tools out of the first request and found them on demand: docs/tool-cost.md).
@@ -41,9 +41,9 @@ export function definitionChars(name: string, description: string, inputSchema: 
 
 export function servedDefinitions(profile: ToolProfile, capabilities: ToolServingCapabilities): ServedDefinition[] {
   return toolDefsFor(profile).map((t) => {
-    const name = `mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`
+    const name = `mcp__${CENTRALU_MCP_NAME}__${t.name}`
     const inputSchema = z.toJSONSchema(t.schema)
-    // The same rule as orchestratorMcp: a set with no deferred tool is alwaysLoad, any other is loaded tool by tool
+    // The same rule as centraluMcp: a set with no deferred tool is alwaysLoad, any other is loaded tool by tool
     const deferred = capabilities.toolDeferral === true && 'deferred' in t && t.deferred === true
     return { name, description: t.description, inputSchema, resident: !deferred, chars: definitionChars(name, t.description, inputSchema) }
   })

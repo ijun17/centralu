@@ -48,7 +48,7 @@ export class ToolRegistry {
 
   /**
    * The default agent tool for this scope — a project's default tool if it has one, or the
-   * orchestrator's own tool if there is no project (a user-folder app). A builder session (C-2) and an
+   * Assistant's own tool if there is no project (a user-folder app). A builder session (C-2) and an
    * agent an app asked for (D-1) both use this same rule.
    */
   defaultToolFor(projectId: string | null): ToolName | null {

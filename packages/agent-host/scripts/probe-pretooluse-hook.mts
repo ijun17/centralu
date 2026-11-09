@@ -1,7 +1,7 @@
 /**
  * Does a `PreToolUse` hook see every tool call, in every permission mode, and can it decide the call (#1447)?
  *
- * A session's request makes the orchestrator's turn one where every step that is not a read must be put to the person. Running the turn
+ * A session's request makes the Assistant's turn one where every step that is not a read must be put to the person. Running the turn
  * under `default` was not enough: a tool that needs no permission (Agent, CronCreate, ScheduleWakeup, TaskStop, SendMessage) never reaches
  * `canUseTool` there (found by the review of #1516, measured with the real CLI). The SDK's own warning says "to gate every tool call, use a
  * PreToolUse hook instead". Measured here, one streaming query in `bypassPermissions` (auto) and one in `default`:

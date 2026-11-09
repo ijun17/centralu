@@ -271,7 +271,7 @@ test('the run dialog: a command goes to the clicked panel\'s project — not whi
   expect(runs[0]!.key.startsWith(betaProjectId)).toBe(true)
 })
 
-test('the run dialog: absent from the orchestrator — with no project there is no directory to run in', async ({ page }) => {
+test('the run dialog: absent from the Assistant — with no project there is no directory to run in', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', 'task')
   await expect(page.getByTestId('run-open')).toBeVisible()
@@ -280,10 +280,10 @@ test('the run dialog: absent from the orchestrator — with no project there is 
 
   await page.evaluate(async () => {
     const st = (window as never as { __store: any }).__store.getState()
-    await st.openOrchestrator() // Opens only the screen — no session is created (#63)
-    await st.askOrchestrator('hello') // The first question creates the session
+    await st.openAssistant() // Opens only the screen — no session is created (#63)
+    await st.askAssistant('hello') // The first question creates the session
   })
-  await expect(page.getByTestId('session-name')).toContainText('Orchestrator')
+  await expect(page.getByTestId('session-name')).toContainText('Assistant')
   await expect(page.getByTestId('session-header-crown')).toBeVisible()
   // A menu that opens to nothing that can go into it is more honest absent than empty
   await expect(page.getByTestId('run-open')).toBeHidden()

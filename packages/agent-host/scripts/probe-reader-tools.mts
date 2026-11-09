@@ -5,7 +5,7 @@
  * Two questions, one model call per row:
  *   cost   the first request's input tokens (input + cache write + cache read) with no Centralu
  *          server, and with each candidate shape of the set: the four candidate tools in the
- *          orchestrator's words, the same tools re-worded, the reader set all loaded, the set as
+ *          Assistant's words, the same tools re-worded, the reader set all loaded, the set as
  *          shipped (app_guide deferred), and the whole set deferred behind tool search.
  *   use    asked about the project's other sessions, about an earlier conversation, or about how
  *          Centralu works, which tools the session calls — all loaded, as shipped, all deferred.
@@ -23,9 +23,9 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
-import type { OrchestratorTools } from '../src/adapters/contract.js'
-import { orchestratorMcp } from '../src/adapters/claude/orchestrator-mcp.js'
-import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, runOrchestratorTool } from '../src/sessions/orchestrator-tools.js'
+import type { CentraluTools } from '../src/adapters/contract.js'
+import { centraluMcp } from '../src/adapters/claude/centralu-mcp.js'
+import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, CENTRALU_TOOLS, READER_TOOLS, runCentraluTool } from '../src/sessions/centralu-tools.js'
 
 const claude = execFileSync('which', ['claude']).toString().trim()
 const cwd = mkdtempSync(join(tmpdir(), 'cc-reader-'))
@@ -48,7 +48,7 @@ const fake = {
     readable: ['/tmp/toolkit/out'],
     outside: [],
   }),
-} as unknown as OrchestratorTools
+} as unknown as CentraluTools
 
 type Def = { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; load?: boolean }
 
@@ -64,7 +64,7 @@ function server(defs: readonly Def[], alwaysLoad: boolean) {
         t.description,
         t.schema.shape,
         async (args: Record<string, unknown>) => {
-          const r = await runOrchestratorTool(fake, t.name, args, { sessionId: 'probe', profile: 'reader' })
+          const r = await runCentraluTool(fake, t.name, args, { sessionId: 'probe', profile: 'reader' })
           return { content: [{ type: 'text' as const, text: r.text }], isError: r.isError }
         },
         t.load ? { alwaysLoad: true } : undefined,
@@ -83,10 +83,10 @@ const FOUR: Def[] = [
 
 const VARIANTS: Record<string, () => Record<string, unknown>> = {
   none: () => ({}),
-  'four, orchestrator text': () => ({ centralu: server(ORCHESTRATOR_TOOLS.filter((t) => CANDIDATES.includes(t.name)), true) }),
+  'four, assistant text': () => ({ centralu: server(CENTRALU_TOOLS.filter((t) => CANDIDATES.includes(t.name)), true) }),
   'four, re-worded': () => ({ centralu: server(FOUR, true) }),
   'reader set, all loaded': () => ({ centralu: server(READER_TOOLS, true) }),
-  'shipped (app_guide deferred)': () => ({ centralu: orchestratorMcp(fake, 'reader', 'probe') }),
+  'shipped (app_guide deferred)': () => ({ centralu: centraluMcp(fake, 'reader', 'probe') }),
   'reader set, all deferred': () => ({ centralu: server(READER_TOOLS, false) }),
   // #371: the set as #320 shipped it (no ask_project), and ask_project deferred rather than loaded as shipped
   '#320 set, before ask_project': () => ({ centralu: server(READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), false) }),
@@ -148,7 +148,7 @@ if (!only || only === 'cost') {
     console.log(`  ${v.padEnd(30)} ${r.total}  (+${r.total - base.total})`)
   }
   // Each tool on its own, in each wording — where the tokens go
-  for (const [label, defs] of [['orchestrator', ORCHESTRATOR_TOOLS], ['re-worded', FOUR], ['reader set', READER_TOOLS]] as const) {
+  for (const [label, defs] of [['assistant', CENTRALU_TOOLS], ['re-worded', FOUR], ['reader set', READER_TOOLS]] as const) {
     for (const t of (defs as readonly Def[]).filter((d) => CANDIDATES.includes(d.name))) {
       const v = `${t.name} (${label})`
       VARIANTS[v] = () => ({ centralu: server([t], true) })

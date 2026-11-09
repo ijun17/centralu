@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ORCHESTRATOR_CHANGE, type SessionInfo, type ToolName } from '@cc/protocol'
+import { ASSISTANT_CHANGE, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../adapters/contract.js'
 import { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
@@ -90,11 +90,11 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     await create()
     const o = adapter.last()
     expect(servers(o)).toEqual(['app-notes'])
-    // The light, read-only set (#320) — not the orchestrator's, and no app tool rides on it
+    // The light, read-only set (#320) — not the Assistant's, and no app tool rides on it
     expect(o.toolProfile).toBe('reader')
-    expect(o.orchestratorTools).toBeDefined()
+    expect(o.centraluTools).toBeDefined()
     // The path back to the host is still received — Codex's app bridge returns to this address
-    expect(o.orchestratorBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
+    expect(o.centraluBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
     // And every session's agent finds the host and its own credential (#1405): the bridge's credential is not that
     expect(o.hostAccess).toEqual({ url: 'ws://127.0.0.1:5999', credential: 'ccs1-cred' })
   })
@@ -113,28 +113,28 @@ describe('apps handed to a session by the manager (decision 4)', () => {
     expect(servers(adapter.last())).toEqual([])
   })
 
-  it('the orchestrator receives only user-folder apps, and still receives the built-in tools', async () => {
-    await mgr.orchestrator()
+  it('the Assistant receives only user-folder apps, and still receives the built-in tools', async () => {
+    await mgr.assistant()
     const o = adapter.last()
     expect(servers(o)).toEqual(['app-helper'])
-    expect(o.orchestratorTools).toBeDefined()
+    expect(o.centraluTools).toBeDefined()
   })
 
   /*
-   * A session's request to the orchestrator (docs/plans/mailbox.md §9.7, #1447): an attached app's tool is a step that changes something, and
+   * A session's request to the Assistant (docs/plans/mailbox.md §9.7, #1447): an attached app's tool is a step that changes something, and
    * under auto the CLI never asks about it. The gate is in the call itself, so it holds on both CLIs and under every preset.
    */
-  it('in a session’s request an app tool of the orchestrator asks the person, naming the session, and a refused call never reaches the app', async () => {
+  it('in a session’s request an app tool of the Assistant asks the person, naming the session, and a refused call never reaches the app', async () => {
     mgr.mail.useMail({ askedBy: () => ({ messageId: 'hub-aaaaaaaa.m_01', sessionId: 'asker', turn: 1, name: 'Fix login', project: 'Acme', trusted: true, cites: { seq: 1, at: Date.now() } }), sessionGone: () => {}, sessionChanged: () => {} })
-    const orc = await mgr.orchestrator()
+    const orc = await mgr.assistant()
     const apps = adapter.last().apps!
     const card = () => {
       const pending = mgr.sessionInfo(orc.id)?.pendingApproval
-      return pending?.detail.kind === 'other' && pending.detail.about === ORCHESTRATOR_CHANGE ? { requestId: pending.requestId, text: pending.detail.raw } : undefined
+      return pending?.detail.kind === 'other' && pending.detail.about === ASSISTANT_CHANGE ? { requestId: pending.requestId, text: pending.detail.raw } : undefined
     }
     const call = apps.call('app-helper', 'poke', { to: 1 })
     await eventually(() => !!card())
-    expect(card()!.text).toBe(`Session "Fix login" in project "Acme" asked the orchestrator to run app-helper.poke {"to":1}. It is the session's request, not yours.`)
+    expect(card()!.text).toBe(`Session "Fix login" in project "Acme" asked the Assistant to run app-helper.poke {"to":1}. It is the session's request, not yours.`)
     mgr.inputs.respondApproval(orc.id, card()!.requestId, 'deny')
     const refused = await call
     expect(refused.isError).toBe(true)
@@ -169,7 +169,7 @@ describe('apps.reach — whether a session can use an app\'s tools (#308)', () =
   it('answers from decision 4 and the live agent, and refuses a session that does not exist', async () => {
     const s = await create()
     expect(await reach(s.id, 'notes', projectId)).toEqual({ reachable: true })
-    // A user-folder app goes only to the orchestrator
+    // A user-folder app goes only to the Assistant
     expect(await reach(s.id, 'helper', null)).toEqual({ reachable: false, reason: 'other-project' })
 
     Handle.attachment = 'restart'

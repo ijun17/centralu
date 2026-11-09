@@ -339,7 +339,7 @@ describe('ChatRow: rows that point elsewhere', () => {
     expect(refused.text).toBe('Asked another project did not finish No such project')
     expect(refused.html).toContain('border-dashed')
     state = { sessions: { d1: session('d1', { projectId: 'p2' }) } }
-    // The host's wording (orchestrator-tools.ts): the session's name and id, then the project
+    // The host's wording (centralu-tools.ts): the session's name and id, then the project
     const pending = 'Docs is still working on it in the session "Docs worker" [d1] in Docs. Ask again later.'
     expect(row(tool({ tool: 'ask_project', title: 'Docs', result: pending })).text).toBe(
       'Asked Docs still working Session d1 →',

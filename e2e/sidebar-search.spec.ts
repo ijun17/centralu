@@ -79,10 +79,10 @@ test('the bar carries no title and no search, and the sidebar starts with the fi
   await expect(page.getByTestId('app-header')).not.toContainText(/centralu/i)
   await expect(page.getByTestId('app-header').getByTestId('search-button')).toHaveCount(0)
   await expect(page.getByTestId('search-slot')).toHaveCount(0)
-  // The field is the first thing in the sidebar, the Orchestrator door the next
+  // The field is the first thing in the sidebar, the Assistant door the next
   const side = await box(page.getByTestId('sidebar'))
   const f = await box(field(page))
-  const orch = await box(page.getByTestId('orchestrator-button'))
+  const orch = await box(page.getByTestId('assistant-button'))
   expect(f.y - side.y).toBeLessThan(10)
   expect(orch.y).toBeGreaterThanOrEqual(f.y + f.height)
 })

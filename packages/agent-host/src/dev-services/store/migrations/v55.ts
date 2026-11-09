@@ -21,7 +21,7 @@ export class StepsV55 extends MigrationRange {
          *   - an asker listed with a project: cleared when that project is not the row's;
          *   - an asker in the trash: the same, with the project its trash record keeps (a trashed row's `project_id` is
          *     null), a record with none counting as no project;
-         *   - otherwise (purged, or listed with no project, as the orchestrator is): cleared when the row's first message
+         *   - otherwise (purged, or listed with no project, as the Assistant is): cleared when the row's first message
          *     is the task that asker sent, framed as ask_project framed it.
          *
          * This ran at every host start until now (`SessionManager`), outside the step list. Builds up to beta.20 still

@@ -15,24 +15,24 @@ export type ReachHost = {
   hostId: string
   /** A session: its project, the session that started it, whether it is here (not in the trash or deleted), whether its seat has the `mail` tool, and which computer. Undefined: never here */
   session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere'; name?: string } | undefined
-  /** The orchestrator's session id, or null before it exists */
-  orchestratorId(): string | null
-  /** Whether the orchestrator's tool can put each step of a request's turn to the person (§7.6): sessions may write requests to it only then */
-  orchestratorAsks(): boolean
+  /** The Assistant's session id, or null before it exists */
+  assistantId(): string | null
+  /** Whether the Assistant's tool can put each step of a request's turn to the person (§7.6): sessions may write requests to it only then */
+  assistantAsks(): boolean
   appCalledBy(app: string, session: string): boolean
   /** A project of this host: whether it is trusted. Undefined: this host does not know it (a deleted project) */
   project(projectId: string): { trusted: boolean; name?: string } | undefined
-  /** The session addresses of the group a session's requests to the orchestrator are counted with, as `relations.ts` groups today */
+  /** The session addresses of the group a session's requests to the Assistant are counted with, as `relations.ts` groups today */
   askGroupMembers(address: string): string[]
 }
 
-/** Where a delegation goes, as far as the hold goes: a session, a project (to create one in, or `ask_project`), the orchestrator or a linked machine */
-export type DelegationTarget = { sessionId?: string; projectId?: string | null; orchestrator?: boolean; linked?: boolean }
+/** Where a delegation goes, as far as the hold goes: a session, a project (to create one in, or `ask_project`), the Assistant or a linked machine */
+export type DelegationTarget = { sessionId?: string; projectId?: string | null; assistant?: boolean; linked?: boolean }
 
 export type MailReach = {
   /**
-   * Why `from` may not write to `to` (§7.1), or null. `asRequest` is false for a session's word to the orchestrator that is no request (an answer to its own
-   * `needsReply` message, a clarification): it needs no orchestrator that can ask the person for each step
+   * Why `from` may not write to `to` (§7.1), or null. `asRequest` is false for a session's word to the Assistant that is no request (an answer to its own
+   * `needsReply` message, a clarification): it needs no Assistant that can ask the person for each step
    */
   mayWrite(from: string, to: string, asRequest?: boolean): RefusalReason | null
   /** Whether the project is untrusted (§7.2): none is not, a project of this host is by its flag, one this host does not know is (fail closed) */
@@ -41,7 +41,7 @@ export type MailReach = {
   holdFor(m: Pick<MailRow, 'kind' | 'senderProject'>, recipient: string): 'policy' | null
   /** The untrusted project a delegation by `callerId` to `target` leaves, or null (§7.4): the tool refuses it, S15 */
   refusesDelegation(callerId: string, target: DelegationTarget): string | null
-  isOrchestrator(address: string): boolean
+  isAssistant(address: string): boolean
   askGroupMembers(address: string): string[]
   /** The project id of a session address, or null for a session of none or an address that is not a session here */
   projectOf(address: string): string | null
@@ -66,9 +66,9 @@ export function mailReach(host: ReachHost): MailReach {
 
   return {
     untrusted,
-    isOrchestrator: (address) => {
+    isAssistant: (address) => {
       const s = sessionOf(address)
-      return s !== undefined && host.orchestratorId() === s.id
+      return s !== undefined && host.assistantId() === s.id
     },
     askGroupMembers: (address) => host.askGroupMembers(address),
     projectOf: (address) => sessionOf(address)?.info?.projectId ?? null,
@@ -100,8 +100,8 @@ export function mailReach(host: ReachHost): MailReach {
       // From here on the sender is a session, which must still be here
       if (!sessionOf(from)?.info?.here) return 'gone'
       if (!receiver) return null
-      const orchestrator = host.orchestratorId()
-      return asRequest && receiver.id === orchestrator && f.sessionId !== orchestrator && !host.orchestratorAsks() ? 'orchestrator_asks' : null
+      const assistant = host.assistantId()
+      return asRequest && receiver.id === assistant && f.sessionId !== assistant && !host.assistantAsks() ? 'assistant_asks' : null
     },
 
     holdFor(m, recipient) {
@@ -113,7 +113,7 @@ export function mailReach(host: ReachHost): MailReach {
     refusesDelegation(callerId, target) {
       const project = host.session(callerId)?.projectId ?? null
       if (project === null) return null
-      const targetProject = target.linked || target.orchestrator ? null : target.sessionId !== undefined ? (host.session(target.sessionId)?.projectId ?? null) : (target.projectId ?? null)
+      const targetProject = target.linked || target.assistant ? null : target.sessionId !== undefined ? (host.session(target.sessionId)?.projectId ?? null) : (target.projectId ?? null)
       return leaves(project, targetProject) ? project : null
     },
   }

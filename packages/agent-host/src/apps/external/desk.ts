@@ -153,7 +153,7 @@ export type CapabilityQuestion = {
 
 /** The part of the broker's body the host's core fills in */
 export type BrokerHost = {
-  /** The default agent tool for this scope — the project's default tool for a project app, the orchestrator's tool for a user-folder app */
+  /** The default agent tool for this scope — the project's default tool for a project app, the Assistant's tool for a user-folder app */
   defaultAgentTool(projectId: string | null): string | null
   /**
    * Sends the request to a new session and waits for the turn to end. If the signal fires, stops the

@@ -65,9 +65,9 @@ const LOCATION = /^(.*?):(\d+)(?::\d+)?$/
  * "leave this as text".
  *
  * `projectRoot` is the session's project directory, and null means the session has no
- * project — which is the orchestrator's case, since its sessions carry `projectId: null`.
+ * project — which is the Assistant's case, since its sessions carry `projectId: null`.
  * There is then no root for a relative path to be relative *to*, and no file tree beside
- * the conversation to open one in, so nothing in an orchestrator message becomes a link.
+ * the conversation to open one in, so nothing in an Assistant message becomes a link.
  * Guessing a root from whichever project happens to be selected would open a file from
  * some other repository under the same name, which is worse than not linking.
  */

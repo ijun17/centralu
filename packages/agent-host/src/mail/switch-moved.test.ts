@@ -1,6 +1,6 @@
 /**
  * What an older build left in the v61 tables, moved at ready (docs/plans/mailbox.md §6.3), as the sessions it was sent to read it afterwards:
- * a request to an orchestrator since trashed, a task to a trashed session, a question read and not answered, an old thread's history, and a row
+ * a request to an Assistant since trashed, a task to a trashed session, a question read and not answered, an old thread's history, and a row
  * the person had released. Each written straight into the old tables (`oldThread`).
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -27,9 +27,9 @@ function ready(w: ReturnType<typeof hostWorld>) {
 const bodies = (w: ReturnType<typeof hostWorld>, id: string) => w.to(id).map((d) => d.input.text).join('\n')
 
 describe('the move, for the sessions the old mail was for', () => {
-  it('a request to an orchestrator since trashed is sent to the role: the next orchestrator takes it, trusted or not', () => {
+  it('a request to an Assistant since trashed is sent to the role: the next Assistant takes it, trusted or not', () => {
     const w = hostWorld()
-    oldSession(w.store, 'orc0', { orchestrator: true, trashedAt: w.clock.t - 500 })
+    oldSession(w.store, 'orc0', { assistant: true, trashedAt: w.clock.t - 500 })
     const old = at('orc0')
     oldThread(w.store, { id: tid(1), owner: A, assignee: old, at: w.clock.t - 1_000 }, [{ id: mid(1), sender: A, kind: 'assign', body: 'trusted ask', receipts: [{ recipient: old }] }])
     oldThread(w.store, { id: tid(2), owner: X, assignee: old, projectId: 'px', at: w.clock.t - 1_000 }, [
@@ -43,9 +43,9 @@ describe('the move, for the sessions the old mail was for', () => {
     expect(w.row(mid(1), old)).toBeUndefined()
   })
 
-  it('mail to an orchestrator outside a session’s request stays its own', () => {
+  it('mail to an Assistant outside a session’s request stays its own', () => {
     const w = hostWorld()
-    oldSession(w.store, 'orc0', { orchestrator: true, trashedAt: w.clock.t - 500 })
+    oldSession(w.store, 'orc0', { assistant: true, trashedAt: w.clock.t - 500 })
     const old = at('orc0')
     oldThread(w.store, { id: tid(3), owner: old, assignee: A, at: w.clock.t - 1_000 }, [{ id: mid(3), sender: A, kind: 'note', body: 'to its own thread', receipts: [{ recipient: old }] }])
     ready(w)
@@ -104,9 +104,9 @@ describe('the move, for the sessions the old mail was for', () => {
     expect(w.row(mid(10), B)?.held).toBe('released')
   })
 
-  it('a row the person released on the older build to an orchestrator since trashed is not held again once the next one takes it', async () => {
+  it('a row the person released on the older build to an Assistant since trashed is not held again once the next one takes it', async () => {
     const w = hostWorld()
-    oldSession(w.store, 'orc0', { orchestrator: true, trashedAt: w.clock.t - 500 })
+    oldSession(w.store, 'orc0', { assistant: true, trashedAt: w.clock.t - 500 })
     const old = at('orc0')
     oldThread(w.store, { id: tid(8), owner: X, assignee: old, projectId: 'px', at: w.clock.t - 1_000 }, [
       { id: mid(12), sender: X, kind: 'assign', body: 'released request', receipts: [{ recipient: old, held: 'released' }] },

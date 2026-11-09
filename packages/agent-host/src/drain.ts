@@ -2,13 +2,13 @@ import { raceTimeout } from './timing.js'
 
 /**
  * Calls the host serves itself, and how a stop waits for them: work it is doing **itself** on someone's behalf, a
- * WebSocket RPC (the UI, the Codex bridge) and an in-process MCP tool call (the orchestrator tools, the app-tool proxy).
+ * WebSocket RPC (the UI, the Codex bridge) and an in-process MCP tool call (the Centralu tools, the app-tool proxy).
  *
  * Built for the blue-green swap (#280 step 3), which drained the old host while its agents kept going; no host swaps
  * since #1895. What begins a drain now is `host.stop {ifIdle}` (lifecycle/stop-gate.ts): from the moment it finds the
  * host idle, every new call is refused as retryable, so nothing starts on a host that is going.
  *
- * Measured on a real store (2026-10-04, #280 "Measurements for option C" §2): orchestrator tools
+ * Measured on a real store (2026-10-04, #280 "Measurements for option C" §2): Centralu tools
  * took at most 0.2 s, app tools at most 5.6 s (GitHub round trips), over 88 calls. A bound of about
  * 10 s covers every recorded call with margin; past it the call is cut and the model is told to try
  * again, rather than the stop waiting on an app that may never answer. Draining every tool was never

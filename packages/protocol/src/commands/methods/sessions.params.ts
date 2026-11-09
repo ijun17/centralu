@@ -94,7 +94,7 @@ export const sessionsParams = {
   /**
    * The archive the window offers for a session that looks idle (#1512), decided by the host at the last moment: it moves the
    * session (as `agents.deleteSession` with the worktree and the tool's file kept) only when nothing it holds would be lost,
-   * the same rule as the orchestrator's `delete_session` (reports owed to or by it, waits and cards on it, what the person
+   * the same rule as the Assistant's `delete_session` (reports owed to or by it, waits and cards on it, what the person
    * allowed it, unfinished mail threads) and it is at rest in the step that moves it. Otherwise nothing moves and `asks` says
    * what would be lost, for the window's dialog (empty when the session was only busy, or is gone). A build from before it
    * answers "Unknown method", and the window asks first as it always did.
@@ -123,14 +123,14 @@ export const sessionsParams = {
    * before deleting. `null` means this is not a worktree session — there is nothing to ask.
    */
   /**
-   * The orchestrator's MCP server proposal flow (propose_mcp_server, then the person's one-click
-   * approval, then the app registers it and restarts the orchestrator). The proposal list is
+   * The Assistant's MCP server proposal flow (propose_mcp_server, then the person's one-click
+   * approval, then the app registers it and restarts the Assistant). The proposal list is
    * fetched by query, and the answer goes through resolve.
    */
   'agents.mcpProposals': z.object({}),
   'agents.resolveMcpProposal': z.object({ name: z.string(), approve: z.boolean() }),
   /**
-   * Orchestrator skills (#71) — fetching and answering proposals, plus listing and deleting
+   * Assistant skills (#71) — fetching and answering proposals, plus listing and deleting
    * approved skills. The reason deletion exists: a skill that can only be added and never
    * removed is worse than not having one at all (the decision recorded on the issue).
    */
@@ -243,7 +243,7 @@ export const sessionsParams = {
    *
    * `keepQuiet` (additive, #1219): also leave a session that said something within the last minute, as the automatic move
    * does, so a restart does not land the moment someone reads an answer and starts typing the next message. The person's own
-   * button asks for none of that wait (it is absent); the orchestrator's `apply_agent_versions` is not the person's own.
+   * button asks for none of that wait (it is absent); the Assistant's `apply_agent_versions` is not the person's own.
    */
   'agents.applyVersions': z.object({ ...machineParam, keepQuiet: z.boolean().optional() }),
   /** When idle sessions go to sleep (#568): this host's setting */
@@ -268,7 +268,7 @@ export const sessionsParams = {
   'sessions.rename': z.object({ sessionId: SessionId, name: z.string() }),
   /*
    * sessions.setKind, which used to be here (the promote/demote from #13), was discontinued
-   * (2026-09-01). There is now only one orchestrator per app (the central one), and the role
+   * (2026-09-01). There is now only one Assistant per app (the central one), and the role
    * that directs sessions inside a project is the worktree manager (#69) instead — a role is not
    * chosen; it comes from the relationship.
    */
@@ -370,7 +370,7 @@ export const sessionsParams = {
   'agents.account': z.object({ tool: ToolName, ...machineParam }),
   /**
    * The session archive (#204; "trash" is the old name, kept in the method names because the protocol only grows).
-   * The person reaches these: the RPC is the UI's channel, and the central orchestrator's trash
+   * The person reaches these: the RPC is the UI's channel, and the Assistant's trash
    * commands make the same calls (#1219), its deletes for good only after the person's card. No other agent tool and
    * not the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
    *

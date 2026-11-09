@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps } from '@cc/protocol'
+import { ASSISTANT_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { bytesText } from '../bytes-text.js'
@@ -67,9 +67,9 @@ function sameRow(a: TrashedSession, b: TrashedSession): boolean {
 type Trash = { sessions: TrashedSession[]; runs: TrashedRun[]; steps: TrashedSubagentSteps[]; bytes: number; unreached: { name: string }[] }
 
 /**
- * The orchestrator's session archive commands (#1219): `list_archive`, `restore_archived` and `archive_subagent_steps` act at once, as
+ * The Assistant's session archive commands (#1219): `list_archive`, `restore_archived` and `archive_subagent_steps` act at once, as
  * the window's Archive screen does; `delete_archived` and `delete_all_archived` delete for good, and wait for a card that names
- * what goes (an `other` card, `ORCHESTRATOR_CHANGE`, every preset, allow or deny only). Each is the call the window
+ * what goes (an `other` card, `ASSISTANT_CHANGE`, every preset, allow or deny only). Each is the call the window
  * makes (`trash.list`, `trash.restore`, `subagents.trash`, `trash.purge`, `trash.purgeSubagentSteps`,
  * `trash.purgeRuns`) through the router, so a linked machine's session archive is reached the way the window reaches it.
  *
@@ -168,7 +168,7 @@ export class TrashFlow {
     const row = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === id)
     if (!row) return { ok: false, error: `No session [${id}] is listed; list_sessions shows them. Nothing was deleted.` }
     const name = shown(row.name)
-    if (row.kind !== 'worker') return { ok: false, error: `${name} is ${row.kind === 'orchestrator' ? 'an orchestrator' : 'a coordinator'}; only the person deletes those.` }
+    if (row.kind !== 'worker') return { ok: false, error: `${name} is ${isAssistantKind(row.kind) ? 'an Assistant' : 'a coordinator'}; only the person deletes those.` }
     if (row.askedBy === caller) return { ok: false, error: `${name} is a child you started; delete it with agent_session (action delete), which also settles its report and its worktree.` }
     if (row.unreachable) return { ok: false, error: `${name} is on a machine that cannot be reached just now; try again when it answers.` }
     if (row.state === 'working' || row.pendingApproval || row.pendingQuestions.length > 0) {
@@ -360,9 +360,9 @@ export class TrashFlow {
     return { ok: true, text: parts.join(' ') }
   }
 
-  /** The delete card, allow or deny only (`ORCHESTRATOR_CHANGE`): the refusal the orchestrator reads, or null once allowed */
+  /** The delete card, allow or deny only (`ASSISTANT_CHANGE`): the refusal the Assistant reads, or null once allowed */
   private async ask(sessionId: string, question: string, signal?: AbortSignal, notDone: 'deleted' | 'restored' | 'archived' = 'deleted'): Promise<string | null> {
-    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ORCHESTRATOR_CHANGE, raw: question }, signal, { alwaysAsk: true })
+    const decision = await this.host.hostCards.askHost(sessionId, { kind: 'other', about: ASSISTANT_CHANGE, raw: question }, signal, { alwaysAsk: true })
     if (decision === 'deny') return 'The person did not approve it, so nothing was ' + notDone + '. Do not ask again unless they tell you to.'
     if (decision === null) return 'The card was withdrawn before the person answered, so nothing was ' + notDone + '.'
     return null

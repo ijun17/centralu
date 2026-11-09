@@ -6,7 +6,7 @@ import type { Store } from '../dev-services/store.js'
 import { rpcError } from '../rpc-error.js'
 import { atAdoptedFolder } from '../user-app-adoption.js'
 import type { DelegationHost } from './delegation-flow.js'
-import { orchestratorHome } from './orchestrator-home.js'
+import { assistantHome } from './assistant-home.js'
 import type { MergeChecks } from './merge-checks.js'
 
 /**
@@ -55,14 +55,14 @@ export class ProjectRegistry {
   }
 
   /**
-   * A project's working directory. **The orchestrator (projectId=null) uses a neutral location.**
+   * A project's working directory. **The Assistant (projectId=null) uses a neutral location.**
    *
    * Placing it inside a project would have it touching the same files as that project's sessions —
    * creating with our own hands exactly the concurrent-session conflict FR-2 warns about. The
-   * orchestrator has no hands of its own: sessions do the work, and the orchestrator instructs and reads.
+   * assistant has no hands of its own: sessions do the work, and the Assistant instructs and reads.
    */
   cwdOf(projectId: string | null): string {
-    if (projectId === null) return orchestratorHome()
+    if (projectId === null) return assistantHome()
     const p = this.requireProject(projectId)
     return p.path
   }

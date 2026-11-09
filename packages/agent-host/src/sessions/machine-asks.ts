@@ -48,7 +48,7 @@ const UNREAD_KEPT_MS = 60 * 60_000
  *     builder's. A session busy with a turn gets nothing: a note or a queue from another machine is not offered, as for
  *     step 3's asks the other way (§12.6).
  *   - The task arrives framed as from that session on that machine (`MACHINE_ASKER`, never the person and never an
- *     orchestrator), and the session works on it one level deeper than the asker (#867), so it cannot ask on.
+ *     assistant), and the session works on it one level deeper than the asker (#867), so it cannot ask on.
  *   - The answer goes back cut to size. Paths in it are this computer's: the machine lists them and opens none.
  */
 export class MachineAsks {

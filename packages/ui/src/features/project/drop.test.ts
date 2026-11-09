@@ -20,7 +20,7 @@ describe('dragVerdict', () => {
     expect(dragVerdict([APP_MIME, projectItemMime('p1')], 'p1')).toBe('add')
   })
 
-  it("refuses another project's session or app, and a session that belongs to no project (the orchestrator)", () => {
+  it("refuses another project's session or app, and a session that belongs to no project (the Assistant)", () => {
     expect(dragVerdict([SESSION_MIME, projectItemMime('p2')], 'p1')).toBe('refuse')
     expect(dragVerdict([APP_MIME, projectItemMime('p2')], 'p1')).toBe('refuse')
     expect(dragVerdict([SESSION_MIME], 'p1')).toBe('refuse')

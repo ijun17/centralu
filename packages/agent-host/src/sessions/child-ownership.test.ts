@@ -135,7 +135,7 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
 
   it('names no caller for a turn given with no report asked for: it is nobody’s work to report', () => {
     const turns = heard()
-    // The orchestrator’s send_to_session with reportBack false: it owns the turn’s cards, and no mark or delegation is left
+    // The Assistant’s send_to_session with reportBack false: it owns the turn’s cards, and no mark or delegation is left
     own.ownTurn('a', 'orchestrator', true)
     own.noteMessage('a', 'work', false, false)
     own.turnStarted('a')
@@ -293,7 +293,7 @@ describe('moveOwner', () => {
     const note = { run: d1, waiters: 0, told: false }
     own.setObserverNote('from>c1', note)
     own.enqueue(request('q1', 'c1', 'from'))
-    own.setLinkedReport('c2', { orchestratorId: 'from', busy: false })
+    own.setLinkedReport('c2', { assistantId: 'from', busy: false })
     const made = start('r-made', 'from', { ended: { childId: 'c1' } })
     const open = start('r-open', 'from')
     own.addAgentStart(made)
@@ -310,7 +310,7 @@ describe('moveOwner', () => {
     expect(own.observerNotes.get('to>c1')).toBe(note)
     expect(own.observerNotes.has('from>c1')).toBe(false)
     expect(own.queued.get('c1')?.[0]?.callerSessionId).toBe('to')
-    expect(own.linkedReports.get('c2')?.orchestratorId).toBe('to')
+    expect(own.linkedReports.get('c2')?.assistantId).toBe('to')
     expect(made.req.callerId).toBe('to')
     // The open request's caller is the card mover's to change, with its card
     expect(open.req.callerId).toBe('from')
@@ -403,8 +403,8 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
       sessionInfo: () => undefined,
       listSessions: () => [],
       canReadMail: () => true,
-      orchestratorId: () => null,
-      orchestratorAsks: () => null,
+      assistantId: () => null,
+      assistantAsks: () => null,
       mailCommand: () => false,
       keptInTurn: () => false,
       oldOwes: () => true,

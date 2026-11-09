@@ -3,7 +3,7 @@ import {
   alwaysAllowKey,
   isCentraluApply,
   isMachineChange,
-  isOrchestratorChange,
+  isAssistantChange,
   isUnknownCard,
   SESSION_HANDOFF,
   sessionOnlyAlways,
@@ -44,7 +44,7 @@ export function ApprovalCard({
   const busy = useStore((s) => !!s.approvalsInFlight[inFlightKey(sessionId, requestId)])
   const sc = useShortcut()
   const inComposer = useComposerFocused(sessionId)
-  // An update card (#581), an agent's apply card (#665) or the orchestrator's handoff card (#694): its "always" is for this session only, never the project
+  // An update card (#581), an agent's apply card (#665) or the Assistant's handoff card (#694): its "always" is for this session only, never the project
   const updateCard = sessionOnlyAlways(detail)
   // An edit whose file is unknown has nothing to remember (#428): no button, and `a` does nothing
   const canAlways = offersAlways(detail)
@@ -372,7 +372,7 @@ function AgentStartCard({
   showProjectKey: boolean
   onAnswer: (decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project') => void
 }) {
-  // The orchestrator's child (#853) works in no project: there is no project to always allow it for
+  // The Assistant's child (#853) works in no project: there is no project to always allow it for
   const inProject = detail.project.id !== ''
   // A child on a linked machine (#1038) is allowed once: nothing is remembered for another machine's project
   const remote = !!detail.machine
@@ -439,7 +439,7 @@ function AgentStartCard({
 }
 
 /**
- * The orchestrator asks to make a new project (#515, create_project). The full path stands on the card, since where
+ * The Assistant asks to make a new project (#515, create_project). The full path stands on the card, since where
  * the folder goes is the whole of what is agreed to; nothing exists until Create. No "always": it is one folder.
  */
 function ProjectCreateCard({
@@ -458,7 +458,7 @@ function ProjectCreateCard({
       testId="approval-card"
       kind="project_create"
       keys={keys === BARE_KEYS ? 'bare' : 'composer'}
-      subtitle="The orchestrator wants to make a new project, and waits"
+      subtitle="The Assistant wants to make a new project, and waits"
     >
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         {detail.source ? 'Clone a repository as the new project' : 'Make a new project'}{' '}
@@ -516,7 +516,7 @@ function ProjectCreateCard({
 }
 
 /**
- * The orchestrator's add_project card (#1220): a folder that already exists becomes a project. What the folder's own
+ * The Assistant's add_project card (#1220): a folder that already exists becomes a project. What the folder's own
  * machine found there is what is agreed to: the machine, the full path, that it is a folder, and whether it is a git
  * repository and where its origin points. No "always": it is one folder, once.
  */
@@ -537,7 +537,7 @@ function ProjectAddCard({
       testId="approval-card"
       kind="project_add"
       keys={keys === BARE_KEYS ? 'bare' : 'composer'}
-      subtitle="The orchestrator wants to add a folder as a project, and waits"
+      subtitle="The Assistant wants to add a folder as a project, and waits"
     >
       <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
         Add the folder <span className="readout">{detail.name}</span>
@@ -618,11 +618,11 @@ function ActionKey({
  * a command with no key either (#838): an empty one, one the card flags (outside the sandbox, the network, input to a
  * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
  * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
- * question the person never saw in full. Nor for the orchestrator's change to a linked machine (#1219): each one is
- * asked on its own, and the host remembers nothing for it. Nor for the orchestrator's change to its settings or the session archive (#1219).
+ * question the person never saw in full. Nor for the Assistant's change to a linked machine (#1219): each one is
+ * asked on its own, and the host remembers nothing for it. Nor for the Assistant's change to its settings or the session archive (#1219).
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
-  if (isUnknownCard(detail) || isMachineChange(detail) || isOrchestratorChange(detail)) return false
+  if (isUnknownCard(detail) || isMachineChange(detail) || isAssistantChange(detail)) return false
   return (detail.kind !== 'file_edit' && detail.kind !== 'command') || alwaysAllowKey(detail) !== ''
 }
 
@@ -659,8 +659,8 @@ export function keyScope(
 
 /**
  * How far "always" on a start_agent card reaches. The project when the person asked for it (⌥a, or ⌥ and a click) and the
- * child has one; the orchestrator's child works in no project (#853), so there is none to remember it for and it stays
- * this session's. The button and the key both ask here: the key sent `project` for the orchestrator's card, and the
+ * child has one; the Assistant's child works in no project (#853), so there is none to remember it for and it stays
+ * this session's. The button and the key both ask here: the key sent `project` for the Assistant's card, and the
  * toast said sessions in a project may start agents when the host had remembered it for this session only.
  */
 export function agentStartScope(detail: { project: { id: string } }, wantsProject: boolean): 'session' | 'project' {

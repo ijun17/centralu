@@ -57,7 +57,7 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
     return peer
   }
   const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
-  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { orchestratorBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } }, replay: state })
+  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { centraluBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } }, replay: state })
   return { events, problems: state.problems, left: state.left(), sent }
 }
 

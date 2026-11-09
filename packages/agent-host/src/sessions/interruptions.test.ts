@@ -18,7 +18,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 /**
  * Sessions stopped by a network outage or a quit (#698). On 2026-10-15 the internet dropped twice while several child
  * sessions were working: the Claude children ended in `error` and needed a "continue" message by hand, and the
- * orchestrator that had started them was not told. A Codex child's interrupted turn was reported as finished, and a
+ * assistant that had started them was not told. A Codex child's interrupted turn was reported as finished, and a
  * full quit reset sessions mid-turn to `idle` with no mark in their conversation.
  */
 
@@ -291,7 +291,7 @@ describe('errors that did not end a running turn (#698)', () => {
 })
 
 describe('a turn its tool interrupted (#698)', () => {
-  it('is reported to the orchestrator as stopped before finishing, never as finished', async () => {
+  it('is reported to the Assistant as stopped before finishing, never as finished', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
@@ -407,7 +407,7 @@ describe('a turn a quit stopped (#698)', () => {
   it('a requester the same quit cut is not woken at launch: its own Continue covers its children', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    // The orchestrator was mid-turn too, waiting on its child, when the app quit
+    // The Assistant was mid-turn too, waiting on its child, when the app quit
     await a.mgr.inputs.send(parent, 'keep going while the child works')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     // Put back after this test, or every later test in the file writes its errors nowhere (#845)
@@ -432,12 +432,12 @@ describe('a turn a quit stopped (#698)', () => {
     expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')
   })
 
-  it("the orchestrator's list says which children stopped and why", async () => {
+  it("the Assistant's list says which children stopped and why", async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     const b = host()
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
-    const r = await b.mgr.runOrchestratorTool(parent, 'read_session', {})
+    const r = await b.mgr.runCentraluTool(parent, 'read_session', {})
     const row = r.text.split('\n').find((l) => l.includes(child))!
     expect(row).toContain('stopped: Centralu quit during its turn')
   })
@@ -450,7 +450,7 @@ describe('a turn a quit stopped (#698)', () => {
  * at once with two children in a turn: both turns ended, and their parent had to send each a note by hand to carry on
  */
 /*
- * #1946 (2026-11-03): a session had asked the orchestrator in the morning; the person used the orchestrator through the day, and a restart
+ * #1946 (2026-11-03): a session had asked the Assistant in the morning; the person used the Assistant through the day, and a restart
  * that cut one of the person's turns told the morning's asker its work stopped, and woke it for nothing
  */
 describe("the person's own turn a quit cut (#1946)", () => {
@@ -1093,9 +1093,9 @@ describe('the session a report names', () => {
   it('is named as read_session lists it, whichever way the turn ended', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    // A resumed conversation's name is its compaction summary's first line, which the orchestrator's list never shows
+    // A resumed conversation's name is its compaction summary's first line, which the Assistant's list never shows
     a.mgr.rename(child, 'This session is being continued from a previous conversation that ran out of context.')
-    const listed = (await a.mgr.runOrchestratorTool(parent, 'read_session', {})).text
+    const listed = (await a.mgr.runCentraluTool(parent, 'read_session', {})).text
     expect(listed).toContain('(resumed session)')
     const kid = a.claude.handles.get(child)!
     kid.answer('done')

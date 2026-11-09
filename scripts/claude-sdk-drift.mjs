@@ -53,8 +53,8 @@ const EXPORTS = [
   'query', // index.ts — the session itself
   'resolveSettings', // normal resolves the selected settings before explicitly passing its mode
   'filterEscalatingDefaultMode', // committed project settings cannot escalate the mode
-  'createSdkMcpServer', // orchestrator-mcp.ts — in-process orchestrator tools (FR-11)
-  'tool', // orchestrator-mcp.ts
+  'createSdkMcpServer', // centralu-mcp.ts — in-process Centralu tools (FR-11)
+  'tool', // centralu-mcp.ts
   'listSessions', // history.ts — feature-detected there; this makes its loss loud instead
   'getSessionMessages', // history.ts
 ]
@@ -77,7 +77,7 @@ const TYPED = [
   'pathToClaudeCodeExecutable', // bundled host cannot use the SDK's own CLI path
   'includePartialMessages',
   'mcpServers',
-  'settingSources', // [] is a security decision — orchestrator reads no files
+  'settingSources', // [] is a security decision — assistant reads no files
   'crossSessionInbound', // documented inbound refusal, independent of settings file selection (#569)
   'disallowedTools', // deny peer discovery while keeping SendMessage for this session's own subagents
   'systemPrompt',

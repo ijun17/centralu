@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
-import type { OrchestratorTools } from '../adapters/contract.js'
+import type { CentraluTools } from '../adapters/contract.js'
 import { isCentraluInputId } from '../adapters/input-receipts.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 
 /**
  * A start_agent child that ends a turn while its own background work runs has not finished (#721). On 2026-10-15 six
@@ -179,7 +179,7 @@ describe('a child that waits on its own background work (#721)', () => {
     }
     // What the caller's model reads, at rest too
     const agentSession = (opts: Parameters<typeof w.mgr.agentSession>[1]) => w.mgr.agentSession(caller, opts)
-    const read = await runOrchestratorTool({ agentSession } as unknown as OrchestratorTools, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: caller, profile: 'reader' })
+    const read = await runCentraluTool({ agentSession } as unknown as CentraluTools, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: caller, profile: 'reader' })
     expect(read.text).toContain('is not working on anything you gave it')
     expect(read.text).toContain('Its own background work is still running (pnpm verify)')
     expect(read.text).not.toContain('action="delete"')

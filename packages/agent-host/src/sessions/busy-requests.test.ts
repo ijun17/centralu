@@ -2,13 +2,13 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentAdapter, HistoryMessage, OrchestratorTools } from '../adapters/contract.js'
+import type { AgentAdapter, HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import type { PermissionPreset, ToolName } from '@cc/protocol'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { runOrchestratorTool } from './orchestrator-tools.js'
+import { runCentraluTool } from './centralu-tools.js'
 
 /**
  * Requests to a busy session (#677): when B asks A for work while A runs a turn that is not B's, Centralu does not
@@ -90,7 +90,7 @@ describe('requests to a busy session (#677)', () => {
     })
     expect(handleOf(a).sent).toHaveLength(2)
     // The model reads each choice and the call that takes it
-    const text = (await runOrchestratorTool({ agentSession: (o) => w.mgr.agentSession(b, o) } as OrchestratorTools, 'agent_session', { sessionId: a, action: 'send', text: 'more work' }, { sessionId: b, profile: 'reader' })).text
+    const text = (await runCentraluTool({ agentSession: (o) => w.mgr.agentSession(b, o) } as CentraluTools, 'agent_session', { sessionId: a, action: 'send', text: 'more work' }, { sessionId: b, profile: 'reader' })).text
     expect(text).toContain('nothing was sent')
     expect(text).toContain('ifBusy="queue"')
   })
@@ -189,8 +189,8 @@ describe('requests to a busy session (#677)', () => {
     expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued', position: 1 })
     expect(await w.mgr.askProject(asker, { project: w.target.id, session: target })).toMatchObject({ ok: true, state: 'queued' })
 
-    const orch = await w.mgr.orchestrator()
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
+    const orch = await w.mgr.assistant()
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): CentraluTools }).centraluToolsFor(orch.id)
     expect(await tools.sendToSession(target, 'and tidy up', false)).toMatchObject({ ok: true, busy: { state: 'busy' } })
     expect(await tools.sendToSession(target, 'and tidy up', false, 'queue')).toMatchObject({ ok: true, busy: { state: 'queued', position: 2 } })
 
@@ -392,11 +392,11 @@ describe('requests to a busy session (#677)', () => {
     })
   })
 
-  it('a note from send_to_session needs an auto orchestrator', async () => {
+  it('a note from send_to_session needs an auto assistant', async () => {
     const worker = await session()
     await w.mgr.inputs.send(worker, "the person's own work")
-    const orch = await w.mgr.orchestrator()
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
+    const orch = await w.mgr.assistant()
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): CentraluTools }).centraluToolsFor(orch.id)
     expect(await tools.sendToSession(worker, 'also this', false, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('auto') })
     await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' })
     expect(await tools.sendToSession(worker, 'also this', false, 'note')).toMatchObject({ ok: true, busy: { state: 'noted' } })
@@ -410,10 +410,10 @@ describe('requests to a busy session (#677)', () => {
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
     const a = started.sessionId
-    const orch = await w.mgr.orchestrator()
+    const orch = await w.mgr.assistant()
     await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' })
-    const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
-    const noted = await runOrchestratorTool(tools, 'send_to_session', { sessionId: a, text: 'also this', reportBack: true, ifBusy: 'note' }, { sessionId: orch.id, profile: 'orchestrator' })
+    const tools = (w.mgr as unknown as { centraluToolsFor(id: string): CentraluTools }).centraluToolsFor(orch.id)
+    const noted = await runCentraluTool(tools, 'send_to_session', { sessionId: a, text: 'also this', reportBack: true, ifBusy: 'note' }, { sessionId: orch.id, profile: 'assistant' })
     expect(noted.text).toContain('Another session is owed')
     expect(handleOf(a).sent.at(-1)).toBe('also this')
     handleOf(a).answer('first job done')
@@ -474,20 +474,20 @@ describe('requests to a busy session (#677)', () => {
 
     it('fork_read shares the busy session\'s folder under at most safe, and its turn reports to the requester', async () => {
       const { a, b } = await busyChild()
-      const orch = await w.mgr.orchestrator()
+      const orch = await w.mgr.assistant()
       w.mgr.setProjectTrusted(w.caller.id, true)
-      const tools = (w.mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch.id)
+      const tools = (w.mgr as unknown as { centraluToolsFor(id: string): CentraluTools }).centraluToolsFor(orch.id)
       const r = await tools.sendToSession(a, 'read the logs', false, 'fork_read')
       expect(r).toMatchObject({ ok: true, busy: { state: 'forked', forkedFrom: a } })
       const forkId = r.busy?.state === 'forked' ? r.busy.sessionId : ''
       expect(info(forkId)).toMatchObject({ forkedFrom: a, permissionPreset: 'safe', worktree: null })
       expect(handleOf(forkId).opts.cwd).toBe(w.caller.path)
-      // Its question goes to the orchestrator, which gave it the turn (#676)
+      // Its question goes to the Assistant, which gave it the turn (#676)
       handleOf(forkId).event({ type: 'question_request', sessionId: forkId, requestId: 'q-f', questions: [{ question: 'Which log?', header: '', options: [], multiSelect: false }] })
       await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('asking a question')))
       expect(await tools.readSession(forkId)).toMatchObject({ cards: [{ requestId: 'q-f', kind: 'question' }] })
       handleOf(forkId).event({ type: 'question_resolved', sessionId: forkId, requestId: 'q-f' })
-      // The orchestrator is told when the fork's turn ends, as for any work it does not wait on
+      // The Assistant is told when the fork's turn ends, as for any work it does not wait on
       handleOf(forkId).answer('logs read')
       await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The session ended its turn')))
       void b
@@ -815,13 +815,13 @@ describe('the queue delivers each request once, in turn, through restarts (#684 
     hosts.push(host)
     return { host, adapter, starts, release: () => release() }
   }
-  const toolsOf = (mgr: SessionManager, id: string) => (mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(id)
-  /** A session the person is using, with a conversation to resume, and the orchestrator's request queued behind its turn */
+  const toolsOf = (mgr: SessionManager, id: string) => (mgr as unknown as { centraluToolsFor(id: string): CentraluTools }).centraluToolsFor(id)
+  /** A session the person is using, with a conversation to resume, and the Assistant's request queued behind its turn */
   const queuedBehindThePerson = async () => {
     const a = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     handleOf(a).externalId = 'ext-a'
     await w.mgr.inputs.send(a, "the person's own work")
-    const orch = await w.mgr.orchestrator()
+    const orch = await w.mgr.assistant()
     expect(await toolsOf(w.mgr, orch.id).sendToSession(a, 'first', false, 'queue')).toMatchObject({ ok: true, busy: { state: 'queued', position: 1 } })
     return { a, orch: orch.id }
   }

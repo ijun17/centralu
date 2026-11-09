@@ -1,6 +1,6 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
-import { trustedJsonText } from '../sessions/orchestrator-tools.js'
+import { trustedJsonText } from '../sessions/centralu-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
@@ -16,13 +16,13 @@ const notRouted: RpcHandler = async (method) => {
 }
 
 /**
- * The linked machines' sessions as the hub's orchestrator reads them (#82 phase 4, docs/plans/remote-hub.md §12).
+ * The linked machines' sessions as the hub's Assistant reads them (#82 phase 4, docs/plans/remote-hub.md §12).
  *
- * Each machine answers for its own sessions with the orchestrator's own code (`host.sessions`, `host.readSession`,
+ * Each machine answers for its own sessions with the Assistant's own code (`host.sessions`, `host.readSession`,
  * `host.recall`, `LinkedHost.hostReader`), so a row, a conversation and a hit read the same from any machine. This
  * side asks every machine at once, qualifies what comes back, and names the machine on it.
  *
- * **What a machine says is fenced here, not trusted.** The orchestrator acts on this host, and a machine is the side
+ * **What a machine says is fenced here, not trusted.** The Assistant acts on this host, and a machine is the side
  * the plan treats as less trusted (§3.2): a name with a newline in it would otherwise read as one more list line of
  * ours, and an id that is not id-shaped would go back into a tool call the model makes. So names and states come as one
  * line, ids must be ids, and a conversation line that is not already one line is quoted as one. Previews and snippets
@@ -46,7 +46,7 @@ const PATH_MAX = 4096
 /**
  * A machine's path on one line, otherwise as the machine wrote it (#428): only what breaks a line goes (control
  * characters, U+2028, U+2029). A path is not a label: its runs of spaces and its joiners (a ZWJ in a folder's emoji
- * name) are part of the name, and `oneLineText` would show the orchestrator a folder that does not exist.
+ * name) are part of the name, and `oneLineText` would show the Assistant a folder that does not exist.
  */
 function onePath(value: unknown): string {
   const text = String(value ?? '').replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
@@ -94,7 +94,7 @@ function cause(err: unknown): string {
 export function linkedSessions(
   machines: () => Iterable<RoutedMachine>,
   route: RpcHandler = notRouted,
-  /** This computer, as a machine names who sent an instruction (`host.send`): the orchestrator is not that machine's own */
+  /** This computer, as a machine names who sent an instruction (`host.send`): the Assistant is not that machine's own */
   hubName?: string,
   /** How long resolving a project name waits for one machine's project list (`lookupMs`); tests shorten it */
   options: { lookupMs?: number } = {},
@@ -333,7 +333,7 @@ export function linkedSessions(
 
     updateSettings(sessionId, s) {
       return viaSession(sessionId, async (m) => {
-        // Not a session the machine hides from the hub (its orchestrator, a coordinator): a machine from before it refuses one too would change it
+        // Not a session the machine hides from the hub (its Assistant, a coordinator): a machine from before it refuses one too would change it
         if (m.hides(await rowOf(m, m.q.strip(sessionId, 'The session')))) throw new Error(`Not a session ${m.name} shares: ${sessionId}`)
         return { info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }
       })
@@ -348,7 +348,7 @@ export function linkedSessions(
       return attempt(m, async () => {
         const sessions: { id: string; name: string; state: string }[] = []
         for (const raw of await listOf(m, 'sessions.list')) {
-          // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's orchestrator or a lead
+          // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's assistant or a lead
           if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || raw.kind !== 'worker' || raw.appId) continue
           if (typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
           sessions.push({ id: m.q.id(raw.id), name: oneLine(raw.name), state: oneLine(raw.state, 40) })
@@ -573,9 +573,9 @@ export function linkedSessions(
       const at = qualifiedMachine(machines(), sessionId)
       if (!at) return null
       const m = at.machine
-      // A coordinator is read too, though the window does not show it (#1941); an orchestrator never
+      // A coordinator is read too, though the window does not show it (#1941); an Assistant never
       const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id) ?? m.unshown?.(at.id)
-      if (!isObj(s) || s.kind === 'orchestrator') return null
+      if (!isObj(s) || isAssistantKind(s.kind)) return null
       if (typeof s.projectId !== 'string') return { trusted: true }
       const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
       return { trusted: isObj(p) && p.trusted === true }

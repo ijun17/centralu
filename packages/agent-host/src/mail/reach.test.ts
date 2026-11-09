@@ -28,7 +28,7 @@ describe('trust (§7.2)', () => {
 })
 
 describe('who may write to whom (§7.1)', () => {
-  it('lets a session write to a session here, the person and the orchestrator, and the person and Centralu write to a session', () => {
+  it('lets a session write to a session here, the person and the Assistant, and the person and Centralu write to a session', () => {
     const { reach } = world()
     expect(reach.mayWrite(A, B)).toBeNull()
     expect(reach.mayWrite(A, C)).toBeNull()
@@ -66,8 +66,8 @@ describe('who may write to whom (§7.1)', () => {
     const reach = mailReach({
       hostId: 'hub-aaaaaaaa',
       session: (id) => (id === 'a' || id === 'b' ? { projectId: 'p1', askedBy: null, here: true, canReadMail: true, host: 'here' } : undefined),
-      orchestratorId: () => null,
-      orchestratorAsks: () => true,
+      assistantId: () => null,
+      assistantAsks: () => true,
       appCalledBy: (_app, session) => session === 'a',
       project: () => ({ trusted: true }),
       askGroupMembers: () => [],
@@ -77,10 +77,10 @@ describe('who may write to whom (§7.1)', () => {
     expect(reach.mayWrite(app, PERSON)).toBe('not_allowed')
   })
 
-  it('refuses a request to the orchestrator while its tool cannot put each step to the person, but not an answer or the orchestrator’s own word', () => {
+  it('refuses a request to the Assistant while its tool cannot put each step to the person, but not an answer or the Assistant’s own word', () => {
     const { reach, state } = world()
     state.asks = false
-    expect(reach.mayWrite(A, ORC)).toBe('orchestrator_asks')
+    expect(reach.mayWrite(A, ORC)).toBe('assistant_asks')
     expect(reach.mayWrite(A, ORC, false)).toBeNull()
     expect(reach.mayWrite(ORC, A)).toBeNull()
     expect(reach.mayWrite(A, B)).toBeNull()
@@ -90,7 +90,7 @@ describe('who may write to whom (§7.1)', () => {
 })
 
 describe('the one hold (§7.4)', () => {
-  it('an untrusted project’s session to another project’s session and to the orchestrator is held policy; to its own project and to the person it is not', () => {
+  it('an untrusted project’s session to another project’s session and to the Assistant is held policy; to its own project and to the person it is not', () => {
     const { reach } = world()
     const m = message(X, 'px')
     expect(reach.holdFor(m, C)).toBe('policy')
@@ -124,7 +124,7 @@ describe('the one hold (§7.4)', () => {
     expect(reach.refusesDelegation('x', { projectId: 'p2' })).toBe('px')
     expect(reach.refusesDelegation('x', { projectId: 'px' })).toBeNull()
     expect(reach.refusesDelegation('x', { projectId: null })).toBe('px')
-    expect(reach.refusesDelegation('x', { orchestrator: true })).toBe('px')
+    expect(reach.refusesDelegation('x', { assistant: true })).toBe('px')
     expect(reach.refusesDelegation('x', { linked: true })).toBe('px')
     // A trusted caller, a caller with no project and a caller nobody knows are never refused
     expect(reach.refusesDelegation('a', { sessionId: 'c' })).toBeNull()
@@ -145,11 +145,11 @@ describe('the one hold (§7.4)', () => {
 })
 
 describe('what the service reads of a session', () => {
-  it('knows the orchestrator, a session’s project, parent and name, and its group', () => {
+  it('knows the Assistant, a session’s project, parent and name, and its group', () => {
     const { reach } = world()
-    expect(reach.isOrchestrator(ORC)).toBe(true)
-    expect(reach.isOrchestrator(A)).toBe(false)
-    expect(reach.isOrchestrator(PERSON)).toBe(false)
+    expect(reach.isAssistant(ORC)).toBe(true)
+    expect(reach.isAssistant(A)).toBe(false)
+    expect(reach.isAssistant(PERSON)).toBe(false)
     expect(reach.projectOf(W)).toBe('p1')
     expect(reach.projectOf(ORC)).toBeNull()
     expect(reach.projectOf(PERSON)).toBeNull()
@@ -167,7 +167,7 @@ describe('what the service reads of a session', () => {
     const other = sessionAddress('hub-bbbbbbbb', 'a')
     expect(reach.projectOf(other)).toBeNull()
     expect(reach.labelOf(other)).toBe(other)
-    expect(reach.isOrchestrator(sessionAddress('hub-bbbbbbbb', 'orc'))).toBe(false)
+    expect(reach.isAssistant(sessionAddress('hub-bbbbbbbb', 'orc'))).toBe(false)
     expect(reach.mayWrite(A, other)).toBe('elsewhere')
     expect(reach.mayWrite(PERSON, other)).toBe('elsewhere')
     expect(reach.mayWrite(other, A)).toBe('gone')
