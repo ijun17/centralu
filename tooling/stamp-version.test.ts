@@ -20,6 +20,7 @@ import { holdStamp, runSteps, stampedFiles, stampVersion, versionOnlyDirt } from
 import { verifyThenStamp, withoutVersion } from '../scripts/release-verify.mjs'
 // @ts-expect-error — as above
 import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
+import { bundleInfoText } from '../packages/agent-host/scripts/bundle-host.mjs'
 
 const dirs: string[] = []
 const temp = () => {
@@ -251,11 +252,17 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
     expect(buildId(root)).toBe(sha)
     writeFileSync(join(root, 'notes.txt'), 'x\n')
     expect(buildId(root)).toBe(`${sha}-dirty`)
-    // bundle.mjs bakes that id into the host and its bundle record, from the repository root
+    // The bundle record states the id it is given as its commit (called, not read: no esbuild)
+    const info = JSON.parse(bundleInfoText({ root: resolve('.'), buildId: `${sha}-dirty` })) as { commit: string }
+    expect(info.commit).toBe(`${sha}-dirty`)
+    // bundle.mjs works the id out from the repository root and hands that one id to both, host script and record
     const bundle = readFileSync(resolve('packages/agent-host/scripts/bundle.mjs'), 'utf8')
     expect(bundle).toContain("import { buildId } from './build-id.mjs'")
     expect(bundle).toContain('const BUILD_ID = buildId(ROOT)')
-    expect(bundle).toContain('__CC_BUILD__: JSON.stringify(BUILD_ID)')
-    expect(bundle).toContain('commit: BUILD_ID,')
+    expect(bundle).toContain('buildId: BUILD_ID })')
+    expect(bundle.match(/buildId: BUILD_ID/g)).toHaveLength(2)
+    // The host script bakes the id it is given (bundling it needs esbuild, so this one is read)
+    const host = readFileSync(resolve('packages/agent-host/scripts/bundle-host.mjs'), 'utf8')
+    expect(host).toContain('__CC_BUILD__: JSON.stringify(buildId)')
   })
 })

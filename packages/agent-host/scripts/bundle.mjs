@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { CONPTY_FILES } from '../../../scripts/conpty-files.mjs'
 import { buildId } from './build-id.mjs'
 import { bundleOutFolder } from './bundle-out.mjs'
+import { bundleHostScript, bundleInfoText } from './bundle-host.mjs'
 
 const require = createRequire(import.meta.url)
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -38,28 +39,7 @@ mkdirSync(OUT, { recursive: true })
 // The commit this build is from, not dirty for a stamped version alone (build-id.mjs)
 const BUILD_ID = buildId(ROOT)
 
-await build({
-  entryPoints: [join(ROOT, 'packages/agent-host/src/main.ts')],
-  outfile: join(OUT, 'main.mjs'),
-  bundle: true,
-  platform: 'node',
-  target: 'node22',
-  format: 'esm',
-  external: ['better-sqlite3', 'node-pty'],
-  // Resolves the workspace alias to source (bundles directly, without a build step)
-  alias: {
-    '@cc/protocol': join(ROOT, 'packages/protocol/src/index.ts'),
-    '@cc/common': join(ROOT, 'packages/common/src/index.ts'),
-  },
-  define: {
-    __CC_BUILD__: JSON.stringify(BUILD_ID),
-  },
-  banner: {
-    // Lets the ESM bundle load a CJS dependency (better-sqlite3) via require
-    js: "import { createRequire as __cr } from 'node:module';const require = __cr(import.meta.url);",
-  },
-  logLevel: 'warning',
-})
+await bundleHostScript({ root: ROOT, outfile: join(OUT, 'main.mjs'), buildId: BUILD_ID })
 
 // 2) Bundle the schema — store.ts checks next to the build output first
 cpSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(OUT, 'schema.sql'))
@@ -236,44 +216,8 @@ if (existsSync(helper)) {
  * which is the case that actually came up — a `.app` had to be identified without launching
  * it, and the fallback was matching binary mtimes against commit times. That is a guess.
  */
-/*
- * `protocolVersion` is the WebSocket protocol the bundled host speaks. The keeper (#280) records
- * it for each host it runs, so a window can see that a running host from another build speaks a
- * different protocol before it tries to talk to it. Read from the source rather than imported:
- * this script runs on plain Node, and the constant lives in TypeScript.
- */
-function protocolVersion() {
-  const src = readFileSync(join(ROOT, 'packages/protocol/src/envelope.ts'), 'utf8')
-  const m = /export const PROTOCOL_VERSION = (\d+)/.exec(src)
-  if (!m) throw new Error('could not find PROTOCOL_VERSION in packages/protocol/src/envelope.ts')
-  return Number(m[1])
-}
-
-writeFileSync(
-  join(OUT, 'bundle-info.json'),
-  JSON.stringify(
-    {
-      commit: BUILD_ID,
-      protocolVersion: protocolVersion(),
-      // The host answers a `prove` before hello (#838): `centralu serve` reads this to say `proof` in the connection line
-      hostProof: 1,
-      // The host takes its token as the first line on stdin (#538): a keeper hands it over there instead of in the environment
-      tokenOnStdin: 1,
-      // The host checks full credentials against serve.json's verifiers, given its key on stdin (#1405): the `centralu serve` of
-      // 0.1.0-beta.45 reads this to hand it the key and make each full credential at --pair, rather than keep one token for it
-      verifiers: 1,
-      // The host signs a key `prove` and takes a hub's key hello (#1711): `centralu serve --pair-key` reads this to report the
-      // key a host started next signs with when none runs
-      keyPairing: 1,
-      builtAt: new Date().toISOString(),
-      runtime: 'system-node',
-      platform: process.platform,
-      arch: process.arch,
-    },
-    null,
-    2,
-  ) + '\n',
-)
+// `protocolVersion` and the rest: bundle-host.mjs, which a test that starts the host as it ships reads too (#2144)
+writeFileSync(join(OUT, 'bundle-info.json'), bundleInfoText({ root: ROOT, buildId: BUILD_ID }))
 
 /*
  * The Node a remote runs (docs/plans/remote-hub.md §10.3): the version and the SHA-256 of each
