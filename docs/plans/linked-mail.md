@@ -87,7 +87,7 @@ withdraws the offer (`on: false` without `mail`) whatever its switch, so the mac
 | The hub answers "Unknown method" (it offered asks, not mail: a release from before this) | `older`: `<hub> runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` |
 | The recorded hub answers `not_yours`: it no longer knows the session as its child, as when its parent there was archived or deleted, which forgets the parent's children | `gone`: `<hub> no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.` |
 | The hub answers an error of its own (too many calls at once, a call it does not read) | `refused`: `<hub> refused the message: <its words>. Nothing was written there.` The server marks an answered error (`peerAnswer`), so it is told from a lost call, which has the same code |
-| The call fails with no answer (link dropped mid-call, 30 s without an answer) | `link_down`: `the link to <hub> failed during the send (<error>), so it is not known whether the message arrived. If you send it again and it did, <hub> refuses the second one as a repeat.` |
+| The call fails with no answer (link dropped mid-call, 30 s without an answer) | `link_down`: `the link to <hub> failed during the send (<error>), so it is not known whether the message arrived. Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.` |
 | The hub refuses it (its own rules: the parent gone, `repeat`, a body too long) | The hub's reason and words |
 
 The last case is the one where a resend may meet the `repeat` guard on the hub: the message did arrive. The refusal
@@ -152,6 +152,20 @@ guards, the sender being a session that is `elsewhere` and alive) and answers wi
 then does the sender's host write **its copy**: the same message id, the sender's own message, with one recipient row
 for the foreign address, written as delivered at hand-over so this host's delivery never tries it
 (`MessageService.sentAcross`). A refused or failed call writes nothing, so `repeat` never counts it.
+
+**An answer that was lost.** The sender's host picks the message id (`id`, additive) and keeps the send as unsure until
+the other host answers. When the call fails after it may have arrived (the link dropped mid-call, 30 s without an
+answer), the other host may have written it and this one has no copy. Then:
+
+- a second send of the same words by the same session goes under the same id, which the recipient's host takes as the
+  message it has, answering as for the first; the copy is written then;
+- the recipient's row, pushed at the next change or connect, or a reply to it, has the sender's host keep the copy at
+  once, so the reply is taken;
+- unsure sends are kept in memory, 24 hours and 500 at most. After a restart a reply to such a message is refused
+  `unknown_message`, with words that say it most likely arrived while the link failed, and to send the answer again
+  as a new message.
+
+A host from before this ignores `id`, and a second send there is refused `repeat` as before.
 
 **A reply** is a send to the original sender, with `replyTo`. The original message is on both hosts under the same id
 (the recipient's message and the sender's copy), so the recipient's host of the reply finds it, settles its own row as

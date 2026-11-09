@@ -78,6 +78,11 @@ export const HubMailParams = z.object({
    * machine's, never as its own Centralu's, and only to a session that sent mail to one of that machine's sessions
    */
   notice: z.boolean().optional(),
+  /**
+   * The message's id, picked by the sending host (#2067 review, additive): the recipient's host writes it under that id and
+   * takes a second send of it as the one it has, so a send whose answer was lost can be sent again, or its copy kept later
+   */
+  id: z.string().min(1).max(200).optional(),
 })
 export type HubMailParams = z.infer<typeof HubMailParams>
 /**
@@ -104,6 +109,8 @@ export const HostMailParams = z.object({
   urgent: z.boolean().optional(),
   replyTo: z.string().min(1).max(200).optional(),
   notice: z.boolean().optional(),
+  /** As `HubMailParams.id` */
+  id: z.string().min(1).max(200).optional(),
 })
 export type HostMailParams = z.infer<typeof HostMailParams>
 /**

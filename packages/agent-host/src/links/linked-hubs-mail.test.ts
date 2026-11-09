@@ -79,7 +79,7 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
   const across = (hubs: LinkedHubs, started: { id: string; name: string } | null) => {
     const a = new MailAcross({
       hostId: 'hub-0000000f',
-      service: { sessionAddress: (id: string) => `session:hub-0000000f/${id}` } as never,
+      service: { sessionAddress: (id: string) => `session:hub-0000000f/${id}`, mintId: () => 'hub-0000000f.m_01JX0000000000000000000000' } as never,
       records: {} as never,
       reach: { labelOf: () => 'child', projectOf: () => null, untrusted: () => false, projectLabel: (p) => p },
       ownEntries: () => [],
@@ -95,7 +95,8 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
     offer(hubs, { client: 7 })
     offer(hubs, { client: 8, ...LAPTOP })
     expect(await across(hubs, LAPTOP)('hello')).toEqual({ ok: true, messageId: 'msg-1', to: 'h1', address: '', computer: 'Laptop' })
-    expect(calls).toEqual([{ client: 8, params: { sessionId: 'c1', name: 'child', text: 'hello', needsReply: false } }])
+    // The id is this computer's: a second send of the same words after a lost answer goes under it (#2067 review)
+    expect(calls).toEqual([{ client: 8, params: { sessionId: 'c1', name: 'child', text: 'hello', needsReply: false, id: 'hub-0000000f.m_01JX0000000000000000000000' } }])
     // Another hub being down does not stand in the way, nor is it named
     hubs.gone(7)
     expect(await across(hubs, LAPTOP)('again')).toMatchObject({ ok: true, computer: 'Laptop' })
@@ -126,14 +127,14 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
     expect(await across(hubs, MAC)('hello')).toEqual({
       ok: false,
       why: 'link_down',
-      text: 'the link to Hub mac failed during the send (the connection closed), so it is not known whether the message arrived. If you send it again and it did, Hub mac refuses the second one as a repeat.',
+      text: 'the link to Hub mac failed during the send (the connection closed), so it is not known whether the message arrived. Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.',
     })
     // An error the hub answered itself: it was there, and whether it wrote before the error cannot be told, so nothing is promised
     answer.fn = () => Promise.reject(peerAnswer(rpcError('Too many calls at once; try again shortly', 'internal', { retryable: true })))
     expect(await across(hubs, MAC)('hello')).toEqual({
       ok: false,
       why: 'refused',
-      text: 'Hub mac answered the send with an error: Too many calls at once; try again shortly. It may not have taken the message; if it did, sending it again is refused there as a repeat.',
+      text: 'Hub mac answered the send with an error: Too many calls at once; try again shortly. It may not have taken the message. Send it again with the same words: if it did arrive, it is not written there twice, and this computer keeps its copy then.',
     })
     // The same error that no one answered (a timeout, a closed connection) stays a lost link
     answer.fn = () => Promise.reject(rpcError('The other side did not answer hub.mail in time', 'internal', { retryable: true }))

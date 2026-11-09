@@ -5,6 +5,7 @@ import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
 import { sessionAddress } from '../mail/address.js'
 import { MailAcross } from '../mail/across.js'
+import { mailPeers } from './mail-peers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -266,5 +267,55 @@ describe('what became of crossing mail is told after the link or the host was aw
     later.usePeers({ selfName: () => 'Remote box', hub: () => peer, hubs: () => [peer] })
     await later.sync()
     expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, recipient: at(hub, 'm1.w1'), settled: 'done' })] } }])
+  })
+})
+
+describe('a send that arrived but whose answer was lost (#2067 review)', () => {
+  /** The hub's mail across, whose next `host.mail` reaches the machine and then loses the machine's answer */
+  function losesNextAnswer(hub: Hub) {
+    const real = mailPeers({ hostId: hub.id, selfName: () => hub.name, machines: hub.links })
+    let lose = true
+    hub.mail!.across.usePeers({
+      ...real,
+      machine: (id) => {
+        const m = real.machine!(id)
+        return m && { ...m, call: async (method: string, params: unknown) => {
+          const r = await m.call(method, params)
+          if (method === 'host.mail' && lose) {
+            lose = false
+            throw new Error('The link is closed before the machine answered; it may or may not have done this')
+          }
+          return r
+        } }
+      },
+    })
+  }
+
+  it('keeps no second message when sent again, and the copy is kept here', async () => {
+    const { machine, hub } = await rig()
+    losesNextAnswer(hub)
+    const first = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'did this arrive?' })
+    expect(first).toEqual({ text: expect.stringMatching(/^Refused \(link_down\): the link to Remote box failed during the send .*Send it again with the same words: if it did arrive, it is not written there twice/), isError: true })
+    const again = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'did this arrive?' })
+    expect(again.text).toMatch(/^Sent /)
+    expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 }).map((m) => m.body)).toEqual(['did this arrive?'])
+    expect(hub.store.mailbox.recipient(idOf(again), at(hub, 'm1.w1'))).toBeDefined()
+  })
+
+  it("the recipient's reply goes through, and the sender keeps its copy of what it answers", async () => {
+    const { machine, hub } = await rig()
+    losesNextAnswer(hub)
+    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'which port?' })).isError).toBe(true)
+    const [question] = machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })
+    const reply = await tool(machine, 'w1', { action: 'reply', thread: question!.id, text: '8080' })
+    expect(reply.text).toMatch(/^Sent /)
+    expect(hub.store.mailbox.message(question!.id)).toMatchObject({ sender: at(hub, 'h1'), body: 'which port?' })
+    expect(hub.store.mailbox.message(idOf(reply))).toMatchObject({ replyTo: question!.id, body: '8080' })
+  })
+
+  it('a reply to a message this side has no record of says what most likely happened', async () => {
+    const { hub } = await rig()
+    const r = await hub.mail!.across.fromMachine({ id: 'm1', name: 'Remote box' }, { sessionId: 'w1', to: at(hub, 'h1'), text: '8080', replyTo: `${hub.id}.m_01JX0000000000000000000000` })
+    expect(r).toEqual({ ok: false, why: 'unknown_message', text: expect.stringMatching(/most likely reached you while the link failed during its sending.*Send your answer again as a new message/) })
   })
 })

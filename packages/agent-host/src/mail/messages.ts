@@ -70,6 +70,8 @@ export type SendInput = {
   via?: readonly (string | null)[]
   /** A request to the Assistant cites the person's newest message in the sender's conversation as their word for it (docs/plans/cited-requests.md) */
   cite?: boolean
+  /** The id another host picked for a message it sends here (#2067 review, `MailAcross`); a new one of this host's when absent */
+  id?: string
 }
 /**
  * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the Assistant cites, checked.
@@ -289,7 +291,7 @@ export class MessageService {
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
-        { sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
+        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -303,6 +305,11 @@ export class MessageService {
       }
       return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
     })
+  }
+
+  /** A new message id of this host's, for a message another host writes first (#2067 review, `MailAcross.send`) */
+  mintId(): string {
+    return messageIdOf(this.opts.hostId, this.ulids.next(this.now()))
   }
 
   /**
