@@ -391,22 +391,28 @@ project of a hub that turned the machine's switch on (Settings → Machines ther
 the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
 ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
 answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
-machine (`reverseCalls`) but mail from the sessions it started there.
+machine (`reverseCalls`) but mail (`hub.mail`, `hub.mailRows`, `hub.find`; below).
 
-**Mail to the parent on a hub** (#2067 item 1, [plans/linked-mail.md](plans/linked-mail.md)). A session a hub started
-here (`startedFromHub`, no parent of its own) that sends `mail` to `parent` reaches the session there that started it:
-the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on the hub recorded when the
-session was created (`started_from_hub_by:`, from the connection `agents.createSession` came in on) and on no other; a
-session with no record is refused (`elsewhere`). That hub offered mail (`host.hubOffer`'s `mail`, sent whatever the
-asks switch says), and writes the message
-with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
-labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names, and
-always as a note: no reply or "no longer watched" notice reaches the child before item 2, so none is awaited. Nothing
-is written on this host. A send with `cite` (refused: the hub cannot check the person's message here), a body over
-local mail's limit (`too_long`, refused here before the call), a link that is down,
-a hub from before it (`older`), no hub that started it, an error the hub answered (`refused`, told from a lost call by
-the server's `peerAnswer` mark) or a refusal of the hub's own rules is said at once with its reason and written nowhere,
-so the same text may be sent again; only a call that gets no answer says it is not known whether the message arrived.
+**Mail across linked machines** (#2067, [plans/linked-mail.md](plans/linked-mail.md)). Every session mails every
+other, on this computer or on one linked to it, both ways (owner decision 2026-11-09; `mayReachAcross`, mail/across.ts,
+allows every pair, and the asks switch is not read). The tool (`MailTool.call`) sends a message for another computer's
+session by one call to that computer (`MailAcross.send`): a machine calls the hub (`hub.mail`, on the connection the hub
+offered on), a hub calls the machine (`host.mail`), and mail between two machines goes through the hub. The recipient's
+host writes it with its own send, its checks and guards, and answers with the message id; only then does the sender's
+host keep a copy under the same id (`MessageService.sentAcross`), which its delivery never tries. Each change to a row
+of such a message is pushed to the other side (`*.mailRows`, merged forward only: the recipient's host decides
+delivered, read, answered and released, the sender's host withdrawn), and a Centralu notice to a session on the other
+side (the "no longer watched" notice) is passed on as a notice. Addresses on the wire are the hub's
+(`session:<hub id>/<machine id>.<id>` for a machine's session); a machine reads its own by the id the hub's offer gives
+it (`you`). `parent` of a session a hub started here goes to the hub recorded when the session was created
+(`started_from_hub_by:`, from the connection `agents.createSession` came in on, or from that connection's first offer
+when the session came before it), which finds the parent in its own record. A link that is down, a computer from before
+it (`older`), an untrusted project (`untrusted_project`: nothing waits for the person across a link), `cite`, a body over
+the limit or a refusal of the other computer's rules is said at once and written nowhere, so the same text may be sent
+again; only a call that gets no answer says it is not known whether the message arrived. `mail find` searches the
+sessions of every computer reached (the hub's own list and its mirrors of its machines; on a machine, each hub's
+`hub.find` too), ranked, at most 8 lines, and `mail send` with a name looks across machines as well, refusing a name
+found more than once with every candidate's address.
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 

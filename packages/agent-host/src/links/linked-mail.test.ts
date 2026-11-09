@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
-import type { RemoteAgent } from '../sessions/remote-agents.js'
+import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey, startingHub } from '../sessions/hub-preset.js'
-import { addressOf } from '../sessions/host-mail.test-helpers.js'
+import { sessionAddress } from '../mail/address.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -21,15 +21,18 @@ const child = (sessionId: string, callerId = 'h1'): RemoteAgent => ({ sessionId:
 type Hub = Awaited<ReturnType<typeof hubHost>>
 type Machine = Awaited<ReturnType<typeof machineHost>>
 
+/** A session's address on the host it is on (each host's mail has its own id, `hubSelfId`) */
+const at = (host: Hub | Machine, sessionId: string) => sessionAddress(host.id, sessionId)
+
 /** Messages a session sent, by its address on that host */
-const sentBy = (host: Hub | Machine, sessionId: string) => host.store.mailbox.postsSince(addressOf(sessionId), 0)
+const sentBy = (host: Hub | Machine, sessionId: string) => host.store.mailbox.postsSince(at(host, sessionId), 0)
 
 /** What the hub's parent `h1` was sent by the child, with its row */
 function received(hub: Hub, childId = 'c1') {
   return hub.store.mailbox
-    .feedOf(addressOf('h1'), { limit: 50 })
-    .filter((m) => m.sender === addressOf(`m1.${childId}`))
-    .map((m) => ({ body: m.body, needsReply: m.needsReply, row: hub.store.mailbox.recipient(m.id, addressOf('h1')) }))
+    .feedOf(at(hub, 'h1'), { limit: 50 })
+    .filter((m) => m.sender === at(hub, `m1.${childId}`))
+    .map((m) => ({ body: m.body, needsReply: m.needsReply, row: hub.store.mailbox.recipient(m.id, at(hub, 'h1')) }))
 }
 
 /** Whether the machine has heard the hub's offer (its mail too) */
@@ -57,19 +60,21 @@ const send = (machine: Machine, text: string, more: { kind?: string; urgent?: bo
   machine.mail!.hooks.tool!(more.from ?? 'c1', { action: 'send', to: more.to ?? 'parent', text, ...(more.kind ? { kind: more.kind } : {}), ...(more.urgent ? { urgent: true } : {}), ...(more.cite ? { cite: true } : {}) })
 
 describe('parent from a session a hub started on a linked machine (#2067 item 1)', () => {
-  it('reaches the session that started it on the hub, written there once and nowhere here, with the asks switch off', async () => {
+  it('reaches the session that started it on the hub, written there, with a copy here under the same id, with the asks switch off', async () => {
     const { machine, hub } = await rig()
     expect(hub.machine().asks).toEqual({ on: false, note: null })
     const r = await send(machine, 'the build is green', { urgent: true })
-    expect(r).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac, as a note, which asks for no reply there\. Its answer reaches you as a new turn, not as mail\.$/) })
-    expect(received(hub)).toEqual([{ body: 'the build is green', needsReply: false, row: expect.objectContaining({ recipient: addressOf('h1') }) }])
+    expect(r).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac\. It waits for a reply; the reply will reach you as mail\./) })
+    // A question asks for a reply there now that a reply reaches the machine (#2067 item 2)
+    expect(received(hub)).toEqual([{ body: 'the build is green', needsReply: true, row: expect.objectContaining({ recipient: at(hub, 'h1') }) }])
     // The id the child was told is the hub's message
     const id = /^Sent (\S+) /.exec(r.text)![1]!
-    expect(hub.store.mailbox.message(id)).toMatchObject({ sender: addressOf('m1.c1'), body: 'the build is green' })
+    expect(hub.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'm1.c1'), body: 'the build is green' })
     // The parent reads the child by its name on its machine, not by an address
-    expect(hub.mail!.service.labelOf(addressOf('m1.c1'))).toBe('c1 on Remote box')
-    // Nothing was written on the machine
-    expect(sentBy(machine, 'c1')).toBe(0)
+    expect(hub.mail!.service.labelOf(at(hub, 'm1.c1'))).toBe('c1 on Remote box')
+    // The machine keeps its copy, under the hub's id, to the parent's address there
+    expect(machine.store.mailbox.message(id)).toMatchObject({ sender: at(machine, 'c1'), body: 'the build is green' })
+    expect(machine.store.mailbox.recipient(id, at(hub, 'h1'))).toBeDefined()
     // The hub's own guards hold for it: the same words again within the window are a repeat there
     expect(await send(machine, 'the build is green')).toEqual({ text: expect.stringMatching(/^Refused \(repeat\): you sent the same text to h1 less than/), isError: true })
     // A note is a note there too
@@ -97,12 +102,6 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     expect(await send(machine, 'y'.repeat(16_001))).toMatchObject({ text: expect.stringMatching(/^Refused \(too_long\)/) })
     expect(hub.heard).toEqual([])
     expect(await send(machine, 'z'.repeat(16_000))).toMatchObject({ text: expect.stringMatching(/^Sent /) })
-    // The hub was there and answered an error of its own (here a call it does not read): it took nothing, and says why
-    expect(await machine.hubs.mail('c1', { id: hub.id, name: hub.name }, { text: '' })).toEqual({
-      ok: false,
-      why: 'refused',
-      text: 'Hub mac refused the message: Not a message this computer reads. Nothing was written there.',
-    })
     expect(received(hub).map((m) => m.body.length)).toEqual([16_000])
   })
 
@@ -125,9 +124,12 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     const r = await call
     if (!r.ok) throw new Error(r.error)
     const childId = r.sessionId.replace(/^m1\./, '')
+    // The machine said at the offer that it takes mail from the hub: the child's task says to mail its parent (#2067 item 2)
+    const sent = (JSON.parse(hub.store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]') as { sent?: string }[]).map((a) => a.sent ?? '')
+    expect(sent).toEqual([expect.stringContaining('call mail with `to: "parent"`')])
     // The machine recorded the hub from the connection the start came in on, and the hub recorded its parent
     expect(startingHub(machine.store.settings, childId)).toEqual({ id: hub.id, name: 'Hub mac' })
-    expect(await send(machine, 'done: hello said', { from: childId })).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac, /) })
+    expect(await send(machine, 'done: hello said', { from: childId })).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac\. /) })
     expect(received(hub, childId).map((m) => m.body)).toEqual(['done: hello said'])
     // Git checkouts and a card: room for a loaded machine, as links.test.ts gives its start_agent rig
   }, 60_000 * SLOW)
@@ -171,8 +173,8 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     await eventually(() => offered(machine, 2))
     startedBy(machine, 'c1', a)
     startedBy(machine, 'c2', b)
-    expect((await send(machine, 'from c2', { from: 'c2' })).text).toMatch(/ on Laptop, /)
-    expect((await send(machine, 'from c1')).text).toMatch(/ on Hub mac, /)
+    expect((await send(machine, 'from c2', { from: 'c2' })).text).toMatch(/ on Laptop\. /)
+    expect((await send(machine, 'from c1')).text).toMatch(/ on Hub mac\. /)
     expect(received(a).map((m) => m.body)).toEqual(['from c1'])
     expect(received(b, 'c2').map((m) => m.body)).toEqual(['from c2'])
     expect(a.heard.map((p) => p.text)).toEqual(['from c1'])

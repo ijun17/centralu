@@ -105,6 +105,11 @@ export type MailDeliveryOptions = {
   crowdOver?: number
   /** Sleeping sessions resumed at once, after such a stop */
   resumeAtOnce?: number
+  /**
+   * Whether an address is a session on another host (#2067 item 2): its mail is the link's to carry, and this delivery never
+   * tries it (a notice there is passed on by `MailAcross`, a sent copy is written delivered)
+   */
+  across?: (address: string) => boolean
 }
 
 const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2, warnPairTurns: WARN_PAIR_TURNS_PER_HOUR, warnHostTurns: WARN_HOST_TURNS_PER_HOUR }
@@ -112,7 +117,8 @@ const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_00
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'across'>>
+  private readonly across: ((address: string) => boolean) | undefined
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
   private readonly turns: MailTurns | undefined
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
@@ -156,7 +162,8 @@ export class MailDelivery {
       })
     this.heartbeat = opts.heartbeat
     this.turns = opts.turns
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns')) }
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'across')) }
+    this.across = opts.across
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -236,7 +243,8 @@ export class MailDelivery {
     }
     this.lastSweepAt = now
     this.moveOnWorkOfGoneSessions()
-    const recipients = this.records.dueRecipients()
+    const across = this.across
+    const recipients = across ? this.records.dueRecipients().filter((r) => !across(r)) : this.records.dueRecipients()
     if (this.catchUpPending) {
       this.catchUpPending = false
       await this.catchUp(recipients)

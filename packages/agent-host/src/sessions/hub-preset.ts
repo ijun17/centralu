@@ -37,6 +37,11 @@ export const startedFromHubKey = (sessionId: string) => `started_from_hub:${sess
  */
 export const startedByHubKey = (sessionId: string) => `started_from_hub_by:${sessionId}`
 
+/** Records the hub that started a session here (`startedByHubKey`): at its creation, or when that hub offers after it (`LinkedHubs.awaitOffer`) */
+export function recordStartingHub(settings: { setAppSetting(key: string, value: string): void }, sessionId: string, hub: { id: string; name: string }): void {
+  settings.setAppSetting(startedByHubKey(sessionId), JSON.stringify({ id: hub.id, name: hub.name }))
+}
+
 /** The hub that started a session here (`startedByHubKey`), or null when none was recorded or the record does not read as one */
 export function startingHub(settings: { appSetting(key: string): string | null }, sessionId: string): { id: string; name: string } | null {
   const raw = settings.appSetting(startedByHubKey(sessionId))

@@ -201,6 +201,9 @@ type TurnWait = { busy: boolean; done: Promise<Step>; end(step: Step): void }
  * own evidence. What does not pass gets the fact and the state word.
  */
 export class RemoteAgents {
+  /** Whether a machine takes mail from this hub (`LinkedMachineConnection.takesMail`, #2067 item 2): its children's task then says to mail. Set by main.ts */
+  machineMail: ((machineId: string) => boolean) | null = null
+
   private loaded: RemoteAgent[] | null = null
   private readonly waits = new Map<string, TurnWait>()
   /** Children whose parent was told their link dropped, until it is back */
@@ -532,7 +535,7 @@ export class RemoteAgents {
      * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
      * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
      */
-    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target))
+    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target), this.machineMail?.(machine.id) === true)
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),

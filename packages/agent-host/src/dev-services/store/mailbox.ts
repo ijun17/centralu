@@ -727,6 +727,66 @@ export class MailboxRecords {
     })
   }
 
+  // ── Across a link (#2067 item 2, docs/plans/linked-mail.md §6) ──
+
+  /**
+   * The rows of messages that crossed a link, with each message's sender: a row whose recipient or whose message's sender is
+   * on another host (`session:<other host>/…`, or this host's id with a dotted session id: a linked machine's session as a
+   * hub names it). Only those still open, or settled or released since `since`: what the other side may not have heard yet
+   */
+  acrossRows(ownHost: string, since: number): (RecipientRow & { sender: string })[] {
+    const own = `session:${ownHost}/%`
+    const dotted = `session:${ownHost}/%.%`
+    const foreign = (x: string) => `(${x} LIKE 'session:%' AND (${x} NOT LIKE @own OR ${x} LIKE @dotted))`
+    return this.db
+      .prepare<{ own: string; dotted: string; since: number }, RecipientSql & { sender: string }>(
+        `SELECT r.*, m.sender AS sender FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE (${foreign('r.recipient')} OR ${foreign('m.sender')})
+            AND (r.settled IS NULL OR r.settled_at >= @since OR r.released_at >= @since)
+          ORDER BY m.created_at, m.id`,
+      )
+      .all({ own, dotted, since })
+      .map((r) => ({ ...toRecipient(r), sender: r.sender }))
+  }
+
+  /**
+   * What the other side of a link knows of a row of a message that crossed, merged forward only (§6). `copy`: this host
+   * sent the message and keeps a copy, and takes from the recipient's host when it was delivered and read, how it was
+   * settled and with which answer, and its release, which the recipient's host already told the sender of. `recipient`:
+   * the row is this host's own recipient's, and takes only a withdrawal, which is the sender's to make. Returns whether
+   * anything changed
+   */
+  mergeAcross(
+    row: { messageId: string; recipient: string; deliveredAt: number | null; readAt: number | null; settled: string | null; settledAt: number | null; answerId: string | null; releasedAt: number | null; releasedWhy: string | null },
+    side: 'copy' | 'recipient',
+  ): boolean {
+    if (side === 'recipient') {
+      if (row.settled !== 'withdrawn') return false
+      return this.settle(row.messageId, row.recipient, 'withdrawn', row.settledAt ?? Date.now()) > 0
+    }
+    return (
+      this.db
+        .prepare(
+          `UPDATE mail_recipients SET
+             delivered_at = COALESCE(@deliveredAt, delivered_at),
+             read_at = COALESCE(read_at, @readAt),
+             settled = COALESCE(settled, @settled),
+             settled_at = CASE WHEN settled IS NULL THEN @settledAt ELSE settled_at END,
+             answer_id = COALESCE(answer_id, @answerId),
+             released_at = COALESCE(released_at, @releasedAt),
+             released_why = COALESCE(released_why, @releasedWhy),
+             told_at = CASE WHEN told_at IS NULL AND @releasedAt IS NOT NULL THEN @releasedAt ELSE told_at END
+           WHERE message_id = @messageId AND recipient = @recipient
+             AND (delivered_at IS NOT @deliveredAt AND @deliveredAt IS NOT NULL
+               OR read_at IS NULL AND @readAt IS NOT NULL
+               OR settled IS NULL AND @settled IS NOT NULL
+               OR answer_id IS NULL AND @answerId IS NOT NULL
+               OR released_at IS NULL AND @releasedAt IS NOT NULL)`,
+        )
+        .run(row).changes > 0
+    )
+  }
+
   // ── Cover (§10.3) ──
 
   /**

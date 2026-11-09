@@ -109,14 +109,18 @@ export function agentChoice(
 
 /**
  * The task of a child started on a linked machine (#1038): as `agentFrame`, said as from a session of the same
- * repository on another computer, whose name the link already gives as "<name> on <hub>"
+ * repository on another computer, whose name the link already gives as "<name> on <hub>". `mail`: the machine said it
+ * takes mail from this hub (its answer to `host.hubOffer`, #2067 item 2), so the child can mail its parent mid-task; a
+ * machine from before it cannot, and its task says the answer is the only way
  */
-export function remoteAgentFrame(parentName: string, task: string, instructions = ''): string {
+export function remoteAgentFrame(parentName: string, task: string, instructions = '', mail = false): string {
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
-      // #1987: mail does not cross computers yet, so the answer is the only way it hears from the child
-      'Mail does not reach it from here yet: the answer is how it hears from you. ' +
+      (mail
+        ? 'To write to it before you answer (a question, a checkpoint), call mail with `to: "parent"`. '
+        : // #1987: this machine's Centralu takes no mail from that computer, so the answer is the only way it hears from the child
+          'Mail does not reach it from here yet: the answer is how it hears from you. ') +
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
     '',
     task,

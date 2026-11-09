@@ -5,6 +5,7 @@ import type { MessageRow } from '../dev-services/store/mail-types.js'
 import { escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
 import { CITE_MS, type MessageService, type ReadItem, type SendResult } from './messages.js'
+import type { MailAcross } from './across.js'
 import type { MailReach } from './reach.js'
 import { refusalReason, refuse } from './rules.js'
 
@@ -13,7 +14,7 @@ import { refusalReason, refuse } from './rules.js'
  * M3a: docs/plans/mailbox.md §11.3). This is what the tool reads once they are checked.
  */
 export type MailToolArgs = {
-  action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'update' | 'close'
+  action: 'inbox' | 'read' | 'handled' | 'send' | 'reply' | 'update' | 'close' | 'find'
   thread?: string | undefined
   to?: string | undefined
   kind?: string | undefined
@@ -30,9 +31,6 @@ export type MailToolArgs = {
 }
 
 export type MailToolResult = { text: string; isError?: boolean }
-
-/** What a message to a parent on the hub that started the session came to (`LinkedHubs.mail`, links/linked-hubs.ts) */
-export type HubParentMail = { ok: true; messageId: string; to: string; hub: string } | { ok: false; why: string; text: string }
 
 /** What the host knows of a session that asked the Assistant (§7.6): the facts the person decides on, which the session cannot write */
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
@@ -54,10 +52,10 @@ export type MailToolHost = {
   /** What `reader` was shown of an old thread before a message moved from it, read-only (§6.3, `Store.legacyChainFor`) */
   legacyChain(threadId: string, messageId: string, reader: string): MessageRow[]
   /**
-   * A message of a session a linked hub started here to the session there that started it (#2067 item 1): the hub writes
-   * it, or refuses it and nothing is written. Absent on a host no hub links to
+   * Mail across linked machines (#2067 items 2 and 3, `MailAcross`): a send to a session on another computer, which that
+   * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
    */
-  hubParent?(sessionId: string, input: { text: string; needsReply: boolean; urgent?: boolean }): Promise<HubParentMail>
+  across?: Pick<MailAcross, 'send' | 'foreign' | 'find' | 'named'>
   now?: () => number
 }
 
@@ -94,28 +92,77 @@ export class MailTool {
   }
 
   /**
-   * The tool as a session calls it: `run`, but a send to `parent` from a session a linked hub started (#2067 item 1) goes to
-   * that hub, which writes it or refuses it. Nothing is written here either way (docs/plans/linked-mail.md §2)
+   * The tool as a session calls it: `run`, but `find` searches every computer this one reaches, and a send or reply to a
+   * session on another computer goes to that computer, which writes it or refuses it (#2067 items 2 and 3,
+   * docs/plans/linked-mail.md §6 to §8). Nothing is written here unless it took the message
    */
   async call(sessionId: string, args: MailToolArgs): Promise<MailToolResult> {
     const me = this.host.caller(sessionId)
-    const hubParent = this.host.hubParent?.bind(this.host)
-    if (!me || !hubParent || args.action !== 'send' || args.to?.trim().toLowerCase() !== 'parent' || me.askedBy || !me.fromHub) return this.run(sessionId, args)
-    // A citation is the person's message in this computer's record, checked here for the Assistant here: the hub cannot
-    // check it, and dropping it would let the sender think the parent reads the person's word
-    if (args.cite) {
-      return {
-        text: "Refused (field_not_allowed): cite is checked against this computer's record of the person's messages, which your parent on another computer cannot read, so nothing was sent. Send it again without cite, quoting what the person said if it matters.",
-        isError: true,
-      }
-    }
+    const across = this.host.across
+    if (!me) return this.run(sessionId, args)
     try {
-      const r = await hubParent(sessionId, { text: this.need(args.text, 'text'), needsReply: args.kind !== 'note', ...(args.urgent ? { urgent: true } : {}) })
+      if (args.action === 'find') {
+        if (!across) return { text: 'Finding sessions is not available here.', isError: true }
+        return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
+      }
+      const far = across ? await this.acrossTarget(sessionId, me, args, across) : null
+      if (!far || !across) return this.run(sessionId, args)
+      // A citation is the person's message in this computer's record, checked here for the Assistant here: the other
+      // computer cannot check it, and dropping it would let the sender think the recipient reads the person's word
+      if (args.cite) {
+        return {
+          text: `Refused (field_not_allowed): cite is checked against this computer's record of the person's messages, which ${far.address === 'parent' ? 'your parent' : 'a session'} on another computer cannot read, so nothing was sent. Send it again without cite, quoting what the person said if it matters.`,
+          isError: true,
+        }
+      }
+      const needsReply = far.replyTo ? args.kind === 'question' : args.kind !== 'note'
+      const r = await across.send(sessionId, { to: far.address, text: this.need(args.text, 'text'), needsReply, ...(args.urgent ? { urgent: true } : {}), ...(far.replyTo ? { replyTo: far.replyTo } : {}) })
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
-      return { text: `Sent ${r.messageId} to your parent ${JSON.stringify(r.to)} on ${r.hub}, as a note, which asks for no reply there. Its answer reaches you as a new turn, not as mail.` }
+      const who = far.address === 'parent' ? `your parent ${JSON.stringify(r.to)}` : `${JSON.stringify(r.to)}${r.address ? ` (${r.address})` : ''}`
+      const after = needsReply ? 'It waits for a reply; the reply will reach you as mail.' : far.replyTo ? 'It answers that message.' : 'It needs no reply.'
+      return { text: `Sent ${r.messageId} to ${who} on ${r.computer}. ${after} What comes back arrives in your mailbox, and wakes you if you are at rest.` }
     } catch (e) {
       return failed(e)
     }
+  }
+
+  /**
+   * Where a send or reply goes when it is to another computer, or null for this one: `parent` of a session a hub started;
+   * an address of a session there; a name found there, refused as ambiguous with the candidates when more than one
+   * session on any computer has it (#2066's rule, across machines); or the sender of the message a reply answers
+   */
+  private async acrossTarget(
+    sessionId: string,
+    me: { address: string; askedBy: string | null; fromHub?: boolean },
+    a: MailToolArgs,
+    across: NonNullable<MailToolHost['across']>,
+  ): Promise<{ address: string; replyTo?: string } | null> {
+    if (a.action === 'reply') {
+      const id = this.target(me.address, this.need(a.thread, 'thread'))
+      const m = this.records.message(id)
+      return m && across.foreign(m.sender) && this.records.recipient(id, me.address) ? { address: m.sender, replyTo: id } : null
+    }
+    if (a.action !== 'send') return null
+    const t = this.need(a.to, 'to')
+    const lower = t.toLowerCase()
+    if (lower === 'parent') return !me.askedBy && me.fromHub ? { address: 'parent' } : null
+    if (lower === PERSON || lower === 'assistant') return null
+    const own = me.address.slice(0, me.address.lastIndexOf('/') + 1)
+    if (parseAddress(t)) return across.foreign(t) ? { address: t } : null
+    if (parseAddress(own + t) && across.foreign(own + t)) return { address: own + t }
+    const here = this.host.sessions()
+    if (here.some((s) => s.id === t)) return null
+    const local = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === lower)
+    const far = await across.named(t)
+    if (far.found.length === 0) return null
+    const [only] = far.found
+    if (only && local.length + far.found.length === 1) return { address: only.address }
+    const shown = [
+      ...local.map((s) => `${this.service.sessionAddress(s.id)} (${s.project === null ? 'no project' : `project ${oneLineText(this.reach.projectLabel(s.project), 40)}`}, ${s.state})`),
+      ...far.found.map((e) => `${e.address} (${e.project === null ? 'no project' : `project ${oneLineText(e.project, 40)}`}, on ${e.machine ?? 'another computer'}, ${e.state})`),
+    ]
+    const n = shown.length
+    throw refuse('ambiguous', `${n} sessions are named ${JSON.stringify(t)}: ${shown.slice(0, 8).join(', ')}${n > 8 ? ', and more' : ''}. Send to one of them by its address.`)
   }
 
   private dispatch(sessionId: string, me: { address: string; askedBy: string | null; fromHub?: boolean }, a: MailToolArgs, calls: MessageCalls): string {
@@ -136,6 +183,8 @@ export class MailTool {
         const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}) })
         return this.sent(sent)
       }
+      case 'find':
+        throw refuse('bad_value', 'find searches other computers too, which this call does not reach')
       case 'update':
       case 'close':
         throw refuse(
@@ -202,7 +251,7 @@ export class MailTool {
     }
     throw refuse(
       'unknown',
-      `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Mail does not reach sessions on other computers yet.`,
+      `no session on this computer has the id or name ${JSON.stringify(oneLineText(word, 80))} (a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").`,
     )
   }
 

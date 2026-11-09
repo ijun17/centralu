@@ -1,6 +1,7 @@
 /**
- * Mail to a child this hub started on a linked machine (#2067, first slice): mail does not cross a link yet, so it is refused as `elsewhere`, with
- * the way that does reach the child, never as a session this host never had (`unknown`) or one in the archive (`gone`) while it is alive there.
+ * Mail to a child this hub started on a linked machine (#2067): the mail tool sends it to that machine (item 2), and with no link to it the send
+ * is refused at once as `link_down`, never as a session this host never had (`unknown`) or one in the archive (`gone`) while it is alive there.
+ * The mailbox itself never writes to another computer's session (`elsewhere`). Delivery over a real link: links/linked-mail-across.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { sessionLiveDefaults } from '@cc/protocol'
@@ -12,7 +13,8 @@ import { SessionManager } from './manager.js'
 import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 
 const CHILD = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'api', startedAt: 1, sent: 'TASK' }
-const REFUSED = `Refused (elsewhere): ${addr(CHILD.sessionId)} is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.`
+const REFUSED = 'Refused (link_down): no machine m1 is linked to this computer, so nothing was sent.'
+const ELSEWHERE = `${addr(CHILD.sessionId)} is on another computer, and only a session's mail tool sends mail there: nothing was written.`
 
 let store: Store
 let mgr: SessionManager
@@ -38,18 +40,19 @@ afterEach(async () => {
 })
 
 describe('mail to a child on a linked machine (#2067)', () => {
-  it('by its id or address is refused as elsewhere, naming what does reach it', async () => {
+  it('by its id or address goes to its machine, and with no link to it is refused at once, written nowhere', async () => {
     for (const to of [CHILD.sessionId, addr(CHILD.sessionId)]) {
       const sent = await m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
       expect(sent).toMatchObject({ isError: true, text: REFUSED })
     }
+    expect(store.mailbox.postsSince(addr('h1'), 0)).toBe(0)
   })
 
-  it('and the mailbox itself, asked for that address, refuses it the same way, not as gone', () => {
-    expect(() => m.service.send(addr('h1'), { to: [addr(CHILD.sessionId)], text: 'one more thing' })).toThrow(REFUSED.slice('Refused (elsewhere): '.length))
+  it('and the mailbox itself, asked for that address, refuses it as elsewhere, not as gone', () => {
+    expect(() => m.service.send(addr('h1'), { to: [addr(CHILD.sessionId)], text: 'one more thing' })).toThrow(ELSEWHERE)
   })
 
-  it('a session this hub never had is still unknown', async () => {
-    expect((await m.hooks.tool!('h1', { action: 'send', to: 'm1.never', text: 'hello' })).text).toMatch(/^Refused \(unknown\)/)
+  it('a session this hub never had goes to its machine too, which says whether it has it', async () => {
+    expect((await m.hooks.tool!('h1', { action: 'send', to: 'm1.never', text: 'hello' })).text).toBe(REFUSED)
   })
 })

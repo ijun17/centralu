@@ -21,10 +21,11 @@ export const addressOf = (sessionId: string): string => sessionAddress(MAIL_HOST
 export function wireHostMail(
   mgr: SessionManager,
   store: Store,
-  opts: { now?: () => number; delivery?: MailDeliveryOptions; assistantHasMailCommand?: () => boolean; hooks?: Partial<MailHooks> } = {},
+  opts: { now?: () => number; delivery?: MailDeliveryOptions; assistantHasMailCommand?: () => boolean; hooks?: Partial<MailHooks>; hostId?: string } = {},
 ): HostMail {
   const m = hostMail(store, mailSessionsOf(mgr, opts.assistantHasMailCommand ?? (() => true)), {
-    hostId: MAIL_HOST,
+    // Two linked hosts each have their own (`hubSelfId`), as main.ts gives it
+    hostId: opts.hostId ?? MAIL_HOST,
     ...(opts.now ? { now: opts.now } : {}),
     delivery: { schedule: () => () => {}, ...opts.delivery },
   })

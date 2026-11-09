@@ -1410,7 +1410,7 @@ hub's project by its name, `<hub>/<name>` or a qualified id. Nothing else of the
   never at an address of the hub's choosing.
 - **The allowlist** (question 1, option (a)). The hub's `RemoteClient` answers a call from the machine only through the
   handler its link gives it (`reverseCalls`, links/reverse-calls.ts): `hub.projects` and `hub.askProject`, and anything
-  else is "Unknown method" (but `hub.mail`, #2067: a child's mail to its parent, whatever the switch says;
+  else is "Unknown method" (but mail, #2067: `hub.mail`, `hub.mailRows` and `hub.find`, whatever the switch says;
   [linked-mail.md](linked-mail.md)). Each call is refused unless the machine's switch is on, read when the call comes. The
   machine is the link's own, never what the call says. At most 16 calls run at once; a withdrawn call or a dropped
   link aborts the call's work.

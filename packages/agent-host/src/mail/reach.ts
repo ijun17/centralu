@@ -24,6 +24,11 @@ export type ReachHost = {
   project(projectId: string): { trusted: boolean; name?: string } | undefined
   /** The session addresses of the group a session's requests to the Assistant are counted with, as `relations.ts` groups today */
   askGroupMembers(address: string): string[]
+  /**
+   * A session of another host this one reaches over a link (#2067 item 2): its name as last heard. Mail from it is taken as
+   * from a session that is alive elsewhere; mail to it is the link's to carry, never written here. Undefined: not reached
+   */
+  foreign?(address: string): { name: string } | undefined
 }
 
 /** Where a delegation goes, as far as the hold goes: a session, a project (to create one in, or `ask_project`), the Assistant or a linked machine */
@@ -58,7 +63,10 @@ export type MailReach = {
 export function mailReach(host: ReachHost): MailReach {
   const sessionOf = (address: string) => {
     const party = parseAddress(address)
-    return party?.kind === 'session' && party.host === host.hostId ? { id: party.sessionId, info: host.session(party.sessionId) } : undefined
+    if (party?.kind !== 'session') return undefined
+    if (party.host === host.hostId) return { id: party.sessionId, info: host.session(party.sessionId) }
+    const far = host.foreign?.(address)
+    return far ? { id: party.sessionId, info: { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere' as const, name: far.name } } : undefined
   }
   const untrusted = (projectId: string | null): boolean => (projectId === null ? false : !(host.project(projectId)?.trusted ?? false))
   /** The one test of leaving: an untrusted project's mail or work to a place that is not that project */

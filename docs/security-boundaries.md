@@ -286,6 +286,13 @@ machine as the less trusted side: a compromised server must not reach the person
   to that machine was given. A machine cannot reach any RPC method, the router, a session's conversation, a file, an
   app or the Assistant through it; anything else is "Unknown method". The machine is the link's own, never what a
   call says, and at most 16 of its calls run at once. A build without the handler drops such a call.
+- **Mail is the one exception to the switch** (#2067, owner decision 2026-11-09: every agent may mail every other,
+  across machines): `hub.mail`, `hub.mailRows` and `hub.find` are answered whatever the switch says. A message is
+  written by the recipient's host through its one send, guards included, from the sender the link names (a machine's
+  session is qualified with the link's machine id, never with what the call says), and the recipient reads it as
+  another session's text, never as the person's (`cite` is refused across). A machine may tell what became of mail only
+  for rows of its own sessions. On the machine, `host.mail` and `host.mailRows` are taken only on a connection a hub
+  offered on, and only from that hub's addresses. Mail out of an untrusted project is refused across rather than held.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
   answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).
   It names the machine and the asking session there, quoted on one line;

@@ -13,7 +13,10 @@ import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { HOUR_MS, REFUSAL_TEXT, WARNING_TEXT, firstLineOf } from './rules.js'
-import { MailTool, type MailToolHost } from './tool.js'
+import { MailTool } from './tool.js'
+import { MailAcross } from './across.js'
+import { entryOf } from './find.js'
+import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { MailTurns } from './turns.js'
 
 /**
@@ -47,8 +50,6 @@ export type HostMailSessions = {
   turnInputs?(id: string): readonly (string | null)[]
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
-  /** A message of a session a linked hub started here to its parent there (`MailSessionsView.toHubParent`, #2067 item 1) */
-  hubParent?: MailToolHost['hubParent']
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
@@ -73,12 +74,15 @@ export function mailSessionsOf(
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
-    hubParent: (id, input) => mgr.mail.toHubParent(id, input),
   }
 }
 
 export type HostMail = {
   service: MessageService
+  /** The mailbox's records as the mail reads and writes them: a change to one tells `across` (#2067 item 2) */
+  records: MailboxRecords
+  /** Mail across linked machines (#2067 items 2 and 3): its links are given once they exist (`usePeers`) */
+  across: MailAcross
   reach: MailReach
   turns: MailTurns
   delivery: MailDelivery
@@ -107,6 +111,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return party?.kind === 'session' ? { ...m, about: party.sessionId } : m
     })
   const projects = () => store.projects.listProjects()
+  // Filled once `across` exists: the reach names a session on another computer through it
+  const far: { across?: MailAcross } = {}
+  const records = watched(store.mailbox, () => far.across?.changed())
   const reach = mailReach({
     hostId,
     session: (id) => {
@@ -114,9 +121,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       if (s) return { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
       // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link. Its
       // mail to its parent here (item 1) shows it by its name on that machine
-      const linked = sessions.onLinkedMachine?.(id)
+      const linked = sessions.onLinkedMachine?.(id) ?? (id.includes('.') ? far.across?.foreignName(addressOf(id)) : undefined)
       return linked ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere', name: linked.name } : undefined
     },
+    // A session of a hub this host is linked to (#2067 item 2), by the name it was last heard by
+    foreign: (address) => far.across?.foreignName(address),
     assistantId: () => sessions.assistantId(),
     assistantAsks: () => sessions.assistantAsks() === null,
     // Nothing records an app's caller before the apps' mail API (§13) but an old thread the app wrote into: its moved mail to that session
@@ -129,7 +138,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   })
   // Filled once `turns` exists: the service reads a session's turn through it (§8.2 step 6)
   const box: { turns?: MailTurns } = {}
-  const service = new MessageService(store.mailbox, reach, {
+  const service = new MessageService(records, reach, {
     hostId,
     ...(opts.now ? { now: opts.now } : {}),
     turn: (address) => {
@@ -169,7 +178,22 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     askerIn: (id, turn) => service.requestsIn(addressOf(id), turn)[0]?.asker ?? null,
   })
   const mailTurns = box.turns
-  const delivery = new MailDelivery(service, store.mailbox, sessions.mailSessions(), {
+  const across = new MailAcross({
+    hostId,
+    service,
+    records,
+    reach,
+    ...(opts.now ? { now: opts.now } : {}),
+    log: (line) => console.error(line),
+    ownEntries: () =>
+      sessions.listSessions().map((s) => entryOf(s, { address: addressOf(s.id), project: s.projectId ? reach.projectLabel(s.projectId) : null, machine: null })),
+  })
+  far.across = across
+  // A Centralu notice to a session on the other side is passed on there (§6)
+  service.onChange((c) => {
+    if (c.recipients.some((r) => across.foreign(r))) void across.passOn(c.messageId)
+  })
+  const delivery = new MailDelivery(service, records, sessions.mailSessions(), {
     turns: mailTurns,
     ...(opts.now ? { now: opts.now } : {}),
     // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions. A setting the previous build never reads
@@ -177,6 +201,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       read: () => Number(store.settings.appSetting('mail.heartbeat')) || null,
       write: (ms) => store.settings.setAppSetting('mail.heartbeat', String(ms)),
     },
+    across: (address) => across.foreign(address),
     ...opts.delivery,
   })
   const askedByHost: AskedByHost = {
@@ -193,7 +218,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return turn ? { turnSeq: turn.turnSeq, requests: requests.flatMap((r) => { const party = parseAddress(r.asker); return party?.kind === 'session' ? [{ sessionId: party.sessionId, messageId: r.messageId }] : [] }) } : null
     },
   }
-  const tool = new MailTool(service, store.mailbox, reach, {
+  const tool = new MailTool(service, records, reach, {
     personMessage: (sessionId, seq) => {
       const row = store.messages.loadMessagesFrom(sessionId, seq - 1, 1).find((r) => r.seq === seq)
       return row && typeof row.payload === 'object' && row.payload !== null && 'text' in row.payload && typeof row.payload.text === 'string' ? row.payload.text : null
@@ -207,7 +232,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     form: (id) => (sessions.mailCommand(id) ? 'command' : 'plain'),
     askerOf: (id) => askerFacts(askedByHost, id),
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
-    ...(sessions.hubParent ? { hubParent: sessions.hubParent } : {}),
+    across,
   })
   const owedOld = (sender: string, recipient: string): boolean => {
     const owner = parseAddress(sender)
@@ -252,6 +277,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
 
   return {
     service,
+    records,
+    across,
     reach,
     turns: mailTurns,
     delivery,
@@ -338,4 +365,27 @@ function refusesDelegation(
   if (projectId === null) return null
   service.refused(callerId, { tool: call.tool, target: call.target, firstLine: firstLineOf(call.text), projectId })
   return `Refused (untrusted_project): ${REFUSAL_TEXT.untrusted_project(reach.projectLabel(projectId), call.target)}`
+}
+
+/** The record methods that change a row or a message: after each, the rows that crossed a link are compared again (`MailAcross.changed`) */
+const MUTATORS = new Set([
+  'insert', 'markAttempt', 'markDelivered', 'hold', 'letGo', 'markRead', 'release', 'closeFor', 'dismiss', 'failedTry', 'takeBack', 'undeliver',
+  'markUncertain', 'markMaybeRepeated', 'deleteHeld', 'deleteRows', 'settle', 'answerHeld', 'answerDropped', 'markReleased', 'markTold',
+  'moveRows', 'moveRole', 'purgeParty', 'sweep', 'mergeAcross',
+])
+
+/** The records, telling `changed` after each change (#2067 item 2): the one place every change of the mail passes */
+function watched(records: MailboxRecords, changed: () => void): MailboxRecords {
+  return new Proxy(records, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver)
+      if (typeof value !== 'function') return value
+      if (typeof key !== 'string' || !MUTATORS.has(key)) return (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+      return (...args: unknown[]): unknown => {
+        const out: unknown = Reflect.apply(value, target, args)
+        changed()
+        return out
+      }
+    },
+  })
 }

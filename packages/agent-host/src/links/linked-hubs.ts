@@ -1,7 +1,5 @@
-import { HubAskResult, HubMailResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
+import { HubAskResult, HubMethods, errorMessage, oneLineText, type HubAskParams, type HubOffer, type HubProject } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
-import { bodyLimit, tooLongText } from '../mail/rules.js'
-import { isPeerAnswer } from '../rpc-error.js'
 
 /**
  * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
@@ -24,17 +22,10 @@ import { isPeerAnswer } from '../rpc-error.js'
 const LOOKUP_MS = 4000
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
-type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean }
+type Hub = { id: string; name: string; client: number | null; projects: HubProject[] | null; asks: boolean; mail: boolean; you: string | null }
 
 /** How long a message to a hub may take before the send is refused as not known to have arrived */
 const MAIL_MS = 30_000
-
-/**
- * What a message to a parent on a hub came to (`mail`): sent, with the hub's message id, the parent's name there and
- * the hub's; or refused, with the reason and the words the session reads, and nothing written on either side, except
- * where the words say it is not known
- */
-export type HubParentMail = { ok: true; messageId: string; to: string; hub: string } | { ok: false; why: string; text: string }
 
 /** A hub's project as an ask_project names it here: its id qualified by the hub's (`<hub id>.<project id>`) */
 export type HubProjectRef = { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string }
@@ -47,6 +38,8 @@ export type LinkedHubsDeps = {
   askTimeoutMs?: number
   /** How long one message may wait for the hub's answer (30 s when absent). For tests */
   mailTimeoutMs?: number
+  /** Records the hub that started a session here (`recordStartingHub`), for one created before that hub offered (`awaitOffer`) */
+  record?: (sessionId: string, hub: { id: string; name: string }) => void
 }
 
 /** The words a call that failed for an older hub says (it has no such method) */
@@ -54,6 +47,8 @@ const older = (err: unknown) => /Unknown method/i.test(errorMessage(err))
 
 export class LinkedHubs {
   private hubs = new Map<string, Hub>()
+  /** Sessions a hub created on a connection before it offered there, by connection (`awaitOffer`) */
+  private readonly waiting = new Map<number, string[]>()
 
   constructor(private readonly deps: LinkedHubsDeps) {}
 
@@ -66,7 +61,11 @@ export class LinkedHubs {
     }
     const prev = this.hubs.get(o.hub.id)
     const projects = o.on ? (prev?.projects ?? null) : null
-    this.hubs.set(o.hub.id, { id: o.hub.id, name: oneLineText(o.hub.name, 120) || o.hub.id, client, projects, asks: o.on, mail })
+    const name = oneLineText(o.hub.name, 120) || o.hub.id
+    this.hubs.set(o.hub.id, { id: o.hub.id, name, client, projects, asks: o.on, mail, you: o.you ?? null })
+    const waiting = this.waiting.get(client)
+    this.waiting.delete(client)
+    for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name })
   }
 
   /** The hubs whose switch for this machine is on: the ones whose projects its sessions may ask */
@@ -76,6 +75,7 @@ export class LinkedHubs {
 
   /** A connection ended: a hub it carried is not reachable until it offers again */
   gone(client: number): void {
+    this.waiting.delete(client)
     for (const h of this.hubs.values()) if (h.client === client) h.client = null
   }
 
@@ -142,48 +142,39 @@ export class LinkedHubs {
   }
 
   /**
-   * A message of a session a hub started here to the session that started it (`hub.mail`, #2067 item 1), sent to `started`,
-   * the hub recorded when it created the session (`startingHub`), and to no other: no other computer reads the text.
-   * Without a record (a session started by a build from before it) nothing is sent, as nothing says which computer that
-   * was. Nothing is written here: the hub writes it, and a refusal is said at once and written nowhere, so the same text
-   * may be sent again (docs/plans/linked-mail.md §3's table).
+   * A hub that takes mail (#2067), as mail across calls it (`MailAcross`, docs/plans/linked-mail.md §6): on the connection
+   * it offered on and no other. `you`: this machine's id there, which a hub from before item 2 does not say
    */
-  async mail(sessionId: string, started: { id: string; name: string } | null, input: { text: string; needsReply?: boolean; urgent?: boolean }): Promise<HubParentMail> {
-    // The mailbox's own limit for a session, said in its words, before anything crosses the link
-    if (input.text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
-    if (!started) {
-      return {
-        ok: false,
-        why: 'elsewhere',
-        text: 'your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
-      }
+  peer(hubId: string): { id: string; name: string; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
+    // A hub that offered asks and not mail is from before it: called all the same, it answers "Unknown method", which names the cause
+    const h = this.hubs.get(hubId)
+    if (!h) return undefined
+    return {
+      id: h.id,
+      name: h.name,
+      reachable: h.client !== null,
+      you: h.you,
+      call: (method, params) => {
+        const client = this.hubs.get(hubId)?.client
+        if (client === null || client === undefined) return Promise.reject(new Error(`${h.name} is ${NOT_REACHABLE}`))
+        return this.deps.call(client, method, params, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
+      },
     }
-    const h = this.hubs.get(started.id)
-    const name = h?.name ?? (oneLineText(started.name, 120) || 'the computer that started this session')
-    if (!h) {
-      return {
-        ok: false,
-        why: 'link_down',
-        text: `${name}, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.`,
-      }
-    }
-    if (h.client === null) return { ok: false, why: 'link_down', text: `${name} is ${NOT_REACHABLE}, so nothing was sent. Send it again once the link is back.` }
-    let raw: unknown
-    try {
-      raw = await this.deps.call(h.client, 'hub.mail', { sessionId, ...input }, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
-    } catch (err) {
-      if (older(err)) return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
-      // The hub answered with an error of its own (too many calls, a call it does not read): it was there and took nothing
-      if (isPeerAnswer(err)) return { ok: false, why: 'refused', text: `${name} refused the message: ${oneLineText(errorMessage(err), 500).replace(/\.$/, '')}. Nothing was written there.` }
-      const why = oneLineText(errorMessage(err), 300)
-      return { ok: false, why: 'link_down', text: `the link to ${name} failed during the send (${why}), so it is not known whether the message arrived. If you send it again and it did, ${name} refuses the second one as a repeat.` }
-    }
-    const parsed = HubMailResult.safeParse(raw)
-    if (!parsed.success) return { ok: false, why: 'link_down', text: `${name} answered in a form this computer does not read, so it is not known whether the message arrived.` }
-    const r = parsed.data
-    // The hub this computer recorded as the starter no longer knows the session: its parent there went (archived or deleted)
-    if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'gone', text: `${name} no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.` }
-    if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
-    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), hub: name }
+  }
+
+  /** Every hub that takes mail, for a search across them */
+  mailHubs(): NonNullable<ReturnType<LinkedHubs['peer']>>[] {
+    return [...this.hubs.values()].flatMap((h) => {
+      const p = h.mail ? this.peer(h.id) : undefined
+      return p ? [p] : []
+    })
+  }
+
+  /**
+   * A session a hub created on this connection before it offered here (item 1's open case): recorded under the hub that
+   * then offers on the connection (`deps.record`), so its `parent` reaches that hub. A connection that ends first forgets it
+   */
+  awaitOffer(client: number, sessionId: string): void {
+    this.waiting.set(client, [...(this.waiting.get(client) ?? []), sessionId])
   }
 }

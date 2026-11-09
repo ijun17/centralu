@@ -73,6 +73,10 @@ describe('the frame a child gets (#729)', () => {
     // A child started from a linked computer is told mail does not reach its parent, not to mail it (#1987)
     expect(remoteAgentFrame('parent', 'run the tests')).not.toContain('call mail')
     expect(remoteAgentFrame('parent', 'run the tests').split('\n')[0]).toContain('Mail does not reach it from here yet: the answer is how it hears from you.')
+    // A machine that said it takes mail from the hub (#2067 item 2): its child is told to mail its parent, not that it cannot
+    const mails = remoteAgentFrame('parent', 'run the tests', '', true).split('\n')[0]
+    expect(mails).toContain('To write to it before you answer (a question, a checkpoint), call mail with `to: "parent"`.')
+    expect(mails).not.toContain('Mail does not reach it')
   })
 
   it('can mail its parent only when that session started it and it is in a project (a fork of the Assistant has no parent, an Assistant child no mail tool)', () => {

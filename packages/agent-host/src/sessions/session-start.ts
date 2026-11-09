@@ -11,7 +11,7 @@ import type { ForkBase, Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
 import { agentDepthKey } from './agent-depth.js'
-import { presetFromHub, startedByHubKey, startedFromHubKey } from './hub-preset.js'
+import { presetFromHub, recordStartingHub, startedFromHubKey } from './hub-preset.js'
 import { adoptOpenedSettings } from './opened-settings.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
@@ -386,7 +386,7 @@ export class SessionStarts {
     // Started by another machine's session (#1038): that depth is this session's own, kept as one started here keeps its
     if (params.agentDepth) this.host.store.settings.setAppSetting(agentDepthKey(id), String(params.agentDepth))
     if (params.fromHub) this.host.store.settings.setAppSetting(startedFromHubKey(id), 'true')
-    if (params.fromHub && params.startedByHub) this.host.store.settings.setAppSetting(startedByHubKey(id), JSON.stringify(params.startedByHub))
+    if (params.fromHub && params.startedByHub) recordStartingHub(this.host.store.settings, id, params.startedByHub)
     this.host.launches.rememberToolPrefix(id)
     this.host.launches.rememberLaunchSettings(info, cwd)
     this.host.store.sessions.setSessionCwd(id, cwd)

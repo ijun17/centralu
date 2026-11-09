@@ -241,6 +241,8 @@ With the limited credential: refused: a hub linked to this host calls it, with t
 - `host.hubAuto`
 - `host.hubOffer`
 - `host.lastAnswer`
+- `host.mail`
+- `host.mailRows`
 - `host.readSession`
 - `host.recall`
 - `host.send`

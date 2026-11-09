@@ -911,6 +911,11 @@ the definition is 811, `MAIL_BUDGET_CHARS` 800 → 820, and the reader seat's ce
 mailed request is not the person's word and is answered in its thread (about 130 characters; its ceiling 9,710 → 9,910, resident in the commands tier too). Nothing else is added to a request: the card
 that asks the person is the host's, and the rule behind it is code.
 
+**#2067 item 3 (finding the recipient across machines).** The mail tool gets the action `find`, and `to` says it takes words
+there: "For find: words (name, project, machine, role) to search every computer". The tool is 1,231 characters, and its
+ceiling 1,170 → 1,240. A `find` answer is capped at 8 sessions, so its cost does not grow with the number of sessions
+(docs/plans/linked-mail.md §8 has the measurement).
+
 **#1739 (a request citing the person's message).** The mail tool gets `cite`, a boolean with no description, and its own description
 says when to set it (", with cite=true only when the person's last message here asked for it": the definition is 907,
 `MAIL_BUDGET_CHARS` 820 → 910, and the reader seat's ceilings rise by 90). The Assistant's line about requests now says to judge

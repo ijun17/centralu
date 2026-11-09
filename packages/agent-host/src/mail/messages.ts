@@ -306,6 +306,26 @@ export class MessageService {
   }
 
   /**
+   * The sender's copy of a message another host took (#2067 item 2, docs/plans/linked-mail.md §6): written only once that
+   * host answered with the message's id, under the same id, so a reply there and here names one message. Its one row is
+   * the foreign recipient's, delivered at hand-over, so this host's delivery never tries it; the recipient's host pushes
+   * what becomes of it (`MailboxRecords.mergeAcross`). No guard runs here: they ran where the message was written. An
+   * answer settles the sender's own row on what it answers, as `send` does
+   */
+  sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }): MailRow {
+    return this.run(() => {
+      const now = this.now()
+      const target = input.replyTo === undefined ? undefined : this.records.message(input.replyTo)
+      const stored = this.put(
+        { id: input.id, sender, kind: 'message', body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, origin: 'mail', createdAt: now },
+        [this.row(input.to, { dueAt: now, deliveredAt: now })],
+      )
+      if (target?.kind === 'message' && target.needsReply && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
+      return stored
+    })
+  }
+
+  /**
    * The person's word a request cites, checked in code (docs/plans/cited-requests.md §3): the newest message the person typed in the sender's own
    * conversation, at most `CITE_MS` old and not later than now, not cited before by this sender. Or, when none passes, why not, in words for the sender
    */
