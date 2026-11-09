@@ -313,6 +313,11 @@ export class LinkedReports {
     return this.host.reportGate?.(sessionId) ?? 'deliver'
   }
 
+  /** Each linked session's background work as its machine last listed it (`tasks`), for `pausedOnBackground` */
+  tasksOf(sessionId: string): readonly BackgroundTask[] {
+    return this.tasks.get(sessionId) ?? []
+  }
+
   /** The session's own background work its machine lists as running; a timer the tool holds is not work (#721) */
   ownTasksRunning(sessionId: string): BackgroundTask[] {
     return liveBackgroundTasks(this.tasks.get(sessionId) ?? []).filter((t) => !t.timer)

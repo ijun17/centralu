@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { SessionId } from '../../entities.js'
 import { HostHandover } from '../../host-logon.js'
 import { MachineId, RemoteShell } from '../../machines.js'
-import { HubOffer } from '../../machines-hub.js'
+import { HostMailParams, HubOffer, MailRowsParams } from '../../machines-hub.js'
 
 /** The parameters of the `host` methods, which the host validates (docs/protocol.md §3). Their results: ./host.results.ts */
 export const hostParams = {
@@ -346,4 +346,11 @@ export const hostParams = {
    * directly, never routed. Additive
    */
   'host.hubOffer': HubOffer,
+  /**
+   * A message from the hub's side to a session here (#2067 item 2, docs/plans/linked-mail.md §6): taken only on a
+   * connection a hub offered on, from that hub's addresses. Asked by the hub directly, never routed. Additive
+   */
+  'host.mail': HostMailParams,
+  /** The rows of messages that crossed, as the hub knows them (#2067 item 2). Additive */
+  'host.mailRows': MailRowsParams,
 } as const

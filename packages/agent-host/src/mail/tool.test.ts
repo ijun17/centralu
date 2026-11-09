@@ -88,7 +88,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
 
 describe('"to" as a name (#2039)', () => {
   const sentTo = (w: ReturnType<typeof world>, from: string) => w.store.mailbox.recipients(w.store.mailbox.feedOf(at(from), { limit: 1 })[0]!.id)[0]!.recipient
-  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Mail does not reach sessions on other computers yet.'
+  const TEXT = 'a session in the archive or deleted cannot be written to). Write to a session by its exact name, its id or session:<host>/<id>, or to "assistant", "parent" or "person". Find one on any computer with mail(action="find", to="<words>").'
 
   it("a session's name, in any case, reaches it as its id does; so does the address with the name in it", () => {
     const w = world()
@@ -113,7 +113,7 @@ describe('"to" as a name (#2039)', () => {
     expect(w.run('a', { action: 'send', to: `session:${HOST}/nobody`, text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "nobody"')
     expect(w.run('a', { action: 'send', to: 'fix: the mail', text: 'x' }).text).toContain('Refused (unknown): no session on this computer has the id or name "fix: the mail"')
     // An address on another computer is not looked up here: the service refuses it in its own words
-    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe('Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.')
+    expect(w.run('a', { action: 'send', to: 'session:hub-bbbbbbbb/z', text: 'x' }).text).toBe("Refused (elsewhere): session:hub-bbbbbbbb/z is on another computer, and only a session's mail tool sends mail there: nothing was written.")
   })
 
   it('a name two sessions share is refused with both addresses, and an address or an id still reaches exactly one', () => {
@@ -136,14 +136,15 @@ describe('"to" as a name (#2039)', () => {
   })
 
   // The child's host has no row of its parent, which lives on the hub: no name or address it can write names it, and the refusal says why instead of "gone"
-  it('a child started from a linked computer that writes the name of its parent, or that name expanded against its own host, is told mail does not reach it', () => {
+  it('a child started from a linked computer that writes the name of its parent, or that name expanded against its own host, is told how to find it', () => {
     const child = hostWorld({ fromHub: ['b'] })
     stops.push(() => child.stop())
     for (const to of ['Hub Parent', 'hubparent', `session:${HOST}/hubparent`]) {
       const r = child.tool.run('b', { action: 'send', to, text: 'checkpoint' })
       expect(r.isError).toBe(true)
       expect(r.text).toMatch(/^Refused \(unknown\): no session on this computer has the id or name/)
-      expect(r.text).toContain('Mail does not reach sessions on other computers yet.')
+      // A name of another computer's session is found across machines by `call` (linked-mail-across.test.ts); `run` reads this one
+      expect(r.text).toContain('Find one on any computer with mail(action="find", to="<words>").')
       expect(r.text).not.toMatch(/gone|Not a mail address|bad_address/)
     }
   })

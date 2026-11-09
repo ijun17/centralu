@@ -43,6 +43,20 @@ describe('foldSummary (#205)', () => {
     expect(foldSummary([{ state: 'error', ...asking }])).toEqual([{ state: 'error', count: 1 }])
   })
 
+  // #2146 (owner decision 2026-11-09): a turn that ended while its own background work runs is still running, once
+  it('counts a session whose turn ended while its own background work runs as one working session, its subagents through it', () => {
+    const run = (kind: 'agent' | 'shell', over = {}) => ({ id: `${kind}-${Math.random()}`, kind, description: kind, status: 'running' as const, ...over })
+    const at = (state: SessionState, backgroundTasks: ReturnType<typeof run>[], over = {}) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 2, backgroundTasks, ...over })
+    // Three background subagents and a command: one session, counted once
+    expect(foldSummary([at('waiting_input', [run('agent'), run('agent'), run('agent'), run('shell')]), at('idle', [run('shell')]), at('working', [])])).toEqual([{ state: 'working', count: 3 }])
+    // A timer (`/loop`), an ambient task or work that ended is not running work
+    expect(foldSummary([at('waiting_input', [run('shell', { timer: true }), run('agent', { ambient: true }), run('agent', { status: 'completed' })])])).toEqual([])
+    // A turn that was cut short stays an error while listed, and is not working once read; a limit stays uncounted
+    expect(foldSummary([at('waiting_input', [run('agent')], { interruption: { reason: 'network' }, lastSeq: 3 })])).toEqual([{ state: 'error', count: 1 }])
+    expect(foldSummary([at('waiting_input', [run('agent')], { interruption: { reason: 'network' } })])).toEqual([])
+    expect(foldSummary([at('limited', [run('agent')])])).toEqual([])
+  })
+
   it('says nothing when only idle or rate-limited sessions are present', () => {
     expect(foldSummary(of('idle', 'limited', 'idle'))).toEqual([])
     expect(foldSummary([])).toEqual([])

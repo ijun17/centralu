@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PermissionPreset, type NormalizedEvent } from '@cc/protocol'
+import { applyBackgroundTasks, pausedOnBackground, PermissionPreset, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { AgentSpawnSpec } from '../contract.js'
 import { callOrder, loadRecording, of, recordedFolders, replaySpawner, streamJsonCodec, temporaryFolder, type Recording } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
@@ -143,6 +143,22 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
     const firstEnd = events.findIndex((e) => e.type === 'turn_complete')
     expect(events.findIndex((e) => e.type === 'background_tasks' && (e.ended?.length ?? 0) > 0)).toBeGreaterThan(firstEnd)
     expect(ended(events)).toBe(2)
+  })
+
+  // #2146: a native background subagent is the session's own background work, so a turn that ends while it runs is paused on it
+  it('background-agent: a subagent run in the background is live as an agent task when the turn ends, so the session reads as paused until it ends', async () => {
+    const { events } = await run('background-agent')
+    expect(of(events, 'tool_call').filter((c) => c.summary.tool === 'Agent').map((c) => c.input)).toMatchObject([{ run_in_background: true }])
+    // The session's task list as the host and the screen fold it (`applyBackgroundTasks`), read at each turn's end
+    let tasks: BackgroundTask[] = []
+    const atEnds: boolean[] = []
+    for (const e of events) {
+      if (e.type === 'background_tasks') tasks = applyBackgroundTasks(tasks, e)
+      if (e.type === 'turn_complete') atEnds.push(pausedOnBackground({ state: 'waiting_input', backgroundTasks: tasks }))
+    }
+    // Paused at the first turn's end on the running subagent; not once the CLI woke the model with its report
+    expect(atEnds).toEqual([true, false])
+    expect(tasks.filter((t) => t.kind === 'agent').map((t) => t.status)).toEqual(['completed'])
   })
 
   it('failed: a model that does not exist ends the turn with one error in the CLI’s words, and no completed turn', async () => {
@@ -359,6 +375,8 @@ describe(`what the adapter makes of the CLI's real turns, the tools Centralu's s
   })
 
   it('thinking: the thinking the CLI shows arrives as reasoning text before the answer, not as an empty block, and the turn ends once', async () => {
+    // Recorded as a session runs: no setting of its own turns thinking on, as no session passes one (#2062 review)
+    expect(scenariosFor('claude').find((s) => s.name === 'thinking')).not.toHaveProperty('settings')
     const { events } = await run('thinking')
     const reasoning = of(events, 'reasoning_delta').map((e) => e.text ?? '').join('')
     // Exactly the words the CLI streamed: the finished message repeats them, and the adapter does not say them twice (`reasoningStreamed`)

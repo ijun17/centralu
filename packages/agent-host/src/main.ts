@@ -20,7 +20,8 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailPerson } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
-import { mailFromMachine } from './mail/from-machine.js'
+import { mailPeers } from './links/mail-peers.js'
+import { recordStartingHub } from './sessions/hub-preset.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/centralu-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -671,6 +672,8 @@ const links = new Links(linkDepsFor(store, {
    */
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
   hubMail: true,
+  // A machine that took this hub's mail at a connect hears what became of mail that crossed while it was away (#2067 review)
+  mailReady: () => hostMailbox.across.changed(),
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop
@@ -680,15 +683,25 @@ const links = new Links(linkDepsFor(store, {
     projects: () => mgr.projectsForMachines(),
     ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
     selfName: hubName,
-    // A child started on a machine mails the session here that started it (#2067 item 1, docs/plans/linked-mail.md §3)
-    mail: mailFromMachine({ service: hostMailbox.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: hubName }),
+    // Every session on a machine mails every session this hub reaches, and finds them (#2067, docs/plans/linked-mail.md §5 to §8)
+    across: hostMailbox.across,
   }),
 }))
 /*
  * The other side of it (#550): the hubs linked to this host that let its sessions ask their projects, each called back
  * on the connection it offered on (`HostServer.call`)
  */
-const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts) })
+const hubs = new LinkedHubs({
+  call: (client, method, params, opts) => server.call(client, method, params, opts),
+  // A session a hub created here before it offered: recorded under it once it does (#2067)
+  record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+})
+// Mail across linked machines (#2067 items 2 and 3): the machines this host links, and the hubs that link it
+hostMailbox.across.usePeers(
+  mailPeers({ hostId: hubSelfId(store), selfName: hubName, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), hubs, settings: store.settings }),
+)
+// A machine that takes mail from this hub is told so in its children's task (#2067 item 2)
+mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
 mgr.useLinkedHubs(hubs)
 mgr.useHubName(hubName)
 mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
@@ -777,6 +790,7 @@ const router: Router = new Router({
     activity: () => activityCounts(activity()),
     updateApply,
     hubs,
+    mailAcross: hostMailbox.across,
     mail: mailPerson,
     requests,
   }),

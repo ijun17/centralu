@@ -1,4 +1,4 @@
-import { isAssistantKind } from '@cc/protocol'
+import { isAssistantKind, pausedOnBackground } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { AgentListRow } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
@@ -32,6 +32,7 @@ export function agentState(host: OwnAgentsHost, s: SessionInfo): AgentListRow['s
   const running = [...host.children.delegations.values()].some((d) => d.sessionId === s.id && !d.settled)
   return s.pendingApproval || s.pendingQuestions.length ? 'waiting'
     : inTurn(s.state) || running ? 'working'
+    : pausedOnBackground(s) ? 'paused'
     : s.state === 'error' || s.state === 'limited' || s.interruption ? 'stopped'
     : 'finished'
 }

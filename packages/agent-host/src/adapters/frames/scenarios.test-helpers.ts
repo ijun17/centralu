@@ -46,11 +46,11 @@ export type Scenario = {
   signedOut?: boolean
   /**
    * The tool's own settings for the run (Codex: its settings folder holds them; Claude Code: flags of the recording's own, as its
-   * settings files are off): `mcp` sets it up with a small MCP server, `probe`, whose one tool `ping` answers `pong`; `thinking`
-   * (Claude Code) turns on extended thinking with its text shown, which the adapter never asks for; `tasks` (Claude Code) offers the
-   * task-list tools, which this CLI leaves out of a non-interactive run
+   * settings files are off): `mcp` sets it up with a small MCP server, `probe`, whose one tool `ping` answers `pong`; `tasks`
+   * (Claude Code) offers the task-list tools, which this CLI leaves out of a non-interactive run. Thinking is no setting: a session
+   * passes no flag for it (the model decides), and the adapter asks for its text in every session (#2062)
    */
-  settings?: 'mcp' | 'thinking' | 'tasks'
+  settings?: 'mcp' | 'tasks'
   /** Whether the tool must be made to ask for every command (OpenCode: through its config; a profile knows how) */
   asksForCommands?: boolean
   /** What the scenario adds to the session it opens: Centralu's tools or an app, answered by `fakes.test-helpers.ts` */
@@ -102,6 +102,22 @@ export const SCENARIOS: readonly Scenario[] = [
       await d.waitFor('the end of the first turn', ended)
       // The task ends on its own, and the CLI wakes the model with its result
       await d.waitFor('the task ended', (e) => e.type === 'background_tasks' && (e.ended?.length ?? 0) > 0)
+      await d.waitFor('the end of the turn that reports it', ended)
+    },
+  },
+  {
+    // A native background subagent that runs on after the turn ends (#2146: the session is then paused on it, counted once)
+    name: 'background-agent',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send(
+        'Use the Agent tool with run_in_background set to true to start one subagent. The subagent is to run this with the Bash tool: sleep 15 && echo agent-done , and then report what it printed. Do not wait for it: as soon as it is started, say started and end your turn.',
+      )
+      await d.waitFor('the background subagent', (e) => e.type === 'background_tasks' && e.live.some((t) => t.kind === 'agent'))
+      await d.waitFor('the end of the first turn', ended)
+      // The subagent ends on its own, and the CLI wakes the model with its report
+      await d.waitFor('the subagent ended', (e) => e.type === 'background_tasks' && (e.ended ?? []).some((t) => t.kind === 'agent'))
       await d.waitFor('the end of the turn that reports it', ended)
     },
   },
@@ -196,11 +212,10 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
-    // Extended thinking with its text shown: the thinking arrives as text, not as an empty block. The recording turns thinking on
-    // (the model it runs on does not think by default); the text is asked for by the adapter, as in every session (#2062)
+    // Thinking with its text shown: the thinking arrives as text, not as an empty block. Recorded as a session runs, with no flag
+    // for thinking: the model decides whether it thinks, and the adapter asks for the text in every session (#2062)
     name: 'thinking',
     tools: ['claude'],
-    settings: 'thinking',
     async run(d) {
       await turn(d, 'What is 17 times 23? Think it through step by step, then give the answer.')
     },

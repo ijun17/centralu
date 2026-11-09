@@ -157,7 +157,8 @@ export const REMINDER = {
 export const REFUSAL_TEXT = {
   gone: (address: string) => `${address} is gone: it is in the session archive or deleted.`,
   no_mailbox: () => 'that session cannot read mail: only an ordinary session in a project, or the Assistant, has the mail tool',
-  elsewhere: (address: string) => `${address} is on another computer, and mail does not reach other computers yet: the session that started it there reaches it with agent_session send.`,
+  // The mailbox here never writes to another computer's session: a session's mail tool sends it there (#2067 item 2), and this is what any other way of sending reads
+  elsewhere: (address: string) => `${address} is on another computer, and only a session's mail tool sends mail there: nothing was written.`,
   unknown_message: (id: string) => `there is no message ${id} you can read; check the id with mail(action="inbox").`,
   own_message: (id: string) => `${id} is your own message; say who it is for with to="…".`,
   recipients: () => `at most ${MAX_RECIPIENTS} recipients.`,

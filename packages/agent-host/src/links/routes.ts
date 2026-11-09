@@ -367,6 +367,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'machines.withdrawAsk': HUB,
   // A hub offering itself to this host (#550): answered here, never passed on
   'host.hubOffer': HUB,
+  // Mail from a hub to this host's sessions, and what became of mail that crossed (#2067 item 2): answered here, never passed on
+  'host.mail': HUB,
+  'host.mailRows': HUB,
   // The hub's own answer; a hub asks a remote's through `machines.activity`
   'host.activity': HUB,
   // The hub's own sessions; the hub's Assistant asks each machine's directly (links/linked-sessions.ts, plan §12)

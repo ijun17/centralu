@@ -391,22 +391,28 @@ project of a hub that turned the machine's switch on (Settings → Machines ther
 the pair in the session that would get the task, remembered once approved (`machine_ask_consents`), the existing
 ordinary session, the task as from `<session> on <machine>` (`MACHINE_ASKER`), one level deeper than the asker, and the
 answer cut to size. A cancelled call there withdraws a card still standing here. The hub answers nothing else of the
-machine (`reverseCalls`) but mail from the sessions it started there.
+machine (`reverseCalls`) but mail (`hub.mail`, `hub.mailRows`, `hub.find`; below).
 
-**Mail to the parent on a hub** (#2067 item 1, [plans/linked-mail.md](plans/linked-mail.md)). A session a hub started
-here (`startedFromHub`, no parent of its own) that sends `mail` to `parent` reaches the session there that started it:
-the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on the hub recorded when the
-session was created (`started_from_hub_by:`, from the connection `agents.createSession` came in on) and on no other; a
-session with no record is refused (`elsewhere`). That hub offered mail (`host.hubOffer`'s `mail`, sent whatever the
-asks switch says), and writes the message
-with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
-labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names, and
-always as a note: no reply or "no longer watched" notice reaches the child before item 2, so none is awaited. Nothing
-is written on this host. A send with `cite` (refused: the hub cannot check the person's message here), a body over
-local mail's limit (`too_long`, refused here before the call), a link that is down,
-a hub from before it (`older`), no hub that started it, an error the hub answered (`refused`, told from a lost call by
-the server's `peerAnswer` mark) or a refusal of the hub's own rules is said at once with its reason and written nowhere,
-so the same text may be sent again; only a call that gets no answer says it is not known whether the message arrived.
+**Mail across linked machines** (#2067, [plans/linked-mail.md](plans/linked-mail.md)). Every session mails every
+other, on this computer or on one linked to it, both ways (owner decision 2026-11-09; `mayReachAcross`, mail/across.ts,
+allows every pair, and the asks switch is not read). The tool (`MailTool.call`) sends a message for another computer's
+session by one call to that computer (`MailAcross.send`): a machine calls the hub (`hub.mail`, on the connection the hub
+offered on), a hub calls the machine (`host.mail`), and mail between two machines goes through the hub. The recipient's
+host writes it with its own send, its checks and guards, and answers with the message id; only then does the sender's
+host keep a copy under the same id (`MessageService.sentAcross`), which its delivery never tries. Each change to a row
+of such a message is pushed to the other side (`*.mailRows`, merged forward only: the recipient's host decides
+delivered, read, answered and released, the sender's host withdrawn), and a Centralu notice to a session on the other
+side (the "no longer watched" notice) is passed on as a notice. Addresses on the wire are the hub's
+(`session:<hub id>/<machine id>.<id>` for a machine's session); a machine reads its own by the id the hub's offer gives
+it (`you`). `parent` of a session a hub started here goes to the hub recorded when the session was created
+(`started_from_hub_by:`, from the connection `agents.createSession` came in on, or from that connection's first offer
+when the session came before it), which finds the parent in its own record. A link that is down, a computer from before
+it (`older`), an untrusted project (`untrusted_project`: nothing waits for the person across a link), `cite`, a body over
+the limit or a refusal of the other computer's rules is said at once and written nowhere, so the same text may be sent
+again; only a call that gets no answer says it is not known whether the message arrived. `mail find` searches the
+sessions of every computer reached (the hub's own list and its mirrors of its machines; on a machine, each hub's
+`hub.find` too), ranked, at most 8 lines, and `mail send` with a name looks across machines as well, refusing a name
+found more than once with every candidate's address.
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 
@@ -424,7 +430,7 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
-| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the session archive; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the session archive; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, `paused (background work)` (its turn ended while its own background commands or the tool's background subagents run, #2146; `pausedOnBackground`, protocol session-state.ts, the one rule the sidebar's working number reads too), finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
 
 **Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
 them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
@@ -1113,7 +1119,7 @@ in five ways, each in one place:
 |---|---|---|---|
 | Finding a tool | PATH, augmented from the login shell | PATH with PATHEXT, absolute entries only; npm/pnpm `.cmd` shims read for the `.js` or `.exe` they start, a shim that starts another (Yarn v1's global bin) followed up to three deep, and Node's own `npm.cmd`/`npx.cmd` (a different shape: variables, and a newer npm in the global prefix preferred) for their `npm-cli.js`/`npx-cli.js` | `env-path.ts`, `tool-launch.ts` |
 | `git`, `gh`, an app's command | by name | by absolute path: given a bare name, Windows looks in the working directory (the project) first. Never a `.cmd` (Node refuses to spawn one): the `.exe` its shim starts, or the first `.exe` on PATH. An app's command given as a path is taken from the app's folder, with PATHEXT tried when it has no extension (#849) | `tool-launch.ts` `programPath`, `resolveCommand` |
-| Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal, and only when taskkill could not end the tree: node-pty's own kill after it listed a console that was gone and killed the shell's pid 5 s later (#857). What an app left running after it ended is found by parent links and creation times (one PowerShell CIM listing, ~0.5 s) and ended the same way | `dev-services/kill-tree.ts` |
+| Ending a tree | process groups, TERM then KILL | `taskkill /T /F`, one shot; a pty's `kill()` gets no signal, and only when taskkill could not end the tree: node-pty's own kill after it listed a console that was gone and killed the shell's pid 5 s later (#857). What an app left running after it ended is found by parent links and creation times (one PowerShell CIM listing, ~0.5 s) and ended, parents before children (each parent alone, #2142). A run or git call (`processes.stop`) reads that table first, then ends its child alone and then what the table showed under it, parents first, one `taskkill` after another without holding the host's thread: a program `taskkill` ends reports success to an MSYS shell, so a parent still running could go on (#2141). Read after, the table would miss a grandchild whose parent Node ended with the child (#2142 review). A stop takes 430–445 ms (measured, three runs; `taskkill /T` took about 60 ms); a table that cannot be read leaves `taskkill /T` on the child. Its sweep after the exit (unless `sweep: false`) finds what the child started after the table was read. What an MSYS program forks has an ended intermediate as its parent, so neither reaches it (a hook's `sleep`); it ends with the host's work job (`lifecycle/work-job.ts`, measured) | `dev-services/kill-tree.ts`, `os/real.ts` |
 | Terminal / Run button | login shell `-l` / `-lc` | `pwsh` or Windows PowerShell, `-NoLogo` / `cmd.exe /d /s /c`, on the ConPTY node-pty ships (`useConptyDll`, `conpty/` in the bundle): Windows' own left a `conhost.exe` per tab and command until the host exited (#849) | `dev-services/terminal.ts`, `dev-services/pty-slot.ts` `spawnPty`, `os.ts` `usesShippedConpty` |
 | Watching the file tree | one watcher per expanded folder | one recursive watcher on the project's root: a watched folder, and every folder above it, cannot be renamed or moved (#849) | `dev-services/watch.ts`, `os.ts` `traitsFor().locksWatchedFolders` |
 
@@ -2336,9 +2342,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
    sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
    does not compare the host's answers to the CLI's `mcp_message` calls (`streamJsonCodec`'s `hostAnswers`). A Claude scenario's own
-   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled`,
-   as the model recorded on does not think by default; the text itself the adapter asks for in every session, #2062; `'tasks'`: `--tools TaskCreate,...`,
-   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
+   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'tasks'`: `--tools TaskCreate,...`,
+   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off. Thinking has no
+   setting: `thinking` is recorded as a session runs, with no flag for it (the model decides; the adapter asks for the text, #2062).
    The recordings also drive the UI's e2e scenarios (#1498): `adapters/frames/replay-agent.test-helpers.ts` makes a
    recorded session the agent of a running host (`--agent replay` of `e2e/fixtures/linked-host-main.ts`), the real
    adapter on a recording in place of the tool's process, and a session replays the scenario its working folder is

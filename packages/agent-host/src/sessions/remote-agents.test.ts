@@ -15,6 +15,10 @@ import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote
 let store: Store
 let children: ChildOwnership
 let state: string
+/** The child's background work as its machine last relayed it (`LinkedReports.tasksOf`) */
+let linkedTasks: { id: string; kind: string; description: string; status: string }[] = []
+/** How the child's turn was cut short there, as the hub's list of the machine carries it */
+let cut: { reason: string; at: number } | undefined
 let settled: string[]
 let told: string[]
 /** The last message the child took there, as the machine lists it */
@@ -37,7 +41,7 @@ const task = { id: 't1', description: 'build', status: 'running' } as never
 function agents(extra: Record<string, unknown> = {}): RemoteAgents {
   const reader = {
     read: async () => ({ ok: true, state, lines: [] }),
-    list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box' }],
+    list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box', ...(cut ? { interruption: cut as never } : {}) }],
     machineLinked: () => true,
     machineWaitsForPerson: () => false,
     lastWords: async () => ({ ok: true as const, text: 'done there', length: 0, seq: null }),
@@ -52,7 +56,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     linkedReader: reader,
     meta: new Map([[caller.id, caller]]),
     settleLinkedTurn: (id: string) => settled.push(id),
-    linkedReports: { ownTasksRunning: () => [] },
+    linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
     tellSession: async (_to: string, text: string) => void told.push(text),
     ...extra,
   } as unknown as RemoteAgentsHost
@@ -64,6 +68,8 @@ beforeEach(() => {
   children = new ChildOwnership(store)
   store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([child]))
   state = 'working'
+  linkedTasks = []
+  cut = undefined
   settled = []
   told = []
   // The child last took the instruction this hub sent it: its turn is the caller's
@@ -207,7 +213,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       linkedReader: reader,
       meta: new Map([[caller.id, caller]]),
       settleLinkedTurn: (id: string) => settled.push(id),
-      linkedReports: { ownTasksRunning: () => [] },
+      linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
       tellSession: async (_to: string, text: string) => void told.push(text),
       autoBoundaryOpen: () => false,
       emit: () => {},
@@ -745,6 +751,24 @@ describe('a child on a linked machine, as the hub follows it (#1038 review)', ()
     expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'waiting' })])
     state = 'idle'
     expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'finished' })])
+  })
+
+  // #2146: its turn ended there while its own background work runs, as its machine relays that work
+  it('lists the child as paused while its machine lists its own background work running after its turn', async () => {
+    const ra = agents()
+    state = 'waiting_input'
+    linkedTasks = [{ id: 'a1', kind: 'agent', description: 'review', status: 'running' }]
+    expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'paused' })])
+    linkedTasks = [{ id: 'a1', kind: 'agent', description: 'review', status: 'completed' }]
+    expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'finished' })])
+  })
+
+  it('lists the child as stopped, never paused, when its turn there was cut short with its work still running (#2146 review)', async () => {
+    const ra = agents()
+    state = 'idle'
+    linkedTasks = [{ id: 'a1', kind: 'agent', description: 'review', status: 'running' }]
+    cut = { reason: 'interrupted', at: 5 }
+    expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'stopped' })])
   })
 
   // A drop before the first event of the turn left it unseen as busy, and its end while the link was down never reported

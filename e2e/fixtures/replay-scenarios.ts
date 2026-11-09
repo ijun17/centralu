@@ -369,6 +369,7 @@ export const REPLAYS: Replay[] = [
   { tool: 'claude', scenario: 'resume' },
   { tool: 'claude', scenario: 'background-open' },
   { tool: 'claude', scenario: 'background-poll' },
+  { tool: 'claude', scenario: 'background-agent' },
   {
     tool: 'claude',
     scenario: 'centralu-agents',

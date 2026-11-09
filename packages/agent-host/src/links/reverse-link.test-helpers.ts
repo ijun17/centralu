@@ -14,10 +14,10 @@ import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { fixtureGit } from '../temp-dir.test-helpers.js'
-import { mailFromMachine } from '../mail/from-machine.js'
+import { mailPeers } from './mail-peers.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
-import { startedFromHubKey } from '../sessions/hub-preset.js'
+import { recordStartingHub, startedFromHubKey } from '../sessions/hub-preset.js'
 import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
 
 /**
@@ -59,13 +59,21 @@ export async function machineHost(o: { without?: readonly string[]; sessions?: r
   for (const id of o.fromHub ?? []) store.settings.setAppSetting(startedFromHubKey(id), 'true')
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
-  const hubs = new LinkedHubs({ call: (client, method, params, opts) => server.call(client, method, params, opts), lookupMs: 2000, ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}), ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}) })
+  const hubs = new LinkedHubs({
+    call: (client, method, params, opts) => server.call(client, method, params, opts),
+    lookupMs: 2000,
+    record: (sessionId, hub) => recordStartingHub(store.settings, sessionId, hub),
+    ...(o.askTimeoutMs ? { askTimeoutMs: o.askTimeoutMs } : {}),
+    ...(o.mailTimeoutMs ? { mailTimeoutMs: o.mailTimeoutMs } : {}),
+  })
   mgr.useLinkedHubs(hubs)
-  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store) : null
+  const id = hubSelfId(store)
+  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store, { hostId: id }) : null
+  mail?.across.usePeers(mailPeers({ hostId: id, selfName: () => 'Remote box', hubs, settings: store.settings }))
   const server: HostServer = new HostServer({
     port: 0,
     token: TOKEN,
-    onRpc: without(createRpcHandler(mgr, adapters, { hubs }), o.without ?? []),
+    onRpc: without(createRpcHandler(mgr, adapters, { hubs, ...(mail ? { mailAcross: mail.across } : {}) }), o.without ?? []),
     onClientGone: (client) => hubs.gone(client),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: APP_VERSION },
   })
@@ -80,7 +88,7 @@ export async function machineHost(o: { without?: readonly string[]; sessions?: r
   }
   cleanups.push(close)
   const ask = (opts: { project: string; session?: string; task?: string }, signal?: AbortSignal) => mgr.askProject('w1', opts, signal)
-  return { store, mgr, server, hubs, port, close, ask, mail }
+  return { store, mgr, server, hubs, port, close, ask, mail, id }
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
@@ -103,10 +111,10 @@ export async function hubHost(
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const name = o.name ?? 'Hub mac'
   mgr.useHubName(() => name)
-  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store) : null
+  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store, { hostId: hubSelfId(store) }) : null
   // Every `hub.mail` this hub was sent, as it read it
   const heard: HubMailParams[] = []
-  const fromMachine = mail && o.mail === true ? mailFromMachine({ service: mail.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: () => name }) : null
+  const across = mail && o.mail === true ? mail.across : null
   const registry = storeRegistry(store)
   registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
   const reverse: Partial<LinkDeps> =
@@ -119,9 +127,18 @@ export async function hubHost(
             projects: () => mgr.projectsForMachines(),
             ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
             selfName: () => name,
-            ...(fromMachine ? { mail: (machine: { id: string; name: string }, p: HubMailParams) => (heard.push(p), fromMachine(machine, p)) } : {}),
+            ...(across
+              ? {
+                  across: {
+                    fromMachine: (machine: { id: string; name: string }, p: HubMailParams) => (heard.push(p), across.fromMachine(machine, p)),
+                    rows: across.rows.bind(across),
+                    answerFind: across.answerFind.bind(across),
+                  },
+                }
+              : {}),
           }),
           ...(o.mail === true ? { hubMail: true } : {}),
+          ...(across ? { mailReady: () => across.changed() } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },
@@ -139,6 +156,9 @@ export async function hubHost(
     ...reverse,
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
+  // Mail across linked machines (#2067 items 2 and 3), as main.ts wires it
+  across?.usePeers(mailPeers({ hostId: hubSelfId(store), selfName: () => name, machines: links, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id) }))
+  if (across) mgr.useMachineMail((id) => links.get(id)?.takesMail === true)
   // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
   if (o.origin) {
     mgr.layout.useLinkedSessions((id) => links.knowsSession(id))

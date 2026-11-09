@@ -4,7 +4,6 @@ import { devNull } from 'node:os'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
-import { hasProcessGroups } from './kill-tree.js'
 import { realOs } from '../os/real.js'
 import type { OsChild, RunOptions } from '../os/port.js'
 import { rpcError } from '../rpc-error.js'
@@ -230,30 +229,8 @@ function runOptions(cwd: string, env: Record<string, string> | undefined, timeou
       const gone = () => live.delete(child)
       child.once('exit', gone)
       child.once('error', gone)
-      endGitFirst(child, timeoutMs, signal)
     },
   }
-}
-
-/**
- * Windows: at the run's bound or its abort, git itself is ended first, at once, before the run's stop reaches what it
- * started (#2141, the same order as `stopGitChildren`, which says why). Registered as git starts, so ahead of the run's
- * own timer and abort listener (`runChild`), which then stop the tree and say why the run ended. Off Windows the run's
- * stop is already right: SIGTERM reaches git and its hook together, and git takes its lock away.
- */
-function endGitFirst(child: OsChild, timeoutMs: number, signal: AbortSignal | undefined): void {
-  if (hasProcessGroups()) return
-  const end = () => {
-    if (running(child)) child.kill()
-  }
-  const timer = realOs().clock.setTimeout(end, timeoutMs)
-  signal?.addEventListener('abort', end, { once: true })
-  const forget = () => {
-    timer.cancel()
-    signal?.removeEventListener('abort', end)
-  }
-  child.once('exit', forget)
-  child.once('error', forget)
 }
 
 /** How long git has, after SIGTERM, to take its lock files away before SIGKILL */
@@ -265,23 +242,18 @@ export const GIT_STOP_GRACE_MS = 2000
  * exited and what it left has been swept, or the grace has passed with a margin. For the host's shutdown, in both of
  * its modes: the keeper does not hold git, so a git left running would outlive the host with the repository's locks.
  *
- * On Windows git itself is ended first, at once (`kill`, which terminates it there), and then what it started (#2141).
- * `taskkill /T /F` does not end git before its hook, and a hook's program ended by taskkill reports success to its
- * shell (MSYS's `sh` sees status 0): the hook then exits 0, and a git still running made the commit the stop was
- * meant to prevent. With git gone, taskkill no longer finds the tree by its root; what git left is ended by the sweep
- * after its exit (`processes.stop`, `collectOrphansWindows`), which finds it by parent links. That sweep is waited for:
- * the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's `sh` stayed
- * after its host had exited).
+ * On Windows git itself is ended first, at once, and then what it started, parents first (#2141, #2142: the shared
+ * stop's order, `processes.stop`). A hook's program ended before git reports success to its shell (MSYS's `sh` sees
+ * status 0 from a program taskkill ended): the hook then exits 0, and a git still running made the commit the stop was
+ * meant to prevent. What git started is ended from the process table read before git was, and what it started after
+ * that by the sweep after its exit, which finds it by parent links. Both are waited for: the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's
+ * `sh` stayed after its host had exited).
  */
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
   const children = [...live].filter(running)
   if (children.length === 0) return
-  const stopped = children.map((child) => {
-    // Windows (no process groups): git itself first, see above
-    if (!hasProcessGroups()) child.kill()
-    return realOs().processes.stop(child, graceMs).catch(() => {})
-  })
-  await raceTimeout(Promise.all(stopped), graceMs + 1000, undefined)
+  // All at once: on Windows one reading of the process table and one sweep for every git, not two per git (#2142 re-check)
+  await raceTimeout(realOs().processes.stopAll(children, graceMs).catch(() => {}), graceMs + 1000, undefined)
 }
 
 /**

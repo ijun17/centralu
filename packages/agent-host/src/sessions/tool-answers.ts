@@ -172,7 +172,7 @@ export function agentListText(r: { ok: true; agents: readonly AgentListRow[] } |
   const finished = rows.filter((r) => r.state === 'finished').length
   const lines = rows.map(
     (r) =>
-      `- ${frameField(r.name)} [${r.sessionId}] · ${r.tool} · ${r.state}${r.asleep ? ' (asleep)' : ''}` +
+      `- ${frameField(r.name)} [${r.sessionId}] · ${r.tool} · ${r.state === 'paused' ? 'paused (background work)' : r.state}${r.asleep ? ' (asleep)' : ''}` +
       (r.machine ? ` · on ${frameField(r.machine)}` : '') +
       (r.worktree ? ` · worktree branch ${frameField(r.worktree.branch)}${r.worktree.unmerged ? ', not merged: a delete keeps its work in the session archive' : ', merged'}` : '') +
       (r.lastActive ? ` · last ${r.lastActive}` : ''),

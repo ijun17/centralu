@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { stopTree } from '../dev-services/kill-tree.js'
+import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows } from '../dev-services/kill-tree.js'
 import {
   killHandle,
   spawnGrouped,
@@ -351,16 +351,60 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
   return asChild(() => spawnGrouped(command, args, options))
 }
 
+/**
+ * Windows (#2142): the child itself is ended first, alone (`kill`, which terminates it there), and then what it started,
+ * parents before children (`stopTreeWindows`), from the process table read before the child was ended. `taskkill /T /F`
+ * on the child ends the tree in no order: a program ended by taskkill reports success to an MSYS shell (Git for Windows'
+ * `sh` sees status 0 from a `sleep` ended so), so a parent still running could take a stopped script's success and go
+ * on, as git made the commit a stop was meant to prevent (#2141). With the child gone first, nothing above a process
+ * outlives it. Read after, the table would miss a grandchild whose parent Node ended with the child (#2142 review).
+ *
+ * The price: a stop waits for the table (0.3–0.75 s), where `taskkill /T` took about 60 ms. A table that cannot be read,
+ * or not within `STOP_LIST_MS` (a machine starved of CPU took over 10 s, #1773), leaves `taskkill /T`. `sweep` then finds
+ * what the child started after the table was read, as everywhere.
+ */
 async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}): Promise<OsExit> {
   if (!(child instanceof RealChild))
     throw new TypeError('realOs().processes.stop: a child the real OS started')
   const node = child.node
   const running = () => node !== null && node.exitCode === null && node.signalCode === null
-  if (node?.pid !== undefined && running()) stopTree(killHandle(node), graceMs, running)
+  const groups = traits.hasProcessGroups
+  if (node?.pid !== undefined && running()) {
+    if (groups) stopTree(killHandle(node), graceMs, running)
+    else await stopTreeWindows({ pid: node.pid, spawnedAt: child.started?.spawnedAt ?? child.spawnedAt }, () => void (running() && node.kill()))
+  }
   const exit = await child.exited
   // What it left, created between its spawn and its exit as seen then: never up to now, when its pid may be another's
   if (child.started && o.sweep !== false) await sweepLeftovers(child.started)
   return { code: exit.code, signal: exit.signal }
+}
+
+/**
+ * `stop` for several children at once, each swept after. On Windows one reading of the table before and one sweep after
+ * serve them all (#2142 re-check): a PowerShell per child, twice, made a shutdown with many git calls slow
+ */
+async function stopAll(children: readonly OsChild[], graceMs: number): Promise<void> {
+  if (traits.hasProcessGroups) {
+    await Promise.all(children.map((c) => stop(c, graceMs).catch(() => {})))
+    return
+  }
+  const real = children.map((c) => {
+    if (!(c instanceof RealChild)) throw new TypeError('realOs().processes.stopAll: children the real OS started')
+    return c
+  })
+  const alive = (node: ChildProcess) => node.exitCode === null && node.signalCode === null
+  const roots = real.flatMap((c) => {
+    const node = c.node
+    if (node?.pid === undefined || !alive(node)) return []
+    return [{ pid: node.pid, spawnedAt: c.started?.spawnedAt ?? c.spawnedAt, endRoot: () => void (alive(node) && node.kill()) }]
+  })
+  await stopTreesWindows(roots)
+  await Promise.all(real.map((c) => c.exited))
+  const ended = real.flatMap((c) => {
+    const pid = c.started?.child.pid
+    return c.started && pid !== undefined ? [{ pid, spawnedAt: c.started.spawnedAt, exitedAt: c.started.exitedAt() ?? Date.now() }] : []
+  })
+  await collectAllOrphansWindows(ended)
 }
 
 function runSync(
@@ -443,6 +487,7 @@ const realOsValue: Os = {
         o,
       ),
     stop,
+    stopAll,
     alive: (pid) => {
       try {
         process.kill(pid, 0)

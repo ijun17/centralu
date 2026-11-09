@@ -1,5 +1,5 @@
 import type { SessionInfo } from './commands.js'
-import type { SessionState } from './entities.js'
+import { workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
 /**
@@ -28,12 +28,32 @@ export function isInTurn(state: unknown): boolean {
 }
 
 /**
+ * **Paused on its own background work** (#2146, owner decision 2026-11-09): its turn ended as a turn does (`waiting_input`,
+ * `idle`) while work it started still runs: background commands, or the tool's own background subagents (Claude Code's
+ * Agent tasks run in the background, `kind: 'agent'`). Its report is still to come (the parent was told it paused, #721).
+ *
+ * The one rule for it. Such a session counts **once** as running in the sidebar's working number (`foldSummary`), its
+ * subagents through it and never one by one (they are not Centralu sessions and cannot be opened), and `agent_session
+ * list` says `paused (background work)` (`agentState`, and a linked machine's child as its machine relays its tasks).
+ * A turn that failed, was cut short (`interruption`) or hit a limit is shown as that, not as paused. The work is `workTasks`: the timers a
+ * tool holds (`/loop`) and ambient tasks are not work.
+ */
+export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): boolean {
+  return (s.state === 'waiting_input' || s.state === 'idle') && !s.interruption && workTasks(s.backgroundTasks ?? []).length > 0
+}
+
+/**
  * A linked machine's session as a hub shows it while it cannot ask that machine (#1822): as last heard, but not working.
  * Nothing says whether that turn still runs, so it is not shown running; the machine's row says the link is down, and
  * the machine's resync brings the real state back. The hub's lists from its mirror and the window's rows read this.
+ * Its background work is not heard either: none is listed, so the session is not counted as paused on it
+ * (`pausedOnBackground`, #2146 review), which would keep it in the working count while the machine is away or gone.
  */
-export function unheard<T extends { state?: unknown }>(row: T): T {
-  return row.state === 'working' ? { ...row, state: 'idle' } : row
+export function unheard<T extends { state?: unknown; backgroundTasks?: unknown }>(row: T): T {
+  const working = row.state === 'working'
+  const tasks = Array.isArray(row.backgroundTasks) && row.backgroundTasks.length > 0
+  if (!working && !tasks) return row
+  return { ...row, ...(working ? { state: 'idle' } : {}), ...(tasks ? { backgroundTasks: [] } : {}) }
 }
 
 /** The legal transitions in the FR-12 table. Anything not here is illegal. */

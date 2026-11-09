@@ -102,7 +102,6 @@ import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { MachineAsks } from './machine-asks.js'
 import type { HubsReader } from './ask-project-flow.js'
-import type { LinkedHubs } from '../links/linked-hubs.js'
 
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
@@ -626,13 +625,14 @@ export class SessionManager {
     this.linkedReader = reader
   }
 
-  /**
-   * The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts), and take mail from
-   * the sessions they started here to their parents (#2067 item 1)
-   */
-  useLinkedHubs(hubs: HubsReader & Partial<Pick<LinkedHubs, 'mail'>>): void {
+  /** Whether a linked machine takes mail from this hub (#2067 item 2): the task of a child started there then says to mail its parent */
+  useMachineMail(takesMail: (machineId: string) => boolean): void {
+    this.delegationFlow.remote.machineMail = takesMail
+  }
+
+  /** The hubs linked to this host that let its sessions ask their projects (#550, links/linked-hubs.ts) */
+  useLinkedHubs(hubs: HubsReader): void {
     this.askProjectFlow.hubs = hubs
-    if (hubs.mail) this.mail.hubs = { mail: hubs.mail.bind(hubs) }
   }
 
   /** This computer's name, as a linked machine's session reads it in an answer or a refusal (#550) */

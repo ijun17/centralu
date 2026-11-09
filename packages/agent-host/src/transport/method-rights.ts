@@ -377,6 +377,9 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   /** The window telling the serve host the system is ending (#1970): said with the window's full credential. An everyday one could plant a false end that relabels a real crash as the system's (#1397) */
   'host.systemEnding': 'window',
   'host.hubOffer': 'link',
+  // From a hub that offered on the same connection only (rpc.ts), as `host.hubOffer` (#2067 item 2)
+  'host.mail': 'link',
+  'host.mailRows': 'link',
 
   // The window's own state, preferences, themes and approval rules
   'workspace.save': 'window',

@@ -35,7 +35,11 @@ import { endsWorkWithJob, systemTool } from '../os.js'
  * - **No breakaway** (`JOB_OBJECT_LIMIT_BREAKAWAY_OK` is not set): only a process that asks to break away could leave,
  *   and Git for Windows' sh (MSYS) asks. With it allowed, what a git hook started, or anything under Git Bash (Claude
  *   Code's Bash tool on Windows), outlived the host (measured with the real host; without it, it ended, and the hook ran
- *   as before).
+ *   as before). This is the only end of a program a hook's `sh` started (#2142): MSYS's fork gives it a parent that has
+ *   already exited, so neither a stop's tree kill nor its sweep by parent links finds it, and a git call that is stopped
+ *   leaves it running until the host exits (measured 2026-11-09, `git commit` with a hook `sleep`: without the job the
+ *   hook's `sh` and `sleep` outlived their Node parent, with it both ended). A job per run would end it with the run, but
+ *   costs one PowerShell (0.3–0.8 s) per program started, so the run itself is not put in one.
  * - **Under a keeper too.** The keeper holds none of the host's children any more (#1895 step 4: the host owns its agents,
  *   terminals and commands, and a swap ends them with the old host), so a job of the host's takes nothing from it.
  *   Measured on native Windows with `CC_KEEPER=1`: without the job a detached grandchild a dev server started survived

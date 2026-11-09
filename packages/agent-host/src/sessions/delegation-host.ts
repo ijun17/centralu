@@ -90,7 +90,7 @@ export type DelegationHost = {
   /** A project's `origin` remote (#1038); null with no repository or no origin */
   readonly files: Pick<ProjectFiles, 'projectOrigin'>
   /** A linked machine's session's own background work running there, as the hub last heard it (`LinkedReports`, #723) */
-  readonly linkedReports: Pick<LinkedReports, 'ownTasksRunning'>
+  readonly linkedReports: Pick<LinkedReports, 'ownTasksRunning' | 'tasksOf'>
   /** A linked session's turn end the hub missed while the link was down: settled as its `turn_complete` would be (#1038) */
   settleLinkedTurn: (sessionId: string) => void
   /**

@@ -720,7 +720,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
    * Tells the machine who this hub is and whether its sessions may ask this hub's projects (`host.hubOffer`), so the
    * machine knows the connection to call back on. Said off too, so a machine that heard "on" earlier in its own life
    * stops offering this hub to its sessions. A machine that could not be told says so on the row, while the switch is on.
-   * `mail`: the sessions this hub started there may mail their parents here (#2067), switch or not
+   * `mail`: every session there may mail every session this hub reaches (#2067), switch or not; `you` is the machine's id
+   * here, by which it reads this hub's names for its own sessions. The machine's answer says whether it takes mail back
+   * (`takesMail`)
    */
   protected async offerAsks(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
@@ -728,7 +730,9 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const on = this.record.asks === true
     let note: string | null = null
     try {
-      await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true } : {}) })
+      const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}) })
+      if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
+      if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
     } catch (err) {
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
@@ -763,6 +767,13 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const client = this.client
     if (!self || !client || !this.reachable || (this.record.asks !== true && !this.deps.hubMail)) return
     await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
+  }
+
+  /** Whether the machine said, at this connection's offer, that it takes mail from this hub (`host.mail`, #2067 item 2) */
+  private mailBack = false
+
+  get takesMail(): boolean {
+    return this.mailBack
   }
 
   // ── RoutedMachine ───────────────────────────────────────────────────────────────────────

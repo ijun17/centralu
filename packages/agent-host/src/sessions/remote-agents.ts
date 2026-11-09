@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, pausedOnBackground } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -201,6 +201,9 @@ type TurnWait = { busy: boolean; done: Promise<Step>; end(step: Step): void }
  * own evidence. What does not pass gets the fact and the state word.
  */
 export class RemoteAgents {
+  /** Whether a machine takes mail from this hub (`LinkedMachineConnection.takesMail`, #2067 item 2): its children's task then says to mail. Set by main.ts */
+  machineMail: ((machineId: string) => boolean) | null = null
+
   private loaded: RemoteAgent[] | null = null
   private readonly waits = new Map<string, TurnWait>()
   /** Children whose parent was told their link dropped, until it is back */
@@ -294,7 +297,11 @@ export class RemoteAgents {
       const there = listed?.find((s) => s.sessionId === r.sessionId)
       const state: AgentListRow['state'] =
         there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
-        : there ? (inTurn(there.state as SessionState) ? 'working' : 'finished')
+        : there ? (inTurn(there.state as SessionState) ? 'working'
+          : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption }) ? 'paused'
+          // Cut short there, as a child here reads (`agentState`): never paused over the work its turn left (#2146 review)
+          : there.state === 'error' || there.state === 'limited' || there.interruption ? 'stopped'
+          : 'finished')
         : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }
@@ -532,7 +539,7 @@ export class RemoteAgents {
      * The instructions of the machine's own copy of the project (#1161 item 2): its paths and its shell. Read again now
      * (#1161 review): the card may have stood a while, and a machine connected on demand was listed from its mirror
      */
-    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target))
+    const task = remoteAgentFrame(label, opts.task, await this.instructionsOn(reader, target), this.machineMail?.(machine.id) === true)
     const rec: RemoteAgent = {
       sessionId: made.sessionId, callerId, machineId: machine.id, machine: machine.name, name: made.name, tool,
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(), sent: task, turn: randomUUID(),

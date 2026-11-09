@@ -809,9 +809,9 @@ export const MAIL_TOOLS = [
     name: 'mail',
     description: `Centralu's mailbox: work and messages with other sessions, apps and the person; send to "assistant" to ask it, with cite=true only when the person's last message here asked for it.`,
     schema: z.object({
-      action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close']),
+      action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close', 'find']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id (a shared name is refused, listing them)'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id (a shared name is refused, listing them). For find: words (name, project, machine, role) to search every computer'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),
@@ -828,8 +828,11 @@ export const MAIL_TOOLS = [
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md */
-export const MAIL_BUDGET_CHARS = 1170
+/**
+ * The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md.
+ * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231)
+ */
+export const MAIL_BUDGET_CHARS = 1240
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the

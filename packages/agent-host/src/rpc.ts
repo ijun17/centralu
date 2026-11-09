@@ -33,6 +33,7 @@ import { centraluToolSchemas } from './sessions/centralu-tools.js'
 import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
 import type { MailPerson } from './mail/person.js'
+import type { MailAcross } from './mail/across.js'
 import type { InlineViews } from './inline-views.js'
 import type { CredentialsReport } from './lifecycle/serve-credentials.js'
 import type {
@@ -110,7 +111,14 @@ export type RpcServices = {
     offer(client: number, o: HubOffer): void
     /** The hub that offered on this connection, if one did: a session it creates with `fromHub` records it (#2067) */
     on?(client: number): { id: string; name: string } | undefined
+    /** A session a hub created on this connection before offering here: recorded once it offers (#2067) */
+    awaitOffer?(client: number, sessionId: string): void
   }
+  /**
+   * Mail across linked machines (#2067 item 2, mail/across.ts): `host.mail` and `host.mailRows` from the hub that offered
+   * on the connection they came in on, and from no other. Without it both are refused, as a build from before them
+   */
+  mailAcross?: Pick<MailAcross, 'fromHub' | 'rows'>
   /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
   mail?: MailPerson
   /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
@@ -160,7 +168,7 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mail, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, mail, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
@@ -308,6 +316,8 @@ export function createRpcHandler(
         ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}),
         ...(startedByHub ? { startedByHub } : {}),
       })
+      // Created before that hub's offer arrived on this connection: recorded when it does
+      if (p.fromHub && ctx && !startedByHub) hubs?.awaitOffer?.(ctx.client, info.id)
       return worktreeBase ? { ...info, worktreeBase } : info
     },
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
@@ -889,6 +899,18 @@ export function createRpcHandler(
     'host.hubOffer': async (p, ctx) => {
       const offer = p
       if (hubs && ctx) hubs.offer(ctx.client, offer)
+      // A hub's task for a child here says to mail its parent when this host takes mail from it (#2067 item 2)
+      return { ok: true as const, ...(mailAcross && hubs ? { mail: true } : {}) }
+    },
+    'host.mail': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection sends mail here')
+      return mailAcross.fromHub(hub, p)
+    },
+    'host.mailRows': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!mailAcross || !hub) throw rpcError('Only a hub that offered on this connection says what became of mail here')
+      await mailAcross.rows(p.rows, { hub: hub.id })
       return { ok: true as const }
     },
     'host.activity': async () => {
