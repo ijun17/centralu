@@ -258,7 +258,9 @@ down makes a machine's search say so at once and list this computer's sessions o
 **Names in `to`.** `mail send` with a name looks across too: on a hub, the mirrors (no call); on a machine, each hub's
 directory, asked for the exact name. A name found once is sent to; a name found more than once, here or elsewhere, is
 refused `ambiguous` with the candidates' addresses, as #2066 does on one host. A hub that does not answer the lookup is
-left out of it, and the refusal for a name found nowhere says which computers could not be asked.
+left out of it, and the refusal for a name found nowhere says which computers could not be asked (the first three, and how many more).
+When a session here has the name, a hub is waited for only as long as a reachable one answers (0.6 s), not the 4 s a
+search waits: one that does not answer by then leaves the send to the session here.
 
 **Cost.** The answer is capped, so its size does not grow with the number of sessions. Measured with the repository's
 token estimate (characters ÷ 4) on generated directories, for a query that matches every session:

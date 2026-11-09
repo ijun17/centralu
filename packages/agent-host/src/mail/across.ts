@@ -103,6 +103,8 @@ const FOREIGN_ID = /^[^\s/]{1,120}\.m_[0-9A-Za-z]{10,40}$/
 
 /** How long a directory search may wait for one hub */
 const FIND_MS = 4000
+/** How long a send by name waits for a hub when a session here has that name already: what a reachable hub answers in */
+const NAMED_HERE_MS = 600
 
 export class MailAcross {
   private peers: AcrossPeers | null = null
@@ -589,14 +591,18 @@ export class MailAcross {
     return findAnswer({ query, found, matched: found.length, total: total - (entries.some((e) => e.address === self) ? 1 : 0), away })
   }
 
-  /** The sessions on other computers named `name` exactly, and the computers that could not be asked */
-  async named(name: string): Promise<{ found: FoundEntry[]; away: { name: string; why: string }[] }> {
-    const { entries, away } = await this.directory(name, true, false)
+  /**
+   * The sessions on other computers named `name` exactly, and the computers that could not be asked. `here`: a session on
+   * this computer has the name, so a hub is waited for only as long as a reachable one answers in (`NAMED_HERE_MS`), not
+   * `FIND_MS`: one that does not answer then leaves the send to the session here (#2067 review)
+   */
+  async named(name: string, o: { here?: boolean } = {}): Promise<{ found: FoundEntry[]; away: { name: string; why: string }[] }> {
+    const { entries, away } = await this.directory(name, true, false, o.here ? NAMED_HERE_MS : FIND_MS)
     return { found: named(entries, name), away }
   }
 
   /** The directory: this host's own entries (unless `own` is false), a hub's mirrors, and each hub's answer on a machine */
-  private async directory(query: string, exact: boolean, own = true): Promise<{ entries: FoundEntry[]; away: { name: string; why: string }[]; total: number }> {
+  private async directory(query: string, exact: boolean, own = true, ms = FIND_MS): Promise<{ entries: FoundEntry[]; away: { name: string; why: string }[]; total: number }> {
     const entries: FoundEntry[] = own ? this.d.ownEntries() : []
     const away: { name: string; why: string }[] = []
     let total = entries.length
@@ -611,7 +617,7 @@ export class MailAcross {
         if (!h.you) return away.push({ name: h.name, why: 'it runs an older Centralu; update it there' })
         if (!h.reachable) return away.push({ name: h.name, why: 'not reachable right now' })
         try {
-          const raw = await Promise.race([h.call('hub.find', { query, limit: exact ? 50 : FIND_LIMIT, ...(exact ? { exact: true } : {}) } satisfies HubFindParams), timeout(FIND_MS)])
+          const raw = await Promise.race([h.call('hub.find', { query, limit: exact ? 50 : FIND_LIMIT, ...(exact ? { exact: true } : {}) } satisfies HubFindParams), timeout(ms)])
           const r = HubFindResult.safeParse(raw)
           if (!r.success) return away.push({ name: h.name, why: 'its answer could not be read' })
           for (const e of r.data.entries) {

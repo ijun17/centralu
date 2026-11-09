@@ -153,7 +153,14 @@ export class MailTool {
     const here = this.host.sessions()
     if (here.some((s) => s.id === t)) return null
     const local = here.filter((s) => s.id !== sessionId && s.name.trim().toLowerCase() === lower)
-    const far = await across.named(t)
+    const far = await across.named(t, { here: local.length > 0 })
+    // Found nowhere: the refusal names the computers that could not be asked, where the session may be (§8)
+    if (far.found.length === 0 && local.length === 0 && far.away.length > 0) {
+      throw refuse(
+        'unknown',
+        `no session on this computer or on the computers asked has the id or name ${JSON.stringify(oneLineText(t, 80))}. Not asked: ${far.away.slice(0, 3).map((a) => `${oneLineText(a.name, 40)} (${a.why})`).join(', ')}${far.away.length > 3 ? `, and ${far.away.length - 3} more` : ''}. A session there cannot be found by name until it answers: try again later.`,
+      )
+    }
     if (far.found.length === 0) return null
     const [only] = far.found
     if (only && local.length + far.found.length === 1) return { address: only.address }

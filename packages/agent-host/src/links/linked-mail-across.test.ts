@@ -167,6 +167,30 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
     const r = await tool(machine, 'w1', { action: 'find', to: '' })
     expect(r.text.split('\n')).toEqual(['The 1 most recently active of 1 sessions. Mail one by its address.', `${at(machine, 'c1')} "c1" · remote-project · child · idle`, 'Not searched: Hub mac (not reachable right now).'])
   })
+
+  it('a name found nowhere while a hub is down is refused with the computer that could not be asked (§8)', async () => {
+    const { machine, hub } = await rig()
+    await hub.stop()
+    await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
+    expect(await tool(machine, 'w1', { action: 'send', to: 'h1', text: 'hello' })).toEqual({
+      text: 'Refused (unknown): no session on this computer or on the computers asked has the id or name "h1". Not asked: Hub mac (not reachable right now). A session there cannot be found by name until it answers: try again later.',
+      isError: true,
+    })
+  })
+
+  it('a name a session here has is sent to without waiting the whole search on a hub that does not answer', async () => {
+    const { machine } = await rig({ machineSessions: ['w1', 'c1', 'x1'] })
+    machine.mgr.rename('x1', 'reviewer')
+    const real = mailPeers({ hostId: machine.id, selfName: () => machine.name, hubs: machine.hubs })
+    // A hub reachable by its link that never answers its lookup
+    machine.mail!.across.usePeers({ ...real, hubs: () => real.hubs!().map((h) => ({ ...h, call: () => new Promise<never>(() => {}) })) })
+    const started = Date.now()
+    const r = await tool(machine, 'w1', { action: 'send', to: 'reviewer', text: 'a look?' })
+    expect(r.text).toMatch(/^Sent /)
+    expect(machine.store.mailbox.feedOf(at(machine, 'x1'), { limit: 10 }).map((m) => m.body)).toEqual(['a look?'])
+    // FIND_MS is 4 s; the wait here is a reachable hub's answer time
+    expect(Date.now() - started).toBeLessThan(2500)
+  })
 })
 
 describe('what a linked machine may say about who wrote what (#2067 review)', () => {
