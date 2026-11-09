@@ -106,13 +106,18 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     expect(received(hub).map((m) => m.body.length)).toEqual([16_000])
   })
 
-  it('a session the hub did not start is refused, and nothing is written on either side', async () => {
+  it('a session the hub no longer knows is refused as gone, and nothing is written on either side', async () => {
     const { machine, hub } = await rig({ records: false })
-    expect(await send(machine, 'hello parent')).toEqual({
-      text: 'Refused (unknown): Hub mac does not know this session as one it started, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
-      isError: true,
-    })
+    expect(await send(machine, 'hello parent')).toEqual({ text: `Refused (gone): Hub mac no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.`, isError: true })
     expect([sentBy(hub, 'm1.c1'), sentBy(machine, 'c1')]).toEqual([0, 0])
+  })
+
+  it('a parent trashed on the hub is said as gone', async () => {
+    const { machine, hub } = await rig()
+    expect(await send(machine, 'before')).toMatchObject({ text: expect.stringMatching(/^Sent /) })
+    await hub.mgr.trash.trashSession('h1')
+    expect(await send(machine, 'after')).toEqual({ text: expect.stringMatching(/^Refused \(gone\): Hub mac no longer has the session that started this one/), isError: true })
+    expect(hub.heard.map((p) => p.text)).toEqual(['before', 'after'])
   })
 
   it('a hub from before it is named as the cause while its asks switch is on; while it is off it never offered, and is said as not linked or older', async () => {

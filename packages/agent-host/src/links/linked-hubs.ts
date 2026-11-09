@@ -181,7 +181,8 @@ export class LinkedHubs {
     const parsed = HubMailResult.safeParse(raw)
     if (!parsed.success) return { ok: false, why: 'link_down', text: `${name} answered in a form this computer does not read, so it is not known whether the message arrived.` }
     const r = parsed.data
-    if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'unknown', text: `${name} does not know this session as one it started, so nothing was sent. End your turn with the answer: that is how your parent hears from you.` }
+    // The hub this computer recorded as the starter no longer knows the session: its parent there went (archived or deleted)
+    if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'gone', text: `${name} no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.` }
     if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
     return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), hub: name }
   }
