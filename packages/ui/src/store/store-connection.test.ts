@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { isAway } from '@cc/core'
-import type { MachineInfo, NormalizedEvent } from '@cc/protocol'
+import { pausedOnBackground, type MachineInfo, type NormalizedEvent } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS, useStore } from './store.js'
@@ -833,6 +833,21 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     mock.emit({ type: 'machine_status', machine: box() })
     mock.emit({ type: 'machine_resync', machineId: 'box' })
     await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.state).toBe('working'))
+  })
+
+  // #2146 review: a session paused on its background work there is not counted as working while its machine cannot be heard
+  it('a session paused on background work on a machine whose link drops is no longer paused, until the machine is read again', async () => {
+    const { mock } = await pair()
+    const there = mock.sessions.get('box.cm-1')!
+    there.state = 'waiting_input'
+    there.backgroundTasks = [{ id: 'agent-1', kind: 'agent', description: 'review', status: 'running' }]
+    await useStore.getState().attach(mock)
+    expect(pausedOnBackground(useStore.getState().sessions['box.cm-1']!)).toBe(true)
+    mock.emit({ type: 'machine_status', machine: box({ status: 'unreachable' }) })
+    expect(pausedOnBackground(useStore.getState().sessions['box.cm-1']!)).toBe(false)
+    mock.emit({ type: 'machine_status', machine: box() })
+    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    await vi.waitFor(() => expect(pausedOnBackground(useStore.getState().sessions['box.cm-1']!)).toBe(true))
   })
 
   // #1822: a list asked while the machine was up and answered after its link dropped does not bring working back

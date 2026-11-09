@@ -46,9 +46,14 @@ export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readon
  * A linked machine's session as a hub shows it while it cannot ask that machine (#1822): as last heard, but not working.
  * Nothing says whether that turn still runs, so it is not shown running; the machine's row says the link is down, and
  * the machine's resync brings the real state back. The hub's lists from its mirror and the window's rows read this.
+ * Its background work is not heard either: none is listed, so the session is not counted as paused on it
+ * (`pausedOnBackground`, #2146 review), which would keep it in the working count while the machine is away or gone.
  */
-export function unheard<T extends { state?: unknown }>(row: T): T {
-  return row.state === 'working' ? { ...row, state: 'idle' } : row
+export function unheard<T extends { state?: unknown; backgroundTasks?: unknown }>(row: T): T {
+  const working = row.state === 'working'
+  const tasks = Array.isArray(row.backgroundTasks) && row.backgroundTasks.length > 0
+  if (!working && !tasks) return row
+  return { ...row, ...(working ? { state: 'idle' } : {}), ...(tasks ? { backgroundTasks: [] } : {}) }
 }
 
 /** The legal transitions in the FR-12 table. Anything not here is illegal. */
