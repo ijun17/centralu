@@ -96,6 +96,9 @@ export type HostMail = {
   afterReady(): void
 }
 
+/** When what became of crossing mail was last told to every linked side (`MailAcrossDeps.toldAt`) */
+const ACROSS_TOLD_KEY = 'mail.acrossToldAt'
+
 /**
  * The mail of this host on the message tables (M3a): the message service over `store.mailbox` with the one reach module, the turns and guards, the
  * delivery, the version-1 tool mapped onto the service, and the recorders the old report paths call. Nothing here starts until `afterReady`
@@ -183,6 +186,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     service,
     records,
     reach,
+    // Kept in the store: a restart tells again what was settled since every side last heard, and nothing older
+    toldAt: {
+      get: () => Number(store.settings.appSetting(ACROSS_TOLD_KEY)) || null,
+      set: (at) => store.settings.setAppSetting(ACROSS_TOLD_KEY, String(at)),
+    },
     ...(opts.now ? { now: opts.now } : {}),
     log: (line) => console.error(line),
     ownEntries: () =>

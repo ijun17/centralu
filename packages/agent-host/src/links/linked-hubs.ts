@@ -50,7 +50,15 @@ export class LinkedHubs {
   /** Sessions a hub created on a connection before it offered there, by connection (`awaitOffer`) */
   private readonly waiting = new Map<number, string[]>()
 
+  /** Run each time a hub offers mail on a connection (`onMailOffer`) */
+  private readonly mailOffered = new Set<(hubId: string) => void>()
+
   constructor(private readonly deps: LinkedHubsDeps) {}
+
+  /** `fn` runs each time a hub offers mail here, at each connect: what crossed while it was away is told then (#2067 review) */
+  onMailOffer(fn: (hubId: string) => void): void {
+    this.mailOffered.add(fn)
+  }
 
   /** A hub's offer, on the connection it came in on. Off, and without mail, forgets it */
   offer(client: number, o: HubOffer): void {
@@ -66,6 +74,7 @@ export class LinkedHubs {
     const waiting = this.waiting.get(client)
     this.waiting.delete(client)
     for (const id of waiting ?? []) this.deps.record?.(id, { id: o.hub.id, name })
+    if (mail) for (const fn of this.mailOffered) fn(o.hub.id)
   }
 
   /** The hubs whose switch for this machine is on: the ones whose projects its sessions may ask */

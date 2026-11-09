@@ -59,6 +59,11 @@ export type AcrossPeers = {
   parentOf?(qualifiedId: string): string | undefined
   /** This computer's name, as the other side reads it */
   selfName(): string
+  /**
+   * `fn` runs each time a hub offers mail here again: what became of mail that crossed is told then (§6). A hub hears its
+   * machines connect through `LinkDeps.mailReady`
+   */
+  onConnect?(fn: () => void): void
 }
 
 export type MailAcrossDeps = {
@@ -69,6 +74,11 @@ export type MailAcrossDeps = {
   /** This host's own sessions as the directory lists them */
   ownEntries(): FoundEntry[]
   now?: () => number
+  /**
+   * When what became of crossing mail was last told to every linked side, kept in the store: rows settled since are told
+   * again after a restart, so none that was never told is lost. Absent: every crossing row is read at each change
+   */
+  toldAt?: { get(): number | null; set(at: number): void }
   /** Runs `fn` soon; tests run it at once */
   soon?: (fn: () => void) => void
   log?: (line: string) => void
@@ -91,17 +101,16 @@ export class MailAcross {
   private readonly told = new Map<string, string>()
   private syncing = false
   private again = false
-  private readonly startedAt: number
   private readonly now: () => number
 
   constructor(private readonly d: MailAcrossDeps) {
     this.now = d.now ?? Date.now
-    this.startedAt = this.now()
   }
 
-  /** The links, once they exist. Rows the other side may not have heard of yet are sent */
+  /** The links, once they exist. Rows the other side may not have heard of yet are sent now and at each connect */
   usePeers(peers: AcrossPeers): void {
     this.peers = peers
+    peers.onConnect?.(() => this.changed())
     this.changed()
   }
 
@@ -359,7 +368,10 @@ export class MailAcross {
 
   private async syncOnce(): Promise<void> {
     const out = new Map<string, { peer: { kind: 'hub'; id: string } | { kind: 'machine'; id: string }; rows: (MailRowState & { sender: string })[]; keys: [string, string][] }>()
-    for (const row of this.d.records.acrossRows(this.d.hostId, this.startedAt - 10 * 60_000)) {
+    // Read before the rows: a row that changes after is newer, and its change runs this again
+    const at = this.now()
+    let all = true
+    for (const row of this.d.records.acrossRows(this.d.hostId, this.d.toldAt?.get() ?? 0)) {
       const copy = this.foreign(row.recipient)
       // The copy's side tells only a withdrawal; the recipient's side tells everything else
       if (copy && row.settled !== 'withdrawn') continue
@@ -380,16 +392,21 @@ export class MailAcross {
     await Promise.all(
       [...out.values()].map(async (b) => {
         const p = b.peer.kind === 'hub' ? this.peers?.hub?.(b.peer.id) : this.peers?.machine?.(b.peer.id)
-        if (!p?.reachable) return
+        // A side no longer linked is never told, and does not hold the mark back; one linked and away is told when it connects
+        if (!p) return
+        if (!p.reachable) return void (all = false)
         try {
           for (let i = 0; i < b.rows.length; i += 200) await p.call(b.peer.kind === 'hub' ? 'hub.mailRows' : 'host.mailRows', { rows: b.rows.slice(i, i + 200) })
           for (const [key, sig] of b.keys) this.told.set(key, sig)
         } catch (e) {
-          // Told again at the next change; one from before item 2 never hears it
-          if (!older(e)) this.d.log?.(`[mail] ${p.name} could not be told what became of ${b.rows.length} message(s): ${errorMessage(e)}`)
+          // Told again at the next change or connect; one from before item 2 never hears it, and does not hold the mark back
+          if (older(e)) return
+          all = false
+          this.d.log?.(`[mail] ${p.name} could not be told what became of ${b.rows.length} message(s): ${errorMessage(e)}`)
         }
       }),
     )
+    if (all) this.d.toldAt?.set(at)
   }
 
   /**

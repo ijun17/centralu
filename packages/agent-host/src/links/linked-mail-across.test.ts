@@ -4,6 +4,7 @@ import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
 import { sessionAddress } from '../mail/address.js'
+import { MailAcross } from '../mail/across.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
@@ -216,5 +217,54 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
     expect((await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello', needsReply: false })).text).toMatch(/^Sent /)
     const r = machine.mail!.across.fromHub(from, { from: at(hub, 'h1'), to: 'w1', text: 'noted', notice: true })
     expect(machine.store.mailbox.message((r as { messageId: string }).messageId)).toMatchObject({ sender: at(hub, 'h1'), kind: 'message' })
+  })
+})
+
+describe('what became of crossing mail is told after the link or the host was away (#2067 review)', () => {
+  it('a message read while the link was down is told to the sender once the link is back, with no other mail', async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'look at this when you can' }))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => !hub.links.get('m1')!.reachable && machine.hubs.mailHubs().every((h) => !h.reachable))
+    expect((await tool(machine, 'w1', { action: 'read', thread: id })).text).toContain('look at this')
+    expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.readAt).toBeNull()
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.readAt != null)
+  })
+
+  it('a question withdrawn while the link was down is withdrawn on the machine once the link is back', async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'can you take the release?' }))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => !hub.links.get('m1')!.reachable)
+    expect((await tool(hub, 'h1', { action: 'handled', thread: id })).text).toMatch(/^Withdrawn: /)
+    expect(machine.store.mailbox.recipient(id, at(machine, 'w1'))).toMatchObject({ settled: null })
+    await hub.router.handle('machines.reconnect', { machineId: 'm1' })
+    await eventually(() => machine.store.mailbox.recipient(id, at(machine, 'w1'))?.settled === 'withdrawn')
+  })
+
+  it('a row settled while the link was down is told by a host that starts long after, from the mark kept in the store', async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is the build green?' }))
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
+    expect((await tool(machine, 'w1', { action: 'handled', thread: id })).isError).toBeFalsy()
+    expect(machine.store.mailbox.recipient(id, at(machine, 'w1'))).toMatchObject({ settled: 'done' })
+    // The machine's host starts again 11 minutes later, its hub reachable: a new one over the same store
+    const told: unknown[] = []
+    const mail = machine.mail!
+    const later = new MailAcross({
+      hostId: machine.id,
+      service: mail.service,
+      records: mail.records,
+      reach: mail.reach,
+      ownEntries: () => [],
+      now: () => Date.now() + 11 * 60_000,
+      toldAt: { get: () => Number(machine.store.settings.appSetting('mail.acrossToldAt')) || null, set: () => {} },
+    })
+    const peer = { id: hub.id, name: hub.name, reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
+    later.usePeers({ selfName: () => 'Remote box', hub: () => peer, hubs: () => [peer] })
+    await later.sync()
+    expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, recipient: at(hub, 'm1.w1'), settled: 'done' })] } }])
   })
 })

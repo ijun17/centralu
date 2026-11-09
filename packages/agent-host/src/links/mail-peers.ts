@@ -29,7 +29,7 @@ export function mailPeers(o: {
   /** The session here that started a machine's child (`LinkedHost.remoteAgentParent`) */
   parentOf?: (qualifiedId: string) => string | undefined
   /** The hubs that link this host, when it is a machine */
-  hubs?: Pick<LinkedHubs, 'peer' | 'mailHubs'>
+  hubs?: Pick<LinkedHubs, 'peer' | 'mailHubs'> & Partial<Pick<LinkedHubs, 'onMailOffer'>>
   /** Where the hub that started a session here is recorded (`startingHub`) */
   settings?: { appSetting(key: string): string | null }
 }): AcrossPeers {
@@ -38,6 +38,9 @@ export function mailPeers(o: {
     new Map((m.lastKnown('projects') ?? []).flatMap((p) => (isObj(p) && typeof p.id === 'string' && typeof p.name === 'string' ? [[p.id, p.name] as const] : [])))
   return {
     selfName: o.selfName,
+    onConnect: (fn) => {
+      hubs?.onMailOffer?.(() => fn())
+    },
     ...(o.parentOf ? { parentOf: o.parentOf } : {}),
     ...(machines
       ? {

@@ -732,6 +732,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     try {
       const answer = await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}) })
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
+      if (this.client === client && this.mailBack) this.deps.mailReady?.(this.id)
     } catch (err) {
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }

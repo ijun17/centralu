@@ -138,6 +138,7 @@ export async function hubHost(
               : {}),
           }),
           ...(o.mail === true ? { hubMail: true } : {}),
+          ...(across ? { mailReady: () => across.changed() } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },

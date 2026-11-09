@@ -172,7 +172,11 @@ the side the copy's recipient is on, a withdrawal only from the side the stored 
 two machines passes through the hub, which keeps no copy: it passes a row on only from the machine the row is about,
 and the other machine checks the sender the row names against the message it has.
 
-A push that fails is tried again on the next change and at the next connect. The sender's `inbox` (`waiting`), its
+A push that fails is tried again on the next change and at the next connect: a machine pushes when a hub offers mail
+on a connection, a hub when a machine takes its offer. What every linked side was last told in full is kept in the store
+as a time (`mail.acrossToldAt`), which a side that is away holds back and one no longer linked does not: a host that
+starts again reads every crossing row settled since then, so a row settled while the link was down is told after a
+restart however long ago it was. The sender's `inbox` (`waiting`), its
 `handled`, and the person's view of the copy read the copy as they read any row.
 
 **Notices.** A Centralu notice the recipient's host writes to a foreign address (the "no longer watched" notice when a
