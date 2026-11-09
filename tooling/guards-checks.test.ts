@@ -543,6 +543,13 @@ describe('guard/assistant-kind', () => {
     ['s.kind === ASSISTANT_KIND'],
     ["host.meta.get(id)?.kind == 'orchestrator'"],
     ['switch (s.kind) { case "orchestrator": }'],
+    ["['orchestrator', 'coordinator'].includes(s.kind)"],
+    ["new Set(['orchestrator']).has(s?.kind)"],
+    ["const f = ({ kind }) => kind === 'orchestrator'"],
+    ["const { kind: k } = s; if (k !== 'orchestrator') {}"],
+    ["function f({ kind }) { switch (kind) { case 'orchestrator': } }"],
+    ["const f = ({ kind }) => ['orchestrator'].includes(kind)"],
+    ["({ orchestrator: 'Assistant', worker: 'Worker' })[s.kind]"],
   ])('reports %s', async (code) => {
     expect((await lines(file, code, 'assistant-kind')).length).toBeGreaterThan(0)
   })
@@ -555,6 +562,14 @@ describe('guard/assistant-kind', () => {
     ["item.kind === 'assistant'"],
     ["// s.kind === 'orchestrator' is what this forbids"],
     ["const kind: SessionKind = 'orchestrator'"],
+    ["['worker', 'coordinator'].includes(s.kind)"],
+    ["['orchestrator'].includes(s.tool)"],
+    ["new Set(['coordinator']).has(s.kind)"],
+    ["new Map([['orchestrator', 1]]).has(s.kind)"],
+    ["const f = ({ tool }) => tool === 'orchestrator'"],
+    ["const f = ({ kind }) => kind === 'coordinator'"],
+    ["({ coordinator: 'C' })[s.kind]"],
+    ["({ orchestrator: 'A' })[s.tool]"],
   ])('does not report %s', async (code) => {
     await quiet(file, 'assistant-kind', code, "s.kind === 'orchestrator'")
   })
