@@ -182,11 +182,11 @@ describe('CI finds main\'s record among main\'s own runs, page by page', () => {
     expect(g.asked.filter((p) => p.includes('/runs?'))).toHaveLength(6)
   })
 
-  it('wires verify: fetch main\'s record, compare in pnpm verify, upload this run\'s even when verify failed', () => {
+  it('wires verify: fetch main\'s record, compare in its own step, upload this run\'s even when verify failed', () => {
     const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')
     const verify = workflow.split(/^ {2}verify:\n/m)[1]!.split(/^ {2}\S/m)[0]!
     const fetch = verify.indexOf('run: node .github/scripts/bundle-base.mjs "$RUNNER_TEMP/bundle-base"')
-    const run = verify.indexOf('- run: pnpm verify')
+    const run = verify.indexOf('run: pnpm exec vitest run tooling/styles.test.ts\n')
     const upload = verify.indexOf(`name: ${ARTIFACT}\n`)
     expect(fetch).toBeGreaterThan(0)
     expect(run).toBeGreaterThan(fetch)
@@ -194,7 +194,8 @@ describe('CI finds main\'s record among main\'s own runs, page by page', () => {
     expect(verify).toContain('CC_BUNDLE_BASE: ${{ runner.temp }}/bundle-base\n')
     expect(verify).toContain('CC_BUNDLE_RECORD: ${{ runner.temp }}/bundle-size\n')
     expect(verify.slice(run, upload + 200)).toContain("if: ${{ !cancelled() }}")
-    // The other job running styles.test.ts in CI says which job compares, rather than skipping quietly
+    // The other jobs running styles.test.ts in CI say which job compares, rather than skipping quietly (verify's test shards, #2153)
+    expect(workflow.split(/^ {2}verify-tests:\n/m)[1]!.split(/^ {2}\S/m)[0]).toContain('CC_BUNDLE_COMPARED_BY: verify')
     expect(workflow.split(/^ {2}windows-tests-unit:\n/m)[1]!.split(/^ {2}\S/m)[0]).toContain('CC_BUNDLE_COMPARED_BY: verify')
   })
 
