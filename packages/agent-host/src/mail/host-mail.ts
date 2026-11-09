@@ -45,8 +45,8 @@ export type HostMailSessions = {
   readsSession?(readerId: string, targetId: string): boolean
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
-  /** Whether the id is a child this host started on a linked machine (`MailSessionsView.onLinkedMachine`, #2067) */
-  onLinkedMachine?(id: string): boolean
+  /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
+  onLinkedMachine?(id: string): { name: string } | undefined
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
@@ -109,8 +109,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     session: (id) => {
       const s = sessions.sessionInfo(id)
       if (s) return { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
-      // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link
-      return sessions.onLinkedMachine?.(id) ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere' } : undefined
+      // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link. Its
+      // mail to its parent here (item 1) shows it by its name on that machine
+      const linked = sessions.onLinkedMachine?.(id)
+      return linked ? { projectId: null, askedBy: null, here: true, canReadMail: false, host: 'elsewhere', name: linked.name } : undefined
     },
     assistantId: () => sessions.assistantId(),
     assistantAsks: () => sessions.assistantAsks() === null,

@@ -20,6 +20,7 @@ import { UserAppAdoption, adoptedProjectOf, adoptedUserApp } from './user-app-ad
 import { SessionManager } from './sessions/manager.js'
 import { MailPerson } from './mail/person.js'
 import { hostMail, mailSessionsOf } from './mail/host-mail.js'
+import { mailFromMachine } from './mail/from-machine.js'
 import { MemoryGate } from './sessions/memory-gate.js'
 import { commandsFor } from './sessions/centralu-tools.js'
 import { readShared } from './sessions/app-access.js'
@@ -678,6 +679,8 @@ const links = new Links(linkDepsFor(store, {
     projects: () => mgr.projectsForMachines(),
     ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
     selfName: hubName,
+    // A child started on a machine mails the session here that started it (#2067 item 1, docs/plans/linked-mail.md §3)
+    mail: mailFromMachine({ service: hostMailbox.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: hubName }),
   }),
 }))
 /*

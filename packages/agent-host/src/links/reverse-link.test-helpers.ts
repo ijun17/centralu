@@ -12,6 +12,10 @@ import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { mailFromMachine } from '../mail/from-machine.js'
+import type { HostMail } from '../mail/host-mail.js'
+import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
+import { REMOTE_AGENTS_KEY, type RemoteAgent } from '../sessions/remote-agents.js'
 
 /**
  * A linked machine and the hubs that link to it, for the reverse direction (#550: asks; #2067: mail). Real hosts in one
@@ -58,15 +62,25 @@ export async function machineHost(o: { without?: readonly string[]; sessions?: r
 }
 
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
-export async function hubHost(machinePort: number, o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset'] } = {}) {
+/**
+ * `mail`: the hub's mail is wired (`wireHostMail`), and it takes mail from the sessions it started on the machine (#2067):
+ * `true` as this build, `'before'` as a build from before `hub.mail` (asks only, no `mail` in its offer)
+ */
+export async function hubHost(
+  machinePort: number,
+  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before'; children?: readonly RemoteAgent[] } = {},
+) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
   store.projects.addProject({ id: 'p-hub', path: folder(), name: projectName })
   seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
+  // The children start_agent started on the machine, as the hub's record keeps them (read once, when the manager first asks)
+  if (o.children) store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify(o.children))
   const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const name = o.name ?? 'Hub mac'
   mgr.useHubName(() => name)
+  const mail: HostMail | null = o.mail ? wireHostMail(mgr, store) : null
   const registry = storeRegistry(store)
   registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
   const reverse: Partial<LinkDeps> =
@@ -79,6 +93,7 @@ export async function hubHost(machinePort: number, o: { name?: string; reverse?:
             projects: () => mgr.projectsForMachines(),
             ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
             selfName: () => name,
+            ...(mail && o.mail === true ? { mail: mailFromMachine({ service: mail.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: () => name }) } : {}),
           }),
         }
   const links = new Links({
@@ -117,7 +132,7 @@ export async function hubHost(machinePort: number, o: { name?: string; reverse?:
     return c
   }
   const machine = () => links.list()[0]!
-  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName }
+  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName, mail }
 }
 
 /** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise */

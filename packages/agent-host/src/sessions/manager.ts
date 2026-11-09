@@ -1160,7 +1160,10 @@ export class SessionManager {
       // Whose a linked child's turn is decides whether its report goes (#1038 review)
       reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
       keepsOverLoss: (sessionId) => self.delegationFlow.remote.keepsOverLoss(sessionId),
-      linkedChild: (sessionId) => self.delegationFlow.remote.of(sessionId) !== undefined,
+      linkedChild: (sessionId) => {
+        const r = self.delegationFlow.remote.of(sessionId)
+        return r && { name: oneLineText(`${r.name} on ${r.machine}`, 120) }
+      },
       skillsPrompt: () => self.launchInputs.skillsPrompt(),
       sleepSession: (...a) => self.processes.sleepSession(...a),
       startAgent: (...a) => self.startAgent(...a),
