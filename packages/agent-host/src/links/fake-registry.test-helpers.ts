@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
@@ -6,6 +6,7 @@ import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 
 /**
  * A local stand-in for registry.npmjs.org and nodejs.org/dist (links/install tests): signed version
@@ -16,19 +17,44 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 export type FakeFile = string | { text: string; mode: number }
 export type FakePackage = { name: string; version: string; files: Record<string, FakeFile> }
 
+/** Writes `files` under `dir/top/` for `tar` to pack */
+function tarFolder(top: string, files: Record<string, FakeFile>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'cc-fake-tar-'))
+  for (const [path, f] of Object.entries(files)) {
+    const file = join(dir, top, path)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, typeof f === 'string' ? f : f.text)
+    if (typeof f !== 'string') chmodSync(file, f.mode)
+  }
+  return dir
+}
+
+/*
+ * Relative paths from the folder: the tar first on PATH may be GNU tar (the one Git for Windows brings, on a Windows
+ * runner), which reads the `C:` of an absolute Windows path as a remote host
+ */
+const TAR_ARGS = (top: string) => ['-czf', 'out.tgz', top]
+
 /** A `.tar.gz` of `files` under `top/`, as npm packs (`package/`) and Node ships (`node-v…/`) */
 export function tarGz(top: string, files: Record<string, FakeFile>): Buffer {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-fake-tar-'))
+  const dir = tarFolder(top, files)
   try {
-    for (const [path, f] of Object.entries(files)) {
-      const file = join(dir, top, path)
-      mkdirSync(dirname(file), { recursive: true })
-      writeFileSync(file, typeof f === 'string' ? f : f.text)
-      if (typeof f !== 'string') chmodSync(file, f.mode)
-    }
-    // Relative paths from `dir`: the tar first on PATH may be GNU tar (the one Git for Windows brings,
-    // on a Windows runner), which reads the `C:` of an absolute Windows path as a remote host
-    execFileSync('tar', ['-czf', 'out.tgz', top], { cwd: dir })
+    execFileSync('tar', TAR_ARGS(top), { cwd: dir })
+    return readFileSync(join(dir, 'out.tgz'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * `tarGz` without holding the event loop while `tar` runs (#2148): a suite's setup that packs many (`fakeRegistry`) held the
+ * worker's loop for each, back to back, and on a loaded Windows machine that passed the 60 s vitest waits for a worker's
+ * messages ("Timeout calling onTaskUpdate"), which failed the file with none of its tests run
+ */
+export async function tarGzAsync(top: string, files: Record<string, FakeFile>): Promise<Buffer> {
+  const dir = tarFolder(top, files)
+  try {
+    await promisify(execFile)('tar', TAR_ARGS(top), { cwd: dir })
     return readFileSync(join(dir, 'out.tgz'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -60,7 +86,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
   const forged = new Set<string>()
   const files = new Map<string, Buffer>()
   for (const p of packages) {
-    const t = tarGz('package', p.files)
+    const t = await tarGzAsync('package', p.files)
     tarballs.set(`${p.name}@${p.version}`, t)
     served.set(`${p.name}@${p.version}`, t)
   }
