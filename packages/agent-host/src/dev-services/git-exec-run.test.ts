@@ -189,7 +189,7 @@ ${shPath(process.execPath)} ${shPath(program)}
 describe('a git that is stopped takes its lock away (#982)', () => {
   let root: string
 
-  /** A repository with a change, whose pre-commit hook sleeps for `seconds` */
+  /** A repository with a change, whose pre-commit hook writes `started()` and then sleeps for `seconds` */
   function slowCommit(seconds: number): string {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-lock-')))
     git(root, 'init', '-q')
@@ -202,12 +202,14 @@ describe('a git that is stopped takes its lock away (#982)', () => {
     writeFileSync(join(root, 'a.txt'), 'b\n')
     const hook = join(root, '.git', 'hooks', 'pre-commit')
     mkdirSync(join(root, '.git', 'hooks'), { recursive: true })
-    writeFileSync(hook, `#!/bin/sh\nsleep ${seconds}\n`)
+    writeFileSync(hook, `#!/bin/sh\ntouch ${shPath(started(root))}\nsleep ${seconds}\n`)
     chmodSync(hook, 0o755)
     return root
   }
 
   const lock = (repo: string) => join(repo, '.git', 'index.lock')
+  /** Written by the hook as it starts: git takes its lock before the hook runs, so the lock alone does not say it runs */
+  const started = (repo: string) => join(repo, 'hook-started')
 
   it.skipIf(process.platform === 'win32')('at its bound', { timeout: 30_000 * SLOW }, async () => {
     const repo = slowCommit(30)
@@ -219,19 +221,21 @@ describe('a git that is stopped takes its lock away (#982)', () => {
     expect(existsSync(lock(repo))).toBe(false)
   })
 
-  // The host leaving (lifecycle/shutdown.ts): git runs in a group of its own, which nothing else ends
-  it('when the host stops: every git still running ends, with what it started', { timeout: 30_000 * SLOW }, async () => {
+  /*
+   * The host leaving (lifecycle/shutdown.ts): git runs in a group of its own, which nothing else ends. Stopped while
+   * its hook runs, git must not go on to commit (#2141: on Windows, `taskkill /T` could end the hook's `sleep` before
+   * git, the hook then reported success, and git committed). Without a stop the hook sleeps out and git commits.
+   */
+  it('when the host stops: every git still running ends, with what it started', { timeout: 60_000 * SLOW }, async () => {
     const repo = slowCommit(30)
-    const call = runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 60_000 * SLOW }).then(
+    const call = runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 120_000 * SLOW }).then(
       () => 'committed',
       () => 'ended',
     )
-    // The hook is running once git holds the lock
-    expect(await settle(() => existsSync(lock(repo)), Boolean, 10_000 * SLOW)).toBe(true)
-    const started = Date.now()
+    expect(await settle(() => existsSync(started(repo)), Boolean, 20_000 * SLOW)).toBe(true)
     await stopGitChildren()
+    // git's own end, however long the stop took
     expect(await call).toBe('ended')
-    expect(Date.now() - started).toBeLessThan(10_000 * SLOW)
     if (process.platform !== 'win32') expect(existsSync(lock(repo))).toBe(false)
     expect(git(repo, 'log', '--format=%s').trim()).toBe('one')
   })

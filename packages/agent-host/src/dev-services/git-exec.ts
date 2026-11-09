@@ -4,6 +4,7 @@ import { devNull } from 'node:os'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
+import { hasProcessGroups } from './kill-tree.js'
 import { realOs } from '../os/real.js'
 import type { OsChild, RunOptions } from '../os/port.js'
 import { rpcError } from '../rpc-error.js'
@@ -240,12 +241,22 @@ const running = (child: OsChild) => child.exitCode === null && child.signalCode 
  * SIGKILL after the grace, the whole tree; Windows has no SIGTERM: `taskkill /T /F` at once), and settles once each has
  * exited or the grace has passed with a margin. For the host's shutdown, in both of its modes: the keeper does not hold
  * git, so a git left running would outlive the host with the repository's locks.
+ *
+ * On Windows git itself is ended first, at once (`kill`, which terminates it there), and then what it started (#2141).
+ * `taskkill /T /F` does not end git before its hook, and a hook's program ended by taskkill reports success to its
+ * shell (MSYS's `sh` sees status 0): the hook then exits 0, and a git still running made the commit the stop was
+ * meant to prevent. With git gone, taskkill no longer finds the tree by its root; what git left is ended by the sweep
+ * after its exit (`processes.stop`, `collectOrphansWindows`), which finds it by parent links.
  */
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
   const children = [...live].filter(running)
   if (children.length === 0) return
   const exited = Promise.all(children.map((child) => child.exited))
-  for (const child of children) void realOs().processes.stop(child, graceMs).catch(() => {})
+  for (const child of children) {
+    // Windows (no process groups): git itself first, see above
+    if (!hasProcessGroups()) child.kill()
+    void realOs().processes.stop(child, graceMs).catch(() => {})
+  }
   await raceTimeout(exited, graceMs + 1000, undefined)
 }
 
