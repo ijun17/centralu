@@ -14,8 +14,8 @@ import { NOT_REACHABLE } from '../adapters/contract.js'
  *   - **What a hub answers is someone else's words**: names on one line, and an answer that does not read as one is a
  *     refusal, never passed on as it came.
  *   - **Mail** (#2067 item 1, docs/plans/linked-mail.md §3): a hub that says it takes mail is kept whatever its switch
- *     for asks says, and a session it started here mails its parent there through it (`mail`). Its projects are listed
- *     and asked only while that switch is on.
+ *     for asks says, and a session it started here mails its parent there through it (`mail`), through that hub only.
+ *     Its projects are listed and asked only while that switch is on.
  */
 
 /** How long a list of a hub's projects may take before that hub counts as away for the call (as `LOOKUP_MS`, #984) */
@@ -133,50 +133,50 @@ export class LinkedHubs {
     return { ...r, project: oneLineText(r.project, 120), sessionName: oneLineText(r.sessionName, 120) }
   }
 
+  /** The hub that offered on this connection, if one did (`startedByHub`: the hub a session it creates here records) */
+  on(client: number): { id: string; name: string } | undefined {
+    for (const h of this.hubs.values()) if (h.client === client) return { id: h.id, name: h.name }
+    return undefined
+  }
+
   /**
-   * A message of a session a hub started here to the session that started it (`hub.mail`, #2067 item 1). This host does
-   * not know which hub that is: each hub that offered mail is asked in turn, and one that did not start the session
-   * answers `not_yours`. A hub that offered asks but not mail runs a release from before mail crossed computers, and is
-   * asked too, so that it can say so. Nothing is written here: the hub that takes it writes it, and a refusal is said at
-   * once and written nowhere, so the same text may be sent again (docs/plans/linked-mail.md §3's table).
+   * A message of a session a hub started here to the session that started it (`hub.mail`, #2067 item 1), sent to `started`,
+   * the hub recorded when it created the session (`startingHub`), and to no other: no other computer reads the text.
+   * Without a record (a session started by a build from before it) nothing is sent, as nothing says which computer that
+   * was. Nothing is written here: the hub writes it, and a refusal is said at once and written nowhere, so the same text
+   * may be sent again (docs/plans/linked-mail.md §3's table).
    */
-  async mail(sessionId: string, input: { text: string; needsReply?: boolean; urgent?: boolean }): Promise<HubParentMail> {
-    const hubs = [...this.hubs.values()].sort((a, b) => Number(b.mail) - Number(a.mail))
-    let down: Hub | null = null
-    let lost: { hub: Hub; why: string } | null = null
-    let before: Hub | null = null
-    for (const h of hubs) {
-      if (h.client === null) {
-        down ??= h
-        continue
+  async mail(sessionId: string, started: { id: string; name: string } | null, input: { text: string; needsReply?: boolean; urgent?: boolean }): Promise<HubParentMail> {
+    if (!started) {
+      return {
+        ok: false,
+        why: 'elsewhere',
+        text: 'your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
       }
-      let raw: unknown
-      try {
-        raw = await this.deps.call(h.client, 'hub.mail', { sessionId, ...input }, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
-      } catch (err) {
-        if (older(err)) before ??= h
-        else lost ??= { hub: h, why: oneLineText(errorMessage(err), 300) }
-        continue
+    }
+    const h = this.hubs.get(started.id)
+    const name = h?.name ?? (oneLineText(started.name, 120) || 'the computer that started this session')
+    if (!h) {
+      return {
+        ok: false,
+        why: 'link_down',
+        text: `${name}, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.`,
       }
-      const parsed = HubMailResult.safeParse(raw)
-      if (!parsed.success) return { ok: false, why: 'link_down', text: `${h.name} answered in a form this computer does not read, so it is not known whether the message arrived.` }
-      const r = parsed.data
-      if (!r.ok && r.why === 'not_yours') continue
-      if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
-      return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), hub: h.name }
     }
-    if (lost) {
-      return { ok: false, why: 'link_down', text: `the link to ${lost.hub.name} failed during the send (${lost.why}), so it is not known whether the message arrived. If you send it again and it did, ${lost.hub.name} refuses the second one as a repeat.` }
+    if (h.client === null) return { ok: false, why: 'link_down', text: `${name} is ${NOT_REACHABLE}, so nothing was sent. Send it again once the link is back.` }
+    let raw: unknown
+    try {
+      raw = await this.deps.call(h.client, 'hub.mail', { sessionId, ...input }, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
+    } catch (err) {
+      if (older(err)) return { ok: false, why: 'older', text: `${name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
+      const why = oneLineText(errorMessage(err), 300)
+      return { ok: false, why: 'link_down', text: `the link to ${name} failed during the send (${why}), so it is not known whether the message arrived. If you send it again and it did, ${name} refuses the second one as a repeat.` }
     }
-    if (down) return { ok: false, why: 'link_down', text: `${down.name} is ${NOT_REACHABLE}, so nothing was sent. Send it again once the link is back.` }
-    if (before) {
-      return { ok: false, why: 'older', text: `${before.name} runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` }
-    }
-    if (hubs.length) return { ok: false, why: 'unknown', text: 'no computer linked to this one says it started this session, so nothing was sent. End your turn with the answer: that is how your parent hears from you.' }
-    return {
-      ok: false,
-      why: 'elsewhere',
-      text: "your parent is a session on another computer, which is not linked to this one now or runs a Centralu from before mail crossed computers, so nothing was sent. End your turn with the answer: that is how your parent hears from you.",
-    }
+    const parsed = HubMailResult.safeParse(raw)
+    if (!parsed.success) return { ok: false, why: 'link_down', text: `${name} answered in a form this computer does not read, so it is not known whether the message arrived.` }
+    const r = parsed.data
+    if (!r.ok && r.why === 'not_yours') return { ok: false, why: 'unknown', text: `${name} does not know this session as one it started, so nothing was sent. End your turn with the answer: that is how your parent hears from you.` }
+    if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
+    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), hub: name }
   }
 }

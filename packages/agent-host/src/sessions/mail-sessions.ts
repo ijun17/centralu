@@ -5,6 +5,7 @@ import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
 import type { HubParentMail, MailToolArgs } from '../mail/tool.js'
 import type { LinkedHubs } from '../links/linked-hubs.js'
+import { startingHub } from './hub-preset.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
@@ -75,7 +76,7 @@ export type MailHooks = {
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
  * with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'closing' | 'handles' | 'meta'> & {
+export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
   /** What a session's tool says and what goes into its conversation: the mail's delivery and its notes */
   readonly events: SessionEvents
   /** What a session is told of work it gave: the report path the mailbox takes over, and the words a stop notice quotes */
@@ -105,10 +106,13 @@ export class MailSessionsView {
   /** The hubs linked to this host, which take mail from the sessions they started here to their parents (#2067 item 1); none until main.ts gives them */
   hubs: Pick<LinkedHubs, 'mail'> | null = null
 
-  /** A message of a session a linked hub started here to the session there that started it: refused when no hub links to this host */
+  /**
+   * A message of a session a linked hub started here to the session there that started it, through the hub recorded when
+   * it was created (`startingHub`) and no other: refused when no hub links to this host
+   */
   toHubParent(sessionId: string, input: { text: string; needsReply: boolean; urgent?: boolean }): Promise<HubParentMail> {
     if (!this.hubs) return Promise.resolve({ ok: false, why: 'elsewhere', text: 'your parent is a session on another computer, and this host takes no link from it. End your turn with the answer: that is how your parent hears from you.' })
-    return this.hubs.mail(sessionId, input)
+    return this.hubs.mail(sessionId, startingHub(this.host.store.settings, sessionId), input)
   }
 
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */

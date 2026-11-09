@@ -106,7 +106,11 @@ export type RpcServices = {
    * The hubs linked to this host that offer the reverse direction (#550, links/linked-hubs.ts): `host.hubOffer` records
    * one on the connection it came in on. Without it an offer is taken and forgotten, as a host that cannot call back
    */
-  hubs?: { offer(client: number, o: HubOffer): void }
+  hubs?: {
+    offer(client: number, o: HubOffer): void
+    /** The hub that offered on this connection, if one did: a session it creates with `fromHub` records it (#2067) */
+    on?(client: number): { id: string; name: string } | undefined
+  }
   /** The person's side of the mailbox (#1347, mail/person.ts); without it this host has no Inbox mail */
   mail?: MailPerson
   /** The calls of the limited credential waiting for the person (#1405, host-requests.ts) */
@@ -296,7 +300,14 @@ export function createRpcHandler(
     'agents.createSession': async (p, ctx) => {
       // Where a worktree forked from (#1488): in the answer, as a linked computer's hub has no other way to read it
       let worktreeBase: string | undefined
-      const info = await mgr.createSession({ ...p, onWorktreeBase: (note) => (worktreeBase = note), ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}) })
+      // A hub's start_agent (#2067): which hub, from the connection it came in on, never from the call
+      const startedByHub = p.fromHub && ctx ? hubs?.on?.(ctx.client) : undefined
+      const info = await mgr.createSession({
+        ...p,
+        onWorktreeBase: (note) => (worktreeBase = note),
+        ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}),
+        ...(startedByHub ? { startedByHub } : {}),
+      })
       return worktreeBase ? { ...info, worktreeBase } : info
     },
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {

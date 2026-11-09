@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
+import { startedByHubKey } from '../sessions/hub-preset.js'
 import { addressOf } from '../sessions/host-mail.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -44,8 +45,12 @@ async function rig(o: { asks?: boolean; hub?: Parameters<typeof hubHost>[1]; rec
   await eventually(() => hub.machine().status === 'connected')
   if (o.asks) await hub.router.handle('machines.setAsks', { machineId: 'm1', on: true })
   if (o.hub?.mail !== 'before' || o.asks) await eventually(() => offered(machine))
+  startedBy(machine, 'c1', hub)
   return { machine, hub }
 }
+
+/** The machine's record of the hub that started a session, as `agents.createSession` writes it from the connection */
+const startedBy = (machine: Machine, sessionId: string, hub: Hub) => machine.store.settings.setAppSetting(startedByHubKey(sessionId), JSON.stringify({ id: hub.id, name: hub.name }))
 
 /** The child's `mail` tool, as its session calls it */
 const send = (machine: Machine, text: string, more: { kind?: string; urgent?: boolean; from?: string; to?: string } = {}) =>
@@ -89,13 +94,13 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
   it('a session the hub did not start is refused, and nothing is written on either side', async () => {
     const { machine, hub } = await rig({ records: false })
     expect(await send(machine, 'hello parent')).toEqual({
-      text: 'Refused (unknown): no computer linked to this one says it started this session, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
+      text: 'Refused (unknown): Hub mac does not know this session as one it started, so nothing was sent. End your turn with the answer: that is how your parent hears from you.',
       isError: true,
     })
     expect([sentBy(hub, 'm1.c1'), sentBy(machine, 'c1')]).toEqual([0, 0])
   })
 
-  it('a hub from before it is named as the cause while its asks switch is on, and is not known at all while it is off', async () => {
+  it('a hub from before it is named as the cause while its asks switch is on; while it is off it never offered, and is said as not linked or older', async () => {
     const on = await rig({ asks: true, hub: { mail: 'before' } })
     expect(await send(on.machine, 'hello')).toEqual({
       text: "Refused (older): Hub mac runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.",
@@ -106,21 +111,29 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
 
     const off = await rig({ hub: { mail: 'before' } })
     expect(await send(off.machine, 'hello')).toEqual({
-      text: "Refused (elsewhere): your parent is a session on another computer, which is not linked to this one now or runs a Centralu from before mail crossed computers, so nothing was sent. End your turn with the answer: that is how your parent hears from you.",
+      text: 'Refused (link_down): Hub mac, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.',
       isError: true,
     })
   })
 
-  it('with two hubs linked, goes to the one that started the session, and only from that session', async () => {
+  it('with two hubs linked, goes to the one that started the session, and the other never reads it', async () => {
     const machine = await machineHost({ sessions: ['w1', 'c1', 'c2'], fromHub: ['c1', 'c2'], mail: true })
     const a = await hubHost(machine.port, { name: 'Hub mac', mail: true, children: [child('c1')] })
     const b = await hubHost(machine.port, { name: 'Laptop', mail: true, children: [child('c2')] })
     await eventually(() => offered(machine, 2))
-    expect((await send(machine, 'from c1')).text).toMatch(/ on Hub mac\. /)
+    startedBy(machine, 'c1', a)
+    startedBy(machine, 'c2', b)
     expect((await send(machine, 'from c2', { from: 'c2' })).text).toMatch(/ on Laptop\. /)
+    expect((await send(machine, 'from c1')).text).toMatch(/ on Hub mac\. /)
     expect(received(a).map((m) => m.body)).toEqual(['from c1'])
     expect(received(b, 'c2').map((m) => m.body)).toEqual(['from c2'])
-    expect([sentBy(a, 'm1.c2'), sentBy(b, 'm1.c1')]).toEqual([0, 0])
+    expect(a.heard.map((p) => p.text)).toEqual(['from c1'])
+    expect(b.heard.map((p) => p.text)).toEqual(['from c2'])
+    // The hub that started it being down is said, by its name; the other's link does not stand in for it
+    await b.stop()
+    await eventually(() => [...(machine.hubs as unknown as { hubs: Map<string, { id: string; client: number | null }> }).hubs.values()].some((h) => h.id === b.id && h.client === null))
+    expect(await send(machine, 'from c2 again', { from: 'c2' })).toEqual({ text: expect.stringMatching(/^Refused \(link_down\): Laptop is not reachable right now/), isError: true })
+    expect(a.heard.map((p) => p.text)).toEqual(['from c1'])
   })
 
   it('a session no hub started keeps its own parent rule, and nothing reaches a hub', async () => {

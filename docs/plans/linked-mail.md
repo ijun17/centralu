@@ -43,10 +43,16 @@ machine to a hub is such a call (`hub.mail`); mail from a hub to a machine is a 
 
 1. **The machine.** The tool resolves `parent` for a `fromHub` session that has no parent of its own (`askedBy`) to
    "the hub session that started it". The machine does not know which session that is, and is never asked to name
-   it.
+   it. It knows which hub: when `agents.createSession` comes with `fromHub`, the machine records the hub that offered on
+   the connection the call came in on (`LinkedHubs.on`, never anything the call says), by its id and name, under
+   `started_from_hub_by:<session id>` beside the `started_from_hub:` mark. An app setting, as the mark is: no store step,
+   an older build reads only the mark, and the purge deletes both with the session.
 2. **The call.** The machine calls `hub.mail` with its own session's id, the text and the send's fields (`needsReply`,
-   `urgent`), on each linked hub that offers mail (below), one after another. A hub answers `not_yours` when it did not
-   start that session; the first other answer is the result.
+   `urgent`) on that hub's connection, and on no other: a hub that did not start the session never reads the text.
+   **A session with no record** (started by a build from before it, or by a hub that had not offered on its
+   connection: one from before mail with its asks switch off) is refused `elsewhere` and nothing is sent anywhere:
+   nothing says which computer started it, and sending the text to every linked hub to find out would show it to
+   computers that are not the parent's.
 3. **The hub** (`mailFromMachine`, mail/from-machine.ts). It qualifies the session id with the machine the call came in
    on (never with anything the call says; a machine id has no dot, so the qualified id names that machine), finds the
    parent in its own record of linked children (`RemoteAgents`, `callerId`), and sends with `MessageService.send` from
@@ -65,10 +71,11 @@ withdraws the offer (`on: false` without `mail`) whatever its switch, so the mac
 
 | Case | Refusal |
 |---|---|
-| No hub known since this host started | `elsewhere`: `your parent is a session on another computer, which is not linked to this one now or runs a Centralu from before mail crossed computers, so nothing was sent. End your turn with the answer: …` |
-| A known hub has no live connection, and no other took it | `link_down`: `<hub> is not reachable right now, so nothing was sent. Send it again once the link is back.` |
+| No hub recorded for the session | `elsewhere`: `your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: …` |
+| The recorded hub has not offered since this host started | `link_down`: `<hub>, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.` |
+| The recorded hub has no live connection | `link_down`: `<hub> is not reachable right now, so nothing was sent. Send it again once the link is back.` |
 | The hub answers "Unknown method" (it offered asks, not mail: a release from before this) | `older`: `<hub> runs an older Centralu, which mail does not reach. Update it there; until then your parent hears from you at your turn's end.` |
-| Every hub answers `not_yours` | `unknown`: `no computer linked to this one says it started this session, so nothing was sent. End your turn with the answer: …` |
+| The hub answers `not_yours` | `unknown`: `<hub> does not know this session as one it started, so nothing was sent. End your turn with the answer: …` |
 | The call fails (link dropped mid-call, 30 s without an answer) | `link_down`: `the link to <hub> failed during the send (<error>), so it is not known whether the message arrived. If you send it again and it did, <hub> refuses the second one as a repeat.` |
 | The hub refuses it (its own rules: the parent gone, `repeat`, a body too long) | The hub's reason and words |
 

@@ -395,8 +395,10 @@ machine (`reverseCalls`) but mail from the sessions it started there.
 
 **Mail to the parent on a hub** (#2067 item 1, [plans/linked-mail.md](plans/linked-mail.md)). A session a hub started
 here (`startedFromHub`, no parent of its own) that sends `mail` to `parent` reaches the session there that started it:
-the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on each hub that offered mail
-(`host.hubOffer`'s `mail`, sent whatever the asks switch says), and the hub that started the session writes the message
+the tool (`MailTool.call`) hands the text to `LinkedHubs.mail`, which calls `hub.mail` on the hub recorded when the
+session was created (`started_from_hub_by:`, from the connection `agents.createSession` came in on) and on no other; a
+session with no record is refused (`elsewhere`). That hub offered mail (`host.hubOffer`'s `mail`, sent whatever the
+asks switch says), and writes the message
 with its own send (`mailFromMachine`, mail/from-machine.ts), from the child's address there (`<machine id>.<id>`,
 labelled `<name> on <machine>`) to the parent found in its own record (`RemoteAgents`), never one the call names. Nothing
 is written on this host. A link that is down, a hub from before it (`older`), no hub that started it, or a refusal of

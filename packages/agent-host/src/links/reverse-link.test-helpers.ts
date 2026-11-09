@@ -1,4 +1,4 @@
-import { APP_VERSION, PROTOCOL_VERSION, type SessionInfo } from '@cc/protocol'
+import { APP_VERSION, PROTOCOL_VERSION, type HubMailParams, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
 import { createRpcHandler } from '../rpc.js'
@@ -85,6 +85,9 @@ export async function hubHost(
   const name = o.name ?? 'Hub mac'
   mgr.useHubName(() => name)
   const mail: HostMail | null = o.mail ? wireHostMail(mgr, store) : null
+  // Every `hub.mail` this hub was sent, as it read it
+  const heard: HubMailParams[] = []
+  const fromMachine = mail && o.mail === true ? mailFromMachine({ service: mail.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: () => name }) : null
   const registry = storeRegistry(store)
   registry.add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
   const reverse: Partial<LinkDeps> =
@@ -97,7 +100,7 @@ export async function hubHost(
             projects: () => mgr.projectsForMachines(),
             ask: (machine, params, signal) => mgr.machineAsks.ask(machine, params, signal),
             selfName: () => name,
-            ...(mail && o.mail === true ? { mail: mailFromMachine({ service: mail.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: () => name }) } : {}),
+            ...(fromMachine ? { mail: (machine: { id: string; name: string }, p: HubMailParams) => (heard.push(p), fromMachine(machine, p)) } : {}),
           }),
           ...(o.mail === true ? { hubMail: true } : {}),
         }
@@ -137,7 +140,7 @@ export async function hubHost(
     return c
   }
   const machine = () => links.list()[0]!
-  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName, mail }
+  return { store, mgr, links, router, server, card, answer, machine, stop, name, id: hubSelfId(store), projectName, mail, heard }
 }
 
 /** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise */
