@@ -122,6 +122,56 @@ export function readStopped(dataDir) {
   return { by: o?.by === 'quit' ? 'quit' : 'stop', at: typeof o?.at === 'number' && Number.isFinite(o.at) ? o.at : null }
 }
 
+/**
+ * A start in progress (#2150): `--detach` writes it before it starts the launcher, naming itself, and removes it once it
+ * has answered; when it gave up waiting while the launcher still runs, it names the launcher instead, which removes it
+ * once its host is ready or has exited. `--stop` waits while it names a live process, so a host that is starting is
+ * stopped once it is up rather than reported as not running and left to come up after the stop.
+ * `{ pid, started, at }`, as host.lock names its writer, so a pid another process got since is not taken for it
+ */
+export const SERVE_STARTING_FILE = 'serve.starting'
+
+/** Names `pid` (by default this process) as the one starting a host in the folder; never fatal */
+export function markStarting(dataDir, pid = process.pid, startOf = processStartTime) {
+  try {
+    replaceFile(join(dataDir, SERVE_STARTING_FILE), `${JSON.stringify({ pid, started: startOf(pid), at: Date.now() })}\n`)
+  } catch {
+    // nowhere to write it: a --stop meanwhile reads the folder as before
+  }
+}
+
+/** Removes the record when it names `pid`: a later start's record is that start's */
+export function clearStarting(dataDir, pid = process.pid) {
+  if (readStarting(dataDir)?.pid !== pid) return
+  try {
+    rmSync(join(dataDir, SERVE_STARTING_FILE), { force: true })
+  } catch {
+    // gone already
+  }
+}
+
+/** The record as `{ pid, started, at? }`, or null when there is none or it does not parse */
+export function readStarting(dataDir) {
+  try {
+    return parseLockHolder(readFileSync(join(dataDir, SERVE_STARTING_FILE), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a start is in progress (`SERVE_STARTING_FILE` names the live process that wrote it). `known` keeps what was
+ * learnt of a record between calls (a Windows creation time costs a PowerShell), so a caller that asks again and again
+ * pays it once per record.
+ */
+export function startingNow(dataDir, known = new Map(), startOf = processStartTime, createdAt = processCreatedAt) {
+  const r = readStarting(dataDir)
+  if (!r) return false
+  const key = `${r.pid}:${r.started}:${r.at}`
+  if (!known.has(key)) known.set(key, isWriter(r, startOf, createdAt) === true)
+  return known.get(key) === true && isAlive(r.pid)
+}
+
 /** The data folder: the host's own rule (`dataRoot()` in agent-host), CC_DATA_DIR or ~/.centralu */
 export function serveDataDir(env, home) {
   return env.CC_DATA_DIR || join(home, '.centralu')

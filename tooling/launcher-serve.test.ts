@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
@@ -71,6 +71,9 @@ import {
   processStartTime,
   processCreatedAt,
   SERVE_STOPPED_FILE,
+  SERVE_STARTING_FILE,
+  markStarting,
+  startingNow,
   markStopped,
   readStopped,
   rotateServeLog,
@@ -84,7 +87,7 @@ import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 import { renameRetrying, replaceFile } from '../packaging/npm/centralu/bin/serve-util.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { changeServeState, noState, STATE_LOCK_MARGIN_MS, STATE_LOCK_STALE_MS } from '../packaging/npm/centralu/bin/serve-files.mjs'
-import { SLOW } from './test-timing.js'
+import { eventually, SLOW } from './test-timing.js'
 import { freePort } from './free-port.js'
 import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js'
 import { pwsh7ModulePath } from '../packages/agent-host/src/links/windows-remote.test-helpers.js'
@@ -2119,6 +2122,76 @@ async function removeShippedHost(dir: string) {
 /** How `--detach` starts here: inside WSL with Windows interop it is a WMI-created `wsl.exe`, which these tests run for real (#1716) */
 const HOW = detachHow(process.platform, process.env) as 'setsid' | 'wsl' | 'wmi'
 
+/*
+ * #2150: `--detach` names the start it has in progress (`serve.starting`), and `--stop` waits for it rather than find
+ * nothing running and leave the host to come up after the stop. Only a record its live writer still holds counts.
+ */
+describe('a --stop during a start (#2150)', () => {
+  const stopNow = async (d: string, o: { startingMs?: number } = {}) => {
+    const lines: string[] = []
+    await runStop({ env: { CC_DATA_DIR: d }, home: d, entry: SOURCE_HOST, write: (l: string) => void lines.push(l), ...o })
+    return JSON.parse(lines.join('')) as { v: 1; stop: Record<string, unknown> }
+  }
+
+  it('waits while a live process names a start, and stops nothing and marks nothing when the start outlasts the bound', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    markStarting(d)
+    expect(startingNow(d)).toBe(true)
+    expect(await stopNow(d, { startingMs: 300 })).toMatchObject({ v: 1, stop: { ok: false, wasRunning: true, starting: true } })
+    expect(readStopped(d)).toBeNull()
+  })
+
+  it('goes on once the start is over, as with no start at all', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    markStarting(d)
+    const stopping = stopNow(d)
+    rmSync(join(d, SERVE_STARTING_FILE))
+    expect(await stopping).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
+  })
+
+  it('leaves no record behind when the host comes up as --detach gives up waiting (review)', async () => {
+    const d = tempDir()
+    // The launcher --detach started: alive past the wait, and its host answers on the next look
+    const launcher = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'])
+    try {
+      let looks = 0
+      const lines: string[] = []
+      const code = await runDetach({
+        env: { CC_DATA_DIR: d },
+        home: d,
+        entry: SOURCE_HOST,
+        version: '1.0.0',
+        cliPath: null,
+        platform: 'linux',
+        how: 'setsid',
+        start: async () => ({ ok: true, pid: launcher.pid, exited: new Promise(() => {}) }),
+        timeoutMs: 0,
+        // The look before starting finds no host; any later one finds it up, as when it answered between the last look and the handover
+        look: async () => (looks++ === 0 ? { hostRunning: false } : { hostRunning: true, port: 1, dataDir: d }),
+        write: (l: string) => void lines.push(l),
+      })
+      expect(code).toBe(0)
+      // Before: the record named the running launcher, and every --stop waited the whole bound for a start long over
+      expect(existsSync(join(d, SERVE_STARTING_FILE))).toBe(false)
+      expect(startingNow(d)).toBe(false)
+    } finally {
+      launcher.kill()
+    }
+  })
+
+  it('takes no account of a record whose process has ended', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    const gone = spawn(process.execPath, ['-e', ''])
+    await new Promise((r) => gone.once('exit', r))
+    markStarting(d, gone.pid)
+    expect(startingNow(d)).toBe(false)
+    expect(await stopNow(d, { startingMs: 60_000 })).toMatchObject({ v: 1, stop: { ok: true, wasRunning: false } })
+  })
+})
+
 describe('centralu serve --detach and --stop, end to end (the host as it ships, a temporary data folder)', () => {
   /*
    * The host as a release ships it (#2144): `--detach` gives the host it starts 30 s to answer, a bound for that build.
@@ -2226,6 +2299,71 @@ describe('centralu serve --detach and --stop, end to end (the host as it ships, 
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'quit' })).line.stop).toMatchObject({ ok: true, wasRunning: true })
         expect(await connection(d)).toMatchObject({ hostRunning: false, stopped: { by: 'quit', at: expect.any(Number) } })
         expect((await cli(d, ['--stop'], { CENTRALU_STOP_BY: 'hub' })).line.stop).toMatchObject({ ok: true })
+      } finally {
+        cleanup(d)
+      }
+    },
+    180_000 * SLOW,
+  )
+
+  /*
+   * #2150: a --stop given while --detach was starting the host found nothing running (the host had not taken the folder
+   * yet), said so, wrote the person's stopped mark, and the host came up after it anyway. The host here waits at a gate in
+   * the data folder before it loads, so --stop is given while the start is surely in progress, and the gate opens only
+   * once --stop has answered or said it waits: the order is fixed by those events, not by how fast the machine is.
+   */
+  it(
+    'a --stop given while --detach starts the host waits for that start and stops the host, instead of answering that nothing runs',
+    async () => {
+      const d = tempDir()
+      try {
+        ensureServeState(d)
+        const port = await freePort()
+        // The shipped host behind a gate: `--db <data>/store.db` names the folder, where the test opens it
+        const gated = join(shipped!.dir, 'gated-main.mjs')
+        writeFileSync(
+          gated,
+          [
+            "import { existsSync } from 'node:fs'",
+            "import { dirname, join } from 'node:path'",
+            "const gate = join(dirname(process.argv[process.argv.indexOf('--db') + 1]), 'test-gate')",
+            'while (!existsSync(gate)) await new Promise((r) => setTimeout(r, 50))',
+            "await import('./main.mjs')",
+            '',
+          ].join('\n'),
+        )
+        const detach = cli(d, ['--detach', '--port', String(port)], { CENTRALU_HOST_ENTRY: gated })
+        // The launcher has started its host, which waits at the gate: nothing holds the folder or answers yet
+        await eventually(() => existsSync(join(d, SERVE_PID_FILE)), 60_000)
+        expect((await connection(d)).hostRunning).toBe(false)
+
+        const stop = spawn(process.execPath, [CLI, 'serve', '--stop'], { cwd: ROOT, env: { ...cliEnv(d), ...entry() }, stdio: ['ignore', 'pipe', 'pipe'] })
+        started.push(stop)
+        let out = ''
+        let err = ''
+        stop.stdout.on('data', (b) => (out += String(b)))
+        const ended = new Promise<number | null>((r) => stop.once('close', r))
+        let answered = false
+        void ended.then(() => (answered = true))
+        await new Promise<void>((r) => {
+          stop.stderr.on('data', (b) => {
+            err += String(b)
+            if (/waiting for it, to stop it/.test(err)) r()
+          })
+          void ended.then(() => r())
+        })
+        // Before the fix --stop had already answered here, before any host ran
+        const answeredBeforeTheHost = answered
+        writeFileSync(join(d, 'test-gate'), '')
+
+        const startedLine = (await detach).line
+        expect(startedLine).toMatchObject({ hostRunning: true, detach: { ok: true, already: false } })
+        expect(await ended).toBe(0)
+        expect(answeredBeforeTheHost).toBe(false)
+        expect(JSON.parse(out.trim().split('\n').at(-1)!)).toEqual({ v: 1, stop: { ok: true, wasRunning: true, how: 'asked' } })
+        // The stop and the folder agree: no host, and the person's stop noted
+        expect((await connection(d))).toMatchObject({ hostRunning: false, stopped: { by: 'stop' } })
+        expect(existsSync(join(d, SERVE_STARTING_FILE))).toBe(false)
       } finally {
         cleanup(d)
       }
