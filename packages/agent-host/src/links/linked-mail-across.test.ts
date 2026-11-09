@@ -190,7 +190,7 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
   it('a name a session here has is sent to without waiting the whole search on a hub that does not answer', async () => {
     const { machine } = await rig({ machineSessions: ['w1', 'c1', 'x1'] })
     machine.mgr.rename('x1', 'reviewer')
-    const real = mailPeers({ hostId: machine.id, selfName: () => machine.name, hubs: machine.hubs })
+    const real = mailPeers({ hostId: machine.id, selfName: () => 'Remote box', hubs: machine.hubs })
     // A hub reachable by its link that never answers its lookup
     machine.mail!.across.usePeers({ ...real, hubs: () => real.hubs!().map((h) => ({ ...h, call: () => new Promise<never>(() => {}) })) })
     const started = Date.now()
