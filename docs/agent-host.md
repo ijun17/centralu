@@ -2292,9 +2292,16 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    session, and each answer the adapter branches on (a status, an error kind) where a real run can send it. A change to an existing adapter that
    depends on what the tool sends adds or cites the recording that shows it; a value copied into a fake without a
    recording is not evidence. On a CLI version bump, run `pnpm frames:canary <claude | codex>` first: it records a few
-   representative scenarios on the installed version, compares their shape (kinds of frame and field names, never values
-   or timing) with the newest earlier version's, and names what to re-record, nothing when they match
-   (`scripts/frames-canary.mts`). For a new tool, record
+   representative scenarios on the installed version (Claude Code: seven, about two cents), compares each with the same
+   scenario on the newest earlier version, and names what to re-record, nothing when they match
+   (`scripts/frames-canary.mts`). It compares what the adapter depends on and a run does not choose: the kinds of frame
+   and their fields, the fields the adapter reads (a hand-kept list, `RULES`), their JSON types, the values it tells
+   apart (a stop reason, a permission answer's behavior) and the order of the kinds sent once in a turn; never text, ids
+   or timing. It cannot see what no canary scenario brings: on Claude Code, `active_goal`, `conversation_reset`,
+   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, the refusal pair, a
+   failed turn's API error, a question's answer and plan mode; on Codex, a compaction and background work. Nor a
+   value or a field the model sends only on some runs, as each version has one run of each scenario: such a change shows
+   in the replay tests of the recordings that hold it, or not until a person meets it. For a new tool, record
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by

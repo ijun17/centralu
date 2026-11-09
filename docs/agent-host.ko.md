@@ -1021,7 +1021,15 @@ interface AdapterCapabilities {
    새 도구는 최소한 다음 녹화와 함께 들어온다: 일반 턴, 승인이 있는 도구 호출, 거절되거나 실패한 턴, 중단된 턴, 긴 답,
    압축(도구에 있으면), 재개한 세션, 실제 실행이 보낼 수 있는 한 어댑터가 분기하는 각 응답(상태, 오류 종류). 도구가 보내는 것에 기대는 기존 어댑터의
    변경은 그것을 보여 주는 녹화를 더하거나 가리킨다. 녹화 없이 가짜에 옮겨 적은 값은 근거가 아니다. CLI 버전이 오르면
-   다시 녹화한다. 새 도구는 `adapters/frames/`의
+   먼저 `pnpm frames:canary <claude | codex>`를 돌린다: 설치된 버전에서 대표 시나리오 몇 개(Claude Code는 일곱 개, 약 2센트)를
+   녹화하고, 각각을 직전 버전의 같은 시나리오와 비교해, 다시 녹화할 것을 말한다(같으면 없음, `scripts/frames-canary.mts`).
+   비교하는 것은 어댑터가 기대고 실행이 고르지 않는 것이다: 프레임 종류와 필드, 어댑터가 읽는 필드(손으로 관리하는 목록 `RULES`),
+   그 JSON 타입, 어댑터가 구분하는 값(stop reason, 권한 답의 behavior), 한 턴에 한 번 오는 종류의 순서. 텍스트, id, 시간은
+   보지 않는다. 카나리 시나리오가 가져오지 않는 것은 보지 못한다: Claude Code의 `active_goal`, `conversation_reset`,
+   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, 거절 한 쌍, 실패한
+   턴의 API 오류, 질문의 답, 플랜 모드; Codex의 압축과 백그라운드 작업. 모델이 어떤 실행에서만 보내는 값이나 필드도 보지
+   못한다(버전마다 시나리오당 한 번만 돌리므로): 그런 변화는 그것을 담은 녹화의 재생 테스트에서 드러나거나, 사람이 만날 때까지
+   드러나지 않는다. 새 도구는 `adapters/frames/`의
    도구 중립 프레임 도구로 녹화한다 (#1498): 녹화기(`CC_RECORD_FRAMES`), 스크러버(`scripts/frames-scrub.mts`), 프로토콜의
    `FrameCodec`을 쓰는 재생기, `SessionHandle` 수준에서 도는 시나리오. 그래서 픽스처는 어댑터 자신이 보내고 받은 그대로다
    (ACP 어댑터의 것은 `scripts/frames-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).

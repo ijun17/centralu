@@ -525,8 +525,11 @@ describe('compaction — saying what is currently happening', () => {
   })
 
   it('compact_boundary becomes a marker (Claude never had this marker until now)', () => {
-    const out = recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'compact_boundary').flatMap(n)
-    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 21274, after: 3318, trigger: 'manual' }])
+    const boundary = recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'compact_boundary')
+    // The counts are the run's own: the newest recording's, whichever version that is
+    const meta = (boundary[0] as unknown as { compact_metadata: { pre_tokens: number; post_tokens: number } }).compact_metadata
+    expect(meta.pre_tokens).toBeGreaterThan(meta.post_tokens)
+    expect(boundary.flatMap(n)).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: meta.pre_tokens, after: meta.post_tokens, trigger: 'manual' }])
     // The tool's own at its threshold says so, which Centralu does not take for its compact (#1451); an automatic one needs a window to fill, so it is written by hand
     expect(n({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, post_tokens: 20000 } })).toEqual([
       { type: 'compaction', sessionId: SID, failed: false, before: 900000, after: 20000, trigger: 'auto' },
