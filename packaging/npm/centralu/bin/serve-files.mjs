@@ -5,7 +5,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
 import { isAlive, renameRetrying, replaceFile, sleepSync } from './serve-util.mjs'
 import { CREDENTIAL_ID_RE, PAIR_LABEL_RE } from './serve-args.mjs'
@@ -123,53 +123,79 @@ export function readStopped(dataDir) {
 }
 
 /**
- * A start in progress (#2150): `--detach` writes it before it starts the launcher, naming itself, and removes it once it
- * has answered; when it gave up waiting while the launcher still runs, it names the launcher instead, which removes it
- * once its host is ready or has exited. `--stop` waits while it names a live process, so a host that is starting is
- * stopped once it is up rather than reported as not running and left to come up after the stop.
- * `{ pid, started, at }`, as host.lock names its writer, so a pid another process got since is not taken for it
+ * Starts in progress (#2150): each process that is starting a host in the folder writes its own record here, and removes it
+ * when its part is over. `--detach` writes one before it starts the launcher and removes it once it has answered, whichever
+ * way; the launcher writes its own before it starts the host and removes it once the host is ready or has exited. `--stop`
+ * waits while a record names a live process, so a host that is starting is stopped once it is up rather than reported as not
+ * running and left to come up after the stop. One file per writer, `<pid>.json`: two starts at once each keep theirs, a
+ * writer that was killed (an ssh that dropped) leaves a record of a dead process, which counts for nothing, and a WSL
+ * launcher writes its own from inside WSL, where a `--stop` there reads it. Each is `{ pid, started, at }`, as host.lock
+ * names its writer, so a pid another process got since is not taken for it
  */
-export const SERVE_STARTING_FILE = 'serve.starting'
+export const SERVE_STARTING_DIR = 'serve-starting'
 
-/** Names `pid` (by default this process) as the one starting a host in the folder; never fatal */
-export function markStarting(dataDir, pid = process.pid, startOf = processStartTime) {
+/**
+ * How old a record may be and still count. Longer than any start takes (`--detach`: its sign-in task's 20 s, then 30 s): a
+ * record older than this names a start that hung, and a `--stop` goes on and stops what holds the folder, if anything
+ */
+export const STARTING_MAX_MS = 120_000
+
+const startingFile = (dataDir, pid) => join(dataDir, SERVE_STARTING_DIR, `${pid}.json`)
+
+/** Names `pid` (by default this process) as one starting a host in the folder; never fatal */
+export function markStarting(dataDir, pid = process.pid, startOf = processStartTime, now = Date.now()) {
   try {
-    replaceFile(join(dataDir, SERVE_STARTING_FILE), `${JSON.stringify({ pid, started: startOf(pid), at: Date.now() })}\n`)
+    mkdirSync(join(dataDir, SERVE_STARTING_DIR), { recursive: true })
+    replaceFile(startingFile(dataDir, pid), `${JSON.stringify({ pid, started: startOf(pid), at: now })}\n`)
   } catch {
     // nowhere to write it: a --stop meanwhile reads the folder as before
   }
 }
 
-/** Removes the record when it names `pid`: a later start's record is that start's */
+/** Removes `pid`'s record (by default this process's) */
 export function clearStarting(dataDir, pid = process.pid) {
-  if (readStarting(dataDir)?.pid !== pid) return
   try {
-    rmSync(join(dataDir, SERVE_STARTING_FILE), { force: true })
+    rmSync(startingFile(dataDir, pid), { force: true })
   } catch {
     // gone already
   }
 }
 
-/** The record as `{ pid, started, at? }`, or null when there is none or it does not parse */
+/** The records as `{ pid, started, at? }`; one that does not parse is left out */
 export function readStarting(dataDir) {
+  let names = []
   try {
-    return parseLockHolder(readFileSync(join(dataDir, SERVE_STARTING_FILE), 'utf8'))
+    names = readdirSync(join(dataDir, SERVE_STARTING_DIR)).filter((n) => /^\d+\.json$/.test(n))
   } catch {
-    return null
+    return []
   }
+  return names.flatMap((n) => {
+    try {
+      const r = parseLockHolder(readFileSync(join(dataDir, SERVE_STARTING_DIR, n), 'utf8'))
+      return r ? [r] : []
+    } catch {
+      return []
+    }
+  })
 }
 
 /**
- * Whether a start is in progress (`SERVE_STARTING_FILE` names the live process that wrote it). `known` keeps what was
- * learnt of a record between calls (a Windows creation time costs a PowerShell), so a caller that asks again and again
- * pays it once per record.
+ * The starts in progress: the records that name the live process that wrote them, no older than `maxAgeMs`. `known` keeps
+ * what was learnt of a record between calls (a Windows creation time costs a PowerShell), so a caller that asks again and
+ * again pays it once per record.
  */
-export function startingNow(dataDir, known = new Map(), startOf = processStartTime, createdAt = processCreatedAt) {
-  const r = readStarting(dataDir)
-  if (!r) return false
-  const key = `${r.pid}:${r.started}:${r.at}`
-  if (!known.has(key)) known.set(key, isWriter(r, startOf, createdAt) === true)
-  return known.get(key) === true && isAlive(r.pid)
+export function liveStarts(dataDir, known = new Map(), { maxAgeMs = STARTING_MAX_MS, now = Date.now(), startOf = processStartTime, createdAt = processCreatedAt } = {}) {
+  return readStarting(dataDir).filter((r) => {
+    if (typeof r.at === 'number' && now - r.at > maxAgeMs) return false
+    const key = `${r.pid}:${r.started}:${r.at}`
+    if (!known.has(key)) known.set(key, isWriter(r, startOf, createdAt) === true)
+    return known.get(key) === true && isAlive(r.pid)
+  })
+}
+
+/** Whether a start is in progress (`liveStarts`) */
+export function startingNow(dataDir, known = new Map(), o = {}) {
+  return liveStarts(dataDir, known, o).length > 0
 }
 
 /** The data folder: the host's own rule (`dataRoot()` in agent-host), CC_DATA_DIR or ~/.centralu */

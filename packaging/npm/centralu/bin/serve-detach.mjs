@@ -7,7 +7,7 @@ import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, startingNow } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriter, readServePid } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslCommandLine } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -138,11 +138,10 @@ export async function runDetach({
   if (await answered(true)) return 0
   /*
    * From here a start is in progress (#2150): a `--stop` meanwhile waits for it rather than find nothing running, write
-   * the stopped mark and leave the host to come up after it. Removed on every way out, or handed to the launcher when
-   * this gave up waiting while it still runs (`SERVE_STARTING_FILE`)
+   * the stopped mark and leave the host to come up after it. This process's record is removed on every way out; the
+   * launcher it starts writes its own, which covers a launcher still starting when this gave up (`SERVE_STARTING_DIR`)
    */
   markStarting(dataDir)
-  let handTo = null
   try {
     const log = join(dataDir, SERVE_LOG_FILE)
     /*
@@ -215,26 +214,10 @@ export async function runDetach({
       if (gone) return fail('exited', `centralu serve exited before its host answered${why ? `:\n${why}` : ''}`)
       await sleep(250)
     }
-    // The launcher still runs, and may yet start its host: a --stop from now on waits for it, as for this (#2150)
-    const launcherRuns = how === 'setsid' ? exited === undefined : how === 'wmi' && started.alive?.() !== false
-    if (launcherRuns && Number.isInteger(started.pid)) {
-      /*
-       * Handed over before one more look: a host that came up since the last one had its launcher clear a record that
-       * still named this process, and a record written after that would name a running host's launcher until it ends,
-       * holding every --stop for the whole bound (#2150 review). Written first, either the launcher clears it, or this does
-       */
-      markStarting(dataDir, started.pid)
-      handTo = started.pid
-      if (await answered(false)) {
-        clearStarting(dataDir, started.pid)
-        return 0
-      }
-    }
     const why = tail(log)
     return fail('timeout', `the host did not answer within ${Math.round(timeoutMs / 1000)} s${why ? `:\n${why}` : ''}`)
   } finally {
-    // A record handed to the launcher is the launcher's to clear now
-    if (!handTo) clearStarting(dataDir)
+    clearStarting(dataDir)
   }
 }
 
@@ -304,31 +287,89 @@ export async function runStop({
   home,
   entry,
   platform = process.platform,
-  timeoutMs = 30_000,
-  graceMs = 15_000,
-  startingMs = 90_000,
+  budgetMs = STOP_BUDGET_MS,
+  graceMs = 10_000,
   kill = (pid, sig) => process.kill(pid, sig),
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
+  const deadline = Date.now() + budgetMs
+  const mark = () => {
+    if (env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, env.CENTRALU_STOP_BY === 'quit' ? 'quit' : 'stop')
+  }
   /*
-   * A start in progress (#2150, `SERVE_STARTING_FILE`): its host is not up yet, so the folder reads as not running, and
-   * stopped here it would come up after the stop, under a stopped mark. Waited for, then stopped as any running host is.
-   * The bound is longer than `--detach` waits (its sign-in task's 20 s, then 30 s); a start still going after it is
-   * left, and said, rather than reported as nothing running
+   * A start in progress (#2150, `SERVE_STARTING_DIR`): its host is not up yet, so the folder reads as not running, and
+   * stopped here it would come up after the stop, under a stopped mark. Waited for while it has not taken the folder: a
+   * host that has held host.lock for `LOCK_GRACE_MS` with its start still named is stopped as any running host is,
+   * answering or not (one that hung before it listened, #1903, is ended by `stopServedHost`). The wait leaves the stop its share of the budget; when that is reached, a start
+   * whose launcher is known (serve.pid) is ended, the launcher and the host it started, and any other is said to be
+   * still starting, with nothing stopped
    */
   const known = new Map()
-  const t0 = Date.now()
+  // Since when a live host holds host.lock while a start is still named: a host that is up ends its start within a moment
+  let heldSince = null
+  const tookTheFolder = () => {
+    const h = lockHolder(dataDir)
+    const key = h ? `lock:${h.pid}:${h.started}:${h.at}` : null
+    if (key && !known.has(key)) known.set(key, isWriter(h) === true)
+    if (!key || !known.get(key) || !isAlive(h.pid)) return (heldSince = null), false
+    heldSince ??= Date.now()
+    return Date.now() - heldSince > LOCK_GRACE_MS
+  }
   let waiting = false
-  while (startingNow(dataDir, known)) {
+  for (let starts = liveStarts(dataDir, known); starts.length > 0 && !tookTheFolder(); starts = liveStarts(dataDir, known)) {
     if (!waiting) say(`centralu serve is starting a host for ${dataDir}; waiting for it, to stop it`)
     waiting = true
-    if (Date.now() - t0 > startingMs) {
-      return answerLine(write, 'stop', { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir} after ${Math.round(startingMs / 1000)} s; nothing was stopped` })
+    if (Date.now() < deadline - STOP_RESERVE_MS) {
+      await sleep(100)
+      continue
     }
-    await sleep(100)
+    const launcher = readServePid(dataDir)
+    const ending = launcher && starts.some((r) => r.pid === launcher.pid) ? [launcher.hostPid, launcher.pid].filter((p) => Number.isInteger(p) && isAlive(p)) : []
+    if (ending.length === 0) {
+      return answerLine(write, 'stop', { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir}; nothing was stopped` })
+    }
+    for (const pid of ending) {
+      try {
+        kill(pid, platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
+      } catch {
+        // gone in the meantime
+      }
+    }
+    const t1 = Date.now()
+    while (ending.some((p) => isAlive(p)) && Date.now() - t1 < 5_000) await sleep(100)
+    for (const pid of ending.filter((p) => isAlive(p))) {
+      try {
+        kill(pid, 'SIGKILL')
+      } catch {
+        // gone in the meantime
+      }
+    }
+    const gone = !ending.some((p) => isAlive(p))
+    if (gone) mark()
+    return answerLine(write, 'stop', gone
+      ? { ok: true, wasRunning: true, how: 'ended', message: `ended a start that was still in progress (pid ${ending.join(', ')})` }
+      : { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir}, and pid ${ending.join(', ')} did not end` })
   }
+  // What is left of the budget: the host is waited for, after its request to stop, for all of it but the grace and the ends that follow
+  const left = deadline - Date.now()
+  const timeoutMs = Math.max(3_000, left - graceMs - 10_000)
   const stopped = await stopServedHost({ dataDir, entry, platform, forUpdate: env.CENTRALU_STOP_FOR === 'update', timeoutMs, graceMs, kill })
-  if (stopped.ok && env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, env.CENTRALU_STOP_BY === 'quit' ? 'quit' : 'stop')
+  if (stopped.ok) mark()
   return answerLine(write, 'stop', stopped)
 }
+
+/**
+ * The longest a whole `serve --stop` takes (#2150 review): the window's "Quit completely" gives it 60 s (keeper
+ * `serve_window.rs` `STOP_TIMEOUT`), and so a start waited for and the stop after it fit in this together, with room.
+ * Worst case: the wait up to `STOP_BUDGET_MS - STOP_RESERVE_MS`, then the host asked and waited for (at least 3 s), its
+ * grace after a signal (10 s; Windows 5) and the ends that follow (5 s and 5 s)
+ */
+export const STOP_BUDGET_MS = 45_000
+/**
+ * How long a host may hold host.lock while its start is still named before `--stop` stops it rather than wait: a host that is
+ * up ends its start at its ready line, and `--detach` answers within a look (250 ms) of that; one past this hung
+ */
+export const LOCK_GRACE_MS = 10_000
+/** What the wait for a start leaves of the budget for the stop itself */
+export const STOP_RESERVE_MS = 23_000
