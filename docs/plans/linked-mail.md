@@ -216,6 +216,8 @@ Each is said at once, and nothing is written on either side:
 | The recipient host's own rules (gone, `repeat`, too long, the Assistant's asks) | its reason and words; `gone` names the session by the address the sender used, and the computer it was on |
 | `cite` | `field_not_allowed`, as for `parent` |
 | The sender's project is not trusted | `untrusted_project` (§5) |
+| A hub sends from an address not on its side, or a notice comes from the other side to a session here that never mailed it (§6, Notices) | `not_allowed` |
+| A send names an id another computer may not give a message (one of this host's own, or not an id), or the id of another message here | `bad_value` |
 
 **A session created before the hub's offer arrived** on that connection (item 1's open case) is recorded when the
 offer arrives: the machine remembers, per connection, the sessions a hub created there with `fromHub` before it
