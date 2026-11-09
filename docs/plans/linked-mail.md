@@ -167,6 +167,11 @@ addresses as a send is, and merged there, forward only:
   the copy takes them;
 - the sender's host is the authority on withdrawn (the sender withdrew it or went); the recipient's row takes it.
 
+Which side may tell a row is read off what the host that takes it has stored, never off the row: a receipt only from
+the side the copy's recipient is on, a withdrawal only from the side the stored message's sender is on. Mail between
+two machines passes through the hub, which keeps no copy: it passes a row on only from the machine the row is about,
+and the other machine checks the sender the row names against the message it has.
+
 A push that fails is tried again on the next change and at the next connect. The sender's `inbox` (`waiting`), its
 `handled`, and the person's view of the copy read the copy as they read any row.
 

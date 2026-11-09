@@ -187,6 +187,25 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
     expect((await tool(hub, 'h1', { action: 'read', thread: written.id })).text).toContain('Centralu on Remote box')
   })
 
+  it('a row a machine tells is checked against the message stored here, never against the sender the row names', async () => {
+    const { hub } = await rig()
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'person', text: 'may I merge?' }))
+    expect(hub.store.mailbox.recipient(id, 'person')).toMatchObject({ settled: null })
+    const row = { messageId: id, recipient: 'person', deliveredAt: null, readAt: null, settledAt: 1, answerId: null, releasedAt: null, releasedWhy: null }
+    // The machine names one of its own sessions as the sender, to withdraw a hub session's question to the person
+    await hub.mail!.across.rows([{ ...row, settled: 'withdrawn', sender: at(hub, 'm1.anything') }], { machine: 'm1' })
+    expect(hub.store.mailbox.recipient(id, 'person')).toMatchObject({ settled: null })
+  })
+
+  it("a hub may not withdraw mail between two of the machine's own sessions", async () => {
+    const { machine, hub } = await rig()
+    const id = idOf(await tool(machine, 'w1', { action: 'send', to: at(machine, 'c1'), text: 'review this?' }))
+    const row = { messageId: id, recipient: at(hub, 'm1.c1'), deliveredAt: null, readAt: null, settled: 'withdrawn', settledAt: 1, answerId: null, releasedAt: null, releasedWhy: null }
+    await machine.mail!.across.rows([{ ...row, sender: at(hub, 'h1') }], { hub: hub.id })
+    await machine.mail!.across.rows([row], { hub: hub.id })
+    expect(machine.store.mailbox.recipient(id, at(machine, 'c1'))).toMatchObject({ settled: null })
+  })
+
   it("a notice a hub passes on from another machine is that machine's message here, and only to a session that mailed it", async () => {
     const { machine, hub } = await rig()
     const from = { id: hub.id, name: hub.name }

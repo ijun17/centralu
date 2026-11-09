@@ -292,7 +292,9 @@ machine as the less trusted side: a compromised server must not reach the person
   session is qualified with the link's machine id, never with what the call says), and the recipient reads it as
   another session's text, never as the person's (`cite` is refused across). A machine's notice is that machine's
   message, never the hub's Centralu's, and is taken only for a session that mailed one of its sessions. A machine may tell what became of mail only
-  for rows of its own sessions. On the machine, `host.mail` and `host.mailRows` are taken only on a connection a hub
+  for rows of its own sessions, read off the message stored on the hub, never off the sender the row names: a receipt
+  only for its session's own row, a withdrawal only of its session's own message. A hub's rows are checked the same way
+  on the machine. On the machine, `host.mail` and `host.mailRows` are taken only on a connection a hub
   offered on, and only from that hub's addresses. Mail out of an untrusted project is refused across rather than held.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can
   answer it, and raised whatever that session's preset: `auto` there answers no card of another machine (#550 review).

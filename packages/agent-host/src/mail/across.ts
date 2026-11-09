@@ -406,8 +406,12 @@ export class MailAcross {
       const here = this.d.records.recipient(row.messageId, recipient)
       if (here) {
         const side = this.foreign(recipient) ? 'copy' : 'recipient'
-        // A machine may tell only rows that concern its own sessions
-        if ('machine' in from && !this.concerns(from.machine, recipient, sender)) continue
+        // Who may tell it, read off what is stored here, never off what the row says: a receipt is the recipient's side's
+        // (the copy's recipient), a withdrawal the sender's side's (the stored message's sender)
+        const stored = this.d.records.message(row.messageId)?.sender
+        if (!this.tells(from, side === 'copy' ? recipient : stored)) continue
+        // A row a hub passes on from another machine names the sender that machine told; it must be the one stored here
+        if (sender !== undefined && sender !== stored) continue
         if (this.d.records.mergeAcross(row, side)) {
           // What this side now has is what the other side told: not told back
           const merged = this.d.records.recipient(row.messageId, recipient)
@@ -416,9 +420,12 @@ export class MailAcross {
         continue
       }
       if (!('machine' in from)) continue
-      // Between two machines: on to the other one
-      const target = this.route(row.settled === 'withdrawn' ? recipient : (sender ?? ''))
-      if (target?.kind !== 'machine' || target.machineId === from.machine || !this.concerns(from.machine, recipient, sender)) continue
+      // Between two machines: on to the other one. This hub keeps no copy of such mail, so the machine that tells it must be
+      // the side it is about (the recipient's for a receipt, the sender's for a withdrawal), and the other machine checks
+      // the sender against the message it has
+      const withdrawn = row.settled === 'withdrawn'
+      const target = this.route(withdrawn ? recipient : (sender ?? ''))
+      if (target?.kind !== 'machine' || target.machineId === from.machine || !this.tells(from, withdrawn ? sender : recipient)) continue
       onward.set(target.machineId, [...(onward.get(target.machineId) ?? []), { ...row, ...(sender ? { sender } : {}) }])
     }
     await Promise.all(
@@ -429,13 +436,15 @@ export class MailAcross {
     )
   }
 
-  /** Whether a row from machine `machineId` is about one of its own sessions, as recipient or sender */
-  private concerns(machineId: string, recipient: string, sender: string | undefined): boolean {
-    const mine = (a: string | undefined) => {
-      const r = a === undefined ? null : this.route(a)
-      return r?.kind === 'machine' && r.machineId === machineId
-    }
-    return mine(recipient) || mine(sender)
+  /**
+   * Whether the side that sent rows (`from`) is the one `address` is on, and so may tell what became of its row: a machine
+   * this hub links for its own sessions, a hub for the sessions on its side
+   */
+  private tells(from: { hub: string } | { machine: string }, address: string | undefined): boolean {
+    if (address === undefined) return false
+    const r = this.route(address)
+    if ('machine' in from) return r?.kind === 'machine' && r.machineId === from.machine
+    return r?.kind === 'hub' && r.hubId === from.hub
   }
 
   // ── Notices ──
