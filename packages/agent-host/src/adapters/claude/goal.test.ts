@@ -34,6 +34,7 @@ const goals = (events: NormalizedEvent[]) =>
 const pushAll = (stream: ClaudeStreamNormalizer, msgs: unknown[]) => msgs.flatMap((m) => stream.push(sdk(m)))
 
 describe('claude /goal — the badge from what the CLI says', () => {
+  // Hand-written, as measured on CLI 2.1.282: /goal runs only in a trusted folder, which a recording run (no settings files) is not
   it('set, not met at Stop (the CLI keeps the turn going), then met: active → one lap with its reason → cleared at the one result', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
@@ -52,6 +53,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(end.filter((e) => e.type === 'turn_complete')).toHaveLength(1)
   })
 
+  // Hand-written: the CLI's replies to /goal status and clear, in a trusted folder, as above
   it('reads the status and clear replies — iterations and the last check from "Goal active", none from "No goal set" and "Goal cleared"', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
@@ -69,6 +71,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(stream.push(sdk(synthetic('No goal set. Usage: `/goal <condition>`'))))).toEqual([null])
   })
 
+  // Hand-written: the CLI's refusal outside a trusted folder, and the same words from elsewhere, which no run sends on purpose
   it('reads a reply only while a /goal we passed through is waiting — the same words from anywhere else change nothing', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     expect(goals(stream.push(sdk(synthetic(`Goal set: ${COND}`))))).toEqual([])
@@ -78,6 +81,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(stream.push(sdk(synthetic(`Goal set: ${COND}`))))).toEqual([])
   })
 
+  // Hand-written: a person's own prompt Stop hook, which a recording run (no settings files) has none of
   it('Stop hook feedback counts only when its bracket holds the goal — a person\'s own prompt Stop hook has the same shape', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
@@ -85,6 +89,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(stream.push(sdk(stopFeedback('Every test passes', 'Two fail.'))))).toEqual([])
   })
 
+  // Hand-written: an interrupt during a /goal lap, in a trusted folder, as above
   it('an interrupted goal turn ends in success too, and the goal stays (measured: "Goal active" afterwards)', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
@@ -98,6 +103,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(end)).toEqual([])
   })
 
+  // Hand-written: a host restart in the middle of a /goal, in a trusted folder, as above
   it('a resumed process knows the goal the host handed it, and clears it when the goal is met', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.seed({ objective: COND, status: 'active', iterations: 2 })
@@ -107,6 +113,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(pushAll(stream, [...modelSays('msg_9', 'Done.'), result()]))).toEqual([null])
   })
 
+  // Hand-written: `active_goal` is a message no released CLI has sent yet; the adapter is ready for it
   it('once the CLI announces the goal itself (active_goal), its word is the only one', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()
@@ -116,6 +123,7 @@ describe('claude /goal — the badge from what the CLI says', () => {
     expect(goals(pushAll(stream, [...modelSays('msg_1', 'Done.'), result()]))).toEqual([])
   })
 
+  // Hand-written: /goal in a trusted folder, as above
   it('the CLI\'s "Goal set" and the model\'s words are two messages, not one row (#212)', () => {
     const stream = new ClaudeStreamNormalizer(SID)
     stream.goal.commandSent()

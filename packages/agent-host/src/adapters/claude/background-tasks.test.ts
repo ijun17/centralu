@@ -107,8 +107,31 @@ describe('a shell that ends on its own (recorded: background)', () => {
   })
 })
 
-// The agent beside the shell, an interrupt and a failure have no cheap real run (a background subagent costs a model turn of its own, a Stop mid-task is a race): these stay as measured by hand
+describe('a background subagent that ends on its own (recorded: background-agent)', () => {
+  const messages = recordedWhere('background-agent', (m) => m.type === 'system' && /^(background_tasks_changed|task_started|task_updated|task_notification)$/.test(String(m.subtype)))
+
+  it('is live as an agent with the call that launched it, its own foreground command is no background work, and it ends once as completed', () => {
+    const { events } = feed(messages)
+    const levels = events.filter((e) => e.type === 'background_tasks')
+    const agent = levels.flatMap((l) => l.live).find((t) => t.kind === 'agent' && t.parentCallId)
+    expect(agent).toMatchObject({ kind: 'agent', parentCallId: 'toolu_000001', status: 'running' })
+    // The command the subagent ran in the foreground: the CLI says it started and ended, and it never entered the live set
+    const foreground = (messages as unknown as Record<string, unknown>[]).find((m) => m.subtype === 'task_started' && m.is_backgrounded === false) as { task_id: string } | undefined
+    expect(foreground).toBeDefined()
+    const named = levels.flatMap((l) => [...l.live, ...(l.ended ?? [])]).map((t) => t.id)
+    expect(named).not.toContain(foreground!.task_id)
+    expect(levels.flatMap((l) => l.ended ?? [])).toEqual([expect.objectContaining({ id: agent!.id, kind: 'agent', status: 'completed' })])
+    expect(levels.at(-1)?.live).toEqual([])
+  })
+})
+
+/*
+ * Hand-written, as measured (scripts/probe-background-tasks.mts): a subagent beside a shell, and an interrupt that ends one and
+ * leaves the other, have no recording (a Stop while both run is a race a scenario cannot hold to), nor has a task that failed (the
+ * failure is the provider's, 529 overloaded, which no run can ask for)
+ */
 describe('a Claude session reports its background work (#290)', () => {
+  // Hand-written: the shell and the subagent live at once, before the interrupt below (no recording holds both)
   it('the live set names each task, its kind, the call that launched it, and what an interrupt does to it', () => {
     const { events } = feed(launched)
     const live = byId(lastTasks(events)?.live)
@@ -124,6 +147,7 @@ describe('a Claude session reports its background work (#290)', () => {
     expect(live['a202e1fd007fa1e73']).toMatchObject({ kind: 'agent', description: 'probe sleeper', parentCallId: AGENT_CALL, stopsWithTurn: true })
   })
 
+  // Hand-written: a Stop while a subagent and a shell both run is a race no scenario holds to
   it('an interrupt ends the subagent as stopped and leaves the shell running', () => {
     const { events } = feed([...launched, ...interrupted])
     const last = lastTasks(events)
@@ -133,11 +157,13 @@ describe('a Claude session reports its background work (#290)', () => {
     ])
   })
 
+  // Hand-written: a notification repeated for one task is not something a run can be asked to send
   it('a task that ended reports it once — a repeated notification adds nothing', () => {
     const { n } = feed([...launched, ...interrupted])
     expect(n.push(sdk(interrupted[2])).filter((e) => e.type === 'background_tasks')).toEqual([])
   })
 
+  // Hand-written: the failure is the provider's (529 overloaded), which no run can ask for
   it('a failed task keeps the reason the CLI gave', () => {
     const { events } = feed([
       ...launched,
@@ -147,14 +173,7 @@ describe('a Claude session reports its background work (#290)', () => {
     expect(lastTasks(events)?.ended?.[0]).toMatchObject({ status: 'failed', summary: 'API Error: 529 overloaded' })
   })
 
-  it('a foreground task that never entered the live set is not background work', () => {
-    const { events } = feed([
-      { type: 'system', subtype: 'task_started', task_id: 'fg1', tool_use_id: 'toolu_fg', description: 'probe fg', is_backgrounded: false, task_type: 'local_agent' },
-      { type: 'system', subtype: 'task_notification', task_id: 'fg1', tool_use_id: 'toolu_fg', status: 'completed', summary: 'done' },
-    ])
-    expect(events.filter((e) => e.type === 'background_tasks')).toEqual([])
-  })
-
+  // Hand-written: a monitor (ambient) task needs an MCP server that watches, which no scenario sets up
   it('a shell a subagent started says nothing about the interrupt — that was not measured — and ambient work is marked', () => {
     const { events } = feed([
       ...launched,
@@ -189,6 +208,7 @@ describe('through the adapter (#290)', () => {
     expect(new ClaudeAdapter().capabilities.backgroundTasks).toBe(true)
   })
 
+  // Hand-written: the SDK is mocked to see the adapter's stopTask call; the frames are the measured ones above
   it('stopping one task asks the CLI to stop that task, and its ending arrives as the stream says', async () => {
     const { handle, events } = await session([...launched, ...interrupted, ...shellStopped])
     await handle.stopBackgroundTask?.('bzztskv5d')
@@ -198,6 +218,7 @@ describe('through the adapter (#290)', () => {
     script.release()
   })
 
+  // Hand-written: what the adapter itself ends on dispose; the CLI sends nothing for it
   it('closing the session ends what was still running as stopped — the process takes it along, silently', async () => {
     const { handle, events } = await session(launched)
     await handle.dispose()

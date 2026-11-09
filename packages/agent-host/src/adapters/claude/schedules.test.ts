@@ -34,6 +34,7 @@ const idleWith = (live: unknown[]) =>
   sessionIdle({ state: 'waiting_input', pendingApproval: null, pendingQuestions: [], backgroundTasks: live as never }, { running: true, reportsBackground: true }).idle
 
 describe('a /loop wake-up', () => {
+  // Hand-written: ScheduleWakeup is offered only inside /loop, which a non-interactive run does not start
   it('keeps the session from being idle until it is due, then lets go', () => {
     let now = 1_000_000
     const t = new ClaudeBackgroundTracker('s1', () => now)
@@ -50,6 +51,7 @@ describe('a /loop wake-up', () => {
     expect(t.nextDue()).toBeNull()
   })
 
+  // Hand-written: ScheduleWakeup, as above
   it('stop: true ends it at once', () => {
     const now = 0
     const t = new ClaudeBackgroundTracker('s1', () => now)
@@ -59,6 +61,7 @@ describe('a /loop wake-up', () => {
     expect(liveOf(t.push(result('w2', { stopped: true, cancelledWakeups: 1 })))).toEqual([])
   })
 
+  // Hand-written: a call that failed, or a result without its structured part, is not something a run can be asked to send
   it('without a structured result, counts the asked delay (clamped to the runtime\'s hour); a failed call sets nothing', () => {
     const now = 0
     const t = new ClaudeBackgroundTracker('s1', () => now)
@@ -72,6 +75,7 @@ describe('a /loop wake-up', () => {
 })
 
 describe('a scheduled prompt (CronCreate)', () => {
+  // Hand-written: CronCreate waits minutes before it fires; a recording would hold a session open that long for one frame
   it('keeps the session from being idle until CronDelete names it', () => {
     const t = new ClaudeBackgroundTracker('s1', () => 0)
     t.push(call('c1', 'CronCreate', { cron: '*/5 * * * *', prompt: 'check the queue' }))
@@ -82,6 +86,7 @@ describe('a scheduled prompt (CronCreate)', () => {
     expect(liveOf(t.push(result('d1', { id: 'job-7' })))).toEqual([])
   })
 
+  // Hand-written: CronCreate and CronList, as above
   it('a CronList answer replaces what is known', () => {
     const t = new ClaudeBackgroundTracker('s1', () => 0)
     t.push(call('c1', 'CronCreate', { cron: '0 9 * * *', prompt: 'p' }))
@@ -93,6 +98,7 @@ describe('a scheduled prompt (CronCreate)', () => {
 })
 
 describe('the process going away', () => {
+  // Hand-written: what the tracker ends when the process goes; the CLI sends nothing for it
   it('ends its timers with the rest of its background work, as stopped', () => {
     const t = new ClaudeBackgroundTracker('s1', () => 0)
     t.push(call('w1', 'ScheduleWakeup', { delaySeconds: 600, reason: 'r', prompt: 'p' }))
@@ -105,6 +111,7 @@ describe('the process going away', () => {
 })
 
 describe('a process adopted from a previous host (#280)', () => {
+  // Hand-written: a conversation an earlier host left with timers pending (#280); recording it needs the timers above
   it('reads its pending timers back from the conversation: the last wake-up and the cron jobs not deleted', () => {
     const t = new ClaudeBackgroundTracker('s1', () => 0)
     const transcript = [
@@ -127,6 +134,7 @@ describe('a process adopted from a previous host (#280)', () => {
     expect(t.nextDue()).toBe(900_000)
   })
 
+  // Hand-written: a /loop stopped by the model (ScheduleWakeup stop), as above
   it('a loop that was stopped leaves nothing', () => {
     const t = new ClaudeBackgroundTracker('s1', () => 0)
     expect(
@@ -136,6 +144,7 @@ describe('a process adopted from a previous host (#280)', () => {
 })
 
 describe('through the stream normalizer, as the adapter reads the CLI', () => {
+  // Hand-written: ScheduleWakeup, as above
   it('a /loop turn that schedules its next wake-up leaves the session not idle after the turn ends', () => {
     const n = new ClaudeStreamNormalizer('s1')
     const events = [
