@@ -77,6 +77,7 @@ withdraws the offer (`on: false` without `mail`) whatever its switch, so the mac
 
 | Case | Refusal |
 |---|---|
+| The send has `cite` (the person's message as their word, checked against this computer's record for the Assistant here, docs/plans/cited-requests.md) | `field_not_allowed`: `cite is checked against this computer's record of the person's messages, which your parent on another computer cannot read, so nothing was sent. Send it again without cite, quoting what the person said if it matters.` Refused rather than dropped, so the sender does not think the parent reads the person's word (`MailTool.call`) |
 | A body longer than the mailbox takes from a session (`bodyLimit`, 16,000 characters) | `too_long`: `a body from this sender is at most 16000 characters`, the words local mail says (`tooLongText`), and the hub is not called |
 | No hub recorded for the session | `elsewhere`: `your parent is a session on another computer, and this session was started before this computer recorded which computer that was, so nothing was sent. End your turn with the answer: …` |
 | The recorded hub has not offered since this host started | `link_down`: `<hub>, which started this session, is not linked to this computer right now (or runs a Centralu from before mail crossed computers), so nothing was sent. Send it again once the link is back.` |

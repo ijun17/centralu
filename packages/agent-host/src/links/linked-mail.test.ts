@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
-import { startedByHubKey } from '../sessions/hub-preset.js'
+import { startedByHubKey, startingHub } from '../sessions/hub-preset.js'
 import { addressOf } from '../sessions/host-mail.test-helpers.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Mail from a session a hub started on a linked machine to the session there that started it (#2067 item 1,
@@ -53,8 +53,8 @@ async function rig(o: { asks?: boolean; hub?: Parameters<typeof hubHost>[1]; rec
 const startedBy = (machine: Machine, sessionId: string, hub: Hub) => machine.store.settings.setAppSetting(startedByHubKey(sessionId), JSON.stringify({ id: hub.id, name: hub.name }))
 
 /** The child's `mail` tool, as its session calls it */
-const send = (machine: Machine, text: string, more: { kind?: string; urgent?: boolean; from?: string; to?: string } = {}) =>
-  machine.mail!.hooks.tool!(more.from ?? 'c1', { action: 'send', to: more.to ?? 'parent', text, ...(more.kind ? { kind: more.kind } : {}), ...(more.urgent ? { urgent: true } : {}) })
+const send = (machine: Machine, text: string, more: { kind?: string; urgent?: boolean; from?: string; to?: string; cite?: boolean } = {}) =>
+  machine.mail!.hooks.tool!(more.from ?? 'c1', { action: 'send', to: more.to ?? 'parent', text, ...(more.kind ? { kind: more.kind } : {}), ...(more.urgent ? { urgent: true } : {}), ...(more.cite ? { cite: true } : {}) })
 
 describe('parent from a session a hub started on a linked machine (#2067 item 1)', () => {
   it('reaches the session that started it on the hub, written there once and nowhere here, with the asks switch off', async () => {
@@ -110,6 +110,34 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     const { machine, hub } = await rig({ records: false })
     expect(await send(machine, 'hello parent')).toEqual({ text: `Refused (gone): Hub mac no longer has the session that started this one (it was archived or deleted there, or its record of this session is gone), so nothing was sent. No session there waits for this one's answer.`, isError: true })
     expect([sentBy(hub, 'm1.c1'), sentBy(machine, 'c1')]).toEqual([0, 0])
+  })
+
+  it('a child start_agent started reaches the session that started it, with nothing recorded by hand', async () => {
+    const origin = 'https://github.com/me/app'
+    const machine = await machineHost({ mail: true, origin })
+    const hub = await hubHost(machine.port, { mail: true, origin })
+    await eventually(() => hub.machine().status === 'connected')
+    await eventually(() => offered(machine))
+    // Work given to another computer waits for the person to trust the project
+    await hub.mgr.setProjectTrusted('p-hub', true)
+    const call = hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box' })
+    await hub.answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const childId = r.sessionId.replace(/^m1\./, '')
+    // The machine recorded the hub from the connection the start came in on, and the hub recorded its parent
+    expect(startingHub(machine.store.settings, childId)).toEqual({ id: hub.id, name: 'Hub mac' })
+    expect(await send(machine, 'done: hello said', { from: childId })).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac, /) })
+    expect(received(hub, childId).map((m) => m.body)).toEqual(['done: hello said'])
+    // Git checkouts and a card: room for a loaded machine, as links.test.ts gives its start_agent rig
+  }, 60_000 * SLOW)
+
+  it('a send that cites the person is refused with the reason, and nothing reaches the hub', async () => {
+    const { machine, hub } = await rig()
+    expect(await send(machine, 'the person wants the release today', { cite: true })).toEqual({ text: expect.stringMatching(/^Refused \(field_not_allowed\): cite is checked against this computer's record/), isError: true })
+    expect(hub.heard).toEqual([])
+    // Without it, the same text goes
+    expect(await send(machine, 'the person wants the release today')).toMatchObject({ text: expect.stringMatching(/^Sent /) })
   })
 
   it('a parent trashed on the hub is said as gone', async () => {

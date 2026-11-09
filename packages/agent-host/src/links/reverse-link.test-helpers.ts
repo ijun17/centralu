@@ -5,6 +5,7 @@ import { createRpcHandler } from '../rpc.js'
 import { HostServer } from '../transport/server.js'
 import { Links, type LinkDeps } from './links.js'
 import { LinkedHubs } from './linked-hubs.js'
+import { linkedSessions } from './linked-sessions.js'
 import { reverseCalls } from './reverse-calls.js'
 import { Router } from './router.js'
 import { DirectTunnel } from './tunnel.js'
@@ -12,6 +13,7 @@ import { hubSelfId, storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { TOKEN, cleanups, folder, lineFor, seedSession } from './links-world.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { fixtureGit } from '../temp-dir.test-helpers.js'
 import { mailFromMachine } from '../mail/from-machine.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { wireHostMail } from '../sessions/host-mail.test-helpers.js'
@@ -32,11 +34,27 @@ export function without(handler: ReturnType<typeof createRpcHandler>, methods: r
   }
 }
 
+/**
+ * A project folder: an empty one, or with `origin` a git checkout of that repository with one commit, so start_agent
+ * finds the same repository on the machine and a worktree can branch from it
+ */
+function projectFolder(origin?: string): string {
+  const dir = folder()
+  if (!origin) return dir
+  fixtureGit(dir, ['init', '-q'])
+  fixtureGit(dir, ['commit', '-q', '--allow-empty', '-m', 'first'])
+  fixtureGit(dir, ['remote', 'add', 'origin', origin])
+  return dir
+}
+
 /** The machine: a trusted project with an ordinary session (the caller), and the hubs that offer it the reverse direction */
-/** `fromHub`: sessions a hub started here (#1273's mark, read when the manager loads them); `mail`: this host's mail wired (`wireHostMail`) */
-export async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean } = {}) {
+/**
+ * `fromHub`: sessions a hub started here (#1273's mark, read when the manager loads them); `mail`: this host's mail wired
+ * (`wireHostMail`); `origin`: its project is a checkout of that repository (`projectFolder`), as the hub's may be
+ */
+export async function machineHost(o: { without?: readonly string[]; sessions?: readonly string[]; askTimeoutMs?: number; mailTimeoutMs?: number; fromHub?: readonly string[]; mail?: boolean; origin?: string } = {}) {
   const store = new Store()
-  store.projects.addProject({ id: 'p-remote', path: folder(), name: 'remote-project' })
+  store.projects.addProject({ id: 'p-remote', path: projectFolder(o.origin), name: 'remote-project' })
   for (const id of o.sessions ?? ['w1']) seedSession(store, 'p-remote', id, 'worker', `ext-${id}`)
   for (const id of o.fromHub ?? []) store.settings.setAppSetting(startedFromHubKey(id), 'true')
   const adapters = scriptedAdapters()
@@ -68,15 +86,16 @@ export async function machineHost(o: { without?: readonly string[]; sessions?: r
 /** A hub linked to the machine as `m1` ("Remote box"), with a project and an ordinary session in it (the asked one) */
 /**
  * `mail`: the hub's mail is wired (`wireHostMail`), and it takes mail from the sessions it started on the machine (#2067):
- * `true` as this build, `'before'` as a build from before `hub.mail` (asks only, no `mail` in its offer)
+ * `true` as this build, `'before'` as a build from before `hub.mail` (asks only, no `mail` in its offer). `origin`: its
+ * project is a checkout of that repository, so with the machine's of the same one start_agent can start a child there
  */
 export async function hubHost(
   machinePort: number,
-  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before'; children?: readonly RemoteAgent[] } = {},
+  o: { name?: string; reverse?: boolean; project?: string; preset?: SessionInfo['permissionPreset']; mail?: true | 'before'; children?: readonly RemoteAgent[]; origin?: string } = {},
 ) {
   const store = new Store()
   const projectName = o.project ?? 'hub-project'
-  store.projects.addProject({ id: 'p-hub', path: folder(), name: projectName })
+  store.projects.addProject({ id: 'p-hub', path: projectFolder(o.origin), name: projectName })
   seedSession(store, 'p-hub', 'h1', 'worker', 'ext-h1', { permissionPreset: o.preset ?? 'normal' })
   // The children start_agent started on the machine, as the hub's record keeps them (read once, when the manager first asks)
   if (o.children) store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify(o.children))
@@ -116,9 +135,15 @@ export async function hubHost(
     tunnelFor: () => new DirectTunnel(() => lineFor(machinePort)),
     retryMs: [50, 200],
     client: { maxBackoffMs: 100 },
+    ...(o.origin ? { ownerOf: (sessionId: string) => mgr.linkedHost.remoteAgentParent(sessionId) } : {}),
     ...reverse,
   })
   const router = new Router({ local: createRpcHandler(mgr, adapters, { machines: links }), machines: () => links.all() })
+  // With a checkout, its sessions start children on the machine (start_agent), as main.ts wires it
+  if (o.origin) {
+    mgr.layout.useLinkedSessions((id) => links.knowsSession(id))
+    mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), name))
+  }
   const server: HostServer = new HostServer({ port: 0, token: TOKEN, onRpc: router.handle })
   await server.listen()
   links.start()

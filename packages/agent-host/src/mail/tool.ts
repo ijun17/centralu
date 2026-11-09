@@ -101,6 +101,14 @@ export class MailTool {
     const me = this.host.caller(sessionId)
     const hubParent = this.host.hubParent?.bind(this.host)
     if (!me || !hubParent || args.action !== 'send' || args.to?.trim().toLowerCase() !== 'parent' || me.askedBy || !me.fromHub) return this.run(sessionId, args)
+    // A citation is the person's message in this computer's record, checked here for the Assistant here: the hub cannot
+    // check it, and dropping it would let the sender think the parent reads the person's word
+    if (args.cite) {
+      return {
+        text: "Refused (field_not_allowed): cite is checked against this computer's record of the person's messages, which your parent on another computer cannot read, so nothing was sent. Send it again without cite, quoting what the person said if it matters.",
+        isError: true,
+      }
+    }
     try {
       const r = await hubParent(sessionId, { text: this.need(args.text, 'text'), needsReply: args.kind !== 'note', ...(args.urgent ? { urgent: true } : {}) })
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
