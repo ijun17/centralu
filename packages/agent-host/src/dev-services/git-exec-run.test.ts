@@ -221,22 +221,41 @@ describe('a git that is stopped takes its lock away (#982)', () => {
     expect(existsSync(lock(repo))).toBe(false)
   })
 
-  /*
-   * The host leaving (lifecycle/shutdown.ts): git runs in a group of its own, which nothing else ends. Stopped while
-   * its hook runs, git must not go on to commit (#2141: on Windows, `taskkill /T` could end the hook's `sleep` before
-   * git, the hook then reported success, and git committed). Without a stop the hook sleeps out and git commits.
-   */
-  it('when the host stops: every git still running ends, with what it started', { timeout: 60_000 * SLOW }, async () => {
+  /** A commit whose hook has started: what the call settled with, once git has ended */
+  async function commitStopped(stop: () => unknown, signal?: AbortSignal): Promise<{ outcome: string; signal?: unknown; repo: string }> {
     const repo = slowCommit(30)
-    const call = runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 120_000 * SLOW }).then(
-      () => 'committed',
-      () => 'ended',
+    const call = runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 120_000 * SLOW, signal }).then(
+      () => ({ outcome: 'committed' }),
+      (e: { signal?: unknown }) => ({ outcome: 'ended', signal: e.signal }),
     )
     expect(await settle(() => existsSync(started(repo)), Boolean, 20_000 * SLOW)).toBe(true)
-    await stopGitChildren()
+    await stop()
     // git's own end, however long the stop took
-    expect(await call).toBe('ended')
-    if (process.platform !== 'win32') expect(existsSync(lock(repo))).toBe(false)
-    expect(git(repo, 'log', '--format=%s').trim()).toBe('one')
+    return { ...(await call), repo }
+  }
+
+  /*
+   * Stopped while its hook runs, git must not go on to commit (#2141). On Windows `taskkill /T` could end the hook's
+   * `sleep` before git; the hook then reported success, and git made the commit. That race cannot be had on demand, so
+   * the order is read from git's end: a git the stop itself ended has the signal, one that died of its hook failing or
+   * of the tree kill has none (read on Windows, where the order is the stop's own). Without a stop, the hook sleeps out
+   * and git commits.
+   */
+  const endedFirst = (r: { outcome: string; signal?: unknown; repo: string }) => {
+    expect(r.outcome).toBe('ended')
+    if (process.platform === 'win32') expect(r.signal).toBe('SIGTERM')
+    if (process.platform !== 'win32') expect(existsSync(lock(r.repo))).toBe(false)
+    expect(git(r.repo, 'log', '--format=%s').trim()).toBe('one')
+  }
+
+  // The host leaving (lifecycle/shutdown.ts): git runs in a group of its own, which nothing else ends
+  it('when the host stops: every git still running ends, itself first', { timeout: 60_000 * SLOW }, async () => {
+    endedFirst(await commitStopped(() => stopGitChildren()))
+  })
+
+  // A caller that gives up (a cancelled commit): the run's own stop
+  it('when its caller aborts: git ends, itself first', { timeout: 60_000 * SLOW }, async () => {
+    const abort = new AbortController()
+    endedFirst(await commitStopped(() => abort.abort(), abort.signal))
   })
 })
