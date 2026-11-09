@@ -205,7 +205,7 @@ describe('processes in memory', () => {
       expect(r).toMatchObject({ code: null, signal: 'SIGTERM' })
     })
 
-    it(`${family}: stop ends the tree: at once on Windows (the child first, #2142), TERM then KILL after the grace elsewhere`, async () => {
+    it(`${family}: stop ends the tree: at once on Windows, TERM then KILL after the grace elsewhere`, async () => {
       const os = memoryOs({ as: family })
       const kid = family === 'windows' ? 'C:\\bin\\kid.exe' : '/usr/bin/kid'
       const root = family === 'windows' ? 'C:\\bin\\root.exe' : '/usr/bin/root'
@@ -226,6 +226,7 @@ describe('processes in memory', () => {
       const stopped = os.processes.stop(child, 3000)
       const exit = await stopped
       if (family === 'windows') {
+        // The child is ended first, by Node's kill, and then what it started (#2142)
         expect(exit).toEqual({ code: null, signal: 'SIGTERM' })
         expect(kidRow().exit).toEqual({ code: 1, signal: null })
       } else {
