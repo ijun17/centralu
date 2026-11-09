@@ -1,5 +1,5 @@
 import type { SessionInfo } from './commands.js'
-import type { SessionState } from './entities.js'
+import { workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
 /**
@@ -25,6 +25,21 @@ export function isWaiting(state: SessionState): boolean {
  */
 export function isInTurn(state: unknown): boolean {
   return state === 'working' || state === 'waiting_approval'
+}
+
+/**
+ * **Paused on its own background work** (#2146, owner decision 2026-11-09): its turn ended as a turn does (`waiting_input`,
+ * `idle`) while work it started still runs: background commands, or the tool's own background subagents (Claude Code's
+ * Agent tasks run in the background, `kind: 'agent'`). Its report is still to come (the parent was told it paused, #721).
+ *
+ * The one rule for it. Such a session counts **once** as running in the sidebar's working number (`foldSummary`), its
+ * subagents through it and never one by one (they are not Centralu sessions and cannot be opened), and `agent_session
+ * list` says `paused (background work)` (`agentState`, and a linked machine's child as its machine relays its tasks).
+ * A turn that failed, was cut short (`interruption`) or hit a limit is shown as that, not as paused. The work is `workTasks`: the timers a
+ * tool holds (`/loop`) and ambient tasks are not work.
+ */
+export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): boolean {
+  return (s.state === 'waiting_input' || s.state === 'idle') && !s.interruption && workTasks(s.backgroundTasks ?? []).length > 0
 }
 
 /**

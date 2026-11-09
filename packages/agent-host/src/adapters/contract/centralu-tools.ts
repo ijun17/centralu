@@ -528,7 +528,8 @@ export type AgentListRow = {
   sessionId: string
   name: string
   tool: string
-  state: 'working' | 'waiting' | 'finished' | 'stopped'
+  /** `paused`: its turn ended while its own background work runs (`pausedOnBackground`, #2146) */
+  state: 'working' | 'waiting' | 'paused' | 'finished' | 'stopped'
   asleep: boolean
   lastActive?: string
   worktree?: { branch: string; unmerged: boolean }

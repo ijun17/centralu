@@ -1,4 +1,4 @@
-import type { Interruption, SessionState } from '@cc/protocol/client'
+import { pausedOnBackground, type BackgroundTask, type Interruption, type SessionState } from '@cc/protocol/client'
 import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**
@@ -24,7 +24,7 @@ export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input'
 export type FoldSummaryState = (typeof FOLD_SUMMARY_STATES)[number]
 
 export function foldSummary(
-  sessions: readonly ({ state: SessionState; pendingQuestions: readonly unknown[]; interruption?: Interruption | null } & ReadTracked)[],
+  sessions: readonly ({ state: SessionState; pendingQuestions: readonly unknown[]; interruption?: Interruption | null; backgroundTasks?: readonly BackgroundTask[] } & ReadTracked)[],
 ): { state: FoldSummaryState; count: number }[] {
   const counts = new Map<SessionState, number>()
   for (const raw of sessions) {
@@ -36,9 +36,12 @@ export function foldSummary(
      * whether an idle session counted depended on having opened it, which the line could not show. The inbox lists the
      * unread ones.
      */
-    if (s.state === 'waiting_input' && !(s.interruption && isListedWaiting(s))) continue
+    const stopped = !!s.interruption && isListedWaiting(s)
+    // A turn that ended while its own background work runs counts once as working, its subagents through it (#2146)
+    const paused = !stopped && pausedOnBackground(s)
+    if (s.state === 'waiting_input' && !stopped && !paused) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
-    const counted = s.interruption && isListedWaiting(s) ? 'error' : s.state
+    const counted = stopped ? 'error' : paused ? 'working' : s.state
     counts.set(counted, (counts.get(counted) ?? 0) + 1)
   }
   return FOLD_SUMMARY_STATES.flatMap((state) => {

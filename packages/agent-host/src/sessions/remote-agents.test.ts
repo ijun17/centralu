@@ -15,6 +15,8 @@ import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote
 let store: Store
 let children: ChildOwnership
 let state: string
+/** The child's background work as its machine last relayed it (`LinkedReports.tasksOf`) */
+let linkedTasks: { id: string; kind: string; description: string; status: string }[] = []
 let settled: string[]
 let told: string[]
 /** The last message the child took there, as the machine lists it */
@@ -52,7 +54,7 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     linkedReader: reader,
     meta: new Map([[caller.id, caller]]),
     settleLinkedTurn: (id: string) => settled.push(id),
-    linkedReports: { ownTasksRunning: () => [] },
+    linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
     tellSession: async (_to: string, text: string) => void told.push(text),
     ...extra,
   } as unknown as RemoteAgentsHost
@@ -64,6 +66,7 @@ beforeEach(() => {
   children = new ChildOwnership(store)
   store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([child]))
   state = 'working'
+  linkedTasks = []
   settled = []
   told = []
   // The child last took the instruction this hub sent it: its turn is the caller's
@@ -207,7 +210,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       linkedReader: reader,
       meta: new Map([[caller.id, caller]]),
       settleLinkedTurn: (id: string) => settled.push(id),
-      linkedReports: { ownTasksRunning: () => [] },
+      linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
       tellSession: async (_to: string, text: string) => void told.push(text),
       autoBoundaryOpen: () => false,
       emit: () => {},
@@ -744,6 +747,16 @@ describe('a child on a linked machine, as the hub follows it (#1038 review)', ()
     state = 'waiting_approval'
     expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'waiting' })])
     state = 'idle'
+    expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'finished' })])
+  })
+
+  // #2146: its turn ended there while its own background work runs, as its machine relays that work
+  it('lists the child as paused while its machine lists its own background work running after its turn', async () => {
+    const ra = agents()
+    state = 'waiting_input'
+    linkedTasks = [{ id: 'a1', kind: 'agent', description: 'review', status: 'running' }]
+    expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'paused' })])
+    linkedTasks = [{ id: 'a1', kind: 'agent', description: 'review', status: 'completed' }]
     expect(await ra.rows('h1')).toEqual([expect.objectContaining({ state: 'finished' })])
   })
 

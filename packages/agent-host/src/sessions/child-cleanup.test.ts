@@ -227,4 +227,25 @@ describe("whose agents list shows, and where each stands (#690 review)", () => {
     expect(agentState(host, info('limited', { state: 'limited' }))).toBe('stopped')
     expect(agentState(host, info('asks', { pendingQuestions: [{}] as unknown as SessionInfo['pendingQuestions'] }))).toBe('waiting')
   })
+
+  // #2146 (owner decision 2026-11-09): a turn that ended while its own background work runs is not finished
+  it('a turn ended while its own background commands or background subagents run reads as paused, and the list says paused (background work)', () => {
+    const host = hostWith([info('parent', { askedBy: null })])
+    const task = (kind: 'agent' | 'shell', over = {}) => ({ id: `t-${kind}`, kind, description: kind, status: 'running' as const, ...over })
+    const at = (state: string, tasks: object[]) => agentState(host, info('c', { state, backgroundTasks: tasks } as unknown as Partial<SessionInfo>))
+    expect(at('waiting_input', [task('agent')])).toBe('paused')
+    expect(at('idle', [task('shell')])).toBe('paused')
+    // A timer a tool holds (`/loop`) or an ambient task is not work; ended work is not running
+    expect(at('waiting_input', [task('shell', { timer: true }), task('agent', { ambient: true })])).toBe('finished')
+    expect(at('waiting_input', [task('agent', { status: 'completed' })])).toBe('finished')
+    // A turn that hit a limit or was cut short says so
+    expect(at('limited', [task('agent')])).toBe('stopped')
+    expect(agentState(host, info('cut', { backgroundTasks: [task('agent')], interruption: { reason: 'network' } } as unknown as Partial<SessionInfo>))).toBe('stopped')
+    const text = agentListText({ ok: true, agents: [
+      { sessionId: 'p', name: 'tests', tool: 'claude', state: 'paused', asleep: false },
+      { sessionId: 'f', name: 'done', tool: 'claude', state: 'finished', asleep: false },
+    ] }).text
+    expect(text).toContain('[p] · claude · paused (background work)')
+    expect(text).toContain('Sessions you started (2, 1 finished):')
+  })
 })

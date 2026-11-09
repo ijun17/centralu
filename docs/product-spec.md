@@ -632,6 +632,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 ```
 
 - Sidebar: the project/session tree, each session's mark in one of four looks (waiting, stopped, answering, idle; the state's table above, #736) with the crown for the Assistant, unread dot, branch and change-count summary. Collapsible.
+  - **A session paused on its own background work counts as working** (owner, 2026-11-09, #2146): one whose turn ended while background commands or its tool's own background subagents still run is counted once in the project's working number, its subagents through it and never one by one. Its row keeps its mark; nothing new is drawn. The rule is `pausedOnBackground` (protocol `session-state.ts`), which `agent_session list` reads as `paused (background work)`.
   - **Which project is open** (2026-10-01). A thin divider separates each project's group — its name row, its
     sessions and its apps — from the next. While the focus view shows a project's screen (§5.5) or one of its
     sessions, or the app view shows one of its apps (2026-10-03), that project's whole group is tinted with the surface-hover of the selected Grid and Assistant

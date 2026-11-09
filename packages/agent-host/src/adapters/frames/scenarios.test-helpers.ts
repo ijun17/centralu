@@ -106,6 +106,22 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // A native background subagent that runs on after the turn ends (#2146: the session is then paused on it, counted once)
+    name: 'background-agent',
+    tools: ['claude'],
+    preset: 'auto',
+    async run(d) {
+      d.session().send(
+        'Use the Agent tool with run_in_background set to true to start one subagent. The subagent is to run this with the Bash tool: sleep 15 && echo agent-done , and then report what it printed. Do not wait for it: as soon as it is started, say started and end your turn.',
+      )
+      await d.waitFor('the background subagent', (e) => e.type === 'background_tasks' && e.live.some((t) => t.kind === 'agent'))
+      await d.waitFor('the end of the first turn', ended)
+      // The subagent ends on its own, and the CLI wakes the model with its report
+      await d.waitFor('the subagent ended', (e) => e.type === 'background_tasks' && (e.ended ?? []).some((t) => t.kind === 'agent'))
+      await d.waitFor('the end of the turn that reports it', ended)
+    },
+  },
+  {
     // A model the API does not have: the turn fails at once
     name: 'failed',
     tools: CLI_TOOLS,

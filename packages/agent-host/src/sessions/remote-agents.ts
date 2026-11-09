@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, pausedOnBackground } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -297,7 +297,7 @@ export class RemoteAgents {
       const there = listed?.find((s) => s.sessionId === r.sessionId)
       const state: AgentListRow['state'] =
         there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
-        : there ? (inTurn(there.state as SessionState) ? 'working' : 'finished')
+        : there ? (inTurn(there.state as SessionState) ? 'working' : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId) }) ? 'paused' : 'finished')
         : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }
