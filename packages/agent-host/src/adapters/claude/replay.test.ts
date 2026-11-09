@@ -375,6 +375,8 @@ describe(`what the adapter makes of the CLI's real turns, the tools Centralu's s
   })
 
   it('thinking: the thinking the CLI shows arrives as reasoning text before the answer, not as an empty block, and the turn ends once', async () => {
+    // Recorded as a session runs: no setting of its own turns thinking on, as no session passes one (#2062 review)
+    expect(scenariosFor('claude').find((s) => s.name === 'thinking')).not.toHaveProperty('settings')
     const { events } = await run('thinking')
     const reasoning = of(events, 'reasoning_delta').map((e) => e.text ?? '').join('')
     // Exactly the words the CLI streamed: the finished message repeats them, and the adapter does not say them twice (`reasoningStreamed`)

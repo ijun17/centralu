@@ -2342,9 +2342,9 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    agent_session, ask_project into a second, trusted project, and a refused call) with a `CLAUDE_CONFIG_DIR` holding a copy of the
    sign-in alone, put back if the CLI refreshed it. Its Centralu tools are an in-process MCP server, so `claude/centralu.test.ts`
    does not compare the host's answers to the CLI's `mcp_message` calls (`streamJsonCodec`'s `hostAnswers`). A Claude scenario's own
-   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'thinking'`: `--thinking enabled`,
-   as the model recorded on does not think by default; the text itself the adapter asks for in every session, #2062; `'tasks'`: `--tools TaskCreate,...`,
-   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off.
+   settings are flags of its process (`settings: 'mcp'`: `--mcp-config` to the probe server; `'tasks'`: `--tools TaskCreate,...`,
+   since a non-interactive CLI 2.1.296 offers no task-list tool by default), as its settings sources are off. Thinking has no
+   setting: `thinking` is recorded as a session runs, with no flag for it (the model decides; the adapter asks for the text, #2062).
    The recordings also drive the UI's e2e scenarios (#1498): `adapters/frames/replay-agent.test-helpers.ts` makes a
    recorded session the agent of a running host (`--agent replay` of `e2e/fixtures/linked-host-main.ts`), the real
    adapter on a recording in place of the tool's process, and a session replays the scenario its working folder is
