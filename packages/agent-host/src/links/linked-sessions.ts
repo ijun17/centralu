@@ -202,7 +202,7 @@ export function linkedSessions(
         ...(s.pr ? { pr: { number: s.pr.number, state: oneLine(s.pr.state, 20) } } : {}),
         preview: s.preview,
         ...(s.lastActive ? { lastActive: oneLine(s.lastActive, 40) } : {}),
-        ...(cut.has(s.sessionId) ? { interruption: cut.get(s.sessionId)! } : {}),
+        ...(cut.get(s.sessionId) ? { interruption: cut.get(s.sessionId) } : {}),
         machine: m.name,
       })
     }
