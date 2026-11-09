@@ -2079,9 +2079,10 @@ const serveCli = cli
 const serveConnection = connection
 
 /**
- * A folder holding the host as a release ships it (#2144): `main.mjs` and `bundle-info.json` as `bundle.mjs` makes them
- * (bundle-host.mjs), `schema.sql` beside them, and the two native addons the bundle leaves out linked in from the
- * workspace's own install rather than copied (the platform's build there is the one `bundle.mjs` would pick)
+ * The host as a release builds it (#2144), as much of its folder as starting and stopping it takes: `main.mjs` and
+ * `bundle-info.json` as `bundle.mjs` makes them (bundle-host.mjs), `schema.sql` beside them, and the two native addons
+ * the bundle leaves out linked in from the workspace's own install rather than copied. Not the rest of a release's
+ * folder (app-template, the terminal broker, the Codex bridge, what a remote install reads): nothing here uses them
  */
 async function shippedHost(): Promise<{ entry: string; dir: string }> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-shipped-host-')))
@@ -2121,8 +2122,9 @@ const HOW = detachHow(process.platform, process.env) as 'setsid' | 'wsl' | 'wmi'
 describe('centralu serve --detach and --stop, end to end (the host as it ships, a temporary data folder)', () => {
   /*
    * The host as a release ships it (#2144): `--detach` gives the host it starts 30 s to answer, a bound for that build.
-   * Run from source, the host first loads every module through the TypeScript loader, which under a full suite's load took
-   * 24 s before its first line and missed the bound (measured 2026-11-09: the bundle under the same load answered in 22 s)
+   * Run from source, the host first loads every module through the TypeScript loader, which under a full suite's load can
+   * take most of that before the host says a word (measured on one Windows machine beside 24 busy processes, 2026-11-09:
+   * 24 s to the source host's first line, the bound missed in 6 of 8 runs; the bundle under the same load answered in 22 s)
    */
   let shipped: { entry: string; dir: string } | null = null
   beforeAll(async () => {
