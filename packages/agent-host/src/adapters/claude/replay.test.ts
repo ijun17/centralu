@@ -108,7 +108,9 @@ describe(`what the adapter makes of the CLI's real turns (${recordedVersion()})`
     const { events } = await run('approval')
     expect(of(events, 'approval_request').map((c) => (c.detail.kind === 'command' ? c.detail.command : c.detail.kind))).toEqual(['touch probe-1.txt', 'touch probe-2.txt', 'touch probe-3.txt'])
     expect(of(events, 'approval_resolved').map((e) => e.decision)).toEqual(['allow', 'deny', 'always'])
-    expect(of(events, 'tool_result').map((r) => r.ok)).toEqual([true, false, true, true])
+    // The scenario's own commands: a run on Windows also checks each file with `Test-Path`, read-only and run without asking
+    const touches = new Set(of(events, 'tool_call').filter((c) => /^touch /.test(String((c.input as { command?: unknown } | undefined)?.command))).map((c) => c.callId))
+    expect(of(events, 'tool_result').filter((r) => touches.has(r.callId)).map((r) => r.ok)).toEqual([true, false, true, true])
     expect(ended(events)).toBe(4)
   })
 

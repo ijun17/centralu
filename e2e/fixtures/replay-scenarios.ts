@@ -230,7 +230,8 @@ async function play(page: Page, replay: Replay, held: Held, run: ReplayRun): Pro
   for (const [i, step] of held.steps.entries()) {
     if (step.kind === 'stop') {
       const cue = {
-        thinking: page.getByTestId('activity-label').filter({ hasText: 'Thinking' }),
+        // Thinking, or the answer already coming: whether the model thinks first is its choice on that run (2.1.296's did, 2.1.316's wrote)
+        thinking: page.getByTestId('activity-label').filter({ hasText: 'Thinking' }).or(page.getByTestId('msg-assistant')),
         folded: page.getByTestId('tool-card-toggle').or(page.getByTestId('fold-line')),
       }[replay.stopAt ?? 'thinking']
       await expect(cue.first()).toBeVisible()
@@ -331,8 +332,9 @@ export const REPLAYS: Replay[] = [
     cards: ['allow', 'deny', 'always'],
     async shows(page, _held, seen) {
       expect(await approvals(page)).toEqual(['Allowed · touch probe-1.txt', 'Denied · touch probe-2.txt', 'Allowed · touch probe-3.txt'])
-      // Each turn's calls are one line between the question and the answer; the denied one says it failed, and the fourth, run on the rule, asked nothing
-      expect(seen.folds).toEqual(['1 tool', '1 tool 1 failed', '1 tool', '1 tool'])
+      // The denied call is the one line that says it failed. How many lines a turn folds, and what they hold, is the model's
+      // choice on that run: a Windows run thinks first, checks each file with Test-Path and talks between its calls
+      expect(seen.folds.filter((f) => / failed$/.test(f))).toEqual(['1 tool 1 failed'])
     },
   },
   {

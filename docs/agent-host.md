@@ -2291,7 +2291,10 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    approval, a refused or failed turn, an interrupted turn, a long answer, a compaction (if the tool has one), a resumed
    session, and each answer the adapter branches on (a status, an error kind) where a real run can send it. A change to an existing adapter that
    depends on what the tool sends adds or cites the recording that shows it; a value copied into a fake without a
-   recording is not evidence. Re-record on a CLI version bump. For a new tool, record
+   recording is not evidence. On a CLI version bump, run `pnpm frames:canary <claude | codex>` first: it records a few
+   representative scenarios on the installed version, compares their shape (kinds of frame and field names, never values
+   or timing) with the newest earlier version's, and names what to re-record, nothing when they match
+   (`scripts/frames-canary.mts`). For a new tool, record
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by

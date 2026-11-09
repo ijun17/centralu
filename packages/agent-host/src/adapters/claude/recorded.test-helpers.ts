@@ -23,19 +23,23 @@ export const CLAUDE_REPLAY_SESSION = { noSettingFiles: true, model: 'haiku' } as
  */
 export const recordedVersion = (scenario?: string): string => newestVersion(CLAUDE_RECORDINGS, scenario)
 
-const fileOf = (scenario: string): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === recordedVersion(scenario))!.file(scenario)
+const fileOf = (scenario: string, version = recordedVersion(scenario)): string => recordedFolders(CLAUDE_RECORDINGS).find((f) => f.dir === version)!.file(scenario)
 
 /** Lines the SDK answers or reads itself and never hands to the adapter */
 const CONTROL = new Set(['control_request', 'control_response', 'control_cancel_request', 'keep_alive'])
 
-/** The messages the CLI sent in `scenario`, in order, as the adapter receives them */
-export function recordedMessages(scenario: string): ClaudeMessage[] {
-  const recording = loadRecording(fileOf(scenario))
+/**
+ * The messages the CLI sent in `scenario`, in order, as the adapter receives them. `version` (a folder, `claude-code-2.1.296`)
+ * names one run when a test needs what happened on it, not on every run: the model chose to think, the account was near a limit
+ */
+export function recordedMessages(scenario: string, version?: string): ClaudeMessage[] {
+  const recording = loadRecording(fileOf(scenario, version))
   return recording.frames.flatMap((f) => (f.dir === 'in' && f.msg && !CONTROL.has(String(f.msg.type)) ? [f.msg as unknown as ClaudeMessage] : []))
 }
 
 /** The messages of `scenario` that `pick` accepts */
-export const recordedWhere = (scenario: string, pick: (m: Record<string, unknown>) => boolean): ClaudeMessage[] => recordedMessages(scenario).filter((m) => pick(m as unknown as Record<string, unknown>))
+export const recordedWhere = (scenario: string, pick: (m: Record<string, unknown>) => boolean, version?: string): ClaudeMessage[] =>
+  recordedMessages(scenario, version).filter((m) => pick(m as unknown as Record<string, unknown>))
 
 /** The `can_use_tool` requests the CLI made in `scenario`: what the adapter was asked to approve */
 export function recordedApprovals(scenario: string): { tool: string; input: Record<string, unknown> }[] {
