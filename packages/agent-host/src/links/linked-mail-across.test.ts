@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
 import { startedByHubKey } from '../sessions/hub-preset.js'
 import { sessionAddress } from '../mail/address.js'
-import { MailAcross } from '../mail/across.js'
+import { FIND_MS, MailAcross, NAMED_HERE_MS } from '../mail/across.js'
 import { mailPeers } from './mail-peers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -193,12 +193,19 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
     const real = mailPeers({ hostId: machine.id, selfName: () => 'Remote box', hubs: machine.hubs })
     // A hub reachable by its link that never answers its lookup
     machine.mail!.across.usePeers({ ...real, hubs: () => real.hubs!().map((h) => ({ ...h, call: () => new Promise<never>(() => {}) })) })
-    const started = Date.now()
-    const r = await tool(machine, 'w1', { action: 'send', to: 'reviewer', text: 'a look?' })
-    expect(r.text).toMatch(/^Sent /)
+    // The wait is a reachable hub's answer time, not the whole search's: read on a clock the test moves, not the wall's
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let r: { text: string } | undefined
+      const sending = tool(machine, 'w1', { action: 'send', to: 'reviewer', text: 'a look?' }).then((x) => (r = x))
+      await vi.advanceTimersByTimeAsync(NAMED_HERE_MS)
+      expect(NAMED_HERE_MS).toBeLessThan(FIND_MS)
+      expect(r?.text).toMatch(/^Sent /)
+      await sending
+    } finally {
+      vi.useRealTimers()
+    }
     expect(machine.store.mailbox.feedOf(at(machine, 'x1'), { limit: 10 }).map((m) => m.body)).toEqual(['a look?'])
-    // FIND_MS is 4 s; the wait here is a reachable hub's answer time
-    expect(Date.now() - started).toBeLessThan(2500)
   })
 })
 

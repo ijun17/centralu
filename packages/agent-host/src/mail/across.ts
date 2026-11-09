@@ -112,9 +112,9 @@ const UNSURE_MAX = 500
 const FOREIGN_ID = /^[^\s/]{1,120}\.m_[0-9A-Za-z]{10,40}$/
 
 /** How long a directory search may wait for one hub */
-const FIND_MS = 4000
+export const FIND_MS = 4000
 /** How long a send by name waits for a hub when a session here has that name already: what a reachable hub answers in */
-const NAMED_HERE_MS = 600
+export const NAMED_HERE_MS = 600
 
 export class MailAcross {
   private peers: AcrossPeers | null = null
