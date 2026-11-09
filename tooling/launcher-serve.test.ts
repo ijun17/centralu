@@ -1,12 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, copyFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '@cc/protocol'
+import { bundleHostScript, bundleInfoText } from '../packages/agent-host/scripts/bundle-host.mjs'
+// @ts-expect-error — plain JavaScript, run by bundle.mjs under plain node
+import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
 import { acquireInstanceLock } from '../packages/agent-host/src/dev-services/instance-lock.js'
 import { HostServer, versionMismatchMessage } from '../packages/agent-host/src/transport/server.js'
 import { CREDENTIAL_ID_RE as HOST_ID_RE, CREDENTIAL_LABEL_RE as HOST_LABEL_RE, credentialCheck, readCredentialFile } from '../packages/agent-host/src/lifecycle/serve-credentials.js'
@@ -2071,10 +2074,69 @@ async function cli(dataDir: string, args: string[], extra: NodeJS.ProcessEnv = {
 }
 
 
+/** `cli` and `connection`, for a describe that names its own of them over another host entry */
+const serveCli = cli
+const serveConnection = connection
+
+/**
+ * The host as a release builds it (#2144), as much of its folder as starting and stopping it takes: `main.mjs` and
+ * `bundle-info.json` as `bundle.mjs` makes them (bundle-host.mjs), `schema.sql` beside them, and the two native addons
+ * the bundle leaves out linked in from the workspace's own install rather than copied. Not the rest of a release's
+ * folder (app-template, the terminal broker, the Codex bridge, what a remote install reads): nothing here uses them
+ */
+async function shippedHost(): Promise<{ entry: string; dir: string }> {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-shipped-host-')))
+  try {
+    const id = buildId(ROOT)
+    await bundleHostScript({ root: ROOT, outfile: join(dir, 'main.mjs'), buildId: id })
+    writeFileSync(join(dir, 'bundle-info.json'), bundleInfoText({ root: ROOT, buildId: id }))
+    copyFileSync(join(ROOT, 'packages/protocol/src/schema/schema.sql'), join(dir, 'schema.sql'))
+    const fromHost = createRequire(join(ROOT, 'packages/agent-host/package.json'))
+    mkdirSync(join(dir, 'node_modules'))
+    for (const name of NATIVE_ADDONS) symlinkSync(dirname(fromHost.resolve(`${name}/package.json`)), join(dir, 'node_modules', name), 'junction')
+    return { entry: join(dir, 'main.mjs'), dir }
+  } catch (e) {
+    await removeShippedHost(dir)
+    throw e
+  }
+}
+
+/** The addons the host bundle leaves out (`bundle-host.mjs`'s `external`), which `shippedHost` links */
+const NATIVE_ADDONS = ['better-sqlite3', 'node-pty'] as const
+
+/** Removes `shippedHost`'s folder: its links first, so the removal never reaches into the workspace's install */
+async function removeShippedHost(dir: string) {
+  for (const name of NATIVE_ADDONS) {
+    try {
+      unlinkSync(join(dir, 'node_modules', name))
+    } catch {
+      // not linked yet: the build stopped before it
+    }
+  }
+  await removeTree(dir)
+}
+
 /** How `--detach` starts here: inside WSL with Windows interop it is a WMI-created `wsl.exe`, which these tests run for real (#1716) */
 const HOW = detachHow(process.platform, process.env) as 'setsid' | 'wsl' | 'wmi'
 
-describe('centralu serve --detach and --stop, end to end (a host from source, a temporary data folder)', () => {
+describe('centralu serve --detach and --stop, end to end (the host as it ships, a temporary data folder)', () => {
+  /*
+   * The host as a release ships it (#2144): `--detach` gives the host it starts 30 s to answer, a bound for that build.
+   * Run from source, the host first loads every module through the TypeScript loader, which under a full suite's load can
+   * take most of that before the host says a word (measured on one Windows machine beside 24 busy processes, 2026-11-09:
+   * 24 s to the source host's first line, the bound missed in 6 of 8 runs; the bundle under the same load answered in 22 s)
+   */
+  let shipped: { entry: string; dir: string } | null = null
+  beforeAll(async () => {
+    shipped = await shippedHost()
+  }, 120_000 * SLOW)
+  afterAll(async () => {
+    if (shipped) await removeShippedHost(shipped.dir)
+  })
+  const entry = () => ({ CENTRALU_HOST_ENTRY: shipped!.entry })
+  const cli = (d: string, args: string[], extra: NodeJS.ProcessEnv = {}) => serveCli(d, args, { ...entry(), ...extra })
+  const connection = (d: string) => serveConnection(d, entry())
+
   // What a test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
   let own = ownProcesses()
   const alive = (pid: number) => own.alive(pid)
@@ -2183,7 +2245,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         // A shell standing in for the ssh session: it runs --detach, then stays, as a session would
         const session = spawn('/bin/sh', ['-c', `"${process.execPath}" "${CLI}" serve --detach --port ${port}; sleep 60`], {
           cwd: ROOT,
-          env: cliEnv(d),
+          env: { ...cliEnv(d), ...entry() },
           stdio: ['ignore', 'pipe', 'pipe'],
           detached: true,
         })
