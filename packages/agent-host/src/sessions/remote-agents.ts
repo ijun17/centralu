@@ -297,7 +297,11 @@ export class RemoteAgents {
       const there = listed?.find((s) => s.sessionId === r.sessionId)
       const state: AgentListRow['state'] =
         there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
-        : there ? (inTurn(there.state as SessionState) ? 'working' : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId) }) ? 'paused' : 'finished')
+        : there ? (inTurn(there.state as SessionState) ? 'working'
+          : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption }) ? 'paused'
+          // Cut short there, as a child here reads (`agentState`): never paused over the work its turn left (#2146 review)
+          : there.state === 'error' || there.state === 'limited' || there.interruption ? 'stopped'
+          : 'finished')
         : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }

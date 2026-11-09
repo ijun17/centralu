@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
+import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/centralu-tools.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
@@ -186,6 +186,8 @@ export function linkedSessions(
   const rows = (m: RoutedMachine, answer: unknown): OrchestratedSession[] => {
     if (!Array.isArray(answer)) return []
     const out: OrchestratedSession[] = []
+    // How a turn was cut short is not in a row the machine answers; the headers it pushed carry it
+    const cut = interruptions(m)
     for (const raw of answer) {
       const r = HostSessionRow.safeParse(raw)
       if (!r.success || !SessionId.safeParse(r.data.sessionId).success) continue
@@ -200,8 +202,20 @@ export function linkedSessions(
         ...(s.pr ? { pr: { number: s.pr.number, state: oneLine(s.pr.state, 20) } } : {}),
         preview: s.preview,
         ...(s.lastActive ? { lastActive: oneLine(s.lastActive, 40) } : {}),
+        ...(cut.has(s.sessionId) ? { interruption: cut.get(s.sessionId)! } : {}),
         machine: m.name,
       })
+    }
+    return out
+  }
+
+  /** Each session's `interruption` as the machine's headers last held it, by its own id (#2146 review) */
+  const interruptions = (m: RoutedMachine): Map<string, Interruption> => {
+    const out = new Map<string, Interruption>()
+    for (const s of m.lastKnown('sessions') ?? []) {
+      if (!isObj(s) || typeof s.id !== 'string') continue
+      const i = Interruption.safeParse(s.interruption)
+      if (i.success) out.set(s.id, i.data)
     }
     return out
   }

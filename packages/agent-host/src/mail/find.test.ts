@@ -53,6 +53,17 @@ describe('finding the recipient (#2067 item 3)', () => {
     expect(ranked(all, 'assistant').map((e) => e.role)).toEqual(['assistant'])
   })
 
+  it('a session paused on its own background work is busy and says paused; one cut short is not (#2146 review)', () => {
+    const base = { name: 'Paused one', kind: 'worker', state: 'idle', createdAt: 1 }
+    const work = [{ id: 'a1', kind: 'agent', description: 'review', status: 'running' }] as never
+    const at = { address: 'session:hub-1a2b3c4d/p', project: null, machine: null }
+    expect(entryOf({ ...base, id: 'p', backgroundTasks: work }, at)).toMatchObject({ busy: true, state: 'paused' })
+    expect(entryOf({ ...base, id: 'p', backgroundTasks: work, interruption: { reason: 'interrupted', at: 2 } }, at)).toMatchObject({ busy: false, state: 'idle' })
+    // So it ranks with the sessions at work, above one at rest that started later
+    const rest = entryOf({ ...base, id: 'r', createdAt: 9 }, { ...at, address: 'session:hub-1a2b3c4d/r' })
+    expect(ranked([rest, entryOf({ ...base, id: 'p', backgroundTasks: work }, at)], 'paused').map((e) => e.address)).toEqual(['session:hub-1a2b3c4d/p', 'session:hub-1a2b3c4d/r'])
+  })
+
   it('the exact name in any case is what `mail send` resolves, and two of it are both returned', () => {
     const all = [...directory(10), { ...directory(1)[0]!, address: 'session:hub-99999999/x', name: 'pr REVIEW 0' }]
     expect(named(all, 'PR review 0').map((e) => e.address)).toEqual([directory(1)[0]!.address, 'session:hub-99999999/x'])

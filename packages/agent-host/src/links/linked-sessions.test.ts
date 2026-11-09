@@ -52,6 +52,13 @@ async function listText(m: RoutedMachine): Promise<string> {
 }
 
 describe('reading a linked machine for the hub’s assistant', () => {
+  it('lists a session cut short there with how, from the headers the machine pushed (#2146 review)', async () => {
+    const cut = { reason: 'interrupted', at: 5 }
+    const m = machine({ 'host.sessions': [row({ sessionId: 'w1' }), row({ sessionId: 'w2' })] }, { mirror: { sessions: [{ id: 'w1', interruption: cut }, { id: 'w2', interruption: { reason: 7 } }] } })
+    const listed = await linkedSessions(() => [m]).list()
+    expect(listed.map((s) => [s.sessionId, s.interruption])).toEqual([['m1.w1', cut], ['m1.w2', undefined]])
+  })
+
   it('says the Assistant is the one changing a machine’s session settings (#659)', async () => {
     const calls: [string, unknown][] = []
     const reader = linkedSessions(() => [machine({ 'sessions.list': [{ id: 'w1', kind: 'worker' }] })], async (method, params) => {

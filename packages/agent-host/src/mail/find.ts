@@ -1,4 +1,4 @@
-import { isAssistantKind, isInTurn, oneLineText, type DirectoryEntry } from '@cc/protocol'
+import { isAssistantKind, isInTurn, oneLineText, pausedOnBackground, type BackgroundTask, type DirectoryEntry } from '@cc/protocol'
 
 /**
  * Finding the recipient across machines (#2067 item 3, docs/plans/linked-mail.md §8): one directory of sessions, this
@@ -25,9 +25,23 @@ export function roleOf(s: { kind: string; askedBy?: string | null | undefined; s
   return s.askedBy || s.startedFromHub ? 'child' : 'session'
 }
 
-/** A session as the directory lists it */
+/**
+ * A session as the directory lists it. One paused on its own background work (#2146) is busy, and says `paused`: its
+ * turn ended, but it is not at rest
+ */
 export function entryOf(
-  s: { id: string; name: string; kind: string; state: string; askedBy?: string | null | undefined; startedFromHub?: boolean | undefined; waitingSince?: number | null | undefined; createdAt: number },
+  s: {
+    id: string
+    name: string
+    kind: string
+    state: string
+    askedBy?: string | null | undefined
+    startedFromHub?: boolean | undefined
+    waitingSince?: number | null | undefined
+    createdAt: number
+    backgroundTasks?: readonly BackgroundTask[] | undefined
+    interruption?: unknown
+  },
   o: { address: string; project: string | null; machine: string | null; machineId?: string },
 ): FoundEntry {
   return {
@@ -36,8 +50,8 @@ export function entryOf(
     project: o.project === null ? null : oneLineText(o.project, 80),
     machine: o.machine === null ? null : oneLineText(o.machine, 80),
     role: roleOf(s),
-    state: oneLineText(s.state, 30),
-    busy: isInTurn(s.state),
+    state: pausedOnBackground(s) ? 'paused' : oneLineText(s.state, 30),
+    busy: isInTurn(s.state) || pausedOnBackground(s),
     at: Math.max(s.waitingSince ?? 0, s.createdAt),
     ...(o.machineId ? { machineId: o.machineId } : {}),
   }

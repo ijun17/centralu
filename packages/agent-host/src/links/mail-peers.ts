@@ -1,3 +1,5 @@
+import { BackgroundTask } from '@cc/protocol'
+import { z } from 'zod'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { isObj } from '../json-value.js'
 import { sessionAddress } from '../mail/address.js'
@@ -77,6 +79,7 @@ export function mailPeers(o: {
                       startedFromHub: s.startedFromHub === true,
                       waitingSince: typeof s.waitingSince === 'number' ? s.waitingSince : null,
                       createdAt: s.createdAt,
+                      ...tasksOf(s),
                     },
                     { address: sessionAddress(o.hostId, `${m.id}.${s.id}`), project: projectId === null ? null : (names.get(projectId) ?? projectId), machine: m.name, machineId: m.id },
                   ),
@@ -95,4 +98,10 @@ export function mailPeers(o: {
         }
       : {}),
   }
+}
+
+/** A mirrored session's background work and how its turn was cut short, as its machine pushed them: what makes it paused (#2146) */
+function tasksOf(s: Record<string, unknown>): { backgroundTasks?: BackgroundTask[]; interruption?: unknown } {
+  const tasks = z.array(BackgroundTask).safeParse(s.backgroundTasks)
+  return { ...(tasks.success ? { backgroundTasks: tasks.data } : {}), ...(s.interruption ? { interruption: s.interruption } : {}) }
 }
