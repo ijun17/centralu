@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOCK_TICK_MS, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, survivorTargets, type KillOs } from './kill-tree.js'
+import { CLOCK_TICK_MS, STOP_LIST_MS, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -429,6 +429,57 @@ describe('leftovers of an ended process on Windows', () => {
     await stopTreeWindows({ pid: 100, spawnedAt: 1_000 }, () => void calls.push('root'), failing)
     expect(calls).toEqual([[100, undefined], 'root'])
     logged.mockRestore()
+  })
+
+  // #2142 re-check: a stop waits for the table, so a starved PowerShell (over 10 s, #1773) held a Stop up to the sweep's 60 s
+  it('a running tree whose table does not come within 1.5 s is ended with taskkill /T on its root, and the listing is told the bound', async () => {
+    vi.useFakeTimers()
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const calls: unknown[] = []
+      const asked: unknown[] = []
+      const hung = {
+        listProcesses: (ms?: number) => (asked.push(ms), new Promise<never>(() => {})),
+        taskkill: (pid: number, alone?: boolean) => void calls.push([pid, alone]),
+      }
+      let done = false
+      const stopped = stopTreeWindows({ pid: 100, spawnedAt: 1_000 }, () => void calls.push('root'), hung).then((r) => ((done = true), r))
+      await vi.advanceTimersByTimeAsync(STOP_LIST_MS - 1)
+      expect(done).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await stopped).toEqual([])
+      expect(calls).toEqual([[100, undefined]])
+      expect(asked).toEqual([STOP_LIST_MS])
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('timed out'))
+    } finally {
+      logged.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  // #2142 re-check: a shutdown stopping many git calls read the table twice per call, a PowerShell each
+  it('several running trees take one reading of the table: every root is ended, then each tree parents first', async () => {
+    const order: unknown[] = []
+    const rows = table('300 200 2000\n200 100 1500\n600 500 2100\n')
+    const os = {
+      listProcesses: async () => (order.push('list'), rows),
+      taskkill: (pid: number, alone?: boolean) => void order.push([pid, alone]),
+    }
+    const roots = [
+      { pid: 100, spawnedAt: 1_000, endRoot: () => void order.push('root 100') },
+      { pid: 500, spawnedAt: 1_000, endRoot: () => void order.push('root 500') },
+    ]
+    expect(await stopTreesWindows(roots, os)).toEqual([200, 300, 600])
+    expect(order).toEqual(['list', 'root 100', 'root 500', [200, true], [300, false], [600, false]])
+  })
+
+  it('the leftovers of several ended processes are found from one reading of the table', async () => {
+    const ended: number[] = []
+    const listProcesses = vi.fn(async () => table('200 100 1500\n300 200 1600\n600 500 2100\n900 4 10\n'))
+    const roots = [root, { pid: 500, spawnedAt: 2_000, exitedAt: 5_000 }]
+    expect(await collectAllOrphansWindows(roots, { listProcesses, taskkill: (pid: number) => void ended.push(pid) })).toEqual([200, 300, 600])
+    expect(ended).toEqual([200, 300, 600])
+    expect(listProcesses).toHaveBeenCalledTimes(1)
   })
 
   // #1773: PowerShell took over 10 s to answer on a starved machine, and the listing given up on left the leftovers running

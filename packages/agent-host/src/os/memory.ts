@@ -1584,6 +1584,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     runSync,
     runShell: (line, o = {}) => runIn(...shell(line), o),
     stop,
+    stopAll: async (children, graceMs) => void (await Promise.all(children.map((c) => stop(c, graceMs)))),
     alive: (pid) => pid === HOST_PID || procs.get(pid)?.row.alive === true,
     signal: (pid, signal) => {
       const refused = signalRefusal(signal, family)

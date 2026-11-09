@@ -385,7 +385,8 @@ export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProc
 
 /** What collecting an ended process's leftovers needs from Windows, as a parameter so it can be tested on any OS */
 export type LeftoverOs = {
-  listProcesses: () => Promise<WinProcRow[]>
+  /** The process table; given up on after `timeoutMs` (by default the long bound below, for a sweep) */
+  listProcesses: (timeoutMs?: number) => Promise<WinProcRow[]>
   /** Ends a process and every process under it, forcibly; with `alone`, that process only. Rejects (or throws) with taskkill's exit status */
   taskkill: (pid: number, alone?: boolean) => void | Promise<void>
 }
@@ -406,9 +407,9 @@ const LIST_PROCESSES =
   "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }"
 /** `run` is `execFile` as a promise, a parameter so a test can answer in its place */
 export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
-  listProcesses: async () => {
+  listProcesses: async (timeoutMs = 60_000) => {
     const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
-    const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 60_000, windowsHide: true })
+    const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: timeoutMs, windowsHide: true })
     return parseWinProcs(stdout)
   },
   // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
@@ -436,22 +437,40 @@ const REAL_LEFTOVER_OS = leftoverOs(runFile)
  * window of the listing's own length) is not found.
  */
 export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  return collectAllOrphansWindows([root], os)
+}
+
+/** `collectOrphansWindows` for several ended processes from one reading of the table: a shutdown sweeps every git at once */
+export async function collectAllOrphansWindows(roots: readonly EndedRoot[], os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  if (roots.length === 0) return []
   let rows: WinProcRow[]
   try {
     rows = await os.listProcesses()
   } catch (e) {
-    console.error(`[agent-host] the process table could not be read (${unread(e)}); what process ${root.pid} left running may still run`)
+    const pids = roots.map((r) => r.pid).join(', ')
+    console.error(`[agent-host] the process table could not be read (${unread(e)}); what process ${pids} left running may still run`)
     return []
   }
-  const found = orphansOf(rows, root)
-  // A child of the root that the time window turned away is left running; a sweep that missed one must say why (#1773)
-  const turnedAway = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && !found.includes(r))
-  if (turnedAway.length > 0) {
-    const list = turnedAway.map((r) => `${r.pid} (created ${r.created})`).join(', ')
-    console.error(`[agent-host] process ${root.pid} ran from ${root.spawnedAt} to ${root.exitedAt}; its children created outside that were left alone: ${list}`)
+  const ended: number[] = []
+  for (const root of roots) {
+    const found = orphansOf(rows, root)
+    // A child of the root that the time window turned away is left running; a sweep that missed one must say why (#1773)
+    const turnedAway = rows.filter((r) => r.ppid === root.pid && r.pid !== root.pid && !found.includes(r))
+    if (turnedAway.length > 0) {
+      const list = turnedAway.map((r) => `${r.pid} (created ${r.created})`).join(', ')
+      console.error(`[agent-host] process ${root.pid} ran from ${root.spawnedAt} to ${root.exitedAt}; its children created outside that were left alone: ${list}`)
+    }
+    ended.push(...(await endInOrder(found, root.pid, os)))
   }
-  return endInOrder(found, root.pid, os)
+  return ended
 }
+
+/**
+ * How long a stop waits for the process table (#2142 re-check): it is read while the tree runs, so a stop waits for it.
+ * A table read in 0.4–0.75 s is the usual; a PowerShell starved of CPU, which took over 10 s (#1773), is given up on, and
+ * the stop takes `taskkill /T`, in no order, rather than wait the sweep's long bound
+ */
+export const STOP_LIST_MS = 1500
 
 /**
  * Stops a running process and what it started, on Windows (#2142 and its review). The process table is read first, while
@@ -464,22 +483,48 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
  * finds it, when the caller sweeps. Returns the pids ended besides the root.
  */
 export async function stopTreeWindows(root: { pid: number; spawnedAt: number }, endRoot: () => void, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  return stopTreesWindows([{ ...root, endRoot }], os)
+}
+
+/**
+ * `stopTreeWindows` for several running processes from one reading of the table (a shutdown stopping every git), read for
+ * at most `STOP_LIST_MS`: every root is ended before any of what it started, then each tree parents first
+ */
+export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt: number; endRoot: () => void }[], os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  if (roots.length === 0) return []
   let rows: WinProcRow[]
   try {
-    rows = await os.listProcesses()
+    rows = await within(os.listProcesses(STOP_LIST_MS), STOP_LIST_MS)
   } catch (e) {
-    console.error(`[agent-host] the process table could not be read (${unread(e)}); process ${root.pid} and what it started are ended with taskkill /T, in no order`)
-    try {
-      await os.taskkill(root.pid)
-    } catch {
-      endRoot()
+    const pids = roots.map((r) => r.pid).join(', ')
+    console.error(`[agent-host] the process table could not be read (${unread(e)}); process ${pids} and what it started are ended with taskkill /T, in no order`)
+    for (const root of roots) {
+      try {
+        await os.taskkill(root.pid)
+      } catch {
+        root.endRoot()
+      }
     }
     return []
   }
-  // Running still: what it started is everything created under it since it was spawned, up to now
-  const tree = orphansOf(rows, { pid: root.pid, spawnedAt: root.spawnedAt, exitedAt: Date.now() })
-  endRoot()
-  return endInOrder(tree, root.pid, os)
+  // Running still: what each started is everything created under it since it was spawned, up to now
+  const now = Date.now()
+  const trees = roots.map((root) => ({ root, tree: orphansOf(rows, { pid: root.pid, spawnedAt: root.spawnedAt, exitedAt: now }) }))
+  for (const { root } of trees) root.endRoot()
+  const ended: number[] = []
+  for (const { root, tree } of trees) ended.push(...(await endInOrder(tree, root.pid, os)))
+  return ended
+}
+
+/** `p`, or a rejection as a timed-out run's (`killed`) once `ms` have passed: a fake table that never answers is bounded too */
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(Object.assign(new Error('timed out'), { killed: true })), ms)
+    p.then(
+      (v) => (clearTimeout(timer), resolve(v)),
+      (e: unknown) => (clearTimeout(timer), reject(e instanceof Error ? e : new Error(String(e)))),
+    )
+  })
 }
 
 /** Why the process table could not be read */

@@ -252,8 +252,8 @@ export const GIT_STOP_GRACE_MS = 2000
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
   const children = [...live].filter(running)
   if (children.length === 0) return
-  const stopped = children.map((child) => realOs().processes.stop(child, graceMs).catch(() => {}))
-  await raceTimeout(Promise.all(stopped), graceMs + 1000, undefined)
+  // All at once: on Windows one reading of the process table and one sweep for every git, not two per git (#2142 re-check)
+  await raceTimeout(realOs().processes.stopAll(children, graceMs).catch(() => {}), graceMs + 1000, undefined)
 }
 
 /**

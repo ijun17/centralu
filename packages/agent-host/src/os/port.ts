@@ -393,6 +393,11 @@ export interface OsProcesses {
    * for. Answers how it ended.
    */
   stop(child: OsChild, graceMs: number, options?: { sweep?: boolean }): Promise<OsExit>
+  /**
+   * `stop` for several children, each swept after; settles once all have exited and been swept. On Windows one reading
+   * of the process table before and one sweep after serve them all, where `stop` each would read it twice per child
+   */
+  stopAll(children: readonly OsChild[], graceMs: number): Promise<void>
   /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */
   alive(pid: number): boolean
   /**

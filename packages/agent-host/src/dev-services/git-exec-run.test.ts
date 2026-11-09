@@ -10,6 +10,7 @@ import { cloneFailure } from './project-clone.js'
 import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { realOs } from '../os/real.js'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -251,6 +252,28 @@ describe('a git that is stopped takes its lock away (#982)', () => {
   // The host leaving (lifecycle/shutdown.ts): git runs in a group of its own, which nothing else ends
   it('when the host stops: every git still running ends, itself first', { timeout: 60_000 * SLOW }, async () => {
     endedFirst(await commitStopped(() => stopGitChildren()))
+  })
+
+  // #2142 re-check: one git at a time read the process table twice each on Windows, a PowerShell per reading
+  it('when the host stops: every git still running is stopped in one go, and each ends', { timeout: 60_000 * SLOW }, async () => {
+    const stopAll = vi.spyOn(realOs().processes, 'stopAll')
+    try {
+      const repos = [slowCommit(30), slowCommit(30)]
+      const calls = repos.map((repo) =>
+        runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 120_000 * SLOW }).then(
+          () => 'committed',
+          () => 'ended',
+        ),
+      )
+      for (const repo of repos) expect(await settle(() => existsSync(started(repo)), Boolean, 20_000 * SLOW)).toBe(true)
+      await stopGitChildren()
+      expect(await Promise.all(calls)).toEqual(['ended', 'ended'])
+      expect(stopAll).toHaveBeenCalledTimes(1)
+      expect(stopAll.mock.calls[0]?.[0]).toHaveLength(2)
+      for (const repo of repos) expect(git(repo, 'log', '--format=%s').trim()).toBe('one')
+    } finally {
+      stopAll.mockRestore()
+    }
   })
 
   // A caller that gives up (a cancelled commit): the run's own stop
