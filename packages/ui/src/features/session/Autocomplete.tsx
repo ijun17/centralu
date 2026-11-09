@@ -155,16 +155,28 @@ export function useAutocomplete({
    */
   const [askedFor, setAskedFor] = useState<string | null>(null)
   if (wantCommands && askedFor !== sessionId) setAskedFor(sessionId)
+  /*
+   * The asks after an answer that gave no list, counted. It used to forget the ask instead (`askedFor` back to null), but
+   * React may run that and the next `/` in one render, which asked again at once: the ask never looked changed, and the
+   * failed answer stayed (#2151, WebKit). A count only goes up
+   */
+  const [asks, setAsks] = useState(0)
+  const [askAgain, setAskAgain] = useState(false)
+  if (wantCommands && askAgain) {
+    setAskAgain(false)
+    setAsks((n) => n + 1)
+  }
   const skills = useLoad<Skills>(
     () => (askedFor === sessionId ? platform.agents.commands(sessionId).then((r) => ({ sessionId, ...r })) : null),
     [askedFor, sessionId, platform],
-    // The session came alive: a cached answer is what was true last time, so ask the tool itself (above)
-    [live],
+    // The session came alive: a cached answer is what was true last time, so ask the tool itself (above). Or a `/` after an
+    // answer that gave no list asks again
+    [live, asks],
   )
   const skillsNow = skillsView(sessionId, skills)
   const skillsWait = skillsNow.loading || skillsNow.note !== null
   useEffect(() => {
-    if (!wantCommands && skillsWait && askedFor !== null) setAskedFor(null)
+    if (!wantCommands && skillsWait && askedFor !== null) setAskAgain(true)
   }, [wantCommands, skillsWait, askedFor])
 
   // Files are searched on every keystroke (fast, since the host holds the index)
