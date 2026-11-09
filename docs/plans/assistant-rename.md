@@ -91,13 +91,18 @@ same N−1 that moves the role writes only `is_orchestrator`, which is why it is
 
 ### 3.2 What step 4 must do
 
-- **Copy the old form into the new one once,** at its first open (a step that sets `is_assistant` from
-  `is_orchestrator` and the `assistant_*` keys from the old ones), then read the new form first. Until then the new
-  form can be stale after N−1 served the store.
+- **Copy the old form into the new one once,** at its first open, then read the new form first. Until then the new
+  form can be stale after N−1 served the store, also where N−1 deleted the old form: N−1 deletes `orchestrator_tool`,
+  the last skill and the last MCP proposal under the old key only, and leaves `assistant_tool`, `assistant_skills` and
+  `assistant_mcp_proposals` as they were. So the copy sets `is_assistant` from `is_orchestrator` on every row, sets
+  each new key from its old key, and **deletes each new key whose old key is absent**. A copy that only fills new keys
+  from old ones that exist would bring back what the person removed.
 - **Keep N−1 out, and only N−1.** Reading the new form first is right only when every build that can open the store
   writes it. Step 4's copy therefore raises `min_reader_version` to 68, step 3's own version: N opens the store
   (it writes both forms), N−1 does not. The gate raises a breaking step's floor to that step's own `to`
   (`migrate-runner.ts`), which would keep N out too, so step 4 needs a step that can name a lower floor.
+  A floor of 68 also admits a build of step 68 alone (a7eb7e2ef on `dev`), which writes only the old settings keys;
+  it was never released, so it is not a supported rollback.
 - **Keep writing and deleting both forms** while N is a release a person can go back to: N reads only the old form.
 - **Drop the old forms one release later (N+2):** `is_orchestrator`, the old keys, the old `via` and sender. A drop
   of `is_orchestrator` in N+1 with `breaksOlderReaders: true` would raise the floor past N, which this plan keeps as

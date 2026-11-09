@@ -212,7 +212,6 @@ const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
 const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone')`
 /** Held for a reason the person acts on */
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
-/** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
 /**
  * The `via` of a recipient row sent to the Assistant's role rather than to one session (§7.7). This build writes
  * `ROLE_VIA`; a later one writes `'assistant'` (#2133, docs/plans/assistant-rename.md), and a row keeps the one it was
@@ -225,6 +224,7 @@ export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly 
 /** The same, as an SQL list */
 const ROLE_VIAS = `(${ROLE_VIA_WORDS.map((w) => `'${w}'`).join(', ')})`
 
+/** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
 export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as const
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...`; the v61 receipts (`mail.ts`) hold for the same words */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
