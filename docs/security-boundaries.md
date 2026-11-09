@@ -290,7 +290,8 @@ machine as the less trusted side: a compromised server must not reach the person
   across machines): `hub.mail`, `hub.mailRows` and `hub.find` are answered whatever the switch says. A message is
   written by the recipient's host through its one send, guards included, from the sender the link names (a machine's
   session is qualified with the link's machine id, never with what the call says), and the recipient reads it as
-  another session's text, never as the person's (`cite` is refused across). A machine may tell what became of mail only
+  another session's text, never as the person's (`cite` is refused across). A machine's notice is that machine's
+  message, never the hub's Centralu's, and is taken only for a session that mailed one of its sessions. A machine may tell what became of mail only
   for rows of its own sessions. On the machine, `host.mail` and `host.mailRows` are taken only on a connection a hub
   offered on, and only from that hub's addresses. Mail out of an untrusted project is refused across rather than held.
 - **The hub's card for each pair**, raised in the hub's session that would get the task, so only the hub's windows can

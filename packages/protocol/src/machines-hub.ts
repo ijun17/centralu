@@ -73,7 +73,10 @@ export const HubMailParams = z.object({
   replyTo: z.string().min(1).max(200).optional(),
   /** The sender's name, as the recipient reads it */
   name: z.string().max(500).optional(),
-  /** A notice of Centralu's to `to` rather than the session's message (the "no longer watched" notice, item 2) */
+  /**
+   * A notice to `to` rather than the session's message (the "no longer watched" notice, item 2). The hub writes it as the
+   * machine's, never as its own Centralu's, and only to a session that sent mail to one of that machine's sessions
+   */
   notice: z.boolean().optional(),
 })
 export type HubMailParams = z.infer<typeof HubMailParams>

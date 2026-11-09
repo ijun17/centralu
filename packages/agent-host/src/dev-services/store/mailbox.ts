@@ -729,6 +729,16 @@ export class MailboxRecords {
 
   // ── Across a link (#2067 item 2, docs/plans/linked-mail.md §6) ──
 
+  /** Whether `sender` ever sent a message to an address that starts with `prefix` (a linked machine's sessions, `session:<hub>/<machine>.`) */
+  sentToward(sender: string, prefix: string): boolean {
+    const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+    return (
+      this.db
+        .prepare<[string, string], { one: number }>(`SELECT 1 AS one FROM mail m JOIN mail_recipients r ON r.message_id = m.id WHERE m.sender = ? AND r.recipient LIKE ? ESCAPE '\\' LIMIT 1`)
+        .get(sender, like) !== undefined
+    )
+  }
+
   /**
    * The rows of messages that crossed a link, with each message's sender: a row whose recipient or whose message's sender is
    * on another host (`session:<other host>/…`, or this host's id with a dotted session id: a linked machine's session as a

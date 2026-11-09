@@ -261,6 +261,8 @@ export class MailAcross {
   async fromMachine(machine: { id: string; name: string }, p: HubMailParams): Promise<HubMailResult & { address?: string }> {
     const sender = this.d.service.sessionAddress(`${machine.id}.${p.sessionId}`)
     if (p.name) this.names.set(sender, `${oneLineText(p.name, 120)} on ${machine.name}`)
+    // A machine's notice is its Centralu's, read as that computer's words (`write`)
+    else if (p.notice && p.sessionId === CENTRALU) this.names.set(sender, `Centralu on ${machine.name}`)
     let to: string
     if (p.to === undefined) {
       const parentId = this.peers?.parentOf?.(`${machine.id}.${p.sessionId}`)
@@ -295,14 +297,22 @@ export class MailAcross {
     return this.write(from, to, p)
   }
 
-  /** The message written here, by this host's one send and its guards; or its refusal, nothing written */
+  /**
+   * The message written here, by this host's one send and its guards; or its refusal, nothing written. Only `from` set to
+   * Centralu, which `fromHub` alone passes (a hub writes its own notices on the machines it links), is written as a notice
+   * of Centralu's. A notice from the other side's session or machine is that side's message, never Centralu's, and is
+   * taken only for a session here that mailed that side: the "no longer watched" notice it passes on is about such mail
+   */
   private write(from: string, to: string, p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined }): HubMailResult & { address?: string } {
     try {
-      if (p.notice || from === CENTRALU) {
+      if (from === CENTRALU) {
         const m = this.d.service.notice(to, { body: p.text, facts: {}, dedupeKey: `across:${this.now()}:${Math.random().toString(36).slice(2, 10)}` })
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
-      const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.needsReply ?? true, ...(p.urgent ? { urgent: true } : {}), ...(p.replyTo ? { replyTo: p.replyTo } : {}) })
+      if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
+        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.foreignName(from)?.name ?? from, 200)} may send a notice only to a session that mailed it, and ${oneLineText(to, 200)} did not, so nothing was written.` }
+      }
+      const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}) })
       let label = to
       try {
         label = oneLineText(this.d.reach.labelOf(to), 120)
@@ -524,6 +534,17 @@ export class MailAcross {
       away: mirror.away,
     }
   }
+}
+
+/**
+ * The side of a link an address of another host's session is on, as a prefix of the addresses there: a linked machine's
+ * sessions (`session:<hub>/<machine>.`), or a hub's own (`session:<hub>/`)
+ */
+function sideOf(address: string): string {
+  const p = parseAddress(address)
+  if (p?.kind !== 'session') return address
+  const dot = p.sessionId.indexOf('.')
+  return dot < 0 ? `session:${p.host}/` : `session:${p.host}/${p.sessionId.slice(0, dot + 1)}`
 }
 
 function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined }) {

@@ -140,7 +140,7 @@ a machine, an address of another host id is that hub's, routed to the hub that o
 
 | Call | Direction | What it carries |
 |---|---|---|
-| `hub.mail` | machine → hub | `sessionId` (the sender, the machine's own; the hub qualifies it with the link's machine). New: `to` (an address, hub naming; none means `parent`), `replyTo`, `name` (the sender's name), `notice` (a Centralu notice for `to`). `needsReply` is now read |
+| `hub.mail` | machine → hub | `sessionId` (the sender, the machine's own; the hub qualifies it with the link's machine). New: `to` (an address, hub naming; none means `parent`), `replyTo`, `name` (the sender's name), `notice` (the machine's notice for `to`, written as the machine's message, §6). `needsReply` is now read |
 | `host.mail` | hub → machine | `from` (an address on the hub's side, or `centralu`), `name`, `to` (the machine's own session id), `text`, `needsReply`, `urgent`, `replyTo`, `notice`. Answered only on a connection a hub offered on, and only for a `from` under that hub's id |
 | `hub.mailRows`, `host.mailRows` | both | the state of recipient rows of messages that crossed (below) |
 | `hub.find` | machine → hub | a search of the hub's directory (§8) |
@@ -171,8 +171,11 @@ A push that fails is tried again on the next change and at the next connect. The
 `handled`, and the person's view of the copy read the copy as they read any row.
 
 **Notices.** A Centralu notice the recipient's host writes to a foreign address (the "no longer watched" notice when a
-recipient stops or goes without answering, `tellUnanswered`) is passed on as a notice and written there by that host;
-the copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice that
+recipient stops or goes without answering, `tellUnanswered`) is passed on and written there by that host. A hub's
+notice is written on a machine as the hub's Centralu's, since the hub links the machine. A machine's notice is written
+on the hub (and on another machine it is passed to) as that machine's message, from `Centralu on <machine>`, never as
+the hub's Centralu, and only to a session that mailed one of that machine's sessions; any other is refused
+`not_allowed`. The copy's row is marked released and told by the receipt, so the sender's host never tells it twice. A notice that
 cannot be passed on (the link is down) is dropped and said in the host's log: nothing is held. This host's delivery
 never tries a foreign address.
 
