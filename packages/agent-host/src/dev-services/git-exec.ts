@@ -4,6 +4,7 @@ import { devNull } from 'node:os'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
+import { hasProcessGroups } from './kill-tree.js'
 import { realOs } from '../os/real.js'
 import type { OsChild, RunOptions } from '../os/port.js'
 import { rpcError } from '../rpc-error.js'
@@ -206,6 +207,8 @@ function gitEnv(own?: Record<string, string>): NodeJS.ProcessEnv {
 /** The git processes running now, each until it exits: what the host's shutdown ends (`stopGitChildren`) */
 const live = new Set<OsChild>()
 
+const running = (child: OsChild) => child.exitCode === null && child.signalCode === null
+
 /**
  * What every git call is run with (`os.processes.run`): git as the root of a tree this host can end (`start`'s
  * `contained`: on macOS and Linux in a process group of its own, on Windows hidden), the environment above, and a
@@ -216,37 +219,69 @@ const live = new Set<OsChild>()
  * `centralu serve`). **No git outlives the host that started it**, so every one is kept in `live` until it exits, and
  * the shutdown ends what is left (`stopGitChildren`, lifecycle/shutdown.ts).
  */
-function runOptions(cwd: string, env: Record<string, string> | undefined, timeoutMs: number): RunOptions {
+function runOptions(cwd: string, env: Record<string, string> | undefined, timeoutMs: number, signal?: AbortSignal): RunOptions {
   return {
     cwd,
     env: gitEnv(env),
     timeoutMs,
+    signal,
     onChild: (child) => {
       live.add(child)
       const gone = () => live.delete(child)
       child.once('exit', gone)
       child.once('error', gone)
+      endGitFirst(child, timeoutMs, signal)
     },
   }
+}
+
+/**
+ * Windows: at the run's bound or its abort, git itself is ended first, at once, before the run's stop reaches what it
+ * started (#2141, the same order as `stopGitChildren`, which says why). Registered as git starts, so ahead of the run's
+ * own timer and abort listener (`runChild`), which then stop the tree and say why the run ended. Off Windows the run's
+ * stop is already right: SIGTERM reaches git and its hook together, and git takes its lock away.
+ */
+function endGitFirst(child: OsChild, timeoutMs: number, signal: AbortSignal | undefined): void {
+  if (hasProcessGroups()) return
+  const end = () => {
+    if (running(child)) child.kill()
+  }
+  const timer = realOs().clock.setTimeout(end, timeoutMs)
+  signal?.addEventListener('abort', end, { once: true })
+  const forget = () => {
+    timer.cancel()
+    signal?.removeEventListener('abort', end)
+  }
+  child.once('exit', forget)
+  child.once('error', forget)
 }
 
 /** How long git has, after SIGTERM, to take its lock files away before SIGKILL */
 export const GIT_STOP_GRACE_MS = 2000
 
-const running = (child: OsChild) => child.exitCode === null && child.signalCode === null
-
 /**
  * Ends every git still running, as a timeout would (`runChild`'s stop: SIGTERM so git takes its `index.lock` away,
  * SIGKILL after the grace, the whole tree; Windows has no SIGTERM: `taskkill /T /F` at once), and settles once each has
- * exited or the grace has passed with a margin. For the host's shutdown, in both of its modes: the keeper does not hold
- * git, so a git left running would outlive the host with the repository's locks.
+ * exited and what it left has been swept, or the grace has passed with a margin. For the host's shutdown, in both of
+ * its modes: the keeper does not hold git, so a git left running would outlive the host with the repository's locks.
+ *
+ * On Windows git itself is ended first, at once (`kill`, which terminates it there), and then what it started (#2141).
+ * `taskkill /T /F` does not end git before its hook, and a hook's program ended by taskkill reports success to its
+ * shell (MSYS's `sh` sees status 0): the hook then exits 0, and a git still running made the commit the stop was
+ * meant to prevent. With git gone, taskkill no longer finds the tree by its root; what git left is ended by the sweep
+ * after its exit (`processes.stop`, `collectOrphansWindows`), which finds it by parent links. That sweep is waited for:
+ * the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's `sh` stayed
+ * after its host had exited).
  */
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
   const children = [...live].filter(running)
   if (children.length === 0) return
-  const exited = Promise.all(children.map((child) => child.exited))
-  for (const child of children) void realOs().processes.stop(child, graceMs).catch(() => {})
-  await raceTimeout(exited, graceMs + 1000, undefined)
+  const stopped = children.map((child) => {
+    // Windows (no process groups): git itself first, see above
+    if (!hasProcessGroups()) child.kill()
+    return realOs().processes.stop(child, graceMs).catch(() => {})
+  })
+  await raceTimeout(Promise.all(stopped), graceMs + 1000, undefined)
 }
 
 /**
@@ -264,10 +299,9 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
   const timeout = opts.timeout ?? DEFAULTS.timeout
   // An open standard input, closed at once when there is nothing to give: git reads its end as it always did
   const r = await realOs().processes.run(programPath('git'), argv, {
-    ...runOptions(cwd, opts.env, timeout),
+    ...runOptions(cwd, opts.env, timeout, opts.signal),
     input: opts.input ?? '',
     maxBuffer: opts.maxBuffer ?? DEFAULTS.maxBuffer,
-    signal: opts.signal,
     stdoutFile: opts.outputFile,
   })
   const out = r.stdout.toString('utf8')
