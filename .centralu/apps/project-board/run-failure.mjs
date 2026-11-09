@@ -7,7 +7,7 @@
 // full CI run the next batch waited behind. A test or build failure is the session's to fix, at once.
 //
 // The contract with CI (two sessions worked on the two sides at once): in a full-tier run, when the
-// `verify` job fails, CI cancels the rest of the run at once (fail fast), so the run's conclusion is
+// `verify` job or one of its test shards (`verify (vitest i/n)`, #2153) fails, CI cancels the rest of the run at once (fail fast), so the run's conclusion is
 // "cancelled". The run's jobs say why: a job that failed in one of its steps is a real failure, even
 // in a cancelled run; jobs cancelled beside it are not. GitHub's job conclusions and step results
 // (`/actions/runs/{id}/jobs`) and the job's annotations (`/check-runs/{id}/annotations`, where GitHub

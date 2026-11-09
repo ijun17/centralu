@@ -165,8 +165,9 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(shards).toBeGreaterThan(1)
     expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(tests)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
     expect(names(tests)).toEqual(Array.from({ length: shards }, (_, i) => `verify (vitest ${i + 1}/${shards})`))
-    // Every test file, split by vitest itself: no list narrows it
-    expect(tests).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}\n')
+    // Every test file, split by vitest itself, but styles.test.ts: the verify job runs all of it, and a shard built the app a second time
+    expect(tests).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --exclude tooling/styles.test.ts\n')
+    expect(checks).toContain('run: pnpm exec vitest run tooling/styles.test.ts\n')
     // Both read main's history (the lint allowlists against main's, #1339), and fail when it is missing
     for (const body of [checks, tests]) {
       expect(body).toMatch(/fetch-depth: 0\n {10}filter: blob:none\n/)

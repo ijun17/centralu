@@ -456,7 +456,9 @@ jobs:
           CC_LINT_BASE: origin/main
           # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
           CC_BUNDLE_COMPARED_BY: verify
-        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
+        # styles.test.ts is left to the verify job, which runs the whole file: in a shard its beforeAll built the app with
+        # vite a second time in the run (#2153 review)
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --exclude tooling/styles.test.ts
 
   # Fail fast (2026-10-19, the owner's decision): on a manual run, the merge queue's batches, a failed `verify`
   # cancels the rest of the run at once. Nothing lands from a run whose `verify` failed, and its e2e shards kept the
@@ -465,7 +467,8 @@ jobs:
   # keeps every job to its end), never main's.
   #
   # `verify` here is both its jobs (#2153): the lint and types, and the test shards (`verify (vitest i/n)`); this waits
-  # for both, and cancels the run when either failed.
+  # for both, and cancels the run when either failed. The cost of two jobs: a lint failure no longer saves the tests' time
+  # (they run beside it), and the cancel comes when the slower of the two has ended, not when the first fails.
   #
   # Its own job, after `verify` has ended, not a step inside it: `verify`'s check stays `failure`, which is how the
   # queue tells this run, `cancelled` as a whole, from one cancelled for nothing (no rerun for a test failure). This
@@ -566,7 +569,7 @@ jobs:
   #
   # Only the tests that touch the OS (#1599, docs/plans/os-layer.md): those that reach the OS layer, a file still on
   # tooling/os-allowlist.txt or anything else in the shipped code that imports an OS module or asks which OS this is,
-  # picked by the lint rule's own judgement (tooling/os-tests.ts). The rest run once, on Linux, in `verify`.
+  # picked by the lint rule's own judgement (tooling/os-tests.ts). The rest run once, on Linux, in `verify`'s test shards (`verify-tests`).
   windows-tests-unit:
     name: windows tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
@@ -626,7 +629,7 @@ jobs:
   # `ci.quickChecks`, so nothing lands without it.
   # A full run whose files change the host's tests (`host_tests`): the tests of the host, the protocol and tooling/ that
   # reach the OS (the Windows rule, tooling/os-tests.ts, and the tests that make folders in the temp folder, where a Mac
-  # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`.
+  # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`'s test shards (`verify-tests`).
   # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
   # Measured on macos-14 (before the move to macos-15) and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
   # job 5.5 minutes with the install. The whole host alone (491 files) was 564 s of vitest (222 s of it collecting the
@@ -682,7 +685,7 @@ jobs:
           tooling/screen-protocol-rules
 
       # The tests that reach the OS, by the rule Windows picks by (tooling/os-tests.ts), and the tests that make folders in the
-      # temp folder (`--macos`); the rest run once, on Linux, in `verify`. Within the host, the protocol and tooling/
+      # temp folder (`--macos`); the rest run once, on Linux, in `verify`'s test shards (`verify-tests`). Within the host, the protocol and tooling/
       - name: Pick the tests that touch the OS
         if: needs.changes.outputs.host_tests == 'true'
         run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"

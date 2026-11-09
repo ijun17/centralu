@@ -203,9 +203,9 @@ script rehearses by default and why nothing publishes automatically.
   runs of main from 2026-11-04 to 2026-11-05. The two shards took 6.0 and 9.1 minutes of tests in the
   first full run, once the split had each file's time (below).
 - **Fail fast** (owner decision 2026-10-19): on a manual run (the merge queue's batches, or
-  `gh workflow run build.yml` by hand), a failed `verify` cancels the rest of the run at once,
+  `gh workflow run build.yml` by hand), a failed `verify` (the lint and types job, or one of its test shards, #2153) cancels the rest of the run,
   through the `fail fast` job: nothing lands from such a run, and its other jobs held the batch
-  and the shared runners about 10 minutes more. `verify` has ended by then, so its check stays
+  and the shared runners about 10 minutes more. The cancel comes once both `verify` jobs have ended (a lint failure no longer saves the tests' time either: they run beside it), so the failed check stays
   `failure` while the run ends `cancelled`: that failed check is how the queue tells this from a
   run cancelled for nothing, and it does not rerun it. `changes` decides (`fail_fast`,
   `.github/scripts/ci-changes.mjs`): a pull request's run (quick tier), main's own runs, and a manual run whose
