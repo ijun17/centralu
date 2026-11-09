@@ -386,8 +386,8 @@ export function orphansOf(rows: readonly WinProcRow[], root: EndedRoot): WinProc
 /** What collecting an ended process's leftovers needs from Windows, as a parameter so it can be tested on any OS */
 export type LeftoverOs = {
   listProcesses: () => Promise<WinProcRow[]>
-  /** Ends a process and every process under it, forcibly; with `alone`, that process only */
-  taskkill: (pid: number, alone?: boolean) => void
+  /** Ends a process and every process under it, forcibly; with `alone`, that process only. Rejects (or throws) with taskkill's exit status */
+  taskkill: (pid: number, alone?: boolean) => void | Promise<void>
 }
 
 /*
@@ -411,7 +411,10 @@ export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
     const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 60_000, windowsHide: true })
     return parseWinProcs(stdout)
   },
-  taskkill: REAL_OS.taskkill,
+  // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
+  taskkill: async (pid, alone = false) => {
+    await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: 5000, windowsHide: true })
+  },
 })
 const REAL_LEFTOVER_OS = leftoverOs(runFile)
 
@@ -437,8 +440,7 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
   try {
     rows = await os.listProcesses()
   } catch (e) {
-    const why = typeof e === 'object' && e !== null && 'killed' in e && e.killed ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
-    console.error(`[agent-host] the process table could not be read (${why}); what process ${root.pid} left running may still run`)
+    console.error(`[agent-host] the process table could not be read (${unread(e)}); what process ${root.pid} left running may still run`)
     return []
   }
   const found = orphansOf(rows, root)
@@ -448,17 +450,59 @@ export async function collectOrphansWindows(root: EndedRoot, os: LeftoverOs = RE
     const list = turnedAway.map((r) => `${r.pid} (created ${r.created})`).join(', ')
     console.error(`[agent-host] process ${root.pid} ran from ${root.spawnedAt} to ${root.exitedAt}; its children created outside that were left alone: ${list}`)
   }
+  return endInOrder(found, root.pid, os)
+}
+
+/**
+ * Stops a running process and what it started, on Windows (#2142 and its review). The process table is read first, while
+ * the tree is whole; then the process itself is ended (`endRoot`), and then what the table showed under it, parents
+ * before children (`endInOrder`). Read after, the table would miss what Node ended with the root: a child in the root's
+ * job dies with it within milliseconds, and a grandchild outside that job would be left with no parent to find it by.
+ * A table that cannot be read leaves the old way, `taskkill /T` on the root, in no order.
+ *
+ * What the root starts between the reading and its end is not in the table: `collectOrphansWindows` after its exit
+ * finds it, when the caller sweeps. Returns the pids ended besides the root.
+ */
+export async function stopTreeWindows(root: { pid: number; spawnedAt: number }, endRoot: () => void, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+  let rows: WinProcRow[]
+  try {
+    rows = await os.listProcesses()
+  } catch (e) {
+    console.error(`[agent-host] the process table could not be read (${unread(e)}); process ${root.pid} and what it started are ended with taskkill /T, in no order`)
+    try {
+      await os.taskkill(root.pid)
+    } catch {
+      endRoot()
+    }
+    return []
+  }
+  // Running still: what it started is everything created under it since it was spawned, up to now
+  const tree = orphansOf(rows, { pid: root.pid, spawnedAt: root.spawnedAt, exitedAt: Date.now() })
+  endRoot()
+  return endInOrder(tree, root.pid, os)
+}
+
+/** Why the process table could not be read */
+function unread(e: unknown): string {
+  return typeof e === 'object' && e !== null && 'killed' in e && e.killed ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
+}
+
+/**
+ * Ends `found` (in the order of its parent links, `orphansOf`), one after another: a process that has children among
+ * them alone, before them; one with none under it with `/T`, which also takes what it started since. Returns the pids ended
+ */
+async function endInOrder(found: readonly WinProcRow[], by: number, os: LeftoverOs): Promise<number[]> {
   const ended: number[] = []
   const parents = new Set(found.map((r) => r.ppid))
   for (const r of found) {
     if (r.pid === process.pid) continue // never ourselves
     try {
-      os.taskkill(r.pid, parents.has(r.pid))
+      await os.taskkill(r.pid, parents.has(r.pid))
       ended.push(r.pid)
     } catch (e) {
       // taskkill's 128: no such process, i.e. already gone or ended by the /T of one before it. Anything else left it running
-      const status = typeof e === 'object' && e !== null && 'status' in e ? e.status : undefined
-      if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${root.pid}, could not be ended (status ${String(status)}: ${e instanceof Error ? e.message.replace(/\s+/g, ' ').trim() : 'unknown error'})`)
+      const status = typeof e === 'object' && e !== null ? ('status' in e ? e.status : 'code' in e ? e.code : undefined) : undefined
+      if (status !== 128) console.error(`[agent-host] process ${r.pid}, left running by ${by}, could not be ended (status ${String(status)}: ${e instanceof Error ? e.message.replace(/\s+/g, ' ').trim() : 'unknown error'})`)
     }
   }
   return ended

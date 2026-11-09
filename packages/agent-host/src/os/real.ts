@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { stopTree } from '../dev-services/kill-tree.js'
+import { stopTree, stopTreeWindows } from '../dev-services/kill-tree.js'
 import {
   killHandle,
   spawnGrouped,
@@ -352,15 +352,16 @@ function start(command: string, args: readonly string[], o: StartOptions = {}, s
 }
 
 /**
- * Windows (#2142): the child itself is ended first, alone (`kill`, which terminates it there), and what it started is
- * ended by the sweep after its exit, parents before children (`collectOrphansWindows`). `taskkill /T /F` on the child
- * ends the tree in no order: a program ended by taskkill reports success to an MSYS shell (Git for Windows' `sh` sees
- * status 0 from a `sleep` ended so), so a parent still running could take a stopped script's success and go on, as git
- * made the commit a stop was meant to prevent (#2141). With the child gone first, nothing above a process outlives it.
+ * Windows (#2142): the child itself is ended first, alone (`kill`, which terminates it there), and then what it started,
+ * parents before children (`stopTreeWindows`), from the process table read before the child was ended. `taskkill /T /F`
+ * on the child ends the tree in no order: a program ended by taskkill reports success to an MSYS shell (Git for Windows'
+ * `sh` sees status 0 from a `sleep` ended so), so a parent still running could take a stopped script's success and go
+ * on, as git made the commit a stop was meant to prevent (#2141). With the child gone first, nothing above a process
+ * outlives it. Read after, the table would miss a grandchild whose parent Node ended with the child (#2142 review).
  *
- * The price: once the child has ended, `taskkill /T` no longer finds its tree by it, so the sweep always runs on
- * Windows, `sweep: false` included, and what the child started runs on until the process listing answers (0.4–0.75 s,
- * over 10 s on a machine starved of CPU, #1773).
+ * The price: a stop waits for the table (0.3–0.75 s, over 10 s on a machine starved of CPU, #1773), where `taskkill /T`
+ * took about 60 ms. A table that cannot be read leaves `taskkill /T`. `sweep` then finds what the child started after
+ * the table was read, as everywhere.
  */
 async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}): Promise<OsExit> {
   if (!(child instanceof RealChild))
@@ -370,11 +371,11 @@ async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}
   const groups = traits.hasProcessGroups
   if (node?.pid !== undefined && running()) {
     if (groups) stopTree(killHandle(node), graceMs, running)
-    else node.kill()
+    else await stopTreeWindows({ pid: node.pid, spawnedAt: child.started?.spawnedAt ?? child.spawnedAt }, () => void (running() && node.kill()))
   }
   const exit = await child.exited
   // What it left, created between its spawn and its exit as seen then: never up to now, when its pid may be another's
-  if (child.started && (o.sweep !== false || !groups)) await sweepLeftovers(child.started)
+  if (child.started && o.sweep !== false) await sweepLeftovers(child.started)
   return { code: exit.code, signal: exit.signal }
 }
 

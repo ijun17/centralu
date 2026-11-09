@@ -245,8 +245,8 @@ export const GIT_STOP_GRACE_MS = 2000
  * On Windows git itself is ended first, at once, and then what it started, parents first (#2141, #2142: the shared
  * stop's order, `processes.stop`). A hook's program ended before git reports success to its shell (MSYS's `sh` sees
  * status 0 from a program taskkill ended): the hook then exits 0, and a git still running made the commit the stop was
- * meant to prevent. What git left is ended by the sweep after its exit, which finds it by parent links. That sweep is
- * waited for: the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's
+ * meant to prevent. What git started is ended from the process table read before git was, and what it started after
+ * that by the sweep after its exit, which finds it by parent links. Both are waited for: the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's
  * `sh` stayed after its host had exited).
  */
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {

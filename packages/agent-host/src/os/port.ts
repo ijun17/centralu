@@ -387,10 +387,10 @@ export interface OsProcesses {
   runShell(commandLine: string, options?: Omit<RunOptions, 'stdoutFile'>): Promise<RunResult>
   /**
    * Ends a child and everything it started: on POSIX TERM to every group in its tree, then KILL to what is left after
-   * `graceMs`; on Windows the child alone at once, then what it started, parents first (#2142). Then sweeps what it left
-   * running (its group, or on Windows the processes it started, by parent links and creation time), unless `sweep` is
-   * false: for a caller that ended the tree on purpose and has nothing left to look for. On Windows the sweep is how its
-   * tree is ended, so it always runs. Answers how it ended.
+   * `graceMs`; on Windows the child alone, then what it started, parents first, from the process table read just before
+   * (#2142). Then sweeps what it left running (its group, or on Windows the processes it started, by parent links and
+   * creation time), unless `sweep` is false: for a caller that ended the tree on purpose and has nothing left to look
+   * for. Answers how it ended.
    */
   stop(child: OsChild, graceMs: number, options?: { sweep?: boolean }): Promise<OsExit>
   /** Whether a process with this pid is alive (`process.kill(pid, 0)`; `EPERM` counts as alive) */

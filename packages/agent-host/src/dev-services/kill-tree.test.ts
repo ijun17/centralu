@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOCK_TICK_MS, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { CLOCK_TICK_MS, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -400,6 +400,35 @@ describe('leftovers of an ended process on Windows', () => {
       [300, true],
       [400, false],
     ])
+  })
+
+  // #2142 review: read after the root's end, the table would miss a grandchild whose parent Node ended with the root
+  it('a running tree is read before its root is ended, then ended parents first, one taskkill after another', async () => {
+    const order: unknown[] = []
+    const rows = table('300 200 2000\n200 100 1500\n')
+    const os = {
+      listProcesses: async () => (order.push('list'), rows),
+      taskkill: async (pid: number, alone?: boolean) => {
+        order.push(['start', pid, alone])
+        await new Promise((r) => setTimeout(r, 5))
+        order.push(['end', pid])
+      },
+    }
+    expect(await stopTreeWindows({ pid: 100, spawnedAt: 1_000 }, () => void order.push('root'), os)).toEqual([200, 300])
+    expect(order).toEqual(['list', 'root', ['start', 200, true], ['end', 200], ['start', 300, false], ['end', 300]])
+  })
+
+  it('a running tree whose table cannot be read is ended with taskkill /T on its root, in no order', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const calls: unknown[] = []
+    const broken = { listProcesses: () => Promise.reject(new Error('powershell missing')), taskkill: (pid: number, alone?: boolean) => void calls.push([pid, alone]) }
+    expect(await stopTreeWindows({ pid: 100, spawnedAt: 1_000 }, () => void calls.push('root'), broken)).toEqual([])
+    expect(calls).toEqual([[100, undefined]])
+    // And when taskkill cannot either, the root is ended alone
+    const failing = { ...broken, taskkill: () => Promise.reject(Object.assign(new Error('Command failed'), { code: 1 })) }
+    await stopTreeWindows({ pid: 100, spawnedAt: 1_000 }, () => void calls.push('root'), failing)
+    expect(calls).toEqual([[100, undefined], 'root'])
+    logged.mockRestore()
   })
 
   // #1773: PowerShell took over 10 s to answer on a starved machine, and the listing given up on left the leftovers running
