@@ -670,6 +670,7 @@ const links = new Links(linkDepsFor(store, {
    * on, and the allowlist a machine's call is answered from (ask_project into this computer's projects, nothing else)
    */
   hubSelf: () => ({ id: hubSelfId(store), name: hubName() }),
+  hubMail: true,
   // When agents compact: this hub's setting governs the machines it links (#1376)
   autoCompact: () => autoCompactOf(mgr.prefs.uiPreferences()),
   // Automatic updates cover the linked machines too (#1508): one on an older release follows this hub's version; none starts while this host drains to stop

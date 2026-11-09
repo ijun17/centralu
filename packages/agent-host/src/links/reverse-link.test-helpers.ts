@@ -95,6 +95,7 @@ export async function hubHost(
             selfName: () => name,
             ...(mail && o.mail === true ? { mail: mailFromMachine({ service: mail.service, parentOf: (id) => mgr.linkedHost.remoteAgentParent(id), selfName: () => name }) } : {}),
           }),
+          ...(o.mail === true ? { hubMail: true } : {}),
         }
   const links = new Links({
     hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: false },

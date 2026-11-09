@@ -719,7 +719,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   /**
    * Tells the machine who this hub is and whether its sessions may ask this hub's projects (`host.hubOffer`), so the
    * machine knows the connection to call back on. Said off too, so a machine that heard "on" earlier in its own life
-   * stops offering this hub to its sessions. A machine that could not be told says so on the row, while the switch is on
+   * stops offering this hub to its sessions. A machine that could not be told says so on the row, while the switch is on.
+   * `mail`: the sessions this hub started there may mail their parents here (#2067), switch or not
    */
   protected async offerAsks(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
@@ -727,7 +728,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const on = this.record.asks === true
     let note: string | null = null
     try {
-      await client.call('host.hubOffer', { hub: self, on })
+      await client.call('host.hubOffer', { hub: self, on, ...(this.deps.hubMail ? { mail: true } : {}) })
     } catch (err) {
       if (on) note = `${this.name} could not be told yet (${(err as Error).message}); it is told again at the next connect`
     }
@@ -760,7 +761,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
   async withdrawOffer(): Promise<void> {
     const self = this.deps.hubSelf?.()
     const client = this.client
-    if (!self || !client || !this.reachable || this.record.asks !== true) return
+    if (!self || !client || !this.reachable || (this.record.asks !== true && !this.deps.hubMail)) return
     await client.call('host.hubOffer', { hub: self, on: false }).catch(() => {})
   }
 
