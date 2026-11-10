@@ -1117,7 +1117,7 @@ export class MessageService {
    * The sender's released and untold rows, gathered in one notice (D25, S3); the row's `told_at` is set so it is listed once. The person is told in
    * the Inbox, in plain words with no ids, and only for what was released at `since` and was not their own doing: the rows older builds released
    * without telling the person are not listed all at once.
-   * It wakes a session, unless a quit cut it (`standing`)
+   * It wakes a session, unless a quit cut it (`wakes`)
    */
   private tellUnanswered(sender: string, since: number, said: ReadonlyMap<string, string | null> = new Map()): void {
     const kind = parseAddress(sender)?.kind
@@ -1140,10 +1140,19 @@ export class MessageService {
     this.centralu(sender, {
       kind: 'notice',
       body: unansweredText(unanswered.map((u) => ({ ...u, name: this.reach.labelOf(u.recipient) })), kind === 'person', words),
-      facts: { unanswered, ...(kind === 'session' && this.opts.standing?.(sender) === 'cut' ? { quiet: true } : {}) },
+      facts: { unanswered, ...(kind === 'session' && !this.wakes(sender, true) ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
     this.records.markTold(rows, this.now())
+  }
+
+  /**
+   * Whether a stop's notice wakes `session` (owner, 2026-11-10): one owed a reply is woken (in a turn it reads it when that turn ends), unless the
+   * same quit cut it, which reads it at its next turn; one owed nothing is woken only from a turn, and otherwise reads it at its next wake
+   */
+  private wakes(session: string, owed: boolean): boolean {
+    const standing = this.opts.standing?.(session) ?? 'rest'
+    return owed ? standing !== 'cut' : standing === 'turn'
   }
 
   /** `stopped`'s stop, to the session that started it: once per stop; owed nothing, woken only from a turn; owed the turn's report, woken (`sessionsStopped`) */
@@ -1151,13 +1160,11 @@ export class MessageService {
     if (parseAddress(starter)?.kind !== 'session') return
     const said = this.quoteFor(stopped, starter, turnSeq)
     const name = this.reach.labelOf(stopped)
-    const standing = this.opts.standing?.(starter) ?? 'rest'
-    const wakes = reportOwed ? standing !== 'cut' : standing === 'turn'
     this.centralu(starter, {
       kind: 'notice',
       body: `${name}, which you started, stopped: ${STARTER_WORDS[why]}. ${reportOwed ? 'Its report to you will not come.' : 'It owed you no answer.'} read_session shows where it stopped; send it a message if it should go on.${said ? `
 ${lastWordsText(name, said)}` : ''}`,
-      facts: { about: { session: stopped }, reason: why, ...(wakes ? {} : { quiet: true }) },
+      facts: { about: { session: stopped }, reason: why, ...(this.wakes(starter, reportOwed) ? {} : { quiet: true }) },
       dedupeKey: `stopped:${starter}:${stopped}:${turnSeq ?? this.now()}`,
     })
   }

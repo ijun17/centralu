@@ -424,7 +424,8 @@ export class SessionEvents {
   private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[]; starter: string | null } {
     const meta = this.host.meta
     const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
-    const known = (who: string | undefined): who is string => !!who && who !== id && meta.has(who)
+    // Not itself: the stop notice leaves the stopped session out (`MessageService.sessionsStopped`)
+    const known = (who: string | undefined): who is string => !!who && meta.has(who)
     const told = d.waited && known(asker) ? [asker] : []
     const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id)])].filter(known).filter((who) => !told.includes(who))
     return { told, held, starter: known(asker) ? asker : null }

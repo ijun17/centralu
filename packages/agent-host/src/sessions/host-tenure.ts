@@ -423,7 +423,7 @@ export class HostTenure {
     const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
     const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
-      const starter = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.host.meta.has(id))
+      const starter = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && this.host.meta.has(id))
       if (starter) this.quitStarters.set(s.id, { starter, reportOwed: starter === marks.get(s.id) })
     }
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
