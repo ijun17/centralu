@@ -69,6 +69,14 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     await eventually(() => hub.store.mailbox.recipient(answer, at(hub, 'm1.c1'))?.readAt !== null)
   })
 
+  it("a child's mail to the person is refused, pointing at its parent: the person works on the hub, and nothing is written here (#1987)", async () => {
+    const { machine } = await rig()
+    const before = machine.store.mailbox.feedOf('person', { limit: 10 }).length
+    const r = await tool(machine, 'c1', { action: 'send', to: 'person', text: 'the tool here stopped answering' })
+    expect(r).toEqual({ isError: true, text: 'Refused (elsewhere): the person works on the computer that started this session, and mail to the person written here is not seen there, so nothing was sent. Write to "parent" instead: that reaches your parent there.' })
+    expect(machine.store.mailbox.feedOf('person', { limit: 10 })).toHaveLength(before)
+  })
+
   it("a hub session mails a machine's session that is not its child, by address, with the asks switch off; that session's reply comes back", async () => {
     const { machine, hub } = await rig()
     expect(hub.machine().asks).toEqual({ on: false, note: null })

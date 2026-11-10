@@ -75,8 +75,11 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     stops.push(() => hub.stop())
     const refused = hub.tool.run('b', { action: 'send', to: 'parent', text: 'blocked' })
     expect(refused.isError).toBe(true)
-    expect(refused.text).toBe('Refused (unknown): your parent is a session on another computer, and mail does not reach it from here yet. End your turn with the answer: that is how your parent hears from you.')
+    expect(refused.text).toBe('Refused (unknown): your parent is a session on the computer that started this session, and mail does not cross computers from this one, so nothing was sent. End your turn with the answer: that is how your parent hears from you.')
     expect(refused.text).not.toContain('person')
+    // Nor is its mail to the person written here, where the person does not work (#1987 item 2)
+    const person = hub.tool.run('b', { action: 'send', to: 'person', text: 'blocked' })
+    expect(person.text).toBe('Refused (elsewhere): the person works on the computer that started this session, and mail to the person written here is not seen there, so nothing was sent. Write to "parent" instead: that reaches your parent there.')
   })
 
   it('from an untrusted project to another project it is held, and the answer says so', () => {
