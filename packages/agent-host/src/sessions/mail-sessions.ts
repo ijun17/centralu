@@ -2,7 +2,7 @@ import type { NormalizedEvent } from '@cc/protocol'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
-import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
+import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopTold, type StopWhy } from '../mail/messages.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { Asker } from '../mail/asked-by.js'
@@ -19,13 +19,8 @@ import { seatHas } from './tool-seats.js'
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
   sessionGone(sessionId: string): void
-  /**
-   * Whether a notice to `readerId` of `stoppedId`'s stop may quote the words of its latest turn (`MessageService.quotes`, security-boundaries.md):
-   * the one rule every stop notice to a session quotes by. Nothing is quoted without it
-   */
-  quotes?(stoppedId: string, readerId: string): boolean
-  /** A session stopped without answering (docs/plans/turn-owned-by-no-one.md §4.1): the senders of the questions it left unanswered are told once. Quiet: wakes no one */
-  stopped?(sessionId: string, why: StopWhy, opts?: { quiet?: boolean; told?: readonly string[]; held?: readonly string[] }): void
+  /** A session stopped without answering (docs/plans/mailbox.md "The stop notice"): the senders of the questions it left unanswered are told once */
+  stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
   /** An older report path held by `stopped` (its `held`) ended: `told`, it really told `senderId` of the stop; else the stop notice tells it now */
   oldPathEnded?(sessionId: string, senderId: string, told: boolean): void
   /**
@@ -109,7 +104,7 @@ export class MailSessionsView {
   }
 
   /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
-  mailStopped(sessionId: string, why: StopWhy, opts: { quiet?: boolean; told?: readonly string[]; held?: readonly string[] } = {}): void {
+  mailStopped(sessionId: string, why: StopWhy, opts: StopTold = {}): void {
     // A host that is leaving writes nothing: its sessions are cut by the leaving, and the next host continues them or finds them marked (§4.1)
     if (this.host.closing) return
     try {
@@ -156,7 +151,6 @@ export class MailSessionsView {
     this.host.children.onPersonWork(hooks.personWork)
     this.host.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
     this.host.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
-    this.host.reports.useQuotes(hooks.quotes ? (stoppedId, readerId) => hooks.quotes?.(stoppedId, readerId) === true : undefined)
     this.host.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.host.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }

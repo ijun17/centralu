@@ -4,21 +4,21 @@
  */
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { MessageService, type StopWhy } from './messages.js'
+import { MessageService, type SessionStop, type StopWhy } from './messages.js'
 import { A, B, C, HOST, ORC, world } from './messages.test-helpers.js'
 import { wakesMessage } from './rules.js'
 
 /**
- * A world whose service also knows which sessions run a turn (`busy`) and which wait on another by more than a task (`waits`: "sender>stopped"), as the
- * host answers it. Every stop here is of turn 1, the turn `ask` delivers into
+ * A world whose service also knows which sessions run a turn (`busy`) and which a quit cut themselves (`cut`), as the host answers it. Every stop here
+ * is of turn 1, the turn `ask` delivers into
  */
 function stopWorld() {
   const w = world()
   const busy = new Set<string>()
-  const waits = new Set<string>()
-  const service = new MessageService(w.store.mailbox, w.reach, { hostId: HOST, now: () => w.clock.t, turn: (a) => w.turns.get(a) ?? null, atRest: (a) => !busy.has(a), waitsOn: (sender, stopped) => waits.has(`${sender}>${stopped}`) })
+  const cut = new Set<string>()
+  const service = new MessageService(w.store.mailbox, w.reach, { hostId: HOST, now: () => w.clock.t, turn: (a) => w.turns.get(a) ?? null, standing: (a) => (cut.has(a) ? 'cut' : busy.has(a) ? 'turn' : 'rest') })
   const stops = {
-    sessionStopped: (who: string, why: StopWhy, o: { quiet?: boolean; told?: readonly string[]; held?: readonly string[]; turnSeq?: number | null } = {}) => service.sessionStopped(who, why, { turnSeq: 1, ...o }),
+    sessionStopped: (who: string, why: StopWhy, o: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}) => service.sessionStopped(who, why, { turnSeq: 1, ...o }),
     sessionsStopped: service.sessionsStopped.bind(service),
     oldPathEnded: service.oldPathEnded.bind(service),
   }
@@ -30,7 +30,9 @@ function stopWorld() {
   }
   /** What Centralu told `who` since the start: the stop notices */
   const noticesTo = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
-  return { ...w, busy, waits, stops, ask, noticesTo }
+  /** What Centralu told `who` of a stop of a session it started and is owed nothing by */
+  const startersNotices = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.about && p.message.facts.reason)
+  return { ...w, busy, cut, stops, ask, noticesTo, startersNotices }
 }
 
 const CAUSES: { why: StopWhy; says: string }[] = [
@@ -48,7 +50,7 @@ describe('a session stops without answering a question', () => {
   it.each(CAUSES)('$why: the question is released with that cause, its sender is told once in plain words, and the question stays open', ({ why, says }) => {
     const w = stopWorld()
     const q = w.ask(A, B)
-    expect(w.stops.sessionStopped(B, why, { quiet: why === 'quit' || why === 'shutdown' })).toBe(1)
+    expect(w.stops.sessionStopped(B, why)).toBe(1)
 
     expect(w.rowOf(q.id, B)).toMatchObject({ releasedWhy: why, toldAt: w.clock.t, settled: null })
     const [told, ...rest] = w.noticesTo(A)
@@ -61,64 +63,96 @@ describe('a session stops without answering a question', () => {
     expect(told?.message.body).not.toContain('no longer watched')
   })
 
-  it('wakes only a sender that is at rest and waits on the stopped session: by a task it gave that is still open, or by a wait (Q1)', () => {
-    for (const why of ['error', 'limit', 'network', 'interrupted', 'stopped', 'uncontinued'] as const) {
-      // A task it gave B, still open
+  it('a sleeping session owed a reply is woken, whatever the cause: it waits for the answer (owner 2026-11-10)', () => {
+    for (const { why } of CAUSES) {
       const w = stopWorld()
-      w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
+      // A question alone: no task, no wait on the session
       w.ask(A, B)
       w.stops.sessionStopped(B, why)
       const [told] = w.noticesTo(A)
       expect(told?.message.facts.quiet, why).toBeUndefined()
       expect(wakesMessage(told!.message), why).toBe(true)
     }
-    // A wait the host reports (a blocking wait, a child it started whose report it is owed)
-    const waiting = stopWorld()
-    waiting.waits.add(`${A}>${B}`)
-    waiting.ask(A, B)
-    waiting.stops.sessionStopped(B, 'error')
-    expect(wakesMessage(waiting.noticesTo(A)[0]!.message)).toBe(true)
   })
 
-  it('a sender that waits on nothing of the stopped session reads the notice with its next mail: it is not woken', () => {
+  it('an awake session owed a reply is told with a wake, so it reads the notice as its turn ends rather than at some later mail', () => {
     const w = stopWorld()
     w.ask(A, B)
-    // C waits on another session, not on B
-    w.mail.task(C, ORC, { text: 'work', origin: 'start_agent', delivered: true })
-    w.ask(C, B)
-    w.waits.add(`${C}>${ORC}`)
-    w.stops.sessionStopped(B, 'error')
-    for (const who of [A, C]) {
-      const [told, ...rest] = w.noticesTo(who)
-      expect(rest).toEqual([])
-      expect(told?.message.facts.quiet, who).toBe(true)
-      expect(wakesMessage(told!.message), who).toBe(false)
-    }
-  })
-
-  it('a quit or a shutdown wakes no one, a sender that waits included: a restart must not wake every sender', () => {
-    for (const why of ['quit', 'shutdown'] as const) {
-      const w = stopWorld()
-      w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-      w.ask(A, B)
-      w.stops.sessionStopped(B, why, { quiet: true })
-      const [told] = w.noticesTo(A)
-      expect(told?.message.facts.quiet, why).toBe(true)
-      expect(wakesMessage(told!.message), why).toBe(false)
-    }
-  })
-
-  it('a sender in a turn reads the notice with its other mail instead of waking again after the turn, though it waits', () => {
-    const w = stopWorld()
-    w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    w.mail.task(C, B, { text: 'work', origin: 'start_agent', delivered: true })
-    w.ask(A, B)
-    w.ask(C, B)
     w.busy.add(A)
     w.stops.sessionStopped(B, 'error')
+    expect(wakesMessage(w.noticesTo(A)[0]!.message)).toBe(true)
+  })
+
+  it('a sender a quit cut itself reads the notice at its next turn: a wake would start a turn with nobody there', () => {
+    const w = stopWorld()
+    w.ask(A, B)
+    w.cut.add(A)
+    w.stops.sessionStopped(B, 'quit')
     expect(wakesMessage(w.noticesTo(A)[0]!.message)).toBe(false)
-    // C is at rest and waits on B: it is woken
-    expect(wakesMessage(w.noticesTo(C)[0]!.message)).toBe(true)
+  })
+
+  it('the session that started the stopped one, owed nothing, is told once and not woken; from a turn it is woken; owed a reply it is told only as a sender', () => {
+    const w = stopWorld()
+    w.stops.sessionStopped(B, 'network', { starter: A })
+    const [told, ...rest] = w.startersNotices(A)
+    expect(rest).toEqual([])
+    expect(told?.message).toMatchObject({ sender: 'centralu', kind: 'notice', facts: { about: { session: B }, reason: 'network', quiet: true } })
+    expect(told?.message.body).toBe('beta, which you started, stopped: it lost the network. It owed you no answer. read_session shows where it stopped; send it a message if it should go on.')
+    expect(wakesMessage(told!.message)).toBe(false)
+    // The same stop again tells nothing more
+    w.stops.sessionStopped(B, 'network', { starter: A })
+    expect(w.startersNotices(A)).toHaveLength(1)
+
+    const awake = stopWorld()
+    awake.busy.add(A)
+    awake.stops.sessionStopped(B, 'error', { starter: A })
+    expect(wakesMessage(awake.startersNotices(A)[0]!.message)).toBe(true)
+
+    const owed = stopWorld()
+    owed.ask(A, B)
+    owed.stops.sessionStopped(B, 'error', { starter: A })
+    expect(owed.startersNotices(A)).toEqual([])
+    expect(owed.noticesTo(A)).toHaveLength(1)
+  })
+
+  it("a starter owed the turn's report the start dropped is told whoever's turn it was, and woken unless the same quit cut it", () => {
+    const w = stopWorld()
+    w.startTurn(B, null, { by: 'person' })
+    w.db.prepare(`UPDATE mail_turns SET started_by = 'person' WHERE turn_seq = 1`).run()
+    w.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: 1, starter: A, reportOwed: true }])
+    const [told, ...rest] = w.startersNotices(A)
+    expect(rest).toEqual([])
+    expect(told?.message.body).toBe('beta, which you started, stopped: Centralu quit during its turn. Its report to you will not come. read_session shows where it stopped; send it a message if it should go on.')
+    expect(wakesMessage(told!.message)).toBe(true)
+
+    const cut = stopWorld()
+    cut.cut.add(A)
+    cut.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: null, starter: A, reportOwed: true }])
+    expect(wakesMessage(cut.startersNotices(A)[0]!.message)).toBe(false)
+  })
+
+  it("the starter is not told of the person's own turn, nor when an older report path tells or may tell it (#1946)", () => {
+    const w = stopWorld()
+    w.startTurn(B, null, { by: 'person' })
+    w.db.prepare(`UPDATE mail_turns SET started_by = 'person' WHERE turn_seq = 1`).run()
+    w.stops.sessionStopped(B, 'error', { starter: A })
+    expect(w.startersNotices(A)).toEqual([])
+    for (const by of [{ told: [A] }, { held: [A] }]) {
+      const v = stopWorld()
+      v.stops.sessionStopped(B, 'error', { starter: A, ...by })
+      expect(v.startersNotices(A)).toEqual([])
+    }
+  })
+
+  it('a restart that finds sessions a quit cut wakes nobody owed nothing: their starters are told quietly, the person in the Inbox', () => {
+    const w = stopWorld()
+    const mine = w.ask(PERSON, C, 'are you done?')
+    expect(w.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: 1, starter: A }, { address: C, why: 'shutdown', turnSeq: 1, starter: A }])).toBe(1)
+    const told = w.startersNotices(A)
+    expect(told).toHaveLength(2)
+    for (const n of told) expect(wakesMessage(n.message)).toBe(false)
+    expect(w.noticesTo(A)).toEqual([])
+    expect(w.noticesTo(PERSON).map((n) => n.message.facts.unanswered)).toEqual([[{ id: mine.id, recipient: C, why: 'shutdown' }]])
   })
 
   it('tells each sender once for all its questions, and nothing again for a second stop or a second call', () => {
@@ -198,7 +232,7 @@ describe('a session stops without answering a question', () => {
     w.records.markReleased(old.id, C, w.clock.t, 'lost')
     w.clock.t += 1000
     const q = w.ask(PERSON, B, 'are you done?')
-    w.stops.sessionStopped(B, 'quit', { quiet: true })
+    w.stops.sessionStopped(B, 'quit')
     const [told, ...rest] = w.noticesTo(PERSON)
     expect(rest).toEqual([])
     expect(told?.message.facts.unanswered).toEqual([{ id: q.id, recipient: B, why: 'quit' }])
@@ -218,13 +252,10 @@ describe('a session stops without answering a question', () => {
     const mine = [w.ask(PERSON, B, 'first'), w.ask(PERSON, C, 'second')]
     const asked = [w.ask(A, B, 'third'), w.ask(A, C, 'fourth')]
     expect(
-      w.stops.sessionsStopped(
-        [
-          { address: B, why: 'quit', turnSeq: 1 },
-          { address: C, why: 'quit', turnSeq: 1 },
-        ],
-        true,
-      ),
+      w.stops.sessionsStopped([
+        { address: B, why: 'quit', turnSeq: 1 },
+        { address: C, why: 'quit', turnSeq: 1 },
+      ]),
     ).toBe(4)
     const toPerson = w.noticesTo(PERSON)
     expect(toPerson).toHaveLength(1)
@@ -278,11 +309,8 @@ describe('a session stops without answering a question', () => {
     expect(notices[1]).toContain(`gamma stopped with an error before it answered ${yours.id}`)
   })
 
-  it('leaves what is not a question alone: a task, a message that needs no reply, one not delivered yet, one already answered; a request to the Assistant is one', () => {
+  it('leaves what waits for no answer alone: a message that needs no reply, one not delivered yet, one already answered; a request to the Assistant is one', () => {
     const w = stopWorld()
-    const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    // Even a task that were marked as needing a reply is the report path's, not this one's
-    w.db.prepare(`UPDATE mail SET needs_reply = 1 WHERE id = ?`).run(task.id)
     const fyi = w.ask(A, B, 'fyi', { needsReply: false })
     const waiting = w.send(A, { to: [B], text: 'not delivered', needsReply: true }).message
     const answered = w.ask(C, B, 'answered one')
@@ -290,8 +318,7 @@ describe('a session stops without answering a question', () => {
     const request = w.ask(C, ORC, 'can you look at CI?')
 
     expect(w.stops.sessionStopped(B, 'error')).toBe(0)
-    for (const id of [task.id, fyi.id, waiting.id]) expect(w.rowOf(id, B)).toMatchObject({ releasedAt: null, toldAt: null })
-    expect(w.rowOf(task.id, B)).toMatchObject({ settled: null })
+    for (const id of [fyi.id, waiting.id]) expect(w.rowOf(id, B)).toMatchObject({ releasedAt: null, toldAt: null })
     expect(w.noticesTo(A)).toEqual([])
     expect(w.noticesTo(C)).toEqual([])
     // Its sender always learns it will not be answered (owner, #1186)
@@ -303,8 +330,7 @@ describe('a session stops without answering a question', () => {
   it.each(CAUSES)("$why: a request to the Assistant is released with that cause and its sender told, as a crash's turnsLost tells it 'lost'", ({ why }) => {
     const w = stopWorld()
     const request = w.ask(A, ORC, 'can you look at CI?')
-    const quiet = why === 'quit' || why === 'shutdown'
-    expect(w.stops.sessionStopped(ORC, why, { quiet })).toBe(1)
+    expect(w.stops.sessionStopped(ORC, why)).toBe(1)
     expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: why, toldAt: w.clock.t, settled: null })
     const [told, ...rest] = w.noticesTo(A)
     expect(rest).toEqual([])
@@ -338,10 +364,14 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A)).toHaveLength(1)
   })
 
-  it('does not run on a task alone: a session that owes only a task tells no one here (the old report path tells its owner)', () => {
+  it("releases every open task a session gave the stopped one, whichever turn it came in; not the person's, whose work is reported to their Inbox", () => {
     const w = stopWorld()
-    w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    expect(w.stops.sessionStopped(B, 'error')).toBe(0)
-    expect(w.records.pendingFor(A, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice')).toEqual([])
+    const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
+    const mine = w.mail.task(PERSON, B, { text: 'my work', origin: 'create_session', delivered: true })
+    expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(1)
+    expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
+    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
+    expect(w.noticesTo(PERSON)).toEqual([])
   })
 })

@@ -8,7 +8,6 @@ import { recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from '../
 import { stoppedAtUpdate, updateNote, type Stopped } from '../lifecycle/update-stopped.js'
 import { rpcError } from '../rpc-error.js'
 import type { CardRests } from './card-rest.js'
-import type { QuitNotice, TurnStarter } from './child-ownership.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationFlow } from './delegation-flow.js'
 import type { ExternalConversations } from './external-conversations.js'
@@ -64,15 +63,18 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
 export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
 
-  /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
-  quitNotices: QuitNotice[] = []
-  /**
-   * The session each turn a quit cut is told to by the older report path (`tellAskerOfInterruption`), and whether that path told it (known once it
-   * ended), read by the mailbox's stop notice (`quitTold`) so a session told is not told again and one not told is. `read`: the stop notice asked
-   */
-  private quitRequesters = new Map<string, { requester: string; told?: boolean; read?: boolean }>()
   /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
   private quitPersonWork: string[] = []
+  /**
+   * The session told of each turn a quit cut that this start found (#698, `HostMail.afterReady`): the one owed its report, else the one that gave the
+   * turn, else the one that started it; the first that still exists. Read before the start drops those rows; a later start finds none
+   */
+  private quitStarters = new Map<string, { starter: string; reportOwed: boolean }>()
+
+  /** Who is told of the turn a quit cut in `sessionId`, as this start found it (`quitStarters`) */
+  quitStarter(sessionId: string): { starter: string; reportOwed: boolean } | null {
+    return this.quitStarters.get(sessionId) ?? null
+  }
   /**
    * Sessions an update's stop left, to tell once the start is done (#1618, `continueCutTurns`): a turn it cut is continued (`turn`; its end
    * says so, #1966); a session at rest whose tasks it stopped is woken for the note alone (#1902). `stopped`: what else it ended there
@@ -103,26 +105,6 @@ export class HostTenure {
   }
 
   /**
-   * The session the older report path tells of the quit that cut `sessionId`'s turn, found at this start: `told` once that path told it, `held` while
-   * it has not ended (a requester an update cut is told later, `tellQuitNotices`). Neither when it ended without telling it (one
-   * cut by the same quit waits for the person's Continue, `tellAskerOfInterruption`), so the stop notice tells it
-   */
-  quitTold(sessionId: string): { told: string[]; held: string[] } {
-    const q = this.quitRequesters.get(sessionId)
-    if (!q) return { told: [], held: [] }
-    q.read = true
-    return q.told === undefined ? { told: [], held: [q.requester] } : { told: q.told ? [q.requester] : [], held: [] }
-  }
-
-  /** The older report path told, or did not tell, a quit's requester (`tellQuitNotices`): the stop notice that held it hears it */
-  private quitTellEnded(sessionId: string, told: string | undefined): void {
-    const q = this.quitRequesters.get(sessionId)
-    if (!q) return
-    q.told = told === q.requester
-    if (q.read) this.host.mail.mailOldPathEnded(sessionId, q.requester, q.told)
-  }
-
-  /**
    * The turn an update cut could not be continued (#698): the session goes idle with the quit mark and its line, and the report it
    * owed goes now, rather than naming a later turn
    */
@@ -139,17 +121,15 @@ export class HostTenure {
     // Whose the turn was (#1377): the person's is reported to nobody
     // The process is gone with it (#1604): what it was given is run by no one
     const turnBy = this.host.children.turnEnded(m.id, null, true)
-    // Centralu cut this turn and could not continue it: the senders of the questions it left unanswered are told (§4.1). The notice to a session the older
-    // path below may tell of the same stop (the owner of the report, the session that gave the turn or started it) waits for that path to end
-    const held = [this.host.children.awaitingReport.get(m.id), this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? undefined].flatMap((id) => (id && id !== m.id ? [id] : []))
-    this.host.mail.mailStopped(m.id, 'uncontinued', { held })
+    // Centralu cut this turn and could not continue it: the senders of what it left unanswered, and the session that started it, are told (mailbox.md
+    // "The stop notice"). The notice to the owner of the report, which the older path below tells of the same stop, waits for that path to end
+    const owner = this.host.children.awaitingReport.get(m.id)
+    const held = owner && owner !== m.id ? [owner] : []
+    this.host.mail.mailStopped(m.id, 'uncontinued', { held, starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
     const sends: Promise<string | undefined>[] = []
-    if (this.host.children.awaitingReport.has(m.id)) sends.push(this.host.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy))
-    else {
-      sends.push(this.host.reports.tellAskerOfInterruption(m.id, this.host.children.turnOwners.get(m.id)?.callerId, turnBy))
-      // The work the person owns: the same end, in their Inbox (§8.1)
-      this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
-    }
+    if (owner) sends.push(this.host.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy))
+    // The work the person owns: the same end, in their Inbox (§8.1)
+    else this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
     this.host.mail.mailStopTold(m.id, held, sends)
   }
 
@@ -215,7 +195,6 @@ export class HostTenure {
         // Its parent is told nothing now: the report of the continued turn's end says the turn was cut and continued (#1966)
       }),
     )
-    this.tellQuitNotices(() => true)
   }
 
   /**
@@ -254,19 +233,13 @@ export class HostTenure {
     return [...this.continuedAfterUpdate]
   }
 
-  /** Tells each requester of a turn a quit cut, once (#698); `ready` holds back one whose own cut turn is not continued yet */
-  private tellQuitNotices(ready: (requester: string) => boolean): void {
+  /** The work the person owns (a script started the session, §8.1) whose turn a quit cut: reported to their Inbox as it ended, once */
+  private reportQuitPersonWork(): void {
     // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
     if (this.disposing) return
-    // The work the person owns (a script started the session, §8.1): the turn a quit cut is reported to their Inbox as it ended
     const person = this.quitPersonWork
     this.quitPersonWork = []
     for (const id of person) if (this.host.meta.has(id)) this.host.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
-    const now = this.quitNotices.filter((n) => ready(n.requester))
-    this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
-    for (const n of now) {
-      void this.host.reports.tellAskerOfInterruption(n.sessionId, n.requester, n.turn).then((told) => this.quitTellEnded(n.sessionId, told), () => this.quitTellEnded(n.sessionId, undefined))
-    }
   }
 
   /**
@@ -386,9 +359,8 @@ export class HostTenure {
      * Which states those are is the one definition a stop lists the turns it ends by (`turnCut`, idle.ts, #1618): what a
      * stop cut and what this start finds cut are the same sessions.
      */
-    /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
+    /** Sessions this start found mid-turn with no process (#698): the mailbox's stop notice tells their senders (`HostMail.afterReady`) */
     const stoppedByQuit: SessionInfo[] = []
-    const cutTurns = new Map<string, TurnStarter>()
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
     /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
@@ -427,8 +399,8 @@ export class HostTenure {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.host.interruptions.markTurnLost(fixed, false, bySystem ? 'shutdown' : 'quit')
         store.sessions.upsertSession(fixed)
-        // The turn the last host was in never sent its end and no process holds what it was given (#1604); whose it was says who is told (#1946)
-        cutTurns.set(s.id, this.host.children.processGone(s.id))
+        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
+        this.host.children.processGone(s.id)
         stoppedByQuit.push(fixed)
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
@@ -446,25 +418,13 @@ export class HostTenure {
     for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the turns an update cut (#1618) */
     const goingOn = new Set(cutByUpdate.map((s) => s.id))
-    /*
-     * Who to tell of a turn a quit cut (#698): the session owed its report, else the one that gave the running turn
-     * (an ask_project or a send), else the one that started it; the first of them that still exists. Read before the
-     * loops below clear those rows. An asker that delegated without waiting was at rest, not cut, and would otherwise
-     * never hear: its mark used to be dropped.
-     *
-     * A requester the same quit cut is skipped when the notice is given (`tellAskerOfInterruption`, its `quit`).
-     */
     this.quitPersonWork = stoppedByQuit.map((s) => s.id)
+    // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
     const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
     const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
-    const requesterOf = (s: SessionInfo) => [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.host.meta.has(id))
     for (const s of stoppedByQuit) {
-      const requester = requesterOf(s)
-      // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
-      if (requester) {
-        this.quitNotices.push({ sessionId: s.id, requester, turn: marks.has(s.id) ? undefined : cutTurns.get(s.id) })
-        this.quitRequesters.set(s.id, { requester })
-      }
+      const starter = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.host.meta.has(id))
+      if (starter) this.quitStarters.set(s.id, { starter, reportOwed: starter === marks.get(s.id) })
     }
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
     const cutIds = new Set(cutByUpdate.map((s) => s.id))
@@ -502,8 +462,7 @@ export class HostTenure {
         for (const id of this.host.children.queued.keys()) if (!goingOn.has(id)) this.host.queue.scheduleDrain(id)
       }, 0)
     }
-    // A requester whose turn an update cut is told once it is continued (`continueCutTurns`), so the note does not start a second process
-    if (this.quitNotices.length || this.quitPersonWork.length) setTimeout(() => this.tellQuitNotices((id) => !goingOn.has(id)), 0)
+    if (this.quitPersonWork.length) setTimeout(() => this.reportQuitPersonWork(), 0)
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }
 }

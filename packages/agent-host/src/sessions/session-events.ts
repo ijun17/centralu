@@ -10,7 +10,7 @@ import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest, MailWithdrawn } from '../mail/delivery.js'
-import type { StopWhy } from '../mail/messages.js'
+import type { StopTold, StopWhy } from '../mail/messages.js'
 import { stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
@@ -69,10 +69,10 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** An event of a session, and whether it ended its turn: what the mail guards count (§7.9). Never throws */
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /**
-     * A turn ended without finishing, and why: the senders of the questions it left unanswered are told once (`MessageService.sessionStopped`), except
-     * `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
+     * A turn ended without finishing, and why: the senders of what it left unanswered, and the session that started it, are told once
+     * (`MessageService.sessionStopped`), except `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
      */
-    mailStopped: (sessionId: string, why: StopWhy, opts: { told: string[]; held: string[] }) => void
+    mailStopped: (sessionId: string, why: StopWhy, opts: StopTold) => void
     /** The older report paths of that stop, each resolving to the session it told: once ended, a `held` session they did not tell gets the stop notice */
     mailStopTold: (sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
@@ -375,7 +375,6 @@ export class SessionEvents {
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
     if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
-    if (endedTurn && e.sessionId && !owed) sends.push(this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy))
     if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
@@ -422,13 +421,13 @@ export class SessionEvents {
    * still waiting, which read the end itself. `held`: every session those paths could tell (the owner of the report or of the thread's turn, the
    * session that gave the turn or started it), whose stop notice waits until they ended and is sent only if they did not tell it
    */
-  private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[] } {
+  private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[]; starter: string | null } {
     const meta = this.host.meta
     const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
     const known = (who: string | undefined): who is string => !!who && who !== id && meta.has(who)
     const told = d.waited && known(asker) ? [asker] : []
-    const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id), asker])].filter(known).filter((who) => !told.includes(who))
-    return { told, held }
+    const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id)])].filter(known).filter((who) => !told.includes(who))
+    return { told, held, starter: known(asker) ? asker : null }
   }
 
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {

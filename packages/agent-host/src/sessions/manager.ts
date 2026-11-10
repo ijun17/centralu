@@ -1120,12 +1120,6 @@ export class SessionManager {
       get queue() {
         return self.queue
       },
-      get quitNotices() {
-        return self.tenure.quitNotices
-      },
-      set quitNotices(notices) {
-        self.tenure.quitNotices = notices
-      },
       get readGrants() {
         return self.readGrants
       },

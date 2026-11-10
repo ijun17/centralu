@@ -43,8 +43,6 @@ const FOR_MODEL: Naming = {
 
 /** In a report's place of the last response when it is not read: Centralu's words, not the session's */
 const NOT_READ = "(not read: the session's last turn was the person's; read_session shows it)"
-/** A stopped turn's words a stop notice does not quote (#1948): the turn was not the asker's alone, or the asker cannot read the session */
-const NOT_QUOTED = '(not quoted: the stopped turn was not yours alone, or you cannot read that session)'
 
 /** The one word of Centralu's that says how a turn ended, for the mailbox's wake (the same cases `deliverReport` words in full) */
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
@@ -211,12 +209,6 @@ export class ChildReports {
   private mailReport: ((ownerId: string, childId: string, draft: ReportDraft) => ReportedAs) | undefined
   useMail(hook: ChildReports['mailReport']): void {
     this.mailReport = hook
-  }
-
-  /** The rule a stop notice quotes the stopped turn by (`MailHooks.quotes`), set by the host when it has a mailbox; with none, nothing is quoted */
-  private quotes: ((stoppedId: string, readerId: string) => boolean) | undefined
-  useQuotes(rule: ChildReports['quotes']): void {
-    this.quotes = rule
   }
 
   /** The draft of a report for the mailbox, and what it answered; `none` when there is no mailbox, or it failed */
@@ -488,36 +480,6 @@ export class ChildReports {
     return m ? this.reportedAs(m).name : sessionId
   }
 
-  /**
-   * A session start_agent started stopped in a turn nobody was owed a report of (#698): on 2026-10-15 the internet
-   * dropped twice, and children's turns their CLI had opened itself (a Monitor firing) ended in a network error. Their
-   * asker had been told of the work it gave and heard nothing of these; the children sat in `error` until the person
-   * sent "continue" by hand. The asker is told once per stopped turn, through the same report: a further report needs
-   * another turn, so two sessions cannot wake each other in a loop. `turn`: whose the stopped turn was, given when no report
-   * is owed; the person's is then told to nobody (#1377), on every path that ends a turn (#1946)
-   */
-  async tellAskerOfInterruption(sessionId: string, requester: string | undefined, turn: TurnStarter | undefined): Promise<string | undefined> {
-    if (turn?.by === 'person') return undefined
-    const m = this.host.meta.get(sessionId)
-    const stop = m?.interruption
-    // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
-    const asker = requester ?? m?.askedBy ?? undefined
-    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting') return undefined
-    /*
-     * **Not a requester a quit stopped** (#698). It waits for the person's Continue under its own "stopped" line; a
-     * notice would resume it and start a model turn with nobody there (at launch, when the same quit cut it), and that
-     * turn would clear its own mark before the person saw it. Once continued, its children's rows say they stopped.
-     */
-    const askerInfo = this.host.meta.get(asker)
-    if (!askerInfo || wentWithItsProcess(askerInfo.interruption)) return undefined
-    console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
-    const { name, project } = this.reportedAs(m)
-    const { preview, seq } = this.stoppedTurnAnswer(sessionId)
-    // Its words only by the rule every stop notice quotes by (#1948): `MailHooks.quotes`, `MessageService.quotes`
-    const quoted = preview === '' || this.quotes?.(sessionId, asker) === true ? preview : NOT_QUOTED
-    return (await this.deliverReport(asker, sessionId, name, project, quoted, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)) ? asker : undefined
-  }
-
   /** The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does */
   stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
     const span = this.host.children.latestTurnRows(sessionId)
@@ -632,7 +594,7 @@ export class ChildReports {
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     // The session's last response, its own words: when there is one, the thread keeps it as the session's message in front of the report
     // Centralu's placeholders for words that were not read are not the session's answer, and are not kept as one
-    const answered = preview !== '' && preview !== NOT_READ && preview !== NOT_QUOTED && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
+    const answered = preview !== '' && preview !== NOT_READ && preview !== MACHINE_UNREACHABLE && preview !== IN_PAUSE_REPORT
     // Its words as they were last read, before its machine went out of reach (#1186): said, so they are not taken for the turn's end
     const asRead = !!work && ('linkLost' in work || 'machineRemoved' in work) && work.asRead === true
     const asReadWords = asRead ? ', as it was last read there, before its machine went out of reach' : ''

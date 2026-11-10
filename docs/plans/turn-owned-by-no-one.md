@@ -175,6 +175,10 @@ Today a card goes to "the turn's owner" (`RoutedCards.routeCard`, `sessions/rout
 
 ### 4.1 Stop notices
 
+> **Superseded in part (2026-11-11, #1948 step 1):** who is told and woken follows the owner's rule of 2026-11-10, built in
+> [mailbox.md §10.6.1](mailbox.md): every sender owed a reply is woken, a quit included; the starter owed nothing is told quietly; open
+> tasks are released too; `quitNotices` and `tellAskerOfInterruption` are gone. Q1 below is the earlier rule.
+
 The machinery exists: `releaseAndTell` and `tellUnanswered` (`messages.ts:823`, `:987`) release rows and send each
 sender one gathered `notice` (D25). Today only `gone` (`partyGone`) and `lost` (`turnsLost`, #1916) use it;
 `WHY_WORDS` (`messages.ts:1121`) and `RELEASE_WHY` (`dev-services/store/mailbox.ts:23`) already have `stopped` and

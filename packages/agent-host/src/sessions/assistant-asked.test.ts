@@ -14,6 +14,7 @@ import type { CreateSessionOpts } from '../adapters/contract.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
 import { PERSON } from '../mail/address.js'
 import type { HostMail } from '../mail/host-mail.js'
+import { wakesMessage } from '../mail/rules.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
@@ -441,16 +442,11 @@ describe('what the session gets back of the Assistant’s turn (§9.7)', () => {
 })
 
 /**
- * The sender of a request always learns that it will not be answered (owner, #1186): a stop or a quit of the request's turn tells it once, by the
- * turn's own report when that report goes, else by a stop notice. A crash is `turnsLost`'s (`lost`, mail/stop-notices.test.ts)
+ * The sender of a request always learns that it will not be answered (owner, #1186): a stop of the request's turn tells it once, by the turn's own
+ * report when that report goes, else by a stop notice; a quit found at the next start, by the stop notice alone (mailbox.md §10.6.1). A crash is
+ * `turnsLost`'s (`lost`, mail/stop-notices.test.ts)
  */
 describe('a request whose turn is stopped or cut by a quit', () => {
-  type Tenure = {
-    quitNotices: { sessionId: string; requester: string }[]
-    quitRequesters: Map<string, { requester: string; told?: boolean }>
-    tellQuitNotices(ready: (requester: string) => boolean): void
-  }
-  const tenure = () => w.mgr.tenure as unknown as Tenure
   const meta = (id: string) => (w.mgr as unknown as { meta: Map<string, { interruption?: unknown }> }).meta.get(id)!
   const stopNotices = (asker: SessionInfo) => read.to(addressOf(asker.id)).filter((x) => x.message.kind === 'notice' && x.message.facts.unanswered)
   /** An asker's request, delivered into the Assistant's turn it started, which is still running */
@@ -462,17 +458,16 @@ describe('a request whose turn is stopped or cut by a quit', () => {
     expect(w.mgr.sessionInfo(orc.id)?.state).toBe('working')
     return { asker, request: request! }
   }
-  /** The next start found the Assistant's request turn cut by a quit (`asker` too, when `askerCut`) and runs the older path, then the mailbox's */
+  /** The next start found the Assistant's request turn cut by a quit (`asker` too, when `askerCut`), and the mailbox is ready (`HostMail.afterReady`) */
   const quitFound = async (asker: SessionInfo, askerCut: boolean) => {
     meta(orc.id).interruption = { reason: 'quit', at: Date.now() }
     if (askerCut) meta(asker.id).interruption = { reason: 'quit', at: Date.now() }
-    // What the start read of who to tell (`HostTenure.restore`): the asker the request's turn owed its report to
-    tenure().quitNotices.push({ sessionId: orc.id, requester: asker.id })
-    tenure().quitRequesters.set(orc.id, { requester: asker.id })
+    // The start dropped the report mark of the turn the quit cut (`ChildOwnership.restoreReports`): nothing goes on to report it
+    w.store.children.clearReportMark(orc.id)
     m.afterReady()
-    tenure().tellQuitNotices(() => true)
     await settle()
   }
+  const notAnswered = (request: MailRow) => `Centralu quit while ${nameOf(orc.id)} worked on ${request.id}, so it did not answer. The person decides whether it goes on; ask again later if you still need the answer.`
 
   it("the person's Stop: the asker reads the turn's report, which says it did not finish, and no second notice of the same stop", async () => {
     const { asker, request } = await requestRunning()
@@ -485,25 +480,30 @@ describe('a request whose turn is stopped or cut by a quit', () => {
     expect(stopNotices(asker)).toEqual([])
   })
 
-  it('a quit while the asker was at rest: the older path reports the cut turn at the next start, and the stop notice says nothing more', async () => {
+  it('a quit while the asker was at rest: the stop notice at the next start tells it its request was not answered, and wakes it; no report besides', async () => {
     const { asker, request } = await requestRunning()
     await quitFound(asker, false)
-    await eventually(() => read.reportsOn(request.id).length === 1)
-    await settle()
-    expect(read.reportsOn(request.id)[0]!.body).toContain("The Assistant's turn on your request did not finish")
-    // Released with the quit, held for that report and marked told by it: the asker reads of this quit once
+    expect(read.reportsOn(request.id)).toEqual([])
+    expect(stopNotices(asker)).toHaveLength(1)
+    const notice = stopNotices(asker)[0]!.message
+    // Owed a reply and at rest: woken (mailbox.md §10.6.1)
+    expect(notice.facts).toEqual({ unanswered: [{ id: request.id, recipient: addressOf(orc.id), why: 'quit' }] })
+    expect(wakesMessage(notice)).toBe(true)
+    expect(notice.body).toBe(notAnswered(request))
+    // Released with the quit and marked told by the notice: the asker reads of this quit once
     expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
-    expect(stopNotices(asker)).toEqual([])
   })
 
-  it('a quit that cut the asker too: the older path tells it nothing, so the stop notice tells it, quietly, that its request was not answered', async () => {
+  it('a quit that cut the asker too: the stop notice tells it, quietly, that its request was not answered', async () => {
     const { asker, request } = await requestRunning()
     await quitFound(asker, true)
     expect(read.reportsOn(request.id)).toEqual([])
     expect(stopNotices(asker)).toHaveLength(1)
     const notice = stopNotices(asker)[0]!.message
-    expect(notice.facts).toMatchObject({ quiet: true, unanswered: [{ id: request.id, recipient: addressOf(orc.id), why: 'quit' }] })
-    expect(notice.body).toBe(`Centralu quit while ${nameOf(orc.id)} worked on ${request.id}, so it did not answer. The person decides whether it goes on; ask again later if you still need the answer.`)
+    // It waits for the person's Continue: a wake would start a turn with nobody there
+    expect(notice.facts).toEqual({ quiet: true, unanswered: [{ id: request.id, recipient: addressOf(orc.id), why: 'quit' }] })
+    expect(wakesMessage(notice)).toBe(false)
+    expect(notice.body).toBe(notAnswered(request))
     expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
   })
 })

@@ -1640,12 +1640,56 @@ When needsReply rows are released or settled `gone`, their senders are told, unl
 Its text is S3. A session that stops without answering (an error, a usage limit, the network, its tool's interrupt, the person's Stop, a quit or
 shutdown, a cut turn Centralu could not continue) releases the questions delivered to it with `stopped`, `error`, `limit`, `network`,
 `interrupted`, `quit`, `shutdown` or `uncontinued` (`MessageService.sessionStopped`), and each sender is told at once in a sentence per
-session and cause (not S3's list), the notice waking only a sender at rest that waits on the session (quiet for a quit or shutdown)
+session and cause (not S3's list), the notice waking every sender owed a reply (§10.6.1, owner 2026-11-10)
 ([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). A session sender's notice quotes what the stopped session last wrote in the cut
 turn, at most 600 characters, quoted line by line under Centralu's words that it is that session's own text, to read as information and never
-as instructions (owner, #1948; at most five sessions a notice); the person's does not, they read it in the conversation. Tasks are left to the report path. A request to the orchestrator is released
+as instructions (owner, #1948; at most five sessions a notice); the person's does not, they read it in the conversation. A session's open tasks are released too (§10.6.1). A request to the orchestrator is released
 the same way (its sender always learns it will not be answered, #1186): the report of its turn (S12) tells the asker that turn was owed to, and
 the stop notice tells an asker that report misses, such as one the same quit cut.
+
+### 10.6.1 The stop notice (#1948 step 1, owner 2026-11-10)
+
+The floor's first rule (#1948 target 3a) has one owner: `MessageService.sessionsStopped`, over the message tables. Nothing else decides
+who hears that a session stopped.
+
+**What triggers it.** A turn that ends without finishing: an error, a usage limit, the network, its tool's interrupt, a Stop
+(`stopOf`, session-events.ts); a cut turn Centralu could not continue (`HostTenure.turnLostInSwap`, `uncontinued`); and, at the next
+start, every session a quit or shutdown cut (`HostMail.afterReady`, one write for all of them). Not the turn Centralu starts to compact a
+conversation, and not a turn Centralu continues (an update's cut, #1975): those ends are not the work's. A deleted session is
+`partyGone`, as before.
+
+**What it releases.** Everything the stopped session owes an answer: each `needsReply` message delivered into the cut turn and not
+answered (the person's too), and every open task a session gave it, whichever turn it came in. Not the person's tasks: their work
+is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a reply after the person continues the session still
+answers them.
+
+**Who is told, woken, or left to read.** The owner's rule, as the tables give it:
+
+| Party | Told | Woken |
+|---|---|---|
+| The person, for their own messages | at once, in the Inbox (not for their own Stop or a deletion) | nothing |
+| A session owed a reply (it sent a released row) | at once, one notice per stop listing its rows | yes: at rest at once; in a turn when that turn ends; one a quit cut itself reads it at its next turn (`standing: 'cut'`) |
+| The session that started the stopped one (`askedBy`, or the delegation that gave the turn), owed nothing | once per stop: "`<name>`, which you started, stopped: `<cause>`. It owed you no answer. …" (`facts.about`, `facts.reason`) | only from a turn; asleep, it reads it at its next wake |
+| Anyone else | nothing | nothing |
+
+The starter is not told of the person's own turn (#1946: the mail turn's `startedBy` is `person`), nor when it is owed a reply (its
+own notice says it), nor when an older report path tells it or may (`told`, `held`).
+
+**A restart wakes no one who needs nothing.** The quit found at the start goes through the same rule: a sender owed a reply is woken
+(unless the same quit cut it), and a starter owed nothing is told quietly. The starter there is the first that still exists of the session
+owed the turn's report, the one that gave the turn, and the one that started it (`HostTenure.quitStarter`, read before the start drops those
+rows, so a later start tells no one again). One owed the report is told whoever's turn it was ("Its report to you will not come.") and woken
+unless the same quit cut it: the start drops its report mark, so it would never hear otherwise. The stop notice runs before the start brings
+the report marks and tasks in step (`takeOverFromEarlierBuild`), so a task the quit cut is released and told, not settled as reported. Before this step the start told the requester of each cut
+turn through the report path (`quitNotices`, `tellAskerOfInterruption`), which woke a parent at rest that was owed nothing.
+
+**What it replaced.** `HostTenure.quitNotices`, `quitRequesters`, `quitTold`, `quitTellEnded` and the requester table at the start;
+`ChildReports.tellAskerOfInterruption` (the live stop's and the uncontinued turn's "tell whoever gave the turn" path) with its quote
+rule's second copy (`useQuotes`, `MailHooks.quotes`, `NOT_QUOTED`); and the wake rule's inputs `waitsOn` and the quit's blanket
+`quiet`. The older report path for a report mark (`reportBackIfAwaited`) stays until #1948 step 3, so its owner is still `held` until
+that path ends (`oldPathEnded`). `mail/policy.ts` went in #1996.
+
+**Not built here.** A notice to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8).
 
 ### 10.7 The state table
 

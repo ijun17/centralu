@@ -1,6 +1,6 @@
 import type { ModelWindows } from './auto-compact.js'
 import { restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
-import type { ChildOwnership, QuitNotice } from './child-ownership.js'
+import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
@@ -43,8 +43,7 @@ import type { CardRests } from './card-rest.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
- * it with getters for its fields, so each is read when used, never kept; `quitNotices`, which a deletion filters, is
- * written back through a setter.
+ * it with getters for its fields, so each is read when used, never kept.
  */
 export type SessionTrashHost = {
   readonly adapters: Map<string, AgentAdapter>
@@ -75,7 +74,6 @@ export type SessionTrashHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>
-  quitNotices: QuitNotice[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
   readonly modelWindows: Pick<ModelWindows, "forget">
@@ -439,7 +437,6 @@ export class SessionTrash {
     this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
-    this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)
     await this.host.store.trash.trashSession(sessionId, {
       projectId: m.projectId,

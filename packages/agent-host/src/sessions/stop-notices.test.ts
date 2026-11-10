@@ -1,7 +1,9 @@
 /**
- * A turn that stops without answering tells the senders of the questions it left (docs/plans/turn-owned-by-no-one.md §4.1, P1), over the real manager:
- * the event that ended the turn gives the cause, a quit or the system's end found at the next start is told quietly, and a cut turn Centralu continues
- * or a turn that ended normally tells no one.
+ * A session that stops without answering tells at once everyone it owes a reply (docs/plans/mailbox.md §10.6.1, owner 2026-11-10), over the real
+ * manager: the event that ended the turn gives the cause; every session owed a reply (a question delivered into the cut turn, an open task it was
+ * given) is woken, at rest or in a turn, unless the same quit cut it; the session that started it and is owed nothing is told quietly; the person is
+ * told in the Inbox. A quit or the system's end found at the next start goes through the same rule, and a cut turn Centralu continues or a turn that
+ * ended normally tells no one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -35,11 +37,7 @@ type Internals = {
   selfCompaction: { compactTurn(id: string): boolean }
 }
 const inside = () => w.mgr as unknown as Internals
-type TenureInternals = {
-  turnLostInSwap(m: unknown): void
-  quitRequesters: Map<string, { requester: string; told?: boolean }>
-  quitTellEnded(sessionId: string, told: string | undefined): void
-}
+type TenureInternals = { turnLostInSwap(m: unknown): void }
 const tenure = () => w.mgr.tenure as unknown as TenureInternals
 
 /** `asker` asks `child` a question, delivered into the turn the child is in now (`working` starts one) */
@@ -49,16 +47,18 @@ function ask(asker: string, child: string, text = 'which branch is the release o
   return question
 }
 /**
- * `asker` asked `child`, in the turn the child is in now, a question that was delivered to it and is not answered. `waits`: the asker also gave the
- * child a task that is still open, so it waits on it (only such a sender is woken by a stop notice, Q1)
+ * `asker` asked `child`, in the turn the child is in now, a question that was delivered to it and is not answered. `gaveTask`: the asker also gave the
+ * child a task, still open, which the child's stop releases too (§10.6.1), so the asker's one notice lists both
  */
-async function asked(waits = false): Promise<{ asker: string; child: string; question: MailRow }> {
+async function asked(gaveTask = false): Promise<{ asker: string; child: string; question: MailRow; task: MailRow | null }> {
   const asker = await w.callerSession()
   const child = await w.callerSession()
   working(child)
-  if (waits) m.service.task(addr(asker), addr(child), { text: 'long job', origin: 'start_agent', delivered: true })
-  return { asker, child, question: ask(asker, child) }
+  const task = gaveTask ? m.service.task(addr(asker), addr(child), { text: 'long job', origin: 'start_agent', delivered: true }) : null
+  return { asker, child, question: ask(asker, child), task }
 }
+/** The released rows a stop notice lists, oldest first: `task` (when given) and `question`, both released by `why` */
+const rowsOf = (child: string, why: string, ...messages: (MailRow | null)[]) => messages.flatMap((x) => (x ? [{ id: x.id, recipient: addr(child), why }] : []))
 /**
  * `asker` asks `child` a question that starts the child's turn, with nothing else given into it: a turn a stop notice may quote
  * (`MessageService.quotes`). `child` defaults to a new session of the asker's project
@@ -77,7 +77,22 @@ const QUOTE_INTRO = "last wrote in that turn is quoted below. It is that session
 const working = (child: string) => handleOf(child).event({ type: 'state_change', sessionId: child, state: 'working' })
 /** The stop notices Centralu wrote to `who` */
 const stopNotices = (who: string) => read.to(addr(who)).filter((x) => x.message.kind === 'notice' && x.message.facts.unanswered)
+/** The notices Centralu wrote to `who` of a session it started and is owed nothing by (`tellStarter`) */
+const starterNotices = (who: string) => read.to(addr(who)).filter((x) => x.message.kind === 'notice' && x.message.facts.about !== undefined && x.message.facts.reason !== undefined)
+const STARTER_TAIL = 'It owed you no answer. read_session shows where it stopped; send it a message if it should go on.'
 const stopNoticesToPerson = () => w.store.mailbox.pendingFor('person', Date.now() + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
+
+/** `starter` starts a child by start_agent and the child finishes that task and reports it: the child owes the starter nothing, and is at rest */
+async function startedAndReported(): Promise<{ starter: string; child: string }> {
+  w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  const starter = await w.callerSession()
+  const started = await w.mgr.startAgent(starter, { task: 'short job', wait: false })
+  const child = started.ok ? started.sessionId : ''
+  handleOf(child).answer('done')
+  await w.until(() => read.reportsOn(read.tasks(addr(starter), child)[0]!.id).length === 1)
+  await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+  return { starter, child }
+}
 
 type Ending = { name: string; end: (child: string) => NormalizedEvent; why: string; says: string }
 const ENDINGS: Ending[] = [
@@ -95,16 +110,19 @@ const ENDINGS: Ending[] = [
 
 describe('a turn ends without finishing', () => {
   it.each(ENDINGS)('$name: the asker is told once, in words that say what happened and what it can do, and the question stays open', async ({ end, why, says }) => {
-    const { asker, child, question } = await asked(true)
+    const { asker, child, question, task } = await asked(true)
     handleOf(child).event(end(child))
     await w.until(() => stopNotices(asker).length === 1)
 
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedWhy: why, settled: null })
+    expect(read.row(task!.id, addr(child))).toMatchObject({ releasedWhy: why, settled: null })
     const message = stopNotices(asker)[0]!.message
-    expect(message.facts.unanswered).toEqual([{ id: question.id, recipient: addr(child), why }])
+    // The question of the cut turn and the open task the asker gave: one notice for both
+    expect(message.facts).toEqual({ unanswered: rowsOf(child, why, task, question) })
     expect(message.body).toContain(says)
     expect(message.body).toContain(question.id)
-    // The asker is at rest and waits on the child: the notice wakes it. The tool's own words are not in it (#120)
+    expect(message.body).toContain(task!.id)
+    // The asker is at rest and owed a reply: the notice wakes it. The tool's own words are not in it (#120)
     expect(wakesMessage(message)).toBe(true)
     expect(message.body).not.toContain('something broke')
     expect(message.body).not.toContain('ECONNREFUSED')
@@ -234,41 +252,47 @@ describe('a turn ends without finishing', () => {
     expect(stopNotices(asker)[0]!.message.body).toContain('> Rebased; CI is green.')
   })
 
-  it('the older report of a stop no report was owed for quotes by the same rule: nothing of a turn the person wrote into', async () => {
-    const asker = await w.callerSession()
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const started = await w.mgr.startAgent(asker, { task: 'short job', wait: false })
-    const child = started.ok ? started.sessionId : ''
-    handleOf(child).answer('done')
-    await w.until(() => read.reportsOn(read.tasks(addr(asker), child)[0]!.id).length === 1)
-    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
-    // The child's CLI runs a turn of its own; the person gives it a key in it; the network ends it: the starter is told (#698)
+  it.each([false, true])('the starter’s notice of a stop it is owed nothing for quotes by the same rule: its own message’s turn, and nothing once the person wrote into it (typed: %s)', async (typed) => {
+    const { starter, child } = await startedAndReported()
+    // The starter's own message, which wants no reply, starts the child's next turn: the child owes it nothing
+    const note = m.service.send(addr(starter), { to: [addr(child)], text: 'also tidy the changelog', needsReply: false }).message
+    const seq = m.turns.begin(child, { workMessage: null, starter: note.id })
+    w.store.mailbox.markDelivered(addr(child), [note.id], Date.now(), seq)
     working(child)
-    await w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true)
-    says(child, 'Using the key k3y on the release branch.')
+    if (typed) await w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true)
+    says(child, typed ? 'Using the key k3y on the changelog.' : 'Tidying the changelog now.')
     handleOf(child).event(ENDINGS[1]!.end(child))
-    const toAsker = () => [
-      ...read.to(addr(asker)).map((x) => x.message.body),
-      ...w.store.messages.loadMessages(asker, 200).map((r) => JSON.stringify(r.payload)),
-    ].join('\n')
-    await w.until(() => toAsker().includes('a network error ended its turn'))
-    expect(toAsker()).not.toContain('Using the key')
-    expect(toAsker()).toContain('(not quoted: the stopped turn was not yours alone')
+    await w.until(() => starterNotices(starter).length === 1)
+
+    const message = starterNotices(starter)[0]!.message
+    expect(message.facts).toEqual({ about: { session: addr(child) }, reason: 'network', quiet: true })
+    expect(message.body.startsWith(`short job, which you started, stopped: it lost the network. ${STARTER_TAIL}`)).toBe(true)
+    if (typed) {
+      expect(message.body).not.toContain('Using the key')
+      expect(message.body).not.toContain(QUOTE_INTRO)
+    } else expect(message.body).toContain(`${QUOTE_INTRO}
+> Tidying the changelog now.`)
+    expect(stopNotices(starter)).toEqual([])
   })
 
-  it('an asker that waits on nothing of the child reads the notice with its next mail: it is not woken', async () => {
-    const { asker, child } = await asked()
+  it('an asker owed a reply and at rest is woken by the notice, though it gave the child nothing else to do', async () => {
+    const { asker, child, question } = await asked()
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
-    expect(wakesMessage(stopNotices(asker)[0]!.message)).toBe(false)
+    const message = stopNotices(asker)[0]!.message
+    expect(message.facts).toEqual({ unanswered: rowsOf(child, 'limit', question) })
+    expect(wakesMessage(message)).toBe(true)
   })
 
-  it('an asker that is in a turn reads the notice with its other mail: it is written quiet, though it waits', async () => {
-    const { asker, child } = await asked(true)
+  it('an asker owed a reply that is in a turn is woken too: the notice is not written quiet, and it reads it when that turn ends', async () => {
+    const { asker, child, question, task } = await asked(true)
     working(asker)
+    expect(w.mgr.sessionInfo(asker)?.state).toBe('working')
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
-    expect(wakesMessage(stopNotices(asker)[0]!.message)).toBe(false)
+    const message = stopNotices(asker)[0]!.message
+    expect(message.facts).toEqual({ unanswered: rowsOf(child, 'limit', task, question) })
+    expect(wakesMessage(message)).toBe(true)
   })
 
   it('the person who asked is told in the Inbox, in plain words with no id or address', async () => {
@@ -452,7 +476,7 @@ describe('who is not told, or told another way', () => {
   })
 
   it('a held notice whose older report path never ends is told after the wait: that path counts as not having told', async () => {
-    const { asker, child, question } = await asked(true)
+    const { asker, child, question, task } = await asked(true)
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
       m.service.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
@@ -460,7 +484,7 @@ describe('who is not told, or told another way', () => {
       await vi.advanceTimersByTimeAsync(OLD_PATH_WAIT_MS - 1_000)
       expect(stopNotices(asker)).toEqual([])
       await vi.advanceTimersByTimeAsync(1_000)
-      expect(stopNotices(asker).map((n) => n.message.facts.unanswered)).toEqual([[{ id: question.id, recipient: addr(child), why: 'limit' }]])
+      expect(stopNotices(asker).map((n) => n.message.facts.unanswered)).toEqual([rowsOf(child, 'limit', task, question)])
     } finally {
       vi.useRealTimers()
     }
@@ -475,67 +499,120 @@ describe('who is not told, or told another way', () => {
   })
 })
 
+describe('the owner’s cases (mailbox.md §10.6.1): who is told, woken, or left to read', () => {
+  // (1) a sender in a turn and (2) a sender at rest, each owed a reply: woken, above ("an asker owed a reply …"); (4) the person: told in the Inbox, above
+  it('(3) a session at rest owed nothing, the one that started the stopped one, is told quietly and not woken', async () => {
+    const { starter, child } = await startedAndReported()
+    // The child's CLI opens a turn of its own, which nobody gave it, and the limit ends it
+    working(child)
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => starterNotices(starter).length === 1)
+
+    const message = starterNotices(starter)[0]!.message
+    expect(message.facts).toEqual({ about: { session: addr(child) }, reason: 'limit', quiet: true })
+    expect(message.body).toBe(`short job, which you started, stopped: it reached its usage limit. ${STARTER_TAIL}`)
+    expect(wakesMessage(message)).toBe(false)
+    expect(stopNotices(starter)).toEqual([])
+  })
+
+  it('(3) the same starter in a turn is woken: it reads the notice when that turn ends', async () => {
+    const { starter, child } = await startedAndReported()
+    working(starter)
+    working(child)
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => starterNotices(starter).length === 1)
+    expect(starterNotices(starter)[0]!.message.facts).toEqual({ about: { session: addr(child) }, reason: 'limit' })
+    expect(wakesMessage(starterNotices(starter)[0]!.message)).toBe(true)
+  })
+
+  it('(3) the starter is not told of a stop of the person’s own turn (#1946): that turn was not its', async () => {
+    const { starter, child } = await startedAndReported()
+    const asker = await w.callerSession()
+    // The person writes to the child at rest: their message starts its turn
+    await w.mgr.inputs.send(child, 'tidy the changelog too', undefined, undefined, true)
+    expect(m.turns.latest(child)).toMatchObject({ by: 'person' })
+    working(child)
+    // Another session's question in the same turn: its notice is the event this stop is seen by
+    const question = ask(asker, child)
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.facts).toEqual({ unanswered: rowsOf(child, 'limit', question) })
+    expect(starterNotices(starter)).toEqual([])
+  })
+
+  // The starter's quiet notice at a real restart, which finds who started the cut turn (`HostTenure.quitStarter`): interruptions.test.ts "a turn a quit stopped"
+  it('(5) a host restart wakes nobody owed nothing: the quit found at the start wakes the sender owed a reply only, and a second start tells no one again', async () => {
+    const { starter, child } = await startedAndReported()
+    const asker = await w.callerSession()
+    working(child)
+    const question = ask(asker, child)
+    inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
+
+    const sweep = vi.spyOn(m.delivery, 'sweep')
+    m.afterReady()
+    const owed = stopNotices(asker)
+    expect(owed.map((n) => n.message.facts)).toEqual([{ unanswered: rowsOf(child, 'quit', question) }])
+    expect(wakesMessage(owed[0]!.message)).toBe(true)
+    // Its starter, owed nothing (its task was reported), is not woken: nothing in its mailbox wakes it
+    expect(read.to(addr(starter)).filter((x) => x.message.kind === 'notice' && wakesMessage(x.message))).toEqual([])
+
+    // The delivery's first sweep closes the cut turn; a later start finds the same mark and tells no one again
+    await sweep.mock.results[0]?.value
+    sweep.mockRestore()
+    m.afterReady()
+    expect(stopNotices(asker)).toHaveLength(1)
+    m.delivery.stop()
+  })
+})
+
 describe('a stop found at the next start, or a cut turn that could not be continued', () => {
-  it.each(['quit', 'shutdown'] as const)('%s: the senders are told at the start, quietly, and a second start tells no one again', async (reason) => {
-    const { asker, child, question } = await asked(true)
+  it.each(['quit', 'shutdown'] as const)('%s: every sender owed a reply is told at the start and woken, and a second start tells no one again', async (reason) => {
+    const { asker, child, question, task } = await asked(true)
     // The last host ended in the middle of the child's turn: the start found it cut and marked it
     inside().meta.get(child)!.interruption = { reason, at: Date.now() }
 
     m.afterReady()
     const message = stopNotices(asker)[0]!.message
-    expect(message.facts).toMatchObject({ quiet: true, unanswered: [{ id: question.id, recipient: addr(child), why: reason }] })
-    expect(wakesMessage(message)).toBe(false)
+    expect(message.facts).toEqual({ unanswered: rowsOf(child, reason, task, question) })
+    expect(wakesMessage(message)).toBe(true)
     expect(message.body).toContain(reason === 'quit' ? 'Centralu quit while' : 'the computer shut down, restarted or signed out')
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedWhy: reason, settled: null })
+    expect(read.row(task!.id, addr(child))).toMatchObject({ releasedWhy: reason, settled: null })
 
     m.afterReady()
     expect(stopNotices(asker)).toHaveLength(1)
     m.delivery.stop()
   })
 
-  it('the session the older report path tells of the quit gets that and no stop notice: a quit tells each sender once', async () => {
-    const { asker, child, question } = await asked()
+  it('the session that started the cut one and is owed a reply hears of the quit once, in its stop notice, and no starter notice besides', async () => {
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const asker = await w.callerSession()
+    const started = await w.mgr.startAgent(asker, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
+    working(child)
+    const task = read.tasks(addr(asker), child)[0]!
+    const question = ask(asker, child, 'which branch?')
     const other = await w.callerSession()
     const second = ask(other, child, 'and the tag?')
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
-    // The start found `asker` to be told by `tellAskerOfInterruption`, and that path told it before the mailbox was ready
-    tenure().quitRequesters.set(child, { requester: asker, told: true })
 
     m.afterReady()
-    expect(stopNotices(asker)).toEqual([])
+    expect(stopNotices(asker).map((n) => n.message.facts)).toEqual([{ unanswered: rowsOf(child, 'quit', task, question) }])
+    expect(wakesMessage(stopNotices(asker)[0]!.message)).toBe(true)
+    expect(starterNotices(asker)).toEqual([])
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
-    // A sender nothing else tells still hears of it
-    expect(stopNotices(other)).toHaveLength(1)
-    expect(read.row(second.id, addr(child))).toMatchObject({ releasedWhy: 'quit' })
+    // A sender that did not start it is told all the same
+    expect(stopNotices(other).map((n) => n.message.facts)).toEqual([{ unanswered: rowsOf(child, 'quit', second) }])
     m.delivery.stop()
   })
 
-  it('a requester the same quit cut is not told by the older path, so the stop notice tells it', async () => {
-    const { asker, child } = await asked()
+  it('a sender the same quit cut is told by the stop notice, quietly: it waits for the person’s Continue, and a wake would start a turn with nobody there', async () => {
+    const { asker, child, question } = await asked()
     inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
     inside().meta.get(asker)!.interruption = { reason: 'quit', at: Date.now() }
-    tenure().quitRequesters.set(child, { requester: asker, told: false })
     m.afterReady()
-    expect(stopNotices(asker)).toHaveLength(1)
-    m.delivery.stop()
-  })
-
-  it('a requester the older path tells later (one the keeper kept) waits for it: told then, it gets no stop notice; not told, it gets one', async () => {
-    const one = await asked()
-    const two = await asked()
-    for (const { child, asker } of [one, two]) {
-      inside().meta.get(child)!.interruption = { reason: 'quit', at: Date.now() }
-      tenure().quitRequesters.set(child, { requester: asker })
-    }
-    m.afterReady()
-    expect(stopNotices(one.asker)).toEqual([])
-    expect(stopNotices(two.asker)).toEqual([])
-    tenure().quitTellEnded(one.child, one.asker)
-    tenure().quitTellEnded(two.child, undefined)
-    expect(stopNotices(one.asker)).toEqual([])
-    expect(read.row(one.question.id, addr(one.child))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
-    expect(stopNotices(two.asker)).toHaveLength(1)
-    expect(stopNotices(two.asker)[0]!.message.facts).toMatchObject({ quiet: true })
+    expect(stopNotices(asker).map((n) => n.message.facts)).toEqual([{ unanswered: rowsOf(child, 'quit', question), quiet: true }])
+    expect(wakesMessage(stopNotices(asker)[0]!.message)).toBe(false)
     m.delivery.stop()
   })
 
@@ -563,12 +640,12 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     m.delivery.stop()
   })
 
-  it('a cut turn Centralu could not continue is told as a stop that wakes the asker that waits', async () => {
-    const { asker, child, question } = await asked(true)
+  it('a cut turn Centralu could not continue is told as a stop that wakes the asker owed a reply', async () => {
+    const { asker, child, question, task } = await asked(true)
     tenure().turnLostInSwap(inside().meta.get(child))
     await w.until(() => stopNotices(asker).length === 1)
     const message = stopNotices(asker)[0]!.message
-    expect(message.facts.unanswered).toEqual([{ id: question.id, recipient: addr(child), why: 'uncontinued' }])
+    expect(message.facts).toEqual({ unanswered: rowsOf(child, 'uncontinued', task, question) })
     expect(message.body).toContain('Centralu could not continue')
     expect(wakesMessage(message)).toBe(true)
   })

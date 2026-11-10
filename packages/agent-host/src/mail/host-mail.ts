@@ -1,6 +1,7 @@
 import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { wentWithItsProcess } from '../sessions/interruptions.js'
+import { labelOf } from '../sessions/transcript-view.js'
 import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
@@ -40,23 +41,21 @@ export type HostMailSessions = {
   mailSessions(): MailSessions
   /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`, #2159): what the reach's hold reads */
   projectTrusted(projectId: string): boolean
-  /** The sessions whose running work `id` waits on (`SessionProcesses.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
-  waitsOn?(id: string): string[]
-  /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`HostTenure.quitTold`) */
-  quitTold?(id: string): { told: string[]; held: string[] }
   /** The words of the turn a stop cut, which the stop notice quotes as that session's own (`MailSessionsView.stoppedWords`) */
   stoppedWords?(id: string): string | null
   /** Whether `readerId` can read `targetId` with read_session (`MailSessionsView.readsSession`): only then is a stopped session's text quoted to it */
   readsSession?(readerId: string, targetId: string): boolean
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
+  /** Who is told of the turn a quit cut in `id`, found by this start (`HostTenure.quitStarter`); none for a turn an earlier start found */
+  quitStarter?(id: string): { starter: string; reportOwed: boolean } | null
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes' | 'projectRegistry'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'projectRegistry'>,
   assistantHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mail.mailSeats(assistantHasMailCommand)
@@ -71,12 +70,11 @@ export function mailSessionsOf(
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
     projectTrusted: (projectId) => mgr.projectRegistry.projectTrusted(projectId),
-    waitsOn: (id) => mgr.processes.waitsOn(id),
-    quitTold: (id) => mgr.tenure.quitTold(id),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
     readsSession: (readerId, targetId) => mgr.mail.readsSession(readerId, targetId),
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
+    quitStarter: (id) => mgr.tenure.quitStarter(id),
   }
 }
 
@@ -93,7 +91,7 @@ export type HostMail = {
   /** What the manager hears through `mgr.mail.useMail` */
   hooks: MailHooks
   /**
-   * The step after the host's ready line (§6.3, §9.5), before delivery starts: the thread mail an older build left pending moves, then the report
+   * The step after the host's ready line (§6.3, §9.5), before delivery starts: the thread mail an older build left pending moves, the turns the last host's end cut are told (the stop notice), then the report
    * marks and tasks are brought in step, then delivery starts. By then the host this one replaced is gone, so only one host delivers
    */
   afterReady(): void
@@ -124,7 +122,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     hostId,
     session: (id) => {
       const s = sessions.sessionInfo(id)
-      if (s) return { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: s.name }
+      // Named as read_session lists it: a conversation compaction renamed goes by its first instruction
+      if (s) return { projectId: s.projectId ?? null, askedBy: s.askedBy ?? null, here: true, canReadMail: sessions.canReadMail(id), host: 'here', name: labelOf(store.messages, s) }
       // A child started on a linked machine (#2067): alive there, so not gone, and refused as elsewhere until mail crosses a link. Its
       // mail to its parent here (item 1) shows it by its name on that machine
       const linked = sessions.onLinkedMachine?.(id) ?? (id.includes('.') ? far.across?.foreignName(addressOf(id)) : undefined)
@@ -156,12 +155,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return mailCalls(1, party?.kind === 'session' && sessions.mailCommand(party.sessionId) ? 'command' : 'plain')
     },
     personSaid: (sessionId) => store.messages.newestPersonMessage(sessionId),
-    // A stop notice wakes a sender at rest; one in a turn reads it with its other mail (§4.1)
-    atRest: (address) => {
+    standing: (address) => {
       const party = parseAddress(address)
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
-      // Not one a quit cut either: it waits for the person's Continue, and a notice would start a turn with nobody there
-      return !s || (!inTurn(s.state) && !wentWithItsProcess(s.interruption))
+      return !s ? 'rest' : wentWithItsProcess(s.interruption) ? 'cut' : inTurn(s.state) ? 'turn' : 'rest'
     },
     stoppedWords: (address) => {
       const party = parseAddress(address)
@@ -172,10 +169,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
     },
     ...(sessions.turnInputs ? { turnInputs: (id: string) => sessions.turnInputs?.(id) ?? [null] } : {}),
-    waitsOn: (sender, stopped) => {
-      const [from, to] = [parseAddress(sender), parseAddress(stopped)]
-      return from?.kind === 'session' && to?.kind === 'session' && (sessions.waitsOn?.(from.sessionId) ?? []).includes(to.sessionId)
-    },
   })
   box.turns = new MailTurns(store.mailbox, {
     ...(opts.now ? { now: opts.now } : {}),
@@ -256,9 +249,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.partyGone(addressOf(id)),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
-    stopped: (id, why, o) => void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.quiet ? { quiet: true } : {}), ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}) }),
+    stopped: (id, why, o) =>
+      void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
     oldPathEnded: (id, sender, told) => service.oldPathEnded(addressOf(id), addressOf(sender), told),
-    quotes: (id, reader) => service.quotes(addressOf(id), addressOf(reader)),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -301,26 +294,25 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         console.error(`[mail] moving the thread mail an older build left pending failed: ${errorMessage(e)}`)
       }
       try {
+        // A turn a quit or the system's end cut, found cut at this start (mailbox.md "The stop notice"): what it left unanswered is released and its senders
+        // told, so a restart wakes only a sender owed a reply. Released once; a start that finds the same mark again finds nothing to release
+        // One write for all of them: the person, and a session that asked several, read one notice. The cut turn is the one this host never saw end
+        const open = new Map(store.mailbox.openTurns().map((t) => [t.sessionId, t.turnSeq]))
+        const stops = sessions.listSessions().flatMap((s) => {
+          const why = s.interruption?.reason
+          if (why !== 'quit' && why !== 'shutdown') return []
+          const told = sessions.quitStarter?.(s.id)
+          return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter: told ? addressOf(told.starter) : null, reportOwed: told?.reportOwed }]
+        })
+        service.sessionsStopped(stops)
+      } catch (e) {
+        console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
+      }
+      // After the stop notice: a task the quit cut is released and told by it, not settled as reported for the mark the start dropped
+      try {
         takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id), oldOwes: (o, c) => sessions.oldOwes(o, c) })
       } catch (e) {
         console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
-      }
-      try {
-        // A turn a quit or the system's end cut, found cut at this start (§4.1): the questions it left unanswered are released and their senders told, quietly,
-        // so a restart wakes none of them. Released once; a start that finds the same mark again finds nothing to release
-        // One write for all of them: the person, and a session that asked several, read one notice. The cut turn is the one this host never saw end
-        const open = new Map(store.mailbox.openTurns().map((t) => [t.sessionId, t.turnSeq]))
-        const quitTold = (id: string) => {
-          const q = sessions.quitTold?.(id) ?? { told: [], held: [] }
-          return { told: q.told.map(addressOf), held: q.held.map(addressOf) }
-        }
-        const stops = sessions.listSessions().flatMap((s) => {
-          const why = s.interruption?.reason
-          return why === 'quit' || why === 'shutdown' ? [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, ...quitTold(s.id) }] : []
-        })
-        service.sessionsStopped(stops, true)
-      } catch (e) {
-        console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
       }
       delivery.start()
     },

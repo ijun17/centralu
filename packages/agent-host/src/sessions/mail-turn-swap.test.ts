@@ -331,10 +331,12 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
   })
 
   /*
-   * #1916 review: the asker also started the session (`askedBy`), so #698's quit report could tell it of the same cut turn. The task it gave
-   * was reported when its turn ended: the quit report has no open work to go into (`closed`), and the notice is the one word it gets
+   * #1916 review: the asker also started the session (`askedBy`), so it could hear of the same cut turn twice. The task it gave was reported when
+   * its turn ended; the quit found at the next start goes through the stop notice alone (mailbox.md §10.6.1, `HostMail.afterReady`, before its
+   * delivery closes the turn): the asker is owed a reply, so the notice listing its question is the one word it gets, with no starter notice and
+   * no quit report besides
    */
-  it('tells an asker that also started the session once, by the notice, not a second time by a quit report', async () => {
+  it('tells an asker that also started the session once, by the stop notice: no starter notice, and no quit report', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('first turn')
@@ -347,11 +349,17 @@ describe('a mail turn cut by a plain restart (#1916)', () => {
     await a.mgr.tenure.disposeAll()
 
     const b = host()
-    await deliverTo(b.m, addressOf(child))
-    // The quit's notices go out once the start's moment is over
     await until(() => b.mgr.sessionInfo(child)?.interruption?.reason === 'quit')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(read().between('centralu', addressOf(parent), 'notice')).toEqual([expect.objectContaining({ facts: { unanswered: [{ id: question.id, recipient: addressOf(child), why: 'lost' }] } })])
+    // The parent was in a turn of its own (the report woke it), which the same quit cut: it waits for the person's Continue
+    expect(b.mgr.sessionInfo(parent)?.interruption?.reason).toBe('quit')
+    const sweep = vi.spyOn(b.m.delivery, 'sweep')
+    b.m.afterReady()
+    await sweep.mock.results[0]?.value
+    sweep.mockRestore()
+    b.m.delivery.stop()
+    // Told quietly, as the same quit cut it: a wake would start a turn with nobody there
+    expect(read().between('centralu', addressOf(parent), 'notice').map((n) => n.facts)).toEqual([{ unanswered: [{ id: question.id, recipient: addressOf(child), why: 'quit' }], quiet: true }])
+    expect(read().row(question.id, addressOf(child))).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
     expect(reports()).toHaveLength(1)
   })
 })
