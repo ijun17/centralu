@@ -13,19 +13,30 @@ const DB = 'centralu-notices'
 const STORE = 'raised'
 const KEPT_MS = 10 * 60_000
 
+/**
+ * The window's connection, opened once. A connection that failed to open, that the browser closed (storage cleared, the
+ * disk gone: `onclose`), that a claim failed on or that did not answer within the bound is dropped, and the next claim
+ * opens another: kept, it would fail every later claim, and every window would raise every notification from then on
+ */
 let opened: Promise<IDBDatabase> | null = null
 
 function database(idb: IDBFactory): Promise<IDBDatabase> {
-  opened ??= new Promise<IDBDatabase>((resolve, reject) => {
+  if (opened) return opened
+  const connection = new Promise<IDBDatabase>((resolve, reject) => {
     const req = idb.open(DB, 1)
     req.onupgradeneeded = () => req.result.createObjectStore(STORE).createIndex('at', '')
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      req.result.onclose = () => drop(connection)
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error ?? new Error('IndexedDB did not open'))
-  }).catch((e: unknown) => {
-    opened = null
-    throw e
   })
-  return opened
+  opened = connection
+  return connection
+}
+
+function drop(connection: Promise<IDBDatabase>): void {
+  if (opened === connection) opened = null
 }
 
 /**
@@ -37,18 +48,22 @@ export const CLAIM_BOUND_MS = 500
 export function firstToRaise(key: string): Promise<boolean> {
   const idb = globalThis.indexedDB
   if (!idb) return Promise.resolve(true)
+  const connection = database(idb)
   return new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(true), CLAIM_BOUND_MS)
-    void claim(idb, key).then((first) => {
+    const timer = setTimeout(() => {
+      drop(connection)
+      resolve(true)
+    }, CLAIM_BOUND_MS)
+    void claim(connection, key).then((first) => {
       clearTimeout(timer)
       resolve(first)
     })
   })
 }
 
-async function claim(idb: IDBFactory, key: string): Promise<boolean> {
+async function claim(connection: Promise<IDBDatabase>, key: string): Promise<boolean> {
   try {
-    const db = await database(idb)
+    const db = await connection
     return await new Promise<boolean>((resolve) => {
       const tx = db.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
@@ -69,6 +84,7 @@ async function claim(idb: IDBFactory, key: string): Promise<boolean> {
       }
     })
   } catch {
+    drop(connection)
     return true
   }
 }
