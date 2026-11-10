@@ -10,6 +10,7 @@ import {
   type RpcParams,
   type RpcResult,
 } from '@cc/protocol/client'
+import { EventCursor } from '@cc/common'
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
 import { deliver } from '../deliver.js'
 
@@ -150,27 +151,14 @@ export class RpcClient {
   private connHandlers = new Set<(s: ConnectionState) => void>()
   private nextId = 1
   /**
-   * The last event seq handed on. Every event at or below it is a repeat and is dropped (#82):
-   * measured on main, the same seq delivered twice was dispatched twice, and a streaming delta
-   * applied twice doubles text for good.
-   *
-   * It also carries #173's first-contact rule. A hello with no cursor is a first meeting with this
-   * host, and the host replays its whole buffer — all of it finished before the screen attached.
-   * Passing that through would put up a "done" card for every finished turn, play a sound and
-   * build a conversation from old fragments on every fresh page load. So a first contact takes
-   * `hello_ok.currentSeq` as its starting point, and the replay up to it is dropped as a repeat;
-   * the list and the store (the snapshot) are the starting point instead.
+   * The cursor into the host's events (`EventCursor`, @cc/common). Every event at or below it is a repeat and is dropped
+   * (#82): measured on main, the same seq delivered twice was dispatched twice, and a streaming delta applied twice
+   * doubles text for good. It also carries #173's first-contact rule: a first meeting takes `hello_ok.currentSeq` as its
+   * start, so the host's replay of turns finished before the screen attached is not put up as new "done" cards; the
+   * list and the store (the snapshot) are the starting point instead. A reconnect sends the cursor with its host
+   * lifetime (`streamEpoch`), and the host replays only when the lifetime matches.
    */
-  private lastSeq = 0
-  /**
-   * The host lifetime `lastSeq` belongs to (#82), from `hello_ok.streamEpoch`. A reconnect sends
-   * both, and the host replays only when the lifetime matches; a host that restarted at the same
-   * address answers with a resync instead of another lifetime's events. Undefined until the first
-   * `hello_ok`, and again after moving to a new endpoint.
-   */
-  private hostEpoch: string | undefined
-  /** Whether `lastSeq` is a cursor into the current host — false means the next hello is a first contact */
-  private cursorValid = false
+  private readonly cursor = new EventCursor()
   /** Whether a handshake with a host has ever completed — a first meeting after that (a new host) means the screen has to re-read what it is holding */
   private greeted = false
   /**
@@ -203,9 +191,7 @@ export class RpcClient {
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
     // A new host numbers events from the start — the next hello is a first contact
-    this.lastSeq = 0
-    this.hostEpoch = undefined
-    this.cursorValid = false
+    this.cursor.forget()
     this.ready = false
     this.clearTimers()
     /*
@@ -274,7 +260,7 @@ export class RpcClient {
           // This window shows the cards of the limited credential's calls (#1405); a host counts on it only with the token
           shows: [SHOWS_HOST_REQUESTS],
           // A cursor travels with the lifetime that issued it (#82)
-          ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.hostEpoch ? { streamEpoch: this.hostEpoch } : {}) } : {}),
+          ...this.cursor.resumeFrom(),
         }),
       )
       // Nothing else goes out until hello_ok (#82)
@@ -330,41 +316,17 @@ export class RpcClient {
       if (this.ready) return // A repeat changes nothing
       clearTimeout(this.handshakeTimer)
       this.handshakeTimer = undefined
-      const hadCursor = this.cursorValid
-      /*
-       * Still the lifetime our cursor came from? The host already answers `resyncRequired` for a
-       * cursor from another lifetime (#82); the client checks too, so a host that does not say so
-       * cannot hand it a stranger's numbers. `currentSeq < lastSeq` is #173's check, kept for a
-       * host that sends no epoch: the host came back up on the same address and is behind us.
-       */
-      const sameLifetime =
-        hadCursor &&
-        (frame.streamEpoch === undefined || this.hostEpoch === undefined || frame.streamEpoch === this.hostEpoch) &&
-        frame.currentSeq >= this.lastSeq
       const greeted = this.greeted
       this.greeted = true
-      this.hostEpoch = frame.streamEpoch
-      this.cursorValid = true
       this.ready = true
       this.attempt = 0
-      let resync: boolean
-      if (!hadCursor) {
-        // A first-met host's replay is not a new event — only its number is caught up to. If the screen was already
-        // holding something (it switched to a new host), that has to be re-read
-        this.lastSeq = frame.currentSeq
-        resync = greeted
-      } else if (frame.resyncRequired || !sameLifetime) {
-        /*
-         * The gap cannot be replayed: the cursor fell out of the buffer, the replay would not fit
-         * the host's budget, or this is another host lifetime. Start from the host's current
-         * number (holding the old one would make the duplicate filter drop a new lifetime's
-         * events) and read what was missed from the snapshot.
-         */
-        this.lastSeq = frame.currentSeq
-        resync = true
-      } else {
-        resync = false
-      }
+      /*
+       * A gap that cannot be replayed (the cursor fell out of the buffer, the replay would not fit the host's budget, or
+       * this is another host lifetime) is read from the snapshot. A first-met host's replay is not a new event; if the
+       * screen was already holding something (it switched to a new host), that has to be re-read
+       */
+      const c = this.cursor.greet(frame)
+      const resync = c.firstContact ? greeted : c.resync
       // Calls made while connecting go out first, in order, then the rest of the app hears about it
       this.flush()
       this.emitConn('connected')
@@ -374,9 +336,7 @@ export class RpcClient {
     // Nothing but hello_ok counts before the handshake (#82)
     if (!this.ready) return
     if (frame.kind === 'event') {
-      if (frame.seq <= this.lastSeq) return // A repeat (#82), or a first-met host's old news (#173)
-      // The cursor moves before the handlers run, so an event is handed on once: every handler has to get it now
-      this.lastSeq = frame.seq
+      if (!this.cursor.take(frame.seq)) return // A repeat (#82), or a first-met host's old news (#173)
       deliver(this.eventHandlers, frame.event)
       return
     }

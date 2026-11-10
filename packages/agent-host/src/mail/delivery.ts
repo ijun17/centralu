@@ -1,7 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
-import { HOUR_MS, WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, needsReceiver, wakesMessage } from './rules.js'
+import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
 
@@ -243,8 +243,7 @@ export class MailDelivery {
     }
     this.lastSweepAt = now
     this.moveOnWorkOfGoneSessions()
-    const across = this.across
-    const recipients = across ? this.records.dueRecipients().filter((r) => !across(r)) : this.records.dueRecipients()
+    const recipients = this.records.dueRecipients().filter(this.here)
     if (this.catchUpPending) {
       this.catchUpPending = false
       await this.catchUp(recipients)
@@ -319,6 +318,12 @@ export class MailDelivery {
     await this.wakeInOrder(crowd)
   }
 
+  /**
+   * Whether an address is this host's to deliver to and to settle: not a session on another host (`across`), a linked machine's
+   * child included, which its own host serves. This host's list does not have it, which is not its being gone (#2164)
+   */
+  private readonly here = (address: string): boolean => !this.across?.(address)
+
   /** For a session in the crowd or left for its next turn: everything but the person's words written since the host came back */
   private readonly skipUnlessPersonSince = (message: MailRow, row: RecipientRow): boolean =>
     message.sender !== PERSON || (this.cutoff !== null && row.dueAt <= this.cutoff)
@@ -338,7 +343,7 @@ export class MailDelivery {
    * failed) still holds watched mail: it is settled now (§7.7). Cheap: only the parties of watched rows not settled
    */
   private moveOnWorkOfGoneSessions(): void {
-    for (const address of this.records.openParties()) {
+    for (const address of this.records.openParties().filter(this.here)) {
       const party = parseAddress(address)
       if (party?.kind !== 'session' || this.sessions.receiver(party.sessionId).kind !== 'gone') continue
       try {
@@ -553,7 +558,6 @@ export class MailDelivery {
    */
   private warnIfRunning(recipient: string, messageIds: readonly string[], now: number): void {
     if (!this.turns) return
-    const hour = Math.floor(now / HOUR_MS) * HOUR_MS
     const senders = new Set(messageIds.flatMap((id) => {
       const sender = this.records.message(id)?.sender
       return sender !== undefined && sender !== recipient && parseAddress(sender)?.kind === 'session' ? [sender] : []
@@ -565,12 +569,12 @@ export class MailDelivery {
       this.service.notice(PERSON, {
         body: WARNING_TEXT.pair(this.service.labelOf(pair[0] ?? recipient), this.service.labelOf(pair[1] ?? sender), turns),
         facts: { pairTurns: { sessions: pair, turns } },
-        dedupeKey: `pairturns:${pair.join('|')}:${hour}`,
+        dedupeKey: hourlyKey(`pairturns:${pair.join('|')}`, now),
       })
     }
     const host = this.turns.hostTurns()
     // The key an earlier build's notice of its cap used: one line an hour whichever build writes it
-    if (host > this.o.warnHostTurns) this.service.notice(PERSON, { body: WARNING_TEXT.host(host), facts: { hostCap: true }, dedupeKey: `hostcap:${PERSON}:${hour}` })
+    if (host > this.o.warnHostTurns) this.service.notice(PERSON, { body: WARNING_TEXT.host(host), facts: { hostCap: true }, dedupeKey: hourlyKey(`hostcap:${PERSON}`, now) })
   }
 
   /** The question about sleeping sessions came up, or was answered or went away: the Inbox is told */

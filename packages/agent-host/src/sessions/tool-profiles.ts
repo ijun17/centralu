@@ -36,13 +36,18 @@ export function isAppAgent(f: Pick<ToolProfileFacts, 'kind' | 'appId' | 'builder
 }
 
 /**
- * Does this ordinary session get the light, read-only set (#320)? Always, in a project (owner decision 2026-10-20: the
- * Settings switch "Let sessions look at other sessions" is gone, and a stored "off" is not read), and never for an agent
- * session an app stood up (M4 D-1): that agent hands its answer back to the app, so reading the project's conversations
- * would carry them out to an app that was never given them (the same reason it gets no apps, `appsFor`).
+ * An ordinary project worker (#2162): a `worker` in a project that no external app owns, so neither a builder nor an app's
+ * agent. The one answer for the reader set (#320: always, in a project, owner decision 2026-10-20), who ask_project and a
+ * machine's ask may reach, a hub's list of a machine's sessions, and handoff. An app's agent is never one: it hands its answer
+ * back to the app, so reading the project's conversations would carry them out to an app that was never given them (M4 D-1,
+ * the same reason it gets no apps, `appsFor`).
+ *
+ * The builder rule: a builder is never ordinary. A caller that knows the builder slot says so (`builder`); a row alone says it
+ * by its app id, which a builder always carries and which is never a reserved one (discovery refuses those, `newEntry`)
  */
-export function readsOwnProject(f: ToolProfileFacts): boolean {
-  return f.kind === 'worker' && !!f.projectId && !isAppAgent(f)
+export function isOrdinary(f: { kind: unknown; builder?: boolean } & Pick<ToolProfileFacts, 'projectId' | 'appId'>): boolean {
+  const appOwned = !!f.appId && !RESERVED_APP_IDS.includes(f.appId)
+  return f.kind === 'worker' && !!f.projectId && !appOwned && f.builder !== true
 }
 
 /**
@@ -54,7 +59,7 @@ export function toolProfileFor(f: ToolProfileFacts): ToolProfile | null {
   if (isAssistantKind(f.kind)) return 'assistant'
   if (f.kind === 'coordinator') return 'scoped'
   if (f.builder) return 'builder'
-  return readsOwnProject(f) ? 'reader' : null
+  return isOrdinary(f) ? 'reader' : null
 }
 
 /**

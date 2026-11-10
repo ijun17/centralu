@@ -1,6 +1,8 @@
 import { errorMessage } from '@cc/protocol/client'
 import type { MailThreadView, NormalizedEvent } from '@cc/protocol/client'
+import { mailNotification } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
+import { alertPerson } from './events/notices.js'
 
 /**
  * The person's mailbox (#1347, docs/plans/mailbox.md §10.1): its list, a thread, and the acts that are the person's. The host
@@ -179,6 +181,9 @@ export function mailAttention(mail: AppState['mail']): number {
 /** The mailbox's news (`mail_changed`): the list is read again, and the thread open in the Inbox if it is the one named. True when it was one */
 export function mailEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boolean {
   if (e.type !== 'mail_changed') return false
+  // A new message the person can read: one notification each, of any kind (#1630)
+  const notice = e.arrived ? mailNotification(e.arrived, { appFocused: get().appFocused, policy: get().notifyPolicy }) : null
+  if (notice) alertPerson(notice, set, get)
   void get().loadMail()
   if (get().mailThread?.thread.id === e.threadId) void refreshThread(get, set, e.threadId)
   return true

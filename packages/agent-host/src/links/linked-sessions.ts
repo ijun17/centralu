@@ -1,6 +1,7 @@
 import { AGENT_INSTRUCTIONS_MAX, BackgroundTask, HostLastAnswerResult, HostReadSessionResult, PermissionPreset, RpcMethods, HostRecallHit, HostSessionRow, Interruption, isInTurn, oneLineText, SessionId, SessionInfo, ToolName, isAssistantKind } from '@cc/protocol'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type ProjectNeed, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/centralu-tools.js'
+import { isOrdinary } from '../sessions/tool-profiles.js'
 import { budgetOf, fitMachineLines, toolLinesOf } from '../sessions/session-lines.js'
 import { askHubAuto } from './hub-auto.js'
 import { findMachine, qualifiedMachine } from './machine-ids.js'
@@ -363,7 +364,7 @@ export function linkedSessions(
         const sessions: { id: string; name: string; state: string }[] = []
         for (const raw of await listOf(m, 'sessions.list')) {
           // Ordinary sessions only, as on this computer: not an app's or a builder's, not the machine's assistant or a lead
-          if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || raw.kind !== 'worker' || raw.appId) continue
+          if (!isObj(raw) || m.hides(raw) || raw.projectId !== projectId || !isOrdinary({ kind: raw.kind, projectId, appId: typeof raw.appId === 'string' ? raw.appId : null })) continue
           if (typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
           sessions.push({ id: m.q.id(raw.id), name: oneLine(raw.name), state: oneLine(raw.state, 40) })
         }

@@ -51,6 +51,8 @@ function newAccess(boundaryOpen?: () => boolean): AppAccess {
     hub,
     store,
     ...(boundaryOpen ? { boundaryOpen } : {}),
+    // The manager's gate (`ProjectRegistry.trustGate`) over this test's projects and preset
+    trustGate: (_id, projectId) => (projects.find((p) => p.id === projectId)?.trusted || boundaryOpen?.() ? null : `Project "${projectId}" is not trusted`),
     session: (id) => sessions.get(id) ?? null,
     projects: () => projects,
     ensureAccess: async (sessionId, to, what) => {

@@ -29,7 +29,15 @@ function delegationOrigin(origin: ThreadOrigin): DelegationOrigin {
  */
 export function personWorkRecorder(mail: MessageService): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
   return (sessionId, text, fromScript) => {
-    mail.task(PERSON, mail.sessionAddress(sessionId), { text, origin: fromScript ? 'script' : 'create_session', delivered: true })
+    mail.task(PERSON, mail.sessionAddress(sessionId), { text, origin: fromScript ? 'script' : 'create_session', delivered: true, ...(fromScript ? { fromScript } : {}) })
+  }
+}
+
+/** The work a script started never began: its first message could not go in (#1463). The person's task is withdrawn, so their Inbox does not show it running */
+export function personWorkWithdrawer(mail: MessageService, records: MailboxRecords): (sessionId: string) => void {
+  return (sessionId) => {
+    const task = records.newestTask(PERSON, mail.sessionAddress(sessionId))
+    if (task) mail.done(PERSON, task.id)
   }
 }
 

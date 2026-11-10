@@ -1,8 +1,9 @@
 import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
+import { partyName } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { Button } from '../../components/Button.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
-import { crowdText, heldLabel, heldResume, partyName, threadStateLabel } from './mailLabels.js'
+import { crowdText, heldLabel, heldResume, threadStateLabel } from './mailLabels.js'
 
 /**
  * The Mail section of the inbox (#1347, docs/plans/mailbox.md §10.1): the threads the person is in with the unread first, the

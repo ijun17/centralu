@@ -1,5 +1,5 @@
 import { gridSessionIds, isAway, isInTurn, type SessionSummary } from '@cc/core'
-import { handoffOpening, handoffPrompt } from '@cc/protocol/client'
+import { busyWith, handoffOpening, handoffPrompt } from '@cc/protocol/client'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
 
@@ -15,13 +15,14 @@ export { handoffPrompt }
 const handoffInFlight = new Set<string>()
 
 /**
- * The card that blocks asking the agent for a handoff note (#174) — `null` if there is none. The
- * store's `handoffSession` and the sidebar's confirmation window use the same decision.
+ * The card that blocks asking the agent for a handoff note (#174) — `null` if there is none: the busy rule's card
+ * (`busyWith`, #2158), so a state that says a card stands blocks it too, though the card is not carried. The store's
+ * `handoffSession` and the sidebar's confirmation window use the same decision. A turn or background work does not
+ * block it: the request waits for the turn's end below, and the confirmation window says what archiving stops.
  */
-export function handoffBlockedBy(s: Pick<SessionSummary, 'pendingQuestions' | 'pendingApproval'>): 'question' | 'approval' | null {
-  if (s.pendingQuestions.length > 0) return 'question'
-  if (s.pendingApproval) return 'approval'
-  return null
+export function handoffBlockedBy(s: Pick<SessionSummary, 'state' | 'pendingQuestions' | 'pendingApproval'>): 'question' | 'approval' | null {
+  const busy = busyWith(s)
+  return busy === 'question' || busy === 'approval' ? busy : null
 }
 
 /** The store's action that hands a session off */
@@ -99,7 +100,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
        */
       const quietBy = Date.now() + 10 * 60_000
       // A machine that is away shows its turn as not working (#1822): what it does there is not known, so it is waited for
-      while (get().sessions[sessionId]?.state === 'working' || isAway(get().sessions[sessionId], get().machines)) {
+      while (isInTurn(get().sessions[sessionId]?.state) || isAway(get().sessions[sessionId], get().machines)) {
         if (Date.now() > quietBy) throw new Error('the session never finished its current turn')
         await new Promise((r) => setTimeout(r, 500))
       }

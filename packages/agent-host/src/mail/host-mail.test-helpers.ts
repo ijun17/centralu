@@ -49,6 +49,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
       note: () => {},
       deliver,
     }),
+    projectTrusted: (projectId) => store.projects.listProjects().some((p) => p.id === projectId && p.trusted),
   }
   const m = hostMail(store, sessions, {
     hostId: HOST,

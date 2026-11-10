@@ -1,6 +1,6 @@
 import { bytesText } from '../bytes-text.js'
 import { scriptLabel } from '../mail/script-label.js'
-import type { StoredMessage } from '@cc/protocol'
+import type { AgentLook, StoredMessage } from '@cc/protocol'
 import { trustedJsonText } from './centralu-tools.js'
 
 /**
@@ -231,7 +231,7 @@ function endingReplies(entries: Entry[]): { seq: number; text: string }[] {
 export type RecordChild = {
   id: string
   name: string
-  state: 'working' | 'waiting for the person' | 'finished'
+  state: Exclude<AgentLook, 'waiting'> | 'waiting for the person'
 }
 /** A background task of the predecessor that is running now (#1481) */
 export type RecordBackground = { id: string; kind: string; description: string; timer?: boolean }

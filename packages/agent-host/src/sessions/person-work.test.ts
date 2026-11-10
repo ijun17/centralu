@@ -2,11 +2,13 @@
  * A session a script or the RPC started with a first message (docs/plans/mailbox.md §8.1, slice 3), over the real manager: nobody is waiting for it, so
  * the work is the person's and the end of its first turn is a report in their Inbox. A window's own session is the person's typing, not work.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from '../mail/address.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
-import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { SessionManager } from './manager.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -104,6 +106,83 @@ describe('a script starts a session with a first message', () => {
     expect(owes(s.id)).toBe(true)
   })
 
+  it('background work that ends with no turn after it is reported as ended, and the task is reported (#1463)', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const dev = { id: 't1', kind: 'shell', description: 'pnpm export', status: 'running' } as const
+    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [dev] })
+    handleOf(s.id)!.answer('Started the export')
+    await w.until(() => reportsOf(s.id).length > 0)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ ...dev, status: 'completed' }] })
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    await w.until(() => reportsOf(s.id).length > 1)
+    expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }), body: expect.stringContaining('has ended, and no turn followed it') })
+    expect(settledOf(s.id)).toBe('reported')
+    expect(owes(s.id)).toBe(false)
+  })
+
+  it('a pause the host quit over is reported at the next start as the work’s end, its tasks stopped; a deleted session leaves no pause (#1463)', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const gone = await start({ initialPrompt: 'Run the import' }, 'limited')
+    for (const [id, description] of [[s.id, 'pnpm export'], [gone.id, 'pnpm import']] as const) {
+      handleOf(id)!.event({ type: 'background_tasks', sessionId: id, live: [{ id: 't1', kind: 'shell', description, status: 'running' }] })
+      handleOf(id)!.answer('Started it')
+      await w.until(() => reportsOf(id).length > 0)
+    }
+    await w.mgr.trash.trashSession(gone.id)
+    expect(w.store.settings.appSetting(`person_report_paused:${gone.id}`)).toBeNull()
+    await w.mgr.tenure.disposeAll()
+    // The next start: the work went with the process, and no turn will end it
+    const next = new SessionManager(w.store, w.adapters, () => {})
+    wireHostMail(next, w.store)
+    try {
+      await w.until(() => reportsOf(s.id).length > 1)
+      expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }) })
+      expect(settledOf(s.id)).toBe('reported')
+      expect(w.store.settings.appSetting(`person_report_paused:${s.id}`)).toBeNull()
+    } finally {
+      await next.tenure.disposeAll()
+    }
+  })
+
+  it('a first message that could not go in withdraws the task: no work began, and the Inbox does not show it running (#1463)', async () => {
+    const send = vi.spyOn(CrossHandle.prototype, 'send').mockImplementationOnce(() => {
+      throw new Error('the tool closed its input')
+    })
+    await expect(start({ initialPrompt: 'Run the export' }, 'limited')).rejects.toThrow('the tool closed its input')
+    send.mockRestore()
+    const task = personTasks().at(-1)!
+    expect(task).toMatchObject({ body: 'Run the export' })
+    expect(w.store.mailbox.recipients(task.id)[0]).toMatchObject({ settled: 'withdrawn' })
+  })
+
+  it("a report to the person the store cannot take is said on stderr, not left to reject: nobody waits for it", async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const unpause = ChildOwnership.prototype.unpauseReport
+    const failing = vi.spyOn(ChildOwnership.prototype, 'unpauseReport').mockImplementation(function (this: ChildOwnership, id, kind) {
+      if (kind === 'person') throw new Error('the disk is full')
+      return unpause.call(this, id, kind)
+    })
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const rejected: unknown[] = []
+    const onRejection = (e: unknown) => rejected.push(e)
+    process.on('unhandledRejection', onRejection)
+    try {
+      handleOf(s.id)!.answer('Done')
+      await w.until(() => said.mock.calls.some((c) => String(c[0]).includes("could not write the person's report")))
+      await new Promise((r) => setImmediate(r))
+      expect(rejected).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+      failing.mockRestore()
+      said.mockRestore()
+    }
+  })
+
   it('work it handed on in the turn keeps the task open: the turn’s end is a pause, not the work’s end', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
@@ -182,7 +261,7 @@ describe('the first message is the script’s, not the person’s (3.8b)', () =>
 
   it('is the script’s on the task too: its origin is the script, and its sender is still the person', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited', 'ci runner')
-    expect(taskOf(s.id)).toMatchObject({ kind: 'task', sender: PERSON, origin: 'script' })
+    expect(taskOf(s.id)).toMatchObject({ kind: 'task', sender: PERSON, origin: 'script', facts: { fromScript: { credential: 'ci runner' } } })
   })
 
   it('a program that said nothing is an unnamed script, and a label that could pose as something else is made plain', async () => {

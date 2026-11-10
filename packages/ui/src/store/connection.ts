@@ -9,7 +9,7 @@ import type {
   ToolStatus,
 } from '@cc/protocol/client'
 import {
-  isAway,
+  wakeable,
   readNotifyPolicy,
   sanitizeArrangements,
   sanitizeGridPanels,
@@ -32,6 +32,7 @@ import {
 import { holdPinnedViews } from './apps.js'
 import { machinesHoldingMirror, reloadCommandRuns } from './machines.js'
 import { settleUnsureSends } from './sessions/send.js'
+import { rereadAll } from './events/rereads.js'
 
 /**
  * The store's link to the host: attaching to a platform (its subscriptions, the first reads and the
@@ -694,18 +695,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     void get().checkUpdate(false)
     // Resolves whether a message being sent at the moment of disconnect reached the host (#173)
     void settleUnsureSends(get, set)
-    // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows
-    void get().refreshExternalApps()
-    void get().refreshAppQuestions()
-    // And the requests waiting for the person (#1405): a missed host_request would leave a program waiting unseen
-    void get().refreshHostRequests()
-    // So is a proposal list change (#703): a missed `orchestrator_proposals_changed` leaves a card, the count and the badge stale
-    void get().refreshMcpProposals()
-    void get().refreshSkillProposals()
-    // So are the preferences (#1306): a missed `prefs_changed` leaves the Assistant's change to a setting unseen
-    void get().refreshPrefs()
-    // So are the links' states (#82): a machine that went away or came back during the gap
-    const machinesRead = get().refreshMachines()
+    // Broadcasts from the gap while disconnected never come again: every list one keeps is read again (`rereads.ts`, #2163)
+    const machinesRead = rereadAll(get, set)
     // The pinned views this window shows are leased to its connection, which just ended (#392)
     void holdPinnedViews(get, set)
 
@@ -797,16 +788,11 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // Only revives a process that was running right before the disconnect but that the new host does not know about
     const alive = new Set(listed.filter((x) => x.live).map((x) => x.id))
     /*
-     * Never one on a machine that is away (#82): the hub listed it from its mirror, and waking it would only fail there.
-     * That machine's own `machine_resync` wakes what has to be woken once it is back (`recoverMachine`). Judged against
-     * the machine list read after the drop, not the one from before it, and never a row the hub still lists from its
-     * mirror: its `live` is last heard, not a fact (#1611).
+     * Never one on a machine that is away (#82), one the hub lists from its mirror (#1611), or one in a turn an update cut
+     * (#1618): `wakeable`, judged against the machine list read after the drop, not the one from before it
      */
     await machinesRead
-    const toWake = wasLive.filter((x) => {
-      const now = get().sessions[x.id]
-      return !alive.has(x.id) && now && !now.unreachable && !isAway(now, get().machines)
-    })
+    const toWake = wasLive.filter((x) => !alive.has(x.id) && wakeable(get().sessions[x.id], get().machines))
     if (toWake.length === 0) return
 
     set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })

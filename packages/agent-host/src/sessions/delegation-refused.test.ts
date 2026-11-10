@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { LinkedSessions } from '../adapters/contract.js'
 import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
+import { ASK_THE_PERSON } from './start-agent-terms.js'
 
 const S15 = 'Refused (untrusted_project): your project consumer is not trusted, so work you give outside it (to the target) waits for the person to trust consumer. Nothing was started.'
 
@@ -173,7 +174,7 @@ describe('ask_project', () => {
     refusal = S15
     expect(await w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'export the sprites' })).toEqual({ ok: false, error: S15 })
     refusal = null
-    const trust = "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
+    const trust = `Project "${w.caller.name}" is not trusted, so asking another project is refused — the person can trust it from the project menu. ${ASK_THE_PERSON}`
     expect(await w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'export the sprites' })).toEqual({ ok: false, error: trust })
     expect(await w.mgr.askProject(caller, { project: 'nowhere', task: 'x' })).toEqual({ ok: false, error: trust })
     expect(handleOf(target)?.sent ?? []).toEqual([])

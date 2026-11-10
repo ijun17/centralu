@@ -78,10 +78,17 @@ const listOrTranscript = (rows: Row[]): Shape => (rows.every((r) => typeof r.rol
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 
+/** Who wrote a line of `read_session`: a session, an app or a script wrote a user line the person did not (#1468) */
+export function rowAuthor(row: Row): string {
+  const role = str(row.role)
+  if (role !== 'user') return role === 'assistant' ? 'agent' : role
+  return str(row.from) || (row.fromScript ? `script ${str(row.fromScript)}` : row.fromApp ? `app ${str(row.fromApp)}` : 'person')
+}
+
 /** One line of a session's conversation: who, when, and what they said or ran */
 function TranscriptRow({ row }: { row: Row }) {
   const role = str(row.role)
-  const who = role === 'user' ? str(row.from) || 'person' : role === 'assistant' ? 'agent' : role
+  const who = rowAuthor(row)
   const ts = str(row.ts)
   const body = str(row.text) || [str(row.tool), str(row.title)].filter(Boolean).join(' · ')
   const isTool = !row.text && (row.tool || row.title)

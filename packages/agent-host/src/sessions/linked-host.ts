@@ -1,5 +1,5 @@
 import type { OrchestratedSession, RecallHit } from '../adapters/contract.js'
-import { oneLineText, isAssistantKind } from '@cc/protocol'
+import { oneLineText, isAssistantKind, isAssistantOrCoordinator } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { budgetOf } from './session-lines.js'
@@ -88,7 +88,7 @@ export class LinkedHost {
    */
   directedFromHub(sessionId: string): void {
     const target = this.host.meta.get(sessionId)
-    if (!target || isAssistantKind(target.kind) || target.kind === 'coordinator') {
+    if (!target || isAssistantOrCoordinator(target.kind)) {
       throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
     }
   }

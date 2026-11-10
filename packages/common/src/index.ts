@@ -4,3 +4,4 @@
  */
 export * from './listeners.js'
 export * from './pending-requests.js'
+export * from './event-cursor.js'

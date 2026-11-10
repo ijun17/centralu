@@ -36,6 +36,11 @@ export function isAssistantKind(kind: unknown): boolean {
   return kind === 'orchestrator' || kind === 'assistant'
 }
 
+/** A directing seat's kind (#2162): the Assistant or a coordinator, which carry role text and are not shown to a hub */
+export function isAssistantOrCoordinator(kind: unknown): boolean {
+  return isAssistantKind(kind) || kind === 'coordinator'
+}
+
 /** The Assistant's kind as this build sends and stores it: the old value, which every supported release parses (#2133) */
 export const ASSISTANT_KIND = 'orchestrator' satisfies SessionKind
 

@@ -7,6 +7,8 @@ import type { SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { canonicalPath } from '../dev-services/path-guard.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
+import { ProjectRegistry } from './project-registry.js'
+import { ASK_THE_PERSON } from './start-agent-terms.js'
 
 /*
  * The worktree code over a host it reaches only through `WorktreeHost` (#428): the refusals before anything is checked
@@ -55,21 +57,22 @@ describe('before anything is checked out', () => {
   it("an untrusted project's repository is not checked out, unless the asking session's auto opens that boundary", async () => {
     const dir = repo('untrusted')
     const asked: string[] = []
+    // The manager's gate over this test's store, which has no project p1 registered: not trusted
+    const registry = new ProjectRegistry({ store, autoBoundaryOpen: (id: string, boundary?: string) => (asked.push(`${id}:${boundary}`), false) } as never)
     const wt = new WorktreeSessions(hostWith({
       gitTrust: () => ({ trusted: false }),
-      projectTrusted: () => false,
-      autoBoundaryOpen: (id, boundary) => (asked.push(`${id}:${boundary}`), false),
+      trustGate: (...a) => registry.trustGate(...a),
       worktreeRoot: join(root, 'trees'),
     }))
-    const refusal = "Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first."
-    await expect(wt.createWorktree({ cwd: dir, projectId: 'p1' }, 's1')).rejects.toThrow(refusal)
-    await expect(wt.createWorktree({ cwd: dir, projectId: 'p1', askedBy: 'parent' }, 's1')).rejects.toThrow(refusal)
-    expect(asked).toEqual(['parent:worktree in an untrusted project'])
+    // The person (no caller) is not told what a session should do instead
+    await expect(wt.createWorktree({ cwd: dir, projectId: 'p1' }, 's1')).rejects.toThrow(/^Project "p1" is not trusted, so checking out a worktree is refused — trust it from the project menu.$/)
+    await expect(wt.createWorktree({ cwd: dir, projectId: 'p1', askedBy: 'parent' }, 's1')).rejects.toThrow(`Project "p1" is not trusted, so checking out a worktree is refused — the person can trust it from the project menu. ${ASK_THE_PERSON}`)
+    expect(asked).toEqual(['parent:checking out a worktree (untrusted project "p1")'])
   })
 
   it('a branch name git would refuse is refused before the checkout', async () => {
     const dir = repo('trusted')
-    const wt = new WorktreeSessions(hostWith({ gitTrust: () => ({ trusted: true }), projectTrusted: () => true, worktreeRoot: join(root, 'trees') }))
+    const wt = new WorktreeSessions(hostWith({ gitTrust: () => ({ trusted: true }), trustGate: () => null, worktreeRoot: join(root, 'trees') }))
     await expect(wt.createWorktree({ cwd: dir, projectId: 'p1', worktreeBranch: 'bad..name' }, 's1')).rejects.toThrow('Not a valid branch name: bad..name')
   })
 
@@ -126,6 +129,7 @@ describe('where a new session worktree forks from (#1484)', () => {
         store,
         gitTrust: () => ({ trusted: true }),
         projectTrusted: () => true,
+        trustGate: () => null,
         trunkOf: () => 'main',
         worktreeRoot: join(root, 'trees'),
       }),

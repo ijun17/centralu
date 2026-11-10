@@ -41,6 +41,10 @@ export type DelegationHost = {
   readonly restartPolicy: Pick<RestartPolicy, 'applyDeferredRestart'>
   readonly hostCards: Pick<HostCards, 'askHost' | 'withdrawHostAsk'>
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
+  /** The project-trust gate (`ProjectRegistry.trustGate`, #2159): null, or the one refusal */
+  trustGate: (callerId: string | null, projectId: string | null, boundary: string, quiet?: boolean) => string | null
+  /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`): for a read, not a crossing (`trustGate`) */
+  projectTrusted: (projectId: string | null) => boolean
   builderRefOf: (m: Pick<SessionInfo, "id" | "appId" | "projectId">) => AppRef | null
   busyAnswer: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => Extract<BusyAnswer, { state: "busy"; }>
   busyChoices: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => BusyChoice[]

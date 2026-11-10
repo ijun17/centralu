@@ -11,7 +11,7 @@ import {
   type MachineStatus,
   type MachineVersions,
   type NormalizedEvent,
-  isAssistantKind,
+  isAssistantOrCoordinator,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
@@ -43,7 +43,7 @@ function autostartOf(a: RemoteAutostart | undefined): MachineInfo['autostart'] {
 
 /** A session the hub does not show: the remote's Assistant (under either of its kind values, #2133) and its coordinators (§3.4) */
 export function hiddenKind(s: unknown): boolean {
-  return isObj(s) && (isAssistantKind(s.kind) || s.kind === 'coordinator')
+  return isObj(s) && isAssistantOrCoordinator(s.kind)
 }
 
 /**

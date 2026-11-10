@@ -23,23 +23,20 @@ import { buildMessageFrame, mailCalls, quoted, type MessageCalls, type MessageFr
 import { UlidMaker, messageIdOf } from './ids.js'
 import { updateInPlace, type TurnReport } from './turn-report.js'
 import type { MailReach } from './reach.js'
+import { sendGuards } from './send-guards.js'
 import {
-  ASKS_PER_HOUR,
-  HOUR_MS,
   MAX_RECIPIENTS,
   MINUTE_MS,
   READ_CHAIN,
   READ_CHARS,
   READ_ITEMS,
   REFUSAL_TEXT,
-  REPEAT_WINDOW_MS,
   bodyLimit,
   cutTask,
   dueAt,
   firstLineOf,
   flowsDownTo,
   pickWork,
-  postsPerMinute,
   quietAnswer,
   refuse,
   tooLongText,
@@ -92,7 +89,7 @@ export type SendResult = {
 export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string }
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string } }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -137,7 +134,8 @@ export type DrainResult = {
   asker: string | null
 }
 
-export type MailChange = { messageId: string; rootId: string; recipients: string[] }
+/** `arrived`: the message itself is new, not a change to one already stored (what the person's OS notification is raised for, #1630) */
+export type MailChange = { messageId: string; rootId: string; recipients: string[]; arrived?: true }
 
 export class MessageService {
   private readonly now: () => number
@@ -214,7 +212,7 @@ export class MessageService {
     const merged = new Map<string, MailChange>()
     for (const c of this.queued) {
       const kept = merged.get(c.messageId)
-      merged.set(c.messageId, kept ? { ...kept, recipients: [...new Set([...kept.recipients, ...c.recipients])] } : c)
+      merged.set(c.messageId, kept ? { ...kept, ...c, recipients: [...new Set([...kept.recipients, ...c.recipients])], ...(kept.arrived ? { arrived: true } : {}) } : c)
     }
     this.queued = []
     for (const c of merged.values()) this.listeners.emit(c)
@@ -261,12 +259,13 @@ export class MessageService {
       if (why !== null) throw refuse(why, this.refusalText(why, r))
     }
 
+    // Before the transaction: a guard that refuses tells the person in a write of its own, which the refusal must not undo
+    const now = this.now()
+    sendGuards({ records: this.records, reach: this.reach, notice: (r, n) => this.notice(r, n) }, { sender, cls, to, text, requests }, now)
     return this.run(() => {
-      const now = this.now()
       // The person's message a request cites, checked here, in the send's transaction: evidence for the Assistant's judgement (docs/plans/cited-requests.md §3)
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
-      this.guards(sender, cls, to, text, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
       const urgent = input.urgent === true
@@ -346,7 +345,7 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       return this.put(
-        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin },
+        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })
@@ -1014,7 +1013,7 @@ export class MessageService {
       if (e instanceof MailTargetMissing) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(e.replyTo))
       throw e
     }
-    if (!stored.duplicate) this.changed(stored, rows.map((r) => r.recipient))
+    if (!stored.duplicate) this.queued.push({ messageId: stored.id, rootId: stored.rootId, recipients: rows.map((r) => r.recipient), arrived: true })
     return stored
   }
 
@@ -1093,20 +1092,6 @@ export class MessageService {
   private causeOf(sender: string): string | null {
     const turn = this.opts.turn?.(sender) ?? null
     return turn !== null && turn.by !== 'person' && turn.by !== 'cli' ? turn.starter : null
-  }
-
-  /** The guards of a send, over the store so a restart does not reset them (§7.5) */
-  private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, requests: readonly boolean[], now: number): void {
-    for (const r of to) {
-      if ((cls === 'session' || cls === 'app') && this.records.sameBody(sender, r, text, now - REPEAT_WINDOW_MS)) throw refuse('repeat', REFUSAL_TEXT.repeat(this.reach.labelOf(r)))
-    }
-    const limit = postsPerMinute(cls)
-    if (limit !== Infinity && this.records.postsSince(sender, now - MINUTE_MS) >= limit) {
-      throw refuse('rate_limited', `at most ${limit} posts a minute from ${cls === 'app' ? 'an app' : 'a session'}: wait a minute`)
-    }
-    for (const [i, r] of to.entries()) {
-      if (requests[i] && this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) throw refuse('ask_rate', REFUSAL_TEXT.ask_rate())
-    }
   }
 
   /** The answer `answer` to `question` is held for the person: the question stays open (it keeps the answer's id) and its asker is told once, quietly (S14) */

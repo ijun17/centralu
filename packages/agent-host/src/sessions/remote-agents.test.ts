@@ -216,6 +216,8 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
       tellSession: async (_to: string, text: string) => void told.push(text),
       autoBoundaryOpen: () => false,
+      // The caller's project is trusted here
+      trustGate: () => null,
       emit: () => {},
       uiPreferences: () => ({}),
     } as unknown as RemoteAgentsHost

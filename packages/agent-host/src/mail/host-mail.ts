@@ -7,12 +7,12 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
-import { HOUR_MS, REFUSAL_TEXT, WARNING_TEXT, firstLineOf } from './rules.js'
+import { REFUSAL_TEXT, WARNING_TEXT, firstLineOf, hourlyKey } from './rules.js'
 import { MailTool } from './tool.js'
 import { MailAcross } from './across.js'
 import { entryOf } from './find.js'
@@ -38,6 +38,8 @@ export type HostMailSessions = {
   /** §9.5: the old report paths still owe the owner a report of the child */
   oldOwes(ownerId: string, childId: string): boolean
   mailSessions(): MailSessions
+  /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`, #2159): what the reach's hold reads */
+  projectTrusted(projectId: string): boolean
   /** The sessions whose running work `id` waits on (`SessionProcesses.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
   waitsOn?(id: string): string[]
   /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`HostTenure.quitTold`) */
@@ -54,7 +56,7 @@ export type HostMailSessions = {
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes' | 'projectRegistry'>,
   assistantHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mail.mailSeats(assistantHasMailCommand)
@@ -68,6 +70,7 @@ export function mailSessionsOf(
     keptInTurn: (id) => mgr.tenure.keptInTurn(id),
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
+    projectTrusted: (projectId) => mgr.projectRegistry.projectTrusted(projectId),
     waitsOn: (id) => mgr.processes.waitsOn(id),
     quitTold: (id) => mgr.tenure.quitTold(id),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
@@ -135,7 +138,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
     project: (projectId) => {
       const p = projects().find((x) => x.id === projectId)
-      return p && { trusted: p.trusted === true, name: p.name }
+      return p && { trusted: sessions.projectTrusted(projectId), name: p.name }
     },
     askGroupMembers: (address) => askGroupMembers(sessions, hostId, address),
   })
@@ -262,10 +265,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     sessionChanged: (id) => delivery.poke(id),
     waiting: (id) => service.wakingFor(addressOf(id)),
     // The person's warning, written as the mailbox writes its own (delivery.ts `warnIfRunning`): one a clock hour for the session, and nothing waits for it
-    compactCycles: (id, count) => {
-      const hour = Math.floor(now() / HOUR_MS) * HOUR_MS
-      service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: `compactcycles:${addressOf(id)}:${hour}` })
-    },
+    compactCycles: (id, count) => service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: hourlyKey(`compactcycles:${addressOf(id)}`, now()) }),
     sessionEvent: (e, ended) => mailTurns.observe(e, ended),
     tool: (id, args) => tool.call(id, args),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
@@ -273,7 +273,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     waitingOn,
     answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
-    personWork: { started: personWorkRecorder(service), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
+    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
     // A turn's end is a report on the task, and the owner is told as mail when it can read it (§9.3)
     report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),

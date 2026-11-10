@@ -46,7 +46,7 @@ export function createdPreset(seat: PermissionPreset, project: { trusted: boolea
  */
 export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   Pick<ProjectCreation, 'createProjectAsked' | 'askAppProject' | 'createProjectOnMachine' | 'addFolderAsked' | 'addFolderOnMachine'> &
-  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation'> & {
+  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation' | 'projectTrusted'> & {
   /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
@@ -178,12 +178,8 @@ export function centraluToolsFor(
    * in a clone nobody trusted could otherwise search every conversation (the reason #382 keeps ask_project and attach_app
    * from there). Acting stays inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
    */
-  const trustedIds = () => new Set(host.store.projects.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
   /** This reader's view reaches past its own project: only from a trusted one */
-  const wide = () => {
-    const own = ownProjectId()
-    return !!ownProject && own !== null && trustedIds().has(own)
-  }
+  const wide = () => !!ownProject && host.projectTrusted(ownProjectId())
   /** An Assistant's row is never read, even one with a project (a project assistant restored from before #1941) */
   const readable = (s: SessionInfo) => !isAssistantKind(s.kind) && (inScope(s) || wide())
   /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one (`CentraluTools.mayRead`) */
@@ -205,11 +201,7 @@ export function centraluToolsFor(
   const projectLabel = (projectId: string | null, names: Map<string, string>, untrusted: (id: string) => boolean) =>
     !projectId ? '(none)' : (names.get(projectId) ?? '(project no longer exists)') + (names.has(projectId) && untrusted(projectId) ? NOT_TRUSTED : '')
   /** Which projects a row is marked untrusted for: only in a trusted reader's wide view, where its own is trusted */
-  const untrustedMark = () => {
-    if (!wide()) return () => false
-    const trusted = trustedIds()
-    return (id: string) => !trusted.has(id)
-  }
+  const untrustedMark = () => (wide() ? (id: string) => !host.projectTrusted(id) : () => false)
   // A stale id (deleted, replaced) says what it was and which live session now carries its name (stale-session-id.ts)
   const readError = (id: string) =>
     (ownProject && wide() ? `Not a session you can read: ${id}` : scopeText(id)) + staleSessionHint(host, id, readable, central, 'read')
@@ -395,7 +387,8 @@ export function centraluToolsFor(
       const seat = host.meta.get(assistantId)
       const own = seat?.permissionPreset ?? 'safe'
       const target = remote[0] ?? local[0]
-      const trusted = target?.trusted === true
+      // A linked machine's project as that machine says; one here as this host reads it now
+      const trusted = remote[0] ? remote[0].trusted === true : host.projectTrusted(target?.id ?? null)
       const asker = host.askedBy?.(assistantId)
       // Held to the lowest asking session's preset: a turn with two askers (which fails closed) holds to the lower of them
       const askerPreset = asker ? lowestPreset(...[asker, ...(asker.also ?? [])].map((a) => host.meta.get(a.sessionId)?.permissionPreset ?? 'safe')) : undefined

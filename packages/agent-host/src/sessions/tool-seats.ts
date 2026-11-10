@@ -222,28 +222,38 @@ export function profileAllows(profile: ToolProfile, name: string, tier: RareTier
   return baseAllows(profile, name)
 }
 
+/**
+ * The seats that hold a capability (#2162), the one answer for the tool lists (`baseAllows`), who mail is for
+ * (`MailSessions.canReadMail`) and who may attach apps (`SessionAppWiring`). The mailbox is an ordinary session's and
+ * the Assistant's, which owns the threads send_to_session opens and runs it as a command; a coordinator, a builder and
+ * an app's agent are not parties of it (#1347). The app-access tools are a reader's, and the Assistant's for the root
+ * apps it attaches when it needs one (#1205).
+ */
+const SEATS_WITH: Record<'mail' | 'apps', readonly ToolProfile[]> = { mail: ['reader', 'assistant'], apps: ['reader', 'assistant'] }
+
+/** Whether this seat holds the capability (`SEATS_WITH`); no seat holds none */
+export function seatHas(profile: ToolProfile | null, capability: keyof typeof SEATS_WITH): boolean {
+  return profile !== null && SEATS_WITH[capability].includes(profile)
+}
+
 /** The profile rule itself, whatever the tier: who may use which of Centralu's commands */
 function baseAllows(profile: ToolProfile, name: string): boolean {
+  if (MAIL_TOOLS.some((t) => t.name === name)) return seatHas(profile, 'mail')
+  if (APP_ACCESS_TOOLS.some((t) => t.name === name)) return seatHas(profile, 'apps')
   if (profile === 'reader') {
     return (
       name === 'update_centralu' ||
       READER_TOOLS.some((t) => t.name === name) ||
       DELEGATE_TOOLS.some((t) => t.name === name) ||
       AGENT_TOOLS.some((t) => t.name === name) ||
-      APP_ACCESS_TOOLS.some((t) => t.name === name) ||
-      MAIL_TOOLS.some((t) => t.name === name) ||
       COMPACT_TOOLS.some((t) => t.name === name)
     )
   }
-  // The mailbox is an ordinary session's and the Assistant's, which owns the threads send_to_session opens and runs it as a command;
-  // a coordinator, a builder and an app's agent are not parties of it (#1347)
-  if (MAIL_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   // compact_self (#1451): the two long-lived seats; the reader branch above has it
   if (COMPACT_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   // ask_project is a reader's alone: every directing seat already works inside its own view. start_agent's pair (#561) is
-  // the Assistant's too (#853), for children outside any project, and so are the app-access tools (#1205), for the
-  // root apps it attaches when it needs one
-  if (AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
+  // the Assistant's too (#853), for children outside any project
+  if (AGENT_TOOLS.some((t) => t.name === name)) return profile === 'assistant'
   if (DELEGATE_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'assistant') return !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)

@@ -79,7 +79,7 @@ export function mailPeers(o: {
                       startedFromHub: s.startedFromHub === true,
                       waitingSince: typeof s.waitingSince === 'number' ? s.waitingSince : null,
                       createdAt: s.createdAt,
-                      ...tasksOf(s),
+                      ...factsOf(s),
                     },
                     { address: sessionAddress(o.hostId, `${m.id}.${s.id}`), project: projectId === null ? null : (names.get(projectId) ?? projectId), machine: m.name, machineId: m.id },
                   ),
@@ -100,8 +100,17 @@ export function mailPeers(o: {
   }
 }
 
-/** A mirrored session's background work and how its turn was cut short, as its machine pushed them: what makes it paused (#2146) */
-function tasksOf(s: Record<string, unknown>): { backgroundTasks?: BackgroundTask[]; interruption?: unknown } {
+/**
+ * What a mirrored session's look and busyness read beyond its state (`agentLook`, `atRest`), as its machine pushed them: its
+ * background work (paused, #2146), how its turn was cut short (stopped), and the cards open on it (waiting), as this host's
+ * own rows carry them
+ */
+function factsOf(s: Record<string, unknown>): { backgroundTasks?: BackgroundTask[]; interruption?: unknown; pendingApproval?: unknown; pendingQuestions?: unknown[] } {
   const tasks = z.array(BackgroundTask).safeParse(s.backgroundTasks)
-  return { ...(tasks.success ? { backgroundTasks: tasks.data } : {}), ...(s.interruption ? { interruption: s.interruption } : {}) }
+  return {
+    ...(tasks.success ? { backgroundTasks: tasks.data } : {}),
+    ...(s.interruption ? { interruption: s.interruption } : {}),
+    ...(s.pendingApproval ? { pendingApproval: s.pendingApproval } : {}),
+    ...(Array.isArray(s.pendingQuestions) ? { pendingQuestions: s.pendingQuestions } : {}),
+  }
 }

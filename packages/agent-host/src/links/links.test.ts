@@ -2566,7 +2566,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await eventually(() => !!card())
     void hub.mgr.setProjectTrusted('p-hub', false)
     expect(card()).toBeFalsy()
-    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
@@ -2577,7 +2577,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     // Taken away at the store, so only the read after the answer can see it
     hub.store.projects.setProjectTrusted('p-hub', false)
     await answer('allow')
-    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
     expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
@@ -3160,7 +3160,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await remote.mgr.setProjectTrusted('p-app', false)
     const refused = start({ branch: 'feat-remote' })
     await answer('allow')
-    expect(await refused).toMatchObject({ ok: false, error: expect.stringContaining('Worktree sessions need a trusted project') })
+    expect(await refused).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so checking out a worktree is refused') })
     await remote.mgr.setProjectTrusted('p-app', true)
     const call = start({ branch: 'feat-remote' })
     expect((await answer('allow')).detail).toMatchObject({ worktree: { branch: 'feat-remote' } })

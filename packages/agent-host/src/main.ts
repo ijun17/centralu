@@ -431,7 +431,6 @@ const userAppAdoption = new UserAppAdoption({
  */
 const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('assistant').includes('mail')), { hostId: hubSelfId(store) })
 const mailDelivery = hostMailbox.delivery
-hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
 mgr.mail.useMail(hostMailbox.hooks)
 // The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
 const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
@@ -451,6 +450,7 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   tellsNow: (id) => mgr.mail.tellsMailNow(id),
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
 })
+hostMailbox.service.onChange((c) => events.push(mailPerson.changeEvent(c)))
 // Terminal and command output can arrive before the server exists: a restarted one writes as it starts (HO11, lifecycle/gate.ts)
 const terminals = new TerminalService(screens.push, ptyBroker ? brokerPtyModule(ptyBroker) : undefined)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal

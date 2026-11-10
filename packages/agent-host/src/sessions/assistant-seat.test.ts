@@ -76,6 +76,7 @@ beforeEach(() => {
     checkApp: vi.fn(),
     createApp: vi.fn(),
     refusesDelegation: vi.fn(() => null),
+    projectTrusted: (projectId) => store.projects.listProjects().some((p) => p.id === projectId && p.trusted),
   }
 })
 afterEach(() => store.close())

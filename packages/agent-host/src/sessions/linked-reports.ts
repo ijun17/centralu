@@ -59,10 +59,11 @@ export type LinkedReportsHost = {
    */
   reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
   /**
-   * Whether a link lost over this session's paused report keeps the report (#1523): a child start_agent started follows its work
-   * across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then
+   * What a link lost over this session's paused report keeps (#1523): a child start_agent started keeps the report, as it follows its
+   * work across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then; `turn` keeps the
+   * turn running there too, the same turn, when an update that continues it there holds the link (#2164). Null: nothing is kept
    */
-  keepsOverLoss?(sessionId: string): boolean
+  keepsOverLoss?(sessionId: string): 'report' | 'turn' | null
 }
 
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
@@ -112,6 +113,8 @@ export type LinkedEvent = {
   turn?: unknown
   /** The message a turn ran for, on the `state_change` that opens it, when the tool ran it after the turn it was sent into (#1604) */
   origin?: unknown
+  /** What a turn that began with no message goes on with, on the `state_change` that opens it (#2164) */
+  continues?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown
@@ -472,8 +475,10 @@ export class LinkedReports {
         this.settle(sessionId, wait)
         continue
       }
-      if (this.host.keepsOverLoss?.(sessionId)) {
-        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for
+      const keeps = this.host.keepsOverLoss?.(sessionId) ?? null
+      if (keeps) {
+        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for. One an update continues there stays the work's
+        if (keeps === 'turn') continue
         wait.busy = false
         delete wait.turn
         continue

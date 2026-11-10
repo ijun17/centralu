@@ -7,6 +7,7 @@ import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
+import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 
 /**
  * The boundary of a child on a linked machine (#1038 review, RV13): the person may use the same session on that
@@ -65,10 +66,10 @@ class Machine {
     this.transcript.push({ seq, role: 'user', kind: 'text', payload: { text, ...(from ? { from } : {}) } })
     this.out({ type: 'user_message', sessionId: CHILD, seq, text, ...(from ? { from } : {}) })
   }
-  private begin(who: 'hub' | 'person' | 'self'): void {
+  private begin(who: 'hub' | 'person' | 'self', continues?: 'compaction'): void {
     this.state = 'working'
     this.turn = who
-    this.out({ type: 'state_change', sessionId: CHILD, state: 'working' })
+    this.out({ type: 'state_change', sessionId: CHILD, state: 'working', ...(continues ? { continues } : {}) })
   }
   private end(words: string): void {
     this.transcript.push({ seq: ++this.seq, role: 'assistant', kind: 'text', payload: { text: words } })
@@ -97,6 +98,10 @@ class Machine {
   selfStarts(): void {
     if (this.state === 'idle') this.begin('self')
   }
+  /** Centralu opens the turn of the child's next step after a compaction (`compact_self`'s `then`), said to go on with the turn before's work (#2164) */
+  stepStarts(): void {
+    if (this.state === 'idle') this.begin('self', 'compaction')
+  }
   selfTurnEnds(): void {
     if (this.turn === 'self') this.end('SELF-ANSWER')
   }
@@ -120,6 +125,8 @@ class Machine {
       list: async () => [{ sessionId: CHILD, name: 'Child', project: 'app', state: this.state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
       machineWaitsForPerson: () => false,
+      // Its host continues the turns an update's stop cuts (#1618)
+      continuesCutTurns: () => true,
       machineNamed: (n: string) => (n === 'Box' ? { id: 'm1', name: 'Box' } : null),
       describe: () => ({ name: 'Child', project: 'app' }),
       lastWords: async () => (this.reachable ? ({ ok: true as const, text: lastOf('assistant')?.payload.text ?? '', length: 0, seq: null }) : { ok: false as const, error: 'not reachable' }),
@@ -196,7 +203,7 @@ class Hub {
       reportGate: (id: string) => this.agents.reportGate(id),
       keepsOverLoss: (id: string) => this.agents.keepsOverLoss(id),
     } as unknown as LinkedReportsHost)
-    this.agents = new RemoteAgents({
+    const host = {
       children: this.children,
       store: this.store,
       linkedReader: reader,
@@ -210,7 +217,10 @@ class Hub {
       hostCards: { askHost: async () => 'allow' },
       files: { projectOrigin: async () => 'https://github.com/me/app' },
       ...this.more,
-    } as unknown as RemoteAgentsHost, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
+    } as unknown as RemoteAgentsHost
+    // The manager's project-trust gate over this host's store and its `auto` (#2159)
+    const registry = new ProjectRegistry(host as unknown as ProjectRegistryHost)
+    this.agents = new RemoteAgents({ ...host, trustGate: (...a) => registry.trustGate(...a) }, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
     this.agents.restore()
   }
 
@@ -597,6 +607,22 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(notes()).toHaveLength(1)
   })
 
+  // #2164: this hub's update of the machine cut that turn, and the host it started there continued it while the link was down
+  it('takes a note into it once an update of its machine cut it and Centralu continued it there', async () => {
+    await paused()
+    await followUp()
+    machine.reachable = false
+    hub.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'updating', operation: { kind: 'update' } } })
+    await linkUp()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true, state: 'working' })
+    expect(notes()).toHaveLength(1)
+    // Its end is the final report, once
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+  })
+
   it('refuses, without blaming the person, a turn the swapped hub did not see begin', async () => {
     await paused()
     machine.backgroundWork([])
@@ -639,6 +665,23 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     // At rest now: a send is new work, not a note
     expect(await hub.act('send', { text: 'more' })).toMatchObject({ ok: true })
     expect(machine.turn).toBe('hub')
+  })
+
+  it("takes a note into the turn a compaction's next step opens after the caller's turn, and reports its end (#2164)", async () => {
+    await started()
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    // The child called compact_self with a next step and ended its turn: Centralu's compact turn, then the step's
+    machine.selfStarts()
+    machine.selfTurnEnds()
+    machine.stepStarts()
+    await flush()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true, state: 'working' })
+    expect(notes()).toHaveLength(1)
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
   })
 
   it('keeps the old refusal on a machine that lists no background work (it never pauses), naming no person', async () => {
@@ -1118,7 +1161,7 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
 
   it('refuses a start whose project the person stopped trusting while its card stood, in the words of a local start', async () => {
     boot({ hostCards: { askHost: async () => (store.projects.setProjectTrusted('p1', false), 'allow') } })
-    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is no longer trusted, so it cannot start agents.") })
+    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so starting agents is refused') })
     expect(machine.sends).toBe(0)
   })
 
@@ -1131,14 +1174,14 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
     await flush()
     expect(await hub.act('send', { text: 'more work' })).toMatchObject({ ok: true, state: 'working' })
     expect(machine.fromHub).toHaveLength(3)
-    const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('start in an untrusted project'))
-    expect(crossed).toEqual(['[permissions] auto session h1: start in an untrusted project allowed'])
+    const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('starting agents'))
+    expect(crossed).toEqual(['[permissions] auto session h1: starting agents (untrusted project "p") allowed'])
   })
 
   // Who may start, and send, in which project (RV13): each condition, on each path that reads it, refused or let through
   const CONDITIONS: Record<string, { set: () => void; refused: string | null }> = {
     'a trusted project, normal': { set: () => {}, refused: null },
-    'an untrusted project, normal': { set: () => store.projects.setProjectTrusted('p1', false), refused: 'trusted, so it cannot start agents' },
+    'an untrusted project, normal': { set: () => store.projects.setProjectTrusted('p1', false), refused: 'is not trusted, so starting agents is refused' },
     'an untrusted project, auto': { set: () => (store.projects.setProjectTrusted('p1', false), asAuto()), refused: null },
     'its project no longer registered': { set: () => hub.meta.set(caller.id, { ...caller, projectId: 'p-gone' }), refused: 'no longer registered' },
     'at the agent depth': { set: () => store.settings.setAppSetting(agentDepthKey(caller.id), '9'), refused: AGENT_DEPTH_SETTING },

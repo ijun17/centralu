@@ -226,9 +226,10 @@ export class TurnInputs {
     if (waiting) this.host.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     else handle?.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
-    // only ends that caller's wait; work left running past the bound has its own Stop.
+    // only ends that caller's wait; work left running past the bound has its own Stop. Not "the person": a script, or a hub's agent
+    // stopping a child of its on this machine, calls the same Stop (#1474 item 7)
     for (const d of this.host.children.delegations.values()) {
-      if (d.callerId === sessionId && (d.waiters ?? 0) > 0) d.stop('the person stopped the session that asked')
+      if (d.callerId === sessionId && (d.waiters ?? 0) > 0) d.stop('your turn was stopped')
     }
   }
 

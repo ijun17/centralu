@@ -195,6 +195,17 @@ describe('no card when the handoff guards nothing', () => {
     callerWith('normal')
     meta.set('t1', target({ state: 'working' }))
     expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('is mid-turn') })
+    // A card is named in words, as the busy rule names it: the state's own word for one included
+    meta.set('t1', target({ state: 'waiting_approval' }))
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('is mid-turn (waiting for an approval)') })
+    expect(steps).toEqual([])
+  })
+
+  it('refuses a session at the end of its turn whose own background work still runs (#2158)', async () => {
+    quiet()
+    callerWith('normal')
+    meta.set('t1', target({ state: 'waiting_input', backgroundTasks: [{ id: 'b1', kind: 'shell', description: 'pnpm verify', status: 'running' }] }))
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('has background work still running, so nothing was handed off') })
     expect(steps).toEqual([])
   })
 

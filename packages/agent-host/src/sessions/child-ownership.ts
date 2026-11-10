@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { errorMessage, TurnOrigin } from '@cc/protocol'
-import type { ApprovalDetail, BackgroundTask, SessionInfo, StoredMessage } from '@cc/protocol'
+import type { BackgroundTask, SessionInfo, StoredMessage } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
@@ -11,6 +11,7 @@ import { StoppedByUpdate } from './stopped-by-update.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
+import type { AgentStartRecord } from './agent-start-record.js'
 
 /**
  * How long a report held over a session's own background work (#721), here or on a linked machine (#723), waits, once
@@ -22,52 +23,6 @@ export const PAUSED_REPORT_SETTLE_MS = 60_000
 
 /** The tools a request can be queued through that this build delivers (#677); a row of another is left alone (#384) */
 const QUEUED_VIA: ReadonlySet<string> = new Set<QueuedRequest['via']>(['ask_project', 'agent_session', 'send_to_session'])
-
-/**
- * A start_agent request waiting on the person's card (#673), as stored in `agent_start_requests`: everything the start
- * needs once allowed, so a host that takes over after a swap or restart can raise the card again and start the child.
- */
-export type AgentStartRequest = {
-  requestId: string
-  callerId: string
-  projectId: string
-  tool: string
-  model?: string
-  effort?: string
-  worktreeBranch?: string
-  task: string
-  unchecked?: string
-  /** start_agent's code intelligence choice (#686) */
-  lsp?: boolean
-  /** The name the child starts with (#861): the caller's, or one made from its task; absent for a worktree child named by its branch */
-  name?: string
-  /**
-   * The start is allowed (by the card or the project's trust) and waits only for memory (#686): a host that takes it
-   * over starts it when memory allows, without raising the card again
-   */
-  allowed?: true
-  detail: Extract<ApprovalDetail, { kind: 'agent_start' }>
-}
-
-/** One such request while this host serves it (`ChildOwnership.agentStarts`) */
-export type AgentStartRecord = {
-  req: AgentStartRequest
-  /** The call that raised it has answered "pending" (#673): how it ends is told to the caller as a message */
-  detached: boolean
-  ended?: { childId: string } | { error: string }
-  /** Resolves when it ends (agent_session wait on the handle) */
-  done: Promise<void>
-  end: () => void
-  /** Allowed, and queued until memory recovers (#686): what was read when it was queued */
-  lowMemory?: LowMemory
-  /** Ends the wait for memory, when the request ends another way (withdrawn, the caller deleted) */
-  stopWaiting?: () => void
-  /** The caller's waits on the handle now, ended when a handoff gives the request to another session (#693) */
-  leaving?: Set<() => void>
-}
-
-/** A start queued for memory (#686), as the caller reads it */
-export type LowMemory = { available: string; floor: string; maxWaitMinutes: number }
 
 /** One ask_project call's work in the target project (#371 part B) — see `ChildOwnership.delegations` */
 export type Delegation = {
@@ -95,8 +50,10 @@ export type Delegation = {
   leaving?: Set<() => void>
 }
 
-/** The store's record that a session's owed report is held over its own background work (#721), kept across a swap */
-export const pausedReportKey = (sessionId: string) => `report_paused:${sessionId}`
+/** Whose report a pause holds (#1463): the caller's, owed by its mark (`awaitingReport`), or the person's, of work they own (`personOwes`) */
+export type PausedKind = 'caller' | 'person'
+/** The store's record that a session's report is held over its own background work (#721): a caller's, kept across a swap with its mark; the person's, across a restart */
+export const pausedReportKey = (sessionId: string, kind: PausedKind = 'caller') => `${kind === 'person' ? 'person_report_paused' : 'report_paused'}:${sessionId}`
 /** A task a paused report waits on (#721), as kept in `report_paused:<session>` */
 export type PausedTask = { id: string; description: string }
 /** The tasks of a stored pause, or null when there is none (an unreadable value is a pause on nothing known) */
@@ -273,10 +230,13 @@ export class ChildOwnership {
    * Reports held over the session's own background work (#721): a turn ended while work it started still ran, so the work is paused, not over. The
    * report stays owed in `awaitingReport` (its caller was told once that it paused) and goes out at the end of a turn with none of that work left, or
    * `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn following. Holds the tasks it paused on (each id and description, for how they ended
-   * and for `stop`). Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark. Those an update stopped: `StoppedByUpdate`
+   * and for `stop`). Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark. Those an update stopped: `StoppedByUpdate`.
+   * The person's report of work they own pauses the same way (#1463, `personPausedReports`, `person_report_paused:<session>`)
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  private readonly personPaused = new Map<string, PausedTask[]>()
+  readonly personPausedReports: ReadonlyMap<string, PausedTask[]> = this.personPaused
   readonly stoppedByUpdate = new StoppedByUpdate()
   /**
    * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
@@ -289,6 +249,13 @@ export class ChildOwnership {
   private readonly cliTurns = new Set<string>()
   /** Sessions whose running turn an update cut and Centralu continued (#1966): the turn's end carries it, once. Memory only */
   private readonly continuedCuts = new Set<string>()
+  /**
+   * Whose work each session is doing (#2164): the caller of its last report mark (`markReport`), until a turn of the person's. A turn that goes on
+   * with that work by Centralu's doing (`turnStarted`: a compaction's next step) is that caller's again. Memory only, as `cliTurns`
+   */
+  private readonly workOf = new Map<string, string>()
+  /** Running turns that go on with that work (#2164), read as a pause's continuing turn is (`continuesWork`) */
+  private readonly goingOn = new Set<string>()
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** The messages given each session's tool that no turn has taken yet (#1639), oldest first; read back from the rows once per host (`held`) */
   private readonly entries = new Map<string, Entry[]>()
@@ -393,7 +360,7 @@ export class ChildOwnership {
    * the person's thread. Set by the host when it has a mailbox
    */
   private personWork:
-    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
+    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; withdrawn(sessionId: string): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
     | undefined
   onPersonWork(hooks: ChildOwnership['personWork']): void {
     this.personWork = hooks
@@ -421,32 +388,38 @@ export class ChildOwnership {
     return this.store.mailbox.handedOnBySessions(ownerId, childId).filter((r) => marks.some((m) => m.sessionId === idOf(r.recipient) && m.callerSessionId === idOf(r.sender))).length
   }
 
-  /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
-  startedForPerson(sessionId: string, text: string, fromScript?: { credential: string }): void {
+  /**
+   * A new session's first message `text`, sent by `send`. A script's (`fromScript`) is work the person owns, written down first; when
+   * `send` throws, no turn will come of it and the person's task is withdrawn (#1463) before the error goes on
+   */
+  firstMessage(sessionId: string, text: string, fromScript: { credential: string } | undefined, send: () => void): void {
+    if (!fromScript) return send()
+    this.personCall('write down the work for the person started in', sessionId, undefined, (w) => w.started(sessionId, text, fromScript))
     try {
-      this.personWork?.started(sessionId, text, fromScript)
+      send()
     } catch (e) {
-      console.error(`[mail] could not write down the work started in ${sessionId.slice(0, 8)} for the person (${errorMessage(e)})`)
+      this.personCall('withdraw the work for the person started in', sessionId, undefined, (w) => w.withdrawn(sessionId))
+      throw e
     }
   }
 
   /** Whether the person has work with `sessionId` whose turn is reported to them; false with no mailbox. Never throws */
   personOwes(sessionId: string): boolean {
-    try {
-      return this.personWork?.owes(sessionId) ?? false
-    } catch (e) {
-      console.error(`[mail] could not read the work of the person in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
-      return false
-    }
+    return this.personCall('read the work of the person in', sessionId, false, (w) => w.owes(sessionId))
   }
 
   /** The end of a turn of work the person owns, in their thread; false when it was not taken. Never throws */
   reportedToPerson(sessionId: string, draft: PersonReportDraft): boolean {
+    return this.personCall('report to the person the work of', sessionId, false, (w) => w.report(sessionId, draft))
+  }
+
+  /** A call into the mailbox's person work: what it gives without a mailbox, or when it failed, which is logged */
+  private personCall<T>(what: string, sessionId: string, none: T, call: (w: NonNullable<ChildOwnership['personWork']>) => T): T {
     try {
-      return this.personWork?.report(sessionId, draft) ?? false
+      return this.personWork ? call(this.personWork) : none
     } catch (e) {
-      console.error(`[mail] could not report the work of ${sessionId.slice(0, 8)} to the person (${errorMessage(e)})`)
-      return false
+      console.error(`[mail] could not ${what} ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+      return none
     }
   }
 
@@ -522,6 +495,7 @@ export class ChildOwnership {
     this.unpauseReport(sessionId)
     this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
     this.reports.set(sessionId, callerId)
+    this.workOf.set(sessionId, callerId)
     this.store.children.setReportMark(sessionId, callerId)
     this.persistTurn(sessionId)
   }
@@ -535,7 +509,7 @@ export class ChildOwnership {
    * At startup (#646): the report marks of the sessions whose turn goes on under this host (`goingOn`: an update cut it,
    * and this host continues it) and of the sessions waiting on threads they handed on, and nothing else.
    */
-  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
+  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): string[] {
     /*
      * "You will be told when it ends" survives an update (#646, #1618): the turn an update cut is continued under this
      * host, so it ends here, and the report it owes goes out from here. Any other mark is dropped rather than left to
@@ -568,6 +542,12 @@ export class ChildOwnership {
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
       this.store.settings.deleteAppSetting(reportTurnKey(mark.sessionId))
     }
+    // The person's paused reports (#1463), all read back: the ones whose work went with the last host's process are returned, to be reported as ended
+    for (const id of sessions.keys()) {
+      const tasks = readPausedTasks(this.store.settings.appSetting(pausedReportKey(id, 'person')))
+      if (tasks) this.personPaused.set(id, tasks)
+    }
+    return [...this.personPaused.keys()].filter((id) => !goingOn.has(id))
   }
 
   /** At startup (#676): the delegated turns of the sessions whose turn goes on under this host (`goingOn`); any other row is dropped */
@@ -633,19 +613,23 @@ export class ChildOwnership {
     if (stored) this.starters.set(sessionId, stored)
   }
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
-  pauseReport(sessionId: string, running: readonly PausedTask[]): void {
-    const held = this.paused.get(sessionId) ?? []
+  pauseReport(sessionId: string, running: readonly PausedTask[], kind: PausedKind = 'caller'): void {
+    const paused = kind === 'person' ? this.personPaused : this.paused
+    const held = paused.get(sessionId) ?? []
     const added = running.filter((t) => !held.some((h) => h.id === t.id)).map((t) => ({ id: t.id, description: t.description }))
-    if (!this.paused.has(sessionId) || added.length) {
+    if (!paused.has(sessionId) || added.length) {
       const next = [...held, ...added]
-      this.paused.set(sessionId, next)
-      this.store.settings.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
+      paused.set(sessionId, next)
+      this.store.settings.setAppSetting(pausedReportKey(sessionId, kind), JSON.stringify(next))
     }
   }
-  unpauseReport(sessionId: string): void {
-    this.stopSettling(sessionId)
-    this.stoppedByUpdate.release(sessionId)
-    if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
+  /** The caller's pause ends with its settling and what an update's stop ended; the person's is only its record */
+  unpauseReport(sessionId: string, kind: PausedKind = 'caller'): void {
+    if (kind === 'caller') {
+      this.stopSettling(sessionId)
+      this.stoppedByUpdate.release(sessionId)
+    }
+    if ((kind === 'person' ? this.personPaused : this.paused).delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId, kind))
   }
   /**
    * A message goes into the session (#1377): the person's, or anyone else's (a caller's, an app's, Centralu's). At rest
@@ -778,7 +762,7 @@ export class ChildOwnership {
   private recordedTurn(sessionId: string): TurnStarter | null {
     return readTurn(this.store.settings.appSetting(reportTurnKey(sessionId)))
   }
-  /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
+  /** The session is deleted: nothing kept of its turns (for a hub that followed them, whose work they were, the person's paused report) is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
     this.dropInputOrigins(sessionId)
     this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
@@ -788,6 +772,9 @@ export class ChildOwnership {
     this.spentAt.delete(sessionId)
     this.named.delete(sessionId)
     this.takenOver.delete(sessionId)
+    this.workOf.delete(sessionId)
+    for (const [id, caller] of this.workOf) if (caller === sessionId) this.workOf.delete(id)
+    this.unpauseReport(sessionId, 'person')
   }
   /**
    * A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604). Kept for every session, not only
@@ -876,9 +863,11 @@ export class ChildOwnership {
 
   /**
    * A turn starts (#1377, #1639): it is decided now, by the oldest message given before it, else it is the CLI's own (the work's background
-   * tasks ended). Nothing is taken off yet: when the tool names the input the turn opened from, it is decided again (`turnNamed`)
+   * tasks ended). Nothing is taken off yet: when the tool names the input the turn opened from, it is decided again (`turnNamed`).
+   * `continues` (#2164): Centralu opened it to go on with the work of the turn before (a compaction's next step): the report of that work is
+   * owed again, to the caller whose work it is, unless the person's message opens it
    */
-  turnStarted(sessionId: string): void {
+  turnStarted(sessionId: string, continues = false): void {
     const held = this.held(sessionId)
     this.takenOver.delete(sessionId)
     this.named.delete(sessionId)
@@ -890,6 +879,11 @@ export class ChildOwnership {
     const first = held.find((e) => !e.carried)
     this.decide(sessionId, first ? starterFor([first]) : undefined, false)
     this.save(sessionId)
+    if (this.starters.get(sessionId)?.by === 'person') return void this.workOf.delete(sessionId)
+    const caller = continues ? this.workOf.get(sessionId) : undefined
+    if (!caller || (this.reports.get(sessionId) ?? caller) !== caller) return
+    if (!this.reports.has(sessionId)) this.markReport(sessionId, caller)
+    this.goingOn.add(sessionId)
   }
   /**
    * The tool names the inputs the turn opening now runs for (#1639, `SessionHandle.turnStartInputs`): ids, of which the last one held
@@ -957,6 +951,7 @@ export class ChildOwnership {
     const starter: TurnStarter = { ...(this.starters.get(sessionId) ?? { by: 'work' as const }) }
     this.starters.delete(sessionId)
     this.cliTurns.delete(sessionId)
+    this.goingOn.delete(sessionId)
     this.takenOver.delete(sessionId)
     if (this.continuedCuts.delete(sessionId)) starter.cut = true
     // The process went with the turn (`cut`): it holds none of the messages given it (#1604). Any other error or limit leaves the process, which can still run one it holds queued as the next turn
@@ -987,13 +982,13 @@ export class ChildOwnership {
     return starter
   }
   /**
-   * Whether the turn running is the paused work's continuing (#1576): the caller's report is held over the session's own
-   * background work, and the turn the tool started when that work ended is the work's (`turnStarted`, no message began
-   * it) with no person's message in it. That turn's end is the report the caller is owed, so it is the caller's too.
-   * The one place that says so, as `reportBackIfAwaited` reads the same turn for its report
+   * Whether the turn running goes on with the caller's work: the paused work's continuing (#1576), when the caller's report is held over the
+   * session's own background work and the tool started this turn when that work ended, or the turn Centralu opened to go on with it after a
+   * compaction (#2164, `turnStarted`). No message began it (`turnStarted`) and no person's message is in it. Its end is the report the caller
+   * is owed, so it is the caller's too. The one place that says so, as `reportBackIfAwaited` reads the same turn for its report
    */
-  continuesPause(sessionId: string, callerId: string): boolean {
-    if (this.reports.get(sessionId) !== callerId || !this.paused.has(sessionId)) return false
+  continuesWork(sessionId: string, callerId: string): boolean {
+    if (this.reports.get(sessionId) !== callerId || !(this.paused.has(sessionId) || this.goingOn.has(sessionId))) return false
     // A turn the mailbox started for another owner's thread, or one given to another caller, is theirs
     const owner = this.turns.get(sessionId)?.callerId
     if ((owner && owner !== callerId) || (this.mailTurns.get(sessionId) && this.mailTurns.get(sessionId)?.ownerId !== callerId)) return false
@@ -1184,6 +1179,7 @@ export class ChildOwnership {
     const { sessions, armReports, starts } = move
     const moving = new Set(sessions)
     for (const id of sessions) if (this.reports.get(id) === from) this.reports.set(id, to)
+    for (const id of sessions) if (this.workOf.get(id) === from) this.workOf.set(id, to)
     for (const id of armReports) this.reports.set(id, to)
     for (const [id, owner] of this.turns) if (moving.has(id) && owner.callerId === from) owner.callerId = to
     // A delegation's key names its caller (`<caller>><child>`, `<caller>><project>><child>`)

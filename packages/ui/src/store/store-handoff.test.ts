@@ -480,6 +480,22 @@ describe('handing off and starting fresh', () => {
     expect((useStore.getState().chat['ho-s3'] ?? []).length).toBe(0)
     expect(useStore.getState().toast).toMatch(/Worktree sessions/)
   })
+
+  /*
+   * The state says a card stands even where the card is not carried (a linked machine's row, `needsAnswer`, #2158): asking
+   * for a note then would answer or drop that card, as with a card listed (#174), so it is refused the same way.
+   */
+  it('never asks for a note while the state says a card stands, though no card is listed', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-card')
+    mock.sessions.set('ho-card', sessionInfo('ho-card', { projectId: proj.id, state: 'waiting_approval', pendingApproval: null, pendingQuestions: [] }))
+    await useStore.getState().attach(mock)
+
+    void useStore.getState().handoffSession('ho-card', { mode: 'agent' })
+
+    await vi.waitFor(() => expect(useStore.getState().toast).toBe('Answer the open approval first, or hand off from the record'))
+    expect((useStore.getState().chat['ho-card'] ?? []).length).toBe(0)
+  })
 })
 
 /*

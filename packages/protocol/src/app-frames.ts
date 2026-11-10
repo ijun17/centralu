@@ -75,6 +75,8 @@ export type BuilderRequestFacts = {
   stopped: { status: 'crashed' | 'failed'; reason: string | null } | null
   /** The app's latest run did not succeed — null when it did (the closest evidence when the person says "this does not work") */
   latestRun: BuilderRunFact | null
+  /** A script the person set up sent it over the limited credential, not the person (#1468): the header does not say the person wrote it */
+  byScript?: boolean
 }
 
 const CALLER: Record<BuilderRunFact['callerKind'], string> = {
@@ -101,7 +103,7 @@ const ENDED: Record<BuilderRunFact['status'], string> = {
  * header is one line — everything after the first line is the person's own words.
  */
 export function builderRequestFrame(facts: BuilderRequestFacts, text: string): string {
-  let head = `[Centralu] The person wrote this in the app "${frameField(facts.app.name)}" (app-${frameField(facts.app.appId)}) that you build`
+  let head = `[Centralu] ${facts.byScript ? 'A script the person set up sent this for' : 'The person wrote this in'} the app "${frameField(facts.app.name)}" (app-${frameField(facts.app.appId)}) that you build`
   if (facts.screen)
     head += `, looking at its screen ${frameField(facts.screen.resourceUri)} (tool "${frameField(facts.screen.tool)}")`
   head += '.'
@@ -137,6 +139,8 @@ export type BuilderRequestInput<B> = {
   view: { uri: string } | null | undefined
   /** The app's latest run, whatever it ended as */
   latestRun: BuilderInputRun | undefined
+  /** Sent by a script, not typed by the person (`BuilderRequestFacts.byScript`) */
+  byScript?: boolean
 }
 
 /** The request as the builder session receives it, or the sentence the person is shown for why it cannot be sent */
@@ -152,6 +156,7 @@ export function builderRequestOf<B>(ask: BuilderRequestInput<B>): { frame: strin
     stopped: app.status === 'crashed' || app.status === 'failed' ? { status: app.status, reason: app.error ?? null } : null,
     // Carried only if the latest run was not a success — a successful run is not evidence for "this does not work"
     latestRun: notOk(ask.latestRun),
+    ...(ask.byScript ? { byScript: true } : {}),
   }
   if (ask.view !== undefined) {
     if (!ask.view) return { refusal: "That view is not open for this app. Reopen the app's view and ask again" }

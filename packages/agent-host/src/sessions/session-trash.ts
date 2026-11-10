@@ -9,6 +9,7 @@ import { isAssistantAgentFolder } from './assistant-home.js'
 import { plainQuoted } from './tool-answers.js'
 import { existsSync, statSync } from 'node:fs'
 import {
+  atRest,
   isInTurn,
   type NormalizedEvent,
   type PermissionPreset,
@@ -215,8 +216,7 @@ export class SessionTrash {
   isQuiet(sessionId: string): boolean {
     const m = this.host.meta.get(sessionId)
     if (!m) return false
-    if (isInTurn(m.state) || m.pendingApproval || m.pendingQuestions.length > 0) return false
-    if (m.backgroundTasks.some((t) => t.status === 'running')) return false
+    if (!atRest(m)) return false
     const run = this.host.agentRuns.get(sessionId)
     if (run && !run.finished) return false
     if (this.host.resuming.has(sessionId) || this.host.restartPolicy.deferredRestarts.has(sessionId) || this.host.inputsHeld(sessionId)) return false

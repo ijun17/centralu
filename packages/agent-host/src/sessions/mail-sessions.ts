@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
-import { errorMessage, isAssistantKind } from '@cc/protocol'
+import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
@@ -14,6 +14,7 @@ import type { DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
+import { seatHas } from './tool-seats.js'
 
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
@@ -51,6 +52,7 @@ export type MailHooks = {
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
+    withdrawn(sessionId: string): void
     owes(sessionId: string): boolean
     report(sessionId: string, draft: PersonReportDraft): boolean
   }
@@ -229,10 +231,10 @@ export class MailSessionsView {
     if (this.host.closing) return { kind: 'busy', why: 'turn' }
     // A card is standing: mail is never taken as its answer (§7.1). `waiting_input` is not one: it is the state a turn ends in
     // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
-    if (m.pendingApproval || m.pendingQuestions.length > 0 || m.state === 'waiting_approval') return { kind: 'busy', why: 'card' }
+    // The session's own background work does not hold mail back (`cardOrTurn`): the message starts its next turn
+    const busy = cardOrTurn(m)
+    if (busy !== null) return { kind: 'busy', why: busy === 'turn' ? 'turn' : 'card' }
     switch (m.state) {
-      case 'working':
-        return { kind: 'busy', why: 'turn' }
       case 'limited':
         return { kind: 'busy', why: 'limited' }
       default: {
@@ -249,13 +251,12 @@ export class MailSessionsView {
   }
 
   /**
-   * Whether the session's seat has the mail tool (§9.1): `reader` and `assistant`. This is the receive rule (who may be written to, and who
+   * Whether the session's seat has the mail tool (§9.1, `seatHas`). This is the receive rule (who may be written to, and who
    * is woken by mail, and told of a child's report by mail), and it does not look at the process: a process the keeper handed over after a
    * swap is still the session's, and mail is for the session
    */
   canReadMail(sessionId: string): boolean {
-    const profile = this.host.tools.toolProfileOf(sessionId)
-    return profile === 'reader' || profile === 'assistant'
+    return seatHas(this.host.tools.toolProfileOf(sessionId), 'mail')
   }
 
   /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the Assistant's `centralu_run` */

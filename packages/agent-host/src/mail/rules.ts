@@ -122,6 +122,8 @@ export function dueAt(now: number, urgent: boolean, fromPerson: boolean): number
 
 export const MINUTE_MS = 60_000
 export const HOUR_MS = 60 * MINUTE_MS
+/** The dedupe key of a notice sent at most once a clock hour: `key` and the hour `now` falls in (the warnings and refusals, §7.5) */
+export const hourlyKey = (key: string, now: number): string => `${key}:${Math.floor(now / HOUR_MS) * HOUR_MS}`
 /** What `read` with no id returns at most: 10 messages and about 20,000 characters, never half a message (§8.4); a chain back from a message, 9 ancestors */
 export const READ_ITEMS = 10
 export const READ_CHARS = 20_000
@@ -181,6 +183,10 @@ export const WARNING_TEXT = {
     `Mail between sessions started ${turns} turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.`,
   compactCycles: (session: string, cycles: number) =>
     `${session} asked to compact its conversation and went on to its next step ${cycles} times in the last hour. It keeps working: look at it if that is more than you expect.`,
+  /** The three guards that refuse rather than warn (#1684, #2035): the person hears of the first refusal of each kind a clock hour */
+  repeat: (sender: string, to: string) => `Centralu refused mail from ${sender} to ${to}: the same text again within ${REPEAT_WINDOW_MS / 60_000} minutes. ${sender} was told; nothing else was stopped.`,
+  rate_limited: (sender: string, limit: number) => `Centralu refused mail from ${sender}: more than ${limit} messages in a minute. ${sender} was told to wait; nothing else was stopped.`,
+  ask_rate: (sender: string) => `Centralu refused a request from ${sender} to the Assistant: its project's sessions asked ${ASKS_PER_HOUR} times in the last hour. ${sender} was told to wait or write to you.`,
 } as const
 
 /** The text of a task written for a report mark an earlier build left with no task (§9.5) */

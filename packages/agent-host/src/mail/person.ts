@@ -1,9 +1,9 @@
-import { errorMessage, oneLineText, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, oneLineText, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
-import type { MessageService } from './messages.js'
+import type { MailChange, MessageService } from './messages.js'
 import { refuse } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
@@ -40,6 +40,12 @@ const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as cons
 
 /** A message as the window reads it: a moved one with the thread kind it had, a new one in the window's thread words */
 type Shown = { m: MailRow; seq: number }
+
+/** A chain's subject: its first message's words, or for work a script started, whose words are not the person's, that script's (#1468) */
+function subjectLine(m: Pick<MailRow, 'body' | 'facts'>): string {
+  const script = m.facts.fromScript?.credential
+  return oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
+}
 
 /**
  * The person's side of the mailbox (#1347, docs/plans/mailbox.md §12, M3a-person) over the message tables. The window of this build draws threads;
@@ -376,7 +382,7 @@ export class MailPerson {
 
   private subjectOf(root: string): string {
     const first = this.shown(root)[0]?.m ?? this.records.message(root)
-    return first ? oneLineText(first.body, SUBJECT_CHARS) : root
+    return first ? subjectLine(first) : root
   }
 
   /**
@@ -403,7 +409,7 @@ export class MailPerson {
     const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
     return {
       id: root,
-      subject: oneLineText(first.body, SUBJECT_CHARS),
+      subject: subjectLine(first),
       state,
       outcome: done ? (closedAs ?? 'finished') : null,
       next: null,
@@ -424,10 +430,25 @@ export class MailPerson {
   private emptyRow(root: string): MailThreadRow {
     const m = this.records.message(root)
     const at = m?.createdAt ?? 0
-    return { id: root, subject: m ? oneLineText(m.body, SUBJECT_CHARS) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
+    return { id: root, subject: m ? subjectLine(m) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
   }
 
   // ── Shapes ──
+
+  /** The windows' `mail_changed` for a change to the mail (main.ts): a new message the person can read also names itself, for the OS notification (#1630) */
+  changeEvent(c: MailChange): Extract<NormalizedEvent, { type: 'mail_changed' }> {
+    const toPerson = c.recipients.includes(PERSON)
+    const arrived = c.arrived && toPerson ? this.arrival(c.messageId) : undefined
+    return { type: 'mail_changed', threadId: c.rootId, toPerson, ...(arrived ? { arrived } : {}) }
+  }
+
+  /** A new message as the person's notification names it (`mail_changed.arrived`): one they can read, not their own */
+  private arrival(messageId: string): { messageId: string; from: MailParty; kind: string; preview: string } | undefined {
+    const m = this.records.message(messageId)
+    const row = this.records.recipient(messageId, PERSON)
+    if (!m || !row || m.sender === PERSON || hiddenFromPerson(row) || row.held !== null) return undefined
+    return { messageId, from: this.party(m.sender), kind: windowKind(m), preview: oneLineText(m.body, PREVIEW_CHARS) }
+  }
 
   private party(address: string): MailParty {
     const p = parseAddress(address)

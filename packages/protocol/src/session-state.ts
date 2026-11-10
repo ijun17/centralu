@@ -1,5 +1,5 @@
 import type { SessionInfo } from './commands.js'
-import { workTasks, type BackgroundTask, type SessionState } from './entities.js'
+import { liveBackgroundTasks, workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
 /**
@@ -41,6 +41,68 @@ export function isInTurn(state: unknown): boolean {
  */
 export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): boolean {
   return (s.state === 'waiting_input' || s.state === 'idle') && !s.interruption && workTasks(s.backgroundTasks ?? []).length > 0
+}
+
+/** The facts a card is read from: an approval card, or a question card the session asked */
+type CardFacts = { state: unknown; pendingApproval?: unknown; pendingQuestions?: { readonly length: number } }
+
+/**
+ * Whether the session is waiting on an answer from the person: an approval card, or a question card it asked. The
+ * sidebar's marks, the look of a panel, the mail receiver and every busy check ask this, so they cannot disagree (#428,
+ * #2158). An error or a finished turn is not one: it needs a look, not an answer. `waiting_approval` with no card listed is
+ * one too: the state says a card stands even where the card itself is not carried (a linked machine's row, a summary).
+ */
+export function needsAnswer(s: CardFacts): boolean {
+  return s.state === 'waiting_approval' || !!s.pendingApproval || (s.pendingQuestions?.length ?? 0) > 0
+}
+
+/**
+ * **At rest** (#2158, owner decision 2026-11-10): the one busy rule. A session is busy when it is in a turn, has a card open
+ * (`needsAnswer`), or has its own background work running; at rest otherwise. The work is what counts as activity
+ * (`liveBackgroundTasks`): a timer the tool holds ends with its process, so a delete or a host stop would lose it. A check
+ * that may end a timer on purpose passes the tasks it counts (worktree cleanup passes `workTasks`, #718).
+ * Trash, delete, handoff, worktree cleanup, the host's idle rule (`sessionBusy`, idle.ts) and the directory read this.
+ */
+export function atRest(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): boolean {
+  return busyWith(s) === null
+}
+
+/** Why a session is not at rest (`busyWith`) */
+export type BusyReason = 'approval' | 'question' | 'turn' | 'background'
+
+/**
+ * Why a session is not at rest, or null when it is: the one place `atRest` is written out, so a check that says why it
+ * refuses (a handoff, the restart on a new CLI) names the same parts it tests. A card first (`needsAnswer`): `question`
+ * when only questions are open, `approval` otherwise (an approval card, or one the state says stands though it is not
+ * carried); then a turn; then its own background work (`liveBackgroundTasks`).
+ */
+export function busyWith(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): BusyReason | null {
+  return cardOrTurn(s) ?? (liveBackgroundTasks(s.backgroundTasks ?? []).length > 0 ? 'background' : null)
+}
+
+/**
+ * `busyWith` without the session's own background work: a card, then a turn. For the checks that work does not stop: mail is
+ * taken while it runs (the message starts the next turn, and the work goes on), and `stop` of a child's resting work (#718)
+ * is how that work is ended, so it cannot be what keeps the stop out
+ */
+export function cardOrTurn(s: CardFacts): Exclude<BusyReason, 'background'> | null {
+  if (needsAnswer(s)) return (s.pendingQuestions?.length ?? 0) > 0 && !s.pendingApproval ? 'question' : 'approval'
+  return isInTurn(s.state) ? 'turn' : null
+}
+
+/**
+ * Where a session stands, in one word an agent reads (#2158): agent_session list, a linked child's row, the directory's
+ * search and a handoff's children. `waiting` on the person's card; `working` in a turn; `paused` on its own background work
+ * (`pausedOnBackground`); `stopped` short (an error, a limit, an interruption), which is resumed, not deleted; `finished`.
+ */
+export type AgentLook = 'waiting' | 'working' | 'paused' | 'stopped' | 'finished'
+
+export function agentLook(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): AgentLook {
+  if (needsAnswer(s)) return 'waiting'
+  if (isInTurn(s.state)) return 'working'
+  if (pausedOnBackground(s)) return 'paused'
+  if (s.state === 'error' || s.state === 'limited' || s.interruption) return 'stopped'
+  return 'finished'
 }
 
 /**

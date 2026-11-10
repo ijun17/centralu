@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, SessionId, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
+import { ASSISTANT_CHANGE, SessionId, atRest, busyWith, liveBackgroundTasks, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { bytesText } from '../bytes-text.js'
@@ -171,12 +171,12 @@ export class TrashFlow {
     if (row.kind !== 'worker') return { ok: false, error: `${name} is ${isAssistantKind(row.kind) ? 'an Assistant' : 'a coordinator'}; only the person deletes those.` }
     if (row.askedBy === caller) return { ok: false, error: `${name} is a child you started; delete it with agent_session (action delete), which also settles its report and its worktree.` }
     if (row.unreachable) return { ok: false, error: `${name} is on a machine that cannot be reached just now; try again when it answers.` }
-    if (row.state === 'working' || row.pendingApproval || row.pendingQuestions.length > 0) {
-      return { ok: false, error: `${name} is busy (${row.pendingApproval || row.pendingQuestions.length ? 'waiting on the person' : 'working'}); the person may be using it. Delete it once it is idle.` }
-    }
-    // Moving it to the session archive ends its process, and with it a server or a watch it started: that is not what the session archive brings back
-    const running = row.backgroundTasks.filter((t) => t.status === 'running')
-    if (running.length) {
+    const busy = busyWith(row)
+    if (busy !== null) {
+      // Moving it to the session archive ends its process, and with it a server or a watch it started: that is not what the session archive brings back
+      const why = busy === 'turn' ? 'working' : busy === 'background' ? null : 'waiting on the person'
+      if (why) return { ok: false, error: `${name} is busy (${why}); the person may be using it. Delete it once it is idle.` }
+      const running = liveBackgroundTasks(row.backgroundTasks)
       return { ok: false, error: `${name} has ${plural(running.length, 'background job')} still running (${running.slice(0, 3).map((t) => plainQuoted(t.description, 80)).join(', ')}); deleting it would end ${running.length === 1 ? 'it' : 'them'} for good. The person can stop ${running.length === 1 ? 'it' : 'them'} first.` }
     }
     const ops = this.sessions
@@ -216,7 +216,7 @@ export class TrashFlow {
       // The machine decides on its own; the list is read again so a session busy since the card is not moved
       const now = (await callWindow(rpc, 'sessions.list', {})).find((s) => s.id === id)
       if (!now) return { ok: true, text: `${name} [${id}] was already gone while the card stood; nothing more was done.` }
-      if (now.state === 'working' || now.pendingApproval || now.pendingQuestions.length > 0 || now.backgroundTasks.some((t) => t.status === 'running')) {
+      if (!atRest(now)) {
         return { ok: false, error: `${name} became busy while the card stood, so it was not moved. Ask again if it still should be.` }
       }
       await callWindow(rpc, 'agents.deleteSession', { sessionId: id, deleteWorktree: false, deleteExternal: false })

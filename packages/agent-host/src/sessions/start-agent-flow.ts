@@ -1,7 +1,8 @@
 import { isAssistantKind } from '@cc/protocol'
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import type { AgentStartRequest, Delegation } from './child-ownership.js'
+import type { Delegation } from './child-ownership.js'
+import type { AgentStartRequest } from './agent-start-record.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
 import { agentChoice, agentFrame, agentName, canMailParent, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
@@ -25,7 +26,6 @@ import {
   ASSISTANT_PLACE,
   START_AGENT_CALL_MS,
   START_AGENT_SETUP_MS,
-  UNTRUSTED_START,
   agentStartPending,
   agentStartPersonText,
   assistantPlace,
@@ -214,9 +214,8 @@ export class AgentStartFlow {
     if (fromAssistant && (opts.worktree || opts.branch)) {
       return done({ ok: false, error: 'A session the Assistant starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
     }
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
-      return done({ ok: false, error: UNTRUSTED_START })
-    }
+    const untrusted = fromAssistant ? null : this.host.trustGate(callerId, project.id, 'starting agents')
+    if (untrusted) return done({ ok: false, error: untrusted })
     /*
      * The same job already waiting on the person (#673 review): a call cut short by a host swap's drain is told to call
      * again, and a model that does gets the handle it never read, not a second card for the same work

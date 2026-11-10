@@ -146,6 +146,35 @@ describe('the guards', () => {
     expect(refusedFor(() => w.send(B, { to: [ORC], text: 'B asks 3' }))).toBe('NOT REFUSED')
   })
 
+  it('each of the three refusals tells the person in one line, once an hour for each sender and kind, and the refusal stands (#1684)', () => {
+    const w = world()
+    const warnings = () => w.records.feedOf(PERSON, { limit: 50 }).filter((m) => m.kind === 'notice' && m.facts.guardRefused !== undefined)
+    w.send(A, { to: [B], text: 'ping' })
+    expect(refusedFor(() => w.send(A, { to: [B], text: 'ping' }))).toBe('repeat')
+    expect(refusedFor(() => w.send(A, { to: [B], text: 'ping' }))).toBe('repeat')
+    expect(warnings().map((m) => [m.body, m.facts.guardRefused])).toEqual([
+      [`Centralu refused mail from ${w.mail.labelOf(A)} to ${w.mail.labelOf(B)}: the same text again within 10 minutes. ${w.mail.labelOf(A)} was told; nothing else was stopped.`, { sender: A, reason: 'repeat' }],
+    ])
+    const t = w.send(B, { to: [A], text: 'start', needsReply: false }).message
+    // 'ping' and 29 replies: the refused sends are not posts
+    for (let i = 1; i <= 29; i++) w.send(A, { replyTo: t.id, text: `reply ${i}` })
+    expect(refusedFor(() => w.send(A, { replyTo: t.id, text: 'reply 31' }))).toBe('rate_limited')
+    for (let i = 1; i <= 5; i++) w.send(C, { to: [ORC], text: `C asks ${i}` })
+    expect(refusedFor(() => w.send(C, { to: [ORC], text: 'C asks 6' }))).toBe('ask_rate')
+    expect(warnings().map((m) => m.facts.guardRefused?.reason).sort()).toEqual(['ask_rate', 'rate_limited', 'repeat'])
+    expect(warnings().find((m) => m.facts.guardRefused?.reason === 'ask_rate')?.body).toContain("its project's sessions asked 5 times in the last hour")
+    // The next clock hour tells again; nothing of the refused sends was written
+    w.clock.t += 61 * MINUTE
+    w.send(A, { to: [B], text: 'pong' })
+    expect(refusedFor(() => w.send(A, { to: [B], text: 'pong' }))).toBe('repeat')
+    expect(warnings().filter((m) => m.facts.guardRefused?.reason === 'repeat')).toHaveLength(2)
+    expect(w.records.feedOf(A, { limit: 100 }).filter((m) => m.body === 'ping')).toHaveLength(1)
+    // The same text to the person twice: the person's line says it was to them, not to "person"
+    w.send(B, { to: [PERSON], text: 'done here' })
+    expect(refusedFor(() => w.send(B, { to: [PERSON], text: 'done here' }))).toBe('repeat')
+    expect(warnings().find((m) => m.facts.guardRefused?.sender === B)?.body).toBe(`Centralu refused mail from ${w.mail.labelOf(B)} to you: the same text again within 10 minutes. ${w.mail.labelOf(B)} was told; nothing else was stopped.`)
+  })
+
   it('a session writes to the Assistant only while its tool can put a request’s steps to the person; an answer to the Assistant is no request', () => {
     const w = world()
     const q = w.send(ORC, { to: [B], text: 'which?' }).message

@@ -182,6 +182,15 @@ describe('one delivery at a time, the sweep', () => {
     expect(w.rowOf(q.message.id, C)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
   })
 
+  it('the sweep leaves a session on another host alone, a linked machine child included: its own host settles it (#2164)', async () => {
+    const w = started({ delivery: { across: (address) => address === C } })
+    const q = w.send(A, { to: [C], text: 'are you there?' })
+    // This host's list does not have it, as it does not have any linked machine's session
+    w.states.set('c', { kind: 'gone' })
+    await w.advance(60_000)
+    expect(w.rowOf(q.message.id, C)).toMatchObject({ settled: null, releasedWhy: null })
+  })
+
   it('does nothing once stopped', async () => {
     const w = started()
     w.delivery.stop()

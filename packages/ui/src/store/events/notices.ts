@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol/client'
-import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type SessionSummary } from '@cc/core'
+import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type NotifyRequest, type SessionSummary } from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { AppState, Notice, StoreGet, StoreSet } from '../state.js'
 import { projectScreenSessions } from '../screens.js'
@@ -18,6 +18,21 @@ export function syncBadge(get: () => AppState): void {
   if (!st.platform) return
   const waiting = [...Object.values(st.sessions), ...proposalCandidates(pendingProposals(st))]
   void st.platform.system.setBadge(badgeCount(countWaiting(waiting)))
+}
+
+/**
+ * Raises a notification on the system: the OS banner and the alert (a sound, the dock or taskbar). The one path every notification
+ * takes, a session's and the mail's (#1630)
+ */
+export function alertPerson(notice: NotifyRequest, set: StoreSet, get: StoreGet): void {
+  const st = get()
+  if (!st.platform) return
+  // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
+  // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
+  void st.platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
+  // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
+  const kind = notice.kind === 'mail' ? 'done' : notice.kind
+  void st.platform.system.alert(kind, st.notifyPolicy.sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
 }
 
 /**
@@ -157,8 +172,7 @@ export function notifyStateChange(
   // Notifications are decided only when the state changed (the decision belongs to core, delivery to the system port)
   if (withSeq.state !== cur.state) {
     const st = get()
-    const platform = st.platform
-    if (!platform) return
+    if (!st.platform) return
 
     /*
      * Only an approval sounds and raises a banner now (owner, 2026-10-20): the "error" and "once when every session
@@ -170,15 +184,7 @@ export function notifyStateChange(
     // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
     const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
     const notice = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
-    if (notice) {
-      // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
-      // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
-      void platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
-      // The path that actually reaches the person. Goes through neither permissions nor signing.
-      void platform.system
-        .alert(notice.kind, st.notifyPolicy.sound)
-        .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
-    }
+    if (notice) alertPerson(notice, set, get)
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     if (notice || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*

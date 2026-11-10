@@ -270,7 +270,7 @@ export class MachineFlow {
           const previous = m.install?.previous
           const nm = plainQuoted(m.name)
           if (!previous) return { ok: false, error: `There is no earlier version installed on ${nm} to go back to; an update puts the one it replaces there.` }
-          const why = ops.installRefusal(m.id, 'rollback') ?? busyWith(m)
+          const why = ops.installRefusal(m.id, 'rollback') ?? machineOperationRefusal(m)
           if (why) return { ok: false, error: why }
           const was = m.install?.current?.version ?? m.versions?.remote.version
           // Across the mail switch it would strand that machine's mail (docs/plans/mailbox.md D28): refused before any card
@@ -293,7 +293,7 @@ export class MachineFlow {
           const installed = m.install?.current
           const nm = plainQuoted(m.name)
           if (!installed) return { ok: false, error: `Nothing this computer installed is on ${nm}, so there is nothing to uninstall.` }
-          const why = ops.installRefusal(m.id, 'uninstall') ?? busyWith(m)
+          const why = ops.installRefusal(m.id, 'uninstall') ?? machineOperationRefusal(m)
           if (why) return { ok: false, error: why }
           const refused = await this.ask(
             sessionId,
@@ -444,7 +444,7 @@ export class MachineFlow {
 const shownVersion = (version: string): string => plainQuoted(version, 80)
 
 /** Why an operation on a machine cannot start just now, when another one is under way there; known before any card */
-function busyWith(m: MachineInfo): string | null {
+function machineOperationRefusal(m: MachineInfo): string | null {
   return m.operation ? `${plainQuoted(m.name)} is busy with ${m.operation.kind} (${m.operation.step}); try again once that is done.` : null
 }
 
@@ -473,7 +473,7 @@ function stillAsCardSaid(ops: MachineOps, before: MachineInfo): MachineInfo | st
   if (!now) return `${nm} was removed while the card stood, so nothing was changed.`
   const held = (m: MachineInfo) => `${m.install?.current?.version ?? ''}|${m.install?.previous?.version ?? ''}`
   if (held(now) !== held(before)) return `The versions Centralu keeps on ${nm} changed while the card stood, so it is not what the card named and nothing was changed. Ask again to show the person what it holds now.`
-  const busy = busyWith(now)
+  const busy = machineOperationRefusal(now)
   if (busy) return `${busy} Nothing was changed.`
   if (reconnects(now) && !reconnects(before)) {
     return `${nm} was disconnected, or lost its connection with Auto reconnect off, while the card stood. This would connect it again, which the card did not say, so nothing was changed. Ask again.`

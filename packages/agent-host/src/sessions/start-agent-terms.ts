@@ -6,7 +6,8 @@
  */
 import type { SessionInfo, ToolName } from '@cc/protocol'
 import type { ChildRunResult } from '../adapters/contract.js'
-import type { AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
+import type { Delegation } from './child-ownership.js'
+import type { AgentStartRequest, LowMemory } from './agent-start-record.js'
 
 /** How long start_agent waits for a model list to check the model and effort asked for, before it starts anyway (#660) */
 export const START_AGENT_MODEL_CHECK_MS = 3_000
@@ -30,8 +31,6 @@ export const START_AGENT_CALL_MS = 270_000
  */
 export const ASK_THE_PERSON = 'Do not do this with your own subagents instead: tell the person what stopped it and let them decide.'
 
-/** A start's first gate, before anything is asked, in an untrusted project for a caller not `auto`; here or on a linked machine */
-export const UNTRUSTED_START = `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}`
 
 /**
  * The answer while a start waits on the person (#673), or on memory (#686): the request's id is the handle agent_session

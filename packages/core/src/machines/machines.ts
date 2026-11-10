@@ -1,4 +1,4 @@
-import { MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
+import { isInTurn, MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
@@ -30,6 +30,19 @@ export function machineAway(machine: Pick<MachineInfo, 'status'> | undefined): b
  */
 export function isAway(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
   return !!row?.machine && machineAway(machines[row.machine])
+}
+
+/**
+ * Whether this window may wake a row a reconnect found asleep (#1611, #1618, #2163): the one rule for a host back after a
+ * drop and for a linked machine back after it was away. Not a row the hub lists from its mirror (its `live` is last heard,
+ * not a fact), nor one on a machine that is away (its own resync wakes it), nor one in a turn with no process: an update
+ * there cut it, and the host or machine continues it itself.
+ */
+export function wakeable(
+  row: (Placed & { live?: boolean; state?: unknown }) | undefined,
+  machines: Readonly<Record<string, MachineInfo>>,
+): boolean {
+  return !!row && !row.live && !row.unreachable && !isAway(row, machines) && !isInTurn(row.state)
 }
 
 /**

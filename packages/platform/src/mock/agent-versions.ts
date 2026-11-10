@@ -1,5 +1,5 @@
 import type { AgentVersions, SleepPolicy } from '@cc/protocol/client'
-import { liveBackgroundTasks, runsOlderCli } from '@cc/protocol/client'
+import { atRest, runsOlderCli } from '@cc/protocol/client'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -35,7 +35,7 @@ export class AgentVersionsMock {
     },
     /**
      * Like the host (#297): a live session that runs an older CLI is restarted on the installed one when it is idle by
-     * the shared rule (no turn, no approval or question, no background work), and listed as busy otherwise.
+     * the one busy rule (`atRest`: no turn, no card, no background work), and listed as busy otherwise.
      */
     applyVersions: async () => {
       const restarted: string[] = []
@@ -44,13 +44,7 @@ export class AgentVersionsMock {
         const to = this.agentVersions.installed[s.tool]
         const from = s.agentVersion
         if (!s.live || !to || !from || !runsOlderCli(from, to)) continue
-        const holds =
-          s.state === 'working' ||
-          s.state === 'waiting_approval' ||
-          s.pendingApproval !== null ||
-          s.pendingQuestions.length > 0 ||
-          liveBackgroundTasks(this.backgroundMock.backgroundOf(s.id)).length > 0
-        if (holds) {
+        if (!atRest({ ...s, backgroundTasks: this.backgroundMock.backgroundOf(s.id) })) {
           busy.push(s.id)
           continue
         }

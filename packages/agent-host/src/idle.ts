@@ -1,4 +1,4 @@
-import { isInTurn, liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
+import { atRest, busyWith, isInTurn, type BusyReason, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
 
 /**
  * The one rule for "is anything running that a person would lose" (#280, #352).
@@ -47,13 +47,7 @@ export type ActivitySnapshot = {
  * its process). A session with no process holds nothing.
  */
 export function sessionBusy(s: IdleActivity): boolean {
-  if (s.live !== true) return false
-  return (
-    inTurn(s.state) ||
-    !!s.pendingApproval ||
-    (s.pendingQuestions?.length ?? 0) > 0 ||
-    liveBackgroundTasks(s.backgroundTasks ?? []).length > 0
-  )
+  return s.live === true && !atRest(s)
 }
 
 /**
@@ -144,17 +138,17 @@ export function cutTurns(s: ActivitySnapshot): string[] {
  */
 export type SessionIdle =
   | { idle: true }
-  | { idle: false; reason: 'turn' | 'approval' | 'question' | 'background' | 'background_unknown' }
+  | { idle: false; reason: BusyReason | 'background_unknown' }
 
 export function sessionIdle(
   s: Pick<SessionInfo, 'state' | 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>,
   process: { running: boolean; reportsBackground: boolean },
 ): SessionIdle {
-  if (s.pendingApproval) return { idle: false, reason: 'approval' }
-  if (s.pendingQuestions.length > 0) return { idle: false, reason: 'question' }
-  if (inTurn(s.state)) return { idle: false, reason: 'turn' }
+  // The busy rule's own reason (`busyWith`), except that background work counts only while a process holds it
+  const busy = busyWith(s)
+  if (busy !== null && busy !== 'background') return { idle: false, reason: busy }
   if (!process.running) return { idle: true }
-  if (liveBackgroundTasks(s.backgroundTasks).length > 0) return { idle: false, reason: 'background' }
+  if (busy !== null) return { idle: false, reason: busy }
   if (!process.reportsBackground) return { idle: false, reason: 'background_unknown' }
   return { idle: true }
 }

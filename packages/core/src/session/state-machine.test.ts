@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { nextStateFor, type NormalizedEvent, type SessionState } from '@cc/protocol'
-import { URGENCY, canTransition, isWaiting, needsAnswer, transition } from './state-machine.js'
+import { URGENCY, canTransition, isWaiting, listedState, needsAnswer, transition } from './state-machine.js'
 
 const ev = (e: Partial<NormalizedEvent> & { type: NormalizedEvent['type'] }) =>
   ({ sessionId: 's1', ...e }) as NormalizedEvent
@@ -126,5 +126,15 @@ describe('needsAnswer', () => {
     for (const state of ['error', 'waiting_input', 'limited', 'working', 'idle'] as const) {
       expect(needsAnswer(q(state))).toBe(false)
     }
+  })
+})
+
+describe('listedState', () => {
+  it('lists every card the person answers as an approval, as needsAnswer reads it; an error outranks the card', () => {
+    expect(listedState({ state: 'working', pendingQuestions: [{}] })).toBe('waiting_approval')
+    // An approval card carried on a row whose state was not raised with it (a summary) is a card all the same
+    expect(listedState({ state: 'working', pendingQuestions: [], pendingApproval: { requestId: 'r1' } })).toBe('waiting_approval')
+    expect(listedState({ state: 'error', pendingQuestions: [{}], pendingApproval: { requestId: 'r1' } })).toBe('error')
+    expect(listedState({ state: 'waiting_input', pendingQuestions: [] })).toBe('waiting_input')
   })
 })

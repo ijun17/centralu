@@ -13,6 +13,7 @@ import { frameField } from '@cc/protocol'
 import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
+import { isOrdinary } from './tool-profiles.js'
 
 
 /**
@@ -59,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -142,10 +143,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (trust && this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, quiet ? undefined : 'delegate from an untrusted project')) {
-      return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
-    }
-    return null
+    return trust ? this.host.trustGate(callerId, caller.projectId, 'asking another project', quiet) : null
   }
 
   /** The project asked is still registered: the person may remove it while its card stands */
@@ -259,9 +257,7 @@ export class AskProjectFlow {
     const target = projects.find((p) => p.id === found[0]!.id)!
     if (target.id === caller.projectId) return { ok: false, error: `${target.name} is this session's own project — do the work here.` }
 
-    const candidates = [...this.host.meta.values()].filter((s) =>
-      s.projectId === target.id && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s),
-    )
+    const candidates = [...this.host.meta.values()].filter((s) => s.projectId === target.id && isOrdinary(s))
     const wantedSession = opts.session?.trim()
     // A bounded call can keep waiting even when the person has since opened another session.
     const outstanding = [...this.host.children.delegations.entries()].filter(([, d]) =>
@@ -292,7 +288,7 @@ export class AskProjectFlow {
 
     const available = (): string | undefined => {
       const current = this.host.meta.get(chosen.id)
-      if (!current || current.projectId !== target.id || current.kind !== 'worker' || current.appId || this.host.builderRefOf(current)) return 'The chosen session is no longer available'
+      if (!current || current.projectId !== target.id || !isOrdinary(current)) return 'The chosen session is no longer available'
     }
     const gone = available()
     if (gone) return { ok: false, error: gone }
@@ -349,7 +345,7 @@ export class AskProjectFlow {
        * An untrusted project's `auto` boundary was logged by the read after the card, with no wait since; one that lost
        * its trust during the wake is logged then
        */
-      const logged = this.host.store.projects.listProjects().find((p) => p.id === callerProjectId)?.trusted !== true
+      const logged = !this.host.projectTrusted(callerProjectId)
       const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
       if (midTurn) {
         const releaseHold = d.wait.holdInput()

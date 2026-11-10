@@ -1,6 +1,25 @@
 import { z } from 'zod'
 import { readJson } from '../dev-services/store/json.js'
-import type { ThenKeep } from './self-compaction.js'
+
+/** How far a request with a `then` has come; the next host reads it to know what it can still do */
+export type ThenStage = 'asked' | 'sent' | 'compacted' | 'refused' | 'sending'
+/**
+ * A pending `then` as the store keeps it. `refused`: the request did not compact and `why` says so; the step goes all the same, as a turn that
+ * says it. `at`: when the record last moved, so a host does not send what an older build left behind long ago (`THEN_KEEP_MS`)
+ */
+export type StoredThen = { stage: ThenStage; then: string; focusAside: string | null; ahead: boolean; why: string | null; at: number }
+/** The store side of a `then` and of the notes owed a session: per session, in the setting store, so the host after a swap or a restart finds them */
+export type ThenKeep = {
+  read(sessionId: string): StoredThen | null
+  write(sessionId: string, record: StoredThen): void
+  clear(sessionId: string): void
+  /** Moves a `compacted` or `refused` record to `sending` in one transaction; true only for the caller that moved it. The other host of a swap finds it moved (or gone) and sends nothing */
+  claim(sessionId: string): boolean
+  /** Records that a compaction of the session went on to its next step at `at`, and answers how many did in the hour up to it (kept, so a swap does not start the count again) */
+  cycle(sessionId: string, at: number): number
+  notes(sessionId: string): string[]
+  writeNotes(sessionId: string, notes: string[]): void
+}
 
 /**
  * What a host swap or restart must not lose of `compact_self`'s `then` (#2024): the setting store, a key per session. Added keys

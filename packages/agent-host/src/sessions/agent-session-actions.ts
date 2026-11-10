@@ -1,9 +1,9 @@
-import { liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
+import { atRest, liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { taskList, type BackgroundStops } from './background-stops.js'
-import type { AgentStartRecord } from './child-ownership.js'
+import type { AgentStartRecord } from './agent-start-record.js'
 import type { DelegationForks } from './delegation-forks.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
@@ -180,11 +180,9 @@ export class AgentSessionActions {
         }
         case 'delete': {
           if (!child.worktree) {
-            const busy = inTurn(child.state) ||
-              !!child.pendingApproval || child.pendingQuestions.length > 0 ||
-              (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)
+            const busy = !atRest(child) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)
             if (!this.host.trashing.has(child.id) && busy && (!d || d.settled || d.callerId !== callerId)) {
-              return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn and its pending approval or question to finish before deleting it.` }
+              return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn, its pending approval or question, and its background work to finish before deleting it (agent_session stop ends background work you started).` }
             }
             // The caller is done with the work: a thread whose work was reported is closed, before the session goes
             if (!observing) this.host.children.finishedWith(callerId, child.id)
@@ -217,10 +215,10 @@ export class AgentSessionActions {
            */
           /*
            * The turn the child's own tool started when the work it paused on ended is the caller's work (#1576): its end is
-           * the report the caller is owed (`continuesPause`), so it is not busy for the caller. A note goes into it as an
+           * the report the caller is owed (`continuesWork`), so it is not busy for the caller. A note goes into it as an
            * observer's does, on a wait of its own, so the report owed is not touched; it needs no `auto`
            */
-          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesPause(child.id, callerId)
+          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesWork(child.id, callerId)
           if ((d && !d.settled && observing) || ((!d || d.settled) && !continuing && this.host.busyForCaller(callerId, child.id))) {
             if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.host.busyAnswer(callerId, child, 'agent_session') }
             if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.host.enqueue(callerId, child, 'agent_session', opts.text ?? '') }

@@ -78,7 +78,7 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
-    readonly selfCompaction: Pick<SelfCompaction, 'compactTurn'>
+    readonly selfCompaction: Pick<SelfCompaction, 'compactTurn' | 'stepOpens'>
     resumeSession: (sessionId: string) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
   }
 
@@ -202,10 +202,11 @@ export class SessionEvents {
     // Text the tool repeats on every start (#304): one stored line per session is enough
     if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.host.store.handoffs.hasNotice(e.sessionId, e.text)) return
     let seq: number | null = null
-    /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
-     * itself */
+    /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event itself */
     let endedTurn = false
     let started: TurnOrigin | undefined
+    /** This event opened a turn that goes on with the work of the turn before, after a compaction (#2164) */
+    let continues = false
     /** The session's interruption before this event (#698); `undefined` when the event belongs to no known session */
     let interruptionBefore: Interruption | null | undefined
     if (e.sessionId) {
@@ -233,7 +234,8 @@ export class SessionEvents {
         if (!wasBusy && inTurn(m.state)) this.host.children.queuedTurnStarted(m.id)
         // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
-          this.host.children.turnStarted(m.id)
+          continues = this.host.selfCompaction.stepOpens(m.id)
+          this.host.children.turnStarted(m.id, continues)
           // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
           this.host.children.noteTurnStart(m.id, m.lastSeq)
         }
@@ -297,8 +299,7 @@ export class SessionEvents {
       if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
         const dead = this.host.handles.get(e.sessionId)
         if (dead) {
-          // Closed before it is removed — so a message issued during close (notice of an unsent message)
-          // still arrives as a message from the registered handle (#157)
+          // Closed before it is removed — so a message issued during close (notice of an unsent message) still arrives as a message from the registered handle (#157)
           void dead.dispose().catch(() => {})
           this.host.handles.delete(e.sessionId)
           this.host.running.delete(e.sessionId)
@@ -307,8 +308,7 @@ export class SessionEvents {
         }
       }
     }
-    // An event that gets recorded carries its assigned in-session seq along with it — the basis for the UI's
-    // unread tracking
+    // An event that gets recorded carries its assigned in-session seq along with it — the basis for the UI's unread tracking
     // Capture the answer before an event subscriber can send more input into this conversation.
     const run = e.sessionId ? this.host.agentRuns.get(e.sessionId) : undefined
     // A wait still reading this turn is owed its end (#698); one that settled earlier is left from a turn before
@@ -333,8 +333,8 @@ export class SessionEvents {
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
     const since = turnBy && e.sessionId ? this.host.children.turnRows(e.sessionId)?.after : undefined
     const turnSaid = turnBy && (e.type === 'turn_complete' || e.type === 'state_change' || e.type === 'error' || e.type === 'limit_reached') ? { ...e, turn: since === undefined ? turnBy : { ...turnBy, since } } : e
-    // What the turn it opens ran for, said with it so a hub that follows this host reads whose it is (#1604)
-    const said = started && e.type === 'state_change' ? { ...turnSaid, origin: started } : turnSaid
+    // What the turn it opens ran for, or goes on with (#2164), said with it so a hub that follows this host reads whose it is (#1604)
+    const said = e.type === 'state_change' && (started || continues) ? { ...turnSaid, ...(started ? { origin: started } : {}), ...(continues ? { continues: 'compaction' as const } : {}) } : turnSaid
     this.host.emit(seq != null ? ({ ...said, seq } as NormalizedEvent) : said)
     this.closeIntoRest(e)
     // After the event that caused it, so a window reads the error first and the reason for it second (#698)
@@ -368,13 +368,13 @@ export class SessionEvents {
       // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
       sends.push(this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy))
       // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
-      if (this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
+      this.host.reports.settlePausedReport(e.sessionId)
     } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
       // A wait settled in an earlier turn holds that turn's answer, not this one's
       sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy && since !== undefined ? { ...turnBy, since } : turnBy))
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
-    if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) void this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+    if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
     if (endedTurn && e.sessionId && !owed) sends.push(this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy))
     if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
@@ -408,7 +408,7 @@ export class SessionEvents {
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
     // A paused report's work may just have ended (#721)
-    if (e.type === 'background_tasks' && e.sessionId && this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
+    if (e.type === 'background_tasks' && e.sessionId) this.host.reports.settlePausedReport(e.sessionId)
   }
 
   /**

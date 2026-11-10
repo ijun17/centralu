@@ -89,7 +89,7 @@ type NormalizedEvent =
   | { type: 'question_resolved';sessionId, requestId }
   // session state and gauges
   | { type: 'turn_complete';    sessionId }
-  | { type: 'state_change';     sessionId, state: SessionState, reason?, origin?: { seq, from } }   // origin: the message the tool ran this turn for, when a sender gave it (into a turn before it, or at rest behind another message) (#1604)
+  | { type: 'state_change';     sessionId, state: SessionState, reason?, origin?: { seq, from }, continues?: 'compaction' }   // origin: the message the tool ran this turn for, when a sender gave it (into a turn before it, or at rest behind another message) (#1604); continues: the turn is a compaction's next step, going on with the work of the turn that asked (#2164)
   | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: one model request's input, for the prompt cache (agent-host.md §6.1)
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate', model?, capped?, compactAt? }  // model: the model the tool resolved the name to (#1376); window: the model's full window as the host says it, capped: only a floor under it is known, compactAt: where the process compacts, in tokens, as the adapter says it (#1553)
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
@@ -106,7 +106,7 @@ type NormalizedEvent =
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this child to the session that took over (a settled one too when the original goes, #738); the sidebar hangs it there. #1038: also the hub naming its session that started a linked machine's child (null once that session is gone)
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
-  | { type: 'mail_changed';     threadId, toPerson? }          // #1347: a mailbox thread changed; the Inbox reads again. App-wide, never forwarded from a linked machine
+  | { type: 'mail_changed';     threadId, toPerson?, arrived? } // #1347: a mailbox thread changed; the Inbox reads again. App-wide, never forwarded from a linked machine. `arrived` (#1630): a new message the person can read, not their own ({ messageId, from: MailParty, kind, preview }); the window raises one OS notification for it
   | { type: 'update_apply_request'; requestId }                 // #665: an agent's "Apply now"; each window answers with updates.answerApply
   | { type: 'update_apply_go';  requestId, ticket }             // #665: only the window holding ticket relaunches: updates.reportApply started, then the outcome
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }

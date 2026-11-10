@@ -1,5 +1,5 @@
 import type { SessionInfo } from '@cc/protocol'
-import { oneLineText } from '@cc/protocol'
+import { busyWith, oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { QueuedRequests, QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -161,10 +161,9 @@ export class HandoffChildren {
     const queuedBy = removed ? new Set<string>() : new Set([...this.host.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string => {
-      // A question blocks the session as an approval does (waiting_approval), so its own list is read first
-      if (s.pendingApproval) return 'waiting for an approval'
-      if (s.pendingQuestions.length) return 'waiting on a question'
-      if (s.state === 'waiting_approval') return 'waiting for an approval'
+      // A card first, named as the busy rule names it (`busyWith`): a question blocks the session as an approval does
+      const card = busyWith(s)
+      if (card === 'question' || card === 'approval') return card === 'question' ? 'waiting on a question' : 'waiting for an approval'
       if (this.host.turnRunning(s)) return queuedBy.has(s.id) && this.host.children.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
       if (queuedBy.has(s.id)) return 'your request is queued'
       // Its turn ended while its own background work runs (#721): the report waits for that work's end

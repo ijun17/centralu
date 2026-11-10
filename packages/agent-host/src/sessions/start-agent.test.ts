@@ -512,7 +512,7 @@ describe('starting another agent in the same project', () => {
       w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.inputs.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
-      expect(told(s, requestId)).toContain('no longer trusted')
+      expect(told(s, requestId)).toContain('is not trusted, so starting agents is refused')
       expect(childrenOf(s)).toEqual([])
     })
 
@@ -531,7 +531,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => making)
       w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
-      expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('no longer trusted') })
+      expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so starting agents is refused') })
       expect(childrenOf(s)).toEqual([])
       const reached = [...w.adapters.get('claude')!.handles.values()].filter((h) => h.sent.some((t) => t.includes('write the parser')))
       expect(reached).toEqual([])
@@ -1222,7 +1222,7 @@ describe('starting another agent in the same project', () => {
     const waitedId = childrenOf(s).find((x) => x.name === 'waited on')!.id
     w.mgr.inputs.interrupt(s)
     const r = await waited
-    expect(!r.ok && r.error).toContain('the person stopped the session that asked')
+    expect(!r.ok && r.error).toContain('your turn was stopped, so the delegated turn was stopped')
     expect(handleOf(waitedId)!.interrupted).toBe(1)
     expect(handleOf(background)!.interrupted).toBe(0)
   })

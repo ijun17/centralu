@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, pausedOnBackground } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, agentLook, oneLineText } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -17,7 +17,8 @@ import type { LinkedEvent } from './linked-reports.js'
 import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
-import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS, UNTRUSTED_START } from './start-agent-terms.js'
+import { autoNotice, bare, carriedPreset, remotePreset, remoteWorktreeLine, shownRemote, type AutoThere } from './remote-agent-words.js'
+import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
 
@@ -100,65 +101,11 @@ const withoutOwed = (r: RemoteAgent): RemoteAgent => {
   return rest
 }
 
-/** A machine's sentence to go inside another, without its own full stop */
-const bare = (error: string): string => error.trim().replace(/\.+$/, '')
-
 /**
  * How long a start waits for the machine to say its instructions for agents now (#1161 review), once the child is made
  * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
  */
 export const INSTRUCTIONS_WAIT_MS = 5_000
-
-
-/**
- * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
- * trash": removed, or left and why. Nothing for a child started without a worktree.
- */
-function remoteWorktreeLine(
-  rec: RemoteAgent,
-  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | undefined,
-): string {
-  if (!rec.worktree) return ''
-  if (!done) return `; its worktree there, on ${rec.worktree}, stays. The person deletes it on that machine`
-  const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
-  // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
-  if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
-  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed`
-  if (done.worktree === 'none') return `; it had no worktree of its own there any more`
-  return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
-}
-
-/**
- * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
- * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
- */
-const shownRemote = (url: string | null): string => (url === null ? 'no origin' : (gitRemoteKey(url) ?? 'a local path'))
-
-/**
- * The most a child on another machine runs under when its caller's `auto` is not carried (#1038 review, as
- * create_session over a link, #838): `normal`. An `auto` caller's is carried only to a machine that takes it (#1273,
- * `AutoThere`), as that machine's own switch says.
- */
-const remotePreset = (caller: PermissionPreset): PermissionPreset => (presetWithin(caller, 'normal') ? caller : 'normal')
-
-/**
- * The caller's preset as `fromHub` carries it (#1273). The machine reads only `auto` from it; `edits` (#1525) is never put
- * on the link, because a machine from before it refuses a whole start for a value it does not know: it goes as `normal`,
- * the preset the child there runs under.
- */
-const carriedPreset = (caller: PermissionPreset): PermissionPreset => (caller === 'auto' ? 'auto' : remotePreset(caller))
-
-/**
- * What a machine says of an `auto` caller's child (#1273, `LinkedSessions.hubAuto`): `auto`, it runs under `auto` there
- * too and no card is raised; otherwise why it runs under `normal` (its switch is off)
- */
-type AutoThere = { auto: true } | { auto: false; withheld: 'machine_off' }
-
-/** What the start tells an `auto` caller of its child's preset (#1273), for its notice */
-const autoNotice = (machine: string, there: AutoThere): string =>
-  there.auto
-    ? `it runs under auto on ${machine}, as this session does`
-    : `it runs under normal on ${machine}: that computer does not take auto from another computer (its "Allow auto from a linked computer" setting is off)`
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
@@ -169,7 +116,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'hostCards' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
+  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
 >
 
 /**
@@ -267,15 +214,31 @@ export class RemoteAgents {
     }
   }
 
-  /** A report paused over the child's background work stays owed when its link drops, and is settled once the link is back (`LinkedReportsHost.keepsOverLoss`, #1523) */
-  keepsOverLoss(sessionId: string): boolean {
+  /**
+   * What a lost link keeps of the child's paused report (`LinkedReportsHost.keepsOverLoss`): the report, settled once the link is back
+   * (#1523), and also the turn running there (`turn`) when this hub's update holds the link and the host it starts continues the turn
+   * its stop cut, so the turn after is the same turn (#2164)
+   */
+  keepsOverLoss(sessionId: string): 'report' | 'turn' | null {
     const rec = this.of(sessionId)
-    return !!rec && this.reportArmed(rec)
+    if (!rec || !this.reportArmed(rec)) return null
+    return this.continuesOverUpdate(rec.machineId) ? 'turn' : 'report'
+  }
+
+  /** This hub's own update or rollback holds the machine's link, and its host continues the turns that stop cuts (#1618) */
+  private continuesOverUpdate(machineId: string): boolean {
+    return this.updateHolds.has(machineId) && this.host.linkedReader?.continuesCutTurns?.(machineId) === true
   }
 
   /** The hub's record of a child on a linked machine, by its qualified id */
   of(sessionId: string): RemoteAgent | undefined {
     return this.records().find((r) => r.sessionId === sessionId)
+  }
+
+  /** A child started here on a linked machine, by its name and machine as one name (`MailSessionsHost.linkedChild`) */
+  named(sessionId: string): { name: string } | undefined {
+    const r = this.of(sessionId)
+    return r && { name: oneLineText(`${r.name} on ${r.machine}`, 120) }
   }
 
   /**
@@ -295,13 +258,9 @@ export class RemoteAgents {
         continue
       }
       const there = listed?.find((s) => s.sessionId === r.sessionId)
-      const state: AgentListRow['state'] =
-        there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
-        : there ? (inTurn(there.state as SessionState) ? 'working'
-          : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption }) ? 'paused'
-          // Cut short there, as a child here reads (`agentState`): never paused over the work its turn left (#2146 review)
-          : there.state === 'error' || there.state === 'limited' || there.interruption ? 'stopped'
-          : 'finished')
+      // Its machine's row as a child here reads (`agentLook`), with the tasks its machine relays (#2146 review)
+      const state: AgentListRow['state'] = there
+        ? agentLook({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption })
         : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }
@@ -395,7 +354,8 @@ export class RemoteAgents {
     // Said, and an `auto` caller's crossing logged, before anything is asked, as by a local start's first gate
     const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) return { ok: false, error: UNTRUSTED_START }
+    const untrusted = this.host.trustGate(callerId, project.id, 'starting agents')
+    if (untrusted) return { ok: false, error: untrusted }
     const refused = this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
     // Counted under the caller's project, as a local child is (#1038); checked before anything is asked
@@ -1128,16 +1088,19 @@ export class RemoteAgents {
    * the caller's: its end is owed as the first turn's was, and a note goes into it. A turn with no origin, or one for a row
    * not held here (the person's, another session's, a machine that does not say), is not taken for the caller's. The rows up
    * to the one named are done with either way: the tool runs messages in the order they were given. While whose the child's turn
-   * is cannot be told (a link's loss, a restart), the rows are kept, and no turn is taken for the caller's
+   * is cannot be told (a link's loss, a restart), the rows are kept, and no turn is taken for the caller's. A turn the machine opened
+   * to go on with the work of the turn before (`continues`, a compaction's next step, #2164) is the caller's while the child's last
+   * turn was, with nobody else's since (`whose`)
    */
   private turnOpens(rec: RemoteAgent, e: LinkedEvent): void {
     const origin = e.type === 'state_change' ? asObj(e.origin) : {}
     const named = origin.seq
     const held = this.givenRows(rec.sessionId)
-    if (typeof named !== 'number' || !held.includes(named) || !this.fromHubHere(rec, origin.from)) return
+    const goesOn = e.type === 'state_change' && e.continues === 'compaction'
+    if (!goesOn && (typeof named !== 'number' || !held.includes(named) || !this.fromHubHere(rec, origin.from))) return
     // Not told apart yet (the link dropped, or Centralu restarted): the rows stay for the re-read that tells (`verify`)
     if (this.whoseOf(rec) === 'unknown') return
-    this.setGiven(rec.sessionId, held.filter((row) => row > named))
+    if (typeof named === 'number') this.setGiven(rec.sessionId, held.filter((row) => row > named))
     if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return
     this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: true })
   }
@@ -1386,7 +1349,7 @@ export class RemoteAgents {
        * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back lets the link go
        * (`updateHolds`), and the drop is told then as any is. A host from before that is told as before
        */
-      if (this.updateHolds.has(m.id) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
+      if (this.continuesOverUpdate(m.id)) continue
       this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '
