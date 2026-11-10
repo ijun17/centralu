@@ -335,8 +335,8 @@ test('A pending approval also calls out with sound and the dock badge', async ({
   // window is always focused, this opens that condition
   await page.evaluate(() => {
     const st = (window as never as { __store: { getState(): Record<string, never> } }).__store.getState()
-    const s = st as unknown as { notifyPolicy: Record<string, boolean>; setNotifyPolicy(p: unknown): void }
-    s.setNotifyPolicy({ ...s.notifyPolicy, whenFocused: true, sound: true })
+    const s = st as unknown as { prefs: { notifyPolicy?: Record<string, boolean> }; setNotifyPolicy(p: unknown): void }
+    s.setNotifyPolicy({ ...s.prefs.notifyPolicy, whenFocused: true, sound: true })
   })
 
   await injectApproval(page, 0, { tool: 'Bash', command: 'rm -rf /tmp/x' })

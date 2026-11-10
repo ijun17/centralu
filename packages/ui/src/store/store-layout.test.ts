@@ -6,7 +6,7 @@
  * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExternalAppInfo } from '@cc/protocol'
+import { notifyPolicyOf, type ExternalAppInfo } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, arrangePanels, withOrder, withPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
@@ -530,23 +530,22 @@ describe('project screen arrangement (#203)', () => {
 })
 
 describe('the workspace snapshot has a single writer (U7)', () => {
-  it('saving the layout after changing the notify policy does not erase the policy', async () => {
+  // #2168: the switches are the host's alone (`prefs.notifyPolicy`); the snapshot no longer carries a second copy
+  it('changing the notify policy writes it to the host, not to the workspace snapshot, and a layout save leaves it there', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
 
     const policy: NotifyPolicy = { ...DEFAULT_NOTIFY_POLICY, sound: !DEFAULT_NOTIFY_POLICY.sound }
     useStore.getState().setNotifyPolicy(policy)
     await new Promise((r) => setTimeout(r, 0))
-    expect((mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy } | null)?.notifyPolicy).toEqual(policy)
+    expect(mock.uiPrefs.notifyPolicy).toEqual(policy)
 
-    // This save used to overwrite the whole thing with a partial snapshot missing `notifyPolicy` →
-    // resetting the policy on restart (the example at the time of the incident was `treeHeight` — that
-    // setting left with the strip, but the rule remains)
     useStore.getState().setShowIgnored(false)
     await new Promise((r) => setTimeout(r, 0))
     const snap = mock.workspaceSnapshot as { notifyPolicy?: NotifyPolicy; showIgnored?: boolean } | null
-    expect(snap?.notifyPolicy).toEqual(policy)
+    expect(snap?.notifyPolicy).toBeUndefined()
     expect(snap?.showIgnored).toBe(false)
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual(policy)
   })
 
   it('conversely, saving the policy does not erase the layout (showIgnored) either', async () => {
@@ -708,7 +707,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
     mock.workspaceSnapshot = { notifyPolicy: { approval: false, error: true, allDone: true, whenFocused: false, sound: 'loud' } } as never
     await useStore.getState().attach(mock)
     await tick()
-    expect(useStore.getState().notifyPolicy).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: true })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: true })
   })
 
   /*
@@ -735,7 +734,8 @@ describe('restoring the workspace saves nothing until it is done', () => {
     await useStore.getState().attach(mock)
     await tick()
 
-    expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rail-r1', panelWidth: 333, sidebarWidth: 251, notifyPolicy: policy, ...lateFields })
+    expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rail-r1', panelWidth: 333, sidebarWidth: 251, ...lateFields })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual(policy)
     expect(useStore.getState()).not.toHaveProperty('railWidth')
 
     useStore.getState().setShowIgnored(true)

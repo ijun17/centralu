@@ -319,9 +319,9 @@ function applyWorkspaceSnapshot(snap: WorkspaceSnapshot, get: () => AppState, se
   if (typeof snap.panelWidth === 'number') get().setPanelWidth(snap.panelWidth)
   if (typeof snap.sidebarWidth === 'number') get().setSidebarWidth(snap.sidebarWidth)
   const savedPolicy = (snap as { notifyPolicy?: unknown }).notifyPolicy
-  // The host's record is the one source (#1306); the snapshot's copy is read only from a host that has none, and it is not
-  // read at all once the host answered (the preferences arrive before the snapshot is applied)
-  if (savedPolicy != null && get().prefs.notifyPolicy === undefined) set({ notifyPolicy: readNotifyPolicy(savedPolicy) })
+  // The host's record is the one source (#1306); the snapshot's copy, which no build writes now (#2168), is read only from a host
+  // that has none, and not at all once the host answered (the preferences arrive before the snapshot is applied)
+  if (savedPolicy != null && get().prefs.notifyPolicy === undefined) set((s) => ({ prefs: { ...s.prefs, notifyPolicy: readNotifyPolicy(savedPolicy) } }))
   // Whether the tree shows ignored files is a way of looking, so it comes back with
   // the rest of the panel's layout rather than being re-chosen every launch (#17).
   //
@@ -554,9 +554,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
         gridPanels,
         tools,
-        prefs,
         // The switches are the host's (#1306); a host from before them answers without, and the snapshot's are read later
-        ...(prefs.notifyPolicy ? { notifyPolicy: prefs.notifyPolicy } : {}),
+        prefs,
         externalApps,
         themeFiles,
         lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
@@ -664,7 +663,6 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       foldedProjects: s.foldedProjects,
       projectPanels: s.projectPanels,
       appSpans: s.appSpans,
-      notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
       introSeen: s.introSeen,
     } as never

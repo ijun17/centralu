@@ -1,5 +1,7 @@
 import type { NormalizedEvent } from '@cc/protocol/client'
 import { badgeCount, countWaiting, gridSessionIds, notificationFor, pendingProposals, proposalCandidates, type NotifyRequest, type SessionSummary } from '@cc/core'
+import { notifyPolicyOf } from '@cc/protocol/client'
+import { firstToRaise } from '../../app/notice-claim.js'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { AppState, Notice, StoreGet, StoreSet } from '../state.js'
 import { projectScreenSessions } from '../screens.js'
@@ -22,17 +24,19 @@ export function syncBadge(get: () => AppState): void {
 
 /**
  * Raises a notification on the system: the OS banner and the alert (a sound, the dock or taskbar). The one path every notification
- * takes, a session's and the mail's (#1630)
+ * takes, a session's and the mail's (#1630), and once per machine however many windows hear `event` (`firstToRaise`, #2168)
  */
-export function alertPerson(notice: NotifyRequest, set: StoreSet, get: StoreGet): void {
-  const st = get()
-  if (!st.platform) return
-  // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
-  // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
-  void st.platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
-  // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
-  const kind = notice.kind === 'mail' ? 'done' : notice.kind
-  void st.platform.system.alert(kind, st.notifyPolicy.sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
+export function alertPerson(notice: NotifyRequest, event: string, set: StoreSet, get: StoreGet): void {
+  void firstToRaise(event).then((first) => {
+    const st = get()
+    if (!first || !st.platform) return
+    // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
+    // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
+    void st.platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
+    // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
+    const kind = notice.kind === 'mail' ? 'done' : notice.kind
+    void st.platform.system.alert(kind, notifyPolicyOf(st.prefs).sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
+  })
 }
 
 /**
@@ -128,10 +132,17 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
        * they come back — so a card alone is half the job. The sound follows the same policy as
        * every other notification — quietly leave only the card while the app is in view.
        */
-      if (s.notifyPolicy.done && (!s.appFocused || s.notifyPolicy.whenFocused)) {
-        void s.platform?.system
-          .alert('done', s.notifyPolicy.sound)
-          .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
+      const policy = notifyPolicyOf(s.prefs)
+      if (policy.done && (!s.appFocused || policy.whenFocused)) {
+        // Once per machine, as every notification (#2168). A turn of a session not yet listed has nothing to tell it from
+        // the next by, and every window sounds it, as before, rather than a second turn going unheard
+        const seq = s.sessions[sessionId]?.lastSeq
+        void (seq === undefined ? Promise.resolve(true) : firstToRaise(`done:${sessionId}:${seq}`)).then((first) => {
+          if (!first) return
+          void get()
+            .platform?.system.alert('done', policy.sound)
+            .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
+        })
       }
     }
 
@@ -174,17 +185,12 @@ export function notifyStateChange(
     const st = get()
     if (!st.platform) return
 
-    /*
-     * Only an approval sounds and raises a banner now (owner, 2026-10-20): the "error" and "once when every session
-     * finishes" switches are gone from Settings, and their saved values are read but no longer followed. An error is
-     * still told in the top bar below; a finished turn keeps its own sound (`noticeEvent`).
-     */
-    const ctx = { appFocused: st.appFocused, policy: { ...st.notifyPolicy, error: false } }
+    const ctx = { appFocused: st.appFocused, policy: notifyPolicyOf(st.prefs) }
 
     // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
     const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
     const notice = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
-    if (notice) alertPerson(notice, set, get)
+    if (notice) alertPerson(notice, `${notice.kind}:${sessionId}:${withSeq.lastSeq}`, set, get)
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     if (notice || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*

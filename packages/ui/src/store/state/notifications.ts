@@ -39,14 +39,12 @@ export type NotificationsSlice = {
    * Only one is kept per session. If one busy session filled the screen, the rest would get buried.
    */
   notices: Notice[]
-  notifyPolicy: NotifyPolicy
   setAppFocused(focused: boolean): void
   /** Dismisses notification cards (× pressed, or that session was seen) */
   dismissNotices(sessionIds: string[]): void
   /**
-   * Sets the notification switches (#1306): shown at once, saved through the host's preferences (only the switches that
-   * changed, so the Assistant's change to another one is not undone), and still written to the workspace snapshot for a
-   * build that reads it there.
+   * Sets the notification switches (#1306), `prefs.notifyPolicy`, their one home (#2168): shown at once, and saved through
+   * the host's preferences (only the switches that changed, so the Assistant's change to another one is not undone).
    */
   setNotifyPolicy(p: NotifyPolicy): void
 }

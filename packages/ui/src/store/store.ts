@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { isolatedListeners } from './isolated-listeners.js'
-import { DEFAULT_UI_PREFERENCES, parseUiPreferences } from '@cc/protocol/client'
+import { DEFAULT_UI_PREFERENCES, notifyPolicyOf, parseUiPreferences } from '@cc/protocol/client'
 import type {
   AppQuestion,
   ToolStatus,
@@ -12,7 +12,7 @@ import type {
   AgentVersions,
   MachineInfo,
 } from '@cc/protocol/client'
-import { DEFAULT_NOTIFY_POLICY, gridSessionIds, type ProjectArrangement } from '@cc/core'
+import { gridSessionIds, type ProjectArrangement } from '@cc/core'
 import { defaultLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
 export { audienceText, messagesToChat } from './transcript.js'
@@ -277,7 +277,6 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     composerFocusFor: null as string | null,
     usageOpen: false,
     settingsOpen: false,
-    notifyPolicy: DEFAULT_NOTIFY_POLICY,
     importDialog: null as { source: string; fromLink: boolean; at: number } | null,
     update: null,
     hostRequests: [],
@@ -338,9 +337,8 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
           prefsRefreshWaiting = true
           return
         }
-        // A host from before the switches answers without them: the window keeps the snapshot's. The snapshot's copy, for a
-        // build that reads it there, catches up with the next save of the snapshot
-        set({ prefs, ...(prefs.notifyPolicy ? { notifyPolicy: prefs.notifyPolicy } : {}) })
+        // A host from before the switches answers without them: the window keeps the ones it has (the snapshot's, #2168)
+        set((s) => ({ prefs: { ...prefs, notifyPolicy: prefs.notifyPolicy ?? s.prefs.notifyPolicy } }))
       } catch {
         /* the host did not answer this time — the screen keeps what it has */
       }
@@ -376,11 +374,9 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     },
 
     setNotifyPolicy(notifyPolicy) {
-      const before = get().notifyPolicy
-      set({ notifyPolicy })
-      // The policy is carried in the workspace snapshot too (E-5, and an older build reads it there) — saving goes through the single writer
-      get().saveWorkspace()
-      // And the host keeps it (#1306): only the switches that changed
+      const before = notifyPolicyOf(get().prefs)
+      set((s) => ({ prefs: { ...s.prefs, notifyPolicy } }))
+      // The host keeps them (#1306): only the switches that changed
       const changed = Object.fromEntries(Object.entries(notifyPolicy).filter(([k, v]) => before[k as keyof typeof before] !== v))
       const platform = get().platform
       if (!platform || Object.keys(changed).length === 0) return
