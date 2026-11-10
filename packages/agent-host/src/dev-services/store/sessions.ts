@@ -46,9 +46,9 @@ export class SessionRecords {
         autoNamed: s.autoNamed ? 1 : 0,
         /*
          * The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed. Written to both
-         * columns (#2133 step 3): `is_orchestrator`, which every build that opens this store reads, and `is_assistant`, which
-         * a later build will read, kept right by every write of this one. Read from `is_orchestrator` only: the build before
-         * this one writes no other (docs/plans/assistant-rename.md, the reading rules)
+         * columns (#2133): `is_assistant`, which this build reads (step 4, after store step v69 copied it once and kept out
+         * the builds that write only the old column), and `is_orchestrator`, which the build of v68 reads and a person can
+         * go back to (docs/plans/assistant-rename.md §3.2)
          */
         isAssistant: isAssistantKind(s.kind) ? 1 : 0,
         effort: s.effort ?? null,
@@ -88,7 +88,7 @@ export class SessionRecords {
    * The id of the **central** assistant (null if there is none).
    *
    * There used to be only one Assistant per app, so this query was the whole answer. Once
-   * project assistants existed (#13), the marker (is_orchestrator=1) could be set on more
+   * project assistants existed (#13), the marker (is_assistant=1) could be set on more
    * than one row, and the central one is whichever of those has no project. The marker itself
    * rides SessionInfo.kind through the ordinary upsert — at one point this was the only place
    * that answered, on the reasoning that "keeping it in two places lets one drift out of sync,"
@@ -102,7 +102,7 @@ export class SessionRecords {
      * would answer here as the central one.
      */
     const row = this.db
-      .prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
+      .prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_assistant = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
       .get()
     return row?.id ?? null
   }
@@ -128,7 +128,7 @@ export class SessionRecords {
       interruptionJson: string | null
     })>(
         `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
-                s.auto_named as autoNamed, s.state, s.is_orchestrator as isAssistant,
+                s.auto_named as autoNamed, s.state, s.is_assistant as isAssistant,
                 s.last_read_seq as lastReadSeq,
                 s.waiting_since as waitingSince, s.created_at as createdAt,
                 s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,

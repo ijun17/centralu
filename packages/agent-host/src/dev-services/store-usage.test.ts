@@ -15,6 +15,9 @@ const bucket = (over: Partial<UsageBucket> = {}): UsageBucket => ({
   requests: 1, input: 10, cacheRead: 100, cacheWrite: 1000, cacheWrite5m: 0, cacheWrite1h: 1000, output: 5, rebuilds: 1, rebuildTokens: 1000, causes: { expired: 1 }, ...over,
 })
 
+/** The newest step this build knows: every open below runs up to it */
+const LATEST = new Store().latestKnownVersion
+
 describe('v62 usage tables', () => {
   it('adds both tables to a store from before them without touching what it holds, and a build that does not know them still opens it', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-usage-v62-'))
@@ -29,7 +32,7 @@ describe('v62 usage tables', () => {
       raw.close()
 
       const s = new Store(file)
-      expect(s.schemaVersion).toBe(68)
+      expect(s.schemaVersion).toBe(LATEST)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       s.usage.addBuckets([bucket()])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
@@ -61,7 +64,7 @@ describe('v63 rebuild tokens (#1492)', () => {
 
       const s = new Store(file)
       open.push(s)
-      expect(s.schemaVersion).toBe(68)
+      expect(s.schemaVersion).toBe(LATEST)
       expect(s.usage.buckets(0, 2 * 3_600_000)).toMatchObject([{ sessionId: 's1', requests: 3, rebuilds: 1, rebuildTokens: 0 }])
       s.close()
       // The previous build names its columns and has none of this one: its insert takes the default
@@ -148,7 +151,7 @@ describe('v64 the last totals of a tool that reports no limits (#1623)', () => {
 
       const s = new Store(file)
       open.push(s)
-      expect(s.schemaVersion).toBe(68)
+      expect(s.schemaVersion).toBe(LATEST)
       expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
       expect(s.usage.buckets(0, 10 * 3_600_000)).toHaveLength(1)
       expect(s.usage.localTotals('opencode')).toBeNull()

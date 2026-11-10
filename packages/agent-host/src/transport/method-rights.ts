@@ -132,6 +132,8 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.resolveSkillProposal': 'window',
   'agents.orchestratorSkills': 'everyday',
   'agents.deleteOrchestratorSkill': 'asks',
+  'agents.assistantSkills': 'everyday',
+  'agents.deleteAssistantSkill': 'asks',
   'agents.exportHandoffRecord': 'everyday',
   'agents.exportHandoffNote': 'everyday',
   'agents.worktreeStatus': 'everyday',

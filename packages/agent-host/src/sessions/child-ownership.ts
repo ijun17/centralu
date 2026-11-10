@@ -7,6 +7,7 @@ import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj, tryParseJson } from '../json-value.js'
 import { isHubSender } from './hub-sender.js'
+import { StoppedByUpdate } from './stopped-by-update.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
@@ -269,14 +270,14 @@ export class ChildOwnership {
   private readonly notes = new Map<string, { run: Delegation; waiters: number; told: boolean }>()
   readonly observerNotes: ReadonlyMap<string, { run: Delegation; waiters: number; told: boolean }> = this.notes
   /**
-   * Reports held over the session's own background work (#721): a turn ended while work it started still ran, so the
-   * work is paused, not over. The report stays owed in `awaitingReport` (its caller was told once that it paused) and
-   * goes out at the end of a turn with none of that work left, or `PAUSED_REPORT_SETTLE_MS` after the work ended with
-   * no turn following. Holds the tasks it paused on (each id and description, for how they ended and for `stop`).
-   * Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark.
+   * Reports held over the session's own background work (#721): a turn ended while work it started still ran, so the work is paused, not over. The
+   * report stays owed in `awaitingReport` (its caller was told once that it paused) and goes out at the end of a turn with none of that work left, or
+   * `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn following. Holds the tasks it paused on (each id and description, for how they ended
+   * and for `stop`). Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark. Those an update stopped: `StoppedByUpdate`
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  readonly stoppedByUpdate = new StoppedByUpdate()
   /**
    * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
    * at its end (`ChildReports.reportBackIfAwaited`). Mirrored in the app setting `report_turn:<session>` while a report is
@@ -643,6 +644,7 @@ export class ChildOwnership {
   }
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
+    this.stoppedByUpdate.release(sessionId)
     if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
   }
   /**

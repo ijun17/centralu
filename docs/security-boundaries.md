@@ -1494,7 +1494,7 @@ protocol does not compile until someone classifies it, and a test compares its k
 | asks | waits for the person's card in the window and runs once allowed ("The card for a limited call" below); refused at once when no window that shows the card holds the token | deleting for good (`trash.purge`, `trash.purgeRuns`, `trash.purgeSubagentSteps`, `trash.empty`); deleting a session (#1371: not fully undoable); deleting or adding a project, its trust either way, its commands, worktree setup and agent instructions; removing, enabling, importing apps, sharing one; adding, removing, installing, updating (save the catch-up below), rolling back, uninstalling a machine, its autostart, its versions, letting it ask here; installing an update (save the idle one below) or turning automatic updates on; a session created above `normal` or carrying a hub's preset (`fromHub`: an `auto` one starts it under `auto` while the hub-auto switch is on, and only a hub, which holds the token, sends it), or set to any preset but `safe` (the parameters do not say what it was); a preference that sets the agent ceiling or depth, or turns approval notifications or their sound off. The hub-auto switch, here (`prefs.set`) or on a linked machine (`machines.hubAuto`), turns on and off with no card (owner decision 2026-11-05) |
 | window | refused, never a card | the person's own answers (approval cards, questions, an update's apply and its report, whose ticket every client hears, MCP and skill proposals), the window's layout written whole, an app's secret, an import's preparing and cancelling, an app view's own calls |
 | link | refused | a hub's `host.*` calls (`host.stop` and `host.activity` are everyday: stopping is what `kill` does) |
-| bridge | refused | `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
+| bridge | refused | `assistant.tool(s)` and `orchestrator.tool(s)`, `apps.sessionTools`, `apps.sessionCall`: through them a caller would act as an `auto` session, whose own cards are skipped |
 
 The full list, method by method, is [generated/method-rights.md](generated/method-rights.md), written from the table by
 `pnpm docs:rights` and checked by a test. A method whose answer depends on its parameters reads them as sent, before they
@@ -1709,7 +1709,7 @@ A host started with `centralu serve` on another machine is reached by the app th
     process of this user there can also read the key. That gives it the limited credential, a session's credential
     (`ccs1`) for any session it can name, which fakes only the name on a card, and also a bridge credential (`ccb1`)
     for any session it can name, which reaches
-    that session's own tool channel (`orchestrator.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
+    that session's own tool channel (`assistant.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
     the launcher checks its parent (#1417).
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
@@ -1914,7 +1914,7 @@ host. It changes where a client connects, not what it must prove:
   so a command a session ran could take it from the bridge's environment as measured above and call every RPC:
   set its own preset to auto (`agents.updateSettings`), trust a project (`projects.setTrusted`). A socket that says
   hello with a bridge credential is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast, no
-  terminal output), and may call only `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools` and
+  terminal output), and may call only `assistant.tools`, `assistant.tool` (or their old names `orchestrator.*`), `apps.sessionTools` and
   `apps.sessionCall`, each naming the credential's own session (`bridgeRefusal`); everything else is refused before
   it reaches the handler (`server.test.ts`, `app-bridge.test.ts`). Because it is derived from the front door's token,
   the next host after a swap accepts it with nothing handed over or stored, and a running bridge keeps working

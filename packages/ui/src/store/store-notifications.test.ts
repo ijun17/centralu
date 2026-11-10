@@ -6,7 +6,7 @@
  * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent, UpdateStatus } from '@cc/protocol'
 import { NO_PATH } from '@cc/protocol'
 import { countWaiting } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
@@ -52,6 +52,85 @@ describe('update status (#43)', () => {
     expect(useStore.getState().update).toEqual(replacement)
     expect(spy).toHaveBeenCalledTimes(1)
     spy.mockRestore()
+  })
+
+  /**
+   * Answers come back in any order (#2155): the window's own check, the forced check as Updates opens and an install
+   * each ask on their own. Here the later request is answered first, then the earlier one: the earlier answer is older
+   * and must not replace the newer state on screen.
+   */
+  describe('an answer older than the one on screen (#2155)', () => {
+    function heldAnswers(platform: MockPlatform, method: 'status' | 'apply') {
+      const answers: Array<(value: UpdateStatus) => void> = []
+      const spy = vi.spyOn(platform.updates, method).mockImplementation(() => new Promise<UpdateStatus>((r) => answers.push(r)))
+      return { answers, spy }
+    }
+
+    it('drops the answer to the earlier of two checks when it arrives last', async () => {
+      const platform = new MockPlatform()
+      const { answers, spy } = heldAnswers(platform, 'status')
+      useStore.setState({ platform, update: null, hostResyncs: 0, toast: null })
+      const earlier = useStore.getState().checkUpdate(false)
+      const later = useStore.getState().checkUpdate(true)
+      const older = { ...status, latest: '9999.0.0', checkedAt: 1 }
+      const newer = { ...status, latest: '9999.0.1', checkedAt: 2 }
+      answers[1]!(newer)
+      await later
+      answers[0]!(older)
+      await earlier
+      expect(useStore.getState().update).toEqual(newer)
+      spy.mockRestore()
+    })
+
+    it('drops a check answer older than the install answer on screen, so "Update to" does not come back', async () => {
+      const platform = new MockPlatform()
+      const check = heldAnswers(platform, 'status')
+      const install = heldAnswers(platform, 'apply')
+      useStore.setState({ platform, update: null, hostResyncs: 0, toast: null })
+      const checking = useStore.getState().checkUpdate(false)
+      const installing = useStore.getState().applyUpdate()
+      const updating = { ...status, phase: 'updating' as const, checkedAt: 2 }
+      install.answers[0]!(updating)
+      await installing
+      check.answers[0]!({ ...status, phase: 'idle', checkedAt: 1 })
+      await checking
+      expect(useStore.getState().update).toEqual(updating)
+      check.spy.mockRestore()
+      install.spy.mockRestore()
+    })
+
+    // #2155 review: the switches seated their answer with neither check, so one from a host connection gone since replaced the newer host's state
+    it("drops a switch's answer that comes back after the host connection it was asked on is gone", async () => {
+      const platform = new MockPlatform()
+      const answers: Array<(value: UpdateStatus) => void> = []
+      const spy = vi.spyOn(platform.updates, 'setAuto').mockImplementation(() => new Promise<UpdateStatus>((r) => answers.push(r)))
+      useStore.setState({ platform, update: null, hostResyncs: 0, toast: null })
+      const saving = useStore.getState().setUpdateAuto(false)
+      const resynced = { ...status, auto: true, checkedAt: 2 }
+      useStore.setState({ hostResyncs: 1, update: resynced })
+      answers[0]!({ ...status, auto: false, checkedAt: 1 })
+      await saving
+      expect(useStore.getState().update).toEqual(resynced)
+      spy.mockRestore()
+    })
+
+    it('says nothing of an earlier check that failed after a later one was answered', async () => {
+      const platform = new MockPlatform()
+      const failures: Array<(e: Error) => void> = []
+      let call = 0
+      const spy = vi.spyOn(platform.updates, 'status').mockImplementation(() => {
+        if (call++ === 0) return new Promise<typeof status>((_, reject) => failures.push(reject))
+        return Promise.resolve(status)
+      })
+      useStore.setState({ platform, update: null, hostResyncs: 0, toast: null })
+      const earlier = useStore.getState().checkUpdate(false)
+      await useStore.getState().checkUpdate(true)
+      failures[0]!(new Error('registry timed out'))
+      await earlier
+      expect(useStore.getState().update).toEqual(status)
+      expect(useStore.getState().toast).toBeNull()
+      spy.mockRestore()
+    })
   })
 
   it('re-reads update status after reconnect without replaying an install (#635)', async () => {

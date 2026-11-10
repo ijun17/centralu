@@ -32,9 +32,9 @@ export const assistantParams = {
     args: z.record(z.string(), z.unknown()),
   }),
   /*
-   * #2133 step 3: the same five under the role's new name, answered as the old ones are. Nothing calls them yet: a window
-   * can stay attached to a host of an older release (#280), which knows only `orchestrator.*`, so callers switch in step 4
-   * (docs/plans/assistant-rename.md)
+   * #2133 step 3: the same five under the role's new name, answered as the old ones are. Since step 4 the Codex bridge calls
+   * these; the window keeps the old ones, since it can reach a host older than step 3, and so does a hub of another release
+   * calling a linked machine (docs/plans/assistant-rename.md §3.3)
    */
   'assistant.get': z.object({}),
   'assistant.peek': z.object({}),

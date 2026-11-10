@@ -1,8 +1,8 @@
 /**
- * The Assistant's marker under both names (#2133 step 3, docs/plans/assistant-rename.md): store step v68 adds
- * `sessions.is_assistant` and copies `is_orchestrator` into it, this build writes both, and it reads `is_orchestrator`
- * only. The build before this one writes only `is_orchestrator`, so after a person goes back to it, changes which
- * session is the Assistant and comes forward again, `is_assistant` is stale and `is_orchestrator` is not.
+ * The Assistant's marker under both names (#2133, docs/plans/assistant-rename.md): store step v68 adds
+ * `sessions.is_assistant` and copies `is_orchestrator` into it, and the build of v68 writes both and reads
+ * `is_orchestrator`. Step 4 (v69) copies the marker once more, keeps out the builds that write only `is_orchestrator`,
+ * and reads `is_assistant`; it still writes both, for the build of v68 a person can go back to.
  */
 import { describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -10,10 +10,12 @@ import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
 
-/** The newest step the next store knows: 67 is the build before this step */
-let newest = 68
+/** The newest step this build knows */
+const LATEST = new Store().latestKnownVersion
+/** The newest step the next store knows: 67 is the build before v68, 68 the build before step 4 */
+let newest = LATEST
 
-/** A store that is the v67 build until `upgrade`, which runs v68 on the same connection */
+/** A store that is the build of `newest` until `upgrade`, which runs the later steps on the same connection */
 class Versioned extends Store {
   protected override migrationSteps(): MigrationStep[] {
     return super.migrationSteps().filter((s) => s.to <= newest)
@@ -23,8 +25,8 @@ class Versioned extends Store {
     return this.db
   }
 
-  upgrade(): void {
-    newest = 68
+  upgrade(to = LATEST): void {
+    newest = to
     this.migrate()
   }
 }
@@ -34,7 +36,7 @@ function store(version: number): Versioned {
   try {
     return new Versioned()
   } finally {
-    newest = 68
+    newest = LATEST
   }
 }
 
@@ -57,7 +59,7 @@ describe("the Assistant's marker under both names (#2133)", () => {
       expect(s.raw.prepare(`SELECT name FROM pragma_table_info('sessions') WHERE name = 'is_assistant'`).all()).toEqual([])
       olderInsert(s, 'a', 1)
       olderInsert(s, 'w', 0)
-      s.upgrade()
+      s.upgrade(68)
       expect(s.schemaVersion).toBe(68)
       expect(markers(s)).toEqual([{ id: 'a', old: 1, new: 1 }, { id: 'w', old: 0, new: 0 }])
       expect(s.sessions.assistantId()).toBe('a')
@@ -67,7 +69,7 @@ describe("the Assistant's marker under both names (#2133)", () => {
   })
 
   it('writes both columns', () => {
-    const s = store(68)
+    const s = store(LATEST)
     try {
       s.sessions.upsertSession(session('a', 'orchestrator'))
       s.sessions.upsertSession(session('w', 'worker'))
@@ -80,19 +82,38 @@ describe("the Assistant's marker under both names (#2133)", () => {
     }
   })
 
-  it('reads the old column, which stays right when the previous build moved the role in between', () => {
+  it('reads the new column after v69, which copied the old one again: the build of v67 moved the role in between', () => {
     const s = store(68)
     try {
       s.sessions.upsertSession(session('a', 'orchestrator'))
-      // The person goes back to the previous build. It opens this store (v68 raised no floor) and names only the columns it
+      // The person goes back to the build of v67. It opens this store (v68 raised no floor) and names only the columns it
       // knows: `a` loses the marker, and it makes a new Assistant `b`
       s.raw.exec(`UPDATE sessions SET is_orchestrator = 0 WHERE id = 'a'`)
       olderInsert(s, 'b', 1)
       expect(markers(s)).toEqual([{ id: 'a', old: 0, new: 1 }, { id: 'b', old: 1, new: 0 }])
 
-      // Forward again: this build reads the role from is_orchestrator
+      // Forward to this build: v69 makes the old column the truth once more, then the new column is read
+      s.upgrade()
+      expect(markers(s)).toEqual([{ id: 'a', old: 0, new: 0 }, { id: 'b', old: 1, new: 1 }])
       expect(s.sessions.assistantId()).toBe('b')
       expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['b', 'orchestrator']])
+    } finally {
+      s.close()
+    }
+  })
+
+  it('reads the new column: the build of v68, gone back to after v69, writes both', () => {
+    const s = store(LATEST)
+    try {
+      s.sessions.upsertSession(session('a', 'orchestrator'))
+      s.sessions.upsertSession(session('w', 'worker'))
+      // The build of v68 moves the role: its upsert names both columns, as this build's does
+      s.raw.exec(`UPDATE sessions SET is_orchestrator = 0, is_assistant = 0 WHERE id = 'a'`)
+      s.raw.exec(`UPDATE sessions SET is_orchestrator = 1, is_assistant = 1 WHERE id = 'w'`)
+      expect(s.sessions.assistantId()).toBe('w')
+      // Only the new column is read: a row whose old column alone says Assistant (no build that opens this store writes that) is not one
+      s.raw.exec(`UPDATE sessions SET is_orchestrator = 1 WHERE id = 'a'`)
+      expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['w', 'orchestrator']])
     } finally {
       s.close()
     }

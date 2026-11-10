@@ -1071,20 +1071,22 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()[0]).toContain('A final report follows only if that work ends.')
       // The Assistant has no agent_session to stop it with
       expect(h.reports()[0]).not.toContain('agent_session')
-      // A turn that ends while the work still runs says nothing more
+      // A turn that ends with words while the work still runs is an update (#1540): still paused, the task named, no end
       turn(h)
-      await h.settle(1)
-      expect(h.reports()).toHaveLength(1)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] An update on the assigned work, which is still paused: a later turn ended with a new answer while its own background work is still running (pnpm verify).')
+      expect(h.reports()[1]).not.toContain('agent_session')
       // The work ends, and the turn its ending starts finishes
       h.mgr.linkedHost.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
       turn(h)
-      await h.settle(2)
-      expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
+      await h.settle(3)
+      expect(h.reports()).toHaveLength(3)
+      expect(h.reports()[2]).toMatch(/^\[Centralu\] The session ended its turn\./)
       // Told once: a later turn there is not the assigned work
       turn(h)
-      await h.settle(2)
-      expect(h.reports()).toHaveLength(2)
+      await h.settle(3)
+      expect(h.reports()).toHaveLength(3)
     })
 
     // #1377: the person's message goes straight to the machine; the hub sees the machine's record of it and the turn's events

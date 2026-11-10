@@ -138,8 +138,8 @@ describe('ask_project into a session that waits on its own background work (#146
   it("the person's own turn in the session is theirs: not reported, and the work's end still is", async () => {
     await pauseOnVerify(ask('run the suite'))
     const h = handleOf(target)
-    h.event({ type: 'user_message', sessionId: target, seq: 99, text: 'what is going on?' } as never)
-    h.event({ type: 'state_change', sessionId: target, state: 'working' })
+    // The person writes in the session (the composer): their turn, not a new answer of the work to send on as an update (#1540)
+    await w.mgr.inputs.send(target, 'what is going on?')
     h.answer('Verify is still running.')
     await settle()
     expect(reports()).toEqual([])

@@ -32,7 +32,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     expect(sent).toMatchObject({ kind: 'message', needsReply: true, body: 'Is #12 still open?' })
     expect(r.text).toBe(`Sent ${sent!.id} to beta (${B}). It waits for a reply; the reply will reach you as mail. What comes back arrives in your mailbox, and wakes you if you are at rest.`)
     w.run('a', { action: 'send', to: 'assistant', text: 'help please', kind: 'question' })
-    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
+    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(A, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'assistant' })
   })
 
   it('kind "note" needs no reply; kind "assign" and "question" both need one', () => {
@@ -57,7 +57,7 @@ describe('send (§11.3: needsReply unless kind "note")', () => {
     const w = world()
     const first = w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 1' })
     expect(first.text).toContain('It went to the Assistant, not to your parent "alpha". If you meant your parent, use to: "parent".')
-    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'orchestrator' })
+    expect(w.store.mailbox.recipients(w.store.mailbox.feedOf(W, { limit: 1 })[0]!.id)[0]).toMatchObject({ recipient: ORC, via: 'assistant' })
     expect(w.run('w', { action: 'send', to: 'assistant', text: 'checkpoint 2' }).text).not.toContain('not to your parent')
     // To the parent, or from a session with none, there is nothing to say
     expect(w.run('w', { action: 'send', to: 'parent', text: 'which branch?' }).text).not.toContain('not to your parent')

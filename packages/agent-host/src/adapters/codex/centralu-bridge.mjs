@@ -24,8 +24,8 @@
  * **Why there is one bridge, not two.** The Centralu tools and an external app take the same
  * path back to the host (the WS address, token and session id). Splitting this into two files
  * would double the bundle copy, path lookup and reconnection logic. Only two RPCs called differ:
- * for an app it is `apps.sessionTools`/`apps.sessionCall`, otherwise `orchestrator.tools`/
- * `orchestrator.tool`. The app bridge also makes no decisions — decision 4 (which apps attach),
+ * for an app it is `apps.sessionTools`/`apps.sessionCall`, otherwise `assistant.tools`/
+ * `assistant.tool`. The app bridge also makes no decisions — decision 4 (which apps attach),
  * exposure scope, and logging are all re-checked by the host using the session id.
  */
 import { WebSocket } from 'ws'
@@ -148,7 +148,7 @@ async function handle(msg) {
   if (method === 'tools/list') {
     try {
       // Sends its own session id along — a manager session (#69) must only receive the subset
-      const tools = await rpc('orchestrator.tools', { sessionId: SESSION_ID })
+      const tools = await rpc('assistant.tools', { sessionId: SESSION_ID })
       return ok(id, { tools })
     } catch (e) {
       return err(id, `Could not get the tool list — ${e.message}`)
@@ -164,7 +164,7 @@ async function handle(msg) {
        * them nothing.
        */
       const r = await rpc(
-        'orchestrator.tool',
+        'assistant.tool',
         { sessionId: SESSION_ID, name: params?.name, args: params?.arguments ?? {} },
         APP_CALL_TIMEOUT_MS,
       )

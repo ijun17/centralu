@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v67. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v69. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -137,6 +137,46 @@ export class StepsV65 extends MigrationRange {
           if (cols.length === 0) return
           this.addColumn('sessions', 'is_assistant', 'INTEGER NOT NULL DEFAULT 0')
           if (cols.some((c) => c.name === 'is_orchestrator')) this.db.exec(`UPDATE sessions SET is_assistant = is_orchestrator`)
+        },
+      },
+      {
+        to: 69,
+        breaksOlderReaders: true,
+        minReader: 68,
+        /**
+         * The Assistant's stored values read under the role's new name from here on (#2133 step 4, docs/plans/assistant-rename.md
+         * §3.2): `is_assistant` is copied from `is_orchestrator` on every row once more, each new settings key is set from its
+         * old key, and **a new key whose old key is absent is deleted**. A build of v68 writes both forms, but the build before
+         * it writes and deletes only the old one: after a person went back to it, `is_assistant` and the new keys can be stale,
+         * and where it deleted the old key (the last skill removed, a list emptied) the new key it left would bring back what
+         * the person removed. This copy makes the old form the truth one last time; from here on the new form is read first.
+         *
+         * **Breaks the builds that write the old form alone, and only them:** the floor goes to 68, not 69 (`minReader`). A
+         * build of v68 (beta.54 on) writes and deletes both forms (`SettingsRecords`, `SessionRecords.upsertSession`), so the
+         * new form stays right when a person goes back to it; a build of v67 or before would leave it stale, and is kept out.
+         * Both forms stay, and this build keeps writing both, so v68 still reads the old one; dropping them is a later step.
+         */
+        run: () => {
+          const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
+          if (cols.some((c) => c.name === 'is_orchestrator') && cols.some((c) => c.name === 'is_assistant')) {
+            this.db.exec(`UPDATE sessions SET is_assistant = is_orchestrator`)
+          }
+          if (this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'`).get() === undefined) return
+          const copy = this.db.prepare(
+            `INSERT INTO app_settings (key, value) SELECT ?, value FROM app_settings WHERE key = ?
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          )
+          const drop = this.db.prepare(`DELETE FROM app_settings WHERE key = ? AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = ?)`)
+          // The keys as they were when this step shipped, not the live `RENAMED_SETTINGS`: a step does the same on every store
+          for (const [old, renamed] of [
+            ['orchestrator_tool', 'assistant_tool'],
+            ['orchestrator_mcp_proposals', 'assistant_mcp_proposals'],
+            ['orchestrator_skill_proposals', 'assistant_skill_proposals'],
+            ['orchestrator_skills', 'assistant_skills'],
+          ] as const) {
+            copy.run(renamed, old)
+            drop.run(renamed, old)
+          }
         },
       },
     ]

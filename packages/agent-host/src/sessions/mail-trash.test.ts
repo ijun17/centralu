@@ -70,7 +70,7 @@ describe('deleting a session while it holds work in the mailbox', () => {
 
     const next = await world.mgr.assistant()
     expect(next.id).not.toBe(orc.id)
-    expect(read.row(request.id, addressOf(next.id))).toMatchObject({ via: 'orchestrator', settled: null, deliveredAt: null })
+    expect(read.row(request.id, addressOf(next.id))).toMatchObject({ via: 'assistant', settled: null, deliveredAt: null })
     expect(read.row(request.id, addressOf(orc.id))).toBeUndefined()
   })
 

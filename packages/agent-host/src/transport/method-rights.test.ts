@@ -18,6 +18,7 @@ describe('the method classification (#1405)', () => {
       'agents.deleteSession',
       'agents.deleteAgentChild',
       'agents.deleteOrchestratorSkill',
+      'agents.deleteAssistantSkill',
       'projects.delete',
       'projects.add',
       'projects.create',

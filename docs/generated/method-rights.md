@@ -10,6 +10,7 @@ With the limited credential: runs.
 
 - `agents.account`
 - `agents.applyVersions`
+- `agents.assistantSkills`
 - `agents.autoCompact`
 - `agents.cancelInstallTool`
 - `agents.cancelSignIn`
@@ -156,6 +157,7 @@ With the limited credential: waits for the person's card in the window and runs 
 
 - `agents.archiveIfAtRest`
 - `agents.deleteAgentChild`
+- `agents.deleteAssistantSkill`
 - `agents.deleteOrchestratorSkill`
 - `agents.deleteSession`
 - `agents.installTool`

@@ -1035,6 +1035,89 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
     expect(sentTo(b, id)).toHaveLength(0)
   })
 
+  /*
+   * #1912: a child whose report paused on its own background work was at rest when an update stopped the host. The next host dropped the report
+   * with the work, so its parent, told "a final report follows only if that work ends", waited for good. The report is kept now
+   */
+  describe('a child whose report to its parent paused on the work the update stopped (#1912)', () => {
+    /** The parent's reports about the child, the update's note among them */
+    const toldOf = (parent: string, child: string) =>
+      store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu]') && t.includes(child))
+    async function pausedChild(h: ReturnType<typeof host>) {
+      const { parent, child } = await parentAndChild(h)
+      const handle = h.claude.handles.get(child)!
+      handle.emit({ type: 'tool_call', sessionId: child, callId: 'call-1', summary: { tool: 'Bash', title: 'pnpm e2e', paths: [] }, input: { command: 'pnpm e2e', run_in_background: true } })
+      handle.emit({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'e2e run', parentCallId: 'call-1', status: 'running' }] })
+      handle.answer('Started the e2e run; waiting for it.')
+      await eventually(() => toldOf(parent, child).length === 1)
+      expect(toldOf(parent, child)[0]).toContain('The assigned work paused: its turn ended while its own background work is still running (e2e run)')
+      // The parent reads the pause and ends its turn
+      h.claude.handles.get(parent)!.answer('Noted.')
+      await eventually(() => info(h, parent).state !== 'working')
+      return { parent, child }
+    }
+
+    it("its parent hears the end of the turn the update's note wakes it for, saying the update stopped that work", async () => {
+      const f = memoryUpdateFolder()
+      const a = host({ updateResume: f })
+      const { parent, child } = await pausedChild(a)
+      await stopForUpdate(a)
+      const b = host({ updateResume: f })
+      await eventually(() => sentTo(b, child).length === 1)
+      expect(sentTo(b, child)[0]).toContain('- shell command: "pnpm e2e" (e2e run)')
+      b.claude.handles.get(child)!.answer('The update stopped the e2e run; I ran it again and it passed.')
+      await eventually(() => toldOf(parent, child).length === 2)
+      const end = toldOf(parent, child)[1]!
+      expect(end).toContain('[Centralu] The session ended its turn.')
+      expect(end).toContain('An update of Centralu stopped the background work this work had paused on before that work ended; the session was told which, and this turn came after.')
+      expect(end).toContain('I ran it again and it passed.')
+      expect(store.children.listReportMarks()).toEqual([])
+    })
+
+    // #1540: whether the person wrote to it was kept in memory, so the next host sent updates of a session the person had written to
+    it('one the person wrote to before the update sends its parent no update after it', async () => {
+      const f = memoryUpdateFolder()
+      const a = host({ updateResume: f })
+      const { parent, child } = await pausedChild(a)
+      await a.mgr.inputs.send(child, 'I will look at the e2e run myself', undefined, undefined, true)
+      a.claude.handles.get(child)!.answer('Sure.')
+      await eventually(() => info(a, child).state !== 'working')
+      await stopForUpdate(a)
+      const b = host({ updateResume: f })
+      await eventually(() => sentTo(b, child).length === 1)
+      // The woken turn starts the run again in the background and ends with words: the work is paused again
+      const handle = b.claude.handles.get(child)!
+      handle.emit({ type: 'tool_call', sessionId: child, callId: 'call-2', summary: { tool: 'Bash', title: 'pnpm e2e', paths: [] }, input: { command: 'pnpm e2e', run_in_background: true } })
+      handle.emit({ type: 'background_tasks', sessionId: child, live: [{ id: 't2', kind: 'shell', description: 'e2e run', parentCallId: 'call-2', status: 'running' }] })
+      handle.answer('Started the e2e run again; waiting for it.')
+      await eventually(() => info(b, child).state !== 'working')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(toldOf(parent, child)).toHaveLength(1)
+      expect(store.children.listReportMarks()).toHaveLength(1)
+    })
+
+    it('one the note cannot wake: its parent is told at once that the update stopped the awaited work', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const f = memoryUpdateFolder()
+      const a = host({ updateResume: f })
+      const { parent, child } = await pausedChild(a)
+      await stopForUpdate(a)
+      const b = host({ updateResume: f })
+      const create = b.claude.createSession.bind(b.claude)
+      b.claude.createSession = async (opts, emit) => {
+        if (opts.sessionId === child) throw new Error('its conversation is gone there')
+        return create(opts, emit)
+      }
+      await eventually(() => toldOf(parent, child).length === 2)
+      const note = toldOf(parent, child)[1]!
+      expect(note).toContain(
+        '[Centralu] An update of Centralu stopped the background work the assigned work had paused on (e2e run) before that work ended, and no turn of the session followed, so the work may not have finished',
+      )
+      expect(note).toContain('Started the e2e run; waiting for it.')
+      expect(store.children.listReportMarks()).toEqual([])
+    })
+  })
+
   it('lists only a session holding something, and only for an update: an empty one and a quit list nothing', async () => {
     const f = memoryUpdateFolder()
     const a = host({ updateResume: f })

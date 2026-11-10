@@ -9,6 +9,13 @@ export interface MigrationStep {
   to: number
   /** A host that knows only versions below `to` cannot run against the store, or silently loses data, once this has run */
   breaksOlderReaders: boolean
+  /**
+   * The store version a breaking step raises `min_reader_version` to, when that is below its own `to`: the step keeps out
+   * the builds below this version and admits the ones from it on. A step whose earlier steps already taught the builds
+   * from that version on everything it relies on names it (#2133 step 4: v69 keeps out only the builds that write the
+   * Assistant's settings under the old key alone). Absent, a breaking step's floor is its own `to`
+   */
+  minReader?: number
   /** Rewrites or re-indexes every message, or `VACUUM`s the file: too long to run while another host waits (#280) */
   heavy?: true
   /**

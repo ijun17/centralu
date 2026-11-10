@@ -21,6 +21,7 @@ import {
 import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
 import { buildMessageFrame, mailCalls, quoted, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
+import { updateInPlace, type TurnReport } from './turn-report.js'
 import type { MailReach } from './reach.js'
 import {
   ASKS_PER_HOUR,
@@ -96,18 +97,6 @@ export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'm
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
 
-export type TurnReport = {
-  outcome: 'finished' | 'failed' | 'stopped' | 'paused' | 'waiting'
-  body: string
-  answer?: string
-  error?: string
-  reason?: string
-  paused?: number
-  waitingOn?: number
-  personNote?: boolean
-  /** When the turn that ended began, for the tasks its report covers (§9.3): the turn has ended by the time the old path reports it */
-  startedAt?: number
-}
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
 /** `withheld`: a request to the Assistant whose words are shown only in the turn it starts (§7.6); the body is left out */
@@ -382,7 +371,8 @@ export class MessageService {
   /**
    * How a turn of delegated work ended (§9.3): Centralu's report, replying to the task, for its sender. A turn that ended for good settles the task
    * `reported`, and every other open task from the same sender to the same child that was delivered before the turn began (F4, K3); a pause
-   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`
+   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`.
+   * A pause's update (`update`, #1540) wakes when its owner has read the one before; until then it is written over that one, `duplicate` too
    */
   report(taskId: string, input: TurnReport): ReportWritten {
     return this.run(() => {
@@ -394,7 +384,11 @@ export class MessageService {
       if (row.settled !== null && task.kind === 'task') return { settledAlready: true }
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
-      const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
+      const held = updateInPlace(this.records, taskId, task.sender, input)
+      if (held?.rewritten) this.changed(held.message, [task.sender])
+      if (held) return { message: held.message, duplicate: true, first: false }
+      // A pause's update carries a new answer (#1540): one that is a report of its own wakes, as the first pause does
+      const first = !pause || input.update !== undefined || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
       const startedAt = input.startedAt ?? this.opts.turn?.(row.recipient)?.startedAt
       const covers = pause || startedAt === undefined || task.kind !== 'task'
         ? []
@@ -409,6 +403,7 @@ export class MessageService {
         ...(input.reason ? { reason: input.reason } : {}),
         ...(input.paused ? { paused: input.paused } : {}),
         ...(input.waitingOn ? { waitingOn: input.waitingOn } : {}),
+        ...(input.update !== undefined ? { update: input.update } : {}),
         ...(input.personNote ? { personNote: true } : {}),
         ...(input.answer ? { answer: input.answer } : {}),
         ...(covers.length > 0 ? { covers } : {}),
@@ -419,7 +414,7 @@ export class MessageService {
         body: input.body,
         facts,
         replyTo: taskId,
-        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}`,
+        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}${input.update !== undefined ? `:update:${input.update}` : ''}`,
       })
       if (!stored.duplicate && !pause) {
         for (const id of [taskId, ...covers]) this.records.settle(id, row.recipient, 'reported', now)

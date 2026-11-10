@@ -68,6 +68,10 @@ export const sessionsResults = {
     skills: z.array(z.object({ name: z.string(), content: z.string() })),
   }),
   'agents.deleteOrchestratorSkill': z.object({ ok: z.literal(true) }),
+  'agents.assistantSkills': z.object({
+    skills: z.array(z.object({ name: z.string(), content: z.string() })),
+  }),
+  'agents.deleteAssistantSkill': z.object({ ok: z.literal(true) }),
   'agents.exportHandoffRecord': z.object({ text: z.string(), path: z.string() }),
   'agents.exportHandoffNote': z.object({ text: z.string(), path: z.string() }).nullable(),
   'agents.autoCompact': z.object({

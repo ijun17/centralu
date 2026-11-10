@@ -118,6 +118,24 @@ export function useRelaunchCheck(): RelaunchCheck | null | undefined {
   return relaunch ? check : undefined
 }
 
+/**
+ * The check Updates asks for as Settings opens (#43): **each time it opens, not each time it mounts** (#2155). Settings
+ * reopened during its closing fade is still mounted, so a check tied to the mount asked nothing and showed what it had
+ * as it closed. Only with automatic checking on, and not over a check or an install under way.
+ */
+export function useUpdateCheckWhileOpen(): void {
+  const open = useStore((s) => s.settingsOpen)
+  useEffect(() => {
+    if (!open) return
+    const store = useStore.getState()
+    const update = store.update
+    if (!update?.auto) return
+    const phase = update.phase
+    if (phase === 'checking' || phase === 'updating' || phase === 'waiting_for_npm' || phase === 'restart_required') return
+    void store.checkUpdate(true)
+  }, [open])
+}
+
 /** Focus checks respect automatic-check consent, and failed requests are throttled too. */
 export function useUpdateCheckOnFocus(): void {
   const lastAttempt = useRef<number | null>(null)

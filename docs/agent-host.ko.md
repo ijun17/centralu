@@ -380,6 +380,23 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    일로 보고되지 않는다(#166). 그 답은 `agent_session`으로 읽을 수 있다. #1895 4단계 PR 1 전에는 호스트 교체가 키퍼가
    지켜 둔 세션의 표지를 남겼고, 교체 사이에 자식이 턴을 끝낸 호출자에게 알렸다(`tellTurnEndedInSwap`, #1186). 이제는
    어떤 프로세스도 자기 호스트보다 오래 살지 않는다.
+   자기 백그라운드 작업이 도는 채로 턴을 마쳐 보고가 멈춘 자식(#721)이 그 작업이 아직 도는 동안 새 답으로 또 턴을 마치면,
+   그 답은 곧바로 **업데이트**로 간다(#1540, `ChildReports.reportPauseUpdate`): "An update on the assigned work, which is
+   still paused: a later turn ended with a new answer while its own background work is still running (…)"에 멈춤과 같은
+   문장과 그 턴의 답이 붙는다. 호출자를 깨우고, 메일로는 끝난 턴이 대화에서 시작한 자리(그 끝을 본 곳에서 읽는다)로 키를
+   단 `paused` 보고다(`TurnReport.update`, 같은 턴의 끝이 다시 오거나 더 앞선 턴의 끝이 와도 저장된 업데이트 그대로다). **읽을 때까지 깨우기는 한 번:** 호출자가 그 멈춤의 마지막 업데이트를 아직 읽지 않았으면
+   새 업데이트는 그 위에 덮어 쓰고(가장 새 답과 작업 수) 아무도 깨우지 않는다. 읽은 뒤의 다음 업데이트는 다시 깨운다.
+   말이 없는 턴, Centralu의 압축 턴, 세션이 보내지 않은 메시지가 들어간 턴, 그리고 보고가 걸린 동안 사람이 그 세션에 쓴 뒤의
+   턴은 아무것도 보내지 않는다(사람의 턴을 언제나 가려낼 수는 없고, 그 말은 호출자의 것이 아니다. 스토어에서 읽으므로 업데이트
+   뒤의 호스트도 안다). 이 호스트의 자식과 연결된 기기의 자식이 한 규칙(`isPauseUpdate`, `sessions/pause-update.ts`)을 따른다. 저장된 보고와 화면은 도는 작업마다 이름을 대고, 모델은 개수만
+   읽으며(#1186) 자기가 띄운 자식이면 `agent_session(action="status")`가 각 작업의 이름을 댄다는 말을 받는다. 최종 보고는 여전히
+   그 작업이 끝날 때 온다.
+   업데이트를 위한 멈춤은 예외다(#1912): 쉬고 있던 자식의 멈춘 보고는 그 멈춤이 끝낸 작업과 함께 버리지 않고 남긴다
+   (`restoreReports`, `StoppedByUpdate`, 메모리만). 업데이트의 알림이 그 자식을 깨워 연 턴은 맡긴 일의 것이고, 그 끝의
+   보고는 "An update of Centralu stopped the background work this work had paused on before that work ended; the session was
+   told which, and this turn came after."라고 말한다. 그런 턴이 오지 않으면(알림이 들어가지 못했거나, 멈춤이 그 세션의
+   작업을 적지 않았다) 호출자는 곧바로 "An update of Centralu stopped the background work the assigned work had paused on (…)
+   before that work ended, and no turn of the session followed, so the work may not have finished"를 받는다(`reportStoppedByUpdate`).
    끝을 알리겠다고 하는 답(보고가 걸린 `working`, `pending`)은 그동안 `status`로 확인하지 말라고, 끝까지 붙잡고
    기다리는 호출은 `wait` 하나라고 말한다. `pending`은 더 이상 `status`를 알려 주지 않는다. `send`를 알려 주는
    답(`done`, `at_rest`)은 다른 종류의 일이면 할 일을 빠짐없이 적어 새 에이전트를 띄우라고 말한다. 새 에이전트는
@@ -1245,7 +1262,7 @@ ubuntu-24.04에서 돌린다. #1895 4단계 PR 7이 Linux를 직접 경로로 �
 한 세션 id의 HMAC이다(`transport/bridge-token.ts`). 같은 사용자의 어떤 프로세스든 브리지가 시작될 때의 환경을 읽을
 수 있기 때문이다([security-boundaries.md](security-boundaries.md), "The front door"). 이것으로 hello한 연결은
 클라이언트가 아니다: `hello_ok` 말고는 아무것도 받지 않고(재생도, 방송도, 터미널 출력도 없다), 호출할 수 있는 것은
-`orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools`, `apps.sessionCall`뿐이며, 그것도 자격 증명을
+`assistant.tools`, `assistant.tool`(또는 그 옛 이름 `orchestrator.*`), `apps.sessionTools`, `apps.sessionCall`뿐이며, 그것도 자격 증명을
 만든 세션을 이름으로 댈 때만이다. 키퍼 아래에서 키는 정문의 토큰이라서, 다음 호스트도 아무것도 넘겨받지 않고 돌던
 브리지의 자격 증명을 받아 준다. 이 변경 이전의 호스트는 거절한다: 그런 빌드로 되돌아가면 새 빌드가 시작한 Codex
 세션은 다시 시작할 때까지 Centralu 도구를 잃고, 브리지가 그렇게 말한다.
@@ -1385,6 +1402,12 @@ PR 4 전에는 키퍼가 다른 빌드의 키퍼에게 스스로를 넘겨주었
 ### 4.5 호스트에서 본 업데이트 적용 (#352)
 
 설계는 [architecture.ko.md](architecture.ko.md) §4.5에 있다. 호스트의 몫은 설치와 규칙 하나다.
+
+**확인 (#635).** 설정 → 업데이트를 열면 자동 확인이 켜져 있을 때만 확인을 강제한다. 설정이 열릴 때마다 묻고, 닫히는
+페이드 중에 다시 열려 화면이 아직 붙어 있을 때도 묻는다(#2155). 호스트는 확인을 한 번에 하나만 돌리지만(`inFlight`),
+창의 요청들(연결할 때의 확인, 업데이트를 열 때의 확인, 설치, 스위치)은 따로 답을 받는다: 창은 물은 순서대로 번호를
+매기고, 이미 보인 가장 새 답보다 오래된 답은 버리며, 그런 오래된 요청의 실패는 토스트를 띄우지 않는다(#2155,
+`packages/ui/src/store/updates.ts`). 호스트의 `update_status` 이벤트는 그의 가장 새 상태이므로 언제나 받는다.
 
 **설치** (`updates.ts`). `updates.apply`는 `npm i -g centralu@<v>`를 돌리고, 설치된 앱이 있으면 `centralu install`을
 돌린 뒤 `restart_required`를 알린다. 아무것도 다시 띄우지 않는다. `autoApply`가 켜져 있으면("Apply updates
@@ -2067,7 +2090,8 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
    이전 빌드는 옛 형태만 쓰고 지우기 때문이다 (사람이 뒤로 갔다 다시 오면 새 형태가 낡는다). 옛 형태만 쓰는 빌드를 모두 막는
    하한을 가진 빌드만 새 형태를 먼저 읽을 수 있다 ([plans/assistant-rename.md](plans/assistant-rename.md) §3.1, §3.2, #2133).
 3. **스토어는 자신을 아직 읽을 수 있는 가장 낮은 스키마 버전을 기록한다:** `app_settings`의 `min_reader_version` 행.
-   깨뜨리는 단계는 실행되기 전에 이 값을 자기 버전으로 올린다. #292 이전의 스토어는 이미 실행한 단계로부터 한 번
+   깨뜨리는 단계는 실행되기 전에 이 값을 자기 버전으로 올리거나, 그 버전부터의 빌드가 이미 그 단계가 기대는 것을 모두 쓸 때는
+   단계가 정한 더 낮은 버전(`minReader`, v69: 68)으로 올린다. #292 이전의 스토어는 이미 실행한 단계로부터 한 번
    계산해 받는다(지금까지 마이그레이션된 모든 스토어는 32). 열 때 `schema.sql`이나 어떤 단계가 파일을 건드리기 전에,
    가장 새 단계가 이 기록보다 낮은 호스트는 시작을 거절한다: "This data was written by a newer Centralu"("이 데이터는
    더 새 Centralu가 썼다")와 두 버전을 stderr와 stdout에 내고 1로 끝난다. 락 충돌과 같은 길이다. 데스크톱 감독자는
@@ -2094,7 +2118,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|
-| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54, 68 | 열 추가 (68: 역할의 새 이름으로 된 어시스턴트 표시 `sessions.is_assistant`. `is_orchestrator`에서 복사하고 그 옆에 함께 쓰며, 아직 어느 빌드도 읽지 않는다, #2133; 45: 이 세션을 요청한 세션인 `sessions.asked_by_session_id`, #371. 그 뜻은 #561과 #614에서 옮겨 갔다, 48과 55 참고; 47: 링크된 기기의 앱 패널을 적는 `grid_layout.remote_app_id`와 `app_machine`, #82; 53: 마지막 턴이 끝나지 못한 이유인 `sessions.interruption`, #698; 54: `auto`만으로 통과한 대기 ask를 표시하는 `queued_requests.opened_by_auto`) | 읽는다 (39: 보관함의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306; 47: 이전 host는 `app_id`가 있는 앱 줄만 읽고, 그 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 앱 패널을 버린다; 53: 이전 host는 `sessions.interruption`을 읽지도 쓰지도 않으므로, 그 host가 맡은 줄은 마지막 값을 그대로 둔다, #698; 54: 이전 host는 `opened_by_auto`를 읽지도 쓰지도 않는다. 그 host가 넣은 줄은 null이고, 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다; 68: 이전 host는 `is_orchestrator`만 쓰므로 이 빌드는 그 열을 읽는다, [plans/assistant-rename.md](plans/assistant-rename.md)) |
+| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 45, 47, 53, 54, 68 | 열 추가 (68: 역할의 새 이름으로 된 어시스턴트 표시 `sessions.is_assistant`. `is_orchestrator`에서 복사하고 그 옆에 함께 쓰며, v69부터 읽는다, #2133; 45: 이 세션을 요청한 세션인 `sessions.asked_by_session_id`, #371. 그 뜻은 #561과 #614에서 옮겨 갔다, 48과 55 참고; 47: 링크된 기기의 앱 패널을 적는 `grid_layout.remote_app_id`와 `app_machine`, #82; 53: 마지막 턴이 끝나지 못한 이유인 `sessions.interruption`, #698; 54: `auto`만으로 통과한 대기 ask를 표시하는 `queued_requests.opened_by_auto`) | 읽는다 (39: 보관함의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306; 47: 이전 host는 `app_id`가 있는 앱 줄만 읽고, 그 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 앱 패널을 버린다; 53: 이전 host는 `sessions.interruption`을 읽지도 쓰지도 않으므로, 그 host가 맡은 줄은 마지막 값을 그대로 둔다, #698; 54: 이전 host는 `opened_by_auto`를 읽지도 쓰지도 않는다. 그 host가 넣은 줄은 null이고, 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다; 68: 이전 host는 `is_orchestrator`만 쓰므로 v68의 빌드는 그 열을 읽는다, [plans/assistant-rename.md](plans/assistant-rename.md)) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 44, 46, 49, 50, 51, 52, 57 | 테이블 추가 (3은 색인도 채운다: 무거움; 44는 한 프로젝트가 다른 프로젝트에 닿도록 받은 "항상"을 적는 `project_consents`를 더한다, #371; 46은 허브의 링크와 각 기기에서 마지막으로 들은 것을 적는 `linked_machines`와 `machine_headers`, 그리고 nullable `grid_layout.remote_session_id`를 더한다, #82; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677; 57은 지운 앱 에이전트 세션의 기록인 `app_run_records`, `app_run_messages`, `app_run_subagent_messages`, 그리고 nullable `app_runs.request`, `answer`, `output`을 더한다, #378) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다; 46: 이전 host의 `setGridView`는 배치를 다시 쓸 때 링크된 기기의 세션 패널을 버린다) |
 | 60 | 열과 테이블 추가 (#550): 링크된 기기의 세션이 이 컴퓨터의 프로젝트에 물어도 되는지 정하는 기기별 스위치 `linked_machines.asks`(기본은 꺼짐), 그리고 사람이 허락한 쌍(그 기기의 세션, 여기의 프로젝트)을 적는 `machine_ask_consents`. 두 끝 모두 CASCADE 외래 키다 | 읽는다 (이전 host의 삽입은 스위치를 끈 채로 두고, 테이블은 읽지 않으며, 기기를 지우면 그 기기의 쌍도 함께 지워진다) |
 | 62 | 테이블 둘 추가 (#1452): `usage_readings`(한도 창의 측정값)와 `usage_buckets`(세션·프로젝트·도구·모델별 시간당 요청), §6.2 | 읽는다 (이전 호스트는 두 테이블을 읽지도 쓰지도 않으므로 교체를 맡는 동안 기록하지 않고, 그 호스트의 영구 삭제는 지운 세션의 `usage_buckets` 행을 남긴다. 개수만 든 행이다) |
@@ -2104,6 +2128,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48, 55 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561. 55는 다른 프로젝트의 세션을 가리키는 `askedBy`, 곧 #614 이전 ask_project의 뜻을 비운다. #844 전까지는 host가 시작할 때마다 하던 일이다) | 읽는다, 되돌릴 수 없다 (55: beta.20 이하의 빌드는 아직 옛 뜻으로 쓰고, 이 단계 뒤에 그 빌드가 쓴 줄은 그 뜻을 그대로 지닌다. 그 빌드가 보이던 대로다) |
 | **13, 28, 32, 56** | **테이블이나 열 삭제** (56: 아무도 쓴 적 없는 `usage_facts`, #423) | **깨진다: `min_reader_version`을 올린다** (56: 옛 host는 그 테이블을 빈 채로 다시 만들 뿐, 해가 없다) |
+| **69** | **어시스턴트의 옛 형태를 새 형태로 한 번 복사** (#2133 4단계): `is_orchestrator`에서 `is_assistant`로, 이름이 바뀐 `app_settings` 키마다 옛 키에서 새 키로 복사하고, 옛 키가 없는 새 키는 지운다. 그 뒤로는 새 형태를 먼저 읽는다 | **v67 이하의 빌드만 깨진다: `min_reader_version`을 69가 아닌 68로 올린다** (`minReader`). v68의 빌드(beta.54부터)는 두 형태를 모두 쓰고 지우므로 여전히 스토어를 연다. 그보다 옛 빌드는 새 형태를 낡은 채로 남긴다 ([plans/assistant-rename.md](plans/assistant-rename.md) §3.2) |
 
 스키마를 바꾸는 단계는 같은 PR에서 [generated/schema.md](generated/schema.md)를 다시 만든다(`pnpm docs:schema`). 새
 테이블은 [domain-model.ko.md](domain-model.ko.md)와 그 원본의 "저장되는 곳" 목록에 한 줄을 얻는다. 둘 다 하기

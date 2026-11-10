@@ -97,6 +97,7 @@ const LONG_CALLS = new Set<string>([
   'agents.resolveMcpProposal', // Restarts the Assistant on approval
   'agents.resolveSkillProposal', // Same
   'agents.deleteOrchestratorSkill', // Same
+  'agents.deleteAssistantSkill', // Same
   /*
    * A new project can be a clone (#515), which takes as long as the repository does. The host gives a clone 10
    * minutes; past this budget the screen says it is still cloning, and the project joins the list when it lands

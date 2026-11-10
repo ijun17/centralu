@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { APP_VERSION } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
-import { applyWords, installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
+import { applyWords, installedUpdate, applyOffer, updateStateText, useRelaunchCheck, useUpdateCheckWhileOpen } from './apply-update.js'
 import { SettingToggle } from './SettingToggle.jsx'
 import { Button } from '../../components/Button.jsx'
 import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
@@ -23,13 +23,7 @@ import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
 export function UpdatesSection() {
   const reportedUpdate = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)
-  useEffect(() => {
-    const status = useStore.getState().update
-    if (!status?.auto) return
-    const phase = status.phase
-    if (phase === 'checking' || phase === 'updating' || phase === 'waiting_for_npm' || phase === 'restart_required') return
-    void checkUpdate(true)
-  }, [checkUpdate])
+  useUpdateCheckWhileOpen()
   const setUpdateAuto = useStore((s) => s.setUpdateAuto)
   const setUpdateAutoApply = useStore((s) => s.setUpdateAutoApply)
   const applyUpdate = useStore((s) => s.applyUpdate)

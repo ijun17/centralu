@@ -3646,7 +3646,11 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
     // The parent starts a child there on a long job, not waited on: its report is owed
     const call = hub.mgr.startAgent('h1', { task: 'a long job: migrate the tests', machine: 'Remote box', wait: false })
-    await eventually(() => !!hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+    // Every early return of the call comes before its card (#2157): its answer is awaited beside the card, and said when it came first
+    let ended: string | undefined
+    void call.then((r) => (ended = r.ok ? 'it started with no card' : r.error), (e: unknown) => (ended = String(e)))
+    await eventually(() => ended !== undefined || !!hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval)
+    if (ended !== undefined) throw new Error(`start_agent ended before its card: ${ended}`)
     hub.mgr.inputs.respondApproval('h1', hub.mgr.listSessions().find((s) => s.id === 'h1')!.pendingApproval!.requestId, 'allow')
     const r = await call
     if (!r.ok) throw new Error(r.error)

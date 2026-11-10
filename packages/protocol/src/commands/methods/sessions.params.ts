@@ -138,6 +138,13 @@ export const sessionsParams = {
   'agents.resolveSkillProposal': z.object({ name: z.string(), approve: z.boolean() }),
   'agents.orchestratorSkills': z.object({}),
   'agents.deleteOrchestratorSkill': z.object({ name: z.string() }),
+  /*
+   * #2133 step 4: the same two under the role's new name, answered as the old ones are. The window keeps calling the old
+   * ones: it can stay attached to a host of the release before this one (#280), which lacks these
+   * (docs/plans/assistant-rename.md §3.2)
+   */
+  'agents.assistantSkills': z.object({}),
+  'agents.deleteAssistantSkill': z.object({ name: z.string() }),
   /**
    * The handoff transcript for a dead agent (#78). Built by the host from the raw store data
    * (plus a compact summary of a codex rollout) without calling that session's tool.

@@ -114,22 +114,55 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(reportsTo(caller, child)).toHaveLength(2)
   })
 
-  it('a second turn end while its tasks still run says nothing more; the caller hears the last one', async () => {
+  /*
+   * #1540: on 2026-10-25 a review child paused on three tasks of its own, wrote its full verdict a quarter of an hour later in a turn of its own,
+   * and its caller never heard it: the report was held until all that work ended, and one task ran on. A new answer while paused is an update, at once
+   */
+  it('a later turn with a new answer while its tasks still run is an update at once, naming the task left; the final report still follows', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const flush = async (n: number) => {
+      for (let i = 0; i < 50 && reportsTo(caller, child).length < n; i++) await vi.advanceTimersByTimeAsync(0)
+    }
     const { caller, child } = await started()
     const lint: BackgroundTask = { id: 'bg-lint', kind: 'shell', description: 'pnpm lint', status: 'running' }
     const h = handleOf(child)!
     h.event({ type: 'background_tasks', sessionId: child, live: [verify, lint] })
     h.answer('Waiting for verify and lint.')
-    await w.until(() => reportsTo(caller, child).length === 1)
-    // lint ends and starts a turn; verify still runs when it ends
+    await flush(1)
+    // The first pause names every task it waits on
+    expect(reportsTo(caller, child)[0]).toContain('its own background work is still running (pnpm verify, pnpm lint)')
+    handleOf(caller)!.answer('Noted.')
+    await flush(1)
+    const wakesBefore = wakes(caller, child).length
+    // lint ends and starts a turn, which writes the verdict; verify still runs when it ends
     h.event({ type: 'background_tasks', sessionId: child, live: [verify], ended: [{ ...lint, status: 'completed' }] })
     h.event({ type: 'state_change', sessionId: child, state: 'working' })
-    h.answer('Lint passed; still waiting for verify.')
-    await settle()
-    expect(reportsTo(caller, child)).toHaveLength(1)
-    verifyEndsAndChildFinishes(child, 'All green, PR opened.')
-    await w.until(() => reportsTo(caller, child).length === 2)
-    expect(reportsTo(caller, child)[1]).toContain('All green, PR opened.')
+    h.answer('Lint passed. Verdict: the change is correct.')
+    await flush(2)
+    expect(reportsTo(caller, child)).toHaveLength(2)
+    const update = reportsTo(caller, child)[1]!
+    expect(update).toContain(
+      '[Centralu] An update on the assigned work, which is still paused: a later turn ended with a new answer while its own background work is still running (pnpm verify). ',
+    )
+    expect(update).toContain('A final report follows only if that work ends; agent_session(action="stop") on it stops that work and ends the wait.')
+    expect(update).toContain('Lint passed. Verdict: the change is correct.')
+    // It woke the caller, and its model read Centralu's words: the tasks counted, and the call that names them
+    expect(wakes(caller, child).length).toBe(wakesBefore + 1)
+    expect(wakes(caller, child).at(-1)).toContain('agent_session(action="status") names each of them.')
+    expect(wakes(caller, child).at(-1)).not.toContain('pnpm verify')
+    // Still owed: a turn that says nothing new (a Monitor's look) tells nothing
+    expect(w.store.children.listReportMarks()).toHaveLength(1)
+    h.event({ type: 'state_change', sessionId: child, state: 'working' })
+    h.event({ type: 'turn_complete', sessionId: child })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(reportsTo(caller, child)).toHaveLength(2)
+    // verify ends with no turn after it: the settled report, as before
+    h.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    await flush(3)
+    expect(reportsTo(caller, child)).toHaveLength(3)
+    expect(reportsTo(caller, child)[2]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: completed, pnpm lint: completed) and no turn followed; its last answer is below.")
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 
   it('tasks that end without starting a turn settle the report after a while, with the last answer', async () => {

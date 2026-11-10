@@ -302,6 +302,12 @@ export function createRpcHandler(
 
   /** The answer of a method that only does something: `ack(work)` runs the work as an argument and answers `{ ok: true }` */
   const ack = (_done?: unknown) => ({ ok: true as const })
+  // `agents.deleteOrchestratorSkill` and its twin under the role's new name (#2133 step 4)
+  const deleteAssistantSkill = async (name: string) => {
+    const r = await mgr.assistantSlot.deleteAssistantSkill(name)
+    if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
+    return { ok: true as const }
+  }
 
   const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
@@ -369,11 +375,10 @@ export function createRpcHandler(
       return { ok: true as const }
     },
     'agents.orchestratorSkills': async () => ({ skills: mgr.assistantSlot.assistantSkills() }),
-    'agents.deleteOrchestratorSkill': async ({ name }) => {
-      const r = await mgr.assistantSlot.deleteAssistantSkill(name)
-      if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
-      return { ok: true as const }
-    },
+    'agents.deleteOrchestratorSkill': async ({ name }) => deleteAssistantSkill(name),
+    // The same two under the role's new name (#2133 step 4)
+    'agents.assistantSkills': async () => ({ skills: mgr.assistantSlot.assistantSkills() }),
+    'agents.deleteAssistantSkill': async ({ name }) => deleteAssistantSkill(name),
     'agents.listExternalSessions': async ({ projectId, tool, limit }) => {
       return mgr.externals.listExternalSessions(projectId, tool, limit)
     },

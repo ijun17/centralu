@@ -161,11 +161,11 @@ function dump(file: string): unknown {
   }
 }
 
-type Step = { to: number; breaksOlderReaders: boolean; heavy?: true; ownTransaction?: true }
+type Step = { to: number; breaksOlderReaders: boolean; minReader?: number; heavy?: true; ownTransaction?: true }
 const stepList = (): Step[] =>
   (new Store() as unknown as { migrationSteps(): Step[] })
     .migrationSteps()
-    .map(({ to, breaksOlderReaders, heavy, ownTransaction }) => ({ to, breaksOlderReaders, heavy, ownTransaction }))
+    .map(({ to, breaksOlderReaders, minReader, heavy, ownTransaction }) => ({ to, breaksOlderReaders, minReader, heavy, ownTransaction }))
 
 describe('the whole migration list, from v1 to the newest', () => {
   it('turns a v1 store into exactly the store the list produced before it was split into modules', async () => {

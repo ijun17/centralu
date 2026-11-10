@@ -16,6 +16,7 @@ import type { HostCards } from './host-cards.js'
 import { withHubMark } from './hub-preset.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import type { LinkedReports } from './linked-reports.js'
+import { keptOverUpdateStop } from './pause-update.js'
 import type { MailSessionsHost, MailSessionsView } from './mail-sessions.js'
 import type { MergeChecks } from './merge-checks.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -193,6 +194,8 @@ export class HostTenure {
             // Nothing was cut: the agent is not told which tasks the update stopped, and the log says so
             console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(e)})`)
             this.updateLists?.done(sessionId)
+            // No turn of it follows: a report kept over the work the update stopped goes now (#1912)
+            this.host.reports.reportStoppedByUpdate(sessionId)
             return
           }
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
@@ -471,7 +474,17 @@ export class HostTenure {
     ]
     // No process outlives its host, so no card the previous host left standing is still asked (#428): every rest it wrote goes
     this.host.cardRests.restore(() => false)
-    this.host.children.restoreReports(this.host.meta, goingOn)
+    // A report paused over work an update's stop ended is kept as one whose turn goes on (#1912, `keptOverUpdateStop`)
+    const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
+    this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
+    for (const id of stopped) this.host.children.stoppedByUpdate.keep(id)
+    /*
+     * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its
+     * conversation moved on) has no such turn coming: its caller is told now
+     */
+    const woken = new Set(this.updateCuts.filter((c) => !c.turn).map((c) => c.sessionId))
+    const unwoken = [...stopped].filter((id) => !woken.has(id))
+    if (unwoken.length) setTimeout(() => unwoken.forEach((id) => this.host.reports.reportStoppedByUpdate(id)), 0)
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()

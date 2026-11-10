@@ -36,7 +36,7 @@ describe('the move, for the sessions the old mail was for', () => {
       { id: mid(2), sender: X, kind: 'assign', body: 'untrusted ask', receipts: [{ recipient: old, held: 'policy' }] },
     ])
     ready(w)
-    expect([w.row(mid(1), old)?.via, w.row(mid(2), old)?.via]).toEqual(['orchestrator', 'orchestrator'])
+    expect([w.row(mid(1), old)?.via, w.row(mid(2), old)?.via]).toEqual(['assistant', 'assistant'])
     w.hooks.roleMoved?.('orc')
     expect(w.row(mid(1), at('orc'))).toBeDefined()
     expect(w.row(mid(2), at('orc'))).toBeDefined()

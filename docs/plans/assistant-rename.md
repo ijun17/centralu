@@ -1,6 +1,7 @@
 # Renaming the orchestrator role to Assistant (#2133)
 
-> **Status: steps 1 and 2 built (as one change), step 3 built; step 4 design (§3.2 says what it must do).** The owner decided on 2026-11-08 (recorded on #2133):
+> **Status: steps 1 and 2 built (as one change), step 3 built (both shipped in beta.54); step 4 built for the release after
+> beta.55 (§3.3 says what it switched and what it left); the contract step (N+2: drops, folder move) not started.** The owner decided on 2026-11-08 (recorded on #2133):
 > - the orchestrator role becomes **Assistant** everywhere it is named, internal identifiers and stored values included;
 > - the mail address `orchestrator` becomes `assistant`, with no alias period;
 > - the current icon stays.
@@ -41,7 +42,8 @@ Each step is one PR on `dev`, landing with the next dev → main PR.
 |---|---|---|---|
 | 1 and 2. Words and code (built) | The screen, docs, the role prompt, tool descriptions and the help topic say Assistant. The mail address is `assistant`, and `orchestrator` is refused as an unknown name is, with the role's address in the refusal. File, type and function names follow. `OrchestratorTools` and its family become `CentraluTools`, since it is the tool set every session with Centralu tools gets. Two values that never leave one build take the new name now: the tool profile (`ToolProfile` `'assistant'`) and the screen's view (`'assistant'`). A workspace an earlier build saved with view `'orchestrator'` still opens the Assistant's screen. The role's session an earlier build named "Orchestrator" is renamed "Assistant" once at the host's start (`AssistantSlot.renameFromOldName`), unless the person renamed it. Otherwise mail to `orchestrator` would still reach it by name | The address `orchestrator` stops working at once (owner: no alias). The previous release, going back, shows the role's session as "Assistant" and does not reopen the Assistant's screen from a workspace this build saved | release N |
 | 3. Read both (built) | protocol: `assistant.*` methods added beside `orchestrator.*`, answered alike under the same rights, routes and bridge token; every caller keeps the old ones (§3.1); `SessionKind` gains `'assistant'`, `by` accepts `'assistant'`, the event `assistant_proposals_changed` and the approval `about: 'assistant_change'` are read beside the old ones, and every reader of the kind goes through `isAssistantKind` (lint `guard/assistant-kind`); stored: an expand step (68) adds `sessions.is_assistant`, copied from `is_orchestrator` and written beside it, the `app_settings` keys are written and deleted under both names and read under the old one, `via` and the hub sender read both; folders: `<data>/assistant` is used if present, else `<data>/orchestrator`. The mail refusal reason `orchestrator_asks` became `assistant_asks` outright: it is not stored or sent to another host | none; every value written and sent is still the old one | release N |
-| 4. Write new | send `'assistant'`, `by: 'assistant'` and the new event and approval names; read the new form first; write the new `via` and sender; the `orchestrator.*` methods go once no supported release calls them. Dropping `is_orchestrator` and the old keys, and moving the folders, is a later contract step (§3.2) | none visible; a build older than N can no longer open the store | release N+1 or later |
+| 4. Read new (built) | store step v69 copies the old forms once and raises the floor to 68; the new form is read first and both are still written; the Codex bridge calls `assistant.*`; mail rows' `via` is written `'assistant'`; `agents.assistantSkills` and `agents.deleteAssistantSkill` are added beside the old ones. What reaches a linked machine or a window of another release stays old (§3.3) | none visible; a build older than N can no longer open the store | release N+1 |
+| 5. Contract (not started) | drop `is_orchestrator` and the old keys, the old `via` and sender; send `'assistant'` where §3.3 kept the old value; move the folders, carrying the saved conversation (below); the `orchestrator.*` methods go once no supported release calls them | a build older than N+1 can no longer open the store | release N+2 or later |
 
 No alias has two consequences in step 1. A worker the person names "Assistant" is reachable only by its id, since
 the role's address wins over a session name. Mail to `orchestrator` falls through to the name lookup, so a role
@@ -52,11 +54,26 @@ deliberate "Orchestrator" is renamed too.
 Step 4 needs release N to be the previous release on every machine a person can go back to. A hub that updates a
 linked machine to N+1 keeps N as its rollback, and N reads the new values.
 
-Step 4 also moves the role's folder. Claude Code keys its saved conversations by the working folder, so renaming
-`<data>/orchestrator` would lose the Assistant's past conversation unless that is carried over too. This is to be
-measured before step 4 is built.
+The contract step also moves the role's folder. Claude Code keys its saved conversations by the working folder
+(`~/.claude/projects/<folder with every character that is not a letter or digit made '-'>/<id>.jsonl`), so renaming
+`<data>/orchestrator` could lose the Assistant's past conversation.
 
-### 3.1 What step 3 reads, and which calls stay old
+**Measured on 2026-11-10 with Claude Code 2.1.296 on Windows**, in a scratch config folder (`CLAUDE_CONFIG_DIR`), with a
+conversation file saved under the folder of `<scratch>/data/orchestrator` and the CLI run from `<scratch>/data/assistant`:
+- `claude -p --resume <id>` from the new folder **finds the conversation** saved under the old folder's key: it went on
+  to the API call (stopped there by an invalid key), as it does from the old folder. A made-up id from the new folder
+  answers `No conversation found with session ID: <id>` at once, so the lookup by id is not limited to the folder's key.
+- The new folder gets its own key folder (`…-data-assistant/memory`), empty: Claude Code's per-folder memory and the
+  folder-scoped `--continue` do not follow the move, and the conversation file stays under the old key.
+- Not measured: whether a resumed turn appends to the old file or writes a new one under the new key, other platforms,
+  and Codex (its rollouts are found by thread id under `~/.codex/sessions`, not by folder; to be checked the same way).
+
+So the contract step can move the folder without losing the conversation for `--resume` by id (which the host uses,
+`externalId`), on this CLI version. It should still move the key folder (`projects/<old key>` to `projects/<new key>`)
+when the new one does not exist, so the memory and `--continue` follow, and it must measure the CLI version it ships
+with again, since an older CLI looked only under the folder's own key.
+
+### 3.1 What step 3 reads, and which calls stay old (superseded by §3.3 for the release after beta.55)
 
 | Value | Written | Read |
 |---|---|---|
@@ -109,6 +126,43 @@ same N−1 that moves the role writes only `is_orchestrator`, which is why it is
   the rollback. The folders move then too, carrying the Assistant's saved conversation (above).
 - `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill` have no `assistant` twin yet: step 4 adds one as
   step 3 did for `orchestrator.*`, and a later build drops the old names.
+
+### 3.3 What step 4 built (the release after beta.55)
+
+Every machine's previous release is beta.54 or later (owner, recorded on #2133), so every build a person can go back to
+reads the new forms (step 3). A linked machine is another matter: the hub connects to any machine of the same protocol
+version (`PROTOCOL_VERSION` is 1 for every release, `linked-machine-connection.ts` `check`), so a machine that stayed
+behind can run a release before step 3. What reaches a linked machine therefore keeps the old value.
+
+**Store.** Step v69 (`store/migrations/v65.ts`) sets `is_assistant` from `is_orchestrator` on every row, sets each new
+`app_settings` key from its old key, and deletes each new key whose old key is absent. It declares `breaksOlderReaders:
+true` with `minReader: 68`: `MigrationStep.minReader` lets a breaking step name a floor below its own `to`
+(`migrate-runner.ts` `floorOfStep`; a floor already higher is never lowered, and a store without a record works its
+floor out the same way). Then:
+
+| Value | Written | Read |
+|---|---|---|
+| `sessions.is_orchestrator` / `is_assistant` | both, equal | `is_assistant` (`SessionRecords`, `user-app-adoption.ts`); the one-time move of old thread mail (`mailbox-adopt.ts`) keeps `is_orchestrator`, which it also meets on stores from before v68 and which every build that opens a v69 store writes equal |
+| the four renamed `app_settings` keys | both, equal; a delete removes both | the new key, else the old one (`SettingsRecords.appSetting`) |
+| mail rows' `via` | `'assistant'` (`ROLE_VIA`): the row stays on this machine and every build that opens the store reads both words | either |
+| the hub's sender `_hub-orchestrator` | unchanged: a linked machine records it and the hub reads it back, and the hub can be of another release | either |
+
+Tests: `store-assistant-step4.test.ts` (a new key whose old key a build deleted alone stays deleted; a stale new key is
+replaced; the step runs once; the build of v68 opens the store and the build of v67 is refused),
+`store-assistant-marker.test.ts`, `store-renamed-settings.test.ts`, `store-min-reader.test.ts` (the floor is 68).
+
+**Wire, name by name.**
+
+| Name | Switched? | Why |
+|---|---|---|
+| `orchestrator.get`, `.peek`, `.configure` (the window) | no (`platform/src/web/index.ts`) | the window can reach a host older than step 3 that the store's floor does not keep out: a keeper of an earlier release it attaches to (#280), and on Windows the data folder's `centralu serve` behind `serve --window`, which the hub installed at whatever version (`sidecar/mod.rs`) and which a store at v68 or below does not refuse. The host answers both names, so switching gains nothing yet. The window switches once no supported keeper or `serve` lacks `assistant.*` |
+| `orchestrator.tools`, `.tool` (the Codex bridge) | yes, to `assistant.*` (`centralu-bridge.mjs`) | the bridge runs from the host's own bundle |
+| the old methods, answered by the host | kept | a hub of another release calls them on a linked machine (`links/routes.ts`) |
+| `agents.orchestratorSkills`, `agents.deleteOrchestratorSkill` | twins added (`agents.assistantSkills`, `agents.deleteAssistantSkill`), same rights and routes; the window keeps the old names | the previous host lacks the twins; the window switches in the release after this one |
+| `SessionKind` `'orchestrator'` (`ASSISTANT_KIND`) | kept | sessions reach the hub from a linked machine, and the hub may be of a release before step 3, which parses a closed enum |
+| `by: 'orchestrator'` | kept | sent by the hub's Assistant to a linked machine |
+| `orchestrator_proposals_changed` | kept | relayed from a linked machine to the hub (`links/qualifier.ts`) |
+| approval `about: 'orchestrator_change'` (`ASSISTANT_CHANGE`) | kept | a linked machine's cards are shown by the hub |
 
 ## 4. What is not renamed
 

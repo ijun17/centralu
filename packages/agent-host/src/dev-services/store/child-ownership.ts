@@ -40,6 +40,11 @@ export class ChildOwnershipRecords {
       .run(sessionId, callerSessionId, Date.now())
   }
 
+  /** When the session's report mark was set: new work from its caller sets it again, a change of owner does not */
+  reportMarkedAt(sessionId: string): number | null {
+    return this.db.prepare<unknown[], { at: number }>(`SELECT marked_at as at FROM report_marks WHERE session_id = ?`).get(sessionId)?.at ?? null
+  }
+
   clearReportMark(sessionId: string): void {
     this.db.prepare(`DELETE FROM report_marks WHERE session_id = ?`).run(sessionId)
   }

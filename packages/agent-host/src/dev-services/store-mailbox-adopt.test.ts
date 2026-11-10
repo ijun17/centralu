@@ -179,7 +179,8 @@ describe('v65 on a store the v64 build served', () => {
       // The v64 build's insert names its own columns: this build's upsert also writes `is_assistant` (v68, #2133), which a v65 store lacks
       store.raw.prepare(`INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, created_at, permission_preset)
         VALUES ('s9', 'p1', 'claude', NULL, 'nine', 0, 'idle', 0, 0, 1, 'normal')`).run()
-      expect(store.sessions.listSessions().map((x) => x.name)).toEqual(['nine'])
+      // Read as the v64 build reads it: this build's reader names `is_assistant` (v69, #2133), which a v65 store lacks
+      expect(rawRows(store.raw, `SELECT name, is_orchestrator FROM sessions WHERE deleted_at IS NULL`)).toEqual([{ name: 'nine', is_orchestrator: 0 }])
     } finally {
       store.close()
     }
