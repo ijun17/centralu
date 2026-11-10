@@ -748,11 +748,12 @@ Platforms: macOS, Linux.
 Happened: only the CLI's pid was signalled; typescript-language-server and tsserver (one at 3.4 GB), MCP servers and
 shells were reparented to launchd or init (#435, b1ffaca3).
 Rule: the CLI leads a process group of its own; a stop signals that group only; after the CLI exits its group is swept
-(TERM, KILL after the grace). On Windows: `taskkill /T /F`, and after exit the leftovers found by parent pid and
+(TERM, KILL after the grace). On Windows: the table read, the CLI ended alone, then what was under it parents first
+(`taskkill /T` only when the table cannot be read, #2141), and after exit the leftovers found by parent pid and
 creation time.
 Guard: `host/adapters/local-process.test.ts` "leads a process group of its own, not the host’s";
 `host/adapters/local-process.test.ts` "a CLI that exits by itself does not leave its helper running";
-`host/adapters/local-process.test.ts` "a stop is taskkill on its tree, and its exit collects what it left running";
+`host/adapters/local-process.test.ts` "a stop ends the CLI first and then what was under it";
 `host/adapters/claude/local-spawn.test.ts` "spawns the CLI itself, and stopping it ends the helper the CLI leaves
 behind".
 Platforms: all.
