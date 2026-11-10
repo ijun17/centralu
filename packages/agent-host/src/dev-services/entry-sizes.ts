@@ -1,6 +1,6 @@
 import { lstat, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { realOs } from '../os/real.js'
+import { execText, type ExecFailure } from '../os/exec.js'
 
 /** How much the entries git ignores take on disk (`gitIgnoredEntries`): du where it runs, a file system walk elsewhere. */
 
@@ -11,10 +11,12 @@ const SIZE_BUDGET_MS = 5000
 export async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
   const sizes = new Map<string, number>()
   try {
-    const r = await realOs().processes.run('du', ['-sk', ...paths], { cwd, timeoutMs: SIZE_BUDGET_MS, maxBuffer: 1 << 20 })
     // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
-    if (r.stdout.length === 0) throw new Error('du answered nothing')
-    const out = r.stdout.toString('utf8')
+    const out = await execText('du', ['-sk', ...paths], { cwd, timeoutMs: SIZE_BUDGET_MS, maxBuffer: 1 << 20 }).then(
+      (r) => r.stdout,
+      (e: ExecFailure) => e.stdout ?? '',
+    )
+    if (out.length === 0) throw new Error('du answered nothing')
     for (const line of out.split('\n')) {
       const [kb, ...rest] = line.split('\t')
       const p = rest.join('\t').trim()

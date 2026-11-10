@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { alive, cleanUp, plantTreeScript, settle, treePids } from '../dev-services/process-tree.test-helpers.js'
 import { endChild } from '../links/ssh-run.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { execText, type ExecFailure } from './exec.js'
+import { execText, execTextSync, isExecFailure, type ExecFailure } from './exec.js'
 import { memoryOs } from './memory.js'
 import { realOs } from './real.js'
 
@@ -46,6 +46,20 @@ describe('execText', () => {
     expect(await ran).toMatchObject({ ended: 'timeout' })
     await os.clock.advance(2000)
     expect(rows().every((p) => !p.alive)).toBe(true)
+  })
+
+  it('execTextSync answers and fails as execText does, for a program that starts nothing', () => {
+    expect(execTextSync(process.execPath, ['-e', "process.stdout.write('out')"], { timeoutMs: 30_000 })).toEqual({ stdout: 'out', stderr: '' })
+    let failed: unknown
+    try {
+      execTextSync(process.execPath, ['-e', "process.stdout.write('{}'); process.exit(1)"], { timeoutMs: 30_000 })
+    } catch (e) {
+      failed = e
+    }
+    expect(isExecFailure(failed)).toBe(true)
+    expect(failed).toMatchObject({ stdout: '{}', code: 1 })
+    // A program that could not start throws the start's error, which carries no output
+    expect(() => execTextSync(join(tmpdir(), 'cc-no-such-program-for-exec-text'), [], { timeoutMs: 30_000 })).toThrow(expect.objectContaining({ code: 'ENOENT' }))
   })
 
   it('goes through the OS it is given', async () => {

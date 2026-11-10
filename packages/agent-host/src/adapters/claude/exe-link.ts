@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
-import { realOs } from '../../os/real.js'
+import { execText, isExecFailure } from '../../os/exec.js'
 
 /**
  * Where a Claude process is started from on Windows (#353), and whether what npm left there can
@@ -85,11 +85,14 @@ export type ExeFs = {
 /** A program run to its end that never rejects: no shell, stdin closed, the whole tree ended past the limit */
 async function runNode(file: string, args: string[], cwd: string | undefined, timeoutMs: number): Promise<{ status: number | null; output: string }> {
   try {
-    const r = await realOs().processes.run(file, args, { cwd, timeoutMs, maxBuffer: 1 << 20 })
-    const output = `${r.stdout.toString('utf8')}${r.stderr.toString('utf8')}`.trim()
-    if (r.ended === 'timeout') return { status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` }
-    return { status: r.code, output }
+    const r = await execText(file, args, { cwd, timeoutMs, maxBuffer: 1 << 20 })
+    return { status: 0, output: `${r.stdout}${r.stderr}`.trim() }
   } catch (e) {
+    // A non-zero exit or a limit carries what was printed (`ExecFailure`); a program that did not start carries only its message
+    if (isExecFailure(e)) {
+      if (e.ended === 'timeout') return { status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` }
+      return { status: e.code, output: `${e.stdout}${e.stderr}`.trim() }
+    }
     return { status: null, output: e instanceof Error ? e.message : String(e) }
   }
 }

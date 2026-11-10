@@ -3,8 +3,7 @@ import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
-import { execText } from './os/exec.js'
-import { realOs } from './os/real.js'
+import { execText, execTextSync } from './os/exec.js'
 import { sleep } from './timing.js'
 
 /**
@@ -201,9 +200,7 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
 
 /** What a program prints when it exits 0 within 5 s; throws otherwise */
 function commandOutput(file: string, args: readonly string[]): string {
-  const r = realOs().processes.runSync(file, args, { timeoutMs: 5_000 })
-  if (r.code !== 0) throw new Error(`${file} exited ${String(r.code)}`)
-  return r.stdout
+  return execTextSync(file, args, { timeoutMs: 5_000 }).stdout
 }
 
 /** The AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`, as `centralu install` writes it) */

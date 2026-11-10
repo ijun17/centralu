@@ -1,15 +1,12 @@
 import { execFailure } from './exec-error.js'
-import { execFile } from 'node:child_process'
 import { devNull } from 'node:os'
-import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
+import { execText } from '../os/exec.js'
 import { realOs } from '../os/real.js'
 import type { OsChild, RunOptions } from '../os/port.js'
 import { RUN_STOP_GRACE_MS } from '../os/run.js'
 import { rpcError } from '../rpc-error.js'
-
-const exec = promisify(execFile)
 
 /**
  * The one place the host starts git (#407). Every git call goes through `runGit` (or `streamGit`, for an answer read
@@ -155,10 +152,10 @@ const LOCKED_SUBCOMMAND: Record<string, string[]> = {
 async function filterOverrides(cwd: string): Promise<string[]> {
   let stdout: string
   try {
-    ;({ stdout } = await exec(programPath('git'), [...BASE, ...LOCKED, 'config', '-z', '--name-only', '--get-regexp', '^filter\\.'], {
+    ;({ stdout } = await execText(programPath('git'), [...BASE, ...LOCKED, 'config', '-z', '--name-only', '--get-regexp', '^filter\\.'], {
       cwd,
-      ...DEFAULTS,
-      windowsHide: true,
+      timeoutMs: DEFAULTS.timeout,
+      maxBuffer: DEFAULTS.maxBuffer,
     }))
   } catch (e) {
     // 1 = no key matched. Anything else (a broken config, a denied folder) fails the read itself

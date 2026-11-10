@@ -697,10 +697,13 @@ describe('guard/timed-start', () => {
     ["execFileSync('ps', args, { encoding: 'utf8', timeout: 2000 })"],
     ["const run = promisify(execFile)" + NL + "await run('npm', ['root'], { timeout: 60_000, windowsHide: true })"],
     ["cp.exec(command, { cwd, timeout: 90_000 }, cb)"],
+    // Options spread from elsewhere may carry a timeout the rule cannot see (git-exec's `...DEFAULTS` did)
+    ["const run = promisify(execFile)" + NL + "await run('git', args, { cwd, ...DEFAULTS, windowsHide: true })"],
+    ["execFileSync('ps', args, { ...base, encoding: 'utf8' })"],
   ])('reports %s', async (code) => {
     expect((await lines(file, code, 'timed-start')).length).toBe(1)
   })
-  it.each([["execFile('claude', ['--version'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"]])('does not report %s', async (code) => {
+  it.each([["execFile('claude', ['--version'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
     await quiet(file, 'timed-start', code, "execFileSync('ps', args, { timeout: 1 })")
   })
   it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {

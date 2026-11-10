@@ -121,7 +121,7 @@ export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self
  * so a child that stays in it (`StartOptions.contained: false`: an ssh, a probe, a setup script) and what it started in it
  * are signalled one by one. Each is a member of a tree seen in the table just read.
  */
-export function ownGroupPids(rows: readonly ProcRow[], from: Iterable<number>, self: number): number[] {
+export function ownGroupPids(rows: readonly ProcRow[], from: readonly number[], self: number): number[] {
   const pgidOf = new Map<number, number>()
   for (const r of rows) pgidOf.set(r.pid, r.pgid)
   const own = pgidOf.get(self)

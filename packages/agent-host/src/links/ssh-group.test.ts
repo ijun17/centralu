@@ -34,7 +34,7 @@ describe('an ssh stays in the host group', () => {
 
   it('the one a command runs over', async () => {
     const { runSsh } = await import('./ssh-run.js')
-    void runSsh({ ssh: 'fake-ssh', args: ['box', 'true'], env: {}, timeoutMs: 50 }).catch(() => {})
+    void runSsh({ ssh: 'fake-ssh', label: 'a command', args: ['box', 'true'], env: {}, timeoutMs: 50 }).catch(() => {})
     expect(started.map((s) => s.options.contained)).toEqual([false])
   })
 })

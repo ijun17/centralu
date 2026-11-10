@@ -165,9 +165,10 @@ const gitStart = guard('git-start', { git: 'git is started here by name: go thro
 /**
  * A program that is given a time limit ends with the whole tree it started (`os.processes.run`, `OsProcesses.stop`), never by
  * `execFile`'s `timeout:`: that signals the pid only, and what a `.cmd` shim's `cmd.exe` started goes on running. A call to a
- * `child_process` starter (or to what `promisify` made of one) with `timeout` in its options is reported.
+ * `child_process` starter (or to what `promisify` made of one) with `timeout` in its options is reported, and so is an exec-family one whose
+ * options spread another object (`{ ...DEFAULTS }`): a `timeout` in what is spread cannot be seen here.
  */
-const timedStart = guard('timed-start', { timed: "'timeout' on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)" }, (_context, add) => {
+const timedStart = guard('timed-start', { timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)" }, (_context, add) => {
   const made = new Set() // `const exec = promisify(execFile)`
   return {
     VariableDeclarator(node) {
@@ -178,7 +179,7 @@ const timedStart = guard('timed-start', { timed: "'timeout' on a started program
       const callee = nameOf(node.callee)
       if (!GIT_STARTERS.has(callee) && !made.has(callee)) return
       for (const a of node.arguments) {
-        if (a.type === 'ObjectExpression' && a.properties.some((p) => p.type === 'Property' && keyOf(p) === 'timeout')) add(node, 'timed')
+        if (a.type === 'ObjectExpression' && a.properties.some((p) => (p.type === 'SpreadElement' && callee !== 'spawn') || (p.type === 'Property' && keyOf(p) === 'timeout'))) add(node, 'timed')
       }
     },
   }
