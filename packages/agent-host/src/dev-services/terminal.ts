@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { whichTool } from '../env-path.js'
-import { commandInterpreter, systemTool } from '../os.js'
+import { commandInterpreter, powershell } from '../os.js'
 import { PtySlot, isPtyModule, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import type { EndedTerminal } from '../lifecycle/update-ended.js'
 
@@ -236,7 +236,7 @@ export function interactiveShell(
   if (platform !== 'win32') return { file: shellPath(), args: ['-l'] }
   const pwsh = find('pwsh')
   if (pwsh) return { file: pwsh, args: ['-NoLogo'] }
-  return { file: systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], env), args: ['-NoLogo'] }
+  return { file: powershell(env), args: ['-NoLogo'] }
 }
 
 /**

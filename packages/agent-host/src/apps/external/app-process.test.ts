@@ -8,6 +8,7 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } f
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { whichTool } from '../../env-path.js'
+import { powershell } from '../../os.js'
 import { AppProcess, AppStartError } from './app-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
@@ -61,7 +62,6 @@ describe('writing to an app that closed its stdin', () => {
    * whenever PowerShell gets there, with no race against a timer.
    */
   it.runIf(process.platform === 'win32')('on Windows, fails the start, and EPIPE never escapes as an uncaught exception', async () => {
-    const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     const script = [
       '$probe = [Console]::In.ReadLine() | ConvertFrom-Json',
       "$getStd = [Type]::GetType('Microsoft.Win32.Win32Native').GetMethod('GetStdHandle', [Reflection.BindingFlags]'NonPublic,Static')",
@@ -69,7 +69,7 @@ describe('writing to an app that closed its stdin', () => {
       "[Console]::Out.WriteLine((@{ jsonrpc = '2.0'; id = $probe.id; error = @{ code = -32601; message = 'Method not found' } } | ConvertTo-Json -Compress))",
       'Start-Sleep -Seconds 1',
     ].join('; ')
-    await expectStartFailsQuietly(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { probeTimeoutMs: 60_000, connectTimeoutMs: 60_000, exitWaitMs: 5_000 })
+    await expectStartFailsQuietly(powershell(), ['-NoProfile', '-NonInteractive', '-Command', script], { probeTimeoutMs: 60_000, connectTimeoutMs: 60_000, exitWaitMs: 5_000 })
   }, 90_000 * SLOW)
 })
 

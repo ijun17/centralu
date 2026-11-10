@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { Socket } from 'node:net'
 import type { Readable, Writable } from 'node:stream'
-import { systemTool } from '../os.js'
+import { powershell } from '../os.js'
 
 /**
  * The Windows process table, read in milliseconds even on a starved machine (#2178): the one source of `pid ppid createdMs`
@@ -70,8 +70,6 @@ const SERVE = [
   '}',
 ].join('\n')
 
-/** PowerShell by its full path under the system folder, like taskkill: a bare name would be looked up in the working directory first */
-export const powershell = (): string => systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
 export const POWERSHELL_ARGS = ['-NoProfile', '-NonInteractive', '-Command'] as const
 
 export type TableReader = {

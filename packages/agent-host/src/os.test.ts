@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { commandInterpreter, openCodeMatchesAnyCase, systemSettingsFolder, systemTool } from './os.js'
+import { commandInterpreter, openCodeMatchesAnyCase, powershell, systemSettingsFolder, systemTool } from './os.js'
 
 /**
  * Windows looks a relative program path up in the working directory first, and the host works in a project's folder:
@@ -9,9 +9,8 @@ import { commandInterpreter, openCodeMatchesAnyCase, systemSettingsFolder, syste
 describe('a Windows system program', () => {
   it('is under %SystemRoot%\\System32 when SystemRoot is a whole path from a drive', () => {
     expect(systemTool(['taskkill.exe'], { SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\taskkill.exe')
-    expect(systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], { SystemRoot: 'C:\\Windows' })).toBe(
-      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-    )
+    expect(powershell({ SystemRoot: 'C:\\Windows' })).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+    expect(powershell({ SystemRoot: '' })).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
   })
 
   it.each([undefined, '', 'Windows', '.\\Windows', 'C:Windows', '\\Windows'])('never under a SystemRoot of %j, which is not one', (root) => {

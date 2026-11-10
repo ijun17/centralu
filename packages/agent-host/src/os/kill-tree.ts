@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
-import { systemTool, traitsFor } from '../os.js'
-import { POWERSHELL_ARGS, READ_ONCE, powershell, tableReader, type TableReader } from './process-table.js'
+import { powershell, systemTool, traitsFor } from '../os.js'
+import { POWERSHELL_ARGS, READ_ONCE, tableReader, type TableReader } from './process-table.js'
 import { descendants } from '../dev-services/proc-table.js'
 
 /**
