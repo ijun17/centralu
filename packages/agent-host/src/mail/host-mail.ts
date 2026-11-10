@@ -7,7 +7,7 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -273,7 +273,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     waitingOn,
     answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
-    personWork: { started: personWorkRecorder(service), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
+    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
     // A turn's end is a report on the task, and the owner is told as mail when it can read it (§9.3)
     report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),

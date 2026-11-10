@@ -393,7 +393,7 @@ export class ChildOwnership {
    * the person's thread. Set by the host when it has a mailbox
    */
   private personWork:
-    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
+    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; withdrawn(sessionId: string): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
     | undefined
   onPersonWork(hooks: ChildOwnership['personWork']): void {
     this.personWork = hooks
@@ -423,32 +423,34 @@ export class ChildOwnership {
 
   /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
   startedForPerson(sessionId: string, text: string, fromScript?: { credential: string }): void {
-    try {
-      this.personWork?.started(sessionId, text, fromScript)
-    } catch (e) {
-      console.error(`[mail] could not write down the work started in ${sessionId.slice(0, 8)} for the person (${errorMessage(e)})`)
-    }
+    this.personCall('write down the work for the person started in', sessionId, undefined, (w) => w.started(sessionId, text, fromScript))
+  }
+
+  /** The first message of the work `startedForPerson` wrote down could not go in (#1463): the person's task is withdrawn. Never throws */
+  firstSendFailedForPerson(sessionId: string): void {
+    this.personCall('withdraw the work for the person started in', sessionId, undefined, (w) => w.withdrawn(sessionId))
   }
 
   /** Whether the person has work with `sessionId` whose turn is reported to them; false with no mailbox. Never throws */
   personOwes(sessionId: string): boolean {
-    try {
-      return this.personWork?.owes(sessionId) ?? false
-    } catch (e) {
-      console.error(`[mail] could not read the work of the person in ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
-      return false
-    }
+    return this.personCall('read the work of the person in', sessionId, false, (w) => w.owes(sessionId))
   }
 
   /** The end of a turn of work the person owns, in their thread; false when it was not taken. Never throws */
   reportedToPerson(sessionId: string, draft: PersonReportDraft): boolean {
+    return this.personCall('report to the person the work of', sessionId, false, (w) => w.report(sessionId, draft))
+  }
+
+  /** A call into the mailbox's person work: what it gives without a mailbox, or when it failed, which is logged */
+  private personCall<T>(what: string, sessionId: string, none: T, call: (w: NonNullable<ChildOwnership['personWork']>) => T): T {
     try {
-      return this.personWork?.report(sessionId, draft) ?? false
+      return this.personWork ? call(this.personWork) : none
     } catch (e) {
-      console.error(`[mail] could not report the work of ${sessionId.slice(0, 8)} to the person (${errorMessage(e)})`)
-      return false
+      console.error(`[mail] could not ${what} ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+      return none
     }
   }
+
 
   /** The mailbox's way of hearing that a session is done with work it gave (it deletes the session that did it), set by the host when it has one */
   private finishedHook: ((callerId: string, childId: string) => void) | undefined

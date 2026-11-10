@@ -368,7 +368,7 @@ export class SessionEvents {
       // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
       sends.push(this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy))
       // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
-      if (this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
+      this.host.reports.settlePausedReport(e.sessionId)
     } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
       // A wait settled in an earlier turn holds that turn's answer, not this one's
       sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy && since !== undefined ? { ...turnBy, since } : turnBy))
@@ -408,7 +408,7 @@ export class SessionEvents {
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
     // A paused report's work may just have ended (#721)
-    if (e.type === 'background_tasks' && e.sessionId && this.host.children.pausedReports.has(e.sessionId)) this.host.reports.settlePausedReport(e.sessionId)
+    if (e.type === 'background_tasks' && e.sessionId) this.host.reports.settlePausedReport(e.sessionId)
   }
 
   /**

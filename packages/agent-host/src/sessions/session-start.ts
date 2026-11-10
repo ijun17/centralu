@@ -543,7 +543,13 @@ export class SessionStarts {
       // Never stamped: its only producer is a handoff, whose opening quotes a note written by an agent, not the person's typing
       if (params.fromScript) this.host.children.startedForPerson(id, params.initialPrompt, params.fromScript)
       // A script's message reaches the session framed as the script's, never stamped as the person's
-      handle.send(params.fromScript ? scriptMessageFrame(params.fromScript.credential, params.initialPrompt) : params.initialPrompt)
+      try {
+        handle.send(params.fromScript ? scriptMessageFrame(params.fromScript.credential, params.initialPrompt) : params.initialPrompt)
+      } catch (e) {
+        // The session exists, but no turn will come of the work (#1463)
+        if (params.fromScript) this.host.children.firstSendFailedForPerson(id)
+        throw e
+      }
     }
     return info
   }

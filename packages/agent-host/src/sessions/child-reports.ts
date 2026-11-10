@@ -82,6 +82,8 @@ function personReportLine(outcome: string, tasks: number): string {
       return `[Centralu] The session you started stopped before finishing: ${SHUTDOWN_WORDS} during its turn.`
     case 'paused':
       return `[Centralu] The session you started paused: its turn ended while its own background work is still running (${tasks} task${tasks === 1 ? '' : 's'}).`
+    case 'settled':
+      return '[Centralu] The background work the session you started paused on has ended, and no turn followed it.'
     default:
       return '[Centralu] The session you started stopped before finishing.'
   }
@@ -205,6 +207,9 @@ export type EndedTurn = TurnStarter & { compaction?: true; since?: number }
 export class ChildReports {
   constructor(private readonly host: ChildReportsHost) {}
 
+  /** Sessions whose report to the person paused on their own background work (#1463): settled as a session owner's paused report is (`settlePausedReport`), so with no turn after the work's end the report goes out all the same. Memory only */
+  private readonly personPaused = new Set<string>()
+
   /** The mailbox's way of taking a report (§8.1), set by the host when it has one: a thread the report goes in, else the old way tells */
   private mailReport: ((ownerId: string, childId: string, draft: ReportDraft) => ReportedAs) | undefined
   useMail(hook: ChildReports['mailReport']): void {
@@ -247,15 +252,17 @@ export class ChildReports {
    * the report lands in the person's Inbox: Centralu's words for how the turn ended, the session's last response as its own beside them. Only the
    * turns that are the work's: the person's own are theirs (#1377), and once the thread is reported the turns after it are not reported
    */
-  async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter): Promise<void> {
+  async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter, settled?: readonly BackgroundTask[]): Promise<void> {
     if (this.host.disposing || turn?.by === 'person') return
     if (!this.host.children.personOwes(sessionId)) return
     const stop = this.host.meta.get(sessionId)?.interruption
     // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
-    const running = ending.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
+    const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
+    if (running.length > 0) this.personPaused.add(sessionId)
+    else this.personPaused.delete(sessionId)
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
-    const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : undefined, stop, ending)
+    const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : settled ? { settled } : undefined, stop, ending)
     const words = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
     this.host.children.reportedToPerson(sessionId, {
       outcome,
@@ -302,7 +309,7 @@ export class ChildReports {
     if (this.host.disposing) return
     const quiet = () => {
       const m = this.host.meta.get(sessionId)
-      return this.host.children.pausedReports.has(sessionId) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
+      return (this.host.children.pausedReports.has(sessionId) || this.personPaused.has(sessionId)) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
         this.ownTasksRunning(sessionId).length === 0
     }
     if (!quiet()) return
@@ -310,7 +317,9 @@ export class ChildReports {
       this.host.children.stopSettling(sessionId)
       if (!quiet() || this.host.disposing) return
       console.error(`[sessions] ${sessionId.slice(0, 8)}: its background work ended and no turn followed; reporting the work as ended`)
-      void this.reportBackIfAwaited(sessionId, { type: 'turn_complete', sessionId }, undefined, this.pausedTasksNow(sessionId))
+      const ending = { type: 'turn_complete', sessionId } as const
+      if (this.personPaused.has(sessionId)) void this.reportToPersonIfOwed(sessionId, ending, undefined, undefined, this.ownTasksRunning(sessionId))
+      if (this.host.children.pausedReports.has(sessionId)) void this.reportBackIfAwaited(sessionId, ending, undefined, this.pausedTasksNow(sessionId))
     }, PAUSED_REPORT_SETTLE_MS)
     timer.unref?.()
     this.host.children.settleAfter(sessionId, timer)
@@ -347,7 +356,7 @@ export class ChildReports {
     if (!assistantId) return undefined
     if (turn?.by === 'person' && !settled) {
       // Their turn changes nothing of the report. The paused work may have ended meanwhile, with no turn to follow: its wait starts again
-      if (this.host.children.pausedReports.has(sessionId)) this.settlePausedReport(sessionId)
+      this.settlePausedReport(sessionId)
       return undefined
     }
     // The report of paused work that ended with no turn after it, when the session's last turn was the person's: its last response is theirs, not the work's (#1377). Read before the report is closed

@@ -33,6 +33,14 @@ export function personWorkRecorder(mail: MessageService): (sessionId: string, te
   }
 }
 
+/** The work a script started never began: its first message could not go in (#1463). The person's task is withdrawn, so their Inbox does not show it running */
+export function personWorkWithdrawer(mail: MessageService, records: MailboxRecords): (sessionId: string) => void {
+  return (sessionId) => {
+    const task = records.newestTask(PERSON, mail.sessionAddress(sessionId))
+    if (task) mail.done(PERSON, task.id)
+  }
+}
+
 /** Whether the person has work with the session whose turn is reported to them: an unsettled task from the person */
 export function personOwes(mail: MessageService, records: MailboxRecords): (sessionId: string) => boolean {
   return (sessionId) => records.newestTask(PERSON, mail.sessionAddress(sessionId)) !== undefined

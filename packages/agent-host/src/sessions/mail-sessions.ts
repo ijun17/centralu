@@ -51,6 +51,7 @@ export type MailHooks = {
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
+    withdrawn(sessionId: string): void
     owes(sessionId: string): boolean
     report(sessionId: string, draft: PersonReportDraft): boolean
   }
