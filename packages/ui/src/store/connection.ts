@@ -427,7 +427,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     resetWorkspaceRead()
     set({ platform })
     subscriptions.push(
-      platform.agents.subscribe((e) => get().dispatchEvent(e)),
+      platform.agents.subscribe((e, id) => get().dispatchEvent(e, id)),
       platform.agents.onConnectionChange((connection) => {
         const was = get().connection
         /*

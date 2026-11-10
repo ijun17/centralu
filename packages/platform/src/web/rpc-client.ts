@@ -145,7 +145,7 @@ export class RpcClient {
   private pending = new Map<string, Pending>()
   /** Bytes of the frames in `pending` that have not been sent yet */
   private queuedBytes = 0
-  private eventHandlers = new Set<(e: NormalizedEvent) => void>()
+  private eventHandlers = new Set<(e: NormalizedEvent, id?: string) => void>()
   private termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   private termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
@@ -337,7 +337,7 @@ export class RpcClient {
     if (!this.ready) return
     if (frame.kind === 'event') {
       if (!this.cursor.take(frame.seq)) return // A repeat (#82), or a first-met host's old news (#173)
-      deliver(this.eventHandlers, frame.event)
+      deliver(this.eventHandlers, frame.event, this.cursor.eventId(frame.seq))
       return
     }
     // Terminal output carries no seq (it does not ride the resend buffer — see envelope)
@@ -501,7 +501,7 @@ export class RpcClient {
     })
   }
 
-  onEvent(handler: (e: NormalizedEvent) => void): Unsubscribe {
+  onEvent(handler: (e: NormalizedEvent, id?: string) => void): Unsubscribe {
     this.eventHandlers.add(handler)
     return () => this.eventHandlers.delete(handler)
   }

@@ -24,10 +24,10 @@ export function syncBadge(get: () => AppState): void {
 
 /**
  * Raises a notification on the system: the OS banner and the alert (a sound, the dock or taskbar). The one path every notification
- * takes, a session's and the mail's (#1630), and once per machine however many windows hear `event` (`firstToRaise`, #2168)
+ * takes, a session's and the mail's (#1630), and once per machine however many windows hear `event` (`raisesHere`, #2168)
  */
-export function alertPerson(notice: NotifyRequest, event: string, set: StoreSet, get: StoreGet): void {
-  void firstToRaise(event).then((first) => {
+export function alertPerson(notice: NotifyRequest, event: string | undefined, set: StoreSet, get: StoreGet): void {
+  void raisesHere(event).then((first) => {
     const st = get()
     if (!first || !st.platform) return
     // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
@@ -37,6 +37,16 @@ export function alertPerson(notice: NotifyRequest, event: string, set: StoreSet,
     const kind = notice.kind === 'mail' ? 'done' : notice.kind
     void st.platform.system.alert(kind, notifyPolicyOf(st.prefs).sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
   })
+}
+
+/**
+ * Whether this window raises the notification for `event` (#2168): a name every window of the host gives the same event
+ * (the host's id for a card or a mail, its number for the event), never a count a window keeps, which two windows can
+ * hold apart (a list read moves `lastSeq` ahead in one of them). With no such name, every window raises its own: a
+ * notification twice rather than none
+ */
+function raisesHere(event: string | undefined): Promise<boolean> {
+  return event === undefined ? Promise.resolve(true) : firstToRaise(event)
 }
 
 /**
@@ -59,9 +69,9 @@ function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notic
 
 /**
  * The notices an event raises as it arrives, before it touches the conversation: a request to start an
- * agent, its answer, and a finished turn.
+ * agent, its answer, and a finished turn. `id` is the host's name for the event (`dispatchEvent`).
  */
-export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet): void {
+export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet, get: StoreGet, id?: string): void {
   /*
    * A session asks to start another agent (#673): a notice every time, on screen or not, until it is answered. It
    * used to stand unseen in a session the person was not looking at until it was withdrawn, and the session then
@@ -134,10 +144,8 @@ export function noticeEvent(e: NormalizedEvent, sessionId: string, set: StoreSet
        */
       const policy = notifyPolicyOf(s.prefs)
       if (policy.done && (!s.appFocused || policy.whenFocused)) {
-        // Once per machine, as every notification (#2168). A turn of a session not yet listed has nothing to tell it from
-        // the next by, and every window sounds it, as before, rather than a second turn going unheard
-        const seq = s.sessions[sessionId]?.lastSeq
-        void (seq === undefined ? Promise.resolve(true) : firstToRaise(`done:${sessionId}:${seq}`)).then((first) => {
+        // Once per machine, as every notification (#2168). A turn has no id of its own: the event that ends it is named
+        void raisesHere(id === undefined ? undefined : `done:${id}`).then((first) => {
           if (!first) return
           void get()
             .platform?.system.alert('done', policy.sound)
@@ -190,7 +198,9 @@ export function notifyStateChange(
     // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
     const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
     const notice = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
-    if (notice) alertPerson(notice, `${notice.kind}:${sessionId}:${withSeq.lastSeq}`, set, get)
+    // The card's own id names it: only a card the person answers makes one (`notificationFor`)
+    const card = e.type === 'approval_request' || e.type === 'question_request' ? e.requestId : undefined
+    if (notice) alertPerson(notice, card === undefined ? undefined : `${notice.kind}:${sessionId}:${card}`, set, get)
     // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
     if (notice || withSeq.state === 'waiting_approval' || withSeq.state === 'error') {
       /*

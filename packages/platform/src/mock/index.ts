@@ -153,8 +153,12 @@ export class MockPlatform implements Platform {
    */
   readonly capabilities = defaultCapabilities({ fileManagerName: 'Finder' })
 
-  /** The channel through which tests inject events */
-  emit(event: NormalizedEvent): void {
+  /**
+   * The channel through which tests inject events. `id` is the host's name for the event, which every window of one
+   * host shares (`agents.subscribe`): a test of two windows gives each page's mock the same one. The mock's own events
+   * carry none
+   */
+  emit(event: NormalizedEvent, id?: string): void {
     // The event families are recorded by the modules that own what they touch; this only runs them in the host's order
     if (event.type === 'subagent_event') {
       const stepSeq = this.store.recordSubagentStep(event)
@@ -173,7 +177,7 @@ export class MockPlatform implements Platform {
         out = this.store.record(s, event, out)
       }
     }
-    this.bus.broadcast(out)
+    this.bus.broadcast(out, id)
   }
 
   /** The fake file tree tests manipulate — the state lives in the MemoryFs behind the `fs` port */

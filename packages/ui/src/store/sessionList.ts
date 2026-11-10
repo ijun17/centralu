@@ -266,7 +266,7 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
 }
 
 /** A holding pen for events belonging to a session not yet registered in the store (replayed right after registration) */
-const pendingEvents = new Map<string, { since: number; events: NormalizedEvent[] }>()
+const pendingEvents = new Map<string, { since: number; events: { e: NormalizedEvent; id: string | undefined }[] }>()
 
 /**
  * How many events the pen holds for one session, and for how long (#392).
@@ -283,12 +283,12 @@ export const PENDING_EVENTS_MAX = 2000
 export const PENDING_EVENTS_MAX_AGE_MS = 10 * 60_000
 
 /** Holds an event for a session not yet registered, and lets go of pens no session is coming for */
-export function penEvent(sessionId: string, e: NormalizedEvent, now: number): void {
+export function penEvent(sessionId: string, e: NormalizedEvent, id: string | undefined, now: number): void {
   for (const [id, pen] of pendingEvents) if (now - pen.since > PENDING_EVENTS_MAX_AGE_MS) pendingEvents.delete(id)
   let pen = pendingEvents.get(sessionId)
   if (!pen) pendingEvents.set(sessionId, (pen = { since: now, events: [] }))
   // Pushed in place: copying the pen for every event made a burst of n events cost n² (#392)
-  pen.events.push(e)
+  pen.events.push({ e, id })
   if (pen.events.length > PENDING_EVENTS_MAX) pen.events.splice(0, PENDING_EVENTS_MAX / 2)
 }
 
@@ -307,6 +307,6 @@ export function replayPendingEvents(get: () => AppState): void {
     if (!get().sessions[id]) continue
     const buffered = pendingEvents.get(id)!
     pendingEvents.delete(id)
-    for (const e of buffered.events) get().dispatchEvent(e)
+    for (const { e, id } of buffered.events) get().dispatchEvent(e, id)
   }
 }

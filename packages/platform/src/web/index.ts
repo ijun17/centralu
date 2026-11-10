@@ -274,7 +274,7 @@ class WebAgentPort implements AgentPort {
   setSleepPolicy(afterMinutes: number | null) {
     return this.rpc.call('agents.setSleepPolicy', { afterMinutes })
   }
-  subscribe(handler: (e: NormalizedEvent) => void): Unsubscribe {
+  subscribe(handler: (e: NormalizedEvent, id?: string) => void): Unsubscribe {
     return this.rpc.onEvent(handler)
   }
   onConnectionChange(handler: (s: ConnectionState) => void): Unsubscribe {

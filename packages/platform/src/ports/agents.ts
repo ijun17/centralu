@@ -239,7 +239,10 @@ export interface AgentPort {
   sleepPolicy(): Promise<SleepPolicy>
   /** "Put idle sessions to sleep after" (#568); null never */
   setSleepPolicy(afterMinutes: number | null): Promise<SleepPolicy>
-  /** Event stream — receives events from the moment of subscription onward */
-  subscribe(handler: (event: NormalizedEvent) => void): Unsubscribe
+  /**
+   * Event stream — receives events from the moment of subscription onward. `id` is what every window of this host calls
+   * the event (#2168), so they can agree on which of them tells the person; none where the host names none
+   */
+  subscribe(handler: (event: NormalizedEvent, id?: string) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe
 }

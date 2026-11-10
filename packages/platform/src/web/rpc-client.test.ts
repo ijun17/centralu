@@ -509,6 +509,17 @@ describe('RpcClient — host lifetime and duplicates (#82)', () => {
     rpc.close()
   })
 
+  it("hands each event on with the host's name for it, its lifetime and number, which every window of the host shares (#2168)", () => {
+    const rpc = makeClient()
+    const ids: (string | undefined)[] = []
+    rpc.onEvent((_e, id) => ids.push(id))
+    rpc.connect()
+    FakeWebSocket.last.ready({ streamEpoch: 'epoch-a' })
+    FakeWebSocket.last.receive(ev(4))
+    expect(ids).toEqual(['epoch-a:4'])
+    rpc.close()
+  })
+
   it('reconnects with its cursor and the lifetime that issued it', async () => {
     const { rpc } = client()
     FakeWebSocket.last.ready({ streamEpoch: 'epoch-a' })

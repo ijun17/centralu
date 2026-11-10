@@ -55,13 +55,14 @@ export function conversationEvent(
   sessionId: string,
   set: StoreSet,
   get: StoreGet,
+  id?: string,
 ): void {
   const cur = get().sessions[sessionId]
   if (!cur) {
     // An event that arrived before the session was registered (the initial prompt streaming right
     // away is one such case). Discarding it would lose the whole first turn, so it is held and
     // replayed right after registration.
-    penEvent(sessionId, e, Date.now())
+    penEvent(sessionId, e, id, Date.now())
     return
   }
 
