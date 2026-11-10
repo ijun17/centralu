@@ -158,7 +158,7 @@ describe('what it tells apart', () => {
     expect(r).toMatchObject({ reachable: false, error: 'ssh to win-pc did not answer in time' })
     const pid = Number(readFileSync(pidFile, 'utf8'))
     const alive = () => isAlive(pid)
-    // The KILL follows the TERM after 2 s (`SSH_KILL_GRACE_MS`)
+    // The KILL follows the TERM after 2 s (`RUN_STOP_GRACE_MS`)
     for (let i = 0; i < 100 && alive(); i++) await new Promise((res) => setTimeout(res, 50))
     const left = alive()
     if (left) process.kill(pid, 'SIGKILL')

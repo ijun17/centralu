@@ -59,11 +59,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   },
 }))
 
-vi.mock('node:child_process', async () => {
-  const { promisify } = await import('node:util')
-  const execFile = () => Promise.resolve({ stdout: fake.status, stderr: '' })
-  return { execFile: Object.assign(execFile, { [promisify.custom]: execFile }) }
-})
+vi.mock('../../os/exec.js', () => ({ execText: async () => ({ stdout: fake.status, stderr: '' }) }))
 vi.mock('../../env-path.js', () => ({ whichTool: () => '/usr/local/bin/claude' }))
 
 const { ClaudeAdapter } = await import('./index.js')

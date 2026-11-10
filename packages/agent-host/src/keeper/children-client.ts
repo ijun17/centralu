@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
+import { realOs } from '../os/real.js'
 import type { HeldIo, ProcRow } from '../lifecycle/keeper-held.js'
 
 /**
@@ -64,7 +64,8 @@ export function parseProcRows(out: string): ProcRow[] {
 /** The process table; empty when `ps` cannot be read */
 function processes(): ProcRow[] {
   try {
-    return parseProcRows(execFileSync('ps', ['-A', '-o', 'pid=,pgid=,tty='], { encoding: 'utf8', timeout: 2000, windowsHide: true }))
+    const r = realOs().processes.runSync('ps', ['-A', '-o', 'pid=,pgid=,tty='], { timeoutMs: 2000 })
+    return r.code === 0 ? parseProcRows(r.stdout) : []
   } catch {
     return []
   }

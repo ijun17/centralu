@@ -13,21 +13,9 @@ const cli = vi.hoisted(() => ({
   run: (_args: string[]): { stdout: string } => ({ stdout: '' }),
 }))
 
-// The adapter calls promisify(execFile), so we attach promisify.custom to resolve to
-// {stdout, stderr} the way the real execFile does. Without it, promisify would return only the
-// first argument (a string).
-vi.mock('node:child_process', async () => {
-  const { promisify } = await import('node:util')
-  const execFile = (_file: string, args: string[]) =>
-    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      try {
-        resolve({ ...cli.run(args), stderr: '' })
-      } catch (e) {
-        reject(e as Error)
-      }
-    })
-  return { execFile: Object.assign(execFile, { [promisify.custom]: execFile }) }
-})
+vi.mock('../../os/exec.js', () => ({
+  execText: async (_file: string, args: string[]) => ({ ...cli.run(args), stderr: '' }),
+}))
 
 vi.mock('../../env-path.js', () => ({ whichTool: () => '/usr/local/bin/claude' }))
 

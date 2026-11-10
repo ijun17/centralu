@@ -162,6 +162,28 @@ const gitStart = guard('git-start', { git: 'git is started here by name: go thro
   },
 }))
 
+/**
+ * A program that is given a time limit ends with the whole tree it started (`os.processes.run`, `OsProcesses.stop`), never by
+ * `execFile`'s `timeout:`: that signals the pid only, and what a `.cmd` shim's `cmd.exe` started goes on running. A call to a
+ * `child_process` starter (or to what `promisify` made of one) with `timeout` in its options is reported.
+ */
+const timedStart = guard('timed-start', { timed: "'timeout' on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)" }, (_context, add) => {
+  const made = new Set() // `const exec = promisify(execFile)`
+  return {
+    VariableDeclarator(node) {
+      const init = node.init && unwrap(node.init)
+      if (init?.type === 'CallExpression' && nameOf(init.callee) === 'promisify' && node.id.type === 'Identifier' && GIT_STARTERS.has(nameOf(unwrap(init.arguments[0]) ?? init))) made.add(node.id.name)
+    },
+    CallExpression(node) {
+      const callee = nameOf(node.callee)
+      if (!GIT_STARTERS.has(callee) && !made.has(callee)) return
+      for (const a of node.arguments) {
+        if (a.type === 'ObjectExpression' && a.properties.some((p) => p.type === 'Property' && keyOf(p) === 'timeout')) add(node, 'timed')
+      }
+    },
+  }
+})
+
 /** A coded error is built by one function (#850), not by `Object.assign(new Error(…), { code: 'x' })` */
 const noHandCodedError = guard('no-hand-coded-error', { coded: 'a coded error is assembled by hand: build it with rpcError (host) or mockError (mock), which type the code (#850)' }, (_context, add) => ({
   CallExpression(node) {
@@ -378,6 +400,7 @@ export const guards = {
     'ui-radius-scale': uiRadiusScale,
     'hidden-children': hiddenChildren,
     'git-start': gitStart,
+    'timed-start': timedStart,
     'no-hand-coded-error': noHandCodedError,
     'purge-callers': purgeCallers,
     'subagent-purge-callers': subagentPurgeCallers,
@@ -410,6 +433,17 @@ export const guardConfigs = [
   // The host
   { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs,cjs}`], ignores: [...TESTS, '**/*.d.ts', '**/test-fixtures/**', '**/node_modules/**'], rules: { 'guard/hidden-children': 'error' } },
   { files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`], ignores: TESTS, rules: { 'guard/git-start': 'error' } },
+  /*
+   * Not read: the files the OS layer is made of, which cannot ask it. `os/real.ts` is the layer (its `runSync` is spawnSync with
+   * the caller's limit); `kill-tree.ts` is what its tree stop is made of (`ps`, PowerShell's process table, `taskkill`: each starts
+   * nothing, and the layer stops through this file); `env-path.ts` (the login shell, in a session of its own whose whole group a
+   * timeout ends) and `tool-launch.ts` are imported by the layer. `remote-install.mjs` runs on another machine and imports nothing.
+   */
+  {
+    files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`],
+    ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/dev-services/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
+    rules: { 'guard/timed-start': 'error' },
+  },
   { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: [`${HOST_SRC}/**/*.tsx`], ignores: ['**/*.test.tsx', '**/*.test-helpers.tsx'], rules: { 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: ['packages/platform/src/mock/*.ts'], ignores: ['**/*.test.ts'], rules: { 'guard/no-hand-coded-error': 'error' } },

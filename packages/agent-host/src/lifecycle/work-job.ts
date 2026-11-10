@@ -1,6 +1,5 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { endsWorkWithJob, systemTool } from '../os.js'
+import { execText } from '../os/exec.js'
 
 /**
  * **The host's work ends with it on Windows** (#1067, #840 item 7, owner's option b).
@@ -116,14 +115,13 @@ export type WorkJobOs = {
   powershell: (script: string) => Promise<string>
 }
 
-const run = promisify(execFile)
 const REAL_OS: WorkJobOs = {
   needed: endsWorkWithJob(),
   powershell: async (script) => {
     // Encoded, so nothing in the script is read by a command line's quoting, and no execution policy applies
     const encoded = Buffer.from(script, 'utf16le').toString('base64')
     const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
-    const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { timeout: 30_000, windowsHide: true })
+    const { stdout } = await execText(exe, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { timeoutMs: 30_000 })
     return stdout
   },
 }

@@ -3,7 +3,11 @@ import type { OsChild, OsClock, OsFiles, OsProcesses, RunOptions, RunResult } fr
 /** How long a run waits for its output to close once the program has exited: a grandchild may hold the pipes (git-exec.ts) */
 export const CLOSE_AFTER_EXIT_MS = 1000
 
-/** The grace a run gives a tree it ends (a timeout, an overflow, an abort) before the second shot */
+/**
+ * The grace a run gives a tree it ends (a timeout, an overflow, an abort) before the second shot: the one grace for a
+ * short-lived program (git, ssh, a tool's probe). `KILL_GRACE_MS` (3 s, `kill-tree.ts`) is longer on purpose: it is for
+ * a dev server, an app or an agent CLI that is asked to save its state, which a git call is not.
+ */
 export const RUN_STOP_GRACE_MS = 2000
 
 /**

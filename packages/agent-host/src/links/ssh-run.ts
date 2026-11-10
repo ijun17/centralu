@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { realOs } from '../os/real.js'
+import type { OsChild } from '../os/port.js'
+import { RUN_STOP_GRACE_MS } from '../os/run.js'
 import { Tail } from '../stream-text.js'
 
 /**
@@ -58,35 +60,21 @@ export type SshRunOptions = {
   /** Who the messages name: `ssh to <label>` */
   label: string
   /** Handed the child once it is spawned, so an owner can end it on close */
-  onChild?: (child: ChildProcess) => void
+  onChild?: (child: OsChild) => void
 }
 
 /** The most characters an asking ssh may print on stdout before it is stopped: the answers read from it are a line or a log tail */
 export const SSH_STDOUT_LIMIT = 1024 * 1024
 /** How much of the end of an asking ssh's stderr is kept */
 export const SSH_STDERR_KEEP = 64 * 1024
-/** How long an ssh asked to stop with TERM has before it is KILLed */
-export const SSH_KILL_GRACE_MS = 2000
-
 /**
- * Asks a child to stop with SIGTERM, and KILLs it if it has not exited after `graceMs`. Resolves once
- * it has exited or the grace is over, whichever is first; a child that has already exited resolves at
- * once. ssh ends what it started itself (a `ProxyCommand`, `ProxyJump`'s second ssh) on SIGTERM.
+ * Stops an ssh and what it started (a `ProxyCommand`, `ProxyJump`'s second ssh) with the shared stop (TERM to the tree, KILL
+ * to what is left after `graceMs`, the default the one every run uses). Resolves once it has exited; a child that has already
+ * exited resolves at once. Nothing is swept after: an ssh ended on purpose has left nothing the stop did not reach.
  */
-export function endChild(child: ChildProcess, graceMs = SSH_KILL_GRACE_MS): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
-  return new Promise<void>((resolve) => {
-    const t = setTimeout(() => {
-      child.kill('SIGKILL')
-      resolve()
-    }, graceMs)
-    t.unref()
-    child.once('exit', () => {
-      clearTimeout(t)
-      resolve()
-    })
-    child.kill('SIGTERM')
-  })
+export async function endChild(child: OsChild, graceMs = RUN_STOP_GRACE_MS): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  await realOs().processes.stop(child, graceMs, { sweep: false }).catch(() => {})
 }
 
 function seconds(ms: number): string {
@@ -97,10 +85,9 @@ function seconds(ms: number): string {
 export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
   const stdoutLimit = opts.stdoutLimit ?? SSH_STDOUT_LIMIT
   return new Promise((resolve, reject) => {
-    const child = spawn(opts.ssh ?? 'ssh', [...opts.args], {
+    const child = realOs().processes.start(opts.ssh ?? 'ssh', opts.args, {
       env: opts.env ?? process.env,
       stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      windowsHide: true,
     })
     if (opts.stdin !== undefined) {
       // A remote that exits before reading it all closes the pipe: that is its answer, not ours to throw

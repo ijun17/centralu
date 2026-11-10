@@ -17,12 +17,16 @@ describe('which reg.exe reads the ANSI code page', () => {
   beforeEach(() => {
     started.length = 0
     vi.resetModules()
-    vi.doMock('node:child_process', async (original) => ({
-      ...(await original<typeof import('node:child_process')>()),
-      execFileSync: (file: string) => {
-        started.push(file)
-        return '    ACP    REG_SZ    949\r\n'
-      },
+    // The host runs it through the OS layer: the program it names is what is checked, not what the machine answers
+    vi.doMock('../os/real.js', () => ({
+      realOs: () => ({
+        processes: {
+          runSync: (file: string) => {
+            started.push(file)
+            return { code: 0, signal: null, stdout: '    ACP    REG_SZ    949\r\n', stderr: '' }
+          },
+        },
+      }),
     }))
     Object.defineProperty(process, 'platform', { value: 'win32' })
   })
@@ -31,7 +35,7 @@ describe('which reg.exe reads the ANSI code page', () => {
     Object.defineProperty(process, 'platform', platform)
     if (systemRoot === undefined) delete process.env.SystemRoot
     else process.env.SystemRoot = systemRoot
-    vi.doUnmock('node:child_process')
+    vi.doUnmock('../os/real.js')
     vi.resetModules()
   })
 

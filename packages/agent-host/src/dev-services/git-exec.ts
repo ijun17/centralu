@@ -6,6 +6,7 @@ import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
 import { realOs } from '../os/real.js'
 import type { OsChild, RunOptions } from '../os/port.js'
+import { RUN_STOP_GRACE_MS } from '../os/run.js'
 import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
@@ -233,8 +234,8 @@ function runOptions(cwd: string, env: Record<string, string> | undefined, timeou
   }
 }
 
-/** How long git has, after SIGTERM, to take its lock files away before SIGKILL */
-export const GIT_STOP_GRACE_MS = 2000
+/** How long git has, after SIGTERM, to take its lock files away before SIGKILL: the grace every run gives */
+export const GIT_STOP_GRACE_MS = RUN_STOP_GRACE_MS
 
 /**
  * Ends every git still running, as a timeout would (`runChild`'s stop: SIGTERM so git takes its `index.lock` away,

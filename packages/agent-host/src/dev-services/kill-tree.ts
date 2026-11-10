@@ -499,7 +499,7 @@ export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt?
       try {
         await os.taskkill(root.pid)
       } catch {
-        root.endRoot()
+        await root.endRoot()
       }
     }
     return []

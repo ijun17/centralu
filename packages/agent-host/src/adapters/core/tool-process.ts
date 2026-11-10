@@ -4,6 +4,7 @@ import { lineSplitter } from '../../transport/json-lines.js'
 import type { AgentProcess, AgentSpawnSpec, ProcessSource } from '../contract.js'
 import { frameRecorder, type FrameRecorder } from '../frames/recorder.js'
 import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
+import { RUN_STOP_GRACE_MS } from '../../os/run.js'
 
 /**
  * The frame tap (docs/plans/session-core.md §6.1, #1654): the one place a tool's lines are recorded, for every tool, at its
@@ -54,7 +55,7 @@ export function isMissingProgram(err: unknown): boolean {
 }
 
 /** How long a stopped tool has after stdin's end to exit on its own before its tree is killed (Codex and ACP, measured as enough) */
-export const STOP_GRACE_MS = 2_000
+export const STOP_GRACE_MS = RUN_STOP_GRACE_MS
 
 /** Where a tool's process comes from (docs/plans/session-core.md §5, §7.2 PR 3) */
 export type ToolStart = {

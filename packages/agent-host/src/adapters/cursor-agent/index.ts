@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
@@ -8,8 +6,8 @@ import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
 import { CURSOR_SURFACE } from './surface.js'
 import { cursorUsageReader } from './usage.js'
+import { execText } from '../../os/exec.js'
 
-const exec = promisify(execFile)
 
 /**
  * What Cursor through ACP can keep (docs/plans/acp-adapter.md §7). Measured on agent 2026.10.22-27dcf5f, or read in its
@@ -64,7 +62,7 @@ export function cursorProfile(): AcpProfile {
   const localUsage = cursorUsageReader(async (timeout) => {
     const install = findCursor()
     if (!install) throw new Error('Cursor CLI not found')
-    const r = await exec(install.command, [...install.args, 'about', '--format', 'json'], { timeout, windowsHide: true, env: { ...process.env, ...install.env } })
+    const r = await execText(install.command, [...install.args, 'about', '--format', 'json'], { timeoutMs: timeout, env: { ...process.env, ...install.env } })
     return r.stdout
   })
   return {
@@ -89,7 +87,7 @@ export function cursorProfile(): AcpProfile {
         result = { tool: DESCRIPTOR.name, installed: false, loggedIn: false, detail: 'Cursor CLI not found (install it from https://cursor.com/cli)' }
       } else {
         // Measured: "✓ Logged in as <account>" or "Not logged in". The account is not repeated on screen
-        const out = await exec(install.command, [...install.args, 'status'], { timeout: 20_000, windowsHide: true, env: { ...process.env, ...install.env } })
+        const out = await execText(install.command, [...install.args, 'status'], { timeoutMs: 20_000, env: { ...process.env, ...install.env } })
           .then((r) => r.stdout, (e: { stdout?: string }) => e.stdout ?? '')
         const loggedIn = /\bLogged in\b/.test(out) && !/Not logged in/i.test(out)
         result = { tool: DESCRIPTOR.name, installed: true, loggedIn, detail: loggedIn ? `agent ${install.version}` : `agent ${install.version} · login required` }

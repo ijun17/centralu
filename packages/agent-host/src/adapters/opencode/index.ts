@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
@@ -10,8 +8,8 @@ import { findOpenCode } from './install.js'
 import { openCodeRefusal } from './refusal.js'
 import { OPENCODE_SURFACE } from './surface.js'
 import { openCodeUsageReader } from './usage.js'
+import { execText } from '../../os/exec.js'
 
-const exec = promisify(execFile)
 
 /**
  * What OpenCode through ACP can keep (docs/plans/acp-adapter.md §7), measured on 1.19.4. Its `usage_update` is the
@@ -41,13 +39,13 @@ export function openCodeProfile(): AcpProfile {
   const localUsage = openCodeUsageReader(async (timeout) => {
     const l = findOpenCode()
     if (!l) throw new Error('OpenCode not found')
-    const r = await exec(l.command, [...l.args, 'stats'], { timeout, windowsHide: true, maxBuffer: 1024 * 1024 })
+    const r = await execText(l.command, [...l.args, 'stats'], { timeoutMs: timeout, maxBuffer: 1024 * 1024 })
     return r.stdout
   })
   const version = async (): Promise<string | null> => {
     if (known && Date.now() - known.at < VERSION_FOR_MS) return known.version
     const l = findOpenCode()
-    const v = l ? await exec(l.command, [...l.args, '--version'], { timeout: 20_000, windowsHide: true }).then((r) => r.stdout.trim() || null, () => null) : null
+    const v = l ? await execText(l.command, [...l.args, '--version'], { timeoutMs: 20_000 }).then((r) => r.stdout.trim() || null, () => null) : null
     known = { at: Date.now(), version: v }
     return v
   }

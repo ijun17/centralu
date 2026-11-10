@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process'
 import type { HostLogon } from '@cc/protocol'
 import { elevatedFromGroups, elevationSource, logonFromGroups, type Platform, HOST_PLATFORM } from './os.js'
+import { execText } from './os/exec.js'
 
 type Probe = {
   platform?: Platform
@@ -30,10 +30,7 @@ export function detectToken(o: Probe = {}): Promise<HostToken> {
   }
   const run =
     o.run ??
-    ((file: string, args: string[]) =>
-      new Promise<string>((resolve, reject) =>
-        execFile(file, args, { windowsHide: true, timeout: 10_000, encoding: 'utf8' }, (err, stdout) => (err ? reject(err) : resolve(stdout))),
-      ))
+    (async (file: string, args: string[]) => (await execText(file, args, { timeoutMs: 10_000 })).stdout)
   return run(source.file, source.args).then(
     (out) => ({ elevated: elevatedFromGroups(out), logon: logonFromGroups(out) }),
     () => ({ elevated: null, logon: null }),
