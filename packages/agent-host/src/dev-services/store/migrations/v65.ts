@@ -1,4 +1,3 @@
-import { RENAMED_SETTINGS } from '../settings.js'
 import { MigrationRange, type MigrationStep } from './context.js'
 
 /** The migration steps v65 to v69. The rule it follows is written above `migrationSteps` in `index.ts` */
@@ -168,7 +167,13 @@ export class StepsV65 extends MigrationRange {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
           )
           const drop = this.db.prepare(`DELETE FROM app_settings WHERE key = ? AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = ?)`)
-          for (const [old, renamed] of RENAMED_SETTINGS) {
+          // The keys as they were when this step shipped, not the live `RENAMED_SETTINGS`: a step does the same on every store
+          for (const [old, renamed] of [
+            ['orchestrator_tool', 'assistant_tool'],
+            ['orchestrator_mcp_proposals', 'assistant_mcp_proposals'],
+            ['orchestrator_skill_proposals', 'assistant_skill_proposals'],
+            ['orchestrator_skills', 'assistant_skills'],
+          ] as const) {
             copy.run(renamed, old)
             drop.run(renamed, old)
           }

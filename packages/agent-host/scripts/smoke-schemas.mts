@@ -66,6 +66,8 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.resumeSession': { sessionId: S },
   'orchestrator.get': {},
   'orchestrator.tools': {},
+  'assistant.get': {},
+  'assistant.tools': {},
   'grid.get': { tagged: true },
   'grid.set': { panels: [{ kind: 'session', sessionId: S }], sessionIds: [S] },
   'workspace.save': { layout: { focusedSessionId: S } },
@@ -111,6 +113,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.mcpProposals': {},
   'agents.skillProposals': {},
   'agents.orchestratorSkills': {},
+  'agents.assistantSkills': {},
   'agents.sleepPolicy': {},
   'agents.versions': {},
   'agents.reportOwed': { sessionId: S },
@@ -119,6 +122,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'usage.history': { from: '2020-01-01T00:00:00Z', to: '2100-01-01T00:00:00Z', groupBy: 'day', by: 'tool' },
   'subagents.usage': {},
   'orchestrator.peek': {},
+  'assistant.peek': {},
   'git.ignoredEntries': { projectId: P },
   'projects.inspect': { path: cwd },
   'projects.origin': { projectId: P },
@@ -146,6 +150,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'projects.setAgentInstructions': { projectId: P, text: '' },
   'projects.setWorktreeSetup': { projectId: P, setup: null },
   'orchestrator.configure': { tool: 'claude' },
+  'assistant.configure': { tool: 'claude' },
   'git.cancel': { projectId: P },
   'fs.resolve': { projectId: P, path: 'a.txt' },
   'agents.exportHandoffRecord': { sessionId: S },
@@ -176,7 +181,7 @@ const SKIP: Record<string, string> = {
     'agents.installTool', 'agents.cancelInstallTool', 'agents.signIn', 'agents.cancelSignIn', 'agents.applyVersions', 'updates.apply', 'updates.answerApply', 'updates.reportApply', 'host.stop', 'host.handover', 'processes.stop', 'commands.stop',
   ]),
   ...skipped('destructive, or writes outside the temporary store', [
-    'agents.archiveIfAtRest', 'agents.deleteAgentChild', 'agents.deleteOrchestratorSkill', 'trash.purgeRuns', 'trash.purgeSubagentSteps', 'trash.restoreSubagentSteps', 'fs.move', 'fs.importFile', 'projects.delete', 'projects.create', 'worktrees.createManager', 'worktrees.setTrunk', 'themes.save', 'themes.import',
+    'agents.archiveIfAtRest', 'agents.deleteAgentChild', 'agents.deleteOrchestratorSkill', 'agents.deleteAssistantSkill', 'trash.purgeRuns', 'trash.purgeSubagentSteps', 'trash.restoreSubagentSteps', 'fs.move', 'fs.importFile', 'projects.delete', 'projects.create', 'worktrees.createManager', 'worktrees.setTrunk', 'themes.save', 'themes.import',
   ]),
   ...skipped('needs something that does not exist here: a pending proposal, a running task, a failed turn, an image, a subagent run, a running command, an open app view, a shared app, a consent, a mail thread', [
     'agents.resolveMcpProposal', 'agents.resolveSkillProposal', 'agents.stopBackgroundTask', 'messages.image', 'sessions.clearError', 'messages.subagent', 'messages.subagentTrashed', 'trash.readRun', 'subagents.trash', 'commands.log', 'commands.resize', 'apps.viewFrame', 'apps.recoverView', 'apps.readResource', 'apps.invoke', 'apps.restart', 'apps.setShared', 'projectConsents.revoke', 'host.send',
@@ -232,8 +237,10 @@ const failed: { m: string; why: string }[] = []
 try {
   const orc = (await rpc('orchestrator.get', {})) as { id: string }
   CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
+  CASES['assistant.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
 } catch {
   SKIP['orchestrator.tool'] = 'could not create the Assistant'
+  SKIP['assistant.tool'] = 'could not create the Assistant'
 }
 
 // git.commitDetail fills in a sha once one is obtained

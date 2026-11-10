@@ -28,7 +28,8 @@ import { StepsV65 } from './v65.js'
  *    build cannot read or would silently lose, lands one release after the code stopped reading and writing what it
  *    removes, and declares `breaksOlderReaders: true`. Dropping something an older schema.sql creates counts: the
  *    older host recreates it empty and carries on (v13).
- * 3. **A breaking step raises the store's `min_reader_version`** (an `app_settings` row) to its own `to`, before it
+ * 3. **A breaking step raises the store's `min_reader_version`** (an `app_settings` row) to its own `to`, or to the
+ *    lower version it names (`minReader`) when the builds from there on already write everything it relies on, before it
  *    runs. A host whose newest step is below that refuses to start and says why (`StoreTooNewError`), instead of
  *    opening the store and failing on the first missing column. A host older than the store but at or above it
  *    opens it and runs nothing it does not know.

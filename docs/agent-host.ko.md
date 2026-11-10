@@ -1262,7 +1262,7 @@ ubuntu-24.04에서 돌린다. #1895 4단계 PR 7이 Linux를 직접 경로로 �
 한 세션 id의 HMAC이다(`transport/bridge-token.ts`). 같은 사용자의 어떤 프로세스든 브리지가 시작될 때의 환경을 읽을
 수 있기 때문이다([security-boundaries.md](security-boundaries.md), "The front door"). 이것으로 hello한 연결은
 클라이언트가 아니다: `hello_ok` 말고는 아무것도 받지 않고(재생도, 방송도, 터미널 출력도 없다), 호출할 수 있는 것은
-`orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools`, `apps.sessionCall`뿐이며, 그것도 자격 증명을
+`assistant.tools`, `assistant.tool`(또는 그 옛 이름 `orchestrator.*`), `apps.sessionTools`, `apps.sessionCall`뿐이며, 그것도 자격 증명을
 만든 세션을 이름으로 댈 때만이다. 키퍼 아래에서 키는 정문의 토큰이라서, 다음 호스트도 아무것도 넘겨받지 않고 돌던
 브리지의 자격 증명을 받아 준다. 이 변경 이전의 호스트는 거절한다: 그런 빌드로 되돌아가면 새 빌드가 시작한 Codex
 세션은 다시 시작할 때까지 Centralu 도구를 잃고, 브리지가 그렇게 말한다.

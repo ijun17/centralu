@@ -2000,7 +2000,7 @@ window's channel), grouped, and for each group one of three states.
 | What a machine's sessions may ask of this computer. `machines.setAsks`, `machines.askConsents`, `machines.withdrawAsk` | **Person** | It widens what code on another computer may do here (#550) |
 | Host to host. `host.activity`, `host.sessions`, `host.readSession`, `host.recall`, `host.lastAnswer`, `host.send`, `host.stop`, `host.handover`, `host.hubOffer` | Not the window's | Answered for a linked hub or a switch; no window calls them |
 | Terminals, commands and processes. `terminal.*`, `commands.*`, `processes.strays`, `processes.stop` | **Person** | A shell and run commands on the person's behalf, and stopping a process; the Assistant has no shell of its own, its sessions do |
-| The Assistant's own channel. `orchestrator.get`, `orchestrator.peek`, `orchestrator.configure`, `orchestrator.tools`, `orchestrator.tool` | Not an errand | How the window and the bridge reach the Assistant itself |
+| The Assistant's own channel. `assistant.get`, `assistant.peek`, `assistant.configure`, `assistant.tools`, `assistant.tool`, and the same under `orchestrator.*` (#2133) | Not an errand | How the window and the bridge reach the Assistant itself |
 
 The same methods are classified once more for a caller that is neither the window nor the Assistant (#1405): a
 script or tool holding the limited credential runs the everyday ones and is refused the rest
@@ -2703,7 +2703,7 @@ keeps its bridge, and only an address that outlives this host survives its resta
 session id keyed by the host's token (`transport/bridge-token.ts`), because any process of the same user can read
 the environment the bridge started with ([security-boundaries.md](security-boundaries.md), "The front door"). A
 connection that says hello with one is not a client: it gets `hello_ok` and nothing else (no replay, no broadcast,
-no terminal output), and it may call only `orchestrator.tools`, `orchestrator.tool`, `apps.sessionTools` and
+no terminal output), and it may call only `assistant.tools`, `assistant.tool` (or their old names `orchestrator.*`), `apps.sessionTools` and
 `apps.sessionCall`, each naming the session the credential was made for. Under a keeper the key is the front door's
 token, so the next host accepts a running bridge's credential without anything being handed over. A host from before
 this change refuses it: after switching back to such a build, a Codex session started by a newer one loses its
