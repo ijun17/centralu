@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { atRest, handoffOpening, handoffPrompt, needsAnswer, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
+import { busyWith, handoffOpening, handoffPrompt, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { HandoffResult } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import { inTurn } from '../idle.js'
 import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './centralu-tools.js'
@@ -113,12 +112,11 @@ export class HandoffFlow {
     if (this.running.has(target.id)) return `${name} is already being handed off.`
     if (!isOrdinary(target)) return `${name} is not a project's ordinary session (an app's builder and its agents are not), so it cannot be handed off.`
     if (target.worktree) return `${name} works in a worktree, and worktree sessions cannot hand off yet: merge or delete it first.`
-    if (!atRest(target)) {
-      if (inTurn(target.state) || needsAnswer(target)) {
-        return `${name} is mid-turn (${target.pendingQuestions.length ? 'waiting on a question' : target.state}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
-      }
-      // Its own background work runs (#2158): the successor's start ends the original's process, and the work with it
-      return `${name} has background work still running, so nothing was handed off. Wait for it to end, or ask the person to stop it.`
+    const busy = busyWith(target)
+    // Its own background work runs (#2158): the successor's start ends the original's process, and the work with it
+    if (busy === 'background') return `${name} has background work still running, so nothing was handed off. Wait for it to end, or ask the person to stop it.`
+    if (busy !== null) {
+      return `${name} is mid-turn (${busy === 'question' ? 'waiting on a question' : target.state}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
     }
     if (mode === 'agent' && target.state === 'error') return `${name} is in an error state and cannot write a note. Hand it off from the record (mode "record").`
     return null

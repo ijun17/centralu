@@ -445,7 +445,8 @@ its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report cou
 archived is gone). `agentLook` (protocol `session-state.ts`) is the one label a linked child's row and the mail directory
 read too. Whether a session is busy is one rule beside it (`atRest`, #2158): in a turn, a card open (`needsAnswer`), or its
 own background work running; delete, delete_session, handoff, worktree cleanup and the host's idle rule (`sessionBusy`)
-refuse or wait on it. `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+refuse or wait on it. `busyWith` is that rule written out once and names the part that holds (a card, a turn, background
+work): `atRest` reads it, and so do the checks that say why (handoff's refusal, the window's handoff note, `sessionIdle`). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
 worktree manager's, which store step v48 copied into `askedBy`.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
 is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the session archive it
@@ -3101,8 +3102,8 @@ from one host to the next (before #1895 step 4 PR 1 the keeper's child tag did).
 never moved by itself (unknown is never "older", `runsOlderCli`), until its next restart.
 
 **When a session is moved** (`restartDecision`): it is live, it runs an older version than the installed one, it is
-idle by `sessionIdle` (no turn, no approval or question, no live background task, and a tool that cannot report
-background work is never idle), and, when it moves by itself, nothing has come from it for 60 s (counted from host start
+idle by `sessionIdle` (at rest by `busyWith`, whose part it names: no turn, no approval or question, no live background
+task; and a tool that cannot report background work is never idle), and, when it moves by itself, nothing has come from it for 60 s (counted from host start
 for a session the host has not heard from). The quiet period is for the person: a turn that just ended is when they read
 the answer and type the next message. `sessionIdle` reads the same facts about a session as `hostBusy`, but leaves
 out terminals and commands, which a session restart does not touch, and never calls a tool idle that cannot report

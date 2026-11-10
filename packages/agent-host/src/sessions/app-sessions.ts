@@ -16,7 +16,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
-import { appKeyOf, noSuchAppText } from '@cc/protocol'
+import { appKeyOf, atRest, noSuchAppText } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
@@ -558,20 +558,20 @@ export class AppSessions {
   /**
    * Woken since its run (a message, a card), waking, restarting, or holding something sent to it: in use, so it stays
    * (#378). A restart applied at the turn's end (a setting changed during the run) closes the process and starts
-   * another; deleted in between, the restart then failed on a session that was gone.
+   * another; deleted in between, the restart then failed on a session that was gone. A turn or a card is the busy rule's
+   * (`atRest`); its background work is not read there, since it went with the process `finishAppAgent` closed, and a
+   * process it holds again is `handles`.
    */
   private inUse(m: SessionInfo): boolean {
     const id = m.id
     return (
-      inTurn(m.state) ||
+      !atRest({ ...m, backgroundTasks: [] }) ||
       this.host.handles.has(id) ||
       this.host.agentRuns.has(id) ||
       this.host.resuming.has(id) ||
       this.host.restartPolicy.deferredRestarts.has(id) ||
       this.host.inputsHeld(id) ||
-      (this.host.children.queued.get(id)?.length ?? 0) > 0 ||
-      !!m.pendingApproval ||
-      m.pendingQuestions.length > 0
+      (this.host.children.queued.get(id)?.length ?? 0) > 0
     )
   }
 

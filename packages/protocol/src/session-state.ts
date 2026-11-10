@@ -64,7 +64,23 @@ export function needsAnswer(s: CardFacts): boolean {
  * Trash, delete, handoff, worktree cleanup, the host's idle rule (`sessionBusy`, idle.ts) and the directory read this.
  */
 export function atRest(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): boolean {
-  return !isInTurn(s.state) && !needsAnswer(s) && liveBackgroundTasks(s.backgroundTasks ?? []).length === 0
+  return busyWith(s) === null
+}
+
+/** Why a session is not at rest (`busyWith`) */
+export type BusyReason = 'approval' | 'question' | 'turn' | 'background'
+
+/**
+ * Why a session is not at rest, or null when it is: the one place `atRest` is written out, so a check that says why it
+ * refuses (a handoff, the restart on a new CLI) names the same parts it tests. A card first (`needsAnswer`): `question`
+ * when only questions are open, `approval` otherwise (an approval card, or one the state says stands though it is not
+ * carried); then a turn; then its own background work (`liveBackgroundTasks`).
+ */
+export function busyWith(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): BusyReason | null {
+  if (needsAnswer(s)) return (s.pendingQuestions?.length ?? 0) > 0 && !s.pendingApproval ? 'question' : 'approval'
+  if (isInTurn(s.state)) return 'turn'
+  if (liveBackgroundTasks(s.backgroundTasks ?? []).length > 0) return 'background'
+  return null
 }
 
 /**

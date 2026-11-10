@@ -1,4 +1,4 @@
-import { isInTurn, nextStateFor, SessionState, type NormalizedEvent } from '@cc/protocol'
+import { isInTurn, needsAnswer, nextStateFor, SessionState, type NormalizedEvent } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 
@@ -72,7 +72,8 @@ export class CardRests {
     s: { id: string; state: SessionState; pendingApproval: unknown; pendingQuestions: readonly unknown[] },
   ): SessionState | null {
     if (e.type !== 'approval_resolved' && e.type !== 'question_resolved') return null
-    if (s.pendingApproval || s.pendingQuestions.length > 0) return null
+    // A card still stands (`needsAnswer`), the state's word for one included: the rest is still owed to it
+    if (needsAnswer(s)) return null
     const rest = this.rests.get(s.id)
     this.drop(s.id)
     return rest !== undefined && s.state === 'working' ? rest : null
