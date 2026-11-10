@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorMessage } from '@cc/protocol'
 import { execFailure } from './exec-error.js'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,18 @@ import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { realOs } from '../os/real.js'
+
+/** Whether the stop is given a process table that cannot be read, as when PowerShell does not answer in time (the test of the fallback below) */
+const table = vi.hoisted(() => ({ unreadable: false }))
+vi.mock('../os/kill-tree.js', async (original) => {
+  const real = await original<typeof import('../os/kill-tree.js')>()
+  const unreadable = { ...real.leftoverOs(promisify(execFile)), listProcesses: () => Promise.reject(Object.assign(new Error('timed out'), { killed: true })) }
+  return {
+    ...real,
+    stopTreeWindows: (root: Parameters<typeof real.stopTreeWindows>[0], endRoot: Parameters<typeof real.stopTreeWindows>[1]) => real.stopTreeWindows(root, endRoot, table.unreadable ? unreadable : undefined),
+    stopTreesWindows: (roots: Parameters<typeof real.stopTreesWindows>[0]) => real.stopTreesWindows(roots, table.unreadable ? unreadable : undefined),
+  }
+})
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -282,6 +295,22 @@ describe('a git that is stopped takes its lock away (#982)', () => {
       for (const repo of repos) expect(git(repo, 'log', '--format=%s').trim()).toBe('one')
     } finally {
       stopAll.mockRestore()
+    }
+  })
+
+  /*
+   * The path #2141 came from: a table that cannot be read in time (a starved machine, CI's Windows runners) leaves `taskkill /T` on the
+   * root, in no order, and a hook's `sleep` that ended before git made git go on and commit. Forced here with a real git and a real slow hook:
+   * whichever the tree kill ends first, git does not commit.
+   */
+  it.runIf(process.platform === 'win32')('when the host stops and the table cannot be read: git ends by taskkill /T, and never commits', { timeout: 60_000 * SLOW }, async () => {
+    table.unreadable = true
+    try {
+      const r = await commitStopped(() => stopGitChildren())
+      expect(r.tableRead).toBe(false) // the path under test was the one taken
+      endedFirst(r)
+    } finally {
+      table.unreadable = false
     }
   })
 
