@@ -18,4 +18,20 @@ describe("a hub's mail directory of a machine's sessions", () => {
       ['session:hub-1a2b3c4d/m1.r1', 'finished', false],
     ])
   })
+
+  it('lists one with a card open there as waiting and busy, and one cut short as stopped, as the local directory does', () => {
+    const row = { name: 'Builder', kind: 'worker', createdAt: 1 }
+    const sessions = [
+      { ...row, id: 'q1', state: 'working', pendingQuestions: [{ requestId: 'q', questions: [] }] },
+      { ...row, id: 'a1', state: 'idle', pendingApproval: { requestId: 'a' } },
+      { ...row, id: 'i1', state: 'idle', interruption: { kind: 'stopped' } },
+    ]
+    const m = { id: 'm1', name: 'Box', reachable: true, call: async () => null, lastKnown: (kind: string) => (kind === 'sessions' ? sessions : []) }
+    const { entries } = mailPeers({ hostId: 'hub-1a2b3c4d', selfName: () => 'Hub', machines: { get: () => m, all: () => [m] } }).machineDirectory!()
+    expect(entries.map((e) => [e.address, e.state, e.busy])).toEqual([
+      ['session:hub-1a2b3c4d/m1.q1', 'waiting', true],
+      ['session:hub-1a2b3c4d/m1.a1', 'waiting', true],
+      ['session:hub-1a2b3c4d/m1.i1', 'stopped', false],
+    ])
+  })
 })

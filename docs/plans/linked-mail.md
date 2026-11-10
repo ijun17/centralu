@@ -247,7 +247,9 @@ matches the name counts most, then the project, the machine and the role. Among 
 first, then those that waited or started most recently. An empty query lists the most recently active.
 
 **The answer.** At most 8 lines, one per session, each with the exact address to mail, then the name, project,
-machine (absent for this computer), role and state:
+machine (absent for this computer), role and state. A mirrored row's state is read as the machine reads its own
+(`agentLook`): its open cards, a cut-short turn and its background work come with the row, so it says `waiting`,
+`stopped` or `paused` there as here:
 
     3 of 41 sessions match "review". Mail one by its address.
     session:hub-1a2b/m3.01JD... "PR review" · project centralu · on Desk · session · working
