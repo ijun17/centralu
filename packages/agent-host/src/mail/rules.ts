@@ -122,6 +122,8 @@ export function dueAt(now: number, urgent: boolean, fromPerson: boolean): number
 
 export const MINUTE_MS = 60_000
 export const HOUR_MS = 60 * MINUTE_MS
+/** The dedupe key of a notice sent at most once a clock hour: `key` and the hour `now` falls in (the warnings and refusals, §7.5) */
+export const hourlyKey = (key: string, now: number): string => `${key}:${Math.floor(now / HOUR_MS) * HOUR_MS}`
 /** What `read` with no id returns at most: 10 messages and about 20,000 characters, never half a message (§8.4); a chain back from a message, 9 ancestors */
 export const READ_ITEMS = 10
 export const READ_CHARS = 20_000

@@ -137,7 +137,7 @@ will not be answered, so a stop releases a request too, with the stop's cause, i
 (`cutQuestions`). The report of the request's turn still tells the asker it was owed to; the stop notice tells the rest (an
 asker the same quit cut heard nothing before).
 
-**Guards:** `guards()` (1105–1116) still *refuses* `repeat`, `rate_limited` and `ask_rate`; the loop, cascade, host-cap
+**Guards:** `sendGuards()` (`send-guards.ts`) still *refuses* `repeat`, `rate_limited` and `ask_rate`; the loop, cascade, host-cap
 and pair guards warn (mailbox.md D13, D32, #2014, #2035). The audit found no code that blocks agent mail beyond those
 three. This round kept them as they are; §6 has the answer.
 

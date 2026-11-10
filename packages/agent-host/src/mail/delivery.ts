@@ -1,7 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
-import { HOUR_MS, WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, needsReceiver, wakesMessage } from './rules.js'
+import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
 
@@ -558,7 +558,6 @@ export class MailDelivery {
    */
   private warnIfRunning(recipient: string, messageIds: readonly string[], now: number): void {
     if (!this.turns) return
-    const hour = Math.floor(now / HOUR_MS) * HOUR_MS
     const senders = new Set(messageIds.flatMap((id) => {
       const sender = this.records.message(id)?.sender
       return sender !== undefined && sender !== recipient && parseAddress(sender)?.kind === 'session' ? [sender] : []
@@ -570,12 +569,12 @@ export class MailDelivery {
       this.service.notice(PERSON, {
         body: WARNING_TEXT.pair(this.service.labelOf(pair[0] ?? recipient), this.service.labelOf(pair[1] ?? sender), turns),
         facts: { pairTurns: { sessions: pair, turns } },
-        dedupeKey: `pairturns:${pair.join('|')}:${hour}`,
+        dedupeKey: hourlyKey(`pairturns:${pair.join('|')}`, now),
       })
     }
     const host = this.turns.hostTurns()
     // The key an earlier build's notice of its cap used: one line an hour whichever build writes it
-    if (host > this.o.warnHostTurns) this.service.notice(PERSON, { body: WARNING_TEXT.host(host), facts: { hostCap: true }, dedupeKey: `hostcap:${PERSON}:${hour}` })
+    if (host > this.o.warnHostTurns) this.service.notice(PERSON, { body: WARNING_TEXT.host(host), facts: { hostCap: true }, dedupeKey: hourlyKey(`hostcap:${PERSON}`, now) })
   }
 
   /** The question about sleeping sessions came up, or was answered or went away: the Inbox is told */

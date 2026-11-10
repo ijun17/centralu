@@ -12,7 +12,7 @@ import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './del
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
-import { HOUR_MS, REFUSAL_TEXT, WARNING_TEXT, firstLineOf } from './rules.js'
+import { REFUSAL_TEXT, WARNING_TEXT, firstLineOf, hourlyKey } from './rules.js'
 import { MailTool } from './tool.js'
 import { MailAcross } from './across.js'
 import { entryOf } from './find.js'
@@ -265,10 +265,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     sessionChanged: (id) => delivery.poke(id),
     waiting: (id) => service.wakingFor(addressOf(id)),
     // The person's warning, written as the mailbox writes its own (delivery.ts `warnIfRunning`): one a clock hour for the session, and nothing waits for it
-    compactCycles: (id, count) => {
-      const hour = Math.floor(now() / HOUR_MS) * HOUR_MS
-      service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: `compactcycles:${addressOf(id)}:${hour}` })
-    },
+    compactCycles: (id, count) => service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: hourlyKey(`compactcycles:${addressOf(id)}`, now()) }),
     sessionEvent: (e, ended) => mailTurns.observe(e, ended),
     tool: (id, args) => tool.call(id, args),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
