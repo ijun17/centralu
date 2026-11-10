@@ -2,7 +2,7 @@ import { errorMessage } from '@cc/protocol'
 import { isObj } from '../json-value.js'
 import { ensureToolPath } from '../env-path.js'
 import { usesShippedConpty } from '../os.js'
-import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
+import { KILL_GRACE_MS, killTree, stopTree } from '../os/kill-tree.js'
 
 /**
  * One pty and the output it left, as a terminal tab (`terminal.ts`) and a command run (`commands.ts`) both hold one

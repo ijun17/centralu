@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { KILL_GRACE_MS, type WinProcRow } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, type WinProcRow } from '../os/kill-tree.js'
 import { CodexClient } from './codex/client.js'
 import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli, ownPid } from './fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent } from './local-process.js'
@@ -65,7 +65,7 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(await goneWithin(helper, KILL_GRACE_MS + 3000)).toBe(true)
   })
 
-  it.runIf(!unix)('Windows: a stop ends the CLI first and then what was under it, so it ends the CLI and its helper', async () => {
+  it.runIf(!unix)('Windows: a stop ends the CLI and its helper (the order is pinned in kill-tree.test.ts)', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli(), env: process.env })
     const helper = await helperPid(p.stdout)
     started.push(helper, ownCli(p))
@@ -73,8 +73,7 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(p.kill('SIGTERM')).toBe(true)
     // `taskkill /F` ends a process with exit code 1; Windows has no signal to report
     expect(await exited).toEqual([1, null])
-    // The stop ends the CLI alone first and then what was under it, parents before children (#2141), from the process
-    // table, which PowerShell takes most of a second to give
+    // The helper goes after the CLI, once the stop has read the process table, which PowerShell takes most of a second to give
     expect(await goneWithin(helper, 15_000)).toBe(true)
   })
 

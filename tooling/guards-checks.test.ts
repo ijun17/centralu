@@ -474,7 +474,7 @@ describe('guard/import-boundary', () => {
   it.each([
     ["import { a } from '../../dev-services/watch.js'"],
     ["import { a } from '../../dev-services/path-guard.js'"],
-    ["import { a } from '../../dev-services/kill-tree.js'"],
+    ["import { a } from '../../os/kill-tree.js'"],
     ["import { a } from '../../dev-services/grouped-child.js'"],
     ["import { a } from '../../dev-services/data-folder.js'"],
     ["import { a } from '../contract.js'"],
@@ -709,7 +709,7 @@ describe('guard/timed-start', () => {
   it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {
     const code = "execFileSync('ps', args, { timeout: 2000 })"
     expect(await lines('packages/agent-host/src/os/real.ts', code, 'timed-start')).toEqual([])
-    expect(await lines('packages/agent-host/src/dev-services/kill-tree.ts', code, 'timed-start')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/kill-tree.ts', code, 'timed-start')).toEqual([])
     expect(await lines('packages/agent-host/src/dev-services/other.ts', code, 'timed-start')).toEqual([1])
     expect(await lines('packages/agent-host/src/sessions/x.test.ts', code, 'timed-start')).toEqual([])
   })

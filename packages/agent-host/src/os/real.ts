@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows } from '../dev-services/kill-tree.js'
+import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows } from './kill-tree.js'
 import {
   killHandle,
   spawnGrouped,

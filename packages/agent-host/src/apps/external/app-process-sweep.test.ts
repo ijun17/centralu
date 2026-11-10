@@ -59,8 +59,8 @@ describe('an app that has ended', () => {
  * wait for it runs out at once; the test ends the app itself, later.
  */
 const kills: number[] = []
-vi.mock('../../dev-services/kill-tree.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../dev-services/kill-tree.js')>()),
+vi.mock('../../os/kill-tree.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../os/kill-tree.js')>()),
   KILL_GRACE_MS: -1_000,
   stopTree: (handle: { pid?: number }) => void kills.push(handle.pid ?? 0),
 }))

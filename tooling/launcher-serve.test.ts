@@ -2188,7 +2188,9 @@ describe('a --stop during a start (#2150)', () => {
     ensureServeState(d)
     markStarting(d)
     const holder = sleeper()
-    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: holder, started: null, at: Date.now(), by: 'app' }))
+    // Written about 2 s before the process was created: where creation times can be read, the real `isWriter` answers false (this
+    // pid is a stranger's, not the writer of that record), so a start that cannot see the writer waits out its whole budget
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: holder, started: null, at: Date.now() - 2000, by: 'app' }))
     const t0 = Date.now()
     expect((await stopNow(d, { budgetMs: 60_000, writer: (h) => ((h as { pid: number }).pid === holder ? null : true) })).stop).not.toHaveProperty('starting')
     expect(Date.now() - t0).toBeLessThan(LOCK_GRACE_MS + 10_000)

@@ -442,7 +442,7 @@ export const guardConfigs = [
    */
   {
     files: [`${HOST_SRC}/**/*.{ts,mts,js,mjs}`],
-    ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/dev-services/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
+    ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/os/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
     rules: { 'guard/timed-start': 'error' },
   },
   { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },

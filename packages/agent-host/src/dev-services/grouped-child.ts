@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { constants } from 'node:os'
-import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, type EndedRoot, type KillablePty, type LeftoverOs } from './kill-tree.js'
+import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, type EndedRoot, type KillablePty, type LeftoverOs } from '../os/kill-tree.js'
 
 /**
  * A child this host starts as the root of a tree it can end, with what it leaves behind: the start and the sweep that

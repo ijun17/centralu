@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { systemTool, traitsFor } from '../os.js'
-import { descendants } from './proc-table.js'
+import { descendants } from '../dev-services/proc-table.js'
 
 /**
  * Kills a process **tree** — shared by the command runner, terminal tabs, and app processes

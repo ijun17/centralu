@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WinProcRow } from '../dev-services/kill-tree.js'
+import type { WinProcRow } from '../os/kill-tree.js'
 
 /**
  * The Windows sweep of an agent CLI's leftovers matches a child to its root by creation time (`orphansOf`): a child of

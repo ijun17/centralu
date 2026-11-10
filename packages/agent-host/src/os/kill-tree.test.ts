@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, ownGroupPids, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
-import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
+import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from '../dev-services/process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
 

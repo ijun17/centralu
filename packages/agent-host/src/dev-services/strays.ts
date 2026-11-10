@@ -4,7 +4,7 @@ import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { execText } from '../os/exec.js'
-import { KILL_GRACE_MS } from './kill-tree.js'
+import { KILL_GRACE_MS } from '../os/kill-tree.js'
 import { ancestors, descendants } from './proc-table.js'
 
 /**

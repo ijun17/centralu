@@ -64,7 +64,7 @@ export const OS_LAYER = [
   'packages/agent-host/src/env-path.ts',
   'packages/agent-host/src/tool-launch.ts',
   // Ending a process tree: groups and signals, or taskkill and parent links
-  'packages/agent-host/src/dev-services/kill-tree.ts',
+  'packages/agent-host/src/os/kill-tree.ts',
   // The terminal's and the Run button's shell
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)

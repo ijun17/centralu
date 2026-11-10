@@ -17,7 +17,7 @@ export type HostParts = {
   /** The mailbox's delivery (#1347): a host that is leaving tells no one anything, the next one delivers */
   mailDelivery: { stop(): void }
   stopActivity: () => void
-  /** The process stops that `killTree`/`stopTree` started and do not wait for (`stopsSettled`, dev-services/kill-tree.ts) */
+  /** The process stops that `killTree`/`stopTree` started and do not wait for (`stopsSettled`, os/kill-tree.ts) */
   stops: { settled(): Promise<void> }
   /** The git calls still running (`stopGitChildren`, dev-services/git-exec.ts) */
   git: { stopAll(): Promise<void> }
