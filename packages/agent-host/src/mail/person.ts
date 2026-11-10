@@ -48,6 +48,12 @@ type Shown = { m: MailRow; seq: number }
  *
  * Parties come back as Centralu names them (the session's name in the sidebar, an app's id), never as a name they gave themselves.
  */
+/** A chain's subject: its first message's words, or for work a script started, whose words are not the person's, that script's (#1468) */
+function subjectLine(m: Pick<MailRow, 'body' | 'facts'>): string {
+  const script = m.facts.fromScript?.credential
+  return oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
+}
+
 export class MailPerson {
   constructor(
     private readonly service: MessageService,
@@ -376,7 +382,7 @@ export class MailPerson {
 
   private subjectOf(root: string): string {
     const first = this.shown(root)[0]?.m ?? this.records.message(root)
-    return first ? oneLineText(first.body, SUBJECT_CHARS) : root
+    return first ? subjectLine(first) : root
   }
 
   /**
@@ -403,7 +409,7 @@ export class MailPerson {
     const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
     return {
       id: root,
-      subject: oneLineText(first.body, SUBJECT_CHARS),
+      subject: subjectLine(first),
       state,
       outcome: done ? (closedAs ?? 'finished') : null,
       next: null,
@@ -424,7 +430,7 @@ export class MailPerson {
   private emptyRow(root: string): MailThreadRow {
     const m = this.records.message(root)
     const at = m?.createdAt ?? 0
-    return { id: root, subject: m ? oneLineText(m.body, SUBJECT_CHARS) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
+    return { id: root, subject: m ? subjectLine(m) : root, state: 'open', outcome: null, next: null, projectId: null, owner: this.party(m?.sender ?? PERSON), assignee: null, unread: 0, held: 0, blocked: 0, working: false, createdAt: at, updatedAt: at, last: null }
   }
 
   // ── Shapes ──

@@ -67,6 +67,8 @@ export const MailFacts = z.looseObject({
   chain: z.array(z.object({ host: z.string(), address: z.string() })).optional(),
   /** On a request to the Assistant: the person's message in the sender's conversation that Centralu checked it cites (docs/plans/cited-requests.md §3) */
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
+  /** On the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection (`scriptLabel`), so no reader takes it for the person's words */
+  fromScript: z.object({ credential: z.string() }).optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>
 

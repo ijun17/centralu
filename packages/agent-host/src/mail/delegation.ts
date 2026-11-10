@@ -29,7 +29,7 @@ function delegationOrigin(origin: ThreadOrigin): DelegationOrigin {
  */
 export function personWorkRecorder(mail: MessageService): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
   return (sessionId, text, fromScript) => {
-    mail.task(PERSON, mail.sessionAddress(sessionId), { text, origin: fromScript ? 'script' : 'create_session', delivered: true })
+    mail.task(PERSON, mail.sessionAddress(sessionId), { text, origin: fromScript ? 'script' : 'create_session', delivered: true, ...(fromScript ? { fromScript } : {}) })
   }
 }
 

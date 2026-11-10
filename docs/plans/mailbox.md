@@ -767,6 +767,7 @@ task is never reminded: its report settles it.
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
+| `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `mailbox.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key

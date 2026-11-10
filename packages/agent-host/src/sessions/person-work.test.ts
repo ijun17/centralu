@@ -213,7 +213,7 @@ describe('the first message is the script’s, not the person’s (3.8b)', () =>
 
   it('is the script’s on the task too: its origin is the script, and its sender is still the person', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited', 'ci runner')
-    expect(taskOf(s.id)).toMatchObject({ kind: 'task', sender: PERSON, origin: 'script' })
+    expect(taskOf(s.id)).toMatchObject({ kind: 'task', sender: PERSON, origin: 'script', facts: { fromScript: { credential: 'ci runner' } } })
   })
 
   it('a program that said nothing is an unnamed script, and a label that could pose as something else is made plain', async () => {

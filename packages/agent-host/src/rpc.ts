@@ -28,7 +28,7 @@ import type { SessionSleeper } from './sessions/sleep.js'
 import type { StopGate } from './lifecycle/stop-gate.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
-import { askBuilder, sendErrorToBuilder } from './builder-requests.js'
+import { askBuilder, sendErrorToBuilder, type BuilderRequestDeps } from './builder-requests.js'
 import { centraluToolSchemas } from './sessions/centralu-tools.js'
 import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
@@ -309,6 +309,17 @@ export function createRpcHandler(
     return { ok: true as const }
   }
 
+  /**
+   * Who wrote a call's text when a script (the limited credential) made it (§8.1, #1468): its label, from the connection and
+   * never from a field of the call. The calls that carry text read it here (`SCRIPT_TEXT`, links/routes.ts)
+   */
+  const scriptAuthor = (ctx?: RpcContext) => (ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined)
+  /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
+  const builderDeps = (ctx?: RpcContext): BuilderRequestDeps => {
+    const fromScript = scriptAuthor(ctx)
+    return { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a, undefined, false, 'ask', fromScript), byScript: fromScript !== undefined }
+  }
+
   const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
     'agents.createSession': async (p, ctx) => {
@@ -319,7 +330,7 @@ export function createRpcHandler(
       const info = await mgr.createSession({
         ...p,
         onWorktreeBase: (note) => (worktreeBase = note),
-        ...(ctx?.rights === 'limited' ? { fromScript: { credential: scriptLabel(ctx.label) } } : {}),
+        fromScript: scriptAuthor(ctx),
         ...(startedByHub ? { startedByHub } : {}),
       })
       // Created before that hub's offer arrived on this connection: recorded when it does
@@ -328,8 +339,7 @@ export function createRpcHandler(
     },
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
-      const fromScript = ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined
-      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, fromScript)
+      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, scriptAuthor(ctx))
       return { ok: true as const }
     },
     'agents.reportOwed': async (p) => ({ owed: mgr.inputs.reportOwed(p.sessionId) }),
@@ -658,19 +668,9 @@ export function createRpcHandler(
     'apps.createBuilder': async ({ appId, projectId, tool }) => {
       return mgr.appSessions.createAppBuilder({ appId, projectId }, tool)
     },
-    'apps.sendError': async ({ appId, projectId, at }) => {
-      return sendErrorToBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
-        { appId, projectId },
-        at,
-      )
-    },
-    'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }) => {
-      return askBuilder(
-        { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a) },
-        { ref: { appId, projectId }, text, attachments, instanceId },
-      )
-    },
+    'apps.sendError': async ({ appId, projectId, at }, ctx) => sendErrorToBuilder(builderDeps(ctx), { appId, projectId }, at),
+    'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }, ctx) =>
+      askBuilder(builderDeps(ctx), { ref: { appId, projectId }, text, attachments, instanceId }),
     'orchestrator.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
     'orchestrator.tool': async ({ sessionId, name, args }) => {
       return mgr.runCentraluTool(sessionId, name, args)

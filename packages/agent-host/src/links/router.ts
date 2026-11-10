@@ -2,7 +2,7 @@ import { RpcMethods, unheard, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, findMachine, qualifiedMachine } from './machine-ids.js'
 import { awaySentence, windowAwaySentence } from './machine-reach.js'
 import type { Qualifier } from './qualifier.js'
-import { ROUTES, type Route } from './routes.js'
+import { ROUTES, SCRIPT_TEXT, type Route } from './routes.js'
 import { isObj, type Obj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 
@@ -160,6 +160,9 @@ export class Router {
   }
 
   private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {
+    if (ctx?.rights === 'limited' && SCRIPT_TEXT.has(method)) {
+      throw rpcError(`A script's message is not sent to ${m.name}: Centralu there would store it as the person's. Run the script on ${m.name} instead.`)
+    }
     /*
      * A call with no socket behind it (`ctx` absent: an agent's, through the host's own use of the router) needs the machine
      * and tries to connect it (#1532). A socket's call (`ctx` given) never does: a window polls and re-reads whatever is on

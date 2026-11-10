@@ -593,6 +593,23 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(m1.calls).toEqual([])
   })
 
+  it("refuses a script's text to a linked machine, which would store it as the person's; the person's own call and a script's read still go (#1468)", async () => {
+    const { router, m1 } = rig()
+    const script = { client: 2, rights: 'limited' as const, label: 'ci runner' }
+    for (const [method, params] of [
+      ['agents.createSession', { projectId: 'm1.p1', cwd: '/srv', tool: 'claude', initialPrompt: 'Run the export' }],
+      ['agents.send', { sessionId: 'm1.s1', text: 'hi' }],
+      ['apps.askBuilder', { projectId: 'm1.p1', appId: 'notes', text: 'bigger' }],
+      ['apps.sendError', { projectId: 'm1.p1', appId: 'notes', at: 1 }],
+    ] as const) {
+      await expect(router.handle(method, params, script)).rejects.toThrow("A script's message is not sent to Machine m1: Centralu there would store it as the person's. Run the script on Machine m1 instead.")
+    }
+    expect(m1.calls).toEqual([])
+    await router.handle('agents.send', { sessionId: 'm1.s1', text: 'hi' }, { client: 1 })
+    await router.handle('agents.interrupt', { sessionId: 'm1.s1' }, script)
+    expect(m1.calls.map((c) => c.method)).toEqual(['agents.send', 'agents.interrupt'])
+  })
+
   it('a call to an unreachable machine fails at once, says to retry, and names the machine', async () => {
     const { router, m1 } = rig()
     m1.reachable = false

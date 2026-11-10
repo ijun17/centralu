@@ -92,7 +92,7 @@ export type SendResult = {
 export const CITE_MS = 30 * 60_000
 
 export type DelegationOrigin = 'start_agent' | 'agent_session' | 'send_to_session' | 'create_session' | 'ask_project' | 'script'
-export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string }
+export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'mail'; delivered: boolean; replyTo?: string; fromScript?: { credential: string } }
 
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
@@ -346,7 +346,7 @@ export class MessageService {
     return this.run(() => {
       const now = this.now()
       return this.put(
-        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin },
+        { sender, kind: 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin, ...(input.fromScript ? { facts: { fromScript: input.fromScript } } : {}) },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
       )
     })

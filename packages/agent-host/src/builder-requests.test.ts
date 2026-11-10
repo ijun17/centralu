@@ -126,6 +126,16 @@ describe('apps.askBuilder', () => {
     expect(events.filter((e) => e.type === 'user_message')).toEqual([expect.objectContaining({ sessionId: builder.id, text: framed })])
   })
 
+  it('from a script (the limited credential) is the script’s: stored and handed on under its label, and the header does not say the person wrote it (#1468)', async () => {
+    const builder = await create('notes', 'Team notes')
+    await rpc('apps.askBuilder', { projectId, appId: 'notes', text: 'Make the counter bigger' }, { client: 1, rights: 'limited', label: 'ci runner' })
+    const [sent] = toAgent.get(builder.id)!
+    expect(sent).toContain('by the script "ci runner" the person set up; the person did not type it.')
+    expect(sent).toContain('A script the person set up sent this for the app "Team notes"')
+    expect(sent).not.toContain('The person wrote this')
+    expect(store.messages.loadMessages(builder.id).filter((m) => m.role === 'user').map((m) => m.payload)).toEqual([expect.objectContaining({ fromScript: { credential: 'ci runner' } })])
+  })
+
   it('when the latest run failed, that fact is appended to the header, and a screenshot is attached by path like the composer and carried into the conversation too', async () => {
     const builder = await create('notes', 'Team notes')
     // A tool the view called failed — a bad argument

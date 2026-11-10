@@ -24,6 +24,8 @@ export type BuilderRequestDeps = {
   views?: ViewHost
   builderOf(ref: AppRef): SessionInfo | null
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
+  /** A script made the call (the limited credential, #1468): `send` writes its text as the script's, and the header does not say the person wrote it */
+  byScript?: boolean
 }
 
 export type BuilderRequest = {
@@ -53,6 +55,7 @@ export async function askBuilder(deps: BuilderRequestDeps, req: BuilderRequest):
     builder,
     view,
     latestRun: deps.apps.runs(req.ref, 1)[0],
+    byScript: deps.byScript === true,
   })
   if ('refusal' in built) refuse(built.refusal)
   await deps.send(built.builder.id, built.frame, req.attachments)

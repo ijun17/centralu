@@ -682,3 +682,17 @@ describe('the window’s numbers and the purge', () => {
     expect(w.store.mailbox.message(mine.id)).toBeDefined()
   })
 })
+
+describe('work a script started (§8.1, #1468)', () => {
+  it('is the script’s on the task: the Inbox subject and the session’s read name the script, not the person', () => {
+    const w = hostWorld()
+    const { person } = ready(w)
+    const task = w.service.task(PERSON, A, { text: 'Run the export', origin: 'script', delivered: true, fromScript: { credential: 'ci runner' } })
+    expect(person.list().threads.find((t) => t.id === task.id)?.subject).toBe('The script "ci runner": Run the export')
+    // The window draws the message under the script's label (MailThread.tsx), from the fact the host wrote
+    expect(person.thread(task.id).messages[0]?.facts).toMatchObject({ fromScript: { credential: 'ci runner' } })
+    const read = w.tool.run('a', { action: 'read', thread: task.id }).text
+    expect(read).toContain('A script the person set up ("ci runner") wrote it, not the person')
+    expect(read).not.toContain('The person wrote it.')
+  })
+})

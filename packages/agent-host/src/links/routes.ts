@@ -97,6 +97,13 @@ const historyResult: ResultFix = (r, q) => {
 // The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
 const usageResult = fields({ cache: fields({ windows: each(fields({ sessions: each(fields({ sessionId: id })) })) }) })
 
+/**
+ * The calls whose text a host stores as a script's when the limited credential sends it (`scriptAuthor`, rpc.ts; #1468). The mark
+ * is written from the connection, and a linked machine sees only the hub's own link, so it would store the text as the
+ * person's: router.ts refuses a script's such call to a machine
+ */
+export const SCRIPT_TEXT: ReadonlySet<string> = new Set<RpcMethodName>(['agents.createSession', 'agents.send', 'apps.askBuilder', 'apps.sendError'])
+
 export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Sessions ───────────────────────────────────────────────────────────────────────────
   'agents.createSession': project(sessionInfo, (p, q) => {
