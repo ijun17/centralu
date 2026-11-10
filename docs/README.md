@@ -8,7 +8,7 @@ it is the one map of the rule documents. This page holds how they are written, a
 way something is built, the design doc wins.
 
 Documents are in English only. The one Korean copy kept is the repository root's `README.ko.md`;
-no other `*.ko.md` is written or kept ([#1497](https://github.com/ijun17/centralu/issues/1497)).
+no other `*.ko.md` is written or updated, and the ones still here are being deleted ([#1497](https://github.com/ijun17/centralu/issues/1497)).
 `generated/` is written by a script from the code, and a test fails when it is out of date:
 [generated/schema.md](generated/schema.md) (the store's tables, `pnpm docs:schema`) and
 [generated/method-rights.md](generated/method-rights.md) (what the limited credential may call, `pnpm docs:rights`).
