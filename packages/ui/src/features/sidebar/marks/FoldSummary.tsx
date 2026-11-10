@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Tooltip, stateLabel } from '../../../components/primitives.jsx'
+import { usePresence } from '../../../components/presence.js'
 import type { SessionLook } from '../../session/look.js'
-import type { FoldSummaryState } from '../fold.js'
+import { FOLD_SUMMARY_STATES, type FoldSummaryState } from '../fold.js'
 import { BackgroundDot } from './ToolMark.jsx'
 
 /**
@@ -24,8 +26,9 @@ export function FoldSummary({ name, counts }: { name: string; counts: { state: F
     <span className="-my-1 ml-auto flex shrink-0 self-center">
       <Tooltip content={label} testId={`fold-summary-tip-${name}`} align="right">
         <span className="flex items-center gap-1" aria-label={label} data-testid={`fold-summary-${name}`}>
-          {counts.map((c) => (
-            <StateCount key={c.state} state={c.state} count={c.count} />
+          {/* Every state has its slot, in the fixed order of `counts`: a chip that comes fades in and one that goes fades out (design-system §9) */}
+          {FOLD_SUMMARY_STATES.map((state) => (
+            <StateCount key={state} state={state} count={counts.find((c) => c.state === state)?.count ?? 0} />
           ))}
         </span>
       </Tooltip>
@@ -45,12 +48,21 @@ const FOLD_LOOK: Record<FoldSummaryState, SessionLook> = {
   background: 'idle',
 }
 
-/** A chip like ToolMark — a count instead of a letter */
+/** A chip like ToolMark — a count instead of a letter. A count of 0 is no chip; the one that just dropped to 0 stays for its exit with its last count (usePresence, as the mark's dot does) */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
+  const presence = usePresence(count > 0)
+  const [held, setHeld] = useState(count)
+  if (count > 0 && held !== count) setHeld(count)
+  if (!presence.shown) return null
   return (
-    <span className="cc-mark relative shrink-0 rounded-md" data-look={FOLD_LOOK[state]} data-state={state}>
+    <span
+      className={`cc-mark relative shrink-0 rounded-md ${presence.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'}`}
+      data-look={FOLD_LOOK[state]}
+      data-state={state}
+      data-leaving={presence.leaving || undefined}
+    >
       <span className="readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong px-[3px] text-2xs font-semibold leading-none text-ink">
-        {count}
+        {held}
       </span>
       {state === 'background' && <BackgroundDot testId="fold-summary-background-dot" />}
     </span>

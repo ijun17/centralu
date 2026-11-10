@@ -11,6 +11,7 @@ import type { ExternalCatalogApp } from '../../../store/app-catalog.js'
 import { MachineBadge } from '../../machines/MachineTag.jsx'
 import { useRemoteIde } from '../../machines/remoteIde.js'
 import { APP_MIME, PROJECT_MIME, projectItemMime } from '../reorder.js'
+import { usePresence } from '../../../components/presence.js'
 import { foldSummary } from '../fold.js'
 import { GUTTER_WIDTH, DISCLOSURE_BUTTON, DISCLOSURE_ICON } from '../layout.js'
 import { ProjectDetail } from './ProjectDetail.jsx'
@@ -89,6 +90,8 @@ export function ProjectHeader({
    * line, and it vanished the moment the project opened (or the pointer rested on it and it opened under it).
    */
   const summary = foldSummary(sessions)
+  // The summary stays mounted while its last chip fades out, so the line does not jump before the fade ends
+  const foldShown = usePresence(summary.length > 0).shown
 
   return (
     /*
@@ -215,7 +218,7 @@ export function ProjectHeader({
         hiding it entirely behind a tooltip would violate "show it, do not block it" (FR-2).
       */}
       <ProjectMarks project={project} />
-      {summary.length > 0 && <FoldSummary name={project.name} counts={summary} />}
+      {foldShown && <FoldSummary name={project.name} counts={summary} />}
       {/*
         Every action on this row sits behind one button, the menu (owner, 2026-10-18). The `+` that started a session
         on the open project (#529) is gone: it took the line's width, and on a folded project it slid in on hover and
@@ -227,7 +230,7 @@ export function ProjectHeader({
       <span
         ref={menuAnchor}
         className={`-my-1 shrink-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
-          summary.length > 0 ? '' : 'ml-auto'
+          foldShown ? '' : 'ml-auto'
         } ${
           menuOpen || proposalHere ? 'opacity-100' : 'opacity-0'
         } ${proposalHere ? 'breathe rounded-md text-ink' : ''}`}
