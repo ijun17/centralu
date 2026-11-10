@@ -6,6 +6,7 @@ import { alive, cleanUp, plantTreeScript, settle, treePids } from '../dev-servic
 import { endChild } from '../links/ssh-run.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { execText, type ExecFailure } from './exec.js'
+import { memoryOs } from './memory.js'
 import { realOs } from './real.js'
 
 describe('execText', () => {
@@ -28,6 +29,24 @@ describe('execText', () => {
     const e = await execText(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 500 * SLOW }).catch((x: ExecFailure) => x)
     expect(e).toMatchObject({ ended: 'timeout' })
   }, 60_000 * SLOW)
+
+  // A probe is in the host's group, not a group of its own: what ends the host's group ends it (`StartOptions.contained`)
+  it('runs the program in the host group, and a stop reaches what it started there', async () => {
+    const os = memoryOs({ as: 'posix' })
+    os.programs.add('/usr/bin/tool', (ctx) => {
+      ctx.start('/usr/bin/helper', [])
+      return new Promise(() => {})
+    })
+    os.programs.add('/usr/bin/helper', (ctx) => new Promise(() => void ctx.ended))
+    const ran = execText('/usr/bin/tool', [], { timeoutMs: 1000 }, os).catch((e: ExecFailure) => e)
+    await os.clock.advance(0)
+    const rows = () => os.processTable().filter((p) => p.command.startsWith('/usr/bin/'))
+    expect(rows().map((p) => p.pgid)).toEqual([os.processes.pid, os.processes.pid])
+    await os.clock.advance(1000)
+    expect(await ran).toMatchObject({ ended: 'timeout' })
+    await os.clock.advance(2000)
+    expect(rows().every((p) => !p.alive)).toBe(true)
+  })
 
   it('goes through the OS it is given', async () => {
     const seen: string[] = []

@@ -116,6 +116,19 @@ export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self
   return groupsOf(descendants(rows, survivors), pgidOf, self)
 }
 
+/**
+ * The pids of `from`'s trees that stand in the host's own group (`self`'s). That group is never signalled as one (`groupsOf`),
+ * so a child that stays in it (`StartOptions.contained: false`: an ssh, a probe, a setup script) and what it started in it
+ * are signalled one by one. Each is a member of a tree seen in the table just read.
+ */
+export function ownGroupPids(rows: readonly ProcRow[], from: Iterable<number>, self: number): number[] {
+  const pgidOf = new Map<number, number>()
+  for (const r of rows) pgidOf.set(r.pid, r.pgid)
+  const own = pgidOf.get(self)
+  if (own === undefined || own <= 1) return []
+  return [...descendants(rows, from)].filter((pid) => pid !== self && pgidOf.get(pid) === own)
+}
+
 /** The `ps` listing every snapshot reads: pid, parent and group of every process */
 const PS_ARGS = ['-A', '-o', 'pid=,ppid=,pgid='] as const
 
@@ -128,6 +141,20 @@ function fireGroups(groups: readonly number[], signal: 'SIGTERM' | 'SIGKILL'): b
       hit = true
     } catch {
       // that group is already gone — keep firing at the rest
+    }
+  }
+  return hit
+}
+
+/** Signals each pid, carrying on past one that is already gone; whether any was reached */
+function firePids(pids: readonly number[], signal: 'SIGTERM' | 'SIGKILL'): boolean {
+  let hit = false
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal)
+      hit = true
+    } catch {
+      // gone already
     }
   }
   return hit
@@ -267,8 +294,9 @@ function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = 
   }
 
   const rows = snapshot()
-  const hit = fireGroups(killTargets(rows, pid, process.pid), signal)
-  if (!hit) {
+  const groupsHit = fireGroups(killTargets(rows, pid, process.pid), signal)
+  const pidsHit = firePids(ownGroupPids(rows, [pid], process.pid), signal)
+  if (!groupsHit && !pidsHit) {
     try {
       handle.kill(signal) // every group is gone, or there is no permission — one last confirming shot
     } catch {
@@ -607,7 +635,9 @@ function finish(handle: KillablePty, first: ProcRow[], rootOurs: boolean): void 
   }
 
   const known = rootOurs ? first : first.filter((r) => r.pid !== handle.pid)
-  const hit = fireGroups(survivorTargets(rows, known, process.pid), 'SIGKILL')
+  const stillThere = known.filter((f) => rows.some((r) => r.pid === f.pid && r.pgid === f.pgid)).map((f) => f.pid)
+  const groupsHit = fireGroups(survivorTargets(rows, known, process.pid), 'SIGKILL')
+  const hit = firePids(ownGroupPids(rows, stillThere, process.pid), 'SIGKILL') || groupsHit
   /*
    * Not one group was hit, but root is still in the table — this is a spot where root sits in
    * our own group and firing at the group is not an option. So a confirming shot fires at the

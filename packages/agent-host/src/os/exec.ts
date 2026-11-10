@@ -18,7 +18,8 @@ export async function execText(
   options: { timeoutMs: number; env?: Env; cwd?: string; maxBuffer?: number },
   os: Pick<Os, 'processes'> = realOs(),
 ): Promise<{ stdout: string; stderr: string }> {
-  const r = await os.processes.run(command, args, options)
+  // In the host's group: a probe is ended by whatever ends the host's group (`StartOptions.contained`)
+  const r = await os.processes.run(command, args, { ...options, contained: false })
   const stdout = r.stdout.toString('utf8')
   const stderr = r.stderr.toString('utf8')
   if (r.code === 0 && !r.ended) return { stdout, stderr }

@@ -1479,7 +1479,9 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
     } else {
       // TERM to every group in the tree but the host's, then KILL to what is left of it after the grace
       const groups = new Set(tree.map((p) => p.row.pgid).filter((g) => g !== HOST_PID))
-      const hit = [...procs.values()].filter((p) => p.row.alive && groups.has(p.row.pgid))
+      // The members of the tree that stand in the host's group are signalled one by one, the group is not
+      const own = tree.filter((p) => p.row.alive && p.row.pgid === HOST_PID)
+      const hit = [...new Set([...procs.values()].filter((p) => p.row.alive && groups.has(p.row.pgid)).concat(own))]
       for (const p of hit) deliver(p, 'SIGTERM')
       if (root.row.alive && !groups.has(root.row.pgid)) deliver(root, 'SIGTERM')
       clock.setTimeout(() => {
@@ -1574,7 +1576,7 @@ export function memoryOs(options: MemoryOsOptions): MemoryOs {
   const runIn: OsProcesses['run'] = (command, args, o = {}) =>
     runChild(
       { processes: { stop }, clock, files },
-      (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+      (stdio) => processes.start(command, args, { cwd: o.cwd, env: o.env, stdio, contained: o.contained }),
       o,
     )
 

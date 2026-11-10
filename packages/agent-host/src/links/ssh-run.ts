@@ -88,6 +88,8 @@ export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
     const child = realOs().processes.start(opts.ssh ?? 'ssh', opts.args, {
       env: opts.env ?? process.env,
       stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      // In the host's group, as the held forward is (tunnel.ts): a host that died leaves no ssh running
+      contained: false,
     })
     if (opts.stdin !== undefined) {
       // A remote that exits before reading it all closes the pipe: that is its answer, not ours to throw

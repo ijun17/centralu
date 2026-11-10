@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
+import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, ownGroupPids, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -69,6 +69,27 @@ describe('killTargets', () => {
  * ps after the grace period. root (100) died first from SIGTERM, and its surviving descendant has
  * been adopted by init (1) — a spot where walking again from the root would see nobody at all.
  */
+describe('ownGroupPids', () => {
+  // The host (pid 10) is in group 10, and so is an ssh it started without a group of its own (`StartOptions.contained: false`)
+  const rows = [
+    { pid: 10, ppid: 1, pgid: 10 }, // the host
+    { pid: 20, ppid: 10, pgid: 10 }, // ssh, in the host's group
+    { pid: 21, ppid: 20, pgid: 10 }, // its ProxyCommand, in the host's group
+    { pid: 22, ppid: 20, pgid: 22 }, // something of its own group
+    { pid: 30, ppid: 10, pgid: 30 }, // another child, a group of its own
+    { pid: 31, ppid: 1, pgid: 10 }, // not under the ssh
+  ]
+
+  it('names what the tree stands in the host group with, not the host and not what is outside the tree', () => {
+    expect(ownGroupPids(rows, [20], 10)).toEqual([20, 21])
+  })
+
+  it('names none for a tree in a group of its own, or when the host is not in the table', () => {
+    expect(ownGroupPids(rows, [30], 10)).toEqual([])
+    expect(ownGroupPids(rows.filter((r) => r.pid !== 10), [20], 10)).toEqual([])
+  })
+})
+
 describe('survivorTargets', () => {
   const rows = (s: string) => parsePs(s)
   // At the first shot: shell 100 -> 200 -> grandchild 300. The host is 900

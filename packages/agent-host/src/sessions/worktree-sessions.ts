@@ -464,6 +464,7 @@ export class WorktreeSessions {
     const ran = await realOs().processes.runShell(setup.command, {
       cwd: worktree.path,
       timeoutMs: SETUP_TIMEOUT_MS,
+      contained: false,
       env: { ...process.env, CENTRALU_WORKTREE: worktree.branch, CENTRALU_WORKTREE_INDEX: String(index) },
     })
     if (ran.code === 0 && !ran.ended) {

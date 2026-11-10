@@ -476,14 +476,14 @@ const realOsValue: Os = {
     run: (command, args, o = {}) =>
       runChild(
         { processes: { stop }, clock, files },
-        (stdio) => start(command, args, { cwd: o.cwd, env: o.env, stdio }),
+        (stdio) => start(command, args, { cwd: o.cwd, env: o.env, stdio, contained: o.contained }),
         o,
       ),
     runSync,
     runShell: (line, o = {}) =>
       runChild(
         { processes: { stop }, clock, files },
-        (stdio) => start(line, [], { cwd: o.cwd, env: o.env, stdio }, true),
+        (stdio) => start(line, [], { cwd: o.cwd, env: o.env, stdio, contained: o.contained }, true),
         o,
       ),
     stop,
