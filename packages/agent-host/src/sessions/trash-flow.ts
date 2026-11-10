@@ -1,4 +1,4 @@
-import { ASSISTANT_CHANGE, SessionId, atRest, liveBackgroundTasks, needsAnswer, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
+import { ASSISTANT_CHANGE, SessionId, atRest, busyWith, liveBackgroundTasks, type PermissionPreset, type TrashedRun, type TrashedSession, type TrashedSubagentSteps, isAssistantKind } from '@cc/protocol'
 import type { TrashRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
 import { bytesText } from '../bytes-text.js'
@@ -171,9 +171,10 @@ export class TrashFlow {
     if (row.kind !== 'worker') return { ok: false, error: `${name} is ${isAssistantKind(row.kind) ? 'an Assistant' : 'a coordinator'}; only the person deletes those.` }
     if (row.askedBy === caller) return { ok: false, error: `${name} is a child you started; delete it with agent_session (action delete), which also settles its report and its worktree.` }
     if (row.unreachable) return { ok: false, error: `${name} is on a machine that cannot be reached just now; try again when it answers.` }
-    if (!atRest(row)) {
+    const busy = busyWith(row)
+    if (busy !== null) {
       // Moving it to the session archive ends its process, and with it a server or a watch it started: that is not what the session archive brings back
-      const why = needsAnswer(row) ? 'waiting on the person' : row.state === 'working' ? 'working' : null
+      const why = busy === 'turn' ? 'working' : busy === 'background' ? null : 'waiting on the person'
       if (why) return { ok: false, error: `${name} is busy (${why}); the person may be using it. Delete it once it is idle.` }
       const running = liveBackgroundTasks(row.backgroundTasks)
       return { ok: false, error: `${name} has ${plural(running.length, 'background job')} still running (${running.slice(0, 3).map((t) => plainQuoted(t.description, 80)).join(', ')}); deleting it would end ${running.length === 1 ? 'it' : 'them'} for good. The person can stop ${running.length === 1 ? 'it' : 'them'} first.` }

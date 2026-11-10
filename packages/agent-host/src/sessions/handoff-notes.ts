@@ -5,7 +5,7 @@ import { inTurn } from '../idle.js'
 import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
-import { errorMessage, liveBackgroundTasks, needsAnswer } from '@cc/protocol'
+import { agentLook, errorMessage, liveBackgroundTasks } from '@cc/protocol'
 import { buildHandoffRecord, lineageLine, type RecordChild } from './handoff-record.js'
 import type { SessionAppWiringHost } from './session-app-wiring.js'
 
@@ -145,11 +145,11 @@ export class HandoffNotes {
     // The sessions it started (or forked) and its running background work, for the contents section (#1481)
     const children: RecordChild[] = [...this.host.meta.values()]
       .filter((s) => s.id !== sessionId && (s.askedBy === sessionId || s.parentSessionId === sessionId))
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        state: needsAnswer(s) ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
-      }))
+      .map((s) => {
+        // Where it stands as an agent reads it (`agentLook`): a child paused on its own background work is not finished
+        const look = agentLook(s)
+        return { id: s.id, name: s.name, state: look === 'waiting' ? 'waiting for the person' : look }
+      })
     const background = liveBackgroundTasks(m.backgroundTasks ?? []).map((t) => ({ id: t.id, kind: t.kind, description: t.description, ...(t.timer ? { timer: true } : {}) }))
     const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, lineage: this.lineageOf(sessionId), children, background })
     // Written into the data folder (#142) — nothing at all is written into the user's own repository

@@ -1,11 +1,10 @@
-import { needsAnswer, type BackgroundTask, type SessionInfo } from '@cc/protocol'
+import { cardOrTurn, type BackgroundTask, type SessionInfo } from '@cc/protocol'
 import {
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
 } from '@cc/protocol'
 import type { ChildRunResult } from '../adapters/contract.js'
-import { inTurn } from '../idle.js'
 import type { DelegationHost } from './delegation-host.js'
 import { sleep } from '../timing.js'
 
@@ -81,7 +80,7 @@ export class BackgroundStops {
    * runs. Work an earlier, finished turn of the person's left running cannot be told apart from the caller's.
    */
   restingWork(child: SessionInfo, callerId: string): BackgroundTask[] {
-    if (child.askedBy !== callerId || inTurn(child.state) || needsAnswer(child)) return []
+    if (child.askedBy !== callerId || cardOrTurn(child) !== null) return []
     if ([...this.host.children.delegations.values()].some((r) => r.sessionId === child.id && !r.settled)) return []
     const run = this.host.agentRuns.get(child.id)
     if (run && !run.finished) return []

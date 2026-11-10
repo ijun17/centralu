@@ -220,6 +220,8 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     ch.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
     ch.answer('waiting for verify')
     await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
+    // The record's list of the sessions it started reads it as an agent does (`agentLook`): paused, not finished
+    expect((await h.mgr.handoffNotes.exportHandoffRecord(parent, 'claude')).text).toContain(`- "Port the parser" — paused — id: ${child}`)
     const heir = await handOff(h, project, parent)
 
     expect(owner(child)).toBe(heir)

@@ -77,10 +77,17 @@ export type BusyReason = 'approval' | 'question' | 'turn' | 'background'
  * carried); then a turn; then its own background work (`liveBackgroundTasks`).
  */
 export function busyWith(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): BusyReason | null {
+  return cardOrTurn(s) ?? (liveBackgroundTasks(s.backgroundTasks ?? []).length > 0 ? 'background' : null)
+}
+
+/**
+ * `busyWith` without the session's own background work: a card, then a turn. For the checks that work does not stop: mail is
+ * taken while it runs (the message starts the next turn, and the work goes on), and `stop` of a child's resting work (#718)
+ * is how that work is ended, so it cannot be what keeps the stop out
+ */
+export function cardOrTurn(s: CardFacts): Exclude<BusyReason, 'background'> | null {
   if (needsAnswer(s)) return (s.pendingQuestions?.length ?? 0) > 0 && !s.pendingApproval ? 'question' : 'approval'
-  if (isInTurn(s.state)) return 'turn'
-  if (liveBackgroundTasks(s.backgroundTasks ?? []).length > 0) return 'background'
-  return null
+  return isInTurn(s.state) ? 'turn' : null
 }
 
 /**

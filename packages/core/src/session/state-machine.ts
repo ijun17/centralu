@@ -1,4 +1,4 @@
-import type { SessionState } from '@cc/protocol/client'
+import { needsAnswer, type SessionState } from '@cc/protocol/client'
 
 /**
  * The session state machine (product-spec FR-12).
@@ -31,10 +31,10 @@ export const URGENCY: Record<SessionState, number> = {
 }
 
 /**
- * The state a session is listed, counted and drawn under. An open question is listed as an approval is (owner,
- * 2026-10-18): the inbox, its counters and a folded project's line all keep it until it is answered, whatever else the
- * session is doing. An error keeps its own place: it outranks the question.
+ * The state a session is listed, counted and drawn under. A card the person answers (`needsAnswer`: an approval, or an open
+ * question, owner 2026-10-18) is listed as an approval: the inbox, its counters and a folded project's line all keep it until
+ * it is answered, whatever else the session is doing. An error keeps its own place: it outranks the card.
  */
-export function listedState(s: { state: SessionState; pendingQuestions: { readonly length: number } }): SessionState {
-  return s.state !== 'error' && s.pendingQuestions.length > 0 ? 'waiting_approval' : s.state
+export function listedState(s: { state: SessionState; pendingQuestions: { readonly length: number }; pendingApproval?: unknown }): SessionState {
+  return s.state !== 'error' && needsAnswer(s) ? 'waiting_approval' : s.state
 }
