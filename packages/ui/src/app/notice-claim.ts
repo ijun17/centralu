@@ -6,7 +6,8 @@
  * machine, as the person sees it. (localStorage would not do: another process sees a write a moment later.)
  *
  * A key is kept `KEPT_MS`, so an event replayed after a reconnect is not raised again either. A page without IndexedDB,
- * or one that fails (a test in Node, storage denied), cannot tell, and every window raises its own, as before.
+ * or one that fails or does not answer within `CLAIM_BOUND_MS` (a test in Node, storage denied, a hung database), cannot
+ * tell, and every window raises its own, as before: a notification twice rather than none.
  */
 const DB = 'centralu-notices'
 const STORE = 'raised'
@@ -27,9 +28,25 @@ function database(idb: IDBFactory): Promise<IDBDatabase> {
   return opened
 }
 
-export async function firstToRaise(key: string): Promise<boolean> {
+/**
+ * How long a claim may take before the window raises the notification anyway: a claim answers in milliseconds, and an
+ * IndexedDB that never answers (a hung open, a transaction that never settles) must not silence every window's
+ */
+export const CLAIM_BOUND_MS = 500
+
+export function firstToRaise(key: string): Promise<boolean> {
   const idb = globalThis.indexedDB
-  if (!idb) return true
+  if (!idb) return Promise.resolve(true)
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(true), CLAIM_BOUND_MS)
+    void claim(idb, key).then((first) => {
+      clearTimeout(timer)
+      resolve(first)
+    })
+  })
+}
+
+async function claim(idb: IDBFactory, key: string): Promise<boolean> {
   try {
     const db = await database(idb)
     return await new Promise<boolean>((resolve) => {
