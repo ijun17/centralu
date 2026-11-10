@@ -8,7 +8,7 @@ import { parseDocument } from 'yaml'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { SHARDS_STEP, jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
 import { REMOTE_NODE_TESTS, balance, remoteNodeTests, timedTests } from './os-tests.js'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
 import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf } from '../.github/scripts/ci-changes.mjs'
@@ -130,10 +130,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     })
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
-    // Every job but `changes`, the report (which waits on the e2e jobs) and the fail fast (which waits on `verify`) has
-    // a gate: nothing else runs on a draft
+    // Every job but `changes`, the report (which waits on the e2e jobs), the fail fast (which waits on `verify`) and the
+    // macOS shards' result (gated with `always()`, below) has a gate: nothing else runs on a draft
     const ungated = jobs.filter((j) => !gate(j.body)).map((j) => j.id)
-    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'fail-fast'])
+    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'fail-fast', 'macos-tests-result'])
     expect(job('changes').body).toMatch(/^ {6}quick: \$\{\{ steps\.classify\.outputs\.quick \}\}$/m)
     expect(job('e2e-report').body).toMatch(/^ {4}needs: \[e2e, e2e-chromium\]$/m)
     expect(job('changes').body).toMatch(/^ {6}full: \$\{\{ steps\.classify\.outputs\.full \}\}$/m)
@@ -264,9 +264,18 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const f of filters) expect(tests.some((t) => t.includes(f)), `${f} matches no test file`).toBe(true)
     // The tooling tests that failed on a Mac and nowhere else (#1695: a SIGTERM hang, macOS's /var -> /private/var link)
     for (const f of ['tooling/e2e-lock', 'tooling/screen-protocol-rules', 'tooling/launcher-']) expect(filters, f).toContain(f)
-    // A landing condition: the board waits for every shard's check on a batch (project.json ci.quickChecks)
+    // A landing condition under the name it had before the split (#2167), which a board started before it waits for
+    // (project.json ci.quickChecks, read once at start): one job that passes only when every shard did, and runs whenever they may
     const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
-    expect(board.ci.quickChecks).toContain('macos tests (vitest *)')
+    expect(board.ci.quickChecks).toContain('macos tests')
+    const result = job('macos-tests-result').body
+    expect(names(result)).toEqual(['macos tests'])
+    expect(result).toContain('needs: [changes, macos-tests]\n')
+    expect(result).toContain("if: always() && needs.changes.outputs.quick == 'true'\n")
+    expect(mac).toContain("if: needs.changes.outputs.quick == 'true'\n")
+    expect(result).toContain('SHARDS: ${{ needs.macos-tests.result }}\n')
+    expect(result).toContain('[ "$SHARDS" = success ]\n')
+    expect(result).toContain(`- name: ${SHARDS_STEP}\n`)
   })
 
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
@@ -318,7 +327,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
     // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
     const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
-    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'ux-tasks', 'verify', 'verify-tests', 'windows-tests', 'windows-tests-unit'])
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'macos-tests-result', 'ux-tasks', 'verify', 'verify-tests', 'windows-tests', 'windows-tests-unit'])
     for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
     expect(limit('e2e')).toBe(25)
     expect(limit('e2e-chromium')).toBe(25)

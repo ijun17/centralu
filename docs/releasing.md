@@ -114,7 +114,7 @@ script rehearses by default and why nothing publishes automatically.
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
   the pull request.
-- **`macos tests (vitest i/n)`** (#1704; two shards since #2167) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
+- **`macos tests (vitest i/n)`** (#1704; two shards since #2167; their one result keeps the name `macos tests`, the check the board's `ci.quickChecks` requires, so a board started before the split still finds it) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
   (`macos-14`, Node 22), because until it existed the release rehearsal was the first place any unit test ran on macOS: the
   differences it found there (#1650's contract cases, #1713's file times under libuv 1.51) failed the release instead of the
   pull request. In the quick tier it runs the tests that reach the OS the most (the OS layer, the process adapter, apps,

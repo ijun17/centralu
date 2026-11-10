@@ -740,6 +740,24 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # The shards' one result under the name the job had before it was split (#2167): `macos tests` is a check the board's
+  # `ci.quickChecks` requires, and a board started before the split reads its list once, at start. Fails when a shard did
+  # not pass (failed, cancelled, or skipped while the quick tier ran); skipped with them when the quick tier does not run.
+  # Its failing step is named for the board (run-failure.mjs `SHARDS_STEP`): the shard that failed says why, not this.
+  macos-tests-result:
+    name: macos tests
+    needs: [changes, macos-tests]
+    if: always() && needs.changes.outputs.quick == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        env:
+          SHARDS: ${{ needs.macos-tests.result }}
+        run: |
+          echo "macos tests (vitest *): $SHARDS"
+          [ "$SHARDS" = success ]
+
   # The UI scenarios (e2e/, Playwright) in WebKit, on every full run (owner decisions, 2026-10-11:
   # every pull request; 2026-10-18: every full run, which is what lands). The desktop app is WKWebView,
   # and until this job existed no CI job ran Playwright at all: nine WebKit-only failures piled up on

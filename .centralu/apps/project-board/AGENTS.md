@@ -644,7 +644,7 @@ run and the full tier's check is not asked for. That run is judged as a pull req
 (`quickGreen`): every run finished, nothing it reported failed or is pending, the full tier's check
 skipped; and more strictly, since it decides a landing (`quickLanded`), every run concluded well and
 **each check named in `ci.quickChecks`** (this repository's: `changes`, `verify`, `verify (vitest *)`, `windows tests (vitest
-*)`, `macos tests (vitest *)`; `*` for any run of characters) was reported and succeeded, every check its name matches: a quick
+*)`, `macos tests`; `*` for any run of characters) was reported and succeeded, every check its name matches: a quick
 check never reported (a renamed job, one a broken `changes` switched off, a shard GitHub never created)
 or skipped does not land, it is left to `decideRun` (missing-check). The list is checked at start: with
 `landTier` "quick" and no names, the app does not start (an error, not "anything goes"). The required set is the whole workflow's, whose full-tier jobs a quick run never reports (a

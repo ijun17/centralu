@@ -308,12 +308,12 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
  */
 describe('the merge queue lands only from a full run, with two tiers of CI', { timeout: 240_000 * SLOW }, () => {
   /** A pull request's own quick run: finished and green on what it ran, the full tier's check skipped. */
-  const quickChecks = (conclusion = 'success') => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', conclusion, 11), ghCheck('windows tests', 'success', 12), ghCheck('macos tests (vitest 1/2)', 'success', 13)]
+  const quickChecks = (conclusion = 'success') => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', conclusion, 11), ghCheck('windows tests', 'success', 12), ghCheck('macos tests', 'success', 13)]
   const fullChecks = (suite: number, conclusion = 'success', tier = 'success') => [
     suiteCheck('full tier', tier, suite * 10, suite),
     suiteCheck('verify', 'success', suite * 10 + 1, suite),
     suiteCheck('windows tests', conclusion, suite * 10 + 2, suite),
-    suiteCheck('macos tests (vitest 1/2)', 'success', suite * 10 + 3, suite),
+    suiteCheck('macos tests', 'success', suite * 10 + 3, suite),
   ]
   const ONE = `batch-${SHA}`
   const oneRun = (conclusion: string | null, attempt = 1) => ghRun(conclusion, attempt, ONE, { id: 950, head_branch: 'queue/batch-1', event: 'workflow_dispatch', check_suite_id: 6000 })
@@ -805,7 +805,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     ...[1, 2, 3].map((i) => suiteCheck(`verify (vitest ${i}/3)`, 'success', suite * 100 + 50 + i, suite)),
     suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
     suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
-    suiteCheck('macos tests (vitest 1/2)', 'success', suite * 10 + 4, suite),
+    suiteCheck('macos tests', 'success', suite * 10 + 4, suite),
   ]
 
   it("lands a batch whose quick run passed while the full tier's jobs never reported, under ci.landTier quick", async () => {
@@ -912,7 +912,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
  * while batch-209 tested #1542) rebatches its members on the new main, and tells no session, up to a cap per head.
  */
 describe('the merge queue batches a pull request again when main moved under its batch (#1548)', { timeout: 240_000 * SLOW }, () => {
-  const fullChecks = (suite: number) => [suiteCheck('full tier', 'success', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite), suiteCheck('macos tests (vitest 1/2)', 'success', suite * 10 + 3, suite)]
+  const fullChecks = (suite: number) => [suiteCheck('full tier', 'success', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite), suiteCheck('macos tests', 'success', suite * 10 + 3, suite)]
   const told = () => notices().filter((e) => e.kind === 'attention')
 
   it('tests the members not landed again together, in a new batch, when main moved after the first landed', async () => {
@@ -979,7 +979,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     ...[1, 2, 3].map((i) => suiteCheck(`verify (vitest ${i}/3)`, 'success', suite * 100 + 50 + i, suite)),
     suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
     suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
-    suiteCheck('macos tests (vitest 1/2)', 'success', suite * 10 + 4, suite),
+    suiteCheck('macos tests', 'success', suite * 10 + 4, suite),
     ...(full ? [suiteCheck('e2e (webkit 1/1)', e2e, suite * 10 + 6, suite), suiteCheck('e2e (chromium 1/1)', e2e, suite * 10 + 7, suite)] : []),
   ]
   const batchRun = (conclusion: string | null) => ghRun(conclusion, 1, ONE, { id: 950, head_branch: 'queue/batch-1', event: 'workflow_dispatch', check_suite_id: 6000 })
