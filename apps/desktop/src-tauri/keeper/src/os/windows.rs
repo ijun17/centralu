@@ -26,6 +26,10 @@ pub fn serve_launcher() -> Option<PathBuf> {
 /// Whether a window that starts its host itself can relaunch into an update just installed (#1895): its bundle is an app the update replaces, and the host it stops for the update is the one the relaunch starts again. Only macOS ships that.
 pub const RELAUNCH_WITHOUT_KEEPER: bool = false;
 
+/// How long a host gets after the polite request (`host_proc::STOP_GRACE`): its whole shutdown bound and a margin, as the host waits for the stops of its
+/// terminals' trees and one ended before they are done leaves a grandchild whose parent it already ended (#2142).
+pub const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(crate::host_proc::HOST_SHUTDOWN_BOUND.as_secs() + 2);
+
 /// Windows has no TERM: closing the host's stdin is the request to stop. The host runs with
 /// `--watch-parent`, so EOF runs the same `shutdown()` a TERM does (`stop_pid_gracefully`).
 pub const CLOSE_STDIN_TO_STOP: bool = true;

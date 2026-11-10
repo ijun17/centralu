@@ -160,7 +160,7 @@ pub const HOST_SHUTDOWN_BOUND: Duration = Duration::from_secs(10);
 /// that takes seconds on a busy machine, `STOPS_SETTLE_MS`), and a host ended before they are done leaves a grandchild whose parent
 /// it already ended, which `taskkill /T` cannot find (#2142). A host at rest exits in well under a second, so this only
 /// lengthens a quit that is slow already. On unix the first shot of every stop is sent before the host goes on, and 3 s is enough.
-pub const STOP_GRACE: Duration = if cfg!(windows) { Duration::from_secs(HOST_SHUTDOWN_BOUND.as_secs() + 2) } else { Duration::from_secs(3) };
+pub const STOP_GRACE: Duration = os::STOP_GRACE;
 
 /// The line that asks a host the window or the keeper started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;

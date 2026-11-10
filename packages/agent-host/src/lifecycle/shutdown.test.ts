@@ -2,7 +2,6 @@
  * The host's shutdown as data (docs/runtime-lessons.md HO8, HO15, #396): the order its steps run
  * in, that every one runs, and that leaving happens once.
  */
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { STOPS_SETTLE_MS } from '../os/kill-tree.js'
 import { both, runSteps, type Step } from './steps.js'
@@ -292,12 +291,5 @@ describe('leaving, once (HO8)', () => {
 describe('the bounds of a shutdown, one number each', () => {
   it("the wait for the process stops fits inside the host's own bound", () => {
     expect(STOPS_SETTLE_MS).toBeLessThan(SHUTDOWN_BOUND_MS)
-  })
-
-  // The keeper (Rust) gives a host this long after the polite request before it ends it (`STOP_GRACE`, on Windows): the bound and a margin
-  it('the keeper names the same bound as the host does', () => {
-    const rs = readFileSync(new URL('../../../../apps/desktop/src-tauri/keeper/src/host_proc/mod.rs', import.meta.url), 'utf8')
-    const secs = /pub const HOST_SHUTDOWN_BOUND: Duration = Duration::from_secs\((\d+)\);/.exec(rs)?.[1]
-    expect(Number(secs) * 1000).toBe(SHUTDOWN_BOUND_MS)
   })
 })

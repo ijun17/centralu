@@ -605,7 +605,7 @@ export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt?
     return { root, tree: spawnedAt === undefined ? [] : orphansOf(rows, { pid: root.pid, spawnedAt, exitedAt: now }) }
   })
   // Every root before any of what it started, and the trees side by side: only the order inside one tree is the one that matters
-  await Promise.all(trees.map(({ root }) => root.endRoot()))
+  await Promise.all(trees.map(async ({ root }) => root.endRoot()))
   return (await Promise.all(trees.map(({ root, tree }) => endInOrder(tree, root.pid, os)))).flat()
 }
 
