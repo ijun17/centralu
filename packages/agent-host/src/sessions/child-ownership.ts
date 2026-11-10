@@ -69,8 +69,6 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
  * their message to the task. `cut`: an update of Centralu cut the turn and Centralu continued it (#1966): its end says so.
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true; cut?: true }
-/** A turn a quit or a swap ended, and who to tell, waiting for the start to finish (#698); `turn`: whose a quit's was (#1946) */
-export type QuitNotice = { sessionId: string; requester: string; turn?: TurnStarter | undefined }
 /**
  * A message given the tool (#1639, docs/plans/turn-starter.md): the input id and row it went in under (none in a test that gives no
  * row), whose it is, and `joined`: it is queued while a turn runs (given into it, or behind the input it opened from), which may take it in

@@ -1,6 +1,6 @@
 import type { ModelWindows } from './auto-compact.js'
 import { restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
-import type { ChildOwnership, QuitNotice } from './child-ownership.js'
+import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
@@ -43,8 +43,7 @@ import type { CardRests } from './card-rest.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
- * it with getters for its fields, so each is read when used, never kept; `quitNotices`, which a deletion filters, is
- * written back through a setter.
+ * it with getters for its fields, so each is read when used, never kept.
  */
 export type SessionTrashHost = {
   readonly adapters: Map<string, AgentAdapter>
@@ -58,7 +57,7 @@ export type SessionTrashHost = {
   readonly cardRests: Pick<CardRests, 'forget'>
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
-  /** The mail it held: its watched rows are settled and their senders told (#1347, `MessageService.partyGone`). Never throws */
+  /** The mail it held: its watched rows are settled and their senders told (#1347, `StopNotices.partyGone`). Never throws */
   mailGone: (sessionId: string) => void
   /** The first lines of the messages that wait for its answer and of the tasks it owes a report of (what `mailGone` settles); null when the mailbox could not be read */
   mailWork: (sessionId: string) => { unanswered: string[]; owed: string[] } | null
@@ -75,7 +74,6 @@ export type SessionTrashHost = {
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   readonly prCheckedAt: Map<string, number>
   projectInfo: (id: string, path: string) => Promise<ProjectInfo>
-  quitNotices: QuitNotice[]
   readonly readGrants: Map<string, Set<string>>
   readonly record: SessionRecord
   readonly modelWindows: Pick<ModelWindows, "forget">
@@ -439,7 +437,6 @@ export class SessionTrash {
     this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)
     this.host.stopWatchingReconnect(sessionId)
-    this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)
     await this.host.store.trash.trashSession(sessionId, {
       projectId: m.projectId,

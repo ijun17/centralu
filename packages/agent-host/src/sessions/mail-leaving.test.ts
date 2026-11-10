@@ -1,5 +1,5 @@
 /**
- * Mail for a session that is waking while the host starts to leave (#1347, docs/plans/mailbox.md §8): the stop cannot cut the
+ * Mail for a session that is waking while the host starts to leave (#1347, docs/agent-host.md §4.6.3): the stop cannot cut the
  * wait for the resume, so the delivery looks again when it ends, and sends nothing from the leaving host.
  */
 import { describe, expect, it } from 'vitest'

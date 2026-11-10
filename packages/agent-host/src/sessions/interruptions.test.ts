@@ -157,22 +157,33 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
   store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
-/** The start's quit notices are taken on its first timer tick; this waits past it */
+/** What the start does on its first timer tick (an update's Continue, the person's work reported to the Inbox) has run; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
-/** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
-const toldLines = (log: { mock: { calls: unknown[][] } }) => log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('no report was owed for; telling'))
+/**
+ * Centralu's notices to `starter` that a session it started stopped, owed it nothing (docs/plans/mailbox.md "The stop notice"): only the mailbox
+ * writes them, so a test that needs one wires mail
+ */
+const starterNotices = (starter: string) =>
+  store.mailbox.feedOf(addressOf(starter), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.about !== undefined)
+/** Centralu's reports in `parent`'s mailbox: with mail wired, a child's report is mail */
+const mailReportsTo = (parent: string) => store.mailbox.feedOf(addressOf(parent), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'report')
+/** The starter notice's words, for the stopped session's name and the cause */
+const starterBody = (name: string, cause: string, reportOwed = false) =>
+  `${name}, which you started, stopped: ${cause}. ${reportOwed ? 'Its report to you will not come.' : 'It owed you no answer.'} read_session shows where it stopped; send it a message if it should go on.`
 const info = (h: ReturnType<typeof host>, id: string) => h.mgr.listSessions().find((s) => s.id === id)!
 const interruptions = (id: string) => events.filter((e) => e.type === 'interruption' && e.sessionId === id)
 
 describe('a turn the network stopped (#698)', () => {
-  it("2026-10-15: a child's own turn fails with ECONNREFUSED; it is marked network and its asker is told, though no report was owed", async () => {
+  it("2026-10-15: a child's own turn fails with ECONNREFUSED; it is marked network and its starter is told, though no report was owed", async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     const kid = a.claude.handles.get(child)!
     // The work it was given finished and was reported; the mark is gone
     kid.answer('waiting on pnpm verify with a Monitor')
-    await eventually(() => reportsTo(parent, child).length === 1)
+    await eventually(() => mailReportsTo(parent).length === 1)
     expect(store.children.listReportMarks()).toEqual([])
+    expect(info(a, parent).state).toBe('idle')
 
     kid.ownTurnFails(ECONNREFUSED)
     expect(info(a, child)).toMatchObject({ state: 'error', interruption: { reason: 'network', detail: ECONNREFUSED } })
@@ -181,14 +192,16 @@ describe('a turn the network stopped (#698)', () => {
     expect(types.lastIndexOf('interruption')).toBeGreaterThan(types.lastIndexOf('error'))
     expect(interruptions(child).at(-1)).toMatchObject({ interruption: { reason: 'network' } })
 
-    await eventually(() => reportsTo(parent, child).length === 2)
-    const told = reportsTo(parent, child)[1]!
-    expect(told).toContain('stopped before finishing: a network error ended its turn')
-    expect(told).toContain('ECONNREFUSED')
-    // The same sentence the person's Continue sends
-    expect(told).toContain('Continue where you stopped. Check what already happened before repeating a step.')
-    expect(told).not.toContain('The session ended its turn')
-    expect(a.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toHaveLength(2)
+    // Its starter, at rest and owed nothing, reads the stop in its mailbox once, with no wake (docs/plans/mailbox.md "The stop notice")
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ sender: 'centralu', kind: 'notice', facts: { about: { session: addressOf(child) }, reason: 'network', quiet: true } })
+    expect(told!.body).toBe(starterBody(info(a, child).name, 'it lost the network'))
+    // Never the tool's own words (#120), and no report: nobody was owed one
+    expect(told!.body).not.toContain('ECONNREFUSED')
+    expect(mailReportsTo(parent)).toHaveLength(1)
+    expect(reportsTo(parent, child)).toEqual([])
+    expect(a.claude.handles.get(parent)!.sent).toEqual([])
   })
 
   it('a report that was owed says the network stopped it, not that the work failed', async () => {
@@ -214,20 +227,21 @@ describe('a turn the network stopped (#698)', () => {
     expect(store.sessions.listSessions().find((x) => x.id === s.id)?.interruption).toBeNull()
   })
 
-  it('an error the network did not cause leaves no interruption, and nobody unasked is told', async () => {
+  it('an error the network did not cause leaves no interruption, and its starter reads that an error ended the turn, not the network', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     const kid = a.claude.handles.get(child)!
     kid.answer('done')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
-    onTestFinished(() => log.mockRestore())
+    await eventually(() => mailReportsTo(parent).length === 1)
     kid.ownTurnFails('unexpected status 401 Unauthorized')
     expect(info(a, child)).toMatchObject({ state: 'error', interruption: null })
-    // The decision to tell is taken with the event: nothing was decided now, so nothing is on its way
-    expect(toldLines(log)).toEqual([])
-    expect(reportsTo(parent, child)).toHaveLength(1)
+    // Told with the event that ended the turn, once, and in Centralu's words, never the tool's (#120)
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'error', quiet: true } })
+    expect(told!.body).toBe(starterBody(info(a, child).name, 'an error ended its turn'))
+    expect(mailReportsTo(parent)).toHaveLength(1)
   })
 })
 
@@ -247,12 +261,11 @@ async function waitingParent(h: ReturnType<typeof host>) {
 describe('a caller waiting on the turn (#698)', () => {
   it('reads the network failure from its own wait, and is not told a second time', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child, call } = await waitingParent(a)
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
-    onTestFinished(() => log.mockRestore())
     a.claude.handles.get(child)!.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
-    expect(toldLines(log)).toEqual([])
+    // Its wait told it: no notice of the stop in its mailbox, neither as the starter nor as the giver of the task
+    expect(store.mailbox.feedOf(addressOf(parent), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice')).toEqual([])
     const r = await call
     expect(JSON.stringify(r)).toContain('ECONNREFUSED')
     expect(reportsTo(parent, child)).toEqual([])
@@ -379,29 +392,37 @@ describe('a turn a quit stopped (#698)', () => {
     expect(store.messages.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
-  it('the next start tells an asker that delegated without waiting, once per child, and only while the asker exists', async () => {
+  it('the next start tells a starter that delegated without waiting (a report mark with no task row, as an older build left it), once per child, and only while the starter exists', async () => {
+    // This host's mail is not wired: the delegation wrote no task, so the starter is owed nothing by its child
     const a = host()
     const { parent, child, project } = await parentAndChild(a)
-    // A second child whose asker is deleted before the quit: nobody is left to tell
+    // A second child whose starter is deleted before the quit: nobody is left to tell
     const gone = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
     const orphan = await a.mgr.startAgent(gone, { task: 'other work', wait: false })
     if (!orphan.ok) throw new Error(orphan.error)
     await a.mgr.trash.trashSession(gone)
 
     const b = host()
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
-    expect(reportsTo(parent, child)[0]).not.toContain('network')
+    // A quit found at the start is told through the mailbox, once it is ready (docs/plans/mailbox.md "The stop notice")
+    wireHostMail(b.mgr, store).afterReady()
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    // Owed the report the start drops (its report mark): woken, though at rest, since it waits for that report (owner 2026-11-10)
+    expect(told).toMatchObject({ sender: 'centralu', kind: 'notice', facts: { about: { session: addressOf(child) }, reason: 'quit' } })
+    expect(told!.facts.quiet).toBeUndefined()
+    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn', true))
+    // No report besides: the old report path that told the requester of a quit is gone
+    expect(reportsTo(parent, child)).toEqual([])
     expect(info(b, orphan.sessionId).interruption).toMatchObject({ reason: 'quit' })
+    expect(starterNotices(gone)).toEqual([])
 
-    // The child is at rest now: the start after that tells nobody again, once its notices have had their moment
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
-    onTestFinished(() => log.mockRestore())
-    host()
+    // The child is at rest now, though still marked: the start after that tells nobody again
+    const c = host()
+    wireHostMail(c.mgr, store).afterReady()
     await startNoticesRan()
-    expect(toldLines(log)).toEqual([])
-    expect(reportsTo(parent, child)).toHaveLength(1)
+    expect(info(c, child).interruption).toMatchObject({ reason: 'quit' })
+    expect(starterNotices(parent)).toHaveLength(1)
+    expect(reportsTo(parent, child)).toEqual([])
   })
 
   it('a requester the same quit cut is not woken at launch: its own Continue covers its children', async () => {
@@ -409,12 +430,13 @@ describe('a turn a quit stopped (#698)', () => {
     const { parent, child } = await parentAndChild(a)
     // The Assistant was mid-turn too, waiting on its child, when the app quit
     await a.mgr.inputs.send(parent, 'keep going while the child works')
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
-    onTestFinished(() => log.mockRestore())
     const b = host()
+    wireHostMail(b.mgr, store).afterReady()
     await startNoticesRan()
-    expect(toldLines(log)).toEqual([])
+    // It reads its child's stop at its next turn: the notice wakes nobody, since a wake would start a turn with nobody there
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit', quiet: true } })
     expect(reportsTo(parent, child)).toEqual([])
     // Nothing resumed it, so its own stop is still there for the person to see and continue
     expect(b.claude.handles.has(parent)).toBe(false)
@@ -422,14 +444,19 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
   })
 
-  it('when the session owed the report is gone, the notice falls back to the turn giver, then the one that started it', async () => {
+  it('when the session owed the report is gone, the one that started it is told', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     // The report is owed to a session deleted since; the child was started by the parent
     store.children.setReportMark(child, 'a-session-deleted-since')
-    host()
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')
+    const b = host()
+    wireHostMail(b.mgr, store).afterReady()
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit', quiet: true } })
+    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn'))
+    expect(starterNotices('a-session-deleted-since')).toEqual([])
+    expect(reportsTo(parent, child)).toEqual([])
   })
 
   it("the Assistant's list says which children stopped and why", async () => {
@@ -456,37 +483,47 @@ describe('a turn a quit stopped (#698)', () => {
 describe("the person's own turn a quit cut (#1946)", () => {
   it('is reported to nobody: not to the session that started this one', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('indent fixed')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    await eventually(() => info(a, parent).state === 'working')
-    a.claude.handles.get(parent)!.answer('noted')
+    await eventually(() => mailReportsTo(parent).length === 1)
     // The person's own turn, then the quit
     await a.mgr.inputs.send(child, 'now tidy the imports')
     expect(info(a, child).state).toBe('working')
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
-    onTestFinished(() => log.mockRestore())
     const b = host()
+    wireHostMail(b.mgr, store).afterReady()
     await startNoticesRan()
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
-    expect(toldLines(log)).toEqual([])
-    expect(reportsTo(parent, child)).toHaveLength(1)
+    expect(starterNotices(parent)).toEqual([])
+    expect(store.mailbox.feedOf(addressOf(parent), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice')).toEqual([])
+    expect(mailReportsTo(parent)).toHaveLength(1)
+    expect(reportsTo(parent, child)).toEqual([])
   })
 
   it("a report still owed is told of the stop though the turn was the person's: the start drops the mark, so it would never hear", async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('indent fixed, server running')
-    await eventually(() => info(a, parent).state === 'working')
-    a.claude.handles.get(parent)!.answer('noted')
+    await eventually(() => mailReportsTo(parent).length === 1)
     // The child's report is held over its own background work (#721); the person writes to it, which keeps the report owed
     store.children.setReportMark(child, parent)
     store.settings.setAppSetting(pausedReportKey(child), JSON.stringify([{ id: 't1', description: 'dev server' }]))
     await a.mgr.inputs.send(child, 'now tidy the imports')
     expect(info(a, child).state).toBe('working')
-    host()
-    await eventually(() => reportsTo(parent, child).some((t) => t.includes('Centralu quit or restarted during its turn')))
+    const b = host()
+    wireHostMail(b.mgr, store).afterReady()
+    // Owed a report, the parent hears of the quit, as a report or as a sender owed an answer, and is woken: it waits for that report
+    const child_ = addressOf(child)
+    const heard = () =>
+      store.mailbox
+        .feedOf(addressOf(parent), { limit: 500 })
+        .filter((m) => m.sender === 'centralu' && ((m.facts.about?.session === child_ && m.facts.reason === 'quit') || (m.facts.unanswered ?? []).some((u) => u.recipient === child_ && u.why === 'quit')))
+    await eventually(() => heard().length > 0)
+    expect(heard()).toHaveLength(1)
+    expect(heard()[0]!.facts.quiet).toBeUndefined()
+    // Not the words for a starter owed nothing: it was owed this report
+    expect(heard()[0]!.body).not.toContain('It owed you no answer')
   })
 })
 
@@ -497,18 +534,21 @@ describe("the person's own turn a quit cut (#1946)", () => {
 describe('the words of a turn a quit cut (#1946)', () => {
   it("are that turn's own: none, never the turn before's answer", async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.answer('indent fixed in the sidebar')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    await eventually(() => info(a, parent).state === 'working')
-    a.claude.handles.get(parent)!.answer('noted')
+    await eventually(() => mailReportsTo(parent).length === 1)
+    expect(mailReportsTo(parent)[0]!.facts.answer).toBe('indent fixed in the sidebar')
     // The child's CLI opens a turn of its own, says nothing, and the app quits
     a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'working' })
-    host()
-    const cut = () => reportsTo(parent, child).find((t) => t.includes('Centralu quit or restarted during its turn'))
-    await eventually(() => cut() !== undefined)
-    expect(cut()).not.toContain('indent fixed in the sidebar')
-    expect(cut()).toContain('(no content)')
+    const b = host()
+    wireHostMail(b.mgr, store).afterReady()
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit', quiet: true } })
+    // The cut turn wrote nothing, and a turn the CLI opened is never quoted: the notice is Centralu's words alone
+    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn'))
+    expect(told!.body).not.toContain('indent fixed in the sidebar')
   })
 })
 
@@ -675,8 +715,15 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(said.mock.calls.map((c) => String(c[0])).some((l) => l.includes('could not be listed') && l.includes('EPERM: operation not permitted'))).toBe(true)
     const b = host({ updateResume: f })
     expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted')
+    // Its starter, owed the report the start drops, reads the quit in its mailbox and is woken, as for any quit (docs/plans/mailbox.md "The stop notice")
+    wireHostMail(b.mgr, store).afterReady()
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit' } })
+    expect(told!.facts.quiet).toBeUndefined()
+    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn', true))
+    // Nothing continued it: no Continue went in
+    expect(b.claude.handles.has(child)).toBe(false)
   })
 
   it('a Continue the tool takes while a second update stops the host is left to the next host, which continues and tells it once (#1626 review)', async () => {
@@ -1175,6 +1222,7 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
 describe('the session a report names', () => {
   it('is named as read_session lists it, whichever way the turn ended', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     // A resumed conversation's name is its compaction summary's first line, which the Assistant's list never shows
     a.mgr.rename(child, 'This session is being continued from a previous conversation that ran out of context.')
@@ -1182,13 +1230,16 @@ describe('the session a report names', () => {
     expect(listed).toContain('(resumed session)')
     const kid = a.claude.handles.get(child)!
     kid.answer('done')
-    await eventually(() => reportsTo(parent, child).length === 1)
+    await eventually(() => mailReportsTo(parent).length === 1)
+    // A turn of its own the network ends: its starter, owed nothing, reads the stop notice
     kid.ownTurnFails(ECONNREFUSED)
-    await eventually(() => reportsTo(parent, child).length === 2)
-    for (const report of reportsTo(parent, child)) {
-      expect(report).not.toContain('This session is being continued')
-      expect(report).toContain('(resumed session)')
+    const [told, ...more] = starterNotices(parent)
+    expect(more).toEqual([])
+    expect(told?.facts).toMatchObject({ about: { session: addressOf(child) }, reason: 'network' })
+    for (const said of [...mailReportsTo(parent), told!].map((m) => m.body)) {
+      expect(said).not.toContain('This session is being continued')
     }
+    expect(told!.body).toContain('(resumed session), which you started, stopped: it lost the network.')
   })
 })
 

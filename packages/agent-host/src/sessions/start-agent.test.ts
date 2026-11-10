@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runCentraluTool } from './centralu-tools.js'
-import { ASK_WAIT_MS } from './ask-project.js'
+import { ANSWER_GROUNDS, ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { SessionManager } from './manager.js'
@@ -61,6 +61,15 @@ describe('the model a child starts on (#107, #729)', () => {
 describe('the frame a child gets (#729)', () => {
   it('asks it to wait for its own background work that ends inside its turn', () => {
     expect(agentFrame('parent', 'run the tests')).toContain('Wait for your own background work that ends (a test run, a build) inside your turn before you answer.')
+  })
+
+  // #2183: an answer whose claims say what they rest on, here and on another computer
+  it('asks it to say what each claim of its answer rests on and to mark what it did not check', () => {
+    expect(ANSWER_GROUNDS).toBe("In your answer, say what each claim rests on (a file, a command's output, a message) and mark what you did not check as unchecked.")
+    for (const frame of [agentFrame('parent', 'run the tests'), agentFrame('parent', 'run the tests', [], '', true), remoteAgentFrame('parent', 'run the tests'), remoteAgentFrame('parent', 'run the tests', '', true)]) {
+      expect(frame.split('\n')[0]).toContain(`as the answer: keep it short`)
+      expect(frame.split('\n')[0]).toContain(ANSWER_GROUNDS)
+    }
   })
 
   // #1984: a child told to share checkpoints with "the parent" mailed the Assistant; nothing it saw named the address

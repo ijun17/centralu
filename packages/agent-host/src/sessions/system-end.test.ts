@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SYSTEM_END_LEAD_MS, SYSTEM_END_TAIL_MS, type SystemEnd } from '../lifecycle/system-end.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
+import { wakesMessage } from '../mail/rules.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /*
  * #1397: a shutdown, restart or sign-out ends the agents' processes. Codex's app-servers got the system's termination and exited 0
@@ -120,16 +122,28 @@ describe('a session the system ended under the host (#1397)', () => {
     expect(info(nextStart({ at: T0 - SYSTEM_END_TAIL_MS }), inTurn).interruption).toMatchObject({ reason: 'quit' })
   })
 
-  it('tells the session that gave the turn, as it is for a quit', async () => {
+  it('tells the session that gave the task, by the stop notice at the next start, as it is for a quit', async () => {
+    // The mail wired as main.ts wires it: start_agent's task is a row the stop releases (mailbox.md §10.6.1)
+    wireHostMail(w.mgr, w.store)
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'fix the sidebar indent', wait: false })
     if (!started.ok) throw new Error(started.error)
+    const [task] = mailReader(w.store).tasks(addressOf(parent), started.sessionId)
 
     const b = nextStart({ at: T0 })
-    const told = () => w.store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((x) => x.includes('[Centralu] The assigned work') && x.includes(started.sessionId))
-    await w.until(() => told().length === 1)
-    expect(told()[0]).toContain('stopped before finishing: the computer shut down, restarted or signed out during its turn')
-    expect(told()[0]).not.toContain('Centralu quit')
     expect(info(b, started.sessionId).interruption).toMatchObject({ reason: 'shutdown' })
+    const m = wireHostMail(b, w.store)
+    m.afterReady()
+    m.delivery.stop()
+    const notices = mailReader(w.store).between('centralu', addressOf(parent), 'notice')
+    // Owed a reply (its task) and at rest: told at once and woken, in the shutdown's words, not a quit's
+    expect(notices.map((n) => n.facts)).toEqual([{ unanswered: [{ id: task!.id, recipient: addressOf(started.sessionId), why: 'shutdown' }] }])
+    expect(wakesMessage(notices[0]!)).toBe(true)
+    expect(notices[0]!.body).toContain('the computer shut down, restarted or signed out while it worked')
+    expect(notices[0]!.body).not.toContain('Centralu quit')
+    // No report of the older path besides (#1948 step 1: `quitNotices` is gone), and the task stays open for the reply: the start's adoption does
+    // not settle a released task as reported
+    expect(mailReader(w.store).reportsOn(task!.id)).toEqual([])
+    expect(mailReader(w.store).row(task!.id, addressOf(started.sessionId))).toMatchObject({ releasedWhy: 'shutdown', settled: null })
   })
 })

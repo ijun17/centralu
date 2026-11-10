@@ -41,6 +41,9 @@ export function taskLine(task: string, max = 160): string {
   return flat.length > max ? `${flat.slice(0, max)}… (cut here; ${flat.length} characters in all)` : flat
 }
 
+/** Said in every frame whose final message goes back as the answer (#2183): the asker can tell a checked claim from an assumed one */
+export const ANSWER_GROUNDS = 'In your answer, say what each claim rests on (a file, a command\'s output, a message) and mark what you did not check as unchecked.'
+
 /**
  * The message the delegated session receives. It says who asks and how the answer travels back, because the
  * delegated session cannot see the caller: its final text is all the caller will read, and a file it does not name
@@ -57,7 +60,7 @@ export function askFrame(callerProject: string, task: string, asker?: { name: st
   const reach = asker?.sessionId && asker.mailable !== false ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\`.` : ''
   return [
     `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
-      `Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path.${reach}]`,
+      `Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path. ${ANSWER_GROUNDS}${reach}]`,
     '',
     task,
   ].join('\n')

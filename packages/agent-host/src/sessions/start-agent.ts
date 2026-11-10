@@ -1,4 +1,5 @@
 import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
+import { ANSWER_GROUNDS } from './ask-project.js'
 import { worktreeSetupFrame } from './worktree-sessions.js'
 
 /**
@@ -58,6 +59,7 @@ export function agentFrame(parentName: string, task: string, setupProblems: read
   return [
     `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
+      `${ANSWER_GROUNDS} ` +
       (mailParent ? PARENT_MAIL : '') +
       // #729: children that backgrounded their verify and ended the turn "waiting for it" left the parent unanswered (#721)
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
@@ -117,6 +119,7 @@ export function remoteAgentFrame(parentName: string, task: string, instructions 
   return [
     `[A session working on this repository on another computer, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       "Your final message goes back to it as the answer: keep it short. It cannot read this computer's files, so put what it needs in the answer itself, and commit and push what it should get. " +
+      `${ANSWER_GROUNDS} ` +
       (mail
         ? 'To write to it before you answer (a question, a checkpoint), call mail with `to: "parent"`. '
         : // #1987: this machine's Centralu takes no mail from that computer, so the answer is the only way it hears from the child
