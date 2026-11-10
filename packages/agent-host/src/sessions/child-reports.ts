@@ -247,30 +247,35 @@ export class ChildReports {
   /**
    * The end of a turn of work the person owns (§8.1): a script or the RPC started the session with a first message, and nobody is waiting for it, so
    * the report lands in the person's Inbox: Centralu's words for how the turn ended, the session's last response as its own beside them. Only the
-   * turns that are the work's: the person's own are theirs (#1377), and once the thread is reported the turns after it are not reported
+   * turns that are the work's: the person's own are theirs (#1377), and once the thread is reported the turns after it are not reported. Never throws
    */
-  async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter, settled?: readonly BackgroundTask[]): Promise<void> {
-    if (this.host.disposing || turn?.by === 'person') return
-    // Nothing owed to the person: nor is a pause of their report
-    if (!this.host.children.personOwes(sessionId)) return void this.host.children.unpauseReport(sessionId, 'person')
-    const stop = this.host.meta.get(sessionId)?.interruption
-    // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
-    const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
-    // Kept as a caller's pause is (`ChildOwnership.personPausedReports`), and settled the same way (`settlePausedReport`)
-    if (running.length > 0) this.host.children.pauseReport(sessionId, running, 'person')
-    else this.host.children.unpauseReport(sessionId, 'person')
-    const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
-    const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
-    const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : settled ? { settled } : undefined, stop, ending)
-    const words = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
-    this.host.children.reportedToPerson(sessionId, {
-      outcome,
-      body: personReportLine(outcome, running.length),
-      ...(words ? { answer: words } : {}),
-      ...(kind ? { error: kindWord(kind) } : {}),
-      ...(running.length > 0 ? { paused: running.length } : {}),
-      then: running.length > 0 ? 'running' : 'review',
-    })
+  reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter, settled?: readonly BackgroundTask[]): void {
+    try {
+      if (this.host.disposing || turn?.by === 'person') return
+      // Nothing owed to the person: nor is a pause of their report
+      if (!this.host.children.personOwes(sessionId)) return void this.host.children.unpauseReport(sessionId, 'person')
+      const stop = this.host.meta.get(sessionId)?.interruption
+      // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
+      const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
+      // Kept as a caller's pause is (`ChildOwnership.personPausedReports`), and settled the same way (`settlePausedReport`)
+      if (running.length > 0) this.host.children.pauseReport(sessionId, running, 'person')
+      else this.host.children.unpauseReport(sessionId, 'person')
+      const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
+      const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
+      const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : settled ? { settled } : undefined, stop, ending)
+      const words = answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
+      this.host.children.reportedToPerson(sessionId, {
+        outcome,
+        body: personReportLine(outcome, running.length),
+        ...(words ? { answer: words } : {}),
+        ...(kind ? { error: kindWord(kind) } : {}),
+        ...(running.length > 0 ? { paused: running.length } : {}),
+        then: running.length > 0 ? 'running' : 'review',
+      })
+    } catch (e) {
+      // Nobody waits for it (each caller goes on), so a store that cannot be written is said here and not left to reject
+      console.error(`[mail] could not write the person's report of ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
+    }
   }
 
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
@@ -281,10 +286,7 @@ export class ChildReports {
   stopSettlingPausedReports(): void {
     this.host.children.stopSettling()
   }
-  /**
-   * The background work the session's tool lists as running, which a turn ending now does not end (#721). A timer the
-   * tool holds (`/loop`, a scheduled prompt) is not work: a report is not held for it, or a loop would hold it for good
-   */
+  /** The background work the session's tool lists as running, which a turn ending now does not end (#721). A timer the tool holds (`/loop`, a scheduled prompt) is not work: a report is not held for it, or a loop would hold it for good */
   ownTasksRunning(sessionId: string): BackgroundTask[] {
     const m = this.host.meta.get(sessionId)
     return m ? liveBackgroundTasks(m.backgroundTasks).filter((t) => !t.timer) : []
@@ -318,7 +320,7 @@ export class ChildReports {
       if (!quiet() || this.host.disposing) return
       console.error(`[sessions] ${sessionId.slice(0, 8)}: its background work ended and no turn followed; reporting the work as ended`)
       const ending = { type: 'turn_complete', sessionId } as const
-      if (this.host.children.personPausedReports.has(sessionId)) void this.reportToPersonIfOwed(sessionId, ending, undefined, undefined, this.pausedTasksNow(sessionId, 'person'))
+      if (this.host.children.personPausedReports.has(sessionId)) this.reportToPersonIfOwed(sessionId, ending, undefined, undefined, this.pausedTasksNow(sessionId, 'person'))
       if (this.host.children.pausedReports.has(sessionId)) void this.reportBackIfAwaited(sessionId, ending, undefined, this.pausedTasksNow(sessionId))
     }, PAUSED_REPORT_SETTLE_MS)
     timer.unref?.()
@@ -516,10 +518,7 @@ export class ChildReports {
     return (await this.deliverReport(asker, sessionId, name, project, quoted, { type: stop.reason === 'network' ? 'error' : 'state_change' }, undefined, seq)) ? asker : undefined
   }
 
-  /**
-   * The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn
-   * before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does
-   */
+  /** The words of the turn a stop cut (a quit, the network, an update), as a notice of it quotes them: those said so far, or none, never the turn before's (#1604, #1946). A turn not seen to begin (one an older build ran) reads as the last response does */
   stoppedTurnAnswer(sessionId: string): { preview: string; seq: number | undefined } {
     const span = this.host.children.latestTurnRows(sessionId)
     if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }

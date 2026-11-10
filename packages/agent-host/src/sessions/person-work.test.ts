@@ -8,7 +8,7 @@ import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
 import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -158,6 +158,29 @@ describe('a script starts a session with a first message', () => {
     const task = personTasks().at(-1)!
     expect(task).toMatchObject({ body: 'Run the export' })
     expect(w.store.mailbox.recipients(task.id)[0]).toMatchObject({ settled: 'withdrawn' })
+  })
+
+  it("a report to the person the store cannot take is said on stderr, not left to reject: nobody waits for it", async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const unpause = ChildOwnership.prototype.unpauseReport
+    const failing = vi.spyOn(ChildOwnership.prototype, 'unpauseReport').mockImplementation(function (this: ChildOwnership, id, kind) {
+      if (kind === 'person') throw new Error('the disk is full')
+      return unpause.call(this, id, kind)
+    })
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const rejected: unknown[] = []
+    const onRejection = (e: unknown) => rejected.push(e)
+    process.on('unhandledRejection', onRejection)
+    try {
+      handleOf(s.id)!.answer('Done')
+      await w.until(() => said.mock.calls.some((c) => String(c[0]).includes("could not write the person's report")))
+      await new Promise((r) => setImmediate(r))
+      expect(rejected).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+      failing.mockRestore()
+      said.mockRestore()
+    }
   })
 
   it('work it handed on in the turn keeps the task open: the turn’s end is a pause, not the work’s end', async () => {

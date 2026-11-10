@@ -148,7 +148,7 @@ export class HostTenure {
     else {
       sends.push(this.host.reports.tellAskerOfInterruption(m.id, this.host.children.turnOwners.get(m.id)?.callerId, turnBy))
       // The work the person owns: the same end, in their Inbox (§8.1)
-      void this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
+      this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
     }
     this.host.mail.mailStopTold(m.id, held, sends)
   }
@@ -261,7 +261,7 @@ export class HostTenure {
     // The work the person owns (a script started the session, §8.1): the turn a quit cut is reported to their Inbox as it ended
     const person = this.quitPersonWork
     this.quitPersonWork = []
-    for (const id of person) if (this.host.meta.has(id)) void this.host.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
+    for (const id of person) if (this.host.meta.has(id)) this.host.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
     for (const n of now) {
@@ -478,7 +478,7 @@ export class HostTenure {
     const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
     const ended = this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
     // The person's reports paused on work that went with the last host's process (#1463): told now as that work's end, each task stopped
-    if (ended.length) setTimeout(() => ended.forEach((id) => void this.host.reports.reportToPersonIfOwed(id, { type: 'turn_complete', sessionId: id }, undefined, undefined, this.host.reports.pausedTasksNow(id, 'person', true))), 0)
+    if (ended.length) setTimeout(() => ended.forEach((id) => this.host.reports.reportToPersonIfOwed(id, { type: 'turn_complete', sessionId: id }, undefined, undefined, this.host.reports.pausedTasksNow(id, 'person', true))), 0)
     for (const id of stopped) this.host.children.stoppedByUpdate.keep(id)
     /*
      * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its

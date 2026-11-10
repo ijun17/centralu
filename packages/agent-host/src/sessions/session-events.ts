@@ -374,7 +374,7 @@ export class SessionEvents {
       sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy && since !== undefined ? { ...turnBy, since } : turnBy))
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
-    if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) void this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+    if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
     if (endedTurn && e.sessionId && !owed) sends.push(this.host.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId, turnBy))
     if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
