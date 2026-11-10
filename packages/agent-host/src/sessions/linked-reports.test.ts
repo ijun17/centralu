@@ -127,6 +127,36 @@ describe('whom a turn end is reported to', () => {
     expect(delivered[1]!.part).toBeUndefined()
   })
 
+  // #2157: the cut turn's end came before the hub, back from the update, could tell whose it was; the end that settles it says nothing of the turn
+  it('keeps the cut of a turn whose end the gate held back for the end that settles it', async () => {
+    ask('m1.w1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    gateAnswer = 'defer'
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
+    await flush()
+    expect(delivered).toEqual([])
+    // Told now: the hub settles the held end as `RemoteAgents` does, with no turn on it
+    gateAnswer = 'deliver'
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await flush()
+    expect(delivered.map((d) => d.part)).toEqual([{ cut: true }])
+  })
+
+  // #2157 review: the held end left the wait busy, so the next turn of a machine that does not say whose a turn is took the cut as its own
+  it('gives the cut of a held turn end to no later turn: the next turn starts afresh', async () => {
+    ask('m1.w1')
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    gateAnswer = 'defer'
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', cut: true } })
+    await flush()
+    // Never settled: the machine runs another turn and ends it, saying nothing of whose it was (an older host)
+    gateAnswer = 'deliver'
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(1)
+    expect(delivered[0]?.part).toBeUndefined()
+  })
+
   // #1604: the words of the turn that ended, not the child's last response; a turn with nothing to say says so
   it("asks for the turn's own words, and says so when the turn ended with none", async () => {
     ask('m1.w1')

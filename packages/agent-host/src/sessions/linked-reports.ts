@@ -222,7 +222,16 @@ export class LinkedReports {
     }
     // Whose turn ended (#1038 review): another's is reported to nobody; one the hub cannot tell yet stays owed
     const gate = this.gate(sessionId)
-    if (gate === 'defer') return
+    /*
+     * Held until whose it is can be told: the settling end (`settleLinkedTurn`) says nothing of the turn, so what the machine
+     * said of it is kept for that end, and its report still says an update cut it (#2157). The turn has ended all the same: the next
+     * one to start sets whose it is afresh, so what this one carried (its cut) is never a later turn's
+     */
+    if (gate === 'defer') {
+      wait.turn = turn
+      wait.busy = false
+      return
+    }
     if (gate === 'withhold') return this.drop(sessionId)
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = e.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
