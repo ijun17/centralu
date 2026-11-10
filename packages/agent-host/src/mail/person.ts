@@ -41,6 +41,12 @@ const PERSON_HOLDS = ['uncertain', 'failed', 'loop', 'budget', 'policy'] as cons
 /** A message as the window reads it: a moved one with the thread kind it had, a new one in the window's thread words */
 type Shown = { m: MailRow; seq: number }
 
+/** A chain's subject: its first message's words, or for work a script started, whose words are not the person's, that script's (#1468) */
+function subjectLine(m: Pick<MailRow, 'body' | 'facts'>): string {
+  const script = m.facts.fromScript?.credential
+  return oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
+}
+
 /**
  * The person's side of the mailbox (#1347, docs/plans/mailbox.md §12, M3a-person) over the message tables. The window of this build draws threads;
  * here a thread is a chain of replies, named by its root message's id, so the window shows what the message service holds and writes through it: the
@@ -48,12 +54,6 @@ type Shown = { m: MailRow; seq: number }
  *
  * Parties come back as Centralu names them (the session's name in the sidebar, an app's id), never as a name they gave themselves.
  */
-/** A chain's subject: its first message's words, or for work a script started, whose words are not the person's, that script's (#1468) */
-function subjectLine(m: Pick<MailRow, 'body' | 'facts'>): string {
-  const script = m.facts.fromScript?.credential
-  return oneLineText(script === undefined ? m.body : `The script "${script}": ${m.body}`, SUBJECT_CHARS)
-}
-
 export class MailPerson {
   constructor(
     private readonly service: MessageService,
