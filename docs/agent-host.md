@@ -2291,7 +2291,17 @@ sets a temporary `CC_DATA_DIR`, and never starts a host or uses `~/.centralu`.
    approval, a refused or failed turn, an interrupted turn, a long answer, a compaction (if the tool has one), a resumed
    session, and each answer the adapter branches on (a status, an error kind) where a real run can send it. A change to an existing adapter that
    depends on what the tool sends adds or cites the recording that shows it; a value copied into a fake without a
-   recording is not evidence. Re-record on a CLI version bump. For a new tool, record
+   recording is not evidence. On a CLI version bump, run `pnpm frames:canary <claude | codex>` first: it records a few
+   representative scenarios on the installed version (Claude Code: seven, about two cents), compares each with the same
+   scenario on the newest earlier version, and names what to re-record, nothing when they match
+   (`scripts/frames-canary.mts`). It compares what the adapter depends on and a run does not choose: the kinds of frame
+   and their fields, the fields the adapter reads (a hand-kept list, `RULES`), their JSON types, the values it tells
+   apart (a stop reason, a permission answer's behavior) and the order of the kinds sent once in a turn; never text, ids
+   or timing. It cannot see what no canary scenario brings: on Claude Code, `active_goal`, `conversation_reset`,
+   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, the refusal pair, a
+   failed turn's API error, a question's answer and plan mode; on Codex, a compaction and background work. Nor a
+   value or a field the model sends only on some runs, as each version has one run of each scenario: such a change shows
+   in the replay tests of the recordings that hold it, or not until a person meets it. For a new tool, record
    with the tool-neutral frame tooling in `adapters/frames/` (#1498): the recorder (`CC_RECORD_FRAMES`), the scrubber
    (`scripts/frames-scrub.mts`), the replayer with the protocol's `FrameCodec`, and the scenarios driven at the
    `SessionHandle` level, so the fixtures are what the adapter itself sent and received (the ACP adapter's are made by
@@ -3329,7 +3339,7 @@ this one for you.
 | `centralu serve --port <n>` | The same, on that port. The port is recorded, and the next `serve` without a flag uses it |
 | `centralu serve --detach [--port <n>]` | Starts `serve` outside this session and returns once its host answers a hello (below). Prints one JSON line. A host already running is reported, not started twice |
 | `centralu serve --detach --from <hub>` | The same; `<hub>` is the name of the computer whose link asks (letters, digits, `.`, `_`, `-`), written with the ssh client's address to the host's `host.lock`, so a second Centralu refused on this folder names that link (#1223). A hub always sends it: every `serve` from 0.1.0-beta.45 on takes it (#1143) |
-| `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line |
+| `centralu serve --stop` | Asks the running host to stop (`host.stop`), waits until it has, and prints one JSON line. A start in progress (#2150: `--detach` and the launcher each keep a record in `<data>/serve-starting/<pid>.json` while they start a host) is waited for first and its host stopped once up, rather than answered with "not running" and left to come up after the stop. A host that has held host.lock for 10 s with its start still named is stopped, answering or not (one hung before it listened, #1903, is ended): one that is up ends its start within a moment; a record of a dead process, or older than 120 s, counts for nothing. The whole stop ends within 45 s (`STOP_BUDGET_MS`, inside the window's 60 s): when the wait has used its share, a start whose launcher serve.pid names is ended, the launcher and its host, and any other is answered `starting: true` with nothing stopped or marked. Not covered: a `--detach` killed after its launcher started and before that launcher wrote its record, a moment of process start-up |
 | `centralu serve --connection` | Prints one JSON line and exits (below). Creates `serve.json` if there is none yet. It carries the limited credential and lists the full ones, never their values (#1405) |
 | `centralu serve --connection --pair <label>` | The same, with a new full credential for `<label>` (`token`, and its id as `credential`), printed once and kept as its SHA-256 only; it replaces `<label>`'s earlier one. A hub runs it at each link as `hub:<its name>-<key>`, the key being 8 hex characters of the hub's own random id (#1405) |
 | `centralu serve --connection --pair-key <label> <public key> [--key-paired]` | A hub's key pairing (#1711, [plans/key-pairing.md](plans/key-pairing.md) §4.2): writes a key entry for `<label>` with the hub's Ed25519 public key (one per label; another key gets a new id), then asks the running host to sign for it. When it signs, or when nothing listens and nothing holds the folder and the installed host takes key hellos, the line carries `hostKey` and `keyId` and lists `pairKey` in `takes`, and no credential; with `--key-paired` the label's verifier entry is removed then. Otherwise it pairs by verifier as `--pair` does. A key the host would refuse (a small-order one) is an error, and nothing is written. Not in `--help`: only a hub runs it |

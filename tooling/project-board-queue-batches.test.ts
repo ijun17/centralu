@@ -781,6 +781,12 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     '    name: full tier',
     '  verify:',
     '    name: verify',
+    '  verify-tests:',
+    '    name: verify (vitest ${{ matrix.shard }}/${{ matrix.shards }})',
+    '    strategy:',
+    '      matrix:',
+    '        shards: [3]',
+    '        shard: [1, 2, 3]',
     '  windows-unit-1:',
     '    name: windows tests (vitest 1/2)',
     '  windows-unit-2:',
@@ -796,6 +802,7 @@ describe('the merge queue lands only from a full run, with two tiers of CI', { t
     suiteCheck('changes', 'success', suite * 10 + 5, suite),
     suiteCheck('full tier', 'skipped', suite * 10, suite),
     suiteCheck('verify', verify, suite * 10 + 1, suite),
+    ...[1, 2, 3].map((i) => suiteCheck(`verify (vitest ${i}/3)`, 'success', suite * 100 + 50 + i, suite)),
     suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
     suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
     suiteCheck('macos tests', 'success', suite * 10 + 4, suite),
@@ -960,7 +967,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
   const ENV = { ...REAL_QUICK, PROJECT_BOARD_CI_SCREEN: JSON.stringify(SCREEN) }
   const WORKFLOW_E2E = [
     'jobs:',
-    ...['changes', 'full tier', 'verify', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'e2e (webkit 1/1)', 'e2e (chromium 1/1)'].flatMap((n, i) => [`  j${i}:`, `    name: ${n}`]),
+    ...['changes', 'full tier', 'verify', 'verify (vitest 1/3)', 'verify (vitest 2/3)', 'verify (vitest 3/3)', 'windows tests (vitest 1/2)', 'windows tests (vitest 2/2)', 'e2e (webkit 1/1)', 'e2e (chromium 1/1)'].flatMap((n, i) => [`  j${i}:`, `    name: ${n}`]),
     '',
   ].join('\n')
   const ONE = `batch-${SHA}`
@@ -969,6 +976,7 @@ describe('the merge queue runs the heavy jobs before landing a batch that change
     suiteCheck('changes', 'success', suite * 10 + 5, suite),
     suiteCheck('full tier', full ? 'success' : 'skipped', suite * 10, suite),
     suiteCheck('verify', verify, suite * 10 + 1, suite),
+    ...[1, 2, 3].map((i) => suiteCheck(`verify (vitest ${i}/3)`, 'success', suite * 100 + 50 + i, suite)),
     suiteCheck('windows tests (vitest 1/2)', 'success', suite * 10 + 2, suite),
     suiteCheck('windows tests (vitest 2/2)', 'success', suite * 10 + 3, suite),
     suiteCheck('macos tests', 'success', suite * 10 + 4, suite),

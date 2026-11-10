@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { fakeServe, tarGz } from './fake-registry.test-helpers.js'
 import { connectionCommand } from './tunnel.js'
 import { WIN_NODE_FILE, WIN_NODE_V, windowsPackages, windowsRemoteEnv, pwsh7ModulePath } from './windows-remote.test-helpers.js'
@@ -35,7 +36,8 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(readdirSync(remote()).filter((n) => n.startsWith('.'))).toEqual([])
       // The hub's lookup, in PowerShell as ssh would start it, now finds the managed launcher, which
       // runs current's centralu.mjs on the Node current names
-      const out = execFileSync(connectionCommand({ shell: 'powershell' }), { shell: true, env: windowsRemoteEnv(w.home), encoding: 'utf8' })
+      // Without holding the event loop while PowerShell starts (#2148: 17 s under load)
+      const { stdout: out } = await promisify(execFile)(connectionCommand({ shell: 'powershell' }), { shell: true, env: windowsRemoteEnv(w.home), encoding: 'utf8' })
       expect(JSON.parse(out.trim().split(/\r?\n/).at(-1)!)).toEqual({ ran: '9.8.0', argv: ['serve', '--connection'], managed: '1' })
     }, 120_000 * SLOW)
 

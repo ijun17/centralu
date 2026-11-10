@@ -21,7 +21,7 @@ type Decision = 'allow' | 'deny' | 'always'
 /** What the pane is to hold when the recording has been played, as the recording says */
 export type Held = {
   /** What the person did, in order. A prompt `during` another's turn is sent while that turn runs */
-  steps: ({ kind: 'prompt'; text: string; during?: boolean } | { kind: 'stop' } | { kind: 'restart' })[]
+  steps: ({ kind: 'prompt'; text: string; during?: boolean } | { kind: 'stop'; after?: 'thinking' | 'text' } | { kind: 'restart' })[]
   /** The agent's words, one entry a block of text */
   said: string[]
   /** The conversation's bubbles in the order the tool made them: the person's prompts and the agent's blocks of text */
@@ -54,6 +54,8 @@ const HELD: Record<string, (recording: Recording) => Held> = {
     const call = (name: string) => held.tools.push(marked(/^mcp__(.+?)__/.exec(name)?.[1] ?? '') ? { name, marked: true } : { name })
     /** The messages that streamed: their words and calls were taken as they came, and the whole message says them again */
     const streamed = new Set<string>()
+    /** What the turn running has shown so far: its thinking, its words */
+    let turn = { thought: false, said: false }
     for (const f of recording.frames) {
       if (f.dir === 'exit') {
         ended = true
@@ -69,7 +71,11 @@ const HELD: Record<string, (recording: Recording) => Held> = {
           held.steps.push({ kind: 'prompt', text: (m.message?.content ?? []).map((b) => b.text ?? '').join(''), ...(running ? { during: true } : {}) })
           held.order.push('prompt')
           running = true
-        } else if (m.type === 'control_request' && m.request?.subtype === 'interrupt') held.steps.push({ kind: 'stop' })
+          turn = { thought: false, said: false }
+        } else if (m.type === 'control_request' && m.request?.subtype === 'interrupt') {
+          // What the turn had shown when the person pressed Stop: the run's choice, which the recording says
+          held.steps.push({ kind: 'stop', ...(turn.thought ? { after: 'thinking' as const } : turn.said ? { after: 'text' as const } : {}) })
+        }
         else if (m.type === 'control_response') {
           // The answer to a question card: the option the person picked for each question
           const answers = (m.response?.response?.updatedInput?.answers ?? {})
@@ -87,8 +93,11 @@ const HELD: Record<string, (recording: Recording) => Held> = {
             else if (b.type === 'tool_use') call(String(b.name))
           }
         }
+        if (m.type === 'system' && m.subtype === 'thinking_tokens') turn.thought = true
         if (m.type !== 'stream_event') continue
         const e = m.event
+        if (e?.type === 'content_block_start' && e.content_block?.type === 'thinking') turn.thought = true
+        if (e?.type === 'content_block_start' && e.content_block?.type === 'text') turn.said = true
         if (e?.type === 'message_start') streamed.add(String(e.message?.id))
         else if (e?.type === 'content_block_start' && e.content_block?.type === 'text') say('')
         else if (e?.type === 'content_block_delta' && e.delta?.type === 'text_delta') held.said[held.said.length - 1] += String(e.delta.text)
@@ -230,7 +239,8 @@ async function play(page: Page, replay: Replay, held: Held, run: ReplayRun): Pro
   for (const [i, step] of held.steps.entries()) {
     if (step.kind === 'stop') {
       const cue = {
-        thinking: page.getByTestId('activity-label').filter({ hasText: 'Thinking' }),
+        // The activity "Thinking", or the answer's words where the turn had shown words and no thinking when Stop was pressed
+        thinking: step.after === 'text' ? page.getByTestId('msg-assistant') : page.getByTestId('activity-label').filter({ hasText: 'Thinking' }),
         folded: page.getByTestId('tool-card-toggle').or(page.getByTestId('fold-line')),
       }[replay.stopAt ?? 'thinking']
       await expect(cue.first()).toBeVisible()
@@ -329,10 +339,15 @@ export const REPLAYS: Replay[] = [
     tool: 'claude',
     scenario: 'approval',
     cards: ['allow', 'deny', 'always'],
-    async shows(page, _held, seen) {
+    async shows(page, held, seen) {
       expect(await approvals(page)).toEqual(['Allowed · touch probe-1.txt', 'Denied · touch probe-2.txt', 'Allowed · touch probe-3.txt'])
-      // Each turn's calls are one line between the question and the answer; the denied one says it failed, and the fourth, run on the rule, asked nothing
-      expect(seen.folds).toEqual(['1 tool', '1 tool 1 failed', '1 tool', '1 tool'])
+      // The denied call is the one line that says it failed. How many lines a turn folds, and what they hold, is the model's
+      // choice on that run: a Windows run thinks first, checks each file with Test-Path and talks between its calls
+      expect(seen.folds.filter((f) => / failed$/.test(f))).toEqual(['1 tool 1 failed'])
+      // The fourth turn ran the third command again on the rule: two calls of it, one card
+      expect(held.steps.filter((s) => s.kind === 'prompt')).toHaveLength(4)
+      expect((await cardTexts(page)).filter((c) => c.includes('touch probe-3.txt'))).toHaveLength(2)
+      expect((await approvals(page)).filter((a) => a.includes('probe-3'))).toHaveLength(1)
     },
   },
   {

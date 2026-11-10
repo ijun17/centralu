@@ -42,7 +42,13 @@ function world(rec: Recording, opts: { signedIn?: boolean } = {}) {
   }
   const profile = antigravityProfile({ dataDir: temp.dir, platform: HOST_TEST_PLATFORM, arch: 'x64' })
   const adapter = new AntigravityAdapter(profile, spawnNoted)
-  return { adapter, profile, state, peers, sent, notes, ...driven() }
+  const d = driven()
+  /**
+   * A step the adapter never reaches ends with the replay's mismatch (the recording, its line, the JSON path), not with the
+   * test's timeout (#2068, as `drive` does for the other tools)
+   */
+  const orMismatch = <T>(p: Promise<T>): Promise<T> => Promise.race([p, state.failed])
+  return { adapter, profile, state, peers, sent, notes, ...d, event: (pick: Parameters<typeof d.event>[0]) => orMismatch(d.event(pick)), orMismatch }
 }
 
 /** One turn: every card answered `decide`, until the turn ends */
@@ -59,13 +65,26 @@ async function turn(w: ReturnType<typeof world>, handle: Awaited<ReturnType<Anti
 }
 
 async function open(w: ReturnType<typeof world>, preset: PermissionPreset = 'normal', resume?: string, more: Partial<CreateSessionOpts> = {}) {
-  return w.adapter.createSession(sessionOpts('agy-replay', preset, { ...(resume ? { resumeExternalId: resume } : {}), ...more }), w.emit)
+  return w.orMismatch(w.adapter.createSession(sessionOpts('agy-replay', preset, { ...(resume ? { resumeExternalId: resume } : {}), ...more }), w.emit))
 }
 
 describe('Antigravity in the registry', () => {
   it('is registered for everyone: the screens for its install and sign-in exist (#59)', async () => {
     const { createAdapters } = await import('../registry.js')
     expect(createAdapters().get('antigravity')).toBeInstanceOf(AntigravityAdapter)
+  })
+})
+
+describe('a replay the adapter departs from', () => {
+  it('ends at the first line it does not have, naming the recording, the line and what differs, instead of waiting out the test (#2068)', async () => {
+    // The recording's prompt under another method: the adapter's session/prompt is not the line the recording has next
+    const rec = recording('permissions')
+    const prompt = rec.frames.find((f) => f.dir === 'out' && f.msg?.method === 'session/prompt')!
+    prompt.msg = { ...prompt.msg, method: 'session/other' }
+    const w = world(rec)
+    const handle = await open(w)
+    await expect(turn(w, handle, 'Do these three steps', 'allow')).rejects.toThrow(new RegExp(`permissions\\.jsonl line ${prompt.line}: .*session/other`))
+    expect(w.state.problems).toHaveLength(1)
   })
 })
 

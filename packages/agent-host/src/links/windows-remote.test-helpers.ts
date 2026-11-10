@@ -1,7 +1,8 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { fakeExe, fakeNodeExe } from '../fake-exe.test-helpers.js'
 import { sha256, type FakePackage } from './fake-registry.test-helpers.js'
 import type { RemoteRuntime } from './install.js'
@@ -37,7 +38,7 @@ export function windowsRemoteSsh(dir: string): string {
  * The "pinned Node" zip as nodejs.org ships it: one top folder, `node.exe` and a licence in it. Packed by
  * System32's own `tar.exe`, which writes a zip for `-a` and reads it back in the install script
  */
-export function windowsNodeZip(): Buffer {
+export async function windowsNodeZip(): Promise<Buffer> {
   const top = `node-v${WIN_NODE_V}-win-x64`
   const dir = mkdtempSync(join(tmpdir(), 'cc-node-zip-'))
   try {
@@ -45,7 +46,8 @@ export function windowsNodeZip(): Buffer {
     writeFileSync(join(dir, top, 'node.exe'), fakeNodeExe())
     writeFileSync(join(dir, top, 'LICENSE'), 'MIT')
     writeFileSync(join(dir, top, 'npm.cmd'), 'a Node install carries npm, which the remote does not keep')
-    execFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-cf', 'node.zip', top], { cwd: dir })
+    // Without holding the event loop while it packs (#2148, `tarGzAsync`)
+    await promisify(execFile)(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), ['-a', '-cf', 'node.zip', top], { cwd: dir })
     return readFileSync(join(dir, 'node.zip'))
   } finally {
     rmSync(dir, { recursive: true, force: true })

@@ -85,7 +85,7 @@ script rehearses by default and why nothing publishes automatically.
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
 - **Two tiers** (owner decision, 2026-10-18): a full run is about 24 jobs and the free plan runs 20
   at once, so every push of every pull request used to queue a whole run behind the others. A pull
-  request now runs the **quick tier**: `changes`, `verify`, the Windows unit tests and the macOS tests
+  request now runs the **quick tier**: `changes`, `verify` (and its test shards, `verify (vitest i/n)`, since #2153), the Windows unit tests and the macOS tests
   (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
   94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
   is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
@@ -177,7 +177,7 @@ script rehearses by default and why nothing publishes automatically.
   summary, and uploads the reports as the `e2e-report` artifact, a folder per engine.
 - **Time limits** (2026-10-19: one e2e shard hung 35 minutes and held a merge batch). Every job
   that does real work has a `timeout-minutes` near its slowest green run of the last 20 full runs
-  with about half again on top: the e2e shards' tests 12 minutes (slowest 7.2 on 10 shards), `verify` 20 (10.8), the
+  with about half again on top: the e2e shards' tests 12 minutes (slowest 7.2 on 10 shards), `verify` 20 (10.8; 17.9 by 2026-11-09, when it became the lint and types job, 10, and three test shards, `verify (vitest i/3)`, 15 each, #2153), the
   Windows unit tests 25 (13.1); the Rust builds more, for a run that misses the cache (bundles
   30, keeper end to end 20). `build.yml`'s comment above the `e2e` job has every number. A job
   that hits its limit ends with GitHub's "has exceeded the maximum execution time" annotation
@@ -203,9 +203,9 @@ script rehearses by default and why nothing publishes automatically.
   runs of main from 2026-11-04 to 2026-11-05. The two shards took 6.0 and 9.1 minutes of tests in the
   first full run, once the split had each file's time (below).
 - **Fail fast** (owner decision 2026-10-19): on a manual run (the merge queue's batches, or
-  `gh workflow run build.yml` by hand), a failed `verify` cancels the rest of the run at once,
+  `gh workflow run build.yml` by hand), a failed `verify` (the lint and types job, or one of its test shards, #2153) cancels the rest of the run,
   through the `fail fast` job: nothing lands from such a run, and its other jobs held the batch
-  and the shared runners about 10 minutes more. `verify` has ended by then, so its check stays
+  and the shared runners about 10 minutes more. The cancel comes once both `verify` jobs have ended (a lint failure no longer saves the tests' time either: they run beside it), so the failed check stays
   `failure` while the run ends `cancelled`: that failed check is how the queue tells this from a
   run cancelled for nothing, and it does not rerun it. `changes` decides (`fail_fast`,
   `.github/scripts/ci-changes.mjs`): a pull request's run (quick tier), main's own runs, and a manual run whose

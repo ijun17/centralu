@@ -103,8 +103,9 @@ pub fn ask_connection(launcher: &Path, timeout: Duration) -> Option<String> {
     run_launcher(launcher, "--connection", &[], timeout).ok()
 }
 
-/// How long "Quit completely" waits for `serve --stop`: the host is asked and waited for up to 30 s, then ended after a
-/// grace of 15 s (`runStop`).
+/// How long "Quit completely" waits for `serve --stop`, which ends within 45 s whatever it meets (`runStop`'s
+/// `STOP_BUDGET_MS`): a start in progress is waited for while it leaves the stop its share, then the host is asked and
+/// waited for, and ended after a grace. A start still going at the end is ended, or answered as still starting.
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long "Quit completely" waits for the host this window is starting (`serve --detach` waits for its host up to 30 s)

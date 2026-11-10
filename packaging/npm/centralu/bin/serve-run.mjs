@@ -4,7 +4,7 @@ import { writeFileSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { isAlive, say } from './serve-util.mjs'
-import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
+import { SERVE_STATE_FILE, SERVE_PID_FILE, readStopped, markStarting, clearStarting, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolder, lockHolderPid, holderWho, removeServePid, pairServe, pairKeyServe, dropVerifierUnder, revokeServe } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, probeHost, probeKeyProof, serveFrom, keyLine, takesKeyHellos } from './serve-host.mjs'
@@ -167,6 +167,8 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   }
 
   const plan = hostCommand(execPath, entry, { port, dataDir, platform })
+  // A start in progress (#2150): this launcher's own record, removed once its host is ready or has exited (below)
+  markStarting(dataDir)
   /*
    * The host gets the key on stdin and the path of serve.json, whose full credentials it checks at each hello (#1405);
    * nothing it gets opens it whole
@@ -209,6 +211,8 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
     const p = readyPort(line)
     if (p === null || ready) return
     ready = true
+    // A start `--detach` handed to this launcher is over (#2150)
+    clearStarting(dataDir)
     try {
       recordServePort(dataDir, p, platform)
     } catch (e) {
@@ -240,12 +244,14 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   return await new Promise((resolve) => {
     child.on('error', (e) => {
       removeServePid(dataDir, process.pid)
+      clearStarting(dataDir)
       say(`could not start the host (${plan.command}): ${e.message}`)
       resolve(1)
     })
     child.on('exit', (code, signal) => {
       for (const s of signals) process.off(s, forward)
       removeServePid(dataDir, process.pid)
+      clearStarting(dataDir)
       if (!ready && code !== 0) {
         const holder = lockHolder(dataDir)
         if (holder && holder.pid !== child.pid && isAlive(holder.pid)) {

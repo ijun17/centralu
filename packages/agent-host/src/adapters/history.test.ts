@@ -33,6 +33,7 @@ import { sdk } from './claude/sdk-message.test-helpers.js'
 afterEach(() => __setSessionApiForTest(undefined))
 
 describe('claude — SDK forkSession (#677)', () => {
+  // Hand-written: forkSession is a call into the SDK, which answers from the disk, not a frame
   it('copies the conversation under a new id, from the folder the original ran in', async () => {
     const calls: unknown[] = []
     __setSessionApiForTest({
@@ -46,6 +47,7 @@ describe('claude — SDK forkSession (#677)', () => {
     expect(calls).toEqual([['old-id', { dir: '/work/app' }]])
   })
 
+  // Hand-written: an SDK without forkSession, or one that answers without an id, which no installed SDK is
   it('says so when the SDK cannot fork, or forks without a new id, rather than continuing the original', async () => {
     __setSessionApiForTest({ listSessions: async () => [] })
     await expect(forkClaudeSession('old-id', '/work/app')).rejects.toThrow('cannot fork')
@@ -55,6 +57,7 @@ describe('claude — SDK forkSession (#677)', () => {
 })
 
 describe('claude — SDK listSessions/getSessionMessages', () => {
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it('carries the list into summaries (title priority: user-set -> summary -> first prompt)', async () => {
     __setSessionApiForTest({
       listSessions: async () => [
@@ -81,6 +84,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
    * watched one showed the call and its output. The rows are read by the live normalizer now, so each call and result
    * is the event the same message gives live. Shapes as getSessionMessages gives them (SDK 0.3.263: `type`, `message`).
    */
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it('reads tool calls and their results back as the live normalizer reads the same messages (#843)', async () => {
     const call = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Building' }, { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'pnpm build' } }] } }
     const result = { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'exit 0' }], is_error: false }] } }
@@ -107,6 +111,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     expect(live[1]).toMatchObject({ callId: 'tu1', ok: true, summary: 'exit 0' })
   })
 
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it('strips blocks the tool injected and keeps only the person\'s own words', async () => {
     __setSessionApiForTest({
       listSessions: async () => [],
@@ -124,6 +129,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it("marks the inputs Centralu wrote by the id it gave them, and drops the CLI's line where a turn was stopped (#1618 review)", async () => {
     const note = '[Centralu] Centralu on this machine was updated while your turn was running. Continue where you stopped.'
     // The CLI keeps the id a stream-json input names as the line's uuid (measured, CLI 2.1.296); its own lines get random ones
@@ -148,6 +154,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     expect([isCentraluInputId(ours), isCentraluInputId(randomUUID()), isCentraluInputId(undefined)]).toEqual([true, false, false])
   })
 
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it("knows Centralu's Continue note by its text where the line lacks the id, and says why (#1626 review)", async () => {
     // Another CLI version, or a transcript a crash left without the id: the row's uuid is a random one
     __setSessionApiForTest({
@@ -179,16 +186,19 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     }
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it("knows Centralu's Continue note in a Codex thread by its text, as that tool keeps no id of ours (#1626 review)", () => {
     const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: UPDATE_CONTINUE_TEXT }] }] }], 10)
     expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: UPDATE_CONTINUE_TEXT, sent: true }])
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it("knows the host's retry note after a turn the provider ended for capacity by its text too, in a Codex thread (#1693)", () => {
     const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'input_text', text: 'Run the tests' }] }, { type: 'userMessage', content: [{ type: 'input_text', text: RETRY_NOTE }] }] }], 10)
     expect(out).toEqual([{ role: 'user', text: 'Run the tests' }, { role: 'user', text: RETRY_NOTE, sent: true }])
   })
 
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {
     __setSessionApiForTest({
       listSessions: async () => [],
@@ -219,6 +229,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
    * the model (the launch notice of a background agent, the hand-back preamble of a foreground one; shapes from
    * claude/subagent.test.ts). The card says the report is not in the record instead, keeping nothing as output.
    */
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it("does not put the text meant for the model on an agent's card", async () => {
     const launch = 'Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a19ec1fdf94e35cfc'
     const handBack = "[Subagent hand-back] The text below is the final report of a subagent this session started.\n\nI'm done."
@@ -245,6 +256,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  // Hand-written: a malformed row on purpose, which no run writes
   it('a row in a shape the reader does not expect costs that row, not the import (#843 review)', async () => {
     __setSessionApiForTest({
       listSessions: async () => [],
@@ -270,6 +282,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
    * #1006: the SDK's `limit` slices from the start (SDK 0.3.263: the whole transcript read, then `offset..offset +
    * limit`), which this fake does too. The reader gave the oldest rows, so a catch-up past 600 rows never matched.
    */
+  // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it('keeps the newest lines of a long conversation, counting words and compactions, not tool rows', async () => {
     const rows = Array.from({ length: 10 }, (_, i) => [
       { type: 'user', message: { content: [{ type: 'text', text: `q${i}` }] } },
@@ -290,12 +303,14 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  // Hand-written: an older SDK on purpose, without the function
   it('an older SDK (missing the function) leaves a reason instead of throwing', async () => {
     __setSessionApiForTest(null)
     await expect(listClaudeSessions('/p', 10)).rejects.toThrow(CLAUDE_UNSUPPORTED)
     await expect(readClaudeHistory('s', '/p', 10)).rejects.toThrow(CLAUDE_UNSUPPORTED)
   })
 
+  // Hand-written: a broken answer on purpose
   it('does not break even when the response is not an array', async () => {
     __setSessionApiForTest({
       listSessions: async () => null as never,
@@ -307,6 +322,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
 })
 
 describe('codex — thread/list · thread/read', () => {
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('carries the thread list into summaries (converts a second-based timestamp to ms)', () => {
     const out = threadListToSummaries(
       [
@@ -328,6 +344,7 @@ describe('codex — thread/list · thread/read', () => {
    * watched, so a command leaves its card as it does live, and an item kind Codex adds later leaves the card it would
    * leave live. Reasoning is not part of a conversation read back. Item shapes from generated/v2/ThreadItem.ts.
    */
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('reads the words, and every other item as the live normalizer reads it (#843)', () => {
     const command = { type: 'commandExecution', id: 'c1', command: 'pnpm test', cwd: '/p', status: 'completed', aggregatedOutput: 'ok', exitCode: 0 }
     const future = { type: 'future_item_type', id: 'f1', title: 'does not crash even though it is unknown' }
@@ -366,6 +383,7 @@ describe('codex — thread/list · thread/read', () => {
    * compaction is a turn of its own holding only the item; an automatic one opens the turn that triggered it, ahead
    * of its userMessage. Without this the marker a live compaction leaves was missing from every imported conversation.
    */
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('keeps a compaction as a marker, where it ran (manual and automatic)', () => {
     const out = turnsToHistory(
       [
@@ -392,6 +410,7 @@ describe('codex — thread/list · thread/read', () => {
     ])
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('keeps the most recent conversation past the limit (trims the older side)', () => {
     const turns = [
       {
@@ -401,6 +420,7 @@ describe('codex — thread/list · thread/read', () => {
     expect(turnsToHistory(turns, 3).map((m) => (m.role === 'system' ? m.event.type : m.text))).toEqual(['m7', 'm8', 'm9'])
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it("counts the words and compactions toward the limit; a turn's tool rows ride along, an older turn's are cut (#843)", () => {
     const turn = (i: number) => ({
       items: [
@@ -417,6 +437,7 @@ describe('codex — thread/list · thread/read', () => {
     expect(lines(100)).toHaveLength(12)
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('keeps the newest calls up to the row cap, and cuts a long output, in one import (#843 review)', () => {
     const calls = Array.from({ length: HISTORY_TOOL_ROWS }, (_, i) => ({ type: 'commandExecution', id: `c${i}`, command: 'ls', status: 'completed', aggregatedOutput: i === HISTORY_TOOL_ROWS - 1 ? 'x'.repeat(HISTORY_OUTPUT_CHARS * 3) : 'a' }))
     const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'text', text: 'go' }] }, ...calls, { type: 'agentMessage', text: 'done' }] }], 100)
@@ -432,12 +453,14 @@ describe('codex — thread/list · thread/read', () => {
     expect(long.summary).toHaveLength(2000)
   })
 
+  // Hand-written: a malformed answer on purpose
   it('gives an empty conversation when turns is missing or malformed', () => {
     expect(turnsToHistory(undefined, 10)).toEqual([])
     expect(turnsToHistory([null, { items: 'not an array' }], 10)).toEqual([])
     expect(threadListToSummaries(undefined, '/p')).toEqual([])
   })
 
+  // Hand-written: an older Codex on purpose, which answers "unknown method"
   it('recognizes an older codex\'s "unknown method" response', () => {
     expect(isUnknownMethod(new Error('Method not found'))).toBe(true)
     expect(isUnknownMethod(new Error('JSON-RPC error -32601'))).toBe(true)
@@ -521,6 +544,7 @@ describe('codex history read in pages (#342)', () => {
     return { request, calls }
   }
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('reads the newest pages until it has the lines it needs, and gives what the whole read gave', async () => {
     const turns = thread(40)
     const { request, calls } = pager(turns)
@@ -534,6 +558,7 @@ describe('codex history read in pages (#342)', () => {
     expect(calls.some((c) => c.method === 'thread/read')).toBe(false)
   })
 
+  // Hand-written: thread/list and thread/read are asked only by an import, which no Codex scenario runs yet (recordable: a scenario that imports a thread)
   it('keeps the compaction marker where it ran, across pages, and reads to the first turn when asked for more', async () => {
     const turns = thread(23)
     const { request, calls } = pager(turns)
@@ -545,6 +570,7 @@ describe('codex history read in pages (#342)', () => {
     expect(calls).toHaveLength(Math.ceil(23 / HISTORY_PAGE_TURNS))
   })
 
+  // Hand-written: an older Codex on purpose, without thread/turns/list
   it('reads the whole thread the old way on a Codex without thread/turns/list', async () => {
     const turns = thread(12)
     const { request, calls } = pager(turns, { pages: false })
@@ -553,6 +579,7 @@ describe('codex history read in pages (#342)', () => {
     expect(calls[1]!.params).toEqual({ threadId: 'x', includeTurns: true })
   })
 
+  // Hand-written: an older Codex, and failures, on purpose
   it('a Codex with neither says why; a thread no message reached is empty; another failure is thrown', async () => {
     await expect(readThreadHistory(pager([], { pages: false, read: false }).request, 'x', 10)).rejects.toThrow(CODEX_UNSUPPORTED)
     const notYet = async () => {

@@ -1021,7 +1021,15 @@ interface AdapterCapabilities {
    새 도구는 최소한 다음 녹화와 함께 들어온다: 일반 턴, 승인이 있는 도구 호출, 거절되거나 실패한 턴, 중단된 턴, 긴 답,
    압축(도구에 있으면), 재개한 세션, 실제 실행이 보낼 수 있는 한 어댑터가 분기하는 각 응답(상태, 오류 종류). 도구가 보내는 것에 기대는 기존 어댑터의
    변경은 그것을 보여 주는 녹화를 더하거나 가리킨다. 녹화 없이 가짜에 옮겨 적은 값은 근거가 아니다. CLI 버전이 오르면
-   다시 녹화한다. 새 도구는 `adapters/frames/`의
+   먼저 `pnpm frames:canary <claude | codex>`를 돌린다: 설치된 버전에서 대표 시나리오 몇 개(Claude Code는 일곱 개, 약 2센트)를
+   녹화하고, 각각을 직전 버전의 같은 시나리오와 비교해, 다시 녹화할 것을 말한다(같으면 없음, `scripts/frames-canary.mts`).
+   비교하는 것은 어댑터가 기대고 실행이 고르지 않는 것이다: 프레임 종류와 필드, 어댑터가 읽는 필드(손으로 관리하는 목록 `RULES`),
+   그 JSON 타입, 어댑터가 구분하는 값(stop reason, 권한 답의 behavior), 한 턴에 한 번 오는 종류의 순서. 텍스트, id, 시간은
+   보지 않는다. 카나리 시나리오가 가져오지 않는 것은 보지 못한다: Claude Code의 `active_goal`, `conversation_reset`,
+   `system/local_command_output`, `system/notification`, `system/informational`, `system/api_retry`, 거절 한 쌍, 실패한
+   턴의 API 오류, 질문의 답, 플랜 모드; Codex의 압축과 백그라운드 작업. 모델이 어떤 실행에서만 보내는 값이나 필드도 보지
+   못한다(버전마다 시나리오당 한 번만 돌리므로): 그런 변화는 그것을 담은 녹화의 재생 테스트에서 드러나거나, 사람이 만날 때까지
+   드러나지 않는다. 새 도구는 `adapters/frames/`의
    도구 중립 프레임 도구로 녹화한다 (#1498): 녹화기(`CC_RECORD_FRAMES`), 스크러버(`scripts/frames-scrub.mts`), 프로토콜의
    `FrameCodec`을 쓰는 재생기, `SessionHandle` 수준에서 도는 시나리오. 그래서 픽스처는 어댑터 자신이 보내고 받은 그대로다
    (ACP 어댑터의 것은 `scripts/frames-record.mts`가 만든다, [plans/acp-adapter.md](plans/acp-adapter.md) §0.5와 §10).
@@ -1683,7 +1691,7 @@ WantedBy=default.target
 | `centralu serve` | 호스트를 전경에서 `127.0.0.1:<port>`로 띄운다. 종료 코드는 호스트의 것 (깨끗이 멈추면 0) |
 | `centralu serve --port <n>` | 같은 것을 그 포트로. 포트는 기록되어, 플래그 없는 다음 `serve`가 그것을 쓴다 |
 | `centralu serve --detach [--port <n>]` | 이 세션 바깥에서 `serve`를 띄우고, 그 호스트가 hello에 답하면 돌아온다. JSON 한 줄을 찍는다. 이미 돌고 있으면 두 번 띄우지 않고 그렇다고 답한다. 어떻게 띄우는지(setsid, WMI, WSL은 WMI로 만든 `wsl.exe`)와 `serve.log`, `serve.pid`는 영어판 §4.7 |
-| `centralu serve --stop` | 돌고 있는 호스트에 멈추라고 묻고(`host.stop`), 멈출 때까지 기다린 뒤 JSON 한 줄을 찍는다. 윈도우에서 런처를 죽이면 호스트가 정리 없이 끝나기 때문이다 |
+| `centralu serve --stop` | 돌고 있는 호스트에 멈추라고 묻고(`host.stop`), 멈출 때까지 기다린 뒤 JSON 한 줄을 찍는다. 윈도우에서 런처를 죽이면 호스트가 정리 없이 끝나기 때문이다. 시작 중인 호스트(#2150: `--detach`와 런처가 시작하는 동안 각자 `<data>/serve-starting/<pid>.json`에 기록을 둔다)는 먼저 기다렸다가 떠오르면 멈춘다. "돌고 있지 않음"이라 답하고 멈춤 뒤에 호스트가 떠오르게 두지 않는다. 시작 기록이 남은 채 host.lock을 10초 동안 쥔 호스트는 응답하든 않든 멈춘다(듣기 전에 멈춘 호스트, #1903는 끝낸다). 떠오른 호스트는 곧 제 시작을 끝낸다. 죽은 프로세스의 기록이나 120초보다 오래된 기록은 세지 않는다. 멈춤 전체는 45초 안에 끝난다(`STOP_BUDGET_MS`, 창의 60초 안). 기다림이 제 몫을 다 쓰면 serve.pid가 런처를 가리키는 시작은 런처와 그 호스트를 끝내고, 그 밖의 시작은 `starting: true`로 답하며 아무것도 멈추거나 표시하지 않는다. 다루지 않는 경우: 런처가 시작된 뒤 그 런처가 기록을 쓰기 전에 `--detach`가 죽는 순간(프로세스가 뜨는 잠깐) |
 | `centralu serve --connection` | JSON 한 줄을 찍고 끝난다 (아래). `serve.json`이 아직 없으면 만든다. 제한 자격 증명을 싣고 전체 자격 증명은 목록만 싣는다(값은 싣지 않는다, #1405). `--pair <label>`을 붙이면 그 label의 새 전체 자격 증명(`token`, id는 `credential`)을 한 번 찍고 SHA-256만 남긴다. 허브는 연결할 때마다 `hub:<이름>-<키>`로 이것을 실행한다(키는 허브 고유의 무작위 id에서 딴 16진수 8자). `--revoke <id>`는 전체 자격 증명 하나를 거둔다. 추가된 `install` 필드는 `{ managed, current, previous, node }` |
 | `centralu serve --rotate-token` | 포트는 두고 토큰을 바꾼다. 돌고 있는 serve는 재시작할 때까지 옛 토큰을 쓴다 |
 | `centralu serve --help` | 위의 것 |

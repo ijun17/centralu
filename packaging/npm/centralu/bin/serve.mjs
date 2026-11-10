@@ -24,7 +24,7 @@
  * (`serve-autostart.mjs`), the hub's version switch (`serve-switch.mjs`), Windows, WSL and PowerShell (`serve-windows.mjs`), and small helpers
  * (`serve-util.mjs`).
  */
-export { SERVE_STATE_FILE, SERVE_LOG_FILE, SERVE_PID_FILE, serveDataDir, readServeState, ensureServeState, recordServePort, rotateServeToken, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, verifierOf, limitedOf, changeServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, processStartTime, processCreatedAt, lockHolder, lockHolderPid, readServePid, SERVE_STOPPED_FILE, SERVE_LOGS_KEPT, markStopped, readStopped, rotateServeLog } from './serve-files.mjs'
+export { SERVE_STATE_FILE, SERVE_LOG_FILE, SERVE_PID_FILE, serveDataDir, readServeState, ensureServeState, recordServePort, rotateServeToken, pairServe, pairKeyServe, dropVerifierUnder, revokeServe, verifierOf, limitedOf, changeServeState, heldHere, startedByServe, foreignHolder, holderWho, lockHolderIsAlive, processStartTime, processCreatedAt, lockHolder, lockHolderPid, readServePid, SERVE_STOPPED_FILE, SERVE_LOGS_KEPT, markStopped, readStopped, rotateServeLog, SERVE_STARTING_DIR, STARTING_MAX_MS, markStarting, clearStarting, readStarting, liveStarts, startingNow } from './serve-files.mjs'
 export { detachHow, windowsArg, wslCommandLine, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, ownLogon } from './serve-windows.mjs'
 export { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, parseNetstatListening } from './serve-port.mjs'
 export { SERVE_HELP, AUTOSTART_ACTIONS, parseServeArgs, PAIR_LABEL_RE, CREDENTIAL_ID_RE } from './serve-args.mjs'
@@ -35,5 +35,5 @@ export { parseLinkPublicKey, hostLinkPublicKey, signedHostKey, linkTranscript } 
 export { runWindow } from './serve-window.mjs'
 export { AUTOSTART_FILE, AUTOSTART_ENV, autostartHow, autostartUnsupported, pathKey, autostartName, autostartLauncher, systemdUnit, taskActionScript, taskScript, parseTaskAnswer, readAutostartMark, autostartInfo, lingerMessage, runAutostart, startInSignIn } from './serve-autostart.mjs'
 export { printConnection, runServe, rotateToken, revokeCredential } from './serve-run.mjs'
-export { CARRIED_ENV, encodeChildSpec, decodeChildSpec, startDetached, runDetach, runDetachedChild, runStop } from './serve-detach.mjs'
+export { CARRIED_ENV, encodeChildSpec, decodeChildSpec, startDetached, runDetach, runDetachedChild, runStop, STOP_BUDGET_MS, STOP_RESERVE_MS, LOCK_GRACE_MS } from './serve-detach.mjs'
 export { SWITCH_FILE, SWITCH_LOCK, SWITCH_RUNNER, lockIsLive, decodeSwitch, readSwitch, setPointers, prune, storeBackup, storeRestore, hostLogTail, runSwitcher, reconcile, beforeHostStart, gateHostStart, clockOf, RUNNER_ENV, rerunAs, runSwitch, runSwitchRun, runSwitchStatus } from './serve-switch.mjs'

@@ -362,18 +362,23 @@ jobs:
   # which derived the old name, failed the 0.1.0-beta.9 rehearsal on all three Unix platforms.
   # Linux, because it is also where the Unix-only surprises live (dash as sh, relative symlinks,
   # Node 22's EventTarget all failed there first).
+  #
+  # Two jobs, not one (#2153): as one, `pnpm verify` took 11.5 to 17.9 minutes of its 20 (main, 2026-11-09): lint 2.0,
+  # dependency rules 0.1, types 0.8, and vitest 15.0 (805 files, 460 s of collecting and 1,919 s of tests on the
+  # runner's 4 CPUs). This one keeps the name `verify`, which `ci.quickChecks` and the fail fast below name, and runs
+  # the parts of `pnpm verify` before the tests, as steps that each run whatever the one before said, plus the bundle's
+  # comparison with main's (tooling/styles.test.ts); `verify-tests` runs every test in three shards side by side.
   verify:
     name: verify
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # main's history without file contents (a file is fetched when read): tooling/type-aware-lint.test.ts
-          # compares the lint allowlists with main's at the merge base (#1339), and CC_LINT_BASE below makes a
-          # missing base a failure here
+          # main's history without file contents (a file is fetched when read): the lint compares its allowlists
+          # with main's at the merge base (#1339), and CC_LINT_BASE below makes a missing base a failure here
           fetch-depth: 0
           filter: blob:none
 
@@ -391,11 +396,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: node .github/scripts/bundle-base.mjs "$RUNNER_TEMP/bundle-base"
 
-      - run: pnpm verify
+      # `pnpm verify`'s parts before the tests (package.json), each a step of its own
+      - run: pnpm lint
+        env:
+          CC_LINT_BASE: origin/main
+      - if: ${{ !cancelled() }}
+        run: pnpm depcruise
+      - if: ${{ !cancelled() }}
+        run: pnpm typecheck
+
+      - name: The app's JS against main's
+        if: ${{ !cancelled() }}
+        run: pnpm exec vitest run tooling/styles.test.ts
         env:
           CC_BUNDLE_BASE: ${{ runner.temp }}/bundle-base
           CC_BUNDLE_RECORD: ${{ runner.temp }}/bundle-size
-          CC_LINT_BASE: origin/main
 
       # Also when verify failed: main's record is main's size whatever else went wrong, and the runs
       # after it need one (styles.test.ts writes it before comparing)
@@ -410,11 +425,50 @@ jobs:
           # The runs after this one read main's newest record; a long quiet spell on main must not expire it
           retention-days: 90
 
+  # `pnpm verify`'s tests (#2153): every test file, on Linux, in three shards of vitest's own split (`--shard`, by file).
+  # In the quick tier, like `verify` above; `ci.quickChecks` names them as `verify (vitest *)`.
+  verify-tests:
+    name: verify (vitest ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
+        shards: [3]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # main's history without file contents: tooling/type-aware-lint.test.ts and tooling/os-layer.test.ts compare
+          # with main's at the merge base (#1339), and CC_LINT_BASE below makes a missing base a failure here
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: ./.github/actions/setup
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: pnpm test (shard ${{ matrix.shard }}/${{ matrix.shards }})
+        env:
+          CC_LINT_BASE: origin/main
+          # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
+          CC_BUNDLE_COMPARED_BY: verify
+        # styles.test.ts is left to the verify job, which runs the whole file: in a shard its beforeAll built the app with
+        # vite a second time in the run (#2153 review)
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --exclude tooling/styles.test.ts
+
   # Fail fast (2026-10-19, the owner's decision): on a manual run, the merge queue's batches, a failed `verify`
   # cancels the rest of the run at once. Nothing lands from a run whose `verify` failed, and its e2e shards kept the
   # batch, and the runners every other run waits for, another 10 minutes before the queue heard. Which runs:
   # `changes` says (`fail_fast`, .github/scripts/ci-changes.mjs): a manual run, never a pull request's (quick tier
   # keeps every job to its end), never main's.
+  #
+  # `verify` here is both its jobs (#2153): the lint and types, and the test shards (`verify (vitest i/n)`); this waits
+  # for both, and cancels the run when either failed. The cost of two jobs: a lint failure no longer saves the tests' time
+  # (they run beside it), and the cancel comes when the slower of the two has ended, not when the first fails.
   #
   # Its own job, after `verify` has ended, not a step inside it: `verify`'s check stays `failure`, which is how the
   # queue tells this run, `cancelled` as a whole, from one cancelled for nothing (no rerun for a test failure). This
@@ -422,8 +476,8 @@ jobs:
   # concurrency group above is untouched.
   fail-fast:
     name: fail fast
-    needs: [changes, verify]
-    if: ${{ !cancelled() && needs.verify.result == 'failure' && needs.changes.outputs.fail_fast == 'true' }}
+    needs: [changes, verify, verify-tests]
+    if: ${{ !cancelled() && (needs.verify.result == 'failure' || needs.verify-tests.result == 'failure') && needs.changes.outputs.fail_fast == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -515,7 +569,7 @@ jobs:
   #
   # Only the tests that touch the OS (#1599, docs/plans/os-layer.md): those that reach the OS layer, a file still on
   # tooling/os-allowlist.txt or anything else in the shipped code that imports an OS module or asks which OS this is,
-  # picked by the lint rule's own judgement (tooling/os-tests.ts). The rest run once, on Linux, in `verify`.
+  # picked by the lint rule's own judgement (tooling/os-tests.ts). The rest run once, on Linux, in `verify`'s test shards (`verify-tests`).
   windows-tests-unit:
     name: windows tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
@@ -575,7 +629,7 @@ jobs:
   # `ci.quickChecks`, so nothing lands without it.
   # A full run whose files change the host's tests (`host_tests`): the tests of the host, the protocol and tooling/ that
   # reach the OS (the Windows rule, tooling/os-tests.ts, and the tests that make folders in the temp folder, where a Mac
-  # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`.
+  # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`'s test shards (`verify-tests`).
   # A full run where only the window or documents changed runs neither (the step reports skipped, the check passes).
   # Measured on macos-14 (before the move to macos-15) and Node 22.23.2 (2026-10-30, #1704): the quick tier 158 test files, 468 s of file time, the
   # job 5.5 minutes with the install. The whole host alone (491 files) was 564 s of vitest (222 s of it collecting the
@@ -631,7 +685,7 @@ jobs:
           tooling/screen-protocol-rules
 
       # The tests that reach the OS, by the rule Windows picks by (tooling/os-tests.ts), and the tests that make folders in the
-      # temp folder (`--macos`); the rest run once, on Linux, in `verify`. Within the host, the protocol and tooling/
+      # temp folder (`--macos`); the rest run once, on Linux, in `verify`'s test shards (`verify-tests`). Within the host, the protocol and tooling/
       - name: Pick the tests that touch the OS
         if: needs.changes.outputs.host_tests == 'true'
         run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"
@@ -695,7 +749,7 @@ jobs:
   # Time limits (2026-10-19): one shard hung 35 minutes and held a merge batch. A job's limit is its
   # slowest green run of the last 20 full runs with about half again on top, so a hang ends as a
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
-  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20, Windows unit tests 13.1/25 (14.9 in the
+  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20 (17.9 as one job by 2026-11-09, #2153: since then the lint and types job 10 and each of its three test shards 15, about a third of that vitest time each; refresh from the first runs), Windows unit tests 13.1/25 (14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
   # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the

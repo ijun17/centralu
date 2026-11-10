@@ -7,7 +7,7 @@ import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriter, readServePid } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslCommandLine } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -123,91 +123,102 @@ export async function runDetach({
   timeoutMs = 30_000,
   noStartMs = 10_000,
   write = (line) => process.stdout.write(line),
+  // What the folder's host answers (a test's stand-in for the host coming up at a given moment)
+  look = describe,
 }) {
   // Created here, so the token exists before the launcher reads it and `answered` reads it again
   const { dataDir } = serveFolder({ env, home, cliPath, platform })
   const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
   const answered = async (already, as = how) => {
-    const d = await describe({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
+    const d = await look({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
     if (!d?.hostRunning) return false
     write(`${connectionLine({ ...d, detach: { ok: true, how: as, already } })}\n`)
     return true
   }
   if (await answered(true)) return 0
-
-  const log = join(dataDir, SERVE_LOG_FILE)
   /*
-   * One start per log: the earlier ones are kept beside it, three of them (`rotateServeLog`, #1143), and its absence is
-   * how a start that never ran shows. So a log that cannot be moved aside is removed rather than left to read as a start
+   * From here a start is in progress (#2150): a `--stop` meanwhile waits for it rather than find nothing running, write
+   * the stopped mark and leave the host to come up after it. This process's record is removed on every way out; the
+   * launcher it starts writes its own, which covers a launcher still starting when this gave up (`SERVE_STARTING_DIR`)
    */
-  const freshLog = () => rotateServeLog(log)
-
-  /*
-   * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
-   * when nobody is. WMI's process keeps this ssh session's network logon, where Git cannot use the credentials saved in
-   * Windows. A task-started host that does not answer in time is left to the lock: the WMI start below then either
-   * holds the folder or is refused by it, never a second host on it. Which way it went, and why, is one line of
-   * serve.log (#1223): the task's serve writes no serve.log, so that line is written here; a WMI launcher writes its own
-   */
-  let notInSignIn = null
-  if (how === 'wmi') {
-    const s = await signIn({ dataDir, env, home, platform })
-    if (s.started) {
-      const line = `started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`
-      say(line)
-      freshLog()
-      try {
-        writeFileSync(log, `[centralu serve] ${line}\n`)
-      } catch {
-        // the line on stderr is all there is
-      }
-      const t0 = Date.now()
-      while (Date.now() - t0 < signInMs) {
-        if (await answered(false, 'task')) return 0
-        await sleep(250)
-      }
-      notInSignIn = `the host the sign-in task "${s.name}" started did not answer within ${Math.round(signInMs / 1000)} s`
-      // The WMI launcher's first line says so; the task's line goes, so `serve.log.1` keeps the start before this one
-      rmSync(log, { force: true, maxRetries: 5 })
-    } else {
-      notInSignIn = signInMissed(s)
-    }
-    say(`${notInSignIn}: starting the host through WMI${s.reason === 'nosession' ? ', outside any sign-in, where Git cannot use the credentials saved in Windows' : ''}`)
-  }
-
-  freshLog()
-  // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
-  const asked = serveFrom(env, from)
-  const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
-  const startedHow = `through ${how === 'wmi' ? 'WMI' : how === 'wsl' ? 'a WMI-created wsl.exe' : how}${notInSignIn ? `: ${notInSignIn}` : ''}`
-  const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log, start: startedHow })}`]
-  let started
+  markStarting(dataDir)
   try {
-    started = await start({ how, execPath, args, env, cwd })
-  } catch (e) {
-    return fail('failed', `could not start centralu serve in the background: ${e.message}`)
-  }
-  if (!started.ok) return fail(started.blocked ? 'wmi_blocked' : 'failed', started.message)
-  say(`started centralu serve in the background (${how}, pid ${started.pid ?? 'unknown'}); waiting for its host`)
+    const log = join(dataDir, SERVE_LOG_FILE)
+    /*
+     * One start per log: the earlier ones are kept beside it, three of them (`rotateServeLog`, #1143), and its absence is
+     * how a start that never ran shows. So a log that cannot be moved aside is removed rather than left to read as a start
+     */
+    const freshLog = () => rotateServeLog(log)
 
-  let exited
-  started.exited?.then((c) => (exited = c ?? 'unknown'))
-  const t0 = Date.now()
-  while (Date.now() - t0 < timeoutMs) {
-    if (await answered(false)) return 0
-    const why = tail(log)
-    if (exited !== undefined) return fail('exited', `centralu serve exited (${exited}) before its host answered${why ? `:\n${why}` : ''}`)
-    const gone = started.alive?.() === false
-    if (how !== 'setsid' && !existsSync(log) && (gone || Date.now() - t0 > noStartMs)) {
-      // WMI said yes, and nothing ran: the process was stopped before Node started, or hangs (`startDetached`)
-      if (!gone) await started.stop?.()
-      return fail('wmi_blocked', wmiBlockedMessage(gone ? `process ${started.pid} ended before it started` : `nothing started within ${Math.round(noStartMs / 1000)} s`))
+    /*
+     * Windows: in the person's sign-in when someone is signed in (#1224), through the scheduled task, and through WMI only
+     * when nobody is. WMI's process keeps this ssh session's network logon, where Git cannot use the credentials saved in
+     * Windows. A task-started host that does not answer in time is left to the lock: the WMI start below then either
+     * holds the folder or is refused by it, never a second host on it. Which way it went, and why, is one line of
+     * serve.log (#1223): the task's serve writes no serve.log, so that line is written here; a WMI launcher writes its own
+     */
+    let notInSignIn = null
+    if (how === 'wmi') {
+      const s = await signIn({ dataDir, env, home, platform })
+      if (s.started) {
+        const line = `started centralu serve in the Windows sign-in (the scheduled task "${s.name}"); waiting for its host`
+        say(line)
+        freshLog()
+        try {
+          writeFileSync(log, `[centralu serve] ${line}\n`)
+        } catch {
+          // the line on stderr is all there is
+        }
+        const t0 = Date.now()
+        while (Date.now() - t0 < signInMs) {
+          if (await answered(false, 'task')) return 0
+          await sleep(250)
+        }
+        notInSignIn = `the host the sign-in task "${s.name}" started did not answer within ${Math.round(signInMs / 1000)} s`
+        // The WMI launcher's first line says so; the task's line goes, so `serve.log.1` keeps the start before this one
+        rmSync(log, { force: true, maxRetries: 5 })
+      } else {
+        notInSignIn = signInMissed(s)
+      }
+      say(`${notInSignIn}: starting the host through WMI${s.reason === 'nosession' ? ', outside any sign-in, where Git cannot use the credentials saved in Windows' : ''}`)
     }
-    if (gone) return fail('exited', `centralu serve exited before its host answered${why ? `:\n${why}` : ''}`)
-    await sleep(250)
+
+    freshLog()
+    // Where this was asked for from (#1223): the launcher runs outside this ssh session, so it is told
+    const asked = serveFrom(env, from)
+    const childEnv = asked ? { ...env, CENTRALU_STARTED_FROM: JSON.stringify(asked) } : env
+    const startedHow = `through ${how === 'wmi' ? 'WMI' : how === 'wsl' ? 'a WMI-created wsl.exe' : how}${notInSignIn ? `: ${notInSignIn}` : ''}`
+    const args = [cliPath, 'serve', ...(port !== null ? ['--port', String(port)] : []), `${CHILD_FLAG}${encodeChildSpec({ env: childEnv, log, start: startedHow })}`]
+    let started
+    try {
+      started = await start({ how, execPath, args, env, cwd })
+    } catch (e) {
+      return fail('failed', `could not start centralu serve in the background: ${e.message}`)
+    }
+    if (!started.ok) return fail(started.blocked ? 'wmi_blocked' : 'failed', started.message)
+    say(`started centralu serve in the background (${how}, pid ${started.pid ?? 'unknown'}); waiting for its host`)
+
+    let exited
+    started.exited?.then((c) => (exited = c ?? 'unknown'))
+    const t0 = Date.now()
+    while (Date.now() - t0 < timeoutMs) {
+      if (await answered(false)) return 0
+      const why = tail(log)
+      if (exited !== undefined) return fail('exited', `centralu serve exited (${exited}) before its host answered${why ? `:\n${why}` : ''}`)
+      const gone = started.alive?.() === false
+      if (how !== 'setsid' && !existsSync(log) && (gone || Date.now() - t0 > noStartMs)) {
+        // WMI said yes, and nothing ran: the process was stopped before Node started, or hangs (`startDetached`)
+        if (!gone) await started.stop?.()
+        return fail('wmi_blocked', wmiBlockedMessage(gone ? `process ${started.pid} ended before it started` : `nothing started within ${Math.round(noStartMs / 1000)} s`))
+      }
+      if (gone) return fail('exited', `centralu serve exited before its host answered${why ? `:\n${why}` : ''}`)
+      await sleep(250)
+    }
+    const why = tail(log)
+    return fail('timeout', `the host did not answer within ${Math.round(timeoutMs / 1000)} s${why ? `:\n${why}` : ''}`)
+  } finally {
+    clearStarting(dataDir)
   }
-  const why = tail(log)
-  return fail('timeout', `the host did not answer within ${Math.round(timeoutMs / 1000)} s${why ? `:\n${why}` : ''}`)
 }
 
 /** Why the host was not started in the Windows sign-in, from `startInSignIn`'s answer, for serve.log and stderr */
@@ -276,13 +287,89 @@ export async function runStop({
   home,
   entry,
   platform = process.platform,
-  timeoutMs = 30_000,
-  graceMs = 15_000,
+  budgetMs = STOP_BUDGET_MS,
+  graceMs = 10_000,
   kill = (pid, sig) => process.kill(pid, sig),
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
+  const deadline = Date.now() + budgetMs
+  const mark = () => {
+    if (env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, env.CENTRALU_STOP_BY === 'quit' ? 'quit' : 'stop')
+  }
+  /*
+   * A start in progress (#2150, `SERVE_STARTING_DIR`): its host is not up yet, so the folder reads as not running, and
+   * stopped here it would come up after the stop, under a stopped mark. Waited for while it has not taken the folder: a
+   * host that has held host.lock for `LOCK_GRACE_MS` with its start still named is stopped as any running host is,
+   * answering or not (one that hung before it listened, #1903, is ended by `stopServedHost`). The wait leaves the stop its share of the budget; when that is reached, a start
+   * whose launcher is known (serve.pid) is ended, the launcher and the host it started, and any other is said to be
+   * still starting, with nothing stopped
+   */
+  const known = new Map()
+  // Since when a live host holds host.lock while a start is still named: a host that is up ends its start within a moment
+  let heldSince = null
+  const tookTheFolder = () => {
+    const h = lockHolder(dataDir)
+    const key = h ? `lock:${h.pid}:${h.started}:${h.at}` : null
+    if (key && !known.has(key)) known.set(key, isWriter(h) === true)
+    if (!key || !known.get(key) || !isAlive(h.pid)) return (heldSince = null), false
+    heldSince ??= Date.now()
+    return Date.now() - heldSince > LOCK_GRACE_MS
+  }
+  let waiting = false
+  for (let starts = liveStarts(dataDir, known); starts.length > 0 && !tookTheFolder(); starts = liveStarts(dataDir, known)) {
+    if (!waiting) say(`centralu serve is starting a host for ${dataDir}; waiting for it, to stop it`)
+    waiting = true
+    if (Date.now() < deadline - STOP_RESERVE_MS) {
+      await sleep(100)
+      continue
+    }
+    const launcher = readServePid(dataDir)
+    const ending = launcher && starts.some((r) => r.pid === launcher.pid) ? [launcher.hostPid, launcher.pid].filter((p) => Number.isInteger(p) && isAlive(p)) : []
+    if (ending.length === 0) {
+      return answerLine(write, 'stop', { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir}; nothing was stopped` })
+    }
+    for (const pid of ending) {
+      try {
+        kill(pid, platform === 'win32' ? 'SIGKILL' : 'SIGTERM')
+      } catch {
+        // gone in the meantime
+      }
+    }
+    const t1 = Date.now()
+    while (ending.some((p) => isAlive(p)) && Date.now() - t1 < 5_000) await sleep(100)
+    for (const pid of ending.filter((p) => isAlive(p))) {
+      try {
+        kill(pid, 'SIGKILL')
+      } catch {
+        // gone in the meantime
+      }
+    }
+    const gone = !ending.some((p) => isAlive(p))
+    if (gone) mark()
+    return answerLine(write, 'stop', gone
+      ? { ok: true, wasRunning: true, how: 'ended', message: `ended a start that was still in progress (pid ${ending.join(', ')})` }
+      : { ok: false, wasRunning: true, starting: true, message: `centralu serve is still starting a host for ${dataDir}, and pid ${ending.join(', ')} did not end` })
+  }
+  // What is left of the budget: the host is waited for, after its request to stop, for all of it but the grace and the ends that follow
+  const left = deadline - Date.now()
+  const timeoutMs = Math.max(3_000, left - graceMs - 10_000)
   const stopped = await stopServedHost({ dataDir, entry, platform, forUpdate: env.CENTRALU_STOP_FOR === 'update', timeoutMs, graceMs, kill })
-  if (stopped.ok && env.CENTRALU_STOP_BY !== 'hub') markStopped(dataDir, env.CENTRALU_STOP_BY === 'quit' ? 'quit' : 'stop')
+  if (stopped.ok) mark()
   return answerLine(write, 'stop', stopped)
 }
+
+/**
+ * The longest a whole `serve --stop` takes (#2150 review): the window's "Quit completely" gives it 60 s (keeper
+ * `serve_window.rs` `STOP_TIMEOUT`), and so a start waited for and the stop after it fit in this together, with room.
+ * Worst case: the wait up to `STOP_BUDGET_MS - STOP_RESERVE_MS`, then the host asked and waited for (at least 3 s), its
+ * grace after a signal (10 s; Windows 5) and the ends that follow (5 s and 5 s)
+ */
+export const STOP_BUDGET_MS = 45_000
+/**
+ * How long a host may hold host.lock while its start is still named before `--stop` stops it rather than wait: a host that is
+ * up ends its start at its ready line, and `--detach` answers within a look (250 ms) of that; one past this hung
+ */
+export const LOCK_GRACE_MS = 10_000
+/** What the wait for a start leaves of the budget for the stop itself */
+export const STOP_RESERVE_MS = 23_000

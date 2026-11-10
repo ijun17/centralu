@@ -424,7 +424,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('pnpm rem
     shell: 'powershell',
     prepare: async (root, home) => {
       windowsRemoteSsh(root)
-      const zip = windowsNodeZip()
+      const zip = await windowsNodeZip()
       return {
         ssh: join(root, 'ssh.exe'),
         env: (over = {}) => windowsRemoteEnv(home, over),

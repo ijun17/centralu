@@ -1091,7 +1091,7 @@ describe('the main guard blames a commit only for a test that fails again on a r
   it('counts a failure only by the test it names, and by the whole of its name', () => {
     const runs = Array.from({ length: 25 }, (_, i) => ({ id: 1000 - i }))
     const flake = (text: string, extra = {}) => ({ flaked: true, jobs: ['verify'], line: text, ...extra })
-    const earlier = (reruns: Record<string, unknown>, text: string) => earlierFlakes({ reruns, runs, names: ['verify'], line: ` First failure: ${text}` })
+    const earlier = (reruns: Record<string, unknown>, text: string) => earlierFlakes({ reruns, runs, line: ` First failure: ${text}` })
     const same = 'FAIL unit tooling/a.test.ts > waits 5s for the lock'
     expect(earlier({ 999: flake(`${same} 120ms`) }, `${same} 133ms`)).toEqual(['999'])
     // Another test whose name has a duration in it is another test
@@ -1104,6 +1104,8 @@ describe('the main guard blames a commit only for a test that fails again on a r
     // Only the newest 20 of main's runs count: 981 is the 20th, 980 is outside
     expect(earlier({ 981: flake(same) }, same)).toEqual(['981'])
     expect(earlier({ 980: flake(same) }, same)).toEqual([])
+    // The same test in another vitest shard (a file moves shard as files are added) is the same flake
+    expect(earlier({ 999: flake(same, { jobs: ['verify (vitest 1/3)'] }), 998: flake(same, { jobs: ['verify (vitest 2/3)'] }) }, same).sort()).toEqual(['998', '999'])
   })
 
   it('starts the hunt at the newest clean green run older than the window, else the oldest one', () => {

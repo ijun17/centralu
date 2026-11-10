@@ -36,7 +36,7 @@ export function windowsRemote() {
     home = join(root, 'home')
     mkdirSync(home, { recursive: true })
     windowsRemoteSsh(root)
-    const zip = windowsNodeZip()
+    const zip = await windowsNodeZip()
     // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one
     const serve = (v: string, switcher = true) => ({ mjs: fakeServe(v, { realServe: pathToFileURL(SERVE_MJS).href }), serve: SERVE_SHIM, switcher })
     reg = await fakeRegistry([

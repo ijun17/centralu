@@ -112,6 +112,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(gated).toEqual({
       // The quick tier: what catches most problems cheaply (the Windows unit tests: build.yml's comment has the numbers)
       verify: 'quick',
+      'verify-tests': 'quick',
       'windows-tests-unit': 'quick',
       // The host's tests on the release's own Mac, so a macOS-only difference fails the pull request (#1704)
       'macos-tests': 'quick',
@@ -147,6 +148,36 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(marker).not.toMatch(/continue-on-error|always\(\)/)
   })
 
+  // #2153: as one job, `pnpm verify` took up to 17.9 of its 20 minutes, 15 of them vitest
+  it('runs every part of `pnpm verify` on Linux: the lint and types in `verify`, the tests in shards beside it', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> }
+    const parts = pkg.scripts.verify!.split(' && ')
+    // A part added to `pnpm verify` must be placed in one of the two jobs: this list is what they run
+    expect(parts).toEqual(['pnpm lint', 'pnpm depcruise', 'pnpm typecheck', 'pnpm test'])
+    expect(pkg.scripts.test).toBe('vitest run')
+    const checks = job('verify').body
+    expect(names(checks)).toEqual(['verify'])
+    for (const run of parts.slice(0, -1)) expect(checks).toContain(`run: ${run}\n`)
+    expect(checks).not.toContain('pnpm verify')
+    const tests = job('verify-tests').body
+    expect(tests).toMatch(/^ {4}runs-on: ubuntu-24\.04$/m)
+    const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(tests)?.[1])
+    expect(shards).toBeGreaterThan(1)
+    expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(tests)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+    expect(names(tests)).toEqual(Array.from({ length: shards }, (_, i) => `verify (vitest ${i + 1}/${shards})`))
+    // Every test file, split by vitest itself, but styles.test.ts: the verify job runs all of it, and a shard built the app a second time
+    expect(tests).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --exclude tooling/styles.test.ts\n')
+    expect(checks).toContain('run: pnpm exec vitest run tooling/styles.test.ts\n')
+    // Both read main's history (the lint allowlists against main's, #1339), and fail when it is missing
+    for (const body of [checks, tests]) {
+      expect(body).toMatch(/fetch-depth: 0\n {10}filter: blob:none\n/)
+      expect(body).toContain('CC_LINT_BASE: origin/main\n')
+    }
+    // The merge queue lands a quick run only once every check of these passed
+    const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
+    expect(board.ci.quickChecks).toEqual(expect.arrayContaining(['verify', 'verify (vitest *)']))
+  })
+
   // #1035: the one Windows job was the longest of every run, 15 of its 16.5 minutes the unit tests
   it('runs the Windows unit tests in shards beside lint and types, under the check name required sets know', () => {
     const checks = job('windows-tests').body
@@ -179,8 +210,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(keep).toContain('name: windows-test-times-${{ matrix.shard }}\n')
     expect(keep).toContain('path: ${{ runner.temp }}\\vitest-times.json\n')
     // Nowhere else is the selection used: the Linux jobs run every test (the macOS job, and the remote Node's Windows shards below, list their own)
-    const verify = job('verify').body
-    expect(verify).not.toMatch(/CC_TEST_FILES|os-tests/)
+    for (const id of ['verify', 'verify-tests']) expect(job(id).body, id).not.toMatch(/CC_TEST_FILES|os-tests/)
     expect(workflow.match(/CC_TEST_FILES/g)).toHaveLength(3)
   })
 
@@ -273,7 +303,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
     // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
     const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
-    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'ux-tasks', 'verify', 'windows-tests', 'windows-tests-unit'])
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'ux-tasks', 'verify', 'verify-tests', 'windows-tests', 'windows-tests-unit'])
     for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
     expect(limit('e2e')).toBe(25)
     expect(limit('e2e-chromium')).toBe(25)
@@ -417,8 +447,9 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   it('cancels the rest of a manual run once verify has failed, from a job of its own, as `changes` says', () => {
     const ff = job('fail-fast').body
     expect(names(ff)).toEqual(['fail fast'])
-    expect(ff).toMatch(/^ {4}needs: \[changes, verify\]$/m)
-    expect(ff).toContain("if: ${{ !cancelled() && needs.verify.result == 'failure' && needs.changes.outputs.fail_fast == 'true' }}")
+    // `verify` is two jobs since #2153: the lint and types, and the test shards; either failing cancels the run
+    expect(ff).toMatch(/^ {4}needs: \[changes, verify, verify-tests\]$/m)
+    expect(ff).toContain("if: ${{ !cancelled() && (needs.verify.result == 'failure' || needs.verify-tests.result == 'failure') && needs.changes.outputs.fail_fast == 'true' }}")
     expect(ff).toMatch(/^ {4}permissions:\n {6}actions: write\n {4}steps:/m)
     // This run, by its id: never another run of the concurrency group
     expect(ff).toContain('RUN_ID: ${{ github.run_id }}')
@@ -426,6 +457,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(ff).not.toContain('continue-on-error')
     // `verify` itself cancels nothing, so its check stays `failure`: how the queue tells this run from one cancelled for nothing
     expect(job('verify').body).not.toMatch(/run cancel|\/cancel/)
+    expect(job('verify-tests').body).not.toMatch(/run cancel|\/cancel/)
     expect(job('changes').body).toMatch(/^ {6}fail_fast: \$\{\{ steps\.classify\.outputs\.fail_fast \}\}$/m)
   })
 

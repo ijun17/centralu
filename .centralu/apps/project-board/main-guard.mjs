@@ -184,15 +184,17 @@ const failureOf = (line) => {
 }
 
 /**
- * The runs among main's newest `FLAKE_WINDOW` where the same failure (the same job, the same test) passed its rerun: the records in
- * `reruns` that `noteFlakes` marked and no hunt has counted yet, as run ids. A failure that names no test is never the same as another.
+ * The runs among main's newest `FLAKE_WINDOW` where the same failure (the same test) passed its rerun: the records in `reruns` that
+ * `noteFlakes` marked and no hunt has counted yet, as run ids. Keyed by the test, not the job: the vitest shards (`verify (vitest i/3)`)
+ * hand a file to another shard when files are added, and a flake that moved shard is still the same flake (#2153 review). A failure
+ * that names no test is never the same as another.
  */
-export function earlierFlakes({ reruns, runs, names, line }) {
+export function earlierFlakes({ reruns, runs, line }) {
   const test = failureOf(line)
   if (!test) return []
   const recent = new Set(runs.slice(0, FLAKE_WINDOW).map((r) => String(r.id)))
   return Object.entries(reruns ?? {})
-    .filter(([id, r]) => r.flaked && !r.counted && recent.has(id) && failureOf(r.line) === test && (r.jobs ?? []).some((n) => names.includes(n)))
+    .filter(([id, r]) => r.flaked && !r.counted && recent.has(id) && failureOf(r.line) === test)
     .map(([id]) => id)
 }
 
@@ -386,7 +388,7 @@ export async function guardTick({ q, update, now = clock(), renew, act, retract,
   // shows the older red run, and a single slot would have each rerun the other for ever
   const rerun = g.reruns?.[red.id] ?? (g.rerun?.run === red.id ? g.rerun : null)
   // The same test has passed its rerun on main lately, often enough that this is no flake (`FLAKE_REPEATS`): hunted without another rerun
-  const flakes = jobs.kind === 'test' && !rerun ? earlierFlakes({ reruns: g.reruns, runs, names: jobs.names, line }) : []
+  const flakes = jobs.kind === 'test' && !rerun ? earlierFlakes({ reruns: g.reruns, runs, line }) : []
   const repeats = flakes.length >= FLAKE_REPEATS - 1 ? { times: flakes.length + 1, window: FLAKE_WINDOW } : null
   if (repeats) {
     base.repeats = repeats

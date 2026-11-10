@@ -15,7 +15,8 @@ const SID = 's1'
 const n = (msg: unknown) => normalizeMessage(sdk(msg), SID)
 
 describe('streaming deltas', () => {
-  const deltas = (scenario: string, kind: string) => recordedWhere(scenario, (m) => m.type === 'stream_event' && (m.event as { delta?: { type?: string } }).delta?.type === kind)
+  const deltas = (scenario: string, kind: string, version?: string) =>
+    recordedWhere(scenario, (m) => m.type === 'stream_event' && (m.event as { delta?: { type?: string } }).delta?.type === kind, version)
 
   it('each text_delta the CLI streamed becomes a message_delta of the same text, in order', () => {
     const sent = deltas('big-output', 'text_delta').map((m) => (m as unknown as { event: { delta: { text: string } } }).event.delta.text)
@@ -32,7 +33,8 @@ describe('streaming deltas', () => {
    * fact of progress (`estTokens`) becomes an event — an empty delta is still nothing at all.
    */
   it('a thinking_delta\'s token estimate becomes a reasoning_delta, and the closing one with none is nothing', () => {
-    const out = deltas('basic', 'thinking_delta').map((m) => n(m))
+    // The run on 2.1.296, where the model thought before its plain answer (on 2.1.316's it did not: the model's choice)
+    const out = deltas('basic', 'thinking_delta', 'claude-code-2.1.296').map((m) => n(m))
     expect(out).toEqual([[{ type: 'reasoning_delta', sessionId: SID, estTokens: 50 }], []])
   })
 
@@ -228,8 +230,16 @@ describe('tool calls (the actual shape from the spike)', () => {
   it('tool_result decides ok: a read or a command that ran is, a command the person refused is not', () => {
     const results = (scenario: string) => recordedWhere(scenario, (m) => m.type === 'user' && JSON.stringify(m).includes('"tool_result"')).flatMap(n).filter((e) => e.type === 'tool_result')
     expect(results('tools')[0]).toMatchObject({ type: 'tool_result', callId: 'toolu_000001', ok: true, summary: '1\tThe sky is red.\n2\t' })
-    expect(results('approval').map((r) => (r as { ok: boolean }).ok)).toEqual([true, false, true, true])
-    expect(results('approval')[1]).toMatchObject({ summary: 'Denied by user' })
+    // The scenario's own commands: a run on Windows also checks each file with `Test-Path`, read-only and run without asking
+    const touches = new Set(
+      recordedWhere('approval', (m) => m.type === 'assistant')
+        .flatMap((m) => (m as unknown as { message: { content: { type: string; id?: string; input?: { command?: string } }[] } }).message.content)
+        .filter((c) => c.type === 'tool_use' && /^touch /.test(c.input?.command ?? ''))
+        .map((c) => c.id),
+    )
+    const approval = results('approval').filter((r) => touches.has((r as { callId: string }).callId))
+    expect(approval.map((r) => (r as { ok: boolean }).ok)).toEqual([true, false, true, true])
+    expect(approval[1]).toMatchObject({ summary: 'Denied by user' })
   })
 
   it("a command that exits with a code, and a Read of a file that is not there, are failed results in the tool's own words (recorded)", () => {
@@ -374,7 +384,8 @@ describe('a limit (M0 finding: rate_limit_event)', () => {
    * vocabulary only means the test protects our own imagination.
    */
   it('a warning is not a limit — no event for allowed_warning', () => {
-    const warnings = recordedWhere('basic', (m) => m.type === 'rate_limit_event')
+    // The run on 2.1.296, made while the account was near a limit (on 2.1.316's it was not, and the CLI said `allowed`)
+    const warnings = recordedWhere('basic', (m) => m.type === 'rate_limit_event', 'claude-code-2.1.296')
     expect(warnings).not.toHaveLength(0)
     expect(warnings.every((w) => (w as unknown as { rate_limit_info: { status: string } }).rate_limit_info.status === 'allowed_warning')).toBe(true)
     expect(warnings.flatMap(n)).toEqual([])
@@ -410,7 +421,8 @@ describe('the result message (usage, context, completion)', () => {
   })
 
   it('carries usage and cost', () => {
-    const [first] = recordedWhere('basic', (m) => m.type === 'result')
+    // The run on 2.1.296, whose counts these are
+    const [first] = recordedWhere('basic', (m) => m.type === 'result', 'claude-code-2.1.296')
     const cost = (first as unknown as { total_cost_usd: number }).total_cost_usd
     expect(n(first).find((e) => e.type === 'usage_update')).toMatchObject({ tokens: { inputTokens: 1176, outputTokens: 21, cacheReadTokens: 17575, cacheCreationTokens: 3512, costUsd: cost } })
   })
@@ -513,8 +525,11 @@ describe('compaction — saying what is currently happening', () => {
   })
 
   it('compact_boundary becomes a marker (Claude never had this marker until now)', () => {
-    const out = recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'compact_boundary').flatMap(n)
-    expect(out).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: 21274, after: 3318, trigger: 'manual' }])
+    const boundary = recordedWhere('compact', (m) => m.type === 'system' && m.subtype === 'compact_boundary')
+    // The counts are the run's own: the newest recording's, whichever version that is
+    const meta = (boundary[0] as unknown as { compact_metadata: { pre_tokens: number; post_tokens: number } }).compact_metadata
+    expect(meta.pre_tokens).toBeGreaterThan(meta.post_tokens)
+    expect(boundary.flatMap(n)).toEqual([{ type: 'compaction', sessionId: SID, failed: false, before: meta.pre_tokens, after: meta.post_tokens, trigger: 'manual' }])
     // The tool's own at its threshold says so, which Centralu does not take for its compact (#1451); an automatic one needs a window to fill, so it is written by hand
     expect(n({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, post_tokens: 20000 } })).toEqual([
       { type: 'compaction', sessionId: SID, failed: false, before: 900000, after: 20000, trigger: 'auto' },

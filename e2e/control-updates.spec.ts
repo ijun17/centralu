@@ -242,5 +242,10 @@ test('Settings > Updates says what applying stops, and applies by itself only wh
     await expect(settings).not.toContainText(not)
     await expect(settings).not.toContainText('keep going')
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(false))
+    /*
+     * Gone, before the next pass opens it: opened again during its exit, Settings stays mounted, Updates asks nothing on
+     * opening, and the next answer came from the 5 s re-check, as long as this test's wait (failed under load on WebKit)
+     */
+    await expect(settings).toBeHidden()
   }
 })
