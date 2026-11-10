@@ -359,6 +359,61 @@ describe('ending a tree on Windows', () => {
     expect(ended.map((e) => e.pid).sort()).toEqual([10, 11, 20, 21])
   })
 
+  it('trees read from the table are ended side by side, each from its parent down, and every root before any of them', async () => {
+    const rows: WinProcRow[] = [
+      { pid: 10, ppid: 1, created: 1_000 },
+      { pid: 11, ppid: 10, created: 1_100 },
+      { pid: 20, ppid: 1, created: 1_000 },
+      { pid: 21, ppid: 20, created: 1_100 },
+    ]
+    const started: number[] = []
+    const release = new Map<number, () => void>()
+    const os: KillOs = {
+      platform: 'win32',
+      listProcesses: async () => rows,
+      taskkill: (pid) => new Promise<void>((resolve) => (started.push(pid), release.set(pid, resolve))),
+    }
+    killTree(windowsPty(10).handle, 'SIGKILL', os)
+    killTree(windowsPty(20).handle, 'SIGKILL', os)
+    await settle()
+    expect(started).toEqual([10, 20]) // the roots together, and none of what they started yet
+    release.get(10)?.()
+    await settle()
+    expect(started).toEqual([10, 20]) // the second root is still being ended
+    release.get(20)?.()
+    await settle()
+    expect(started).toEqual([10, 20, 11, 21]) // the trees together: 21 does not wait for 11 to end
+    release.get(11)?.()
+    release.get(21)?.()
+    await stopsSettled(1_000)
+  })
+
+  it('a stop that rejects is not an unhandled rejection, and is let go of', async () => {
+    // A table the code cannot read (nothing in the stop catches that) rejects the stop itself
+    const os: KillOs = { platform: 'win32', listProcesses: async () => [null as never], taskkill: async () => {} }
+    const unhandled: unknown[] = []
+    const on = (e: unknown) => unhandled.push(e)
+    process.on('unhandledRejection', on)
+    try {
+      killTree(windowsPty(10).handle, 'SIGKILL', os)
+      await settle()
+      await settle()
+      await stopsSettled(1_000)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', on)
+    }
+  })
+
+  it('two stops of one handle in one turn are one root', async () => {
+    const { os, ended } = fakeOs([{ pid: 10, ppid: 1, created: 1_000 }])
+    const pty = windowsPty(10)
+    killTree(pty.handle, 'SIGKILL', os)
+    killTree(pty.handle, 'SIGKILL', os)
+    await settle()
+    expect(ended).toEqual([{ pid: 10, alone: true }])
+  })
+
   it('a table that cannot be read ends every tree with taskkill /T side by side, not one after another', async () => {
     const started: number[] = []
     const release: (() => void)[] = []
@@ -595,7 +650,7 @@ describe('leftovers of an ended process on Windows', () => {
   })
 
   // #2142 re-check: a shutdown stopping many git calls read the table twice per call, a PowerShell each
-  it('several running trees take one reading of the table: every root is ended, then each tree parents first', async () => {
+  it('several running trees take one reading of the table: every root is ended, then each tree parents first, the trees side by side', async () => {
     const order: unknown[] = []
     const rows = table('300 200 2000\n200 100 1500\n600 500 2100\n')
     const os = {
@@ -607,7 +662,7 @@ describe('leftovers of an ended process on Windows', () => {
       { pid: 500, spawnedAt: 1_000, endRoot: () => void order.push('root 500') },
     ]
     expect(await stopTreesWindows(roots, os)).toEqual([200, 300, 600])
-    expect(order).toEqual(['list', 'root 100', 'root 500', [200, true], [300, false], [600, false]])
+    expect(order).toEqual(['list', 'root 100', 'root 500', [200, true], [600, false], [300, false]]) // 300 after 200, its parent; 600 does not wait for them
   })
 
   it('the leftovers of several ended processes are found from one reading of the table', async () => {

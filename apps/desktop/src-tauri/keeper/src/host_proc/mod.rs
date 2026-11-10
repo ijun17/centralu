@@ -149,9 +149,18 @@ pub const MAX_RESTARTS: u32 = 5;
 /// apply to consecutive failures.
 pub const STABLE_UPTIME: Duration = Duration::from_secs(30);
 
-/// How long a host gets to run its own `shutdown()` after TERM before its group is killed.
-/// The old 300ms finished the process off before its WAL checkpoint had completed.
-pub const STOP_GRACE: Duration = Duration::from_secs(3);
+/// How long the host lets its own shutdown take, whatever is left: it exits after this (agent-host `lifecycle/shutdown.ts`,
+/// `SHUTDOWN_BOUND_MS`). The two are one number in two languages: `shutdown.test.ts` reads this line and fails when they differ.
+pub const HOST_SHUTDOWN_BOUND: Duration = Duration::from_secs(10);
+
+/// How long a host gets to run its own `shutdown()` after the polite request before it is ended. The old 300ms finished the
+/// process off before its WAL checkpoint had completed.
+///
+/// On Windows it is the host's whole bound and a margin: the host waits for the stops of its terminals' trees (a table read
+/// that takes seconds on a busy machine, `STOPS_SETTLE_MS`), and a host ended before they are done leaves a grandchild whose parent
+/// it already ended, which `taskkill /T` cannot find (#2142). A host at rest exits in well under a second, so this only
+/// lengthens a quit that is slow already. On unix the first shot of every stop is sent before the host goes on, and 3 s is enough.
+pub const STOP_GRACE: Duration = if cfg!(windows) { Duration::from_secs(HOST_SHUTDOWN_BOUND.as_secs() + 2) } else { Duration::from_secs(3) };
 
 /// The line that asks a host the window or the keeper started to stop for an update (agent-host `main.ts`, #1895)
 pub const STOP_FOR_UPDATE_LINE: &str = r#"{"op":"stop","forUpdate":true}"#;
@@ -169,9 +178,8 @@ pub const SYSTEM_ENDING_LINE: &str = r#"{"op":"system-ending"}"#;
 pub const SYSTEM_ENDING_LOGOFF_LINE: &str = r#"{"op":"system-ending","logoff":true}"#;
 pub const SYSTEM_ENDING_CANCELLED_LINE: &str = r#"{"op":"system-ending","cancelled":true}"#;
 
-/// How long a host asked to stop for an update gets before it is stopped the usual way. The host ends its shutdown after
-/// 10 s whatever is left (`SHUTDOWN_BOUND_MS`), so this is that and a margin
-pub const STOP_FOR_UPDATE_WAIT: Duration = Duration::from_secs(15);
+/// How long a host asked to stop for an update gets before it is stopped the usual way: the host's own bound and a margin
+pub const STOP_FOR_UPDATE_WAIT: Duration = Duration::from_secs(HOST_SHUTDOWN_BOUND.as_secs() + 5);
 
 /// What the watcher does after one host run ended.
 #[derive(Debug, PartialEq)]

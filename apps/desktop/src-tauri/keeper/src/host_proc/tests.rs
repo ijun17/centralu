@@ -840,3 +840,15 @@ fn the_system_ending_lines_are_the_hosts_control_lines() {
     assert_eq!(said(SYSTEM_ENDING_LOGOFF_LINE), serde_json::json!({ "op": "system-ending", "logoff": true }));
     assert!(!SYSTEM_ENDING_LINE.contains('\n') && !SYSTEM_ENDING_CANCELLED_LINE.contains('\n'));
 }
+
+/// #2141/#2142 under load: a host ended before its own shutdown bound has run out may leave a terminal's grandchild whose parent it
+/// already ended. The wait for the polite request covers that bound on Windows, and an update's wait covers it everywhere; the host's
+/// bound itself is the same number as agent-host's `SHUTDOWN_BOUND_MS` (checked there, in `shutdown.test.ts`).
+#[test]
+fn the_waits_for_a_host_cover_its_own_shutdown_bound() {
+    #[cfg(windows)]
+    assert!(STOP_GRACE > HOST_SHUTDOWN_BOUND, "a Windows host is given its whole shutdown: {STOP_GRACE:?}");
+    assert!(STOP_FOR_UPDATE_WAIT > HOST_SHUTDOWN_BOUND, "{STOP_FOR_UPDATE_WAIT:?}");
+    // The stop for good: the line, then the usual way (`stop_by_line`), well inside what a quit waits for (60 s, `STOP_TIMEOUT`)
+    assert!(STOP_WAIT + STOP_GRACE < Duration::from_secs(30), "{:?}", STOP_WAIT + STOP_GRACE);
+}

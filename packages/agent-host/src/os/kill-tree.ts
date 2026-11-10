@@ -242,7 +242,7 @@ const queued = new Map<KillOs, { handle: KillablePty; pid: number }[]>()
  */
 function enqueue(handle: KillablePty, pid: number, os: KillOs): void {
   const batch = queued.get(os)
-  if (batch) return void batch.push({ handle, pid })
+  if (batch) return void (batch.some((b) => b.pid === pid) || batch.push({ handle, pid }))
   queued.set(os, [{ handle, pid }])
   const stop = new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
     const batch = queued.get(os) ?? []
@@ -250,7 +250,9 @@ function enqueue(handle: KillablePty, pid: number, os: KillOs): void {
     return shootWindows(batch, os)
   })
   stopping.add(stop)
-  void stop.finally(() => stopping.delete(stop))
+  // Both ways out, so a stop that rejects is handled here too, and cannot end the host as an unhandled rejection
+  const done = () => void stopping.delete(stop)
+  stop.then(done, done)
 }
 
 /**
@@ -265,10 +267,12 @@ export const STOP_LIST_MS = 3000
 const TASKKILL_MS = 5000
 
 /**
- * How long the host's shutdown waits for the stops it started (`stopsSettled`): a table read (`STOP_LIST_MS`), then the one
- * `taskkill` the stop that could not read it takes (they run side by side), and a second to spare. Under the host's own
- * bound (`SHUTDOWN_BOUND_MS`, 10 s); past it the shutdown goes on, and a tree the stop did not reach is the one thing the host
- * can no longer do anything about.
+ * How long the host's shutdown waits for the stops it started (`stopsSettled`), under the host's own bound (`SHUTDOWN_BOUND_MS`).
+ * A stop that could not read the table is a table read (`STOP_LIST_MS`) and one `taskkill` for every root side by side (`TASKKILL_MS` at
+ * most), and a second to spare. One that read it is the read, one `taskkill` for the roots, and one for each process of the longest
+ * tree after the one before it, which a tree of a few processes fits (0.2–0.5 s each, measured), and which a starved machine
+ * does not: the table then is what fails first. Past the bound the shutdown goes on, and a tree the stop did not reach is the
+ * one thing the host can no longer do anything about.
  */
 export const STOPS_SETTLE_MS = STOP_LIST_MS + TASKKILL_MS + 1000
 
@@ -600,10 +604,9 @@ export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt?
     const spawnedAt = root.spawnedAt ?? rows.find((r) => r.pid === root.pid)?.created
     return { root, tree: spawnedAt === undefined ? [] : orphansOf(rows, { pid: root.pid, spawnedAt, exitedAt: now }) }
   })
-  for (const { root } of trees) await root.endRoot()
-  const ended: number[] = []
-  for (const { root, tree } of trees) ended.push(...(await endInOrder(tree, root.pid, os)))
-  return ended
+  // Every root before any of what it started, and the trees side by side: only the order inside one tree is the one that matters
+  await Promise.all(trees.map(({ root }) => root.endRoot()))
+  return (await Promise.all(trees.map(({ root, tree }) => endInOrder(tree, root.pid, os)))).flat()
 }
 
 /** `p`, or a rejection as a timed-out run's (`killed`) once `ms` have passed: a fake table that never answers is bounded too */
@@ -623,7 +626,8 @@ function unread(e: unknown): string {
 }
 
 /**
- * Ends `found` (in the order of its parent links, `orphansOf`), one after another: a process that has children among
+
+ * Ends `found` (in the order of its parent links, `orphansOf`), one after another, the one tree: a process that has children among
  * them alone, before them; one with none under it with `/T`, which also takes what it started since. Returns the pids ended
  */
 async function endInOrder(found: readonly WinProcRow[], by: number, os: LeftoverOs): Promise<number[]> {
