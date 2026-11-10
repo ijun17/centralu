@@ -122,13 +122,13 @@ export function worktreeSetupFrame(problems: readonly string[]): string {
 export type WorktreeHost = {
   readonly agentRuns: Map<string, AgentRunWait>
   archiveBusy: (sessionId: string) => boolean
-  autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   cwdOf: (projectId: string | null) => string
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   readonly meta: Map<string, SessionInfo>
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   projectTrusted: (projectId: string | null) => boolean
+  trustGate: (callerId: string | null, projectId: string | null, boundary: string, quiet?: boolean) => string | null
   readonly restartPolicy: RestartPolicy
   readonly resuming: Map<string, Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean; }>>
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
@@ -174,9 +174,8 @@ export class WorktreeSessions {
      * out with those turned off: `gitWorktreeAdd`. Nothing before this point ran the
      * repository's programs (the read above is locked for an untrusted project).
      */
-    if (!this.host.projectTrusted(params.projectId) && !(params.askedBy && this.host.autoBoundaryOpen(params.askedBy, 'worktree in an untrusted project'))) {
-      throw rpcError("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first.")
-    }
+    const untrusted = this.host.trustGate(params.askedBy ?? null, params.projectId, 'checking out a worktree')
+    if (untrusted) throw rpcError(untrusted)
     /*
      * The person can set the branch name (#69) — because the branch name doubles as the session
      * name, it is effectively permanent. If not set, the session id's leading characters are used

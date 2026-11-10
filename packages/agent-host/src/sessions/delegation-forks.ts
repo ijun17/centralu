@@ -9,6 +9,9 @@ import { agentFrame, canMailParent, lowestPreset, presetWithin } from './start-a
 import type { AgentStartFlow, StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf } from './transcript-view.js'
 
+/** A fork's refusal, `No fork of "<name>": <why>.`, for a clause or a whole sentence */
+const noFork = (target: SessionInfo, why: string) => `No fork of "${target.name}": ${why.replace(/\.$/, '')}.`
+
 /** What a fork reaches of the rest of the delegation flow (`DelegationFlow`): start_agent's gates and the child's run */
 export type ForkDelegations = Pick<StartAgentDelegations, 'startDelegation'> & { readonly starts: AgentStartFlow }
 
@@ -30,11 +33,11 @@ export class DelegationForks {
    * trust and the per-project ceiling here; the person's consent when the fork is made (`ensureAgentConsent`).
    */
   forkGateError(callerId: string, target: SessionInfo): string | null {
-    return this.forkTrustError(callerId, target) ?? this.flow.starts.agentCeilingError(callerId, target.projectId ?? '')
+    return this.forkTrustError(callerId, target, true) ?? this.flow.starts.agentCeilingError(callerId, target.projectId ?? '')
   }
 
-  /** `forkGateError` without the ceiling: read before the card and again once it is answered (`forkFor`) */
-  private forkTrustError(callerId: string, target: SessionInfo): string | null {
+  /** `forkGateError` without the ceiling: read before the card and again once it is answered (`forkFor`); `quiet` as `trustGate` */
+  private forkTrustError(callerId: string, target: SessionInfo, quiet: boolean): string | null {
     const caller = this.host.meta.get(callerId)
     if (!caller) return 'the requesting session is gone'
     if (!this.host.meta.has(target.id)) return 'it is no longer here'
@@ -43,10 +46,8 @@ export class DelegationForks {
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
     // A session with no project (the Assistant's child, #853) has no repository to fork from (#994 review)
     if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
-    const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)
-    if (!project) return 'its project is no longer registered'
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"
-    return null
+    if (!this.host.store.projects.listProjects().some((p) => p.id === target.projectId)) return 'its project is no longer registered'
+    return this.host.trustGate(callerId, target.projectId, 'forking a session', quiet)
   }
 
   /**
@@ -66,7 +67,7 @@ export class DelegationForks {
     signal?: AbortSignal,
   ): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo } | { ok: true; queued: Extract<BusyAnswer, { state: 'queued' }> }> {
     const fork = this.host.busyChoices(callerId, target, 'agent_session').find((c) => c.choice === 'fork')!
-    if (!fork.available) return { ok: false, error: `No fork of "${target.name}": ${fork.why}.` }
+    if (!fork.available) return { ok: false, error: noFork(target, fork.why ?? '') }
     const caller = this.host.meta.get(callerId)!
     const adapter = this.host.adapters.get(target.tool)!
     const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)!
@@ -87,8 +88,8 @@ export class DelegationForks {
       signal,
     )
     // The card may have stood a while: the gates are read again, and their reason comes before the card's
-    const refused = this.forkTrustError(callerId, target)
-    if (refused) return { ok: false, error: `No fork of "${target.name}": ${refused}.` }
+    const refused = this.forkTrustError(callerId, target, false)
+    if (refused) return { ok: false, error: noFork(target, refused) }
     if (!consent.ok) return consent
     // Counted and the place taken before the first wait, as for start_agent's child
     const place = this.flow.starts.reservePlace(callerId, project.id)
@@ -134,10 +135,10 @@ export class DelegationForks {
       // Its depth stays even when the requester is deleted later (#897 review)
       recordAgentDepth(this.host, child.id, callerId)
       // Copying and making the session took a while: the gates are read again, with no wait before the delegation
-      const lateGate = this.forkTrustError(callerId, target)
+      const lateGate = this.forkTrustError(callerId, target, true)
       const cap = lateGate ? undefined : lowestPreset(this.host.meta.get(callerId)!.permissionPreset, this.host.meta.get(target.id)!.permissionPreset)
       const late = lateGate
-        ? `No fork of "${target.name}": ${lateGate}.`
+        ? noFork(target, lateGate)
         : cap && !presetWithin(child.permissionPreset, cap)
           ? `No fork of "${target.name}": a preset was lowered to ${cap} while the fork was being made.`
           : null

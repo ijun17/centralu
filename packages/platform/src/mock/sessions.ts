@@ -434,7 +434,7 @@ export class SessionsMock {
       throw refuse(p?.git?.denied ? 'Cannot read this git repository — grant folder access and try again' : 'Worktrees need a git repository. This directory is not one.')
     }
     if (!p.trusted) {
-      throw refuse("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first.")
+      throw refuse(`Project "${p.name}" is not trusted, so checking out a worktree is refused — trust it from the project menu.`)
     }
     const requested = params.worktreeBranch?.trim()
     if (requested && !validBranchName(requested)) throw refuse(`Not a valid branch name: ${requested}`)

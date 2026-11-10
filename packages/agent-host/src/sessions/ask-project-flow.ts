@@ -60,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -143,10 +143,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (trust && this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, quiet ? undefined : 'delegate from an untrusted project')) {
-      return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
-    }
-    return null
+    return trust ? this.host.trustGate(callerId, caller.projectId, 'asking another project', quiet) : null
   }
 
   /** The project asked is still registered: the person may remove it while its card stands */

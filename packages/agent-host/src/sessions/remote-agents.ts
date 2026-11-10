@@ -17,7 +17,7 @@ import type { LinkedEvent } from './linked-reports.js'
 import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
-import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS, UNTRUSTED_START } from './start-agent-terms.js'
+import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
 
@@ -169,7 +169,7 @@ export const REMOTE_AGENTS_KEY = 'remote_agents'
  */
 export type RemoteAgentsHost = Pick<
   DelegationHost,
-  'hostCards' | 'autoBoundaryOpen' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
+  'hostCards' | 'autoBoundaryOpen' | 'trustGate' | 'children' | 'emit' | 'linkedReader' | 'meta' | 'store' | 'tellSession' | 'uiPreferences' | 'files' | 'linkedReports' | 'settleLinkedTurn'
 >
 
 /**
@@ -405,7 +405,8 @@ export class RemoteAgents {
     // Said, and an `auto` caller's crossing logged, before anything is asked, as by a local start's first gate
     const project = this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
-    if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) return { ok: false, error: UNTRUSTED_START }
+    const untrusted = this.host.trustGate(callerId, project.id, 'starting agents')
+    if (untrusted) return { ok: false, error: untrusted }
     const refused = this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
     // Counted under the caller's project, as a local child is (#1038); checked before anything is asked

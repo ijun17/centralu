@@ -135,7 +135,7 @@ describe('projects', () => {
       await rpc('files.search', { projectId, query: 'new' })
       await expect(
         rpc('agents.createSession', { projectId, cwd: planted.dir, tool: 'claude', worktree: true }),
-      ).rejects.toThrow(/trusted project/)
+      ).rejects.toThrow(/is not trusted, so checking out a worktree is refused/)
       expect(planted.ran()).toEqual([])
 
       await rpc('projects.setTrusted', { projectId, trusted: true })

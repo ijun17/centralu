@@ -7,13 +7,14 @@ import { rpcError } from '../rpc-error.js'
 import { atAdoptedFolder } from '../user-app-adoption.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { assistantHome } from './assistant-home.js'
+import { ASK_THE_PERSON } from './start-agent-terms.js'
 import type { MergeChecks } from './merge-checks.js'
 
 /**
  * What the project registry reaches of the session manager (#1143), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type ProjectRegistryHost = Pick<DelegationHost, 'store' | 'emit' | 'firstTool'> & {
+export type ProjectRegistryHost = Pick<DelegationHost, 'store' | 'emit' | 'firstTool' | 'autoBoundaryOpen'> & {
   /** Root under which worktrees are created, one of "our own folders" (`folderRoots`) */
   readonly worktreeRoot: string
   /** Merge detection (#69, merge-checks.ts), started without waiting for it */
@@ -52,6 +53,18 @@ export class ProjectRegistry {
   projectTrusted(projectId: string | null): boolean {
     if (!projectId) return false
     return this.host.store.projects.projectRoots().some((p) => p.id === projectId && p.trusted)
+  }
+
+  /**
+   * The project-trust gate (#2159): null when the project is trusted or the caller is `auto` (`autoBoundaryOpen`, a
+   * session still starting included), else the one refusal. `boundary` names what crosses, in the refusal and in the
+   * log line each crossing writes; `quiet` for a re-read of a crossing already logged. A null caller is the person.
+   */
+  trustGate(callerId: string | null, projectId: string | null, boundary: string, quiet = false): string | null {
+    if (this.projectTrusted(projectId)) return null
+    const name = this.projectRow(projectId)?.name ?? projectId
+    if (callerId && this.host.autoBoundaryOpen(callerId, quiet ? undefined : `${boundary} (untrusted project "${name}")`)) return null
+    return `Project "${name}" is not trusted, so ${boundary} is refused — ${callerId ? `the person can trust it from the project menu. ${ASK_THE_PERSON}` : 'trust it from the project menu.'}`
   }
 
   /**

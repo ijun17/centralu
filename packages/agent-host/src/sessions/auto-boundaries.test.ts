@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelOption, PermissionPreset } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { ASK_THE_PERSON } from './start-agent-terms.js'
 
 const DEPTH_SETTING = 'How deep agents may start agents'
 
@@ -134,6 +135,19 @@ describe('auto Centralu boundaries (#603)', () => {
       ok: false,
       error: expect.stringContaining('not trusted'),
     })
+  })
+
+  it('opens the project-trust gate for a session still starting under auto, as its created preset, and logs it (#2159)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await w.mgr.setProjectTrusted(w.caller.id, false)
+    // Until its row is saved, a new session's preset is only in `starting` (#1638)
+    w.mgr.apps.starting.set('unborn-auto', { permissionPreset: 'auto', profile: 'reader' })
+    w.mgr.apps.starting.set('unborn-normal', { permissionPreset: 'normal', profile: 'reader' })
+    expect(w.mgr.projectRegistry.trustGate('unborn-auto', w.caller.id, 'attaching apps')).toBeNull()
+    expect(w.mgr.projectRegistry.trustGate('unborn-normal', w.caller.id, 'attaching apps')).toBe(
+      `Project "${w.caller.name}" is not trusted, so attaching apps is refused — the person can trust it from the project menu. ${ASK_THE_PERSON}`,
+    )
+    expect(log.mock.calls.map((c) => String(c[0]))).toContain(`[permissions] auto session unborn-auto: attaching apps (untrusted project "${w.caller.name}") allowed`)
   })
 
   /*

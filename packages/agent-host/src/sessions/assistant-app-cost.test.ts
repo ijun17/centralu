@@ -79,6 +79,10 @@ function world(rootApps: number, extra: FakeApp[] = []): World {
       permissions: { getProjectConsent: () => null },
     },
     session: (id) => (id === ORCH.id ? ORCH : null),
+    // The Assistant has no project for the trust gate to read (#1205)
+    trustGate: () => {
+      throw new Error('the Assistant passed the project-trust gate')
+    },
     projects: () => projects,
     ensureAccess: async () => ({ ok: false, error: 'no card in this test' }),
     attachedChanged: (id) => {

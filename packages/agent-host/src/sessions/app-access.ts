@@ -63,10 +63,12 @@ export type AppAccessDeps = {
   hub: SessionAppsHub
   /** The manager reads the calling session's preset at each boundary. */
   boundaryOpen?(sessionId: string, boundary?: string): boolean
+  /** The project-trust gate (`ProjectRegistry.trustGate`, #2159) */
+  trustGate(sessionId: string, projectId: string, boundary: string, quiet?: boolean): string | null
   store: AppAccessStore
   /** The session as decision 4 sees it, or null for one that gets no apps at all (a session an app stood up) */
   session(sessionId: string): AppSessionKey | null
-  projects(): readonly { id: string; name: string; trusted: boolean }[]
+  projects(): readonly { id: string; name: string }[]
   /**
    * Asks the person for this pair of projects, unless an "always" is remembered (part B's
    * `ensureProjectAccess`): the consent card in the calling session, Allow once / Always / Deny.
@@ -139,7 +141,8 @@ export class AppAccess implements OnDemandApps {
     // The Assistant (#1205): a user-folder app, or a root app of a trusted project, and no other
     if (isAssistantKind(session.kind)) return app.projectId === null || (app.root === true && app.status !== 'untrusted')
     const from = session.projectId
-    if (from === null || (!this.projectTrusted(from) && !this.deps.boundaryOpen?.(session.id))) return false
+    // Re-read on every count: the crossing was logged when the app was attached
+    if (from === null || this.deps.trustGate(session.id, from, 'attaching apps', true)) return false
     // A user-folder app, or another project's root app (#1141, which took the user-folder app's place): no switch, no card
     if (app.projectId === null) return true
     // Another project's root app follows its project's trust (owner, #1141): never one of an untrusted project, even under auto
@@ -301,10 +304,8 @@ export class AppAccess implements OnDemandApps {
     // The Assistant attaches the root apps (#1205): it has no project whose trust would gate it
     if (isAssistantKind(session.kind)) return { ok: true, session }
     if (session.projectId === null) return { ok: false, error: 'Only a session in a project can attach apps from other projects.' }
-    if (!this.projectTrusted(session.projectId) && !this.deps.boundaryOpen?.(sessionId, 'attach from an untrusted project')) {
-      return { ok: false, error: "This session's project is not trusted, so it cannot attach apps — the person can trust it from the project menu." }
-    }
-    return { ok: true, session }
+    const untrusted = this.deps.trustGate(sessionId, session.projectId, 'attaching apps')
+    return untrusted ? { ok: false, error: untrusted } : { ok: true, session }
   }
 
   /**
@@ -374,10 +375,6 @@ export class AppAccess implements OnDemandApps {
 
   private projectName(id: string): string {
     return this.deps.projects().find((p) => p.id === id)?.name ?? id
-  }
-
-  private projectTrusted(id: string): boolean {
-    return this.deps.projects().find((p) => p.id === id)?.trusted === true
   }
 
   /** The app's agent tools for the tool result — started here if never listed, within the hub's cap; empty on failure */

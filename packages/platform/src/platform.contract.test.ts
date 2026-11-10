@@ -653,7 +653,7 @@ describe.each([
       const empty = await h.platform.projects.create('fresh', parent)
       await expect(worktree(empty)).rejects.toThrow(/need a git repository/)
       const r = await h.platform.projects.add(repo)
-      await expect(worktree(r)).rejects.toThrow(/need a trusted project/)
+      await expect(worktree(r)).rejects.toThrow(/^Project "[^"]+" is not trusted, so checking out a worktree is refused — trust it from the project menu\.$/)
       await h.platform.projects.setTrusted(r.id, true)
       await expect(worktree(r, 'bad..name')).rejects.toThrow('Not a valid branch name: bad..name')
     })

@@ -514,6 +514,20 @@ describe('requests to a busy session (#677)', () => {
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
     })
 
+    it('under auto, forks in an untrusted project and logs that crossing once (#2159)', async () => {
+      const { a, b } = await busyChild('auto')
+      await w.mgr.setProjectTrusted(w.caller.id, false)
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read it', ifBusy: 'fork_read' })
+      await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a))
+      const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
+      await w.until(() => handleOf(fork.id).sent.length === 1)
+      handleOf(fork.id).answer('read')
+      expect(await forking).toMatchObject({ ok: true, via: 'fork', forkedFrom: a })
+      const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('forking a session'))
+      expect(crossed).toEqual([`[permissions] auto session ${b}: forking a session (untrusted project "${w.caller.name}") allowed`])
+    })
+
     /*
      * A fork starts an agent, so it keeps to the agent depth (#867) under every preset, auto included: the requester B is
      * itself a child here, and A is B's child the person is using.

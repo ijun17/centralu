@@ -1115,6 +1115,7 @@ export class SessionManager {
       projectInfo: (...a) => self.projectRegistry.projectInfo(...a),
       projectRow: (...a) => self.projectRegistry.projectRow(...a),
       projectTrusted: (...a) => self.projectRegistry.projectTrusted(...a),
+      trustGate: (...a) => self.projectRegistry.trustGate(...a),
       queuedOf: (...a) => self.queue.queuedOf(...a),
       get queue() {
         return self.queue
@@ -1278,9 +1279,9 @@ export class SessionManager {
     return centraluToolsFor(this.seat(), assistantId, scopeIds, ownProject, hubView)
   }
 
-  /** The caller's own preset, read at the boundary, never its project's or parent's preset. */
+  /** The caller's own preset, read at the boundary, never its project's or parent's; one still starting has its created one (#2159) */
   private autoBoundaryOpen(sessionId: string, boundary?: string): boolean {
-    if (this.meta.get(sessionId)?.permissionPreset !== 'auto') return false
+    if ((this.meta.get(sessionId) ?? this.apps.starting.get(sessionId))?.permissionPreset !== 'auto') return false
     if (boundary) console.error(`[permissions] auto session ${sessionId}: ${boundary} allowed`)
     return true
   }

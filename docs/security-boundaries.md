@@ -798,7 +798,8 @@ would. `normal` keeps its meaning (the person approves each step).
 ### When the person is asked
 
 "Open" means the calling session's own `auto` preset opens that permission boundary (#603),
-read at call time by `SessionManager.autoBoundaryOpen`; auto allowances are logged, without
+read at call time by `SessionManager.autoBoundaryOpen` (a session still starting by the preset it was created with,
+#2159; project trust through `ProjectRegistry.trustGate`); auto allowances are logged, without
 writing remembered consents. Tool profiles, same-project scope, valid inputs, app sharing,
 and the target's own preset still apply. Global bypass under `normal` does not open host boundaries.
 "Allowed" runs without a card, "asks" raises a card in the calling session, "refused" fails the call

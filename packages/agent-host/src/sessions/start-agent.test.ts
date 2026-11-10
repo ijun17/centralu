@@ -512,7 +512,7 @@ describe('starting another agent in the same project', () => {
       w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.inputs.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
-      expect(told(s, requestId)).toContain('no longer trusted')
+      expect(told(s, requestId)).toContain('is not trusted, so starting agents is refused')
       expect(childrenOf(s)).toEqual([])
     })
 
@@ -531,7 +531,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => making)
       w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
-      expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('no longer trusted') })
+      expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so starting agents is refused') })
       expect(childrenOf(s)).toEqual([])
       const reached = [...w.adapters.get('claude')!.handles.values()].filter((h) => h.sent.some((t) => t.includes('write the parser')))
       expect(reached).toEqual([])

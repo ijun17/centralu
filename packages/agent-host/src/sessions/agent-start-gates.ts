@@ -2,7 +2,7 @@ import { isAssistantKind } from '@cc/protocol'
 import { agentDepthRefusal } from './agent-depth.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AGENT_CEILING } from './start-agent.js'
-import { ASK_THE_PERSON, ASSISTANT_PLACE } from './start-agent-terms.js'
+import { ASSISTANT_PLACE } from './start-agent-terms.js'
 import { FILL, namedCall } from './tool-seats.js'
 
 /**
@@ -80,14 +80,12 @@ export class AgentStartGates {
  * project (`null`) has none registered. Nothing is logged: an `auto` caller's crossing into an untrusted project was
  * logged once, at the start's first gate.
  */
-export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' | 'children' | 'uiPreferences'>, callerId: string, projectId: string | null): string | null {
+export function agentStartGateError(host: Pick<DelegationHost, 'meta' | 'store' | 'children' | 'uiPreferences' | 'trustGate'>, callerId: string, projectId: string | null): string | null {
   const caller = host.meta.get(callerId)
   if (!caller) return 'The session that asked is no longer here.'
   // The Assistant's place is no project (#853): nothing to be registered or trusted
   if (projectId === ASSISTANT_PLACE && isAssistantKind(caller.kind)) return agentDepthRefusal(host, callerId, 'start agents')
   const now = host.store.projects.listProjects().find((p) => p.id === projectId)
   if (!now) return 'This session\'s project is no longer registered.'
-  const auto = caller.permissionPreset === 'auto'
-  if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
-  return agentDepthRefusal(host, callerId, 'start agents')
+  return host.trustGate(callerId, now.id, 'starting agents', true) ?? agentDepthRefusal(host, callerId, 'start agents')
 }

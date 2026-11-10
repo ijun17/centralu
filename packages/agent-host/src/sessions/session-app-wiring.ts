@@ -31,7 +31,7 @@ export const ROOT_APPS_NOTICE =
  * What the app wiring reaches of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBoundaryOpen' | 'builderRefOf' | 'ensureProjectAccess' | 'handles' | 'meta' | 'onEvent' | 'store'> &
+export type SessionAppWiringHost = Pick<DelegationHost, 'adapters' | 'autoBoundaryOpen' | 'trustGate' | 'builderRefOf' | 'ensureProjectAccess' | 'handles' | 'meta' | 'onEvent' | 'store'> &
   Pick<AppSessionsHost, 'defaultToolFor'> &
   Pick<SessionTrashHost, 'restartPolicy'> &
   Pick<RestartHost, 'restartSession'> &
@@ -118,7 +118,8 @@ export class SessionAppWiring {
       },
     })
     this.appAccess = new AppAccess({
-      boundaryOpen: (id, boundary) => this.starting.get(id)?.permissionPreset === 'auto' || this.host.autoBoundaryOpen(id, boundary),
+      boundaryOpen: (id, boundary) => this.host.autoBoundaryOpen(id, boundary),
+      trustGate: (...a) => this.host.trustGate(...a),
       hub: this.appsHub,
       store: this.host.store,
       session: (id) => {
@@ -126,7 +127,7 @@ export class SessionAppWiring {
         if (!m || this.isAppAgentSession(m)) return null
         return { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.host.builderRefOf(m) }
       },
-      projects: () => this.host.store.projects.listProjects().map((p) => ({ id: p.id, name: p.name, trusted: p.trusted })),
+      projects: () => this.host.store.projects.listProjects().map((p) => ({ id: p.id, name: p.name })),
       ensureAccess: (id, to, what, signal) => this.host.ensureProjectAccess(id, to, 'apps', what, signal),
       attachedChanged: (id) => this.sessionAppsChanged(id),
       ...(opts?.toolListWaitMs !== undefined ? { toolListWaitMs: opts.toolListWaitMs } : {}),

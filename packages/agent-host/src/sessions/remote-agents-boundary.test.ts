@@ -7,6 +7,7 @@ import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
+import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
 
 /**
  * The boundary of a child on a linked machine (#1038 review, RV13): the person may use the same session on that
@@ -199,7 +200,7 @@ class Hub {
       keepsOverLoss: (id: string) => this.agents.keepsOverLoss(id),
       keepsTurnOverLoss: (id: string) => this.agents.keepsTurnOverLoss(id),
     } as unknown as LinkedReportsHost)
-    this.agents = new RemoteAgents({
+    const host = {
       children: this.children,
       store: this.store,
       linkedReader: reader,
@@ -213,7 +214,10 @@ class Hub {
       hostCards: { askHost: async () => 'allow' },
       files: { projectOrigin: async () => 'https://github.com/me/app' },
       ...this.more,
-    } as unknown as RemoteAgentsHost, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
+    } as unknown as RemoteAgentsHost
+    // The manager's project-trust gate over this host's store and its `auto` (#2159)
+    const registry = new ProjectRegistry(host as unknown as ProjectRegistryHost)
+    this.agents = new RemoteAgents({ ...host, trustGate: (...a) => registry.trustGate(...a) }, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
     this.agents.restore()
   }
 
@@ -1137,7 +1141,7 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
 
   it('refuses a start whose project the person stopped trusting while its card stood, in the words of a local start', async () => {
     boot({ hostCards: { askHost: async () => (store.projects.setProjectTrusted('p1', false), 'allow') } })
-    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is no longer trusted, so it cannot start agents.") })
+    expect(await hub.start()).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so starting agents is refused') })
     expect(machine.sends).toBe(0)
   })
 
@@ -1150,14 +1154,14 @@ describe('what a start and a send on a linked machine rest on in the caller', ()
     await flush()
     expect(await hub.act('send', { text: 'more work' })).toMatchObject({ ok: true, state: 'working' })
     expect(machine.fromHub).toHaveLength(3)
-    const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('start in an untrusted project'))
-    expect(crossed).toEqual(['[permissions] auto session h1: start in an untrusted project allowed'])
+    const crossed = log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('starting agents'))
+    expect(crossed).toEqual(['[permissions] auto session h1: starting agents (untrusted project "p") allowed'])
   })
 
   // Who may start, and send, in which project (RV13): each condition, on each path that reads it, refused or let through
   const CONDITIONS: Record<string, { set: () => void; refused: string | null }> = {
     'a trusted project, normal': { set: () => {}, refused: null },
-    'an untrusted project, normal': { set: () => store.projects.setProjectTrusted('p1', false), refused: 'trusted, so it cannot start agents' },
+    'an untrusted project, normal': { set: () => store.projects.setProjectTrusted('p1', false), refused: 'is not trusted, so starting agents is refused' },
     'an untrusted project, auto': { set: () => (store.projects.setProjectTrusted('p1', false), asAuto()), refused: null },
     'its project no longer registered': { set: () => hub.meta.set(caller.id, { ...caller, projectId: 'p-gone' }), refused: 'no longer registered' },
     'at the agent depth': { set: () => store.settings.setAppSetting(agentDepthKey(caller.id), '9'), refused: AGENT_DEPTH_SETTING },

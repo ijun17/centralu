@@ -48,7 +48,7 @@ describe('the gates read before anything is asked', () => {
     const flow = new AskProjectFlow(hostWith({
       meta, children, store,
       uiPreferences: () => ({ agentDepth }) as never,
-      autoBoundaryOpen: (id, boundary) => (opened.push(`${id}:${boundary ?? ''}`), true),
+      trustGate: (id, _projectId, boundary) => (opened.push(`${id}:${boundary}`), null),
     }))
     // No depth saved reads as 1; auto is never asked about the depth
     expect(flow.askGateError('asked')).toMatch(/^This session is 1 level below a session the person started, and "How deep agents may start agents" in Settings → Agents is 1, so it cannot ask a project\./)
@@ -56,9 +56,9 @@ describe('the gates read before anything is asked', () => {
     expect(flow.askGateError('asked')).toMatch(/so it cannot ask a project/)
     expect(opened).toEqual([])
     agentDepth = 2
-    // Past the depth, the project's trust is the next gate (the store has no such project: not trusted, auto opens it)
+    // Past the depth, the project's trust is the next gate
     expect(flow.askGateError('asked')).toBeNull()
-    expect(opened).toEqual(['asked:delegate from an untrusted project'])
+    expect(opened).toEqual(['asked:asking another project'])
   })
 
 })

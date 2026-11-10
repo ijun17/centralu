@@ -741,7 +741,7 @@ describe('asking another project', () => {
     const s = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const r = await w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
-    expect(!r.ok && r.error).toContain("This session's project is not trusted, so it cannot ask another project")
+    expect(!r.ok && r.error).toContain(`Project "${w.caller.name}" is not trusted, so asking another project is refused`)
     expect(w.card(s)).toBeUndefined()
     expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toHaveLength(1)
     expect(handleOf(targetSession)!.sent).toEqual([])
@@ -788,7 +788,7 @@ describe('asking another project', () => {
       await w.until(() => !!w.card(s))
       void w.mgr.setProjectTrusted(w.caller.id, false)
       expect(w.card(s)).toBeUndefined()
-      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
       expect(handleOf(targetSession)!.sent).toEqual([])
     })
 
@@ -804,7 +804,7 @@ describe('asking another project', () => {
       void p.then(() => (settled = true))
       await w.until(() => settled || handleOf(targetSession)!.sent.length > 0)
       expect(handleOf(targetSession)!.sent).toEqual([])
-      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
     })
 
     it('withdraws the card when the asked project is removed, and the call reads a clean refusal', async () => {
@@ -869,12 +869,12 @@ describe('asking another project', () => {
       void w.mgr.setProjectTrusted(w.caller.id, false)
       wake()
       expect(await delivered()).toEqual([])
-      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('is not trusted, so asking another project is refused') })
     })
 
     /** How many times auto's open trust boundary was logged for an ask (`autoBoundaryOpen`) */
     const boundaryLogs = (log: { mock: { calls: unknown[][] } }) =>
-      log.mock.calls.filter((c) => String(c[0]).includes('delegate from an untrusted project allowed')).length
+      log.mock.calls.filter((c) => String(c[0]).includes('asking another project (untrusted project')).length
 
     it('is still delivered for an auto caller whose project loses trust while the asked session wakes, and says so once (#606)', async () => {
       const log = vi.spyOn(console, 'error')
