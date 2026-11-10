@@ -116,7 +116,7 @@ describe('a session stops without answering a question', () => {
     expect(owed.noticesTo(A)).toHaveLength(1)
   })
 
-  it("a starter owed the turn's report the start dropped is told whoever's turn it was, and woken unless the same quit cut it", () => {
+  it("a starter owed the turn's report the start dropped (a mark with no task row: an older build's, or a crash between the mark and the task row) is told whoever's turn it was, and woken unless the same quit cut it", () => {
     const w = stopWorld()
     w.startTurn(B, null, { by: 'person' })
     w.db.prepare(`UPDATE mail_turns SET started_by = 'person' WHERE turn_seq = 1`).run()

@@ -392,7 +392,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(store.messages.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
-  it('the next start tells a starter that delegated without waiting, once per child, and only while the starter exists', async () => {
+  it('the next start tells a starter that delegated without waiting (a report mark with no task row, as an older build left it), once per child, and only while the starter exists', async () => {
     // This host's mail is not wired: the delegation wrote no task, so the starter is owed nothing by its child
     const a = host()
     const { parent, child, project } = await parentAndChild(a)

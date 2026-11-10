@@ -266,6 +266,7 @@ export class StopNotices {
   }
 
   /** `stopped`'s stop, to the session that started it: once per stop; owed nothing, woken only from a turn; owed the turn's report, woken (`sessionsStopped`) */
+  // `reportOwed` is reached by a report mark with no task row (an older build's, or a crash between the mark and the task row); #1948 step 3 deletes it together with the report marks
   private tellStarter(starter: string, stopped: string, why: StopWhy, turnSeq: number | null, reportOwed: boolean): void {
     if (parseAddress(starter)?.kind !== 'session') return
     const said = this.quoteFor(stopped, starter, turnSeq)
