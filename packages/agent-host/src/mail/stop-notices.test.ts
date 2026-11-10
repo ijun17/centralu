@@ -353,6 +353,26 @@ describe('a session stops without answering a question', () => {
     }
   })
 
+  it('a stop with no turn on record still holds the sender an older path may tell: told by it, no notice; missed by it, one notice', () => {
+    for (const reported of [true, false]) {
+      const w = stopWorld()
+      const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
+      expect(w.stops.sessionStopped(B, 'error', { turnSeq: null, held: [A] })).toBe(1)
+      expect(w.noticesTo(A), String(reported)).toEqual([])
+      w.stops.oldPathEnded(B, A, reported)
+      expect(w.noticesTo(A), String(reported)).toHaveLength(reported ? 0 : 1)
+      expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'error', toldAt: w.clock.t })
+    }
+  })
+
+  it('the starter is told once per stop when no turn is on record: the same stop again, later, writes no second notice', () => {
+    const w = stopWorld()
+    w.stops.sessionStopped(B, 'network', { turnSeq: null, starter: A })
+    w.clock.t += 5
+    w.stops.sessionStopped(B, 'network', { turnSeq: null, starter: A })
+    expect(w.startersNotices(A)).toHaveLength(1)
+  })
+
   it('a reply after the stop still answers the question: the row was released, not settled', () => {
     const w = stopWorld()
     const q = w.ask(A, B)

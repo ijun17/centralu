@@ -853,7 +853,7 @@ export class MessageService {
           released++
           owed.add(m.sender)
           if (told?.includes(m.sender)) this.records.markTold([{ messageId: row.messageId, recipient: address }], now)
-          else if (turnSeq === null || !held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, turnSeq, now)) senders.add(m.sender)
+          else if (!held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, turnSeq, now)) senders.add(m.sender)
         }
         const party = parseAddress(address)
         const persons = party?.kind === 'session' && turnSeq !== null && this.records.turn(party.sessionId, turnSeq)?.startedBy === 'person'
@@ -884,13 +884,19 @@ export class MessageService {
    * Holds a released row's notice for an older report path (`oldPathEnded`), with the stopped session's words as they are now, so a late notice
    * quotes the cut turn. One stop of a pair is held at a time: a later stop's rows are told now (a double notice at worst, never a lost one)
    */
-  private holdFor(stopped: string, sender: string, messageId: string, turnSeq: number, now: number): boolean {
+  private holdFor(stopped: string, sender: string, messageId: string, turnSeq: number | null, now: number): boolean {
     const key = oldPathKey(stopped, sender)
     const open = this.oldPathsOpen.get(key)
     if (open && open.at !== now) return false
     if (open) open.rows.push({ messageId, recipient: stopped })
     else this.oldPathsOpen.set(key, { at: now, rows: [{ messageId, recipient: stopped }], said: this.quoteFor(stopped, sender, turnSeq) })
     return true
+  }
+
+  /** The latest turn the mailbox recorded of a session address, 0 when none */
+  private latestTurnSeq(address: string): number {
+    const party = parseAddress(address)
+    return party?.kind === 'session' ? this.records.nextTurnSeq(party.sessionId) - 1 : 0
   }
 
   /** What `stopped`'s stop notice to `sender` quotes of its cut turn `turnSeq` (owner, #1948): its words when `quotes` allows it, else null */
@@ -1165,7 +1171,8 @@ export class MessageService {
       body: `${name}, which you started, stopped: ${STARTER_WORDS[why]}. ${reportOwed ? 'Its report to you will not come.' : 'It owed you no answer.'} read_session shows where it stopped; send it a message if it should go on.${said ? `
 ${lastWordsText(name, said)}` : ''}`,
       facts: { about: { session: stopped }, reason: why, ...(this.wakes(starter, reportOwed) ? {} : { quiet: true }) },
-      dedupeKey: `stopped:${starter}:${stopped}:${turnSeq ?? this.now()}`,
+      // One per stop: its cause and the turn it cut, else the session's latest turn (a stop with no turn on record names none of its own)
+      dedupeKey: `stopped:${starter}:${stopped}:${why}:${turnSeq ?? this.latestTurnSeq(stopped)}`,
     })
   }
 
