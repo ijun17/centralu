@@ -122,8 +122,8 @@ script rehearses by default and why nothing publishes automatically.
   the npm launcher's, `e2e-lock` and `screen-protocol-rules`, the two that failed on a Mac and nowhere else in #1695: 158 test
   files, about 5.5 minutes); on a full run that changes the host's tests, the tests of the host, the protocol and `tooling/` that
   reach the OS: the ones Windows picks (`tsx tooling/os-tests.ts`) and those that make folders in the temp folder, where a Mac
-  answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks` (`macos tests (vitest *)`), so a batch lands only
-  with every shard. Two shards (#2167): as one job it was the last job of 7 of the 10 merge batches to 2026-11-10 (19.1
+  answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. `ci.quickChecks` names the shards' one result, `macos tests`, which passes
+  only when every shard passed, so a batch lands only with every shard. Two shards (#2167): as one job it was the last job of 7 of the 10 merge batches to 2026-11-10 (19.1
   minutes median, 23.0 at most, of a limit of 25), which made it every landing's wait. The full run's list is split by each
   file's time on the Mac (`os-tests.ts --macos --shard`, `tooling/test-durations-macos.json`, refreshed weekly with
   Windows' times: [os-layer.md §6.4](plans/os-layer.md#64-shards-balanced-by-measured-time)); the quick tier's filters by

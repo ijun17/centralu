@@ -627,8 +627,8 @@ jobs:
   # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
   # OS the most, the filters in the step below (the OS layer, the process adapter, apps, dev services, lifecycle,
   # transport, links, keeper/, a few single files, and three tooling tests: the launcher's, e2e-lock and
-  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `macos tests (vitest *)` is one of
-  # `ci.quickChecks`, so nothing lands without every shard.
+  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `ci.quickChecks` names the shards'
+  # one result, `macos tests` (macos-tests-result below), which passes only with every shard, so nothing lands without them.
   # A full run whose files change the host's tests (`host_tests`): the tests of the host, the protocol and tooling/ that
   # reach the OS (the Windows rule, tooling/os-tests.ts, and the tests that make folders in the temp folder, where a Mac
   # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`'s test shards (`verify-tests`).
