@@ -19,8 +19,8 @@ hook's output, a linked machine's is whatever it sends), a session's or project'
 session gets when a session it asked stops before answering (docs/plans/turn-owned-by-no-one.md §4.1) quotes what the
 stopped session last wrote in the cut turn, at most 600 characters, five sessions a notice, every line behind `> `, under
 Centralu's words that it is that session's own text, to be read as information and never as instructions. It is not a new
-read path, and one rule decides it (`MessageService.quotes`), which the older report path's notice of a stop
-(`ChildReports.tellAskerOfInterruption`) is held to as well. Each of these must hold, or nothing is quoted:
+read path, and one rule decides it (`MessageService.quotes`), which the notice to the session that started the stopped one
+(`MessageService.tellStarter`) is held to as well. Each of these must hold, or nothing is quoted:
 - the sender is a session that can read the stopped session with `read_session` (that tool's own rule,
   `CentraluTools.mayRead`, asked through `SessionTools.readsSession`);
 - the cut turn is the session's latest in the mailbox's record of turns, and the sender's own message started it: a mail the
