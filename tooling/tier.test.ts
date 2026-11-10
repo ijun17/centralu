@@ -26,6 +26,7 @@ const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules
 const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
   { name: 'documents only', paths: ['docs/apps.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
   { name: 'a change to docs/security-boundaries.md', paths: ['docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc' },
+  { name: 'a document in a docs/security-boundaries/ folder', paths: ['docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc' },
   { name: 'docs with docs/security-boundaries.md among them', paths: ['docs/apps.md', 'docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc', because: ['docs/security-boundaries.md'] },
   {
     name: 'fixture data only',
@@ -190,7 +191,9 @@ describe('the repository\'s tier rules', () => {
   it('matches every glob against at least one file in the repository, so a rename cannot drop a path silently', () => {
     const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean)
     const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
-    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
+    // The document may become a folder (#2179): its glob is written before the folder exists, so no file matches it yet
+    const folderToCome = ['docs/security-boundaries/**']
+    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !folderToCome.includes(g) && !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
     expect(dead).toEqual([])
   })
 })

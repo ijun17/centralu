@@ -239,19 +239,8 @@ Codex Centralu tools bridge connect there.
 | The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives its restart (`keeper-integration.mjs`, `front-door` scenario). The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
 | App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host by a stop for an update (a swap's drain did it until #1895 step 4 PR 5; [agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
-**The blue-green swap, until #1895 step 4 PR 4.** `switch` started host B of the new build with `--standby` beside
-host A, had A drain and stop for an update once B had checked itself, then activated B behind the same front door, and
-started A's build again if B failed. Since the host's children became its own (§4.3), the drain stopped them for an
-update anyway, so the swap kept only the door's address across builds, and an update is now the keeper's stop instead
-(§4.5). Since PR 5 a host started with `--standby` exits before it touches the data folder, so a keeper of an earlier
-build that still swaps fails with its running host untouched, and `activate` and `drain` get no answer
-([plans/keeper-removal.md](plans/keeper-removal.md) §4). The drain's 10 s bound came from a real store: assistant
-tools took at most 0.2 s and app tools at most 5.6 s, while draining every tool was never an option (p99 78 s, max 4.5 h).
-
-**App views opening during a swap (#580).** A relaunched window used to attach to the keeper's existing host, request
-its automatic switch and wait for it before opening panels, so that a home tool did not run on an older host. Since
-#1895 step 4 PR 3 the window never switches: an update stops the keeper's host and the relaunched window starts its own
-build's keeper (§4.5), so the host it opens panels on is always reached by a fresh start, and the wait went.
+The drain's 10 s bound (`host.stop {ifIdle}`) came from a real store: assistant tools took at most 0.2 s and app tools at most 5.6 s, while draining every
+tool was never an option (p99 78 s, max 4.5 h).
 
 Every view-opening path subscribes before its RPC and waits for a reconnect or resync before retrying a dropped
 answer, up to three retries and 30 seconds per reconnect wait. Subscribing first also covers a new-host greeting
@@ -283,21 +272,9 @@ host for an update and exit, and the relaunched window starts the new build's ke
 ends them with the host, and a turn in flight shows stopped with Continue. Supervision, background mode, credential
 issuance and the front door stay with the keeper. The details are in [agent-host.md](agent-host.md) §4.3 and §4.5.
 
-**The children service, from #280 step 2 to #1895 step 4.** Until #1895 step 3 the keeper spawned these children
-itself over a second user-only socket, `<data>/children.sock`, so they outlived a host that crashed, restarted or was
-swapped out, and the next host listed them and re-attached mid-turn. Step 3 stopped offering it (owner decision
-2026-11-03, option C), step 4 PR 1 removed the host's side and PR 2 the keeper's ([plans/keeper-removal.md](plans/keeper-removal.md)):
-the keeper's `children` op answers an empty list, and a handoff that carries a child table, which only a holding keeper
-of beta.48 or older sends, is refused; since PR 4 the keeper takes no handoff at all (§4.4). What holding them took (a session per child, the keeper owning and
-draining each pty, lossless whole-line agent streams, no closed connection ever signalling a child) is in
-[runtime-lessons.md](runtime-lessons.md) §7.
-
 **Leaving has one mode.** Every ending is a stop: sessions, terminals and commands stop with the host. The keeper
 asks for it by a line on the host's stdin, plain when it is stopping for good ("Quit completely", "Restart
-completely", the last window closing with background mode off, idle exit) and with `forUpdate` for an update; a
-swap's drain was a stop for an update too, until no keeper swapped (#1895 step 4 PR 4). The detach mode, which left the tools running in the keeper, and the
-re-attach of the next host went with #1895 step 4 PR 1. The measurements that made the re-attach work (claude's
-re-`initialize`, codex's `thread/resume`) are in the earlier versions of [agent-host.md](agent-host.md) §4.3.
+completely", the last window closing with background mode off, idle exit) and with `forUpdate` for an update.
 
 ### 4.4 A keeper runs one build (#1895 step 4 PR 4)
 
@@ -309,20 +286,9 @@ with code 7 before it binds anything.
 
 | Decision | Why |
 |---|---|
-| A keeper's update is a stop, not a handoff | The handoff (below) let a keeper's update cut nothing. Since #1895 step 3 the host's children are its own and an update stops them for an update anyway, so the handoff kept only the front door's port and token and saved a reconnect of about 85 ms, for about 3,000 lines of descriptor passing, freezing and snapshots on two OSes, and a second verify-and-copy path beside the shell's ([plans/keeper-removal.md](plans/keeper-removal.md) §1, §4 row 4). A script holding the limited credential reads `keeper.sock` again after an update, as after any keeper restart. |
+| A keeper's update is a stop, not a handoff | The handoff let a keeper's update cut nothing. Since #1895 step 3 the host's children are its own and an update stops them for an update anyway, so the handoff kept only the front door's port and token and saved a reconnect of about 85 ms, for about 3,000 lines of descriptor passing, freezing and snapshots on two OSes, and a second verify-and-copy path beside the shell's ([plans/keeper-removal.md](plans/keeper-removal.md) §1, §4 row 4). A script holding the limited credential reads `keeper.sock` again after an update, as after any keeper restart. |
 | The take-over flag exits with code 7, not ignored with a log line | 7 is what a sending keeper of an earlier build reads as its handoff aborted (its `EXIT_ABORTED`): it rolls back and serves on with its host, and the window shows the refusal. A keeper that ignored the flag would go on as a second keeper on a lock its sender holds. |
 | "Restart completely" stops the keeper and the window starts one of its own build | It is the keeper's `stop`, the one "Quit completely" uses, so it stops what that stops (the host, every agent process, terminal and running command, said in its confirmation), but the window stays: its attach loop sees the keeper exit and launches a keeper from its own executable with its own host, then reattaches. Conversations resume through the store. The alternative, waiting for the keeper's next idle exit or quit, leaves the fixed keeper unused for days in background mode. |
-
-**Until PR 4: the keeper handed itself over (#280, option C step 4).** Keeper A started B, the new build's keeper inside
-its bundle, with a `socketpair` end at descriptor 3 (`--take-over-fd 3`), froze (accepted nothing, parked every relay,
-paused the host's stdout, stopped copying and removing host copies), and passed `keeper.lock`, both listeners, the
-front door's token, the host's pipes, every relayed and attached connection (`SCM_RIGHTS`) and its state. A's commit
-point was B's `ready`; any failure before it rolled A back. Measured on macOS with a claude and a codex turn in their
-tool calls, a terminal and a dev server counting: 0.5 to 0.8 s, the same pids, continuous counters, nothing reconnected.
-A keeper from verified content verified and copied the new build's signed content first and handed over to the keeper
-in that copy. What it took (a freeze rather than a drain, so no byte read ahead was lost; macOS failing a descriptor
-batch with `EMSGSIZE` instead of blocking; watching a handed-over host by kqueue or pidfd, since B was not its parent)
-is in this section's history before PR 4 and in [runtime-lessons.md](runtime-lessons.md).
 
 ### 4.5 Applying an update: one click, or by itself when idle (#352)
 

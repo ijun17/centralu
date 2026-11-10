@@ -47,7 +47,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Asleep | Not live because the host ended an idle session's process (#568, after 15 minutes by default) or nothing has woken it since a restart. Typing to it or sending it a message wakes it; selecting it does not | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
 | Session archive | A finished or put-away session, kept until the person deletes it for good; it can be opened and restored. It also holds the kept records of app-agent sessions and archived subagent steps. Called the trash until #1404, and not FR-20, the retired hide-a-session feature that had no way out | `sessions.deleted_at`, `sessions.trash`, `trash.*`; product-spec FR-22 | trash, recycle bin, bin |
 | Imported session | A session continued from a conversation the tool started outside Centralu | `SessionInfo.importedFrom`; [agent-host.md](agent-host.md) §8 | |
-| Handoff | A fresh successor session, on either tool, taking over from a predecessor through a note: built from the stored conversation with no model (#78; the default since #694; it opens with a contents section, and a tool result is cut to its head, #1481), or written by the agent itself. The person starts one from the session menu; the Assistant with `handoff_session`, behind the person's card unless it is `auto` or the session is at rest and its preset (the successor's) is within the Assistant's own (#1509), never mid-turn, and always keeping the predecessor (#694). The note is a file, `<data>/handoff/<project>/<session>.md`, and the successor's first message points at it. Every child of the predecessor (working, waiting, queued, unreported or unread, a start card still standing, or finished and waiting for more work) becomes the successor's, listed at the top of the note (#693, #738, #1475; except, for a predecessor that stays, one doing a task the predecessor owes its own giver, which stays so that its report finishes that task, #1932), and so do the apps the predecessor attached itself, copied (#1638). The window archives the predecessor by default (#1477; it kept it by default from #694 to then, and deleted it before), and one box turns that off to branch; a predecessor that stays keeps its own copy of the apps and the mail the successor did not take, and a child it starts after the handoff goes to the successor when it is deleted later. What a handoff carries and what it leaves: agent-host §1.2.5 | `handoff` event, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (not the keeper's handoff, §1.5) |
+| Handoff | A fresh successor session, on either tool, taking over from a predecessor through a note: built from the stored conversation with no model (#78; the default since #694; it opens with a contents section, and a tool result is cut to its head, #1481), or written by the agent itself. The person starts one from the session menu; the Assistant with `handoff_session`, behind the person's card unless it is `auto` or the session is at rest and its preset (the successor's) is within the Assistant's own (#1509), never mid-turn, and always keeping the predecessor (#694). The note is a file, `<data>/handoff/<project>/<session>.md`, and the successor's first message points at it. Every child of the predecessor (working, waiting, queued, unreported or unread, a start card still standing, or finished and waiting for more work) becomes the successor's, listed at the top of the note (#693, #738, #1475; except, for a predecessor that stays, one doing a task the predecessor owes its own giver, which stays so that its report finishes that task, #1932), and so do the apps the predecessor attached itself, copied (#1638). The window archives the predecessor by default (#1477; it kept it by default from #694 to then, and deleted it before), and one box turns that off to branch; a predecessor that stays keeps its own copy of the apps and the mail the successor did not take, and a child it starts after the handoff goes to the successor when it is deleted later. What a handoff carries and what it leaves: agent-host §1.2.5 | `handoff` event, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | |
 | Switch tool | Keeping the session (name, order, history, panel) and swapping the agent tool under it. The new tool starts a new thread: the old tool's conversation does not carry over to the agent, though the record stays on screen | `agents.switchTool`, `packages/protocol/src/commands/methods/sessions.ts`; `switchTool`, `manager.ts` | |
 | Goal | An objective set on a session, judged by the tool. Live only | `SessionGoal`, `entities/sessions.ts` | |
 | Background task | Work the agent left running inside its own process (a subagent, a shell). Live only | `BackgroundTask`, `entities/sessions.ts` | |
@@ -119,12 +119,10 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides, also without `--db`; the legacy folder is moved only into the default one) | `packages/agent-host/src/data-dir.ts` (`chooseDataDir`) | |
 | Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host and owns the front door; the host's children are the host's own (#1895). macOS release builds, and macOS debug builds with `CC_USE_KEEPER=1` (Linux too until #1895 step 4 PR 7) | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
 | Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
-| Children service | The keeper's `<data>/children.sock`, through which a host once asked the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlived a host. A keeper started fresh has not offered it since #1895 step 3; the host's side went with step 4 PR 1 and the keeper's with PR 2, whose keeper answers `children` with an empty list | gone; [architecture.md](architecture.md) §4.3 | |
 | Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
 | Swap | Replacing the running host with another build's, blue-green, behind the front door. No keeper swaps since #1895 step 4 PR 4 and no host stands by for one since PR 5: an update or another build is a stop | gone; `packages/agent-host/src/keeper-control.ts` keeps the control lines and the front door's addresses | restart |
-| Drain | Refusing new calls and giving running ones 10 s before a stop. A swap's outgoing host drained until #1895 step 4 PR 5; now only `host.stop {ifIdle}` (the stop gate) does | `packages/agent-host/src/drain.ts` | |
+| Drain | Refusing new calls and giving running ones 10 s before a stop. Only `host.stop {ifIdle}` (the stop gate) drains | `packages/agent-host/src/drain.ts` | |
 | Stop / stop for an update | How a host leaves: a **stop** ends its agents, terminals and commands; a **stop for an update** ends them too and lists the turns, terminals and Run commands for the next host, which continues and reopens them. **Detach**, which left the keeper's children running for the next host, went with #1895 step 4 PR 1 | `packages/agent-host/src/lifecycle/shutdown.ts`; [architecture.md](architecture.md) §4.3 | |
-| Keeper handoff | A keeper replacing itself with a newer keeper, passing every descriptor, so nothing reconnected. Gone since #1895 step 4 PR 4: a keeper runs one build for its life, and `--take-over-fd` exits with code 7 | gone; [architecture.md](architecture.md) §4.4 | (not the session handoff, §1.1) |
 | Codex bridge | A small Node MCP server that `codex app-server` starts for a session: one for Centralu's tools and one per attached app. It calls back into the host over the front door (or the host's own port without a keeper). Claude needs none: its servers run inside the host | `packages/agent-host/src/adapters/codex/centralu-bridge.mjs` | Centralu tools bridge (it carries more) |
 | `centralu serve` | The npm launcher running a host headless on `127.0.0.1:17175`, no window and no keeper, for remote mode phase 1 | `packaging/npm/centralu/bin/serve.mjs`; [agent-host.md](agent-host.md) §4.7 | |
 | Stream epoch | A random id per host life. A client whose epoch differs after a reconnect resyncs instead of replaying | `packages/agent-host/src/transport/event-log.ts`; [protocol.md](protocol.md) | |
@@ -135,7 +133,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 
 | Word | The two meanings |
 |---|---|
-| Handoff | A session handing its work to a successor (§1.1); a keeper handing itself to a newer keeper (§1.5, gone since #1895 step 4 PR 4). Open views passed to the next host are the **view handover** |
+| Handoff | A session handing its work to a successor (§1.1). Open views passed to the next host are the **view handover** |
 | Manager | `SessionManager`, the host's class that runs every session; before #561 part 3 also the worktree manager, a role folded into ordinary sessions (a session now starts and owns its worktree agents) |
 | Delegate | `DELEGATE_TOOLS` and the consent kind `delegate` are the **caller's** side of `ask_project`; the session doing the work is the delegated session |
 | Capability | `AdapterCapabilities`: what an agent tool supports; an app's capability: what it may ask the broker for |
@@ -539,16 +537,14 @@ flowchart TD
 - Agent CLIs, terminals, command runs and app MCP servers are the **host's** children, as without a keeper (§4.2),
   and end with it. An update stops them for an update: the next host continues the cut turns and opens the
   terminals and Run commands again. A crash ends them, and a turn in flight shows stopped with Continue
-  ([architecture.md](architecture.md) §4.3). Until #1895 step 3 the keeper held the agents, terminals and commands
-  over `children.sock`, and a host that restarted or was swapped re-attached to them; that service went with #1895
-  step 4 PR 2.
+  ([architecture.md](architecture.md) §4.3).
 - Claude's Centralu tools and app proxies run **inside the host** (in-process SDK MCP servers), reached over the
   CLI's own stdio. Codex has no in-process servers, so it starts a bridge per session that calls back over the front
   door.
 - App views are served by the host over HTTP through the front door. An app that asks for its own origin
   (`view.origin: app`) gets a port of its own on the host, outside the front door (`views/origin-ports.ts`).
 - An update, or a window of another build, stops the keeper and its host, and the window starts a keeper of its own
-  build. Until #1895 step 4 PR 4 a keeper handed itself over to a newer keeper (§1.5) by passing every descriptor.
+  build.
 
 ### 4.2 Without a keeper (Windows, debug builds, `pnpm dev`, `centralu serve`)
 
@@ -702,8 +698,7 @@ has its answer (#378); the record of what it did stays in the session archive.
 
 Since #1895 step 4 an update, and a window of another build, stop the keeper and the window starts a keeper of its own
 build, whose host continues the turns. A keeper runs one build for its life: `switch` and `upgrade`, which an earlier
-build's window may still send, answer `gone` (PR 4). Until then this was a blue-green swap of the host, with the keeper
-handing itself over first when it was of another build.
+build's window may still send, answer `gone` (PR 4).
 
 ```mermaid
 sequenceDiagram

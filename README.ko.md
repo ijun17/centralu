@@ -105,5 +105,4 @@ CI에서 빌드·검사만 거쳤지 사람이 띄워본 적은 없습니다. �
 ## 문서
 
 [docs/product-spec.md](docs/product-spec.md)가 나머지 전부가 따르는 기준이고,
-[docs/README.md](docs/README.md)가 그 지도입니다. `docs/` 일부는 아직 한국어입니다
-— 번역은 [#27](https://github.com/ijun17/centralu/issues/27)에서 진행 중입니다.
+[docs/README.md](docs/README.md)가 그 지도입니다. `docs/`의 문서는 영어로만 씁니다.

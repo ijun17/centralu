@@ -92,7 +92,7 @@ export class StepsV58 extends MigrationRange {
         to: 61,
         breaksOlderReaders: false,
         /**
-         * The mailbox (#1347, docs/plans/mailbox.md §4.1): one durable channel between sessions, apps and the person.
+         * The mailbox (#1347, docs/plans/mailbox.md §6): one durable channel between sessions, apps and the person.
          * Six tables that nothing reads or writes yet (slice 1: the store and the model).
          *
          *   mail_threads       a conversation that is also a task: subject, state, owner, assignee, next step, links.

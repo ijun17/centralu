@@ -1789,8 +1789,7 @@ A host started with `centralu serve` on another machine is reached by the app th
 ## The keeper's control socket
 
 The keeper (`centralu-keeper`, #280, #440) is a new trust boundary: through its socket a process can read the front
-door's port and a credential and stop the host (until #1895 step 4 PR 4 also make the keeper run a host from another
-folder, `switch`). The rule:
+door's port and a credential and stop the host. The rule:
 **only this user's processes get in, and only a Centralu window gets the token** (#1405).
 
 - **Who is a window** (`keeper/window_peer.rs`). The peer pid the kernel recorded at `connect` (`LOCAL_PEERPID`,
@@ -1810,8 +1809,7 @@ folder, `switch`). The rule:
   two copies of the test binary against the socket, one at the accepted path and one named `centralu` elsewhere: only
   the first gets the token (`only_the_accepted_window_executable_gets_the_token`).
 - **What a window gets.** `status` and `attach` carry the front door's token (`view.rights: "full"`), and so does
-  every status pushed to it. (Until #1895 step 4 PR 4 it alone could `switch` and `upgrade`, which started a build of
-  the request's naming and handed it the token; both answer `gone` to anyone now.)
+  every status pushed to it. (`switch` and `upgrade` answer `gone` to anyone.)
 - **What anything else gets.** The limited credential in the token's place (`view.rights: "limited"`, `limited.rs`,
   derived as the host derives it, so it works behind the door across the host's restarts), on `status`, `attach` and
   every push to it. `stop`, `restart`, `settings`,
@@ -1931,25 +1929,6 @@ host. It changes where a client connects, not what it must prove:
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.
 
-### The keeper's child socket (gone)
-
-From #280 step 2 the keeper held the host's agents, terminals and commands and served them on a second socket,
-`<data>/children.sock`, through which a process could start a program, read and write an agent's stdin and stdout, and
-signal any child the keeper held; only the hosts the keeper held got in (#538, by the peer pid the kernel recorded).
-A keeper started fresh has not served it since #1895 step 3, no host connects to one since step 4 PR 1, and the keeper
-has no children service since PR 2: nothing listens there, a socket a dead holding keeper left is removed at start,
-`keeper.sock`'s read-only `{"op":"children"}` answers an empty list, and since PR 4 the keeper takes no handoff at all.
-
-### The keeper handoff channel (gone since #1895 step 4 PR 4)
-
-Until #1895 step 4 PR 4 a keeper update handed everything the keeper held to the new build's keeper over a
-`socketpair` end at descriptor 3 of the process it started (#280 step 4): the front door's token, the listening
-sockets and every connection. It had no path, so no other process could connect, and the incoming keeper still
-checked its peer's uid; the process started was the executable a window named in `switch` or `upgrade`, which only a
-window could send (#1405). A keeper now runs one build for its life ([architecture.md](architecture.md) §4.4): it
-starts no other keeper and passes nothing, and a keeper started with `--take-over-fd` exits with code 7 before it
-reads the channel, binds or locks anything.
-
 ## Signed content (#440)
 
 With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and the host run from a
@@ -1959,9 +1938,7 @@ including release content and owner-approved local content (#610). The verifier 
 `apps/desktop/content-verify` (shared by the shell and the window's diagnosis of a refusal); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
 the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
-`shell.lock` pins; until shell v1 is pinned, no release opens it. Until #1895 step 4 PR 4 its second
-was a keeper the shell started, which verified the next build's content itself before handing over to it (step 5,
-§10.3).
+`shell.lock` pins.
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
   the app version, platform and minimum shell version. `content-manifest.json.sig` is an ed25519 signature
@@ -2036,8 +2013,6 @@ window asked, and the window's `hostDir` was never read. What stays of the keepe
   `tooling/keeper-executable.test.ts`); its verifier only words the window's diagnosis.
 
 The shell's refusal is **shown by the window itself, in a native dialog** (#634, `apps/desktop/src-tauri/src/refusal.rs`).
-The keeper's refusal of a switch's content was shown the same way until #1895 step 4 PR 3, when the window stopped asking
-for switches; PR 4 removed the switch:
 
 - **Why it is drawn there.** The build bar is drawn by the web UI, which the host feeds, and the host is the thing whose
   content failed to verify: it could hide the line or write another. The dialog is drawn by the window process, the signed
@@ -2369,7 +2344,7 @@ A view is an app's HTML running inside the desktop window, isolated in layers. B
 behind a 32-byte random path segment made at each launch, a different value from the WebSocket
 token (`transport/http.ts`). Under the keeper the segment is instead derived from the keeper's token
 (HMAC-SHA256 under a fixed label, base64url, 43 characters; `deriveHttpSecret`), so that every host
-the keeper starts has the same one and a view's address survives the host's restarts under one keeper (#280 step 4; a build switch too, until #1895 step 4 PR 4). It
+the keeper starts has the same one and a view's address survives the host's restarts under one keeper (#280 step 4). It
 is still a different value from the token, and one-way from it: a leaked view address gives nothing
 toward the RPC door. The other direction was never a boundary, since whoever holds the token can
 already ask `apps.viewFrame` for an address carrying the secret. It lives as long as the keeper's
@@ -2498,8 +2473,7 @@ Limits:
   puts a link or text into a composer's draft, never sends it. An app the person is pressing in at
   that moment could still post an end pointing at a session of its choosing; what it gets is text
   in a draft the person sees before sending.
-- Open view instances survive a stop for an update (`view-handover.ts`; a swap's drain until #1895
-  step 4 PR 5): the leaving host writes each instance's id, app and `ui://` address (nothing the app
+- Open view instances survive a stop for an update (`view-handover.ts`): the leaving host writes each instance's id, app and `ui://` address (nothing the app
   returned) to the store under `views.handover`, and the next host reopens them under the same ids if the record is
   at most ten minutes old, then deletes it. Each reopened instance holds its app as a fresh one
   does and must still match its app on every request; a view in a conversation is re-bound to its

@@ -19,10 +19,8 @@ describe('the domain model documents', () => {
     expect(docs('generated/schema.md')).toBe(renderSchemaDoc(schema))
   })
 
-  it('gives every stored table a concept in docs/domain-model.md and its Korean mirror', () => {
+  it('gives every stored table a concept in docs/domain-model.md', () => {
     const en = storedTables(docs('domain-model.md'), 'Where it is stored')
-    const ko = storedTables(docs('domain-model.ko.md'), '저장되는 곳')
     expect(tables.filter((t) => !en.has(t)), 'tables no "Where it is stored" list in docs/domain-model.md names').toEqual([])
-    expect(tables.filter((t) => !ko.has(t)), 'tables no "저장되는 곳" list in docs/domain-model.ko.md names').toEqual([])
   })
 })

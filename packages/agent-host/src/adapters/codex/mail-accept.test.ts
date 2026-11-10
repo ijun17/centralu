@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * A wake the mailbox hands Codex is taken when `turn/start` answers (docs/plans/mailbox.md §7.6.2), not when the write returns:
+ * A wake the mailbox hands Codex is taken when `turn/start` answers (docs/plans/mailbox.md §8.2), not when the write returns:
  * a rejected `turn/start`, or a thread that never comes up, is a failure the mailbox tries again, not a delivery.
  */
 const state = vi.hoisted(() => ({

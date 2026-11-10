@@ -260,8 +260,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   something is running, and always before a stop of the second kind. The window then starts the keeper and host of its
   own build; while it does, the bar says "Restarting Centralu on this build…". With automatic updates on, a newer window
   does this by itself when nothing is running and the keeper can stop for an update; it never moves back to an older
-  build. Until step 4 PR 3 this was "Switch to this build", a blue-green swap with its steps shown in the bar. Desktop
-  only; it needs the keeper ([architecture.md](architecture.md) §4.5).
+  build. Desktop only; it needs the keeper ([architecture.md](architecture.md) §4.5).
 - **Applying an update** (#352). Once an update is installed, the update line offers **Apply now**: the app
   relaunches itself into the new version. Since #1895 step 3 the keeper first stops the host for the update and exits,
   and the relaunched window starts the new build's keeper: running turns go on once the host is back, and terminals and

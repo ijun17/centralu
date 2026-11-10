@@ -4,7 +4,7 @@
 // newest one uploaded by a push to main: it lists main's runs of build.yml (newest first, a page at
 // a time) and asks each for its artifact, so pull request and merge-queue runs, which upload too,
 // never push main's record out of reach. The same steps run on every event: the audit of build.yml
-// (docs/releasing.md, "Workflow event audit") lets a pull request's run stand for main's only when no
+// (docs/releasing.md, "Release CI evidence") lets a pull request's run stand for main's only when no
 // job branches on the event, so main is picked by the run that uploaded, never by this run's event.
 //
 // When no run of main has a record (the first runs after this landed, or none in the pages read),

@@ -9,7 +9,7 @@ export const APP_SETTINGS_DDL = `
 `
 
 /**
- * This computer's id as a hub (#550), made once and kept: the host id in every mail id and address (#1347, mailbox §11.4).
+ * This computer's id as a hub (#550), made once and kept: the host id in every mail id and address (#1347, mailbox §5.1, §5.2).
  * Written by `hubSelfId` (links/stored.ts); the store's purge reads it to find this host's own mail rows
  */
 export const HUB_SELF_KEY = 'hub.selfId'
