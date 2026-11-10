@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough, Readable, type Writable } from 'node:stream'
-import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepLeftovers, tracked, type GroupedChild } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
@@ -32,7 +32,7 @@ import type { AgentProcess, AgentSpawnSpec } from './contract.js'
  */
 
 /** What this needs from the OS, as a parameter so the Windows path can be tested on any OS */
-export type LocalProcessOs = KillOs & Pick<LeftoverOs, 'listProcesses'>
+export type LocalProcessOs = KillOs
 
 export type LocalSpawnSpec = AgentSpawnSpec & {
   /** The SDK passes one: aborting it stops the process, as `spawn`'s own `signal` option would */
@@ -277,7 +277,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Groups of its own its helpers started (a shell, measured: Cursor's), which its group's sweep does not reach
     this.stopGroupClock()
     for (const g of this.groups) stopGroup(g, KILL_GRACE_MS)
-    void sweepLeftovers(this.started, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {
+    void sweepLeftovers(this.started, this.os?.platform, this.os).then((ended) => {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
     })
   }

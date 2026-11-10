@@ -144,19 +144,15 @@ function snapshot(): ProcRow[] {
 
 /**
  * What this module needs from the OS on Windows, as a parameter so the Windows path can be tested
- * on any OS.
+ * on any OS: the process table and `taskkill` (`LeftoverOs`), the same two every Windows stop uses.
  */
-export type KillOs = {
-  platform: NodeJS.Platform
-  /** Ends a process and every process under it, forcibly; with `alone`, that process only (`/T` left out) */
-  taskkill: (pid: number, alone?: boolean) => void
-}
+export type KillOs = LeftoverOs & { platform: NodeJS.Platform }
 
 /**
  * Whether a process started `detached` gets a group of its own that can be signalled as one, and
  * what it leaves behind is swept by that group (`stopGroup`). Not on Windows (#14): there `detached`
  * means a process with no console, whose every console child opens a visible window, and a tree is
- * ended with `taskkill /T` (`shootWindows`) and its leftovers found by parent links
+ * ended by `shootWindows` and its leftovers found by parent links
  * (`collectOrphansWindows`).
  */
 export function hasProcessGroups(platform: NodeJS.Platform = process.platform): boolean {
@@ -164,23 +160,15 @@ export function hasProcessGroups(platform: NodeJS.Platform = process.platform): 
 }
 
 /**
- * Windows (#14) has no process groups and no signals. `taskkill /T /F` ends a pid and its
- * descendants (it walks the parent links itself), which is the one tool for the job. It is named by
- * its full path under the system folder: a bare `taskkill` would be looked up in the working
- * directory first.
- */
-const REAL_OS: KillOs = {
-  platform: process.platform,
-  taskkill: (pid, alone = false) => {
-    const exe = systemTool(['taskkill.exe'])
-    // stderr is kept: the message of a failure says why (`collectOrphansWindows` prints it)
-    execFileSync(exe, ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000, windowsHide: true })
-  },
-}
-
-/**
- * The Windows shot. There is nothing polite to send, so the first shot is already the last: the
- * tree goes with `taskkill /T /F`, then the handle itself is closed.
+ * The Windows shot (#14, #2141). There is nothing polite to send, so the first shot is already the last, and it is the one
+ * order every Windows stop in the host uses: the process table is read while the tree is whole, the process itself is ended
+ * alone, then what the table showed under it, parents before children (`endInOrder`, #2142). `taskkill /T` ends a tree in
+ * no order, and a git hook's `sleep` that died first made git go on and commit (#2141). A table that cannot be read leaves
+ * `taskkill /T` on the root, in no order (`stopTreesWindows`); the handle itself is closed only when taskkill did not end it.
+ *
+ * It runs on its own, as the callers (`killTree`, `stopTree`) do not wait: the table takes 0.4-0.75 s, and `taskkill` is
+ * named by its full path under the system folder (`leftoverOs`), where a bare name would be looked up in the working
+ * directory first. Nothing here throws.
  *
  * `kill()` is called **without a signal.** node-pty's Windows `kill()` throws "Signals not
  * supported on windows." when given one (windowsTerminal.js), and every caller passed one: Stop,
@@ -199,16 +187,24 @@ const REAL_OS: KillOs = {
  * comes). The pty slot does, on that exit (`pty-slot.ts` `releaseEnded`). A tree taskkill could not
  * end (no pid, a timeout) still gets `kill()`, the one thing left to try.
  */
-function shootWindows(handle: KillablePty, os: KillOs): void {
+async function shootWindows(handle: KillablePty, os: KillOs): Promise<void> {
   const pid = handle.pid
   if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
-    try {
-      os.taskkill(pid)
-      return
-    } catch {
-      // already gone (taskkill exits non-zero for a pid that is not there), or it could not end it
+    // The root alone; a failure (already gone, or it could not be ended) leaves the pty to close itself
+    const endRoot = async () => {
+      try {
+        await os.taskkill(pid, true)
+      } catch {
+        closeHandle(handle)
+      }
     }
+    await stopTreeWindows({ pid }, endRoot, os)
+    return
   }
+  closeHandle(handle)
+}
+
+function closeHandle(handle: KillablePty): void {
   try {
     handle.kill()
   } catch {
@@ -219,7 +215,7 @@ function shootWindows(handle: KillablePty, os: KillOs): void {
 /** Fires one signal at the tree, and returns the tree seen at that moment (root's and descendants' rows) — the list the second shot will carry */
 function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): ProcRow[] {
   if (os.platform === 'win32') {
-    shootWindows(handle, os)
+    void shootWindows(handle, os)
     return []
   }
   const pid = handle.pid
@@ -271,7 +267,7 @@ export async function noteGroups(root: number, known: ReadonlySet<number>, platf
   return notedGroups(rows, root, known, process.pid)
 }
 
-/** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty). On Windows, taskkill (shootWindows) */
+/** Fires one signal at the tree. Falls back to pty.kill as before when the pid is unknown (a fake pty). On Windows, `shootWindows` */
 export function killTree(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): void {
   shoot(handle, signal, os)
 }
@@ -418,6 +414,7 @@ export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
   },
 })
 const REAL_LEFTOVER_OS = leftoverOs(runFile)
+const REAL_OS: KillOs = { platform: process.platform, ...REAL_LEFTOVER_OS }
 
 /**
  * Ends what an ended process left running, on Windows (#14) — the Windows side of `stopGroup`, which has no group to
@@ -482,7 +479,7 @@ export const STOP_LIST_MS = 1500
  * What the root starts between the reading and its end is not in the table: `collectOrphansWindows` after its exit
  * finds it, when the caller sweeps. Returns the pids ended besides the root.
  */
-export async function stopTreeWindows(root: { pid: number; spawnedAt: number }, endRoot: () => void, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+export async function stopTreeWindows(root: { pid: number; spawnedAt?: number }, endRoot: () => void | Promise<void>, os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
   return stopTreesWindows([{ ...root, endRoot }], os)
 }
 
@@ -490,7 +487,7 @@ export async function stopTreeWindows(root: { pid: number; spawnedAt: number }, 
  * `stopTreeWindows` for several running processes from one reading of the table (a shutdown stopping every git), read for
  * at most `STOP_LIST_MS`: every root is ended before any of what it started, then each tree parents first
  */
-export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt: number; endRoot: () => void }[], os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
+export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt?: number; endRoot: () => void | Promise<void> }[], os: LeftoverOs = REAL_LEFTOVER_OS): Promise<number[]> {
   if (roots.length === 0) return []
   let rows: WinProcRow[]
   try {
@@ -509,8 +506,13 @@ export async function stopTreesWindows(roots: readonly { pid: number; spawnedAt:
   }
   // Running still: what each started is everything created under it since it was spawned, up to now
   const now = Date.now()
-  const trees = roots.map((root) => ({ root, tree: orphansOf(rows, { pid: root.pid, spawnedAt: root.spawnedAt, exitedAt: now }) }))
-  for (const { root } of trees) root.endRoot()
+  // Without a start of its own (a pty or an app's handle knows none), the creation time the table shows for it: a child of an
+  // earlier holder of this number is older. A root the table does not show is gone, and has no tree to find
+  const trees = roots.map((root) => {
+    const spawnedAt = root.spawnedAt ?? rows.find((r) => r.pid === root.pid)?.created
+    return { root, tree: spawnedAt === undefined ? [] : orphansOf(rows, { pid: root.pid, spawnedAt, exitedAt: now }) }
+  })
+  for (const { root } of trees) await root.endRoot()
   const ended: number[] = []
   for (const { root, tree } of trees) ended.push(...(await endInOrder(tree, root.pid, os)))
   return ended

@@ -288,7 +288,8 @@ describe('an agent CLI started without a keeper (Windows)', () => {
     await exited
     expect(killed[0]).toBe(p.pid)
     await new Promise((r) => setTimeout(r, 100))
-    expect(listed).toBe(1)
+    // One reading when the stop begins (it shows no row for the CLI, so the stop is `taskkill /T`), one after its exit
+    expect(listed).toBe(2)
     expect(killed).toEqual([p.pid, orphan])
   })
 })
