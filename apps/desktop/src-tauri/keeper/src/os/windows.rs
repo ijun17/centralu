@@ -80,7 +80,21 @@ fn taskkill_tree(pid: u32) -> Command {
 
 /// `%SystemRoot%\System32\<name>`.
 fn windows_system_tool(name: &str) -> std::path::PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    system_tool_under(std::env::var_os("SystemRoot").as_deref(), name)
+}
+
+/// `windows_system_tool` for a given `SystemRoot`. One that is not a whole path from a drive's root (an empty one, a
+/// relative one, `C:x`, a share) is not used: `System32\taskkill.exe` would be relative to the working directory, where
+/// a planted program runs (#428; the host's `systemTool` has the same rule).
+fn system_tool_under(root: Option<&std::ffi::OsStr>, name: &str) -> std::path::PathBuf {
+    let drive_absolute = |r: &std::ffi::OsStr| {
+        let b = r.to_string_lossy().into_owned().into_bytes();
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
+    };
+    let root = match root {
+        Some(r) if drive_absolute(r) => r,
+        _ => std::ffi::OsStr::new("C:\\Windows"),
+    };
     std::path::PathBuf::from(root).join("System32").join(name)
 }
 
@@ -106,5 +120,17 @@ mod tests {
         assert_eq!(program, std::path::Path::new(&root).join("System32").join("taskkill.exe"));
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(args, ["/PID", "4242", "/T", "/F"]);
+    }
+
+    /// #428: a `SystemRoot` that is empty, relative or drive-relative would put the tool under the working directory.
+    #[test]
+    fn a_system_root_that_is_not_a_whole_path_is_not_used() {
+        use std::ffi::OsStr;
+        let default = std::path::Path::new("C:\\Windows\\System32\\taskkill.exe");
+        for bad in ["", "Windows", "C:Windows", "\\\\server\\share", "\\Windows"] {
+            assert_eq!(system_tool_under(Some(OsStr::new(bad)), "taskkill.exe"), default, "{bad:?}");
+        }
+        assert_eq!(system_tool_under(None, "taskkill.exe"), default);
+        assert_eq!(system_tool_under(Some(OsStr::new("D:\\WinNT")), "taskkill.exe"), std::path::Path::new("D:\\WinNT\\System32\\taskkill.exe"));
     }
 }
