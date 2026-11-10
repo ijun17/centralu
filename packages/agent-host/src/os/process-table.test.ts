@@ -101,10 +101,13 @@ describe('the warm process-table reader', () => {
     expect(started).toHaveLength(2)
   })
 
-  it('a read that times out ends that reader, so its late answer is never taken for the next read', async () => {
+  it('a read that times out ends that reader and starts the next at once, and the late answer is never taken for the next read', async () => {
     const { reader, started } = fake(() => null)
     await expect(reader.read(20)).rejects.toMatchObject({ message: 'timed out', killed: true })
     expect(started[0]!.killed).toBe(true)
+    // Started before any read asks for it: the next read does not wait out its start
+    expect(started).toHaveLength(2)
+    expect(started[1]!.asked).toEqual([])
     const next = reader.read(1000)
     await vi.waitFor(() => expect(started[1]?.asked).toHaveLength(1))
     // The first reader's answer comes while the next read waits for the second's

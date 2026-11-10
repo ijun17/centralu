@@ -147,8 +147,15 @@ export function tableReader(start: () => ReaderProcess = startServer): TableRead
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         waiting = null
-        if (child === c) child = null
         c.kill()
+        /*
+         * Its successor starts now, not at the next read: the start is the slow part (2.2 s measured on a loaded machine),
+         * and a reader started by a read spends it out of that read's time limit
+         */
+        if (child === c) {
+          child = null
+          warm()
+        }
         reject(Object.assign(new Error('timed out'), { killed: true }))
       }, timeoutMs)
       waiting = {
