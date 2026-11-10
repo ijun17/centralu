@@ -141,7 +141,9 @@ describe('a session the system ended under the host (#1397)', () => {
     expect(wakesMessage(notices[0]!)).toBe(true)
     expect(notices[0]!.body).toContain('the computer shut down, restarted or signed out while it worked')
     expect(notices[0]!.body).not.toContain('Centralu quit')
-    // No report of the older path besides (#1948 step 1: `quitNotices` is gone)
+    // No report of the older path besides (#1948 step 1: `quitNotices` is gone), and the task stays open for the reply: the start's adoption does
+    // not settle a released task as reported
     expect(mailReader(w.store).reportsOn(task!.id)).toEqual([])
+    expect(mailReader(w.store).row(task!.id, addressOf(started.sessionId))).toMatchObject({ releasedWhy: 'shutdown', settled: null })
   })
 })

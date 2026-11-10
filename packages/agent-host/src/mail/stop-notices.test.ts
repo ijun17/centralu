@@ -364,13 +364,16 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A)).toHaveLength(1)
   })
 
-  it("releases every open task a session gave the stopped one, whichever turn it came in; not the person's, whose work is reported to their Inbox", () => {
+  it("releases every open task a session gave the stopped one, whichever turn it came in; not the person's, whose work is reported to their Inbox, nor one still queued", () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
     const mine = w.mail.task(PERSON, B, { text: 'my work', origin: 'create_session', delivered: true })
+    const queued = w.mail.task(C, B, { text: 'later work', origin: 'send_to_session', delivered: false })
     expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(1)
     expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
     expect(w.rowOf(mine.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.rowOf(queued.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.noticesTo(C)).toEqual([])
     expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
     expect(w.noticesTo(PERSON)).toEqual([])
   })

@@ -1659,9 +1659,10 @@ conversation, and not a turn Centralu continues (an update's cut, #1975): those 
 `partyGone`, as before.
 
 **What it releases.** Everything the stopped session owes an answer: each `needsReply` message delivered into the cut turn and not
-answered (the person's too), and every open task a session gave it, whichever turn it came in. Not the person's tasks: their work
-is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a reply after the person continues the session still
-answers them.
+answered (the person's too), and every open task a session gave it and that reached it, whichever turn it came in (one still queued
+was never its work). Not the person's tasks: their work is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a
+reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
+released task as reported.
 
 **Who is told, woken, or left to read.** The owner's rule, as the tables give it:
 

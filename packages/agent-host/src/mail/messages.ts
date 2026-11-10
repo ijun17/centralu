@@ -939,8 +939,8 @@ export class MessageService {
 
   /**
    * The questions `address` left unanswered in its turn `turnSeq`, the rows a stop (`sessionsStopped`) or a lost turn (`turnsLost`) releases: each
-   * `needsReply` message delivered into that turn and not answered, settled or released, a request to the Assistant included. Not a task (the old
-   * report path tells its owner, #698), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
+   * `needsReply` message delivered into that turn and not answered, settled or released, a request to the Assistant included. Not a task (a stop
+   * releases those whichever turn they came in, `openTasksTo`), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
    */
   private cutQuestions(address: string, turnSeq: number): { row: RecipientRow; message: MailRow }[] {
     return this.records.unansweredTo(address).flatMap((row) => {
@@ -950,10 +950,13 @@ export class MessageService {
     })
   }
 
-  /** The open tasks a session gave `address`, which its stop releases (`sessionsStopped`): not the person's, whose work is reported to their Inbox */
+  /**
+   * The open tasks a session gave `address`, which its stop releases (`sessionsStopped`): delivered ones only (one still queued was never its work), and
+   * not the person's, whose work is reported to their Inbox
+   */
   private openTasksTo(address: string): { row: RecipientRow; message: MailRow }[] {
     return this.records.watchedTo(address).flatMap((row) => {
-      const message = row.releasedAt === null ? this.records.message(row.messageId) : undefined
+      const message = row.releasedAt === null && row.deliveredAt !== null ? this.records.message(row.messageId) : undefined
       return message?.kind === 'task' && parseAddress(message.sender)?.kind === 'session' && message.sender !== address ? [{ row, message }] : []
     })
   }

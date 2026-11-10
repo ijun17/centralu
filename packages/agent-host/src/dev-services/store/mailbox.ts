@@ -595,11 +595,14 @@ export class MailboxRecords {
     return this.db.prepare(`UPDATE mail_recipients SET answer_id = NULL WHERE answer_id = ? AND COALESCE(settled, 'legacy') = 'legacy'`).run(answerId).changes
   }
 
-  /** Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5) */
+  /**
+   * Every unsettled task row with its sender, oldest first: what `takeOverFromEarlierBuild` checks the old report paths against (§9.5). Not a released
+   * one: a stop told its sender it was not answered, and it stays open for the reply (mailbox.md §10.6.1)
+   */
   unsettledTasks(): { messageId: string; sender: string; recipient: string }[] {
     return this.db
       .prepare<[], { message_id: string; sender: string; recipient: string }>(
-        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE m.kind = 'task' AND r.settled IS NULL ORDER BY m.created_at, m.id`,
+        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id WHERE m.kind = 'task' AND r.settled IS NULL AND r.released_at IS NULL ORDER BY m.created_at, m.id`,
       )
       .all()
       .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient }))
