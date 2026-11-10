@@ -1660,7 +1660,9 @@ conversation, and not a turn Centralu continues (an update's cut, #1975): those 
 
 **What it releases.** Everything the stopped session owes an answer: each `needsReply` message delivered into the cut turn and not
 answered (the person's too), and every open task a session gave it and that reached it, whichever turn it came in (one still queued
-was never its work). Not the person's tasks: their work is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a
+was never its work). The person's Stop releases only the tasks of the turn it stopped (delivered into it, or the work it was for): the
+session can still answer the others, so their givers are not told (owner, 2026-11-11). A stop that leaves it unable to answer (an error, a
+usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. Not the person's tasks: their work is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a
 reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
 released task as reported.
 

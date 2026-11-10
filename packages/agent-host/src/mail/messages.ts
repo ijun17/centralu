@@ -848,7 +848,7 @@ export class MessageService {
       let released = 0
       for (const { address, why, turnSeq, told, held, starter, reportOwed } of stops) {
         const owed = new Set<string>()
-        for (const { row, message: m } of [...(turnSeq === null ? [] : this.cutQuestions(address, turnSeq)), ...this.openTasksTo(address)]) {
+        for (const { row, message: m } of [...(turnSeq === null ? [] : this.cutQuestions(address, turnSeq)), ...this.openTasksTo(address, why, turnSeq)]) {
           if (!this.records.markReleased(row.messageId, address, now, why)) continue
           released++
           owed.add(m.sender)
@@ -958,11 +958,15 @@ export class MessageService {
 
   /**
    * The open tasks a session gave `address`, which its stop releases (`sessionsStopped`): delivered ones only (one still queued was never its work), and
-   * not the person's, whose work is reported to their Inbox
+   * not the person's, whose work is reported to their Inbox. A stop that leaves it unable to answer (an error, a limit, the network, a quit) releases
+   * them all; the person's Stop only those in the turn it stopped (delivered into it, or the work it was for): the session can still answer the rest
    */
-  private openTasksTo(address: string): { row: RecipientRow; message: MailRow }[] {
+  private openTasksTo(address: string, why: StopWhy, turnSeq: number | null): { row: RecipientRow; message: MailRow }[] {
+    const party = parseAddress(address)
+    const turn = why === 'stopped' && turnSeq !== null && party?.kind === 'session' ? this.records.turn(party.sessionId, turnSeq) : undefined
+    const stopped = (row: RecipientRow): boolean => why !== 'stopped' || (turnSeq !== null && (row.turnSeq === turnSeq || turn?.starterId === row.messageId))
     return this.records.watchedTo(address).flatMap((row) => {
-      const message = row.releasedAt === null && row.deliveredAt !== null ? this.records.message(row.messageId) : undefined
+      const message = row.releasedAt === null && row.deliveredAt !== null && stopped(row) ? this.records.message(row.messageId) : undefined
       return message?.kind === 'task' && parseAddress(message.sender)?.kind === 'session' && message.sender !== address ? [{ row, message }] : []
     })
   }

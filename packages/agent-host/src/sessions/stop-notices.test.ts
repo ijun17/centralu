@@ -115,13 +115,16 @@ describe('a turn ends without finishing', () => {
     await w.until(() => stopNotices(asker).length === 1)
 
     expect(read.row(question.id, addr(child))).toMatchObject({ releasedWhy: why, settled: null })
-    expect(read.row(task!.id, addr(child))).toMatchObject({ releasedWhy: why, settled: null })
+    // The open task the asker gave before this turn: released by a stop that leaves the child unable to answer, not by the person's Stop, after
+    // which the child can still answer it
+    const kept = why === 'stopped'
+    expect(read.row(task!.id, addr(child))).toMatchObject(kept ? { releasedAt: null, settled: null } : { releasedWhy: why, settled: null })
     const message = stopNotices(asker)[0]!.message
-    // The question of the cut turn and the open task the asker gave: one notice for both
-    expect(message.facts).toEqual({ unanswered: rowsOf(child, why, task, question) })
+    // The question of the cut turn and the open task: one notice for both
+    expect(message.facts).toEqual({ unanswered: kept ? rowsOf(child, why, question) : rowsOf(child, why, task, question) })
     expect(message.body).toContain(says)
     expect(message.body).toContain(question.id)
-    expect(message.body).toContain(task!.id)
+    if (!kept) expect(message.body).toContain(task!.id)
     // The asker is at rest and owed a reply: the notice wakes it. The tool's own words are not in it (#120)
     expect(wakesMessage(message)).toBe(true)
     expect(message.body).not.toContain('something broke')
@@ -130,8 +133,14 @@ describe('a turn ends without finishing', () => {
     // Once: another stop of the same session, before it was continued, tells no one again
     working(child)
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
-    await new Promise((r) => setTimeout(r, 20))
-    expect(stopNotices(asker)).toHaveLength(1)
+    if (!kept) {
+      await new Promise((r) => setTimeout(r, 20))
+      expect(stopNotices(asker)).toHaveLength(1)
+      return
+    }
+    // After the Stop the task was still open: this stop, which leaves the child unable to answer, tells it, and only it
+    await w.until(() => stopNotices(asker).length === 2)
+    expect(stopNotices(asker).map((n) => n.message.facts)).toEqual(expect.arrayContaining([{ unanswered: rowsOf(child, 'stopped', question) }, { unanswered: rowsOf(child, 'limit', task) }]))
   })
 
   it('quotes what the session last wrote in a turn the asker’s own question started, framed as its own text, at most 600 characters', async () => {
@@ -538,6 +547,24 @@ describe('the owner’s cases (mailbox.md §10.6.1): who is told, woken, or left
     await w.until(() => stopNotices(asker).length === 1)
     expect(stopNotices(asker)[0]!.message.facts).toEqual({ unanswered: rowsOf(child, 'limit', question) })
     expect(starterNotices(starter)).toEqual([])
+  })
+
+  it("the person's Stop of their own turn leaves another session's open task alone: the child can still answer it, so its giver is not told", async () => {
+    const giver = await w.callerSession()
+    const child = await w.callerSession()
+    const task = m.service.task(addr(giver), addr(child), { text: 'long job', origin: 'start_agent', delivered: true })
+    const asker = await w.callerSession()
+    // The person writes to the child at rest: their message starts its turn, and they press Stop
+    await w.mgr.inputs.send(child, 'tidy the changelog too', undefined, undefined, true)
+    expect(m.turns.latest(child)).toMatchObject({ by: 'person' })
+    working(child)
+    // A question in that turn: its notice is the event the stop is seen by
+    const question = ask(asker, child)
+    handleOf(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.facts).toEqual({ unanswered: rowsOf(child, 'stopped', question) })
+    expect(read.row(task.id, addr(child))).toMatchObject({ releasedAt: null, settled: null })
+    expect(read.to(addr(giver)).filter((x) => x.message.kind === 'notice')).toEqual([])
   })
 
   // The starter's quiet notice at a real restart, which finds who started the cut turn (`HostTenure.quitStarter`): interruptions.test.ts "a turn a quit stopped"

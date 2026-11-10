@@ -365,6 +365,19 @@ describe('a session stops without answering a question', () => {
     }
   })
 
+  it("the person's Stop releases only the tasks of the turn it stopped; a stop that leaves the session unable to answer releases them all", () => {
+    for (const why of ['stopped', 'error'] as const) {
+      const w = stopWorld()
+      const earlier = w.mail.task(A, B, { text: 'earlier work', origin: 'start_agent', delivered: true })
+      const inTurn = w.mail.task(C, B, { text: 'this turn', origin: 'send_to_session', delivered: true })
+      w.records.markDelivered(B, [inTurn.id], w.clock.t, 1)
+      w.stops.sessionStopped(B, why, { turnSeq: 1 })
+      expect(w.rowOf(inTurn.id, B), why).toMatchObject({ releasedWhy: why })
+      expect(w.rowOf(earlier.id, B), why).toMatchObject(why === 'stopped' ? { releasedAt: null } : { releasedWhy: 'error' })
+      expect(w.noticesTo(A), why).toHaveLength(why === 'stopped' ? 0 : 1)
+    }
+  })
+
   it('the starter is told once per stop when no turn is on record: the same stop again, later, writes no second notice', () => {
     const w = stopWorld()
     w.stops.sessionStopped(B, 'network', { turnSeq: null, starter: A })
