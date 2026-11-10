@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
+import type { ChildReports } from './child-reports.js'
 import { hostMail, mailSessionsOf, type HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, MAIL_HOST, mailReader, wireHostMail } from './host-mail.test-helpers.js'
@@ -35,6 +36,7 @@ const askAgents = () => w.store.permissions.setProjectConsent(w.caller.id, w.cal
 /** The mailbox as it reads once a report is due: the message service of this host with a clock 10 s ahead (the manager keeps the test's hooks) */
 const later = () =>
   hostMail(w.store, mailSessionsOf(w.mgr, () => true), { hostId: MAIL_HOST, now: () => Date.now() + 10_000, delivery: { schedule: () => () => {} } }).service
+const reports = () => (w.mgr as unknown as { reports: ChildReports }).reports
 const children = () => (w.mgr as unknown as { children: { awaitingReport: Map<string, string>; pausedReports: Map<string, unknown> } }).children
 
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
@@ -117,6 +119,71 @@ describe('a turn ends, the owner reads mail', () => {
     expect(report?.facts.quiet).toBeUndefined()
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
     expect(oldReports(parent, child)).toEqual([])
+  })
+
+  it('a later turn with a new answer while still paused is an update (#1540): a report of its own that wakes, and the task stays open', async () => {
+    const { parent, child } = await parentAndChild()
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
+    await turnEnds(child, 'watcher started')
+    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+    await turnEnds(child, 'verdict: the change is correct')
+    const reports = reportsIn(parent, child)
+    expect(reports).toHaveLength(2)
+    expect(reports[1]?.facts).toMatchObject({ outcome: 'paused', paused: 1, answer: 'verdict: the change is correct' })
+    expect(reports[1]?.facts.quiet).toBeUndefined()
+    expect(reports[1]?.body).toContain('An update on the assigned work, which is still paused')
+    expect(reports[1]?.body).not.toContain('pnpm dev')
+    expect(taskRow(parent, child)).toMatchObject({ settled: null })
+    expect(oldReports(parent, child)).toEqual([])
+  })
+
+  /*
+   * #1540 review: every worded turn of a paused child made an update that woke its owner, so a child watching its work with a Monitor woke its
+   * parent at each look. An update the owner has not read takes the newer words and count in its place, and wakes nobody again
+   */
+  it("a pause's updates wake their owner once until it reads them: the unread one holds the newest words and task count", async () => {
+    const { parent, child } = await parentAndChild()
+    const dev = { id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev] })
+    await turnEnds(child, 'watcher started')
+    m.service.read(addr(parent))
+    for (let i = 1; i <= 10; i++) {
+      if (i === 10) handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev, { ...dev, id: 't2', description: 'pnpm test' }] })
+      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+      await turnEnds(child, `look ${i}: still running`)
+    }
+    const updates = () => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
+    expect(updates()).toHaveLength(1)
+    expect(updates()[0]?.facts).toMatchObject({ outcome: 'paused', paused: 2, answer: 'look 10: still running' })
+    expect(updates()[0]?.facts.quiet).toBeUndefined()
+    expect(read.row(updates()[0]!.id, addr(parent))).toMatchObject({ readAt: null })
+    // Read, the next update is a report of its own, which wakes again
+    m.service.read(addr(parent))
+    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+    await turnEnds(child, 'look 11: verdict written')
+    expect(updates()).toHaveLength(2)
+    expect(updates()[1]?.facts).toMatchObject({ answer: 'look 11: verdict written' })
+    expect(updates()[1]?.facts.quiet).toBeUndefined()
+    expect(taskRow(parent, child)).toMatchObject({ settled: null })
+  })
+
+  // #1540 review: an update with no stored answer was keyed by the clock, so the same turn's end told twice made two updates
+  it("a pause's update is named by the turn that ended: the same turn's end told again is no second update", async () => {
+    const { parent, child } = await parentAndChild()
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
+    await turnEnds(child, 'watcher started')
+    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+    await turnEnds(child, 'verdict: correct')
+    const updates = () => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
+    expect(updates()).toHaveLength(1)
+    m.service.read(addr(parent))
+    // The end of that turn told again, with no stored answer to name it by (a replay after a restart)
+    const paused = [{ id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }]
+    for (let i = 0; i < 2; i++) {
+      await reports().deliverReport(parent, child, 'child', 'p', 'verdict: correct', { type: 'turn_complete' }, { paused, stoppable: true, update: true })
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    expect(updates()).toHaveLength(1)
   })
 
   it('the person writing into the turn is a fact of the report, never their words', async () => {

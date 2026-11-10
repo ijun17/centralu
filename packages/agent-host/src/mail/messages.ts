@@ -107,6 +107,12 @@ export type TurnReport = {
   personNote?: boolean
   /** When the turn that ended began, for the tasks its report covers (§9.3): the turn has ended by the time the old path reports it */
   startedAt?: number
+  /**
+   * A pause's update (#1540): a later turn of the paused work ended with a new answer while its own background work still runs. The number of
+   * that turn in the child's stored turns: the same turn's end told twice is one update. An update the owner has not read yet is written over
+   * with the newer one, and wakes nobody again; once read, the next one is a report of its own, which wakes
+   */
+  update?: number
 }
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
@@ -382,7 +388,8 @@ export class MessageService {
   /**
    * How a turn of delegated work ended (§9.3): Centralu's report, replying to the task, for its sender. A turn that ended for good settles the task
    * `reported`, and every other open task from the same sender to the same child that was delivered before the turn began (F4, K3); a pause
-   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`
+   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`.
+   * A pause's update (`update`, #1540) wakes when its owner has read the one before; until then it is written over that one, `duplicate` too
    */
   report(taskId: string, input: TurnReport): ReportWritten {
     return this.run(() => {
@@ -394,7 +401,23 @@ export class MessageService {
       if (row.settled !== null && task.kind === 'task') return { settledAlready: true }
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
-      const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
+      const reports = this.records.reportsOn(taskId)
+      if (input.update !== undefined) {
+        const updates = reports.filter((r) => r.facts.update !== undefined)
+        const last = updates.at(-1)
+        // The same turn's end again (a replay after a restart): the update it made
+        if (last?.facts.update === input.update) return { message: last, duplicate: true, first: false }
+        // The pause's last update is not read yet (#1540): it holds the newer answer and task count now, and its owner is woken for it once
+        if (last && this.records.recipient(last.id, task.sender)?.readAt === null) {
+          const { answer: _answer, personNote: _note, ...kept } = last.facts
+          const facts: MailFacts = { ...kept, paused: input.paused ?? 0, update: input.update, ...(input.answer ? { answer: input.answer } : {}), ...(input.personNote ? { personNote: true } : {}) }
+          const rewritten = this.records.rewrite(last.id, input.body, facts) ?? last
+          this.changed(rewritten, [task.sender])
+          return { message: rewritten, duplicate: true, first: false }
+        }
+      }
+      // A pause's update carries a new answer (#1540): the first since its owner read the last wakes, as the first pause does
+      const first = !pause || input.update !== undefined || !reports.some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
       const startedAt = input.startedAt ?? this.opts.turn?.(row.recipient)?.startedAt
       const covers = pause || startedAt === undefined || task.kind !== 'task'
         ? []
@@ -409,6 +432,7 @@ export class MessageService {
         ...(input.reason ? { reason: input.reason } : {}),
         ...(input.paused ? { paused: input.paused } : {}),
         ...(input.waitingOn ? { waitingOn: input.waitingOn } : {}),
+        ...(input.update !== undefined ? { update: input.update } : {}),
         ...(input.personNote ? { personNote: true } : {}),
         ...(input.answer ? { answer: input.answer } : {}),
         ...(covers.length > 0 ? { covers } : {}),
@@ -419,7 +443,7 @@ export class MessageService {
         body: input.body,
         facts,
         replyTo: taskId,
-        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}`,
+        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}${input.update !== undefined ? `:update:${input.update}` : ''}`,
       })
       if (!stored.duplicate && !pause) {
         for (const id of [taskId, ...covers]) this.records.settle(id, row.recipient, 'reported', now)

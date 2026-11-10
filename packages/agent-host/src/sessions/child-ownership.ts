@@ -225,6 +225,10 @@ export type LinkedReport = {
   addNext?: number
   /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
   read?: { preview: string; seq: number | undefined }
+  /** The call that asked took the answer of the turn that paused (`LinkedReports.oweAsker`): that turn's end is no update (#1540). Memory only */
+  toldTurn?: true
+  /** The person wrote to the session there since the wait began: no later turn is an update (#1540, `isPauseUpdate`). Memory only, as the wait */
+  personWrote?: true
 }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
@@ -277,6 +281,23 @@ export class ChildOwnership {
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  /**
+   * Paused reports whose work an update's stop ended (#1912): the session was at rest, so no turn was cut, and the start kept the report rather than
+   * drop it with the work. The next report about it says so, once. Memory only: a start after another stop finds the same in the store again
+   */
+  private readonly stoppedByUpdate = new Set<string>()
+  readonly pausesStoppedByUpdate: ReadonlySet<string> = this.stoppedByUpdate
+  /**
+   * Whether the person wrote to the session since it owed its report (#1540): a pause of that work sends no updates. Which turn is the person's
+   * cannot always be told (a CLI that does not name the inputs a turn took, docs/plans/turn-starter.md §3), and their words are never the caller's
+   * to read. The final report still comes when the work ends. Read from the store (the person's message after the report's mark, which new work
+   * sets again), so a host after an update reads it as the one before did
+   */
+  personWroteSinceMark(sessionId: string): boolean {
+    const marked = this.store.children.reportMarkedAt(sessionId)
+    const said = marked === null ? null : this.store.messages.newestPersonMessage(sessionId)
+    return marked !== null && said !== null && said.ts >= marked
+  }
   /**
    * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
    * at its end (`ChildReports.reportBackIfAwaited`). Mirrored in the app setting `report_turn:<session>` while a report is
@@ -534,7 +555,12 @@ export class ChildOwnership {
    * At startup (#646): the report marks of the sessions whose turn goes on under this host (`goingOn`: an update cut it,
    * and this host continues it) and of the sessions waiting on threads they handed on, and nothing else.
    */
-  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
+  restoreReports(
+    sessions: ReadonlyMap<string, SessionInfo>,
+    goingOn: ReadonlySet<string>,
+    /** This start follows an update's stop (#1912): a report paused over work that stop ended is kept, and said to be so (`pausesStoppedByUpdate`) */
+    afterUpdate = false,
+  ): void {
     /*
      * "You will be told when it ends" survives an update (#646, #1618): the turn an update cut is continued under this
      * host, so it ends here, and the report it owes goes out from here. Any other mark is dropped rather than left to
@@ -549,6 +575,16 @@ export class ChildOwnership {
       const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
       if (kept && (inTurn(child.state) || paused)) {
         this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
+        continue
+      }
+      /*
+       * A report paused over the work of a session at rest, which an update's stop ended (#1912): no turn was cut, so nothing here would end the
+       * work's wait, and its caller would wait for good. The report is kept, and the next one about the session says the update stopped that work:
+       * the end of the turn the update's note wakes it for (`HostTenure.continueCutTurns`), or at once when no such turn comes (`ChildReports.reportStoppedByUpdate`)
+       */
+      if (afterUpdate && paused && child && !inTurn(child.state) && sessions.has(mark.callerSessionId)) {
+        this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
+        this.stoppedByUpdate.add(mark.sessionId)
         continue
       }
       /*
@@ -643,7 +679,12 @@ export class ChildOwnership {
   }
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
+    this.stoppedByUpdate.delete(sessionId)
     if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
+  }
+  /** The caller has been told that an update stopped the paused work (#1912): later reports do not say it again */
+  toldStoppedByUpdate(sessionId: string): void {
+    this.stoppedByUpdate.delete(sessionId)
   }
   /**
    * A message goes into the session (#1377): the person's, or anyone else's (a caller's, an app's, Centralu's). At rest

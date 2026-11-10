@@ -12,7 +12,8 @@ import { wentWithItsProcess } from './interruptions.js'
 import { TURN_ENDED, type ReportDraft, type ReportedAs } from '../mail/delegation.js'
 import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
-import type { ReportWork } from './linked-reports.js'
+import type { ReportPart, ReportWork } from './linked-reports.js'
+import { isPauseUpdate } from './pause-update.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE } from './ask-project.js'
@@ -92,10 +93,17 @@ function waitingReportLine(n: number): string {
 `
 }
 
-/** The first line of a report held over the session's own background work (#721) */
-function pausedReportLine(running: readonly BackgroundTask[], stop: string | undefined, name: Naming = STORED): string {
+/**
+ * The first line of a report held over the session's own background work (#721). `update` (#1540): not the first pause but a later turn of
+ * the paused work, which ended with a new answer while that work still runs. `listed`: the call that names each task, for the model, which
+ * reads them counted (#1186)
+ */
+function pausedReportLine(running: readonly BackgroundTask[], stop: string | undefined, name: Naming = STORED, update = false, listed?: string): string {
   return (
-    `[Centralu] The assigned work paused: its turn ended while its own background work is still running (${name.tasks(running)}). ` +
+    (update
+      ? `[Centralu] An update on the assigned work, which is still paused: a later turn ended with a new answer while its own background work is still running (${name.tasks(running)}). `
+      : `[Centralu] The assigned work paused: its turn ended while its own background work is still running (${name.tasks(running)}). `) +
+    (listed ? `${listed} names each of them. ` : '') +
     'If that work is a server or watcher it leaves running, the answer below may be its final one. ' +
     'A final report follows only if that work ends' +
     (stop ? `; ${stop} on it stops that work and ends the wait.\n` : '.\n')
@@ -145,15 +153,27 @@ function tookOverReportLine(paused: readonly BackgroundTask[], name: Naming = ST
   )
 }
 /** What a report says of the person's part in the turn it reports (#1377): Centralu's own words, never the person's */
-export function personPartLine(turn: { wrote?: true; added?: true; cut?: true } | undefined): string {
+export function personPartLine(turn: ReportPart | undefined): string {
   // An update cut the turn and Centralu continued it (#1966): its parent heard nothing of the cut, so the end says so
-  const cut = turn?.cut ? 'An update of Centralu cut this turn and Centralu continued it.\n' : ''
-  if (turn?.added) return `${cut}The person added an instruction to this task during this turn.\n`
-  if (turn?.wrote) return `${cut}The person wrote in this session during this turn.\n`
-  return cut
+  const centralu =
+    (turn?.cut ? 'An update of Centralu cut this turn and Centralu continued it.\n' : '') +
+    // An update stopped the background work the report had paused on (#1912): the turn reported is the session's after Centralu told it so
+    (turn?.stoppedByUpdate ? 'An update of Centralu stopped the background work this work had paused on before that work ended; the session was told which, and this turn came after.\n' : '')
+  if (turn?.added) return `${centralu}The person added an instruction to this task during this turn.\n`
+  if (turn?.wrote) return `${centralu}The person wrote in this session during this turn.\n`
+  return centralu
 }
-/** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
-function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED): string {
+/**
+ * The first line of a paused report settled with no turn after its work ended (#721): how that work ended. `byUpdate` (#1912): an update's
+ * stop ended it, and no turn of the session followed (it could not be told, or it was the person's)
+ */
+function settledReportLine(tasks: readonly BackgroundTask[], name: Naming = STORED, byUpdate = false): string {
+  if (byUpdate) {
+    return (
+      `[Centralu] An update of Centralu stopped the background work the assigned work had paused on (${name.tasks(tasks)}) before that work ended, ` +
+      'and no turn of the session followed, so the work may not have finished; its last answer is below.\n'
+    )
+  }
   const clean = tasks.every((t) => t.status === 'completed')
   return (
     `[Centralu] The assigned work's background work ended (${name.tasks(tasks, true)}) and no turn followed` +
@@ -263,8 +283,10 @@ export class ChildReports {
   /** The tasks a paused report waited on, as the session lists them now: how each ended, or still running (#721) */
   pausedTasksNow(sessionId: string): BackgroundTask[] {
     const listed = this.host.meta.get(sessionId)?.backgroundTasks ?? []
+    const byUpdate = this.host.children.pausesStoppedByUpdate.has(sessionId)
     return (this.host.children.pausedReports.get(sessionId) ?? []).map((t) =>
-      listed.find((l) => l.id === t.id) ?? { id: t.id, kind: 'other' as const, description: t.description, status: 'completed' as const })
+      // One an update's stop ended is not listed by the new process: stopped, not completed (#1912)
+      listed.find((l) => l.id === t.id) ?? { id: t.id, kind: 'other' as const, description: t.description, status: byUpdate ? ('stopped' as const) : ('completed' as const) })
   }
   /**
    * A paused report whose background work has ended with no turn running (#721): the turn that ending starts ends the
@@ -312,8 +334,8 @@ export class ChildReports {
     answer?: string,
     /** The paused work's tasks, ended with no turn after them (#721): the report says how they ended */
     settled?: readonly BackgroundTask[],
-    /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed */
-    turn?: TurnStarter,
+    /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed. `compaction`: Centralu's own turn to compact it */
+    turn?: TurnStarter & { compaction?: true },
   ): Promise<string | undefined> {
     const assistantId = this.host.children.awaitingReport.get(sessionId)
     if (!assistantId) return undefined
@@ -328,13 +350,16 @@ export class ChildReports {
     const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
     const paused = running.length > 0
     const toldPaused = paused && this.host.children.pausedReports.has(sessionId)
+    // An update's stop ended the work it had paused on (#1912): the report says so, once. Read before the report is closed
+    const byUpdate = this.host.children.pausesStoppedByUpdate.has(sessionId)
     // Work it handed on that is still going (§6): the turn is not the work's end, and the report stays owed for the turn that ends it
     const waiting = !paused && ending.type === 'turn_complete' ? this.host.children.waitingOn(assistantId, sessionId) : 0
     if (paused) this.pauseReport(sessionId, running)
     else if (waiting === 0) this.host.children.clearReport(sessionId)
     // Its own background work has ended (settled) and what it handed on has not: the pause on tasks is over, the one on threads is not
     else this.host.children.unpauseReport(sessionId)
-    if (toldPaused) return undefined
+    // Paused already: a later turn with a new answer is an update, at once (#1540); the final report still waits for the work's end
+    if (toldPaused) return this.reportPauseUpdate(sessionId, assistantId, ending, running, answer, turn, byUpdate)
 
     const target = this.host.meta.get(sessionId)
     if (!target || !this.host.meta.has(assistantId)) return undefined
@@ -346,9 +371,69 @@ export class ChildReports {
      * raw report is record/screen provenance, and the vendor turn is the trust boundary.
      */
     const { name, project } = this.reportedAs(target)
-    const work = paused ? { paused: running, stoppable: target.askedBy === assistantId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled } : undefined
+    const work = paused ? { paused: running, stoppable: target.askedBy === assistantId } : waiting > 0 ? { waitingOn: waiting } : settled ? { settled, ...(byUpdate ? { byUpdate: true as const } : {}) } : undefined
     const preview = theirs ? NOT_READ : answer !== undefined ? clipPreview(answer, 600) : previewOf(this.host.store.messages, sessionId, 600)
-    return (await this.deliverReport(assistantId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), turn)) ? assistantId : undefined
+    // A settled report says the update in its first line; a turn's end says it beside the person's part
+    const part = byUpdate && !settled ? { ...turn, stoppedByUpdate: true as const } : turn
+    return (await this.deliverReport(assistantId, sessionId, name, project, preview, ending, work, theirs ? undefined : this.answerSeq(sessionId), part)) ? assistantId : undefined
+  }
+
+  /**
+   * A later turn of paused work ended with a new answer while the work it paused on still runs (#1540): on 2026-10-25 a review child wrote its
+   * full verdict a quarter of an hour after its pause, and its caller never heard it, the report being held for work that ran on. The answer goes
+   * to the caller at once as an update that says the work is still paused and on what; the final report still waits for that work's end. Which
+   * turn is one, `isPauseUpdate` says
+   */
+  private async reportPauseUpdate(
+    sessionId: string,
+    assistantId: string,
+    ending: NormalizedEvent,
+    running: readonly BackgroundTask[],
+    answer: string | undefined,
+    turn: (TurnStarter & { compaction?: true }) | undefined,
+    byUpdate: boolean,
+  ): Promise<string | undefined> {
+    const said = this.turnWords(sessionId, answer)
+    const later = { compaction: turn?.compaction === true, othersWrote: this.othersWroteInTurn(sessionId), personWrote: this.host.children.personWroteSinceMark(sessionId) }
+    const target = this.host.meta.get(sessionId)
+    if (!said || !isPauseUpdate(later, said.preview) || !target || !this.host.meta.has(assistantId)) return undefined
+    if (byUpdate) this.host.children.toldStoppedByUpdate(sessionId)
+    const { name, project } = this.reportedAs(target)
+    const work = { paused: running, stoppable: target.askedBy === assistantId, update: true as const }
+    const part = byUpdate ? { ...turn, stoppedByUpdate: true as const } : turn
+    return (await this.deliverReport(assistantId, sessionId, name, project, said.preview, ending, work, said.seq, part)) ? assistantId : undefined
+  }
+
+  /**
+   * Whether the turn that just ended has a message in it that no session sent (#1540): the person's, typed in the tool itself too, an app's or a
+   * script's. Such a turn may be theirs though it reads as the work's, so it is no update. The turn the tool starts when a task ends has none
+   */
+  private othersWroteInTurn(sessionId: string): boolean {
+    // Since the turn before it began, so the message a turn opened from is counted (`latestTurnInputs`); a null is one no session sent
+    return this.host.children.latestTurnInputs(sessionId).includes(null)
+  }
+
+  /** What the turn that just ended said itself (#1540): the answer its run gave, else its own last response; none when it said nothing */
+  private turnWords(sessionId: string, answer: string | undefined): { preview: string; seq: number | undefined } | undefined {
+    if (answer !== undefined && answer.trim() !== '') return { preview: clipPreview(answer, 600), seq: this.answerSeq(sessionId) }
+    const span = this.host.children.latestTurnRows(sessionId)
+    if (!span) return undefined
+    const rows = this.host.store.messages.loadMessages(sessionId, 200)
+    const text = lastResponse(rows, span)
+    return text.trim() === '' ? undefined : { preview: clipPreview(text, 600), seq: lastResponseSeq(rows, span) ?? undefined }
+  }
+
+  /**
+   * A report kept over work an update's stop ended (#1912) whose session no turn of the work follows: the note of what the update stopped could not
+   * go in, or it had nothing to wake the session for. Its caller is told now, rather than wait for a turn that will not come. A session in a turn
+   * reports at that turn's end
+   */
+  reportStoppedByUpdate(sessionId: string): void {
+    if (this.host.disposing || !this.host.children.pausesStoppedByUpdate.has(sessionId)) return
+    const m = this.host.meta.get(sessionId)
+    if (!m || inTurn(m.state) || !this.host.children.awaitingReport.has(sessionId)) return
+    console.error(`[sessions] ${sessionId.slice(0, 8)}: an update stopped the background work its report paused on, and no turn followed; reporting that`)
+    void this.reportBackIfAwaited(sessionId, { type: 'turn_complete', sessionId }, undefined, this.pausedTasksNow(sessionId))
   }
 
   /**
@@ -484,8 +569,8 @@ export class ChildReports {
     work?: ReportWork,
     /** Where its last response starts in its conversation, when it is read here: the read the model is pointed to (#1186) */
     answerSeq?: number,
-    /** The person's part in the turn reported (#1377): they wrote into it, or added to the task */
-    part?: { wrote?: true; added?: true; cut?: true },
+    /** The person's part in the turn reported (#1377): they wrote into it, or added to the task; and an update's part in it (#1966, #1912) */
+    part?: ReportPart,
   ): Promise<boolean> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
@@ -503,8 +588,16 @@ export class ChildReports {
       : work && 'swapped' in work ? swappedReportLine()
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
-      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable ? this.agentCall(assistantId, { action: 'stop' }) : undefined, name)
-      : work && 'settled' in work ? settledReportLine(work.settled, name)
+      : work && 'paused' in work
+        ? pausedReportLine(
+            work.paused,
+            work.stoppable ? this.agentCall(assistantId, { action: 'stop' }) : undefined,
+            name,
+            work.update === true,
+            // The model reads the tasks counted (#1186): the call that names each, where the caller may make it
+            name === FOR_MODEL && work.stoppable ? this.agentCall(assistantId, { action: 'status' }) : undefined,
+          )
+      : work && 'settled' in work ? settledReportLine(work.settled, name, work.byUpdate === true)
       : work && 'waitingOn' in work ? waitingReportLine(work.waitingOn)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
@@ -572,6 +665,8 @@ export class ChildReports {
       ...(answered ? { answer: preview } : {}),
       ...(kind ? { error: kindWord(kind) } : {}),
       ...(holding ? { paused: work.paused.length } : {}),
+      // A new answer of a pause (#1540): the mailbox names it by the turn that ended
+      ...(holding && 'update' in work && work.update ? { update: true as const } : {}),
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
       then: holding || handedOn ? 'running' : 'review',
     })

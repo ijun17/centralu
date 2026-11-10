@@ -193,6 +193,8 @@ export class HostTenure {
             // Nothing was cut: the agent is not told which tasks the update stopped, and the log says so
             console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(e)})`)
             this.updateLists?.done(sessionId)
+            // No turn of it follows: a report kept over the work the update stopped goes now (#1912)
+            this.host.reports.reportStoppedByUpdate(sessionId)
             return
           }
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
@@ -471,7 +473,14 @@ export class HostTenure {
     ]
     // No process outlives its host, so no card the previous host left standing is still asked (#428): every rest it wrote goes
     this.host.cardRests.restore(() => false)
-    this.host.children.restoreReports(this.host.meta, goingOn)
+    this.host.children.restoreReports(this.host.meta, goingOn, lists !== null)
+    /*
+     * A report kept over work an update's stop ended (#1912): the turn the update's note wakes the session for reports, saying so. A session the note
+     * does not wake (the stop listed nothing of it, or its conversation moved on) has no such turn coming: its caller is told now
+     */
+    const woken = new Set(this.updateCuts.filter((c) => !c.turn).map((c) => c.sessionId))
+    const unwoken = [...this.host.children.pausesStoppedByUpdate].filter((id) => !woken.has(id))
+    if (unwoken.length) setTimeout(() => unwoken.forEach((id) => this.host.reports.reportStoppedByUpdate(id)), 0)
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()

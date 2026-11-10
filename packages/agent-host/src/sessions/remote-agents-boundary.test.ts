@@ -633,7 +633,9 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     machine.selfTurnEnds()
     await flush()
     expect(hub.children.linkedReports.get(CHILD)?.paused).toBeTruthy()
-    expect(hub.delivered).toHaveLength(1)
+    // Still paused, and that turn's answer goes to the caller at once as an update (#1540), not as the work's end
+    expect(hub.delivered).toHaveLength(2)
+    expect(JSON.parse(hub.delivered[1]!)).toMatchObject({ work: { update: true } })
     // At rest now: a send is new work, not a note
     expect(await hub.act('send', { text: 'more' })).toMatchObject({ ok: true })
     expect(machine.turn).toBe('hub')

@@ -3,7 +3,7 @@ import type { BackgroundTask } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
-import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
+import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportPart, type ReportWork } from './linked-reports.js'
 import { HUB_SENDER } from './hub-sender.js'
 
 /*
@@ -14,7 +14,7 @@ import { HUB_SENDER } from './hub-sender.js'
  * no store side to check here.
  */
 
-type Delivered = { assistantId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: { wrote?: true; added?: true; cut?: true } }
+type Delivered = { assistantId: string; sessionId: string; name: string; project: string; preview: string; ending: string; error?: string; work?: ReportWork; part?: ReportPart }
 
 let store: Store
 let children: ChildOwnership
@@ -169,32 +169,64 @@ describe('whom a turn end is reported to', () => {
 })
 
 describe('a pause over the session\'s own background work there (#723)', () => {
-  it('grows with work a later turn leaves running, tells it once, and settles with how each task ended', async () => {
+  it('grows with work a later turn leaves running, sends that turn\'s new answer as an update (#1540), and settles with how each task ended', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     ask('m1.w1')
     reports.observe(tasks('m1.w1', [verify]))
     turn('m1.w1')
     await flush()
     expect(delivered).toMatchObject([{ work: { paused: [verify], stoppable: false } }])
-    // The next turn starts more work and ends: the pause holds both, and nothing more is said
+    // The next turn starts more work and ends with words: the pause holds both, and that answer is an update naming what runs
     reports.observe(tasks('m1.w1', [verify, build]))
     turn('m1.w1')
     await flush()
-    expect(delivered).toHaveLength(1)
+    expect(delivered).toHaveLength(2)
+    expect(delivered[1]).toMatchObject({ preview: 'last words of m1.w1', work: { paused: [verify, build], stoppable: false, update: true } })
     expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify', 'bg-build'])
+    // A turn that says nothing there tells nothing
+    said = () => ''
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(2)
     // verify fails; build leaves the list without saying how, which reads as completed
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'failed' }]))
     await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS - 1)
-    expect(delivered).toHaveLength(1)
+    expect(delivered).toHaveLength(2)
     await vi.advanceTimersByTimeAsync(1)
     await flush()
-    expect(delivered).toHaveLength(2)
-    expect(delivered[1]).toMatchObject({
+    expect(delivered).toHaveLength(3)
+    expect(delivered[2]).toMatchObject({
       assistantId: 'o1',
       ending: 'turn_complete',
       work: { settled: [{ id: 'bg-verify', status: 'failed' }, { id: 'bg-build', status: 'completed' }] },
     })
     expect(children.linkedReports.has('m1.w1')).toBe(false)
+  })
+
+  // #1540 review: the linked path skipped only a turn with no words, so Centralu's compaction there, or a turn the person wrote into, woke the Assistant
+  it("sends no update for a later turn the hub's own children send none for: a compaction, a turn the person wrote into, any after it", async () => {
+    ask('m1.w1')
+    reports.observe(tasks('m1.w1', [verify]))
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(1)
+    // The machine's host says the turn was Centralu's own, to compact the conversation
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1', turn: { by: 'work', compaction: true } })
+    await flush()
+    expect(delivered).toHaveLength(1)
+    // The work's own turn with words is an update
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(2)
+    // The person writes into the work's turn there: neither it nor a later turn is an update
+    reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
+    reports.observe({ type: 'user_message', sessionId: 'm1.w1', text: 'look at the logs too' })
+    reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
+    turn('m1.w1')
+    await flush()
+    expect(delivered).toHaveLength(2)
+    expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify'])
   })
 
   it('a state the machine reports after the paused turn, before any new turn, does not end the report', async () => {
@@ -559,11 +591,13 @@ describe('a machine whose link drops or comes back', () => {
       assistantId: 'o1', sessionId: 'm1.w1', name: 'Worker', project: 'Site',
       preview: 'last words of m1.w1', ending: 'turn_complete', work: { linkLost: 'Box', paused: [verify], asRead: true },
     })
-    // m10 kept its wait and what the hub knew of its work: its next turn end, with that work still running, is no report
+    // m10 kept its wait and what the hub knew of its work: its next turn end, with that work still running, is an update (#1540), not an end
     expect(children.linkedReports.get('m10.w1')?.paused).toEqual([build])
     turn('m10.w1')
     await flush()
-    expect(delivered).toHaveLength(3)
+    expect(delivered).toHaveLength(4)
+    expect(delivered[3]).toMatchObject({ assistantId: 'o2', sessionId: 'm10.w1', work: { paused: [build], update: true } })
+    expect(children.linkedReports.get('m10.w1')?.paused).toEqual([build])
   })
 
   it('a link that drops does not give one asker the words another asker’s pause read', async () => {

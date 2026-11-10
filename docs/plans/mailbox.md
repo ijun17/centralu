@@ -278,7 +278,10 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     #1682, #1864).
 - **D19. Delegation reports keep their words and rules**, keyed by the task instead of the thread (§9): paused on its
   own background work; waiting on work it handed on; a person's turn is reported to nobody (#1377); the first pause
-  wakes the owner and later ones do not.
+  wakes the owner and later ones do not, except a pause's update: a later turn with a new answer while the work still
+  runs wakes the owner with that answer (#1540), once until the owner reads it: a newer update is written over an unread
+  one and wakes nobody. A pause an update's stop ended is reported once the session's next
+  turn ends, or at once when none follows (#1912).
 - **D20. Task state leaves mail.** `review`, `blocked`, blockers, next step, links, follow-ups and assignee go. A task
   board, if wanted, is its own design on #1577, as its own table that may name a message (Q3, accepted).
 
@@ -744,6 +747,7 @@ task is never reminded: its report settles it.
 | `about` | report | `{ session }`: the session whose turn ended |
 | `error`, `reason` | report | one word of Centralu's, as today |
 | `paused` | report | the number of background tasks still running |
+| `update` | report | a pause's update (#1540): the child's stored turn whose answer it holds now (§9.3) |
 | `waitingOn` | report | the number of tasks it handed on that are still owed |
 | `personNote` | report | the person wrote into the turn |
 | `answer` | report | the session's last response, clipped as today (`draft.answer`) |
@@ -966,7 +970,7 @@ sender about its messages, that is the sender.
 
 | Notice | Key |
 |---|---|
-| A report | `report:<recipient>:<task id>:<outcome>:<paused or waitingOn count>`. A second report with the same key is the same pause again: `ReportedAs` `closed` (§9.3) |
+| A report | `report:<recipient>:<task id>:<outcome>:<paused or waitingOn count>`, and `:update:<n>` for a pause's update, `n` the child's stored turn that ended (#1540, §9.3). A second report with the same key is the same pause again: `ReportedAs` `closed` (§9.3) |
 | A reminder | `reminder:<recipient>:<n>:<first 16 hex of sha256 of the sorted ids in of>` |
 | A sender told its messages went unanswered, for any reason (release, trash, error, stop), gathered (D25) | `unanswered:<recipient>:<the first 16 hex of sha256 of the sorted "message id/row recipient" pairs it lists>`. A row is listed in one notice only: the notice sets each listed row's `told_at`, and only rows with `released_at` set and `told_at` null are gathered |
 | A sender whose held mail the person dismissed (S13) | `dropped:<recipient>:<project id>:<dismissal time>` |
@@ -1361,6 +1365,7 @@ old path acts on (`child-reports.ts:194-216`). `delivery` is `wake` when the own
 | Finished, failed or stopped, with no own work left and no handed-on task owed | `facts.outcome` as `outcomeOf` words it today, `body` = `draft.body` (or S12 for a request), `answer`, `covers` | `reported`, and **every other unsettled task from this owner to this child delivered before this turn began** (F4, K3) | `wake`: `mailed`. `old`: `{ keep: true, settle: () => markDelivered(owner, [reportId]) }` |
 | With its own work running (`workTasks` not empty), the first pause of this task (`reportsOn(task)` has no `paused` or `waiting`) | `outcome: paused`, `paused: n`, wakes | unsettled | as the row above |
 | A later pause, or the same pause again (the key exists) | `outcome: paused`, `facts.quiet` | unsettled | key exists: `closed`. Else `wake`: `mailed`; `old` and the owner not in a turn: `closed`; `old` and the owner in a turn: `{ keep: true, settle }` |
+| A pause's update (#1540): a later turn of the paused work ended with a new answer while its own work still runs (`TurnReport.update`, the turn's number in `mail_turns`) | `outcome: paused`, `paused: n`, `update: <turn>`; wakes as the first pause does when the owner has read the pause's last update, else that unread one is written over with this one's words and count (`MailboxRecords.rewrite`) and nothing new wakes; the key ends `:update:<turn>`, and the same turn again is `duplicate` | unsettled | as the first pause |
 | With handed-on tasks still owed (`waitingOn` > 0, §9.4) | `outcome: waiting`, `waitingOn: n`; the first wakes, later ones quiet, as the two rows above | unsettled | as the two rows above |
 | A turn the person started | the old path does not call the recorder (#1377) | unchanged | — |
 | The person took the session over (`Take it over`, when built) | `outcome: stopped`, `reason: taken_over` | `reported` | as finished |

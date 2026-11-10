@@ -380,6 +380,23 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    일로 보고되지 않는다(#166). 그 답은 `agent_session`으로 읽을 수 있다. #1895 4단계 PR 1 전에는 호스트 교체가 키퍼가
    지켜 둔 세션의 표지를 남겼고, 교체 사이에 자식이 턴을 끝낸 호출자에게 알렸다(`tellTurnEndedInSwap`, #1186). 이제는
    어떤 프로세스도 자기 호스트보다 오래 살지 않는다.
+   자기 백그라운드 작업이 도는 채로 턴을 마쳐 보고가 멈춘 자식(#721)이 그 작업이 아직 도는 동안 새 답으로 또 턴을 마치면,
+   그 답은 곧바로 **업데이트**로 간다(#1540, `ChildReports.reportPauseUpdate`): "An update on the assigned work, which is
+   still paused: a later turn ended with a new answer while its own background work is still running (…)"에 멈춤과 같은
+   문장과 그 턴의 답이 붙는다. 호출자를 깨우고, 메일로는 끝난 턴으로 키를 단 `paused` 보고다(`TurnReport.update`, 같은 턴의
+   끝이 두 번 와도 업데이트는 하나다). **읽을 때까지 깨우기는 한 번:** 호출자가 그 멈춤의 마지막 업데이트를 아직 읽지 않았으면
+   새 업데이트는 그 위에 덮어 쓰고(가장 새 답과 작업 수) 아무도 깨우지 않는다. 읽은 뒤의 다음 업데이트는 다시 깨운다.
+   말이 없는 턴, Centralu의 압축 턴, 세션이 보내지 않은 메시지가 들어간 턴, 그리고 보고가 걸린 동안 사람이 그 세션에 쓴 뒤의
+   턴은 아무것도 보내지 않는다(사람의 턴을 언제나 가려낼 수는 없고, 그 말은 호출자의 것이 아니다. 스토어에서 읽으므로 업데이트
+   뒤의 호스트도 안다). 이 호스트의 자식과 연결된 기기의 자식이 한 규칙(`isPauseUpdate`, `sessions/pause-update.ts`)을 따른다. 저장된 보고와 화면은 도는 작업마다 이름을 대고, 모델은 개수만
+   읽으며(#1186) 자기가 띄운 자식이면 `agent_session(action="status")`가 각 작업의 이름을 댄다는 말을 받는다. 최종 보고는 여전히
+   그 작업이 끝날 때 온다.
+   업데이트를 위한 멈춤은 예외다(#1912): 쉬고 있던 자식의 멈춘 보고는 그 멈춤이 끝낸 작업과 함께 버리지 않고 남긴다
+   (`restoreReports`, `pausesStoppedByUpdate`, 메모리만). 업데이트의 알림이 그 자식을 깨워 연 턴은 맡긴 일의 것이고, 그 끝의
+   보고는 "An update of Centralu stopped the background work this work had paused on before that work ended; the session was
+   told which, and this turn came after."라고 말한다. 그런 턴이 오지 않으면(알림이 들어가지 못했거나, 멈춤이 그 세션의
+   작업을 적지 않았다) 호출자는 곧바로 "An update of Centralu stopped the background work the assigned work had paused on (…)
+   before that work ended, and no turn of the session followed, so the work may not have finished"를 받는다(`reportStoppedByUpdate`).
    끝을 알리겠다고 하는 답(보고가 걸린 `working`, `pending`)은 그동안 `status`로 확인하지 말라고, 끝까지 붙잡고
    기다리는 호출은 `wait` 하나라고 말한다. `pending`은 더 이상 `status`를 알려 주지 않는다. `send`를 알려 주는
    답(`done`, `at_rest`)은 다른 종류의 일이면 할 일을 빠짐없이 적어 새 에이전트를 띄우라고 말한다. 새 에이전트는

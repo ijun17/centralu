@@ -144,7 +144,7 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     expect(h.reports()).toHaveLength(1)
   })
 
-  it('a turn that ends while the work still runs says nothing more, and the work ending with no turn after it settles the report', async () => {
+  it('a later turn with words while the work still runs is an update (#1540), and the work ending with no turn after it settles the report', async () => {
     const h = await hub()
     const r = await h.ask('run the suite', () => {
       h.event({ type: 'message_delta' })
@@ -152,17 +152,22 @@ describe('ask_project to a linked machine whose session ends its turn on its own
       h.event({ type: 'turn_complete' })
     })
     expect(r).toMatchObject({ ok: true, state: 'done', paused: expect.any(String) })
-    h.turn()
+    // The turn whose answer the call took is not told again; a later one with words is, as an update naming what still runs
     await h.settle(0)
     expect(h.reports()).toEqual([])
+    h.turn()
+    await h.settle(1)
+    expect(h.reports()).toHaveLength(1)
+    expect(h.reports()[0]).toContain('An update on the assigned work, which is still paused')
+    expect(h.reports()[0]).toContain('(pnpm verify)')
     // No turn follows the work's end: after the settle wait it is reported as ended
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     h.tasks([], [done])
     await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 100)
     vi.useRealTimers()
-    await h.settle(1)
-    expect(h.reports()).toHaveLength(1)
-    expect(h.reports()[0]).toContain('background work ended (pnpm verify: completed) and no turn followed')
+    await h.settle(2)
+    expect(h.reports()).toHaveLength(2)
+    expect(h.reports()[1]).toContain('background work ended (pnpm verify: completed) and no turn followed')
   })
 
   it('a call that went away before the turn ended still gets the pause when it collects, and the report is not told twice', async () => {

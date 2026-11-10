@@ -36,6 +36,8 @@ export const MailFacts = z.looseObject({
   reason: z.string().optional(),
   paused: z.number().optional(),
   waitingOn: z.number().optional(),
+  /** On a pause's update (#1540): the turn of the child's whose answer it holds now (`TurnReport.update`) */
+  update: z.number().optional(),
   personNote: z.boolean().optional(),
   answer: z.string().optional(),
   quiet: z.boolean().optional(),
@@ -310,6 +312,15 @@ export class MailboxRecords {
       const stored = oneRow(this.db.prepare<[string], MailSql>(`SELECT * FROM mail WHERE id = ?`).get(mail.id))
       return { ...this.toMail(stored), duplicate: false }
     })
+  }
+
+  /**
+   * A message's words and facts written again, the rest of it and its rows left as they are: a pause's update its owner has not read yet takes the
+   * newer one's place (docs/plans/mailbox.md §9.3, #1540). Returns the message as stored now
+   */
+  rewrite(id: string, body: string, facts: MailFacts): MailRow | undefined {
+    this.db.prepare(`UPDATE mail SET body = ?, facts = ? WHERE id = ?`).run(body, JSON.stringify(facts), id)
+    return this.message(id)
   }
 
   /**
