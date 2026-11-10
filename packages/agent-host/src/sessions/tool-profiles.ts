@@ -36,14 +36,18 @@ export function isAppAgent(f: Pick<ToolProfileFacts, 'kind' | 'appId' | 'builder
 }
 
 /**
- * An ordinary project worker (#2162): a `worker` in a project that no external app owns, so neither a builder (it always
- * carries its app's id) nor an app's agent. The one answer for the reader set (#320: always, in a project, owner decision
- * 2026-10-20), who ask_project and a machine's ask may reach, a hub's list of a machine's sessions, and handoff. An app's
- * agent is never one: it hands its answer back to the app, so reading the project's conversations would carry them out
- * to an app that was never given them (M4 D-1, the same reason it gets no apps, `appsFor`).
+ * An ordinary project worker (#2162): a `worker` in a project that no external app owns, so neither a builder nor an app's
+ * agent. The one answer for the reader set (#320: always, in a project, owner decision 2026-10-20), who ask_project and a
+ * machine's ask may reach, a hub's list of a machine's sessions, and handoff. An app's agent is never one: it hands its answer
+ * back to the app, so reading the project's conversations would carry them out to an app that was never given them (M4 D-1,
+ * the same reason it gets no apps, `appsFor`).
+ *
+ * The builder rule: a builder is never ordinary. A caller that knows the builder slot says so (`builder`); a row alone says it
+ * by its app id, which a builder always carries and which is never a reserved one (discovery refuses those, `newEntry`)
  */
-export function isOrdinary(f: { kind: unknown } & Pick<ToolProfileFacts, 'projectId' | 'appId'>): boolean {
-  return f.kind === 'worker' && !!f.projectId && (!f.appId || RESERVED_APP_IDS.includes(f.appId))
+export function isOrdinary(f: { kind: unknown; builder?: boolean } & Pick<ToolProfileFacts, 'projectId' | 'appId'>): boolean {
+  const appOwned = !!f.appId && !RESERVED_APP_IDS.includes(f.appId)
+  return f.kind === 'worker' && !!f.projectId && !appOwned && f.builder !== true
 }
 
 /**

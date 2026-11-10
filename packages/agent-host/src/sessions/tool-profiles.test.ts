@@ -78,6 +78,8 @@ describe('isAppAgent and isOrdinary', () => {
     expect(isOrdinary(facts({ appId: 'app-notes', builder: true }))).toBe(false)
     // A row of the removed control app (#372) is no external app's
     for (const reserved of RESERVED_APP_IDS) expect(isOrdinary(facts({ appId: reserved }))).toBe(true)
+    // The builder rule stands on its own: a builder slot is enough, whatever the row's app id says
+    for (const appId of [null, ...RESERVED_APP_IDS]) expect(isOrdinary(facts({ appId, builder: true }))).toBe(false)
   })
 })
 
