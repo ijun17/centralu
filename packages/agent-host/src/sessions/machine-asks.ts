@@ -9,12 +9,13 @@ import { MACHINE_ASKER } from './hub-sender.js'
 import { raceBound } from '../timing.js'
 import { turnAnswer } from './turn-answer.js'
 import { lastActiveOf } from './transcript-view.js'
+import { isOrdinary } from './tool-profiles.js'
 
 /**
  * What a linked machine's ask reaches of the session manager (#550), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
  */
-export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'builderRefOf' | 'deliver' | 'emit' | 'meta' | 'store'>
+export type MachineAsksHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'deliver' | 'emit' | 'meta' | 'store'>
 
 /** The machine a call came from, as the link it came in on names it: never what the call says */
 export type AskingMachine = { id: string; name: string }
@@ -77,7 +78,7 @@ export class MachineAsks {
   /** An ordinary session of the project here, which an ask may reach (#614) */
   private ordinary(projectId: string): { id: string; name: string; state: SessionState; lastActive?: string }[] {
     return [...this.host.meta.values()]
-      .filter((s) => s.projectId === projectId && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s))
+      .filter((s) => s.projectId === projectId && isOrdinary(s))
       .map((s) => ({ id: s.id, name: s.name, state: s.state }))
   }
 

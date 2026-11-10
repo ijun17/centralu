@@ -18,6 +18,7 @@ import { APP_NAMES_PREFIX, SessionAppsHub } from './session-apps.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { ToolQueriesHost } from './tool-queries.js'
 import { isAppAgent } from './tool-profiles.js'
+import { seatHas } from './tool-seats.js'
 
 /** `orchestrator_apps_notice:<session id>`: set once an Assistant's first turn by a build since #1205 has gone in (purged with the session) */
 export const ROOT_APPS_NOTICE_PREFIX = 'orchestrator_apps_notice:'
@@ -112,7 +113,7 @@ export class SessionAppWiring {
          */
         allowed: (session, app) => {
           const profile = this.host.toolProfileOf(session.id) ?? this.starting.get(session.id)?.profile ?? null
-          return (profile === 'reader' || (profile === 'assistant' && isAssistantKind(session.kind))) && (this.appAccess?.allowed(session, app) ?? false)
+          return seatHas(profile, 'apps') && (this.appAccess?.allowed(session, app) ?? false)
         },
       },
     })

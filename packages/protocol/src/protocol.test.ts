@@ -11,6 +11,7 @@ import {
   ASSISTANT_KIND,
   isAssistantChange,
   isAssistantKind,
+  isAssistantOrCoordinator,
   UpdateSettingsParams,
   turnsRunning,
   type HostActivity,
@@ -1258,6 +1259,10 @@ describe("the Assistant's values under both names (#2133)", () => {
   it('reads both kinds as the Assistant, and no other kind', () => {
     expect(['orchestrator', 'assistant', 'worker', 'coordinator', undefined, 'Assistant'].map(isAssistantKind)).toEqual([true, true, false, false, false, false])
     expect(ASSISTANT_KIND).toBe('orchestrator')
+  })
+
+  it('reads a directing seat as the Assistant under either kind or a coordinator (#2162)', () => {
+    expect(['orchestrator', 'assistant', 'coordinator', 'worker', undefined].map(isAssistantOrCoordinator)).toEqual([true, true, true, false, false])
   })
 
   it("parses a session a later release sends with the kind 'assistant'", () => {

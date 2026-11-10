@@ -271,10 +271,14 @@ describe('handoff_session (#694)', () => {
     const { project, orch } = await world('auto')
     const self = await handoff(orch, { sessionId: orch })
     expect(self.text).toContain('does not hand itself off')
+    // An app's agent and an app's builder (#2162): not ordinary, one sentence for both
     const app = (await mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', appId: 'notes' })).id
-    expect((await handoff(orch, { sessionId: app })).text).toContain('belongs to an app')
+    const builder = (await mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', appId: 'kanban', builderOf: { projectId: project, appId: 'kanban' } })).id
+    for (const id of [app, builder]) {
+      expect((await handoff(orch, { sessionId: id })).text).toContain("is not a project's ordinary session (an app's builder and its agents are not)")
+    }
     expect((await handoff(orch, { sessionId: 'nobody' })).text).toContain('Not a session this app manages')
-    expect(mgr.listSessions()).toHaveLength(3)
+    expect(mgr.listSessions()).toHaveLength(4)
   })
 
   it('is not a tool of an ordinary session: it cannot hand off itself or a neighbour', async () => {

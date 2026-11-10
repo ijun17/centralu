@@ -1,4 +1,4 @@
-import { isAssistantKind } from '@cc/protocol'
+import { isAssistantOrCoordinator } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { CreateSessionOpts } from '../adapters/contract.js'
 import { underGrant } from './ask-project.js'
@@ -57,7 +57,7 @@ export class LaunchInputs {
   settingFilesFor(
     m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
   ): Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'> {
-    if (isAssistantKind(m.kind) || m.kind === 'coordinator') return { projectTrusted: false, noSettingFiles: true }
+    if (isAssistantOrCoordinator(m.kind)) return { projectTrusted: false, noSettingFiles: true }
     if (m.projectId === null && this.host.builderRefOf(m)) return { projectTrusted: true }
     /*
      * Agent a user-folder app asked for (M4 D-1) — receives only the person's own settings

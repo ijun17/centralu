@@ -5,7 +5,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import type { ToolProfile } from '../apps/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
-import { codeIntelligenceOff, isAppAgent, readsOwnProject, toolBundleFor, toolProfileFor, type CodeIntelligenceFacts, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceOff, isAppAgent, isOrdinary, toolBundleFor, toolProfileFor, type CodeIntelligenceFacts, type ToolProfileFacts } from './tool-profiles.js'
 
 /** An ordinary session in a project; each case overrides what makes it different */
 const facts = (over: Partial<ToolProfileFacts> = {}): ToolProfileFacts => ({
@@ -56,11 +56,11 @@ describe('toolProfileFor — which bundle a session gets (#69, #320)', () => {
     // A caller still handing the old switch in, off, changes nothing: the rule does not read it
     const withOldSwitch = { ...facts(), sessionTools: false } as ToolProfileFacts
     expect(toolProfileFor(withOldSwitch)).toBe('reader')
-    expect(readsOwnProject(withOldSwitch)).toBe(true)
+    expect(isOrdinary(withOldSwitch)).toBe(true)
   })
 })
 
-describe('isAppAgent and readsOwnProject', () => {
+describe('isAppAgent and isOrdinary', () => {
   it('an app agent is a worker with an app stamp that is not the builder', () => {
     expect(isAppAgent({ kind: 'worker', appId: 'app-notes', builder: false })).toBe(true)
     expect(isAppAgent({ kind: 'worker', appId: 'app-notes', builder: true })).toBe(false)
@@ -69,13 +69,15 @@ describe('isAppAgent and readsOwnProject', () => {
     for (const reserved of RESERVED_APP_IDS) expect(isAppAgent({ kind: 'worker', appId: reserved, builder: false })).toBe(false)
   })
 
-  it('reads its own project only as a worker, in a project, not for an app', () => {
-    expect(readsOwnProject(facts())).toBe(true)
-    expect(readsOwnProject(facts({ kind: 'orchestrator' }))).toBe(false)
-    expect(readsOwnProject(facts({ projectId: null }))).toBe(false)
-    expect(readsOwnProject(facts({ appId: 'app-notes' }))).toBe(false)
-    // The builder is an ordinary worker to this question; the profile rule ranks it first
-    expect(readsOwnProject(facts({ appId: 'app-notes', builder: true }))).toBe(true)
+  it('is ordinary only as a worker, in a project, owned by no app: never a builder or an app agent (#2162)', () => {
+    expect(isOrdinary(facts())).toBe(true)
+    expect(isOrdinary(facts({ kind: 'orchestrator' }))).toBe(false)
+    expect(isOrdinary(facts({ kind: 'coordinator' }))).toBe(false)
+    expect(isOrdinary(facts({ projectId: null }))).toBe(false)
+    expect(isOrdinary(facts({ appId: 'app-notes' }))).toBe(false)
+    expect(isOrdinary(facts({ appId: 'app-notes', builder: true }))).toBe(false)
+    // A row of the removed control app (#372) is no external app's
+    for (const reserved of RESERVED_APP_IDS) expect(isOrdinary(facts({ appId: reserved }))).toBe(true)
   })
 })
 

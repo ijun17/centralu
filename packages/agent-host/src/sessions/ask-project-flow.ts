@@ -13,6 +13,7 @@ import { frameField } from '@cc/protocol'
 import type { BackgroundTask } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
+import { isOrdinary } from './tool-profiles.js'
 
 
 /**
@@ -59,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -259,9 +260,7 @@ export class AskProjectFlow {
     const target = projects.find((p) => p.id === found[0]!.id)!
     if (target.id === caller.projectId) return { ok: false, error: `${target.name} is this session's own project — do the work here.` }
 
-    const candidates = [...this.host.meta.values()].filter((s) =>
-      s.projectId === target.id && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s),
-    )
+    const candidates = [...this.host.meta.values()].filter((s) => s.projectId === target.id && isOrdinary(s))
     const wantedSession = opts.session?.trim()
     // A bounded call can keep waiting even when the person has since opened another session.
     const outstanding = [...this.host.children.delegations.entries()].filter(([, d]) =>
@@ -292,7 +291,7 @@ export class AskProjectFlow {
 
     const available = (): string | undefined => {
       const current = this.host.meta.get(chosen.id)
-      if (!current || current.projectId !== target.id || current.kind !== 'worker' || current.appId || this.host.builderRefOf(current)) return 'The chosen session is no longer available'
+      if (!current || current.projectId !== target.id || !isOrdinary(current)) return 'The chosen session is no longer available'
     }
     const gone = available()
     if (gone) return { ok: false, error: gone }

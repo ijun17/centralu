@@ -8,6 +8,7 @@ import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './centralu-tools.js'
 import { presetWithin } from './start-agent.js'
 import { raceBound } from '../timing.js'
+import { isOrdinary } from './tool-profiles.js'
 
 /**
  * What the handoff flow reaches of the session manager (#428), each member read when used: the manager builds it with
@@ -110,8 +111,7 @@ export class HandoffFlow {
     const name = trustedJsonText(target.name)
     if (target.id === callerId) return 'An Assistant does not hand itself off; the person does that.'
     if (this.running.has(target.id)) return `${name} is already being handed off.`
-    if (target.kind !== 'worker' || !target.projectId) return `${name} is not a project's ordinary session, so it cannot be handed off.`
-    if (target.appId) return `${name} belongs to an app (its builder or an agent it started); only the person hands those off.`
+    if (!isOrdinary(target)) return `${name} is not a project's ordinary session (an app's builder and its agents are not), so it cannot be handed off.`
     if (target.worktree) return `${name} works in a worktree, and worktree sessions cannot hand off yet: merge or delete it first.`
     if (!atRest(target)) {
       if (inTurn(target.state) || needsAnswer(target)) {

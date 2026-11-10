@@ -14,6 +14,7 @@ import type { DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget } from './delegation-host.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
+import { seatHas } from './tool-seats.js'
 
 /** What the mailbox hears from the manager (#1347): a session gone, a session that may now take mail, an event the guards count */
 export type MailHooks = {
@@ -250,13 +251,12 @@ export class MailSessionsView {
   }
 
   /**
-   * Whether the session's seat has the mail tool (§9.1): `reader` and `assistant`. This is the receive rule (who may be written to, and who
+   * Whether the session's seat has the mail tool (§9.1, `seatHas`). This is the receive rule (who may be written to, and who
    * is woken by mail, and told of a child's report by mail), and it does not look at the process: a process the keeper handed over after a
    * swap is still the session's, and mail is for the session
    */
   canReadMail(sessionId: string): boolean {
-    const profile = this.host.tools.toolProfileOf(sessionId)
-    return profile === 'reader' || profile === 'assistant'
+    return seatHas(this.host.tools.toolProfileOf(sessionId), 'mail')
   }
 
   /** The seat rules of the mailbox's policy (`mailRelations`): who has the mail tool, and who has it as a command of the Assistant's `centralu_run` */
