@@ -1,7 +1,7 @@
 import { JsonObject, readJson } from './json.js'
 
 /*
- * What is left of the pre-mailbox thread world that live code still reads (docs/plans/mailbox.md §4.1, store step v61): the
+ * What is left of the pre-mailbox thread world that live code still reads (docs/plans/mailbox.md §6, store step v61): the
  * words a thread was opened with and a message was of, and a message row as the v64 build stored it. `store/mailbox-adopt.ts`
  * moves what the old thread tables hold, and the origins name how a delegation is recorded. The tables stay until the M7
  * gate; the queries over them (`MailRecords`) and the retention sweep are gone, since only tests ran them.

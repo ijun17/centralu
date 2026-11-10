@@ -315,7 +315,7 @@ export type InputObserver = {
   fail(error: Error): void
   /**
    * The tool took the input: Codex answered `turn/start`, Claude started a turn for it. Before `complete`, which waits for the turn to be
-   * recorded. The mailbox's delivery counts a wake as delivered from here, not from the write (docs/plans/mailbox.md §7.6.2)
+   * recorded. The mailbox's delivery counts a wake as delivered from here, not from the write (docs/plans/mailbox.md §8.2)
    */
   accepted?(): void
 }

@@ -14,7 +14,7 @@
         "packaging/npm/*/README.md",
         "packages/agent-host/scripts/README.md"
       ],
-      "except": ["docs/security-boundaries.md"],
+      "except": ["docs/security-boundaries.md", "docs/security-boundaries/**"],
       "why": "documents and their images, which nothing runs: only these extensions (.md .txt .png .jpg .jpeg .gif .webp .avif .svg), so anything else under docs (a script, a template, a notebook, a Makefile) is light; AGENTS.md, CLAUDE.md and CONTRIBUTING.md are left light, since every agent session follows them",
       "ignoreCase": true
     },
@@ -45,7 +45,7 @@
     {
       "id": "security-doc",
       "tier": "deep",
-      "paths": ["docs/security-boundaries.md", "SECURITY.md"],
+      "paths": ["docs/security-boundaries.md", "docs/security-boundaries/**", "SECURITY.md"],
       "why": "the trust boundaries as written: later trust decisions are checked against this text"
     },
     {

@@ -1,5 +1,5 @@
 /**
- * A wake counts as delivered when the tool took it, not when the write returned (#1347, docs/plans/mailbox.md §7.6.2): the
+ * A wake counts as delivered when the tool took it, not when the write returned (#1347, docs/plans/mailbox.md §8.2): the
  * delivery waits for the tool to say so, and a failure before that is a failure the mailbox tries again.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'

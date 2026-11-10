@@ -128,7 +128,7 @@ export type AgentModels = z.infer<typeof AgentModels>
 
 /**
  * An adapter's capability declaration — the UI enables or disables features based on this
- * (architecture §6.2).
+ * (product-spec §6.2).
  *
  * **Anything knowable from whether an optional method exists does not go here.** A flag and the
  * implementation can drift apart: there used to be a listExternal flag, and when it was true but

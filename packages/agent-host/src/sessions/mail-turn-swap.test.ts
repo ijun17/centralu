@@ -1,5 +1,5 @@
 /**
- * The turn records across a restart (docs/plans/mailbox.md §6, §4.2, §16 M3a): a session whose turn an update cut goes on in that turn under the
+ * The turn records across a restart (docs/plans/mailbox.md §6, §8, §16 M3a): a session whose turn an update cut goes on in that turn under the
  * next host (#1618), whose start must not close that turn's row as lost, so that its end is recorded; the rows of everything else are. The rows
  * name the turn's work message (`mail_turns.message_id`) and its starter (`starter_id`).
  */

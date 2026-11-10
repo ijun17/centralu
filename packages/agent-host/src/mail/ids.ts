@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 /**
- * The ids of threads and messages (docs/plans/mailbox.md §11.4): `<hostId>.t_<ulid>` and `<hostId>.m_<ulid>`, minted by
+ * The ids of threads and messages (docs/plans/mailbox.md §5.2): `<hostId>.t_<ulid>` and `<hostId>.m_<ulid>`, minted by
  * the host that created the thread or sent the message, so an id is unique everywhere and a forwarded copy is the same
  * row (`INSERT OR IGNORE` by id, §11.6). A ULID sorts by time, then by a counter within one millisecond.
  *
