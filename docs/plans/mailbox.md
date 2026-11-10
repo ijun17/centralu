@@ -424,6 +424,32 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     when the trash is emptied. The v61 sweep (`mail-retention.ts`) does not exempt the trash either, and an exemption
     would make the store match addresses against `sessions.deleted_at`, while a restored session's mail is what any
     session's mail is after the same time.
+- **D33. Agents ask the person by mail** (owner, 2026-11-10, #1630). A session with the mail tool asks the person with a
+  `question` to `person`, which may carry 2 to 6 short `choices` (`facts.choices`, `MailChoices` in the protocol). The
+  session keeps working or ends its turn, and the person's answer arrives as mail and wakes it, as any answer does.
+  - **Only a session's question to the person alone** carries choices (`checkedChoices` in `messages.ts`): to anyone else,
+    on a note or from another party they are refused `field_not_allowed`, and fewer than 2, more than 6 or an empty one
+    `bad_value`. Each is cut to one line of 80 characters, so a choice cannot carry a line that reads as Centralu's.
+  - **The person answers in their own words** today: the Inbox's reply box answers the question, and a window that cannot
+    draw choices still shows the question and takes the answer. The choice buttons are not built: their look is shown
+    to the owner as a mock-up first. Picking one will post its words as the answer.
+  - **The CLI's own choice tool is off** in every Claude session that has the mail tool (`disallowedTools: ['AskUserQuestion']`,
+    `claudeQueryOptions`), and the mail tool's description says to ask the person with a mail question. A session
+    without mail (a builder, an app's agent) keeps the question card. Codex's `request_user_input` exists only in its
+    plan mode and behind a feature flag, neither of which Centralu turns on, so it has nothing to switch off.
+    Approvals stay cards: they hold a tool call.
+  - **Before this lands** (review of lane-mail, 2026-11-11): it lands together with the Inbox's choice buttons, and the
+    native card stays until then. `facts` is Centralu's own words about a message (`MailMessage.facts`), so the choices, which
+    are the sender's words, move to a field of their own on the message rather than staying in `facts`.
+  - **Every mail to the person raises an OS notification**, of any kind (`mail_changed.arrived`, through the same port and
+    alert as an approval); a question calls the person back as an approval does.
+  - **What others do** (2026-11-10). Claude Code's `AskUserQuestion` asks 1 to 4 questions of 2 to 4 options, each a label
+    and a description, optionally several picked, and holds the turn until answered; an "Other" answer is always
+    possible. OpenAI Codex's `request_user_input` (plan mode) asks 1 to 3 short questions with options, and also holds
+    the turn. Cline's `ask_followup_question` takes a question and an optional list of 2 to 5 options and waits for the
+    reply. Taken: short options, and a free answer always possible. Not taken: holding the turn (the reason for this
+    decision), and a description per option or several picked: each word of the tool rides in every Codex request
+    (docs/tool-cost.md, #1630), and the window does not draw them yet.
 
 ### 1.6 Out of scope here
 
@@ -773,6 +799,7 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
+| `choices` | message | `string[]`, 2 to 6, none the same: a session's question to the person offers these answers to pick (D33, #1630); the sender's words, checked for shape |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `store/mail-facts.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key

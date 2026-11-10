@@ -1,6 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, flagSettings } from './sdk-query.js'
+import type { CreateSessionOpts } from '../contract.js'
 
 /**
  * What Claude Code is told in the flag layer (#1376): where it compacts by itself, per session and without touching a file,
@@ -34,10 +35,10 @@ describe('flagSettings', () => {
 })
 
 describe('the options of a session\'s query', () => {
-  const options = (autoCompactTokens?: number) =>
+  const options = (autoCompactTokens?: number, more: Partial<CreateSessionOpts> = {}) =>
     claudeQueryOptions({
       sessionId: 's1',
-      opts: { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', ...(autoCompactTokens ? { autoCompactTokens } : {}) },
+      opts: { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', ...(autoCompactTokens ? { autoCompactTokens } : {}), ...more },
       executablePath: undefined,
       servers: {},
       permissionOptions: { permissionMode: 'default' },
@@ -51,6 +52,15 @@ describe('the options of a session\'s query', () => {
     expect(options(120_000)).toMatchObject({ settings: { autoCompactWindow: 153_000, autoCompactEnabled: true } })
     // The cross-session refusal is always in the flag layer; Centralu adds nothing of its own to it
     expect(options().settings).toEqual({ crossSessionInbound: 'refuse' })
+  })
+
+  it("turn the CLI's own choice tool off for a session that asks the person by mail, and only for one (#1630)", () => {
+    const tools = {} as NonNullable<CreateSessionOpts['centraluTools']>
+    expect(options(undefined, { centraluTools: tools, toolProfile: 'reader' }).disallowedTools).toContain('AskUserQuestion')
+    expect(options(undefined, { centraluTools: tools }).disallowedTools).toContain('AskUserQuestion')
+    // A builder has no mail, nor has a session without Centralu's tools: the card stays theirs
+    expect(options(undefined, { centraluTools: tools, toolProfile: 'builder' }).disallowedTools).not.toContain('AskUserQuestion')
+    expect(options().disallowedTools).not.toContain('AskUserQuestion')
   })
 })
 
