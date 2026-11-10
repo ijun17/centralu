@@ -569,8 +569,7 @@ running, possibly the very session doing the work.
 - issues, issue comments, pull requests and review comments
 
 The project is open source, and a decision recorded in a language most readers cannot read
-is a decision they cannot check. Most of the existing code comments and several older
-documents are still Korean ([#27](https://github.com/ijun17/centralu/issues/27)).
+is a decision they cannot check. Most of the existing code comments are still Korean ([#27](https://github.com/ijun17/centralu/issues/27)).
 Translating one is welcome as long as it keeps the reasoning intact rather than reducing it
 to a restatement of the code. Quote non-English text verbatim when the exact words matter —
 a user-facing string, an error message, a test title under discussion — and say what it

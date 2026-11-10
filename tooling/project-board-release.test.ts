@@ -79,19 +79,8 @@ describe('the version rules', () => {
     expect(parseVersion('1.0.0-0.x')).toMatchObject({ pre: ['0', 'x'] })
   })
 
-  it.each([
-    ['docs/releasing.md', 'The steps by hand:'],
-    ['docs/releasing.ko.md', '손으로 하는 단계:'],
-  ])('keeps the release guide lead-in attached to step one in %s', (path, lead) => {
-    expect(readFileSync(join(REPO_ROOT, path!), 'utf8')).toContain(`${lead}\n\n1. `)
-  })
-
-  it('keeps the Korean release explanation in Korean', () => {
-    const korean = readFileSync(join(REPO_ROOT, 'docs/releasing.ko.md'), 'utf8')
-    const section = korean.split('## 버전 릴리스하기')[1]!.split('\n1. ')[0]!
-    for (const paragraph of section.trim().split(/\n\s*\n/)) {
-      expect(paragraph.replace(/`[^`]*`/g, ''), paragraph).toMatch(/[가-힣]/)
-    }
+  it.each([['docs/releasing.md', 'The steps by hand:']])('keeps the release guide lead-in attached to step one in %s', (path, lead) => {
+    expect(readFileSync(join(REPO_ROOT, path), 'utf8')).toContain(`${lead}\n\n1. `)
   })
 
   it('names files with * inside a folder and ** across folders', () => {
