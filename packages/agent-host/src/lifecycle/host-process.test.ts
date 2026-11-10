@@ -391,32 +391,31 @@ describe('the host process, started for real', () => {
    * (its stdin closed, as the keeper's stop does) while that was still going: what the shell had started in a window of its own was
    * never ended. The shutdown waits for the stops it started (`stopsSettled`).
    */
-  it.runIf(!posix)('Windows: a stop of the host ends what a terminal started hidden, before the host is gone (#2141)', async () => {
+  it.runIf(!posix)('Windows: a stop of the host ends what two terminals started hidden, before the host is gone (#2141)', async () => {
     const s = setup()
     const project = join(s.dir, 'project')
     mkdirSync(project)
     const idle = join(s.dir, 'idle.js')
-    const pidFile = join(s.dir, 'hidden.pid')
-    writeFileSync(idle, `require('node:fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000)
-`)
-    const run = `Start-Process -WindowStyle Hidden -FilePath node -ArgumentList '${idle}','${pidFile}'`
+    writeFileSync(idle, "require('node:fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000)")
+    const pidFiles = [join(s.dir, 'hidden-1.pid'), join(s.dir, 'hidden-2.pid')]
     const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_KEEPER: '1' })
-    host.p.stdin.write(`${JSON.stringify({ token })}
-`)
+    host.p.stdin.write(JSON.stringify({ token }) + String.fromCharCode(10))
     const port = await host.ready
-    let hidden = 0
+    let hidden: number[] = []
     try {
       const { id } = (await rpc(port, token, 'projects.add', { path: project })) as { id: string }
-      // A terminal, as the person's: its shell is a pty child, and the line is typed to it
-      const t = (await rpc(port, token, 'terminal.create', { projectId: id, cols: 500, rows: 20 })) as { terminalId?: string; id?: string }
-      await settle(4000) // the shell is up before it is typed to
-      await rpc(port, token, 'terminal.input', { terminalId: (t.terminalId ?? t.id)!, data: `${run}\r` })
-      hidden = await pidIn(pidFile, 30_000 * SLOW)
+      // Terminals, as the person's: each shell is a pty child, and the line is typed to it
+      const terminals = await Promise.all(pidFiles.map(() => rpc(port, token, 'terminal.create', { projectId: id, cols: 500, rows: 20 }) as Promise<{ terminalId: string }>))
+      await settle(4000) // the shells are up before they are typed to
+      await Promise.all(
+        terminals.map((t, i) => rpc(port, token, 'terminal.input', { terminalId: t.terminalId, data: `Start-Process -WindowStyle Hidden -FilePath node -ArgumentList '${idle}','${pidFiles[i]!}'` + String.fromCharCode(13) })),
+      )
+      hidden = await Promise.all(pidFiles.map((file) => pidIn(file, 30_000 * SLOW)))
       host.p.stdin.end()
       expect(await exitsSoon(host)).toBe(0)
-      expect(alive(hidden)).toBe(false)
+      expect(hidden.filter(alive)).toEqual([])
     } finally {
-      if (hidden > 0 && alive(hidden)) process.kill(hidden)
+      for (const pid of hidden) if (alive(pid)) process.kill(pid)
     }
   }, 180_000 * SLOW)
 
