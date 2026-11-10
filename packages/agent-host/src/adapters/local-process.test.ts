@@ -65,7 +65,7 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(await goneWithin(helper, KILL_GRACE_MS + 3000)).toBe(true)
   })
 
-  it.runIf(!unix)('Windows: a stop is taskkill on the tree, which ends the CLI and its helper', async () => {
+  it.runIf(!unix)('Windows: a stop ends the CLI first and then what was under it, so it ends the CLI and its helper', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli(), env: process.env })
     const helper = await helperPid(p.stdout)
     started.push(helper, ownCli(p))
@@ -73,9 +73,9 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(p.kill('SIGTERM')).toBe(true)
     // `taskkill /F` ends a process with exit code 1; Windows has no signal to report
     expect(await exited).toEqual([1, null])
-    // Gone already: `/T` ended it with the CLI. The sweep after an exit would also find it, but only
-    // once its process listing is back, which takes PowerShell most of a second to start
-    expect(alive(helper)).toBe(false)
+    // The stop ends the CLI alone first and then what was under it, parents before children (#2141), from the process
+    // table, which PowerShell takes most of a second to give
+    expect(await goneWithin(helper, 15_000)).toBe(true)
   })
 
   it('a CLI that exits by itself does not leave its helper running', async () => {
