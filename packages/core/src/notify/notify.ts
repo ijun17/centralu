@@ -1,4 +1,5 @@
-import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type NotifyPolicy, type SessionState } from '@cc/protocol/client'
+import { DEFAULT_NOTIFY_POLICY, readNotifyPolicy, type MailParty, type NotifyPolicy, type SessionState } from '@cc/protocol/client'
+import { partyName } from '../inbox/mail-party.js'
 
 /**
  * Notification policy (FR-12 display layer ④).
@@ -40,9 +41,9 @@ export function notificationFor(
  * notification follows (`policyNow`) and none of an approval's, a question included: it holds no tool call. The host names
  * only a message the person did not write (`mail_changed.arrived`), once
  */
-export function mailNotification(arrived: { from: string; kind: string; preview: string }, ctx: NotifyContext): NotifyRequest | null {
+export function mailNotification(arrived: { from: MailParty; kind: string; preview: string }, ctx: NotifyContext): NotifyRequest | null {
   if (!policyNow(ctx)) return null
-  return { kind: 'mail', title: `${arrived.kind === 'question' ? 'Question' : 'Mail'} from ${arrived.from}`, body: arrived.preview }
+  return { kind: 'mail', title: `${arrived.kind === 'question' ? 'Question' : 'Mail'} from ${partyName(arrived.from)}`, body: arrived.preview }
 }
 
 /** The one read of the person's switches every notification starts from: the policy, or null while the app is in view and they asked for none there */

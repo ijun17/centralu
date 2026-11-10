@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionState } from '@cc/protocol'
+import type { MailParty, SessionState } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, badgeCount, mailNotification, notificationFor, readNotifyPolicy } from './notify.js'
 
 describe('readNotifyPolicy: the policy a snapshot from another build holds (#384)', () => {
@@ -62,12 +62,14 @@ describe('dock badge', () => {
 })
 
 describe('mail to the person (#1630)', () => {
+  const planner: MailParty = { address: 'session:s1', kind: 'session', sessionId: 's1', name: 'Planner', state: null }
+  const centralu: MailParty = { address: 'centralu', kind: 'centralu', sessionId: null, name: null, state: null }
   it('every message raises one, of any kind, a question too; focus follows the setting, and the approval switch does not', () => {
-    expect(mailNotification({ from: 'Planner', kind: 'note', preview: 'The build is green' }, bg)).toEqual({ kind: 'mail', title: 'Mail from Planner', body: 'The build is green' })
-    expect(mailNotification({ from: 'Centralu', kind: 'notice', preview: 'Centralu refused mail' }, bg)).toMatchObject({ kind: 'mail', title: 'Mail from Centralu' })
-    expect(mailNotification({ from: 'Planner', kind: 'question', preview: 'Which branch?' }, bg)).toEqual({ kind: 'mail', title: 'Question from Planner', body: 'Which branch?' })
-    expect(mailNotification({ from: 'Planner', kind: 'question', preview: 'x' }, { ...bg, policy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })).not.toBeNull()
-    expect(mailNotification({ from: 'Planner', kind: 'note', preview: 'x' }, { appFocused: true })).toBeNull()
-    expect(mailNotification({ from: 'Planner', kind: 'note', preview: 'x' }, { appFocused: true, policy: { ...DEFAULT_NOTIFY_POLICY, whenFocused: true } })).not.toBeNull()
+    expect(mailNotification({ from: planner, kind: 'note', preview: 'The build is green' }, bg)).toEqual({ kind: 'mail', title: 'Mail from Planner', body: 'The build is green' })
+    expect(mailNotification({ from: centralu, kind: 'notice', preview: 'Centralu refused mail' }, bg)).toMatchObject({ kind: 'mail', title: 'Mail from Centralu' })
+    expect(mailNotification({ from: planner, kind: 'question', preview: 'Which branch?' }, bg)).toEqual({ kind: 'mail', title: 'Question from Planner', body: 'Which branch?' })
+    expect(mailNotification({ from: planner, kind: 'question', preview: 'x' }, { ...bg, policy: { ...DEFAULT_NOTIFY_POLICY, approval: false } })).not.toBeNull()
+    expect(mailNotification({ from: planner, kind: 'note', preview: 'x' }, { appFocused: true })).toBeNull()
+    expect(mailNotification({ from: planner, kind: 'note', preview: 'x' }, { appFocused: true, policy: { ...DEFAULT_NOTIFY_POLICY, whenFocused: true } })).not.toBeNull()
   })
 })

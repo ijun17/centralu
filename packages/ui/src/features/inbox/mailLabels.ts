@@ -5,22 +5,6 @@ import type { MailHeldRow, MailParty, MailThreadRow, MailThreadView } from '@cc/
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 
-/** A party as the screen names it: the person is "You", a session or an app by its name, one that is gone by what it was */
-export function partyName(p: MailParty): string {
-  switch (p.kind) {
-    case 'person':
-      return 'You'
-    case 'centralu':
-      return 'Centralu'
-    case 'session':
-      return p.name ?? 'A session that is gone'
-    case 'app':
-      return p.name ?? 'An app'
-    default:
-      return p.name ?? p.address
-  }
-}
-
 /** The thread's state as a word, with how it ended when it is done */
 export function threadStateLabel(t: Pick<MailThreadRow, 'state' | 'outcome'>): string {
   if (t.state === 'done') return t.outcome && t.outcome !== 'finished' ? `Done (${t.outcome})` : 'Done'

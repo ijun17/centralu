@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MailMessage } from '@cc/protocol/client'
+import { partyName } from '@cc/core'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
 import { Fold } from '../../components/Fold.js'
@@ -7,7 +8,7 @@ import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
-import { closeStopsWork, partyName, replyKind, threadStateLabel } from './mailLabels.js'
+import { closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
