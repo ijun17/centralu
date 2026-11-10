@@ -1,5 +1,5 @@
 /**
- * A party's name in mail (docs/plans/mailbox.md §5.1).
+ * A party's name in mail (docs/plans/mailbox.md §4, §5.1).
  *
  *   session:<hostId>/<sessionId>          a session; the host id is the id of the host the session lives on
  *   app:<hostId>/<projectId>/<appId>      an app of a project

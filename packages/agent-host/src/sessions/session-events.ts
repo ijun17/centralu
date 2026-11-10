@@ -92,7 +92,7 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
 export const MAIL_ACCEPT_MS = 90_000
 
 /**
- * Hands a wake to the tool and waits until the tool took it (docs/plans/mailbox.md §8.2): Codex when `turn/start` answers, Claude
+ * Hands a wake to the tool and waits until the tool took it (docs/agent-host.md §4.6.3): Codex when `turn/start` answers, Claude
  * when a turn runs for it, and a rejection or a process that closed with the wake still queued is a failure, so the mailbox keeps the
  * mail and tries again. A tool that cannot track its inputs (an older CLI) has taken it when the write returns, as before.
  *
