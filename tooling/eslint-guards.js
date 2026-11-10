@@ -498,7 +498,7 @@ export const guardConfigs = [
   },
   // The path rules are written in os/rules.ts alone
   { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/rules.ts`], rules: { 'guard/one-path-rule': 'error' } },
-  // The real Os is where Node's rename and removal are made to wait out a hold (os/held.ts)
+  // The real Os is where Node's `rename` and `rm` are made to wait out a hold (os/held.ts); `rmdir` and `unlink` are not
   { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/real.ts`], rules: { 'guard/held-files': 'error' } },
   { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: [`${HOST_SRC}/**/*.tsx`], ignores: ['**/*.test.tsx', '**/*.test-helpers.tsx'], rules: { 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
