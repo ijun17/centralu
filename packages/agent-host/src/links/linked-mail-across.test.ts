@@ -94,7 +94,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     machine.mgr.rename('x1', 'h1')
     // `h1` is a session here and one on the hub: a guess could send the words to the wrong one
     const twice = await tool(machine, 'w1', { action: 'send', to: 'h1', text: 'hello' })
-    expect(twice).toEqual({ text: expect.stringMatching(/^Refused \(ambiguous\): 2 sessions are named "h1": session:hub-[0-9a-f]+\/x1 \(project remote-project, idle\), session:hub-[0-9a-f]+\/h1 \(project hub-project, on Hub mac, idle\)\. Send to one of them by its address\.$/), isError: true })
+    expect(twice).toEqual({ text: expect.stringMatching(/^Refused \(ambiguous\): 2 sessions are named "h1": session:hub-[0-9a-f]+\/x1 \(project remote-project, idle\), session:hub-[0-9a-f]+\/h1 \(project hub-project, on Hub mac, finished\)\. Send to one of them by its address\.$/), isError: true })
     expect(machine.store.mailbox.postsSince(at(machine, 'w1'), 0)).toBe(0)
     // By the hub's address it goes
     const r = await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello' })
@@ -160,10 +160,10 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
   it('a machine finds a hub session and the hub finds a machine session, each with the address to mail', async () => {
     const { machine, hub } = await rig()
     const fromMachine = await tool(machine, 'w1', { action: 'find', to: 'hub' })
-    expect(fromMachine.text.split('\n')).toEqual([`1 of 2 sessions match "hub". Mail one by its address.`, `${at(hub, 'h1')} "h1" · hub-project · on Hub mac · session · idle`])
+    expect(fromMachine.text.split('\n')).toEqual([`1 of 2 sessions match "hub". Mail one by its address.`, `${at(hub, 'h1')} "h1" · hub-project · on Hub mac · session · finished`])
     const fromHub = await tool(hub, 'h1', { action: 'find', to: 'remote w1' })
     // (the project by the name the machine lists it under to the hub)
-    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its address.`, expect.stringMatching(/^session:hub-[0-9a-f]+\/m1\.w1 "w1" · \S+ · on Remote box · session · idle$/)])
+    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its address.`, expect.stringMatching(/^session:hub-[0-9a-f]+\/m1\.w1 "w1" · \S+ · on Remote box · session · finished$/)])
     expect(fromHub.text).toContain(`${at(hub, 'm1.w1')} "w1"`)
     // The address found is the one to mail
     expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'found you' })).text).toMatch(/^Sent /)
@@ -174,7 +174,7 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
     await hub.stop()
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
     const r = await tool(machine, 'w1', { action: 'find', to: '' })
-    expect(r.text.split('\n')).toEqual(['The 1 most recently active of 1 sessions. Mail one by its address.', `${at(machine, 'c1')} "c1" · remote-project · child · idle`, 'Not searched: Hub mac (not reachable right now).'])
+    expect(r.text.split('\n')).toEqual(['The 1 most recently active of 1 sessions. Mail one by its address.', `${at(machine, 'c1')} "c1" · remote-project · child · finished`, 'Not searched: Hub mac (not reachable right now).'])
   })
 
   it('a name found nowhere while a hub is down is refused with the computer that could not be asked (§8)', async () => {

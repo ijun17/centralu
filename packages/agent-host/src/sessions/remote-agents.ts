@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, pausedOnBackground } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, agentLook } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -295,13 +295,9 @@ export class RemoteAgents {
         continue
       }
       const there = listed?.find((s) => s.sessionId === r.sessionId)
-      const state: AgentListRow['state'] =
-        there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
-        : there ? (inTurn(there.state as SessionState) ? 'working'
-          : pausedOnBackground({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption }) ? 'paused'
-          // Cut short there, as a child here reads (`agentState`): never paused over the work its turn left (#2146 review)
-          : there.state === 'error' || there.state === 'limited' || there.interruption ? 'stopped'
-          : 'finished')
+      // Its machine's row as a child here reads (`agentLook`), with the tasks its machine relays (#2146 review)
+      const state: AgentListRow['state'] = there
+        ? agentLook({ state: there.state, backgroundTasks: this.host.linkedReports.tasksOf(r.sessionId), interruption: there.interruption })
         : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
       out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
     }

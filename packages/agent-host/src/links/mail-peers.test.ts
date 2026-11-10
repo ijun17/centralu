@@ -15,7 +15,7 @@ describe("a hub's mail directory of a machine's sessions", () => {
     const { entries } = peers.machineDirectory!()
     expect(entries.map((e) => [e.address, e.state, e.busy])).toEqual([
       ['session:hub-1a2b3c4d/m1.p1', 'paused', true],
-      ['session:hub-1a2b3c4d/m1.r1', 'waiting_input', false],
+      ['session:hub-1a2b3c4d/m1.r1', 'finished', false],
     ])
   })
 })

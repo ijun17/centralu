@@ -1,7 +1,6 @@
-import { isAssistantKind, pausedOnBackground } from '@cc/protocol'
+import { agentLook, isAssistantKind } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { AgentListRow } from '../adapters/contract.js'
-import { inTurn } from '../idle.js'
 import type { DelegationHost } from './delegation-host.js'
 
 /**
@@ -27,14 +26,11 @@ export function ownAgents(host: OwnAgentsHost, callerId: string): SessionInfo[] 
     .sort((a, b) => a.createdAt - b.createdAt)
 }
 
-/** Where one of them stands: a card on it, a turn or a delegation running, stopped short, or finished */
+/** Where one of them stands (`agentLook`), and working while a delegation it was given still runs */
 export function agentState(host: OwnAgentsHost, s: SessionInfo): AgentListRow['state'] {
+  const look = agentLook(s)
   const running = [...host.children.delegations.values()].some((d) => d.sessionId === s.id && !d.settled)
-  return s.pendingApproval || s.pendingQuestions.length ? 'waiting'
-    : inTurn(s.state) || running ? 'working'
-    : pausedOnBackground(s) ? 'paused'
-    : s.state === 'error' || s.state === 'limited' || s.interruption ? 'stopped'
-    : 'finished'
+  return running && look !== 'waiting' ? 'working' : look
 }
 
 /**

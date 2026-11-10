@@ -14,11 +14,12 @@ import {
   frameField,
   isProjectId,
   isSessionId,
-  liveBackgroundTasks,
+  atRest,
+  workTasks,
 } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import { inTurn, sessionBusy } from '../idle.js'
+import { inTurn } from '../idle.js'
 import { gitSummary, gitRevParse } from '../dev-services/git.js'
 import { gitWrite } from '../dev-services/git-write.js'
 import {
@@ -513,10 +514,10 @@ export class WorktreeSessions {
      * Background work left after the turn (#718) is named, and it is what agent_session's stop stops. A timer the tool
      * holds (`/loop`, a scheduled prompt) is not work: stop cannot reach it, so it does not hold the cleanup either
      */
-    const live = this.host.handles.has(target.id)
-    const work = live ? liveBackgroundTasks(target.backgroundTasks).filter((t) => !t.timer) : []
-    if (inTurn(target.state) || this.host.agentRuns.has(target.id) || sessionBusy({ ...target, live, backgroundTasks: work })) {
-      if (!inTurn(target.state) && !this.host.agentRuns.has(target.id) && !target.pendingApproval && !target.pendingQuestions.length) {
+    const work = this.host.handles.has(target.id) ? workTasks(target.backgroundTasks) : []
+    const running = this.host.agentRuns.has(target.id)
+    if (running || !atRest({ ...target, backgroundTasks: work })) {
+      if (!running && atRest({ ...target, backgroundTasks: [] })) {
         const names = (tasks: readonly BackgroundTask[]) => tasks.map((t) => frameField(t.description)).join(', ')
         const stoppable = work.filter((t) => t.stoppable)
         const other = work.filter((t) => !t.stoppable)

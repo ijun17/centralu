@@ -441,8 +441,11 @@ The line says to archive the child once its answer is used and to keep it only i
 The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
 and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over
 its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
-(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being archived is
-gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+(`ownAgents`, `agentState` on `agentLook`: a delegation still running is working, a cut-short turn is stopped, one being
+archived is gone). `agentLook` (protocol `session-state.ts`) is the one label a linked child's row and the mail directory
+read too. Whether a session is busy is one rule beside it (`atRest`, #2158): in a turn, a card open (`needsAnswer`), or its
+own background work running; delete, delete_session, handoff, worktree cleanup and the host's idle rule (`sessionBusy`)
+refuse or wait on it. `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
 worktree manager's, which store step v48 copied into `askedBy`.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
 is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the session archive it

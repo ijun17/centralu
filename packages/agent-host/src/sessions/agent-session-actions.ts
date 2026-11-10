@@ -1,4 +1,4 @@
-import { liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
+import { atRest, liveBackgroundTasks, isAssistantKind } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { ASK_WAIT_MS } from './ask-project.js'
@@ -180,11 +180,9 @@ export class AgentSessionActions {
         }
         case 'delete': {
           if (!child.worktree) {
-            const busy = inTurn(child.state) ||
-              !!child.pendingApproval || child.pendingQuestions.length > 0 ||
-              (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)
+            const busy = !atRest(child) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)
             if (!this.host.trashing.has(child.id) && busy && (!d || d.settled || d.callerId !== callerId)) {
-              return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn and its pending approval or question to finish before deleting it.` }
+              return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn, its pending approval or question, and its background work to finish before deleting it (agent_session stop ends background work you started).` }
             }
             // The caller is done with the work: a thread whose work was reported is closed, before the session goes
             if (!observing) this.host.children.finishedWith(callerId, child.id)

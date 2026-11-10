@@ -198,6 +198,14 @@ describe('no card when the handoff guards nothing', () => {
     expect(steps).toEqual([])
   })
 
+  it('refuses a session at the end of its turn whose own background work still runs (#2158)', async () => {
+    quiet()
+    callerWith('normal')
+    meta.set('t1', target({ state: 'waiting_input', backgroundTasks: [{ id: 'b1', kind: 'shell', description: 'pnpm verify', status: 'running' }] }))
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('has background work still running, so nothing was handed off') })
+    expect(steps).toEqual([])
+  })
+
   it('reads the preset after the tool check: one raised while the tool was checked asks', async () => {
     quiet()
     callerWith('normal')

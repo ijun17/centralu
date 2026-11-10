@@ -1,5 +1,5 @@
 import type { NormalizedEvent } from '@cc/protocol'
-import { errorMessage, isAssistantKind } from '@cc/protocol'
+import { errorMessage, isAssistantKind, needsAnswer } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
 import { OLD_PATH_WAIT_MS, type HandedOverMessage, type StopWhy } from '../mail/messages.js'
@@ -229,7 +229,7 @@ export class MailSessionsView {
     if (this.host.closing) return { kind: 'busy', why: 'turn' }
     // A card is standing: mail is never taken as its answer (§7.1). `waiting_input` is not one: it is the state a turn ends in
     // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
-    if (m.pendingApproval || m.pendingQuestions.length > 0 || m.state === 'waiting_approval') return { kind: 'busy', why: 'card' }
+    if (needsAnswer(m)) return { kind: 'busy', why: 'card' }
     switch (m.state) {
       case 'working':
         return { kind: 'busy', why: 'turn' }

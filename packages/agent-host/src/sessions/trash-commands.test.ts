@@ -359,6 +359,17 @@ describe('delete_session', () => {
     expect((await trash()).sessions).toEqual([])
   })
 
+  it('refuses a session in waiting_approval with no card listed, as one with a card (#2158)', async () => {
+    const orc = await mgr.assistant()
+    const s = await newSession('Asking')
+    const meta = (mgr as unknown as { meta: Map<string, { state: string }> }).meta.get(s.id)!
+    meta.state = 'waiting_approval'
+    const r = await run(orc.id, 'delete_session', { sessionId: s.id })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('"Asking" is busy (waiting on the person); the person may be using it. Delete it once it is idle.')
+    expect(await listed()).toContain(s.id)
+  })
+
   it('refuses a session with a background job still running, which the session archive would end for good, and takes it once only ended jobs are left', async () => {
     const orc = await mgr.assistant()
     const s = await newSession('Serving')

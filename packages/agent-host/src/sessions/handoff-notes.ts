@@ -5,7 +5,7 @@ import { inTurn } from '../idle.js'
 import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
-import { errorMessage, liveBackgroundTasks } from '@cc/protocol'
+import { errorMessage, liveBackgroundTasks, needsAnswer } from '@cc/protocol'
 import { buildHandoffRecord, lineageLine, type RecordChild } from './handoff-record.js'
 import type { SessionAppWiringHost } from './session-app-wiring.js'
 
@@ -148,7 +148,7 @@ export class HandoffNotes {
       .map((s) => ({
         id: s.id,
         name: s.name,
-        state: s.pendingApproval || s.pendingQuestions.length || s.state === 'waiting_approval' ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
+        state: needsAnswer(s) ? 'waiting for the person' : inTurn(s.state) ? 'working' : 'finished',
       }))
     const background = liveBackgroundTasks(m.backgroundTasks ?? []).map((t) => ({ id: t.id, kind: t.kind, description: t.description, ...(t.timer ? { timer: true } : {}) }))
     const text = buildHandoffRecord({ name: m.name, tool: m.tool, toTool, summary, rows, pivotSeq, previousNote, lineage: this.lineageOf(sessionId), children, background })

@@ -84,6 +84,18 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     expect(told).toContain('remains: centralu_run(command="agent_session", args={action: "list"}) shows them.')
   })
 
+  it('delete refuses a child at rest in its turn whose own background work runs, and takes it once that work ended (#2158)', async () => {
+    const s = await session()
+    const child = await startRunning(s, 'job')
+    handleOf(child)!.answer('done')
+    await w.until(() => reportOf(s, child).length === 1)
+    const meta = (w.mgr as unknown as { meta: Map<string, { backgroundTasks: object[] }> }).meta.get(child)!
+    meta.backgroundTasks = [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'running' }]
+    expect(await w.mgr.agentSession(s, { sessionId: child, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('and its background work to finish') })
+    meta.backgroundTasks = [{ id: 'dev', kind: 'shell', description: 'npm run dev', status: 'completed' }]
+    expect(await w.mgr.agentSession(s, { sessionId: child, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+  })
+
   it("list shows the caller's own children with their state, and none of another session's", async () => {
     const s = await session()
     const other = await session()
@@ -226,6 +238,8 @@ describe("whose agents list shows, and where each stands (#690 review)", () => {
     expect(agentState(host, info('cut', { interruption: { reason: 'network' } as SessionInfo['interruption'] }))).toBe('stopped')
     expect(agentState(host, info('limited', { state: 'limited' }))).toBe('stopped')
     expect(agentState(host, info('asks', { pendingQuestions: [{}] as unknown as SessionInfo['pendingQuestions'] }))).toBe('waiting')
+    // The state says a card stands even where the card is not carried (#2158): waiting, as a card is
+    expect(agentState(host, info('approves', { state: 'waiting_approval' }))).toBe('waiting')
   })
 
   // #2146 (owner decision 2026-11-09): a turn that ended while its own background work runs is not finished

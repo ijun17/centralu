@@ -1,4 +1,4 @@
-import { isInTurn, liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
+import { atRest, isInTurn, liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
 
 /**
  * The one rule for "is anything running that a person would lose" (#280, #352).
@@ -47,13 +47,7 @@ export type ActivitySnapshot = {
  * its process). A session with no process holds nothing.
  */
 export function sessionBusy(s: IdleActivity): boolean {
-  if (s.live !== true) return false
-  return (
-    inTurn(s.state) ||
-    !!s.pendingApproval ||
-    (s.pendingQuestions?.length ?? 0) > 0 ||
-    liveBackgroundTasks(s.backgroundTasks ?? []).length > 0
-  )
+  return s.live === true && !atRest(s)
 }
 
 /**

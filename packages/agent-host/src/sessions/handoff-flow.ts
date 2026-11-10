@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { handoffOpening, handoffPrompt, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
+import { atRest, handoffOpening, handoffPrompt, needsAnswer, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { HandoffResult } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
@@ -113,8 +113,12 @@ export class HandoffFlow {
     if (target.kind !== 'worker' || !target.projectId) return `${name} is not a project's ordinary session, so it cannot be handed off.`
     if (target.appId) return `${name} belongs to an app (its builder or an agent it started); only the person hands those off.`
     if (target.worktree) return `${name} works in a worktree, and worktree sessions cannot hand off yet: merge or delete it first.`
-    if (inTurn(target.state) || target.pendingApproval || target.pendingQuestions.length) {
-      return `${name} is mid-turn (${target.pendingQuestions.length ? 'waiting on a question' : target.state}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
+    if (!atRest(target)) {
+      if (inTurn(target.state) || needsAnswer(target)) {
+        return `${name} is mid-turn (${target.pendingQuestions.length ? 'waiting on a question' : target.state}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
+      }
+      // Its own background work runs (#2158): the successor's start ends the original's process, and the work with it
+      return `${name} has background work still running, so nothing was handed off. Wait for it to end, or ask the person to stop it.`
     }
     if (mode === 'agent' && target.state === 'error') return `${name} is in an error state and cannot write a note. Hand it off from the record (mode "record").`
     return null

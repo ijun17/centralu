@@ -99,7 +99,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
        */
       const quietBy = Date.now() + 10 * 60_000
       // A machine that is away shows its turn as not working (#1822): what it does there is not known, so it is waited for
-      while (get().sessions[sessionId]?.state === 'working' || isAway(get().sessions[sessionId], get().machines)) {
+      while (isInTurn(get().sessions[sessionId]?.state) || isAway(get().sessions[sessionId], get().machines)) {
         if (Date.now() > quietBy) throw new Error('the session never finished its current turn')
         await new Promise((r) => setTimeout(r, 500))
       }
