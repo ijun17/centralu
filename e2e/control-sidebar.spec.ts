@@ -302,6 +302,58 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   await expect(page.getByTestId('fold-summary-beta').locator('[data-state="working"]')).toHaveText('1')
 })
 
+test('Sidebar: a session paused on its own background work has its own chip after working, not a working count (#2146)', async ({ page }, testInfo) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const id = await newSession(page, 'alpha', 'A task')
+  const task = { id: 'bg-1', kind: 'shell', description: 'tail', status: 'running' }
+  await page.evaluate(
+    ({ sid, task }) => (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], state: 'waiting_input', backgroundTasks: [task] } } })),
+    { sid: id, task },
+  )
+  const line = page.getByTestId('fold-summary-alpha')
+  const chip = line.locator('[data-state="background"]')
+  await expect(chip).toHaveText('1')
+  await expect(chip).toHaveAttribute('data-look', 'idle')
+  await expect(chip.getByTestId('fold-summary-background-dot')).toBeVisible()
+  await expect(line.locator('[data-state="working"]')).toHaveCount(0)
+  await line.hover()
+  await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 waiting on background work')
+  const box = (await line.boundingBox())!
+  await page.screenshot({ path: testInfo.outputPath('project-line-background.png'), clip: { x: 0, y: box.y - 10, width: box.x + box.width + 12, height: box.height + 20 } })
+})
+
+for (const motion of ['no-preference', 'reduce'] as const) {
+  test(`Sidebar: a project line's chip fades in and out instead of popping, then is gone (#2146, reduced motion: ${motion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: motion })
+    await setup(page, { projects: ['/tmp/alpha'] })
+    const id = await newSession(page, 'alpha', 'A task')
+    const setTasks = (tasks: unknown[]) =>
+      page.evaluate(
+        ({ sid, tasks }) => (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [sid]: { ...s.sessions[sid], state: 'waiting_input', backgroundTasks: tasks } } })),
+        { sid: id, tasks },
+      )
+    const chip = page.getByTestId('fold-summary-alpha').locator('[data-state="background"]')
+    await setTasks([{ id: 'bg-1', kind: 'shell', description: 'tail', status: 'running' }])
+    await expect(chip).toHaveText('1')
+    await expect(chip).not.toHaveAttribute('data-leaving', /.*/)
+    // The work ends: the chip is still there, leaving, with its last count, and only then goes
+    await page.evaluate(() => {
+      const w = window as any
+      w.__leaving = new Promise((resolve) => {
+        const watch = new MutationObserver(() => {
+          const el = document.querySelector('[data-testid="fold-summary-alpha"] [data-state="background"]')
+          if (el?.getAttribute('data-leaving')) resolve(el.textContent)
+        })
+        watch.observe(document.body, { subtree: true, childList: true, attributes: true })
+      })
+    })
+    await setTasks([])
+    expect(await page.evaluate(() => (window as any).__leaving)).toBe('1')
+    await expect(chip).toHaveCount(0)
+    await expect(page.getByTestId('fold-summary-alpha')).toHaveCount(0)
+  })
+}
+
 test('Sidebar: a project keeps its count on the name row when it is open, folded, and opened again (owner, 2026-11-05)', async ({
   page,
 }) => {

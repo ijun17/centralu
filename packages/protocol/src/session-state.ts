@@ -28,13 +28,14 @@ export function isInTurn(state: unknown): boolean {
 }
 
 /**
- * **Paused on its own background work** (#2146, owner decision 2026-11-09): its turn ended as a turn does (`waiting_input`,
+ * **Paused on its own background work** (#2146, owner decisions 2026-11-09 and 2026-11-10): its turn ended as a turn does (`waiting_input`,
  * `idle`) while work it started still runs: background commands, or the tool's own background subagents (Claude Code's
  * Agent tasks run in the background, `kind: 'agent'`). Its report is still to come (the parent was told it paused, #721).
  *
- * The one rule for it. Such a session counts **once** as running in the sidebar's working number (`foldSummary`), its
- * subagents through it and never one by one (they are not Centralu sessions and cannot be opened), and `agent_session
- * list` says `paused (background work)` (`agentState`, and a linked machine's child as its machine relays its tasks).
+ * The one rule for it. Agents see it as
+ * `paused (background work)` in `agent_session list` and mail find (`agentState`, and a linked machine's child as its
+ * machine relays its tasks). On screen it is **not** running: it shows as waiting, with the background dot on its mark,
+ * and is not counted in the sidebar's working number: the project's name line counts it in a chip of its own (`foldSummary`, `background`); the person found "running" confusing (2026-11-10).
  * A turn that failed, was cut short (`interruption`) or hit a limit is shown as that, not as paused. The work is `workTasks`: the timers a
  * tool holds (`/loop`) and ambient tasks are not work.
  */
@@ -46,8 +47,8 @@ export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readon
  * A linked machine's session as a hub shows it while it cannot ask that machine (#1822): as last heard, but not working.
  * Nothing says whether that turn still runs, so it is not shown running; the machine's row says the link is down, and
  * the machine's resync brings the real state back. The hub's lists from its mirror and the window's rows read this.
- * Its background work is not heard either: none is listed, so the session is not counted as paused on it
- * (`pausedOnBackground`, #2146 review), which would keep it in the working count while the machine is away or gone.
+ * Its background work is not heard either: none is listed, so the session is not read as paused on it
+ * (`pausedOnBackground`, #2146 review), which would keep it shown as paused while the machine is away or gone.
  */
 export function unheard<T extends { state?: unknown; backgroundTasks?: unknown }>(row: T): T {
   const working = row.state === 'working'

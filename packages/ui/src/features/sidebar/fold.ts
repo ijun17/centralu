@@ -9,8 +9,8 @@ import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked }
  * becomes a feature that hides signal instead. So the folded row keeps the state of the hidden rows
  * **as counts**.
  *
- * There are four states counted, in the same order of urgency as the inbox (approval → error →
- * waiting for input, then working). Error was not part of the original request, but it cannot be
+ * There are five states counted, in the same order of urgency as the inbox (approval → error →
+ * waiting for input, then working, then `background`: a turn that ended while its own background work runs, #2146). Error was not part of the original request, but it cannot be
  * dropped: it is a state that the inbox and ⌘⇧A count as a waiting session (core `isWaiting`), and if a
  * session stalled inside a folded project disappears with no indication at all, folding has just done
  * exactly that. Idle and rate-limited are not counted — they are rows that neither call the person nor
@@ -19,14 +19,14 @@ import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked }
  * The counts are never summed (the same rule as the dashboard in FR-12): seeing only "3" does not say
  * whether it is three approvals or three working sessions.
  */
-export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input', 'working'] as const
+export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input', 'working', 'background'] as const
 
 export type FoldSummaryState = (typeof FOLD_SUMMARY_STATES)[number]
 
 export function foldSummary(
   sessions: readonly ({ state: SessionState; pendingQuestions: readonly unknown[]; interruption?: Interruption | null; backgroundTasks?: readonly BackgroundTask[] } & ReadTracked)[],
 ): { state: FoldSummaryState; count: number }[] {
-  const counts = new Map<SessionState, number>()
+  const counts = new Map<SessionState | 'background', number>()
   for (const raw of sessions) {
     // An open question is an approval here as it is in the inbox (`listedState`): the line cannot call it working or nothing
     const s = { ...raw, state: listedState(raw) }
@@ -37,11 +37,15 @@ export function foldSummary(
      * unread ones.
      */
     const stopped = !!s.interruption && isListedWaiting(s)
-    // A turn that ended while its own background work runs counts once as working, its subagents through it (#2146)
+    /*
+     * A turn that ended while its own background work runs (`pausedOnBackground`) is not running here (owner, 2026-11-10,
+     * #2146: "running" was confusing) and not dropped either: it has its own chip after working, the waiting look with the
+     * background dot. It calls nobody, so it is quieter than working. Subagents count through their session, once.
+     */
     const paused = !stopped && pausedOnBackground(s)
     if (s.state === 'waiting_input' && !stopped && !paused) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
-    const counted = stopped ? 'error' : paused ? 'working' : s.state
+    const counted = stopped ? 'error' : paused ? 'background' : s.state
     counts.set(counted, (counts.get(counted) ?? 0) + 1)
   }
   return FOLD_SUMMARY_STATES.flatMap((state) => {
