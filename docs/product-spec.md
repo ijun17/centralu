@@ -859,7 +859,7 @@ ring, and the spin settings left with the spinner. The lesson is recorded here b
 - **Offline/fault tolerance**: on adapter process crash, move the session state to `error` + one-click restart. On app crash, restore from the snapshot.
 - **Security**: we do not handle API keys directly — each CLI's own login (keychain) is used as is. No secrets are stored in the app DB.
 - **Platform**: macOS first (the development machine), with the structure kept cross-platform (Tauri).
-- **Language**: Korean-first UI, with strings separated so English is easy to add.
+- **Language**: the UI is English only; Korean appears only in what the person and the agents write ([ux-writing.md](ux-writing.md) §3).
 
 ---
 

@@ -1,41 +1,20 @@
-# Documentation map
+# Documentation: conventions and records
+
+Which document to read before changing what is in [AGENTS.md](../AGENTS.md) ("Before you change …"):
+it is the one map of the rule documents. This page holds how they are written, and the records.
 
 `product-spec.md` decides **what** gets built. Everything else in this folder decides
 **how**. Where they disagree on a requirement the spec wins; where they disagree on the
 way something is built, the design doc wins.
 
-Design documents are kept in two languages: English is the canonical text (`*.md`),
-Korean is a maintained mirror (`*.ko.md`) — same convention as the repository root
-README. When a design changes, both files change **in the same PR as the code**.
-`plans/` and `spikes/` are records of what happened and are not mirrored
-([#27](https://github.com/ijun17/centralu/issues/27)). Nor is `generated/`: it is written by a script
-from the code, in English only, and a test fails when it is out of date.
+Documents are in English only. The one Korean copy kept is the repository root's `README.ko.md`;
+no other `*.ko.md` is written or kept ([#1497](https://github.com/ijun17/centralu/issues/1497)).
+`generated/` is written by a script from the code, and a test fails when it is out of date:
+[generated/schema.md](generated/schema.md) (the store's tables, `pnpm docs:schema`) and
+[generated/method-rights.md](generated/method-rights.md) (what the limited credential may call, `pnpm docs:rights`).
 
 Current state: **M2 done, dogfooding** — [what M2 actually produced](plans/m2-result.md),
 [what release still needs](plans/beta-release-checklist.md).
-
-## Design
-
-| Document | What is in it | Read first |
-|---|---|---|
-| [domain-model.md](domain-model.md) | The vocabulary: every concept a newcomer meets (project, session and its roles, approval, app, view, keeper, host, swap, …), how they relate, the session state machine, the process tree, the main flows, and where each is stored and defined | — |
-| [generated/schema.md](generated/schema.md) | The store's tables and columns, generated from a real store by `pnpm docs:schema` (English only) | domain-model |
-| [generated/method-rights.md](generated/method-rights.md) | What the limited credential may call, method by method (#1405), generated from the host's table by `pnpm docs:rights` (English only) | security-boundaries |
-| [product-spec.md](product-spec.md) | The spec: requirements (FR-1–22), screens (focus view, grid, project screen), roadmap, risks | — |
-| [architecture.md](architecture.md) | Axes of change, layers, dependency rules, design patterns, process topology; the keeper, switching builds and applying an update (§4.1–4.5, including a keeper that cannot move: §4.4) | product-spec §6 |
-| [folder-structure.md](folder-structure.md) | How the monorepo is split, and where code for a given change goes | architecture |
-| [tech-stack.md](tech-stack.md) | Library choices with the reasoning, and the list of things not to reach for | architecture |
-| [platform-abstraction.md](platform-abstraction.md) | The Platform port — how web development turns into a Tauri app. Implementation matrix and the lint rules that enforce it | architecture |
-| [protocol.md](protocol.md) | UI ↔ agent host messages: schemas and versioning rules | architecture |
-| [agent-host.md](agent-host.md) | Inside the Node sidecar: AgentAdapter, how to add a new tool, and the rule for store migrations | protocol |
-| [themes.md](themes.md) | Themes: choosing (mode, a theme per side, accent), the theme file format and its schema, live editing, the urgency-order check, what app views receive | tech-stack |
-| [design-system.md](design-system.md) | The rules every screen is drawn by: colour (brightness is importance, white only for what waits), the corner scale and its guard, lines, type, icons, the top bar's capsules, the conversation, waiting cards, motion, states, and which shared component to use | themes |
-| [ux-writing.md](ux-writing.md) | The words on screen (**draft**, to be settled with the owner; English only until then): the rules the app already follows, with its own strings, and the open questions | design-system |
-| [apps.md](apps.md) | Apps (M4): the manifest, where apps live, trust, lifecycle, the one call path, inline and pinned views and what is standard, the build loop, attaching to sessions, the broker | agent-host |
-| [state-management.md](state-management.md) | Front-end state: event → store → selector, persistence and restore | architecture, protocol |
-| [releasing.md](releasing.md) | How a version reaches users: npm package layout, CI, publish procedure | — |
-| [commit-conventions.md](commit-conventions.md) | Conventional Commit format, allowed types, and commit boundaries | — |
-| [usability.md](usability.md) | How the screen is judged: the goal, the principles and decisions (the discoverable path first, focus, IME), what a pull request that changes the screen shows, the methods in brief, and what is not measured yet | ux-metrics |
 
 ## Record of what was measured
 
@@ -48,10 +27,10 @@ them is what later decisions rest on.
 | [spikes/2026-10-memory-heavy-store.md](spikes/2026-10-memory-heavy-store.md) | What the window costs in memory against a store shaped like the owner's (#364): WebKit and Chromium, idle, grid, switching, streaming, before and after #393; the optimisation targets |
 | [spikes/2026-10-thin-shell-tcc.md](spikes/2026-10-thin-shell-tcc.md) | Where macOS attaches Screen Recording and Accessibility (#440): the responsible process, a nested shell losing Screen Recording, the Dock and menu bar of each layout |
 | [spikes/2026-10-linux-keeper.md](spikes/2026-10-linux-keeper.md) | The keeper run for real on Linux (WSL2 Ubuntu 24.04): #350's cause (procps-ng 4.0.4's `kill`), the keeper scripts, handoff and the #387 sweep, what happens when the AppImage's mount goes, and what is left before it can be the default |
-| [tool-cost.md](tool-cost.md) | What Centralu's MCP tools cost a session (#513): how to run `pnpm measure:tools` and read it, and the baseline: resident tokens per session kind on Claude and Codex, cache rebuilds per event, tool selection and first-try arguments, result growth; and the Assistant's rare commands resident, deferred or behind `centralu_run` (#512); and ordinary sessions' instructions to use Centralu's tools first (#564). A record, so not mirrored in Korean |
-| [ux-metrics.md](ux-metrics.md) | What core tasks cost in keyboard and mouse operations (#518): the Keystroke-Level Model and Fitts's law with their values and sources, where the M's go, how to write a task and read the numbers, budgets, and the baseline with what it shows. English only |
-| [stored-shapes.md](stored-shapes.md) | Every shape another build reads back (#384): settings rows, JSON columns, data-folder files, app manifests, theme files, the lines between processes and the host ↔ UI payloads; for each its owner, its parser (`file:line`) and what an added field, a removed field and a broken value do today, with the rules they are held to and what an older-host-on-a-newer-store e2e would take. A record of the code, so English only |
-| [runtime-lessons.md](runtime-lessons.md) | The process runtime's trial-and-error record: every rule learned about starting, supervising, handing over, updating and stopping the window, shell, keeper, host, agents, terminals and remote `serve` on each OS, the test that guards it, and the work list of rules no test guards yet. A record like plans/ and spikes/, so not mirrored in Korean |
+| [tool-cost.md](tool-cost.md) | What Centralu's MCP tools cost a session (#513): how to run `pnpm measure:tools` and read it, and the baseline: resident tokens per session kind on Claude and Codex, cache rebuilds per event, tool selection and first-try arguments, result growth; and the Assistant's rare commands resident, deferred or behind `centralu_run` (#512); and ordinary sessions' instructions to use Centralu's tools first (#564). |
+| [ux-metrics.md](ux-metrics.md) | What core tasks cost in keyboard and mouse operations (#518): the Keystroke-Level Model and Fitts's law with their values and sources, where the M's go, how to write a task and read the numbers, budgets, and the baseline with what it shows |
+| [stored-shapes.md](stored-shapes.md) | Every shape another build reads back (#384): settings rows, JSON columns, data-folder files, app manifests, theme files, the lines between processes and the host ↔ UI payloads; for each its owner, its parser (`file:line`) and what an added field, a removed field and a broken value do today, with the rules they are held to and what an older-host-on-a-newer-store e2e would take. A record of the code |
+| [runtime-lessons.md](runtime-lessons.md) | The process runtime's trial-and-error record: every rule learned about starting, supervising, handing over, updating and stopping the window, shell, keeper, host, agents, terminals and remote `serve` on each OS, the test that guards it, and the work list of rules no test guards yet. A record like plans/ and spikes/ |
 | [plans/m1-plan.md](plans/m1-plan.md) · [m1-result.md](plans/m1-result.md) | M1 plan and result: gates, measured performance, decisions made mid-implementation |
 | [plans/m1.5-plan.md](plans/m1.5-plan.md) · [m1.5-result.md](plans/m1.5-result.md) | Always-on operation and a verification protocol; the 5 defects measurement caught |
 | [plans/m2-plan.md](plans/m2-plan.md) · [m2-result.md](plans/m2-result.md) | M2 plan (revised after independent review) and result: the release build passing, 5 more measured defects, how to start dogfooding |

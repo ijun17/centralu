@@ -1,8 +1,7 @@
 # Working in this repository
 
-For coding agents (Claude Code, Codex and others). Every session reads this file, so it holds
-only what you cannot easily find out yourself and what costs the most when missed. The reasons
-behind each line live in the linked documents.
+For coding agents (Claude Code, Codex and others). Every session reads this file: it holds what
+costs the most when missed, and says which document holds the rules for what you are about to change.
 
 ## Never
 
@@ -12,7 +11,9 @@ behind each line live in the linked documents.
   its keeper and its host match the same names, and your own session may be running under them.
 - Trigger an OS permission prompt (screen capture, camera, protected folders) without asking.
   A tool started under Centralu asks in Centralu's name.
-- Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine. The runners take a lock themselves and wait for each other; do not bypass it by calling `playwright` directly. WSL and native Windows are two machines to that lock: a run in each does not wait for the other, so use one of them.
+- Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine, or start `playwright`
+  yourself: the runners take the machine's lock. WSL and native Windows are two machines to it, so use one of them.
+- Run `tauri build` / `pnpm app` unless asked: it rewrites the bundle a running app may be using.
 - Merge your own pull request.
 
 ## Commands
@@ -20,52 +21,47 @@ behind each line live in the linked documents.
 | Need | Run |
 |---|---|
 | Everything that has to pass | `pnpm verify` (lint, dependency rules, types, tests); CI runs it too |
-| UI scenarios | `CI=1 pnpm e2e` (waits if another run holds the machine's lock and says who; `tooling/e2e-lock.ts`) |
-| One UI spec or filter | `CI=1 pnpm e2e tool-setup` (same lock; a filter after `--` reaches Playwright too) |
-| UI scenarios as CI runs them (one engine at a time) | `CI=1 E2E_BROWSER=webkit pnpm e2e` (or `=chromium`) |
+| Before a pull request | `pnpm pre-pr`, then `pnpm tier` for the review it needs |
+| UI scenarios, all or one spec | `CI=1 pnpm e2e [filter]` (`E2E_BROWSER=webkit` or `=chromium`: one engine, as CI runs it) |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |
 
 Inside Codex's macOS sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with
 `E2E_BROWSER=chromium` only; CI runs WebKit. Unset `STYLE_SNAPSHOT_BROWSER=webkit` too.
-The runners refuse WebKit there before launch, since it crashes and raises an OS dialog.
+What reaches a running app without a restart: [CONTRIBUTING.md](CONTRIBUTING.md#how-a-change-reaches-the-running-app).
 
-A change to `packages/agent-host`, `packages/protocol` or `packages/common` only reaches a running app after a
-restart; `packages/ui` and `packages/platform` reload live under `pnpm app:dev`. Do not run
-`tauri build` / `pnpm app` unless asked: it rewrites the bundle a running app may be using.
+## Before you change …
 
-## Map
+Read the row's document first. The guard is what fails when the rule is broken; UNGUARDED means
+nothing does, so your own check and the review must catch it.
 
-- `packages/protocol`: types and messages shared by UI and host. Additions only.
-- `packages/common`: pure helpers both the host and the screen run (listener set, pending requests). No IO, no React, no other package.
-- `packages/core`: pure domain logic. No IO, no React.
-- `packages/platform`: ports (interfaces) and their web, Tauri and mock implementations.
-- `packages/ui`: React. Talks to the outside only through ports.
-- `packages/agent-host`: the Node host. Claude and Codex adapters, sessions, store, apps.
-- `apps/desktop`: the Tauri shell (Rust) and the keeper that supervises the host.
-- `apps/web`: the browser entry used by `pnpm dev` and e2e.
-
-Vocabulary (session roles, apps, keeper, host, swap) and how the concepts relate: `docs/domain-model.md`.
-The layer rules are enforced by lint (`docs/architecture.md` §2). Where things go:
-`docs/folder-structure.md`. All design documents: `docs/README.md`.
-
-## Traps
-
-- The desktop app is WKWebView. A UI bug that Chromium does not show may still be real: try
-  `test.use({ browserName: 'webkit' })`. Playwright's WebKit forces overlay scrollbars, so
-  scrollbar bugs need the real app.
-- PATH, bundling and native modules only misbehave in the packaged app; dev mode inherits PATH
-  from your terminal.
-- Store migrations add first and remove later: a step may not break the previous build, which a
-  person can go back to and a linked machine's rollback starts again (`Store.migrate()`, `docs/agent-host.md`).
-- The host logs to stderr only. stdout carries one handshake line with a secret.
-- An adapter's tests replay recorded frames of a real run (`adapters/*/recordings`, `adapters/frames/`) wherever a
-  real run can send them, not hand-written ones: a fake holds what you believe the tool sends. Record first (docs/agent-host.md §3 step 3).
-- Tests that wait on wall-clock time fail under load. Wait for an event, or give generous bounds.
-- A framed button, pick-one toggle, small caps label, capsule or text field is a shared component
-  (`Button`, `Segmented`, `Badge`, `Pill`, `TextInput`/`TextField` in `packages/ui/src/components/`),
-  not a class string; the lint rule `guard/hand-made-looks` fails on a hand-drawn one and names the component.
+| What you change | Read | The rule in one line | Guard |
+|---|---|---|---|
+| Anything | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) "What is expected of code" | Fix a hazard once, at its owner. One definition per concept. Root cause, not a stopgap. Less code, no dead code | pre-pr `orphans` (dead files only); the rest UNGUARDED |
+| A concept, state or name | [domain-model.md](docs/domain-model.md) §1, §3 | One glossary. The UI never works out a session's state with conditions of its own | `guard/protocol-type-copies`, `core/session/state-parity.test.ts` |
+| Which package code goes in, an import or a dependency | [architecture.md](docs/architecture.md) §2; [folder-structure.md](docs/folder-structure.md) §1–3; [platform-abstraction.md](docs/platform-abstraction.md) §4, §6; [tech-stack.md](docs/tech-stack.md) §6 | core and common do no IO; ui reaches the outside only through ports and never knows its OS; only apps pick an implementation. A library on the forbidden list needs reasoning in tech-stack.md | dependency-cruiser (pre-pr `deps`), `tooling/boundaries.test.ts`, `guard/ui-no-os`; a dependency is `pnpm tier` deep |
+| Front-end state or settings | [state-management.md](docs/state-management.md) §3, §6 | Derived values (inbox order, counts, unread, badges) are selectors, never stored fields | UNGUARDED |
+| A test | [CONTRIBUTING.md](CONTRIBUTING.md#what-has-to-pass-before-you-send-it) "What has to pass" | It fails with its fix disabled. Wait for events, not time. Sweep boundaries; interleave writers | pre-pr `revert`, `test-limits/scaled-by-slow` |
+| A component or style | [design-system.md](docs/design-system.md) §1, §2, §4, §11, "Changing this" | Use the shared component (`Button`, `Segmented`, `Badge`, `Pill`, `TextInput`/`TextField`) and the scales. A new look is a token or component, with this doc changed in the same PR | `guard/hand-made-looks`, `guard/ui-radius-scale`, `guard/ui-type-scale`, `tooling/styles.test.ts` |
+| Something that folds, appears, leaves or switches | [design-system.md](docs/design-system.md) §9 | Animated, about 150–200 ms, never blocking input; reduced motion leaves a short fade | UNGUARDED |
+| A theme or ink | [themes.md](docs/themes.md) "The urgency order" | Contrast is urgency: `ink-signal` > `ink` > `ink-muted` > `ink-faint` on every surface | `packages/ui/src/app/theme.test.ts` (presets) |
+| A string on screen | [ux-writing.md](docs/ux-writing.md) §1, §3 | English only, American spelling. Copy the nearest string that follows the rules; no internal words; one wording per state | `guard/archive-wording` ("trash" only) |
+| How a task is done on screen | [usability.md](docs/usability.md) "Process"; [ux-metrics.md](docs/ux-metrics.md) "Budgets" | A frequent task has a ux task; a raised budget says why in the PR | CI `ux tasks` |
+| What the product does | [product-spec.md](docs/product-spec.md) | The spec wins on what is built; the design document wins on how | UNGUARDED |
+| Host code that touches the OS or processes | [architecture.md](docs/architecture.md) §2; [runtime-lessons.md](docs/runtime-lessons.md) (by rule id); [plans/os-layer.md](docs/plans/os-layer.md) | The OS only behind the OS layer; signal only pids you started; stdout carries the handshake only (HO1) | `local/os-imports`, `local/platform-checks`, `guard/git-start`, `log-file.test.ts` |
+| Data from outside the process | [architecture.md](docs/architecture.md) §2 "Data from outside the process…" | Check it with zod or a narrowing guard, never `as T`; a caught value's text via `errorMessage(e)` | type-aware lint, `guard/type-assertions`, `tooling/type-aware-lint.test.ts` |
+| An adapter | [agent-host.md](docs/agent-host.md) §3 step 3, §3.1 | Tests replay recordings of real runs. A new vendor name joins the drift contract. CLI names stay in `adapters/` | `agent/agent-adapter-checks`, `.github/workflows/drift.yml` |
+| A protocol message | [protocol.md](docs/protocol.md) §4 | Additions only; a shape is declared once; an added host field has a default the client applies | `protocol.test.ts` (golden fixtures), `e2e/older-host.spec.ts`, `pnpm tier` (deep) |
+| The store or anything stored | [agent-host.md](docs/agent-host.md) §5.1; [stored-shapes.md](docs/stored-shapes.md) "The rules" | Add first, remove later: a step never breaks the previous build. The step number comes from your brief, or ask | `store-migrations.test.ts`, `store-older-builds.test.ts`, `schema-doc.test.ts`, pre-pr `store-step` |
+| An MCP tool definition or instructions | [agent-host.md](docs/agent-host.md) §1.1; [tool-cost.md](docs/tool-cost.md) §5 | Every word rides in every request. Raising a `*_BUDGET_CHARS` ceiling is a decision | `sessions/centralu-tools.test.ts`, `adapters/claude/tool-prefix.test.ts` |
+| Trust, permissions, credentials, keeper, links | [security-boundaries.md](docs/security-boundaries.md), the section for the area | A session's credential is attribution, not proof, and never grants more than the limited credential's rights | `pnpm tier` (deep) |
+| An app or its manifest | [apps.md](docs/apps.md) §1.1, §5 | Every app call goes through `ExternalApps.call`; a change of meaning goes through `manifestVersion` | UNGUARDED |
+| CI or a release | [releasing.md](docs/releasing.md) "CI runner and action pins", "Releasing a version" | Explicit runner labels, actions pinned by SHA; a release needs a fully green main commit | `workflow-runners.test.ts`, `actions-pinned.test.ts`, `pnpm tier` (deep) |
+| Code that cites a plan | [docs/plans/](docs/plans/) (`mailbox.md`, `remote-hub.md`, `thin-shell.md` most often) | A plan section the code cites binds it until that rule moves into a rule document | UNGUARDED |
+| A document | [CONTRIBUTING.md](CONTRIBUTING.md#documentation) "Documentation"; [docs/README.md](docs/README.md) | In the same PR as the code. Decisions carry their reasoning | `schema-doc.test.ts` (generated schema only) |
+| A commit or pull request | [commit-conventions.md](docs/commit-conventions.md); [CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request) | Conventional Commits; `pnpm pre-pr`; the tier's review recorded in Verified | pre-pr, the board's `commit_check` |
+| A report or a claim | [CONTRIBUTING.md](CONTRIBUTING.md#what-is-expected-of-code) | Say what each claim was checked against and what was not; keep the qualifiers when relaying | UNGUARDED |
 
 ## How work is done
 
@@ -75,17 +71,10 @@ another model reads the diff against the self-check, deep: a separate review ses
 real-environment cases) and record in Verified who reviewed and what they found
 ([how](CONTRIBUTING.md#review-before-you-say-done)).
 
-[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: tests that must fail without their fix,
-commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull request template
-and its **Not exercised** field, and updating documents in the same pull request. When your
-session has the project board app's tools, they carry these rules as code: `open_pr`, `comment`,
-`file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `queue_merge` (many
-PRs or a stack), `mark_ready` (without merge rights), `release`; use them instead of `gh` by hand
-(`help` says which for what). A change whose tier is auto (docs, fixture data, UI assets) needs no
-PR of yours: push its branch and hand it over with `integrate`, which lands it.
-The owner answers decisions on the board's screen, saved on their machine only: `list_owner_answers`
-lists those not recorded yet; record each on its issue in English with `comment`, then
-`mark_answer_recorded`. Never post the owner's text as written.
+With the project board app's tools, use them instead of `gh` by hand (`help` says which for what).
+A change whose tier is auto (docs, fixture data, UI assets) needs no PR of yours: push its branch
+and hand it over with `integrate`, which lands it. Owner answers (`list_owner_answers`): record each
+on its issue in English with `comment`, then `mark_answer_recorded`. Never post the owner's text as written.
 
 Talk to the person in whatever language they use. Everything written down (code, comments,
 tests, documents, commits, issues, pull requests, reviews) is in English.
