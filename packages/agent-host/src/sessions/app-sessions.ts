@@ -60,6 +60,8 @@ export type AppSessionsHost = {
   readonly appsHub: SessionAppsHub | null
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; }) => Promise<SessionInfo>
   defaultToolFor: (projectId: string | null) => ToolName | null
+  /** The project's trust as a git read needs it (`ProjectRegistry.gitTrust`) */
+  gitTrust: (projectId: string | null) => { trusted: boolean }
   /** Where a new app project's folder goes (#1141): `ProjectCreation.appProjectTarget` */
   appProjectTarget: (id: string, parent?: string) => { path: string; isDefault: boolean }
   /** Registers a folder made for a new app as a trusted project, and tells the windows: `ProjectCreation.registerMadeFolder` */
@@ -344,7 +346,7 @@ export class AppSessions {
         }
         const project = this.host.store.projects.listProjects().find((p) => p.id === app.projectId)
         if (!project) throw new Error('the project of this app is gone')
-        const trust = { trusted: project.trusted }
+        const trust = this.host.gitTrust(project.id)
         return gitStatusForApp(await gitSummary(project.path, trust), () => gitStatusFiles(project.path, trust))
       }
     }
