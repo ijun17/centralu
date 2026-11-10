@@ -312,7 +312,8 @@ export function createRpcHandler(
 
   /**
    * Who wrote a call's text when a script (the limited credential) made it (§8.1, #1468): its label, from the connection and
-   * never from a field of the call. Each call names itself from `SCRIPT_TEXT` (links/routes.ts), the list a hub refuses to forward
+   * never from a field of the call. `_call` is for the compiler only: it must be a name in `SCRIPT_TEXT` (links/routes.ts), the list a
+   * hub refuses to forward, so a new caller has to add its call there. Nothing checks that the name is the caller's own, or that a listed name has a caller
    */
   const scriptAuthor = (_call: ScriptTextCall, ctx?: RpcContext) => (ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined)
   /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
