@@ -585,7 +585,7 @@ describe('asking another project', () => {
     const r = await p
     expect(h.interrupted).toBe(1)
     expect(r.ok).toBe(false)
-    expect(!r.ok && r.error).toContain('the person stopped the session that asked')
+    expect(!r.ok && r.error).toContain('your turn was stopped, so the delegated turn was stopped')
   })
 
   it('the call\'s own cancellation stops the delegated turn too', async () => {
@@ -675,7 +675,7 @@ describe('asking another project', () => {
     expect(h.interrupted).toBe(0)
     const waitingAgain = w.mgr.askProject(caller, { project: w.target.id })
     w.mgr.inputs.interrupt(caller)
-    expect(await waitingAgain).toMatchObject({ ok: false, error: expect.stringContaining('the person stopped') })
+    expect(await waitingAgain).toMatchObject({ ok: false, error: expect.stringContaining('your turn was stopped') })
     expect(h.interrupted).toBe(1)
   })
 

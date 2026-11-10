@@ -1222,7 +1222,7 @@ describe('starting another agent in the same project', () => {
     const waitedId = childrenOf(s).find((x) => x.name === 'waited on')!.id
     w.mgr.inputs.interrupt(s)
     const r = await waited
-    expect(!r.ok && r.error).toContain('the person stopped the session that asked')
+    expect(!r.ok && r.error).toContain('your turn was stopped, so the delegated turn was stopped')
     expect(handleOf(waitedId)!.interrupted).toBe(1)
     expect(handleOf(background)!.interrupted).toBe(0)
   })
