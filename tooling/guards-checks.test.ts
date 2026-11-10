@@ -281,6 +281,29 @@ describe('guard/git-start', () => {
   })
 })
 
+describe('guard/held-files', () => {
+  const file = 'packages/agent-host/src/apps/x.ts'
+  it.each([
+    ["import { rmSync } from 'node:fs'"],
+    ["import { existsSync, renameSync as move } from 'fs'"],
+    ["import { rm } from 'node:fs/promises'"],
+    ["import { 'rename' as r } from 'fs/promises'"],
+    ["import * as fs from 'node:fs'; fs.rmSync(p)"],
+    ["import fsp from 'node:fs/promises'; await fsp['rename'](a, b)"],
+  ])('reports %s', async (code) => {
+    expect((await lines(file, code, 'held-files')).length).toBeGreaterThan(0)
+  })
+  it.each([["import { readFileSync, rmdirSync } from 'node:fs'"], ["import type { rm } from 'node:fs/promises'"], ['realOs().files.rmSync(p)'], ['os.files.promises.rename(a, b)'], ["import { rm } from './remove.js'"]])('does not report %s', async (code) => {
+    await quiet(file, 'held-files', code, "import { rmSync } from 'node:fs'")
+  })
+  it('lets the real Os and tests through', async () => {
+    const code = "import { rmSync } from 'node:fs'"
+    expect(await lines('packages/agent-host/src/os/real.ts', code, 'held-files')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/x.test.ts', code, 'held-files')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/x.ts', code, 'held-files')).toEqual([1])
+  })
+})
+
 describe('guard/no-hand-coded-error', () => {
   const file = 'packages/agent-host/src/x.ts'
   it.each([

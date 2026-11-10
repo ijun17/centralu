@@ -210,6 +210,31 @@ describe('the real OS is made of the layer modules', () => {
   )
 
   /*
+   * #2161: a folder Windows holds for a moment (here the working folder of a process that is ending) is renamed once it is
+   * let go, by the policy in os/held.ts, where Node's own rename refuses it at once with EBUSY
+   */
+  it.runIf(HOST_FAMILY === 'windows')(
+    'windows: a rename of a folder held for a moment is tried again until it is let go',
+    async () => {
+      const root = realpathSync.native(mkdtempSync(os.paths.path.join(tmpdir(), 'cc-os-held-')))
+      roots.push(root)
+      const dir = os.paths.path.join(root, 'held')
+      os.files.mkdirSync(dir)
+      const holder = os.processes.start(process.execPath, ['-e', "process.stdout.write('in'); process.stdin.on('end', () => process.exit(0)).resume()"], {
+        cwd: dir,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+      await new Promise((resolve) => holder.stdout?.once('data', resolve))
+      const moved = os.files.promises.rename(dir, `${dir}-moved`)
+      holder.stdin?.end()
+      await moved
+      expect(os.files.existsSync(`${dir}-moved`)).toBe(true)
+      await holder.exited
+    },
+    30_000 * SLOW,
+  )
+
+  /*
    * #2142: on Windows the child is ended first, by itself (Node's kill: `SIGTERM` in its exit; `taskkill /F` gives code 1
    * and no signal), so nothing it started can report back to it; what it started goes after it, from the process table
    * read before, without a sweep.

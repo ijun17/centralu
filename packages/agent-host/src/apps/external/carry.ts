@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { realOs } from '../../os/real.js'
@@ -75,12 +75,12 @@ function returnOnce(from: string, to: string, aside: string): void {
   if (kept) {
     if (existsSync(aside)) throw new Error(`${aside} is already there`)
     mkdirSync(dirname(aside), { recursive: true })
-    renameSync(to, aside)
+    realOs().files.renameSync(to, aside)
   }
   try {
-    renameSync(from, to)
+    realOs().files.renameSync(from, to)
   } catch (e) {
-    if (kept) renameSync(aside, to)
+    if (kept) realOs().files.renameSync(aside, to)
     throw e
   }
 }
@@ -123,7 +123,7 @@ async function copyFolderOnce(os: Os, stepMs: number, from: string, to: string):
     // junction, all an app on Windows can make without a right, always holds a whole path: kept as written, the two
     // keys would share what is behind it, and removing the old key's copy would take the new key's data with it.
     await os.files.promises.cp(from, tmp, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true, links: { from, to }, stepMs })
-    renameSync(tmp, to)
+    realOs().files.renameSync(tmp, to)
   } catch (e) {
     removeDataQuietly(tmp, '[apps]')
     throw e
@@ -135,5 +135,5 @@ function copyFileOnce(from: string, to: string): void {
   mkdirSync(dirname(to), { recursive: true })
   const tmp = `${to}.carry-${randomUUID()}`
   copyFileSync(from, tmp)
-  renameSync(tmp, to)
+  realOs().files.renameSync(tmp, to)
 }

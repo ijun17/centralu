@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, newAppIdProblem, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
@@ -11,6 +11,7 @@ import type { AppRef } from './ref.js'
 import type { ExternalAppsDeps } from './runtime-types.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
 import { AppUnavailableError } from './unavailable.js'
+import { realOs } from '../../os/real.js'
 
 /**
  * Making and removing an app folder (M4 A-7, C-1b) — an approved MCP server turned into an app, a
@@ -227,7 +228,7 @@ export function writeAppProject(host: Pick<FoldersHost, 'deps' | 'disposed'>, ta
   try {
     scaffoldApp(host.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
     if (nameTaken(target.path)) throw new Error(`something appeared at ${target.path} meanwhile`)
-    renameSync(staging, target.path)
+    realOs().files.renameSync(staging, target.path)
   } catch (err) {
     removeDataQuietly(staging, '[apps]')
     throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
@@ -248,7 +249,7 @@ export function moveToAppTrash(dataRoot: string, dir: string, appId: string, at 
   const trash = join(dataRoot, 'app-trash')
   mkdirSync(trash, { recursive: true })
   const to = appTrashEntry(dataRoot, appId, at)
-  renameSync(dir, to)
+  realOs().files.renameSync(dir, to)
   return to
 }
 

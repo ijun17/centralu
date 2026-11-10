@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
+import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { execText, isExecFailure } from '../../os/exec.js'
+import { realOs } from '../../os/real.js'
 
 /**
  * Where a Claude process is started from on Windows (#353), and whether what npm left there can
@@ -112,11 +113,11 @@ export const realExeFs: ExeFs = {
   read: (p) => readFileSync(p, 'utf8'),
   link: (a, b) => linkSync(a, b),
   copy: (a, b) => copyFileSync(a, b),
-  rename: (a, b) => renameSync(a, b),
+  rename: (a, b) => realOs().files.renameSync(a, b),
   list: (d) => readdirSync(d),
   mkdir: (d) => void mkdirSync(d, { recursive: true }),
-  removeDir: (d) => rmSync(d, { recursive: true, force: true }),
-  removeFile: (p) => rmSync(p, { force: true }),
+  removeDir: (d) => realOs().files.rmSync(d, { recursive: true, force: true }),
+  removeFile: (p) => realOs().files.rmSync(p, { force: true }),
   runInstaller: (installer, timeoutMs) => runNode(process.execPath, [installer], dirname(installer), timeoutMs),
   /*
    * Where `install.cjs` takes the program from: the platform package its `package.json` lists, resolved

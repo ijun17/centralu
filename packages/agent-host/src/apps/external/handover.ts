@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, renameSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { appKeyOf, type AppReview, type ExternalAppInfo } from '@cc/protocol'
@@ -189,7 +189,7 @@ export class AppHandover {
      */
     this.book.mark(id, s.appDir, s.review.source)
     try {
-      renameSync(s.appDir, dir)
+      realOs().files.renameSync(s.appDir, dir)
     } catch (e) {
       this.book.drop(id)
       throw e
@@ -223,14 +223,14 @@ export class AppHandover {
     if (target.isDefault) mkdirSync(dirname(target.path), { recursive: true })
     if (nameTaken(target.path)) throw new ImportRefused(`Something is already at ${target.path}. Choose another folder`)
     try {
-      renameSync(s.appDir, target.path)
+      realOs().files.renameSync(s.appDir, target.path)
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EXDEV') throw e
       // Another volume: copied beside its place and renamed in, so it never stands half there
       const tmp = join(dirname(target.path), `.${s.review.appId}.${randomUUID()}`)
       try {
         realOs().files.cpSync(s.appDir, tmp, { recursive: true, preserveTimestamps: true })
-        renameSync(tmp, target.path)
+        realOs().files.renameSync(tmp, target.path)
       } catch (err) {
         discard(tmp, this.opts.remove)
         throw err

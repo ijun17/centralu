@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseUpdateResume, READ_RETRY_MS, READ_TRIES, recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from './update-resume.js'
+import { HELD_WAITS_MS } from '../os/held.js'
+import { parseUpdateResume, recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from './update-resume.js'
 import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 
 /**
@@ -87,7 +88,7 @@ describe('the turns an update cut, in the data folder', () => {
     const waits: number[] = []
     const lists = new UpdateResumeLists(f, (ms) => waits.push(ms))
     expect(lists.cut('s1', 4)).toBe(true)
-    expect(waits).toEqual([READ_RETRY_MS, READ_RETRY_MS])
+    expect(waits).toEqual(HELD_WAITS_MS.slice(0, 2))
     expect(said.mock.calls.filter((c) => String(c[0]).includes('EBUSY'))).toHaveLength(2)
   })
 
@@ -101,7 +102,7 @@ describe('the turns an update cut, in the data folder', () => {
     }
     const waits: number[] = []
     const lists = new UpdateResumeLists(f, (ms) => waits.push(ms))
-    expect(waits).toHaveLength(READ_TRIES - 1)
+    expect(waits).toEqual(HELD_WAITS_MS)
     expect([...lists.ids()]).toEqual([])
     expect(said.mock.calls.map((c) => String(c[0])).some((l) => l.includes('kept for a later start') && l.includes('EBUSY'))).toBe(true)
     expect(f.files.size).toBe(1)
@@ -115,7 +116,7 @@ describe('the turns an update cut, in the data folder', () => {
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }])
     f.read = () => {
-      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' })
     }
     const waits: number[] = []
     new UpdateResumeLists(f, (ms) => waits.push(ms))

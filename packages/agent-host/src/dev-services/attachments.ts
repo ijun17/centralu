@@ -1,9 +1,10 @@
-import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { isSessionId, type Attachment } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 import { dataBytes, removeData } from './data-folder.js'
 import { rpcError } from '../rpc-error.js'
+import { realOs } from '../os/real.js'
 
 /**
  * Attachment storage (D-1).
@@ -20,7 +21,7 @@ const root = () => join(dataRoot(), 'attachments')
  * A session's folder — here, the id has to be **exactly one segment** (#94).
  *
  * This is the only file that uses a session id as a directory name, and that directory is
- * deleted whole. Given `"../../Documents"`, `rm(..., { recursive: true })` actually deleted that
+ * deleted whole. Given `"../../Documents"`, `realOs().files.promises.rm(..., { recursive: true })` actually deleted that
  * folder under the user's home. The protocol already filters the same thing at its boundary
  * (`SessionId`), but the side building the path checks it again itself — these functions are
  * called without going through the RPC layer too (`saveAttachment(m.id, 'agent-image', …)` is one
@@ -105,7 +106,7 @@ export async function sweepAttachments(maxBytes: number = ATTACHMENTS_MAX_BYTES)
   for (const f of files) {
     if (total <= maxBytes) break
     // A file that could not be removed still takes its space: the sweep goes on to the next oldest (#841)
-    if (!(await rm(f.path, { force: true }).then(() => true, () => false))) continue
+    if (!(await realOs().files.promises.rm(f.path, { force: true }).then(() => true, () => false))) continue
     total -= f.size
     removed++
   }

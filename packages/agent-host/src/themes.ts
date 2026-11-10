@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, readdir, readFile, rename, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import {
   THEME_SCHEMA_FILE,
@@ -152,7 +152,7 @@ export class ThemeFiles {
     const kept = join(this.dir, REMOVED_DIR)
     await mkdir(kept, { recursive: true })
     const to = join(kept, `${id}-${Date.now()}-${randomBytes(3).toString('hex')}.json`)
-    await rename(from, to)
+    await realOs().files.promises.rename(from, to)
     return to
   }
 

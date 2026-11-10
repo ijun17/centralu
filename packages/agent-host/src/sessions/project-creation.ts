@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { GitSource, ProjectInfo, RpcResult } from '@cc/protocol'
@@ -14,6 +14,7 @@ import { traitsFor } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
+import { realOs } from '../os/real.js'
 
 /**
  * What making a project reaches of the session manager (#428), typed as the manager declares each member. The manager
@@ -235,7 +236,7 @@ export class ProjectCreation {
         await cloneInto(source.git, target.path, target.parent, source.branch)
       } catch (e) {
         // Only the folder made just above: it held nothing before the clone
-        rmSync(target.path, { recursive: true, force: true })
+        realOs().files.rmSync(target.path, { recursive: true, force: true })
         console.error(`[projects] clone into ${target.path} failed, folder removed: ${(e as Error).message}`)
         throw e
       }

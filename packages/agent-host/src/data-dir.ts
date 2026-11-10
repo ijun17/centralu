@@ -1,9 +1,10 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { HOST_PLATFORM, traitsFor, type Platform } from './os.js'
 import { canonicalPath } from './dev-services/path-guard.js'
+import { realOs } from './os/real.js'
 
 /**
  * Moves the pre-rename data folder to its new name (`~/.control-center` → `~/.centralu`). (legacy-name)
@@ -28,7 +29,7 @@ export function migrateLegacyDataDir(from: string, to: string): boolean {
    */
   if (!existsSync(from) || existsSync(to)) return false
   try {
-    renameSync(from, to)
+    realOs().files.renameSync(from, to)
     return true
   } catch {
     // Even if the move fails, the app still has to start — it starts empty with the new folder,

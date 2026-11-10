@@ -3750,7 +3750,7 @@ the person's Continue would.
   compaction, begin with no row. So a list left behind (one a virus scanner held open when it was to go, one a host from
   before #1618 never read after a rollback) continues no later turn, and a later stop of the person's that cuts one is
   told as a quit's. A list the start cannot read because it is held (`EBUSY`, a virus scanner that opened the file just
-  written) is read again up to five times 200 ms apart, each failure in the log; one still held stays where it is for a
+  written) is read again by the one policy for held files (os/held.ts: 1.6 s in all), each failure in the log; one still held stays where it is for a
   later start, and the turns of sessions this start finds cut are marked stopped like a quit's (the host cannot tell which
   the list names), with the log saying why. A list goes once each
   turn it names is dealt with (`UpdateResumeLists.done`): its Continue went in, its loss was reported, or the start did

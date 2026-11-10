@@ -1,6 +1,5 @@
 import { isAssistantKind } from '@cc/protocol'
 import { randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
 import type { Delegation } from './child-ownership.js'
 import type { AgentStartRequest } from './agent-start-record.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
@@ -31,6 +30,7 @@ import {
   assistantPlace,
   type StartProgress,
 } from './start-agent-terms.js'
+import { realOs } from '../os/real.js'
 
 // Moved to the terms start_agent's modules share (#428); still importable from here
 export { ASK_THE_PERSON, agentStartPending, agentStartPersonText } from './start-agent-terms.js'
@@ -475,7 +475,7 @@ export class AgentStartFlow {
       })
     } catch (e) {
       // No session owns the child's folder: it goes with the failed start
-      if (scratch) await rm(scratch, { recursive: true, force: true }).catch(() => {})
+      if (scratch) await realOs().files.promises.rm(scratch, { recursive: true, force: true }).catch(() => {})
       return done({ ok: false, error: `Could not start the session: ${(e as Error).message}` })
     }
     // Its depth stays even when the caller is deleted later (#897 review)

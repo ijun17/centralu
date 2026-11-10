@@ -280,6 +280,31 @@ const importBoundary = guard('import-boundary', { import: "'{{specifier}}' is im
   }
 })
 
+const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises'])
+const HELD_CALLS = new Set(['rm', 'rmSync', 'rename', 'renameSync'])
+/**
+ * A rename or an `rm` goes through the `Os` (`os.files`, `realOs().files`), whose real one tries again what Windows holds
+ * for a moment (os/held.ts, #2161): Node's own, imported by name or called on the module, refuses at the first hold. The
+ * module's `promises` (`fs.promises.rm`) is a spelling not seen.
+ */
+const heldFiles = guard('held-files', { held: "'{{name}}' from node:fs refuses a file Windows holds for a moment: rename and remove through the Os (os.files, realOs().files), which tries again (os/held.ts, #2161)" }, (_context, add) => {
+  const namespaces = new Set()
+  const named = (n) => (n.type === 'Identifier' ? n.name : plain(n))
+  return {
+    ImportDeclaration(node) {
+      if (!FS_MODULES.has(plain(node.source)) || node.importKind === 'type') return
+      for (const s of node.specifiers) {
+        if (s.type !== 'ImportSpecifier') namespaces.add(s.local.name)
+        else if (s.importKind !== 'type' && HELD_CALLS.has(named(s.imported))) add(s, 'held', { name: named(s.imported) })
+      }
+    },
+    MemberExpression(node) {
+      const name = node.computed ? plain(node.property) : named(node.property)
+      if (node.object.type === 'Identifier' && namespaces.has(node.object.name) && HELD_CALLS.has(name)) add(node, 'held', { name })
+    },
+  }
+})
+
 /** The protocol does not know about vendors (#59): no tool name in its code */
 const noToolNames = guard('no-tool-names', { tool: "the protocol names a tool ('{{text}}'): an adapter introduces itself, so a vendor is never written on the shelf both sides reach (#59)" }, (_context, add) => {
   const re = /\b(claude|codex)\b/i
@@ -409,6 +434,7 @@ export const guards = {
     'no-tool-names': noToolNames,
     'no-sleeps': noSleeps,
     'assistant-kind': assistantKind,
+    'held-files': heldFiles,
     ...tsRules,
   },
 }
@@ -445,6 +471,8 @@ export const guardConfigs = [
     ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/os/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
     rules: { 'guard/timed-start': 'error' },
   },
+  // The real Os is where Node's rename and removal are made to wait out a hold (os/held.ts)
+  { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/real.ts`], rules: { 'guard/held-files': 'error' } },
   { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: [`${HOST_SRC}/**/*.tsx`], ignores: ['**/*.test.tsx', '**/*.test-helpers.tsx'], rules: { 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },
   { files: ['packages/platform/src/mock/*.ts'], ignores: ['**/*.test.ts'], rules: { 'guard/no-hand-coded-error': 'error' } },

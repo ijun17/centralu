@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { errnoCode } from '../../os/errors.js'
 import { realOs } from '../../os/real.js'
@@ -126,7 +126,7 @@ export class PrivateJsonFile<T> {
   private damaged(reason: string): T {
     const aside = `${this.path}.unreadable-${Date.now()}`
     try {
-      renameSync(this.path, aside)
+      realOs().files.renameSync(this.path, aside)
     } catch (e) {
       // Gone in the meantime: the other host of a swap moved it aside first, and nothing is left to overwrite
       if (errnoCode(e) === 'ENOENT') return this.settled(this.opts.empty())
@@ -205,7 +205,7 @@ function sweepStaleTemps(path: string): void {
     const file = join(dir, name)
     try {
       const old = now - statSync(file).mtimeMs > STALE_TEMP_MS
-      if (old || (pid !== undefined && !alive(Number(pid)))) rmSync(file, { force: true })
+      if (old || (pid !== undefined && !alive(Number(pid)))) realOs().files.rmSync(file, { force: true })
     } catch {
       // Gone already, or not ours to remove: the next start looks again
     }

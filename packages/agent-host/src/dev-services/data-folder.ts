@@ -1,5 +1,4 @@
-import { rmSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { realOs } from '../os/real.js'
 import { treeBytes } from './entry-sizes.js'
 
 /**
@@ -20,20 +19,17 @@ export async function dataBytes(path: string): Promise<number> {
 }
 
 /**
- * Removes a data folder (or file) for good. A missing one is already removed. `maxRetries` is for
- * Windows, where a file another process just closed (an indexer, an antivirus scan, a viewer) can
- * still refuse removal for a moment with EBUSY or EPERM; Node retries those, waiting a little longer each time.
+ * Removes a data folder (or file) for good. A missing one is already removed. On Windows, where a file another process
+ * just closed (an indexer, an antivirus scan, a viewer) can still refuse removal for a moment, the `Os` tries it again
+ * (os/held.ts).
  */
 export async function removeData(path: string): Promise<void> {
-  await rm(path, { recursive: true, force: true, maxRetries: 3 })
+  await realOs().files.promises.rm(path, { recursive: true, force: true })
 }
 
-/**
- * `removeData` without an await, for a write that must not yield (`writeHandoffNoteSync`). Node 20 and 22 do not retry
- * a held folder in the synchronous call (the EBUSY of a running app's folder is thrown on the first try); Node 24 does.
- */
+/** `removeData` without an await, for a write that must not yield (`writeHandoffNoteSync`) */
 export function removeDataSync(path: string): void {
-  rmSync(path, { recursive: true, force: true, maxRetries: 3 })
+  realOs().files.rmSync(path, { recursive: true, force: true })
 }
 
 /**
