@@ -29,6 +29,7 @@ import type { StopGate } from './lifecycle/stop-gate.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
 import { openHomeView } from './app-home-view.js'
 import { askBuilder, sendErrorToBuilder, type BuilderRequestDeps } from './builder-requests.js'
+import type { ScriptTextCall } from './links/routes.js'
 import { centraluToolSchemas } from './sessions/centralu-tools.js'
 import type { AgentAdapter, ToolSetupControl } from './adapters/contract.js'
 import type { ViewHost } from './views/view-host.js'
@@ -311,12 +312,12 @@ export function createRpcHandler(
 
   /**
    * Who wrote a call's text when a script (the limited credential) made it (§8.1, #1468): its label, from the connection and
-   * never from a field of the call. The calls that carry text read it here (`SCRIPT_TEXT`, links/routes.ts)
+   * never from a field of the call. Each call names itself from `SCRIPT_TEXT` (links/routes.ts), the list a hub refuses to forward
    */
-  const scriptAuthor = (ctx?: RpcContext) => (ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined)
+  const scriptAuthor = (_call: ScriptTextCall, ctx?: RpcContext) => (ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined)
   /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
-  const builderDeps = (ctx?: RpcContext): BuilderRequestDeps => {
-    const fromScript = scriptAuthor(ctx)
+  const builderDeps = (call: ScriptTextCall, ctx?: RpcContext): BuilderRequestDeps => {
+    const fromScript = scriptAuthor(call, ctx)
     return { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a, undefined, false, 'ask', fromScript), byScript: fromScript !== undefined }
   }
 
@@ -330,7 +331,7 @@ export function createRpcHandler(
       const info = await mgr.createSession({
         ...p,
         onWorktreeBase: (note) => (worktreeBase = note),
-        fromScript: scriptAuthor(ctx),
+        fromScript: scriptAuthor('agents.createSession', ctx),
         ...(startedByHub ? { startedByHub } : {}),
       })
       // Created before that hub's offer arrived on this connection: recorded when it does
@@ -339,7 +340,7 @@ export function createRpcHandler(
     },
     'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
-      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, scriptAuthor(ctx))
+      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, scriptAuthor('agents.send', ctx))
       return { ok: true as const }
     },
     'agents.reportOwed': async (p) => ({ owed: mgr.inputs.reportOwed(p.sessionId) }),
@@ -352,9 +353,7 @@ export function createRpcHandler(
     // Deleting moves the session to the trash (#204); only the trash.* methods below remove anything for good
     'agents.deleteSession': async ({ sessionId, deleteWorktree, deleteExternal }) => ack(await mgr.trash.trashSession(sessionId, deleteWorktree, deleteExternal)),
     // The window's archive of a session that looks idle: only when nothing is lost (#1512)
-    'agents.archiveIfAtRest': async ({ sessionId, deleteExternal }) => {
-      return mgr.trash.archiveIfAtRest(sessionId, deleteExternal)
-    },
+    'agents.archiveIfAtRest': async ({ sessionId, deleteExternal }) => mgr.trash.archiveIfAtRest(sessionId, deleteExternal),
     // What the window's archive dialog lists before it moves anything (#1595)
     'agents.archiveLosses': async ({ sessionId }) => {
       return { asks: mgr.trash.archiveLosses(sessionId) }
@@ -668,9 +667,9 @@ export function createRpcHandler(
     'apps.createBuilder': async ({ appId, projectId, tool }) => {
       return mgr.appSessions.createAppBuilder({ appId, projectId }, tool)
     },
-    'apps.sendError': async ({ appId, projectId, at }, ctx) => sendErrorToBuilder(builderDeps(ctx), { appId, projectId }, at),
+    'apps.sendError': async ({ appId, projectId, at }, ctx) => sendErrorToBuilder(builderDeps('apps.sendError', ctx), { appId, projectId }, at),
     'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }, ctx) =>
-      askBuilder(builderDeps(ctx), { ref: { appId, projectId }, text, attachments, instanceId }),
+      askBuilder(builderDeps('apps.askBuilder', ctx), { ref: { appId, projectId }, text, attachments, instanceId }),
     'orchestrator.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
     'orchestrator.tool': async ({ sessionId, name, args }) => {
       return mgr.runCentraluTool(sessionId, name, args)

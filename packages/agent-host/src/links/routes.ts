@@ -98,11 +98,14 @@ const historyResult: ResultFix = (r, q) => {
 const usageResult = fields({ cache: fields({ windows: each(fields({ sessions: each(fields({ sessionId: id })) })) }) })
 
 /**
- * The calls whose text a host stores as a script's when the limited credential sends it (`scriptAuthor`, rpc.ts; #1468). The mark
- * is written from the connection, and a linked machine sees only the hub's own link, so it would store the text as the
- * person's: router.ts refuses a script's such call to a machine
+ * The calls whose text a host stores as a script's when the limited credential sends it (#1468). The mark is written from the
+ * connection, and a linked machine sees only the hub's own link, so it would store the text as the person's: router.ts refuses a
+ * script's such call to a machine. rpc.ts's `scriptAuthor` takes one of these names, so a call that marks text and is missing
+ * here does not compile
  */
-export const SCRIPT_TEXT: ReadonlySet<string> = new Set<RpcMethodName>(['agents.createSession', 'agents.send', 'apps.askBuilder', 'apps.sendError'])
+const SCRIPT_TEXT_CALLS = ['agents.createSession', 'agents.send', 'apps.askBuilder', 'apps.sendError'] as const satisfies readonly RpcMethodName[]
+export type ScriptTextCall = (typeof SCRIPT_TEXT_CALLS)[number]
+export const SCRIPT_TEXT: ReadonlySet<string> = new Set<RpcMethodName>(SCRIPT_TEXT_CALLS)
 
 export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Sessions ───────────────────────────────────────────────────────────────────────────
