@@ -17,6 +17,8 @@ export type HostParts = {
   /** The mailbox's delivery (#1347): a host that is leaving tells no one anything, the next one delivers */
   mailDelivery: { stop(): void }
   stopActivity: () => void
+  /** The process stops that `killTree`/`stopTree` started and do not wait for (`stopsSettled`, dev-services/kill-tree.ts) */
+  stops: { settled(): Promise<void> }
   /** The git calls still running (`stopGitChildren`, dev-services/git-exec.ts) */
   git: { stopAll(): Promise<void> }
   links: { stop(): Promise<void> }
@@ -39,6 +41,8 @@ export type HostParts = {
  *   a session of its own, so a supervisor's group SIGKILL after its 3 s budget cannot reach it: if
  *   these did not run before the first await, a dev server was left orphaned. Up to this step they
  *   came after awaiting the ssh links and the sessions.
+ * - **Every stop of a process tree ends before the host does.** The terminals and commands are let go of first, in the
+ *   same tick, and their Windows stops (a table read, then the tree) are waited for here, with a bound, after the rest.
  * - **The server closes after every service** that may still tell a screen something (a session's
  *   last state), and only then the store, whose close folds its WAL.
  *
@@ -87,6 +91,9 @@ export function stopPlan(p: HostParts): Step[] {
     { name: 'the themes watcher', run: () => p.themes.close() },
     { name: 'app views in conversations', run: () => p.inlineViews.dispose() },
     { name: 'app views', run: () => p.views.dispose() },
+    // The terminals' and commands' trees end on Windows after a table read, which `terminals.disposeAll()` does not wait for;
+    // a host that exits first leaves what they started (a hidden child). Before the server so that it overlaps the rest
+    { name: 'the process stops still running', run: () => p.stops.settled() },
     { name: 'the server', run: () => p.server.close() },
     { name: 'the store', run: () => p.store.close() },
   )

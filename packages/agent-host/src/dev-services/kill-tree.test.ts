@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, survivorTargets, type KillOs } from './kill-tree.js'
+import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
@@ -315,6 +315,34 @@ describe('ending a tree on Windows', () => {
     await settle()
     expect(ended).toEqual([{ pid: 4242, alone: true }])
     expect(pty.calls).toEqual([])
+  })
+
+  /*
+   * #2141 re-check: the host exits as soon as its shutdown steps are done, and `killTree`/`stopTree` return before the table is
+   * read. The shutdown waits for the stops it started (`stopsSettled`), or what the table showed under a terminal's shell
+   * is left running (a hidden child survived 3 of 3 host stops).
+   */
+  it('stopsSettled waits for a stop that has not ended the tree yet, and not longer than its bound', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const ended: number[] = []
+    const rows = [{ pid: 4242, ppid: 1, created: 1_000 }, { pid: 50, ppid: 4242, created: 2_000 }]
+    const os: KillOs = { platform: 'win32', listProcesses: async () => (await held, rows), taskkill: async (pid) => void ended.push(pid) }
+    killTree(windowsPty(4242).handle, 'SIGKILL', os)
+    let done = false
+    const waited = stopsSettled(5_000).then(() => (done = true))
+    await settle()
+    expect(done).toBe(false) // the table is still being read
+    release()
+    await waited
+    expect(ended).toEqual([4242, 50])
+
+    // A stop that never ends is given up on at the bound
+    killTree(windowsPty(4243).handle, 'SIGKILL', { ...os, listProcesses: () => new Promise(() => {}) })
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await stopsSettled(20)
+    expect(err.mock.calls.flat().join('')).toContain('had not ended')
+    err.mockRestore()
   })
 
   /*

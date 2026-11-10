@@ -204,6 +204,44 @@ async function shootWindows(handle: KillablePty, os: KillOs): Promise<void> {
   closeHandle(handle)
 }
 
+/** The Windows stops started and not yet ended: `killTree` and `stopTree` do not wait for theirs, the host's shutdown does (`stopsSettled`) */
+const stopping = new Set<Promise<void>>()
+
+/** `shootWindows`, kept in `stopping` until it ends */
+function track(stop: Promise<void>): void {
+  stopping.add(stop)
+  void stop.finally(() => stopping.delete(stop))
+}
+
+/**
+ * How long the host's shutdown waits for the stops it started (`stopsSettled`): a table read (`STOP_LIST_MS`) and the
+ * ending of a tree after it. Inside the supervisor's budget (3 s) it is meant to fit; past it the shutdown goes on, and a
+ * tree the stop did not reach is the one thing the host can no longer do anything about.
+ */
+export const STOPS_SETTLE_MS = 2500
+
+/**
+ * Resolves when every Windows stop `killTree` and `stopTree` started has ended, or after `boundMs`: the one place the
+ * host waits for them (HO8, `stopPlan`). Those two return at once (the table takes 0.4-1.5 s), and a host that exits
+ * as soon as its services are let go of left a terminal's hidden child running, which was ended after the host was gone
+ * or not at all. Nothing is waiting on POSIX, where the first shot is sent before they return.
+ */
+export async function stopsSettled(boundMs = STOPS_SETTLE_MS): Promise<void> {
+  if (stopping.size === 0) return
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      console.error(`[agent-host] ${stopping.size} process stop(s) had not ended after ${boundMs} ms; the host leaves without them`)
+      resolve()
+    }, boundMs)
+  })
+  try {
+    await Promise.race([Promise.allSettled([...stopping]).then(() => undefined), late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function closeHandle(handle: KillablePty): void {
   try {
     handle.kill()
@@ -215,7 +253,7 @@ function closeHandle(handle: KillablePty): void {
 /** Fires one signal at the tree, and returns the tree seen at that moment (root's and descendants' rows) — the list the second shot will carry */
 function shoot(handle: KillablePty, signal: 'SIGTERM' | 'SIGKILL', os: KillOs = REAL_OS): ProcRow[] {
   if (os.platform === 'win32') {
-    void shootWindows(handle, os)
+    track(shootWindows(handle, os))
     return []
   }
   const pid = handle.pid
