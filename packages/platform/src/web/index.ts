@@ -100,6 +100,11 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
+  /*
+   * The role's methods keep their old names (#2133, docs/plans/assistant-rename.md §3.3): the window can reach a host older
+   * than step 3 (a keeper of an earlier release, or on Windows the data folder's `centralu serve`, which the hub installed
+   * at whatever version), and every host answers the old names
+   */
   assistant() {
     return this.rpc.call('orchestrator.get', {})
   }

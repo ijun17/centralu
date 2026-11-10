@@ -214,11 +214,12 @@ const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') A
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /**
  * The `via` of a recipient row sent to the Assistant's role rather than to one session (§7.7). This build writes
- * `ROLE_VIA`; a later one writes `'assistant'` (#2133, docs/plans/assistant-rename.md), and a row keeps the one it was
- * written with, so every reader takes both
+ * `ROLE_VIA` (#2133 step 4, docs/plans/assistant-rename.md); a build before it wrote `'orchestrator'`, and a row keeps
+ * the one it was written with, so every reader takes both. The row stays on this machine, and every build that can
+ * open the store (v68 on, store step v69) reads both words
  */
-export const ROLE_VIA = 'orchestrator'
-const ROLE_VIA_WORDS = [ROLE_VIA, 'assistant'] as const
+export const ROLE_VIA = 'assistant'
+const ROLE_VIA_WORDS = [ROLE_VIA, 'orchestrator'] as const
 /** Whether a row's `via` is the Assistant's role, under either name */
 export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly unknown[]).includes(via)
 /** The same, as an SQL list */

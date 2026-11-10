@@ -79,7 +79,7 @@ export class UserAppAdoptionRecords {
         this.db
           .prepare<unknown[], { id: string }>(
             `SELECT id FROM sessions
-              WHERE project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_orchestrator = 0 AND scope_session_ids IS NULL`,
+              WHERE project_id IS NULL AND app_id = ? AND deleted_at IS NULL AND is_assistant = 0 AND scope_session_ids IS NULL`,
           )
           .all(appId)
       )
@@ -132,7 +132,7 @@ export class UserAppAdoptionRecords {
        * The Assistant was given it as a user-folder app; a root app it attaches when it needs one (#1205). One it has
        * seen keeps it attached, under the name it called it by: an attachment of its own, as attach_app writes one
        */
-      const assistants = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND deleted_at IS NULL`).all()
+      const assistants = this.db.prepare<unknown[], { id: string }>(`SELECT id FROM sessions WHERE is_assistant = 1 AND deleted_at IS NULL`).all()
       for (const { id } of assistants) {
         const book = parseJson(this.settings.appSetting(`session_app_names:${id}`))
         const server = isObj(book) ? book[to] : undefined

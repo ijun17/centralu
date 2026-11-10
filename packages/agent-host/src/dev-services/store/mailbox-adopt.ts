@@ -72,7 +72,7 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
          VALUES (@messageId, @recipient, @via, @dueAt, @attemptAt, @deliveredAt, @readAt, @held, @attempts, @lastError, @settled, @now)`,
       )
       const sessionRow = db.prepare<[string], { assistant: number; trashed: number }>(
-        `SELECT is_orchestrator = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS assistant, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
+        `SELECT is_assistant = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS assistant, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
       )
       const sessionOf = (address: string) => {
         const party = parseAddress(address)

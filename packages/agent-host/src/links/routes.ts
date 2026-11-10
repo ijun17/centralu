@@ -302,6 +302,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.resolveSkillProposal': HUB,
   'agents.orchestratorSkills': HUB,
   'agents.deleteOrchestratorSkill': HUB,
+  'agents.assistantSkills': HUB,
+  'agents.deleteAssistantSkill': HUB,
   'orchestrator.get': HUB,
   'orchestrator.peek': HUB,
   'orchestrator.configure': HUB,

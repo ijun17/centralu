@@ -63,7 +63,7 @@ export abstract class MigrationRunner extends ReaderGate {
      * must not undo that.
      */
     const stored = this.storedMinReader()
-    let floor = stored ?? Math.max(0, ...steps.filter((s) => s.breaksOlderReaders && s.to <= current).map((s) => s.to))
+    let floor = stored ?? Math.max(0, ...steps.filter((s) => s.breaksOlderReaders && s.to <= current).map(floorOfStep))
     if (stored === null) {
       // A record that is not a version reaches here only on a store this host knows every step of (`tooNew`, #384)
       const unreadable = this.unreadableMinReader()
@@ -116,7 +116,8 @@ export abstract class MigrationRunner extends ReaderGate {
   }
 
   /**
-   * Runs one step, raising `min_reader_version` first when the step breaks older readers. Returns the new floor.
+   * Runs one step, raising `min_reader_version` first when the step breaks older readers: to the step's own `to`, or to
+   * the lower version it names (`minReader`). Never lowered: a floor already above it stays. Returns the new floor.
    *
    * Raised **before** the step runs, in the same commit. A store an older host opens and breaks on is what the record
    * exists to prevent; since the step and the record commit together (#396), a step that fails takes the raise back
@@ -124,9 +125,9 @@ export abstract class MigrationRunner extends ReaderGate {
    * the old order: the record first, then the step.
    */
   private runStep(step: MigrationStep, floor: number, record: () => void): number {
-    const raise = step.breaksOlderReaders && step.to > floor
+    const raise = step.breaksOlderReaders && floorOfStep(step) > floor
     const apply = () => {
-      if (raise) this.writeMinReader(step.to)
+      if (raise) this.writeMinReader(floorOfStep(step))
       step.run()
       record()
     }
@@ -151,7 +152,7 @@ export abstract class MigrationRunner extends ReaderGate {
       for (const work of later) work()
     }
     this.migrationsRun += 1
-    return raise ? step.to : floor
+    return raise ? floorOfStep(step) : floor
   }
 
   /** Work a migration step leaves for after its commit; outside a step it runs at once */
@@ -204,4 +205,9 @@ export abstract class MigrationRunner extends ReaderGate {
   private writeDeferred(steps: number[]): void {
     writeStoreKey(this.db, DEFERRED_KEY, steps.length === 0 ? null : JSON.stringify([...steps].sort((a, b) => a - b)))
   }
+}
+
+/** The floor a breaking step raises the store to: its own `to`, or the lower version it names (#2133 step 4) */
+function floorOfStep(step: MigrationStep): number {
+  return Math.min(step.minReader ?? step.to, step.to)
 }

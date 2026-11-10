@@ -93,14 +93,13 @@ export function listSetting(
 }
 
 /**
- * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md §3.1) gives a new key, by their old key.
- * Callers name the old key. A write or delete reaches both keys; a read takes the old key only. Every build that can
- * open the store writes the old key, so it is never the stale one, also after a person goes back a release and
- * forward again. The new key is not read even when the old one is missing: the build before this one deletes only
- * the old key (a list that empties), and the new key it leaves would bring back what the person removed. No build
- * that can open this store writes the new key alone (step 4 writes both). The new key is kept equal so step 4 can
- * read it first once the store's reader floor keeps out the builds that write only the old key.
- * `orchestrator_mcp_servers` keeps its name: no build since M4 A-7 writes it, it is only read to be moved into apps.
+ * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md §3.2) gives a new key, by their old key.
+ * Callers name the old key. A write or delete reaches both keys; a read takes the new key first, and the old key only
+ * when the new one is missing. Store step v69 copied every old key into its new key once (and deleted a new key whose
+ * old key was gone) and raised the store's floor to 68, so every build that can open the store writes and deletes both
+ * keys: the new key is never the stale one. Both keys are still written because the build of v68, which a person can
+ * go back to, reads only the old one. `orchestrator_mcp_servers` keeps its name: no build since M4 A-7 writes it, it is
+ * only read to be moved into apps.
  */
 export const RENAMED_SETTINGS: ReadonlyMap<string, string> = new Map([
   ['orchestrator_tool', 'assistant_tool'],
@@ -172,8 +171,14 @@ export class SettingsRecords {
    * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
    */
   appSetting(key: string): string | null {
-    const row = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)
-    return row?.value ?? null
+    const read = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`)
+    const renamed = RENAMED_SETTINGS.get(key)
+    // The new key first (#2133 step 4, `RENAMED_SETTINGS`)
+    if (renamed !== undefined) {
+      const row = read.get(renamed)
+      if (row) return row.value
+    }
+    return read.get(key)?.value ?? null
   }
 
   setAppSetting(key: string, value: string): void {

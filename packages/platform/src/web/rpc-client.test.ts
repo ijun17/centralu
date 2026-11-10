@@ -275,6 +275,7 @@ describe('RpcClient — budget for a call ending in a revival (#164)', () => {
     'agents.resolveMcpProposal',
     'agents.resolveSkillProposal',
     'agents.deleteOrchestratorSkill',
+    'agents.deleteAssistantSkill',
   ] as const
 
   it.each(RESUMING)('%s is not cut off at 30 seconds, but is cut off at 180', async (method) => {
