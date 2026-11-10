@@ -1165,6 +1165,7 @@ export class SessionManager {
       // Whose a linked child's turn is decides whether its report goes (#1038 review)
       reportGate: (sessionId) => self.delegationFlow.remote.reportGate(sessionId),
       keepsOverLoss: (sessionId) => self.delegationFlow.remote.keepsOverLoss(sessionId),
+      keepsTurnOverLoss: (sessionId) => self.delegationFlow.remote.keepsTurnOverLoss(sessionId),
       linkedChild: (sessionId) => {
         const r = self.delegationFlow.remote.of(sessionId)
         return r && { name: oneLineText(`${r.name} on ${r.machine}`, 120) }

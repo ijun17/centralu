@@ -120,6 +120,8 @@ class Machine {
       list: async () => [{ sessionId: CHILD, name: 'Child', project: 'app', state: this.state, tool: 'claude', preview: '', machine: 'Box' }],
       machineLinked: () => true,
       machineWaitsForPerson: () => false,
+      // Its host continues the turns an update's stop cuts (#1618)
+      continuesCutTurns: () => true,
       machineNamed: (n: string) => (n === 'Box' ? { id: 'm1', name: 'Box' } : null),
       describe: () => ({ name: 'Child', project: 'app' }),
       lastWords: async () => (this.reachable ? ({ ok: true as const, text: lastOf('assistant')?.payload.text ?? '', length: 0, seq: null }) : { ok: false as const, error: 'not reachable' }),
@@ -195,6 +197,7 @@ class Hub {
         void this.delivered.push(JSON.stringify({ sessionId, preview, ending, work })),
       reportGate: (id: string) => this.agents.reportGate(id),
       keepsOverLoss: (id: string) => this.agents.keepsOverLoss(id),
+      keepsTurnOverLoss: (id: string) => this.agents.keepsTurnOverLoss(id),
     } as unknown as LinkedReportsHost)
     this.agents = new RemoteAgents({
       children: this.children,
@@ -595,6 +598,22 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     await followUp()
     expect(await hub.act('send', note)).toMatchObject({ ok: true })
     expect(notes()).toHaveLength(1)
+  })
+
+  // #2164: this hub's update of the machine cut that turn, and the host it started there continued it while the link was down
+  it('takes a note into it once an update of its machine cut it and Centralu continued it there', async () => {
+    await paused()
+    await followUp()
+    machine.reachable = false
+    hub.observe({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'updating', operation: { kind: 'update' } } })
+    await linkUp()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true, state: 'working' })
+    expect(notes()).toHaveLength(1)
+    // Its end is the final report, once
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
+    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
   })
 
   it('refuses, without blaming the person, a turn the swapped hub did not see begin', async () => {

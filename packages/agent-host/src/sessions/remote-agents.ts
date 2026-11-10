@@ -273,6 +273,20 @@ export class RemoteAgents {
     return !!rec && this.reportArmed(rec)
   }
 
+  /**
+   * Whether the turn running there goes on across its link's loss (#2164): this hub's update holds the link, and the host it
+   * starts continues the turn its stop cut, so the turn after is the same turn (`LinkedReportsHost.keepsTurnOverLoss`)
+   */
+  keepsTurnOverLoss(sessionId: string): boolean {
+    const rec = this.of(sessionId)
+    return !!rec && this.continuesOverUpdate(rec.machineId)
+  }
+
+  /** This hub's own update or rollback holds the machine's link, and its host continues the turns that stop cuts (#1618) */
+  private continuesOverUpdate(machineId: string): boolean {
+    return this.updateHolds.has(machineId) && this.host.linkedReader?.continuesCutTurns?.(machineId) === true
+  }
+
   /** The hub's record of a child on a linked machine, by its qualified id */
   of(sessionId: string): RemoteAgent | undefined {
     return this.records().find((r) => r.sessionId === sessionId)
@@ -1382,7 +1396,7 @@ export class RemoteAgents {
        * link is back (`caughtUp`), not that the link dropped. An update that ends with the machine not back lets the link go
        * (`updateHolds`), and the drop is told then as any is. A host from before that is told as before
        */
-      if (this.updateHolds.has(m.id) && this.host.linkedReader?.continuesCutTurns?.(m.id) === true) continue
+      if (this.continuesOverUpdate(m.id)) continue
       this.toldDown.set(rec.sessionId, alone)
       const why = !alone
         ? 'It cannot be followed until the link is back: '

@@ -63,6 +63,8 @@ export type LinkedReportsHost = {
    * across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then
    */
   keepsOverLoss?(sessionId: string): boolean
+  /** Whether the turn running there goes on across the loss, the same turn (#2164): an update that continues it there holds the link */
+  keepsTurnOverLoss?(sessionId: string): boolean
 }
 
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
@@ -473,7 +475,8 @@ export class LinkedReports {
         continue
       }
       if (this.host.keepsOverLoss?.(sessionId)) {
-        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for
+        // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for. One an update continues there stays the work's
+        if (this.host.keepsTurnOverLoss?.(sessionId)) continue
         wait.busy = false
         delete wait.turn
         continue
