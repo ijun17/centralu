@@ -116,7 +116,8 @@ export class HandoffFlow {
     // Its own background work runs (#2158): the successor's start ends the original's process, and the work with it
     if (busy === 'background') return `${name} has background work still running, so nothing was handed off. Wait for it to end, or ask the person to stop it.`
     if (busy !== null) {
-      return `${name} is mid-turn (${busy === 'question' ? 'waiting on a question' : target.state}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
+      const why = busy === 'question' ? 'waiting on a question' : busy === 'approval' ? 'waiting for an approval' : target.state
+      return `${name} is mid-turn (${why}), so nothing was handed off. Wait for the turn to end (read_session shows it), or ask the person.`
     }
     if (mode === 'agent' && target.state === 'error') return `${name} is in an error state and cannot write a note. Hand it off from the record (mode "record").`
     return null

@@ -195,6 +195,9 @@ describe('no card when the handoff guards nothing', () => {
     callerWith('normal')
     meta.set('t1', target({ state: 'working' }))
     expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('is mid-turn') })
+    // A card is named in words, as the busy rule names it: the state's own word for one included
+    meta.set('t1', target({ state: 'waiting_approval' }))
+    expect(await flowOf().handoff('orch', meta.get('t1')!, {})).toMatchObject({ ok: false, error: expect.stringContaining('is mid-turn (waiting for an approval)') })
     expect(steps).toEqual([])
   })
 
