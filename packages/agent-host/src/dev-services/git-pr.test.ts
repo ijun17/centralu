@@ -6,6 +6,10 @@ import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git-pr.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
+import { useWarmProcessTable } from '../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 
 /**

@@ -5,6 +5,10 @@ import { ExternalApps, resultText, type AppRef, type RuntimeTiming } from './run
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { useWarmProcessTable } from '../../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * App check (M4 C-3) — deliberately breaks the `server.mjs` of an app scaffolded from the template,

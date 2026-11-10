@@ -13,6 +13,10 @@ import { memoryOs } from './memory.js'
 import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import { HOST_FAMILY, realOs } from './real.js'
 import { fileUrlToPath, pathRules, pathToFileUrl, type OsFamily } from './rules.js'
+import { useWarmProcessTable } from './process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * The real OS against the in-memory one (#1599, docs/plans/os-layer.md §7.1), on whatever OS this runs (every OS the

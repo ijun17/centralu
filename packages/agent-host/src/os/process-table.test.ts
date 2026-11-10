@@ -73,6 +73,17 @@ describe('the warm process-table reader', () => {
     expect(started).toHaveLength(1)
   })
 
+  it('is ended by `stop`, failing the read that waited on it, and the next read starts another', async () => {
+    const { reader, started } = fake((n) => (n === 1 ? null : '200 100 1500\nEND\n'))
+    const read = reader.read(1000)
+    await vi.waitFor(() => expect(started[0]!.asked).toHaveLength(1))
+    reader.stop()
+    await expect(read).rejects.toThrow('the process table reader was stopped')
+    expect(started[0]!.killed).toBe(true)
+    expect(await reader.read(1000)).toBe('200 100 1500\n')
+    expect(started).toHaveLength(2)
+  })
+
   it('rejects with why the table could not be read, and reads again on the next ask', async () => {
     const { reader, started } = fake((n) => (n === 1 ? 'ERR NtQuerySystemInformation status 5\nEND\n' : '200 100 1500\nEND\n'))
     await expect(reader.read(1000)).rejects.toThrow('NtQuerySystemInformation status 5')

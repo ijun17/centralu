@@ -79,6 +79,8 @@ export type TableReader = {
   read(timeoutMs: number): Promise<string>
   /** Starts the reader ahead of the first read, which on a starved machine takes 2–3 s to start: a stop cannot wait for that */
   warm(): void
+  /** Ends the reader (a read waiting on it fails); a later read or `warm` starts another */
+  stop(): void
 }
 
 /** What the reader needs of its PowerShell, a type of its own so a test can stand in for it */
@@ -159,6 +161,15 @@ export function tableReader(start: () => ReaderProcess = startServer): TableRead
 
   return {
     warm: () => void warm(),
+    stop: () => {
+      const c = child
+      if (!c) return
+      child = null
+      const w = waiting
+      waiting = null
+      c.kill()
+      w?.reject(new Error('the process table reader was stopped'))
+    },
     read: (timeoutMs) => {
       const r = queue.then(() => readOnce(timeoutMs))
       queue = r.catch(() => {})

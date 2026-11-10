@@ -530,6 +530,12 @@ export function warmProcessTable(platform: NodeJS.Platform = process.platform): 
   warmTable ??= tableReader()
   warmTable.warm()
 }
+
+/** Ends the warm reader `warmProcessTable` started, if any: a test that runs the host's stop path and then leaves */
+export function stopProcessTable(): void {
+  warmTable?.stop()
+  warmTable = undefined
+}
 const REAL_OS: KillOs = { platform: process.platform, ...REAL_LEFTOVER_OS }
 
 /**

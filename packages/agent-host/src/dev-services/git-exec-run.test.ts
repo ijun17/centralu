@@ -12,6 +12,10 @@ import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { realOs } from '../os/real.js'
+import { useWarmProcessTable } from '../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /** Whether the stop is given a process table that cannot be read, as when PowerShell does not answer in time (the test of the fallback below) */
 const table = vi.hoisted(() => ({ unreadable: false }))
