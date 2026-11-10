@@ -1,6 +1,7 @@
 import { Tooltip, stateLabel } from '../../../components/primitives.jsx'
 import type { SessionLook } from '../../session/look.js'
 import type { FoldSummaryState } from '../fold.js'
+import { BackgroundDot } from './ToolMark.jsx'
 
 /**
  * The status summary on a project's name line (#205) — what its session rows are waiting for, as counts: all of them
@@ -18,7 +19,7 @@ import type { FoldSummaryState } from '../fold.js'
  * mark has, the faster the answer needs to come.
  */
 export function FoldSummary({ name, counts }: { name: string; counts: { state: FoldSummaryState; count: number }[] }) {
-  const label = counts.map((c) => `${c.count} ${stateLabel(c.state).toLowerCase()}`).join(' · ')
+  const label = counts.map((c) => `${c.count} ${foldStateLabel(c.state)}`).join(' · ')
   return (
     <span className="-my-1 ml-auto flex shrink-0 self-center">
       <Tooltip content={label} testId={`fold-summary-tip-${name}`} align="right">
@@ -32,21 +33,26 @@ export function FoldSummary({ name, counts }: { name: string; counts: { state: F
   )
 }
 
-/** What each state a folded project counts looks like: the same four looks as a session's mark (#736) */
+/** What a chip's tooltip and label say of its count */
+const foldStateLabel = (state: FoldSummaryState): string => (state === 'background' ? 'waiting on background work' : stateLabel(state).toLowerCase())
+
+/** What each state a folded project counts looks like: the same four looks as a session's mark (#736); background work is the waiting look with the mark's dot (#2146) */
 const FOLD_LOOK: Record<FoldSummaryState, SessionLook> = {
   waiting_approval: 'waiting',
   error: 'stopped',
   waiting_input: 'idle',
   working: 'answering',
+  background: 'idle',
 }
 
 /** A chip like ToolMark — a count instead of a letter */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
   return (
-    <span className="cc-mark shrink-0 rounded-md" data-look={FOLD_LOOK[state]} data-state={state}>
+    <span className="cc-mark relative shrink-0 rounded-md" data-look={FOLD_LOOK[state]} data-state={state}>
       <span className="readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong px-[3px] text-2xs font-semibold leading-none text-ink">
         {count}
       </span>
+      {state === 'background' && <BackgroundDot testId="fold-summary-background-dot" />}
     </span>
   )
 }

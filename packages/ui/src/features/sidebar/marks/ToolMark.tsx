@@ -99,15 +99,20 @@ export function ToolMark({
         >
           {meta.mark}
         </span>
-        {background && dot.shown && (
-          <span
-            aria-hidden
-            className={`absolute -bottom-px -right-px size-[5px] rounded-full bg-ink-faint ring-[1.5px] ring-surface-side ${dot.leaving ? 'cc-fade-out' : 'cc-fade'}`}
-            data-testid={background.testId}
-            data-leaving={dot.leaving || undefined}
-          />
-        )}
+        {background && dot.shown && <BackgroundDot testId={background.testId} leaving={dot.leaving} />}
       </span>
     </Tooltip>
+  )
+}
+
+/** The background-work dot on a mark's bottom-right corner; a project's chip for sessions paused on background work wears it too */
+export function BackgroundDot({ testId, leaving = false }: { testId: string; leaving?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`absolute -bottom-px -right-px size-[5px] rounded-full bg-ink-faint ring-[1.5px] ring-surface-side ${leaving ? 'cc-fade-out' : 'cc-fade'}`}
+      data-testid={testId}
+      data-leaving={leaving || undefined}
+    />
   )
 }
