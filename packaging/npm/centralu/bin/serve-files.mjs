@@ -184,11 +184,12 @@ export function readStarting(dataDir) {
  * what was learnt of a record between calls (a Windows creation time costs a PowerShell), so a caller that asks again and
  * again pays it once per record.
  */
-export function liveStarts(dataDir, known = new Map(), { maxAgeMs = STARTING_MAX_MS, now = Date.now(), startOf = processStartTime, createdAt = processCreatedAt } = {}) {
+export function liveStarts(dataDir, known = new Map(), { maxAgeMs = STARTING_MAX_MS, now = Date.now(), startOf = processStartTime, createdAt = processCreatedAt, writer = (r) => isWriter(r, startOf, createdAt) } = {}) {
   return readStarting(dataDir).filter((r) => {
     if (typeof r.at === 'number' && now - r.at > maxAgeMs) return false
     const key = `${r.pid}:${r.started}:${r.at}`
-    if (!known.has(key)) known.set(key, isWriter(r, startOf, createdAt) === true)
+    // A launcher of another logon (creation unreadable) is a live start for as long as a start takes, as records here are
+    if (!known.has(key)) known.set(key, isWriterWithin(r, maxAgeMs, writer))
     return known.get(key) === true && isAlive(r.pid)
   })
 }
@@ -692,6 +693,17 @@ export function isWriter(holder, startOf = processStartTime, createdAt = process
   if (holder.at === undefined || holder.at > Date.now()) return false
   const created = createdAt(holder.pid)
   return created === null ? null : created <= holder.at + CLOCK_TICK_MS
+}
+
+/**
+ * `isWriter` with its third answer settled: a process that lives but whose creation Windows will not tell (another logon's,
+ * `null`) counts as the writer while its record is younger than `maxAgeMs`, by the `at` it wrote. Asking for more
+ * (an elevated read, a prompt) is not an option for a launcher; the cost is a stranger that took a dead writer's pid
+ * within that time counting as the writer for the rest of it.
+ */
+export function isWriterWithin(holder, maxAgeMs, writer = isWriter) {
+  const w = writer(holder)
+  return w === null ? typeof holder?.at === 'number' && Date.now() - holder.at < maxAgeMs : w
 }
 
 /** One tick of the Windows clock */

@@ -7,7 +7,7 @@ import { existsSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep } from './serve-util.mjs'
-import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriter, readServePid } from './serve-files.mjs'
+import { SERVE_LOG_FILE, serveDataDir, ensureServeState, markStopped, rotateServeLog, markStarting, clearStarting, liveStarts, lockHolder, isWriterWithin, isWriter, readServePid, STARTING_MAX_MS } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslCommandLine } from './serve-windows.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { startInSignIn } from './serve-autostart.mjs'
@@ -291,6 +291,7 @@ export async function runStop({
   graceMs = 10_000,
   kill = (pid, sig) => process.kill(pid, sig),
   write = (line) => process.stdout.write(line),
+  writer = isWriter,
 }) {
   const dataDir = serveDataDir(env, home)
   const deadline = Date.now() + budgetMs
@@ -311,13 +312,14 @@ export async function runStop({
   const tookTheFolder = () => {
     const h = lockHolder(dataDir)
     const key = h ? `lock:${h.pid}:${h.started}:${h.at}` : null
-    if (key && !known.has(key)) known.set(key, isWriter(h) === true)
+    // A host started in another logon (its creation unreadable) took the folder too: counted for as long as a start takes
+    if (key && !known.has(key)) known.set(key, isWriterWithin(h, STARTING_MAX_MS, writer))
     if (!key || !known.get(key) || !isAlive(h.pid)) return (heldSince = null), false
     heldSince ??= Date.now()
     return Date.now() - heldSince > LOCK_GRACE_MS
   }
   let waiting = false
-  for (let starts = liveStarts(dataDir, known); starts.length > 0 && !tookTheFolder(); starts = liveStarts(dataDir, known)) {
+  for (let starts = liveStarts(dataDir, known, { writer }); starts.length > 0 && !tookTheFolder(); starts = liveStarts(dataDir, known, { writer })) {
     if (!waiting) say(`centralu serve is starting a host for ${dataDir}; waiting for it, to stop it`)
     waiting = true
     if (Date.now() < deadline - STOP_RESERVE_MS) {

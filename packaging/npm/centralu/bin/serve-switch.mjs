@@ -18,7 +18,7 @@ import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFi
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { answerLine, replaceFile, runCaptured, say, sleep, tail, waitUntil } from './serve-util.mjs'
-import { isWriter, processStartTime, serveDataDir } from './serve-files.mjs'
+import { isWriter, isWriterWithin, processStartTime, serveDataDir } from './serve-files.mjs'
 import { POINTER_WORD, managedLauncherScript, parsePointer, remoteLayout } from './serve-install.mjs'
 import { detachHow } from './serve-windows.mjs'
 
@@ -97,8 +97,7 @@ function readPointerFile(file) {
 /** Whether `switch.lock` names a live switcher (`isWriter`), a Windows pid of another logon counting for a while */
 export function lockIsLive(holder, writer = isWriter) {
   if (!holder || !Number.isInteger(holder.pid)) return false
-  const w = writer(holder)
-  return w === null ? Date.now() - holder.at < UNREADABLE_ALIVE_MS : w
+  return isWriterWithin(holder, UNREADABLE_ALIVE_MS, writer)
 }
 
 /**
