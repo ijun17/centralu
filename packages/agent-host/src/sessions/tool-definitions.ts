@@ -807,7 +807,7 @@ export const AGENT_BUDGET_CHARS = 1400
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Centralu's mailbox: work and messages with other sessions, apps and the person; send to "assistant" to ask it, with cite=true only when the person's last message here asked for it. Ask the person with kind "question" to "person", and 2-6 choices to pick if they fit.`,
+    description: `Centralu's mailbox: work and messages with other sessions, apps and the person; send to "assistant" to ask it, with cite=true only when the person's last message here asked for it.`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close', 'find']),
       thread: z.string().optional(),
@@ -823,7 +823,6 @@ export const MAIL_TOOLS = [
       urgent: z.boolean().optional(),
       follows: z.array(z.string()).optional(),
       cite: z.boolean().optional(),
-      choices: z.array(z.string()).optional(),
     }),
     deferred: true,
   },
@@ -832,9 +831,8 @@ export const MAIL_TOOLS = [
 /**
  * The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). Measured in docs/tool-cost.md.
  * 1170 → 1240 for `find` and its words in `to` (#2067 item 3; measured 1231)
- * 1240 → 1380 for `choices` and the line on asking the person (#1630; measured 1374)
  */
-export const MAIL_BUDGET_CHARS = 1380
+export const MAIL_BUDGET_CHARS = 1240
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the
@@ -1000,7 +998,6 @@ export const READER_BUDGET_CHARS = 1960
  * #1739 (a request citing the person's message): the mail tool gets `cite` and its description says when to set it (`MAIL_BUDGET_CHARS` 820 → 910, measured 907, so the reader's sum rises by 90), and the Assistant's instructions say how to judge a request and its citation and which steps still ask (9,910 → 10,030; measured 10,480 with compaction's 460, so 10,020).
  * #1984 (the address of the session that started you): `to` gets a description naming `parent`, `assistant` and `person` (`MAIL_BUDGET_CHARS` 910 → 1,110, measured 1,109, so the reader's sum rises by 200).
  * #2039 (a name for `to`): the description of `to` says a session may be named by its name or id and what a shared name gets (`MAIL_BUDGET_CHARS` 1,110 → 1,170, measured 1,160, so the reader's sum rises by 60).
- * #1630 (agents ask the person through mail): `choices` and one line saying to ask the person with a mail question (`MAIL_BUDGET_CHARS` 1,240 → 1,380, measured 1,374, so the reader's sum rises by 140; Codex's reader measured 6,671).
  * #1988 (owner decision 2026-11-05): create_session takes `preset` (the default a new session gets, held to the seat, the asker and an untrusted project's `normal`), its enum and one line, with words cut from its description: the Assistant rises 10,030 → 10,180.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {

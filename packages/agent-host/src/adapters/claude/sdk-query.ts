@@ -3,7 +3,6 @@ import { hostAccessEnv } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
-import { seatHas } from '../../sessions/tool-seats.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
@@ -223,12 +222,6 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      */
     ...(opts.outputSchema ? { outputFormat: { type: 'json_schema' as const, schema: opts.outputSchema } } : {}),
     resume: opts.resumeExternalId,
-    /*
-     * A session with Centralu's mail asks the person through it (#1630): a question by mail does not hold the turn, lives past a host swap and a
-     * dropped link, and is answered in the Inbox. The CLI's own choice tool is off for it; the mail tool's description says how to ask instead.
-     * A session without mail (a builder, an app's agent) keeps the card. The profile defaults as the tools' server does (`centraluMcp`)
-     */
-    ...(opts.centraluTools && seatHas(opts.toolProfile ?? 'assistant', 'mail') ? { disallowedTools: ['AskUserQuestion'] } : {}),
     // allowedTools is never set (M0: it would shadow canUseTool).
     /*
      * **The callback is passed even in auto** (#171). It used to be omitted for auto, and

@@ -1,4 +1,4 @@
-import { errorMessage, oneLineText, type MailChoices } from '@cc/protocol'
+import { errorMessage, oneLineText } from '@cc/protocol'
 import { isRoleVia, ROLE_VIA, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
@@ -28,8 +28,6 @@ export type MailToolArgs = {
   urgent?: boolean | undefined
   follows?: string[] | undefined
   cite?: boolean | undefined
-  /** A question to the person: the answers it offers to pick from (#1630) */
-  choices?: string[] | undefined
 }
 
 export type MailToolResult = { text: string; isError?: boolean }
@@ -69,11 +67,6 @@ export type MailToolHost = {
  *
  * What other parties wrote comes back quoted line by line, under Centralu's word for who they are to the reader (§8.3).
  */
-/** The choices a call offers, as the service takes them (`checkedChoices` judges them) */
-function choicesOf(a: MailToolArgs): { choices?: MailChoices } {
-  return a.choices ? { choices: a.choices } : {}
-}
-
 export class MailTool {
   private readonly now: () => number
   /** The sessions told once that `assistant` is not their parent (#1984) */
@@ -189,12 +182,12 @@ export class MailTool {
         return this.handled(me.address, this.target(me.address, this.need(a.thread, 'thread')))
       case 'send': {
         const to = this.party(sessionId, me, this.need(a.to, 'to'))
-        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}), ...choicesOf(a) })
+        const sent = this.service.send(me.address, { to: [to.address], text: this.need(a.text, 'text'), needsReply: a.kind !== 'note', ...(a.urgent ? { urgent: true } : {}), ...(to.via ? { via: [to.via] } : {}), ...(a.cite ? { cite: true } : {}) })
         return this.sent(sent) + this.parentHint(sessionId, me, to)
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
-        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}), ...choicesOf(a) })
+        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}) })
         return this.sent(sent)
       }
       case 'find':

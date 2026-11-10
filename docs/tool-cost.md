@@ -929,11 +929,6 @@ the citation is code ([plans/cited-requests.md](plans/cited-requests.md) §3), s
 
 **#2039 (a name for `to`).** A bare `to` was read as a session id, so a name was refused as gone. `to` now says a session may be named by its name or id, and that a shared name is refused with a list: the definition is 1,160, `MAIL_BUDGET_CHARS` 1,110 → 1,170, and the reader seat's ceilings rise by 60.
 
-**#1630 (agents ask the person through mail).** The description gains ", and 2-6 choices to pick if they fit" after a line saying to ask the
-person with kind "question" to "person", and the tool gets `choices`, a list of strings with no description. The definition is 1,374,
-`MAIL_BUDGET_CHARS` 1,240 → 1,380, and the reader seat's ceilings rise by 140 (Codex's reader with its developer instructions measured
-6,671). A choice's description and a pick of several were left out: both cost words in every Codex request, and the window does not draw them yet.
-
 Every field but `action` and `to` is optional and has no description: each word rides in every Codex request, and the answers say
 what a call lacks ("thread is needed for this action", "kind is one of …"). The wake that delivers mail names the exact
 call (`mail(action="read", thread="…")`), which is how a deferred tool is found; a session that opens a thread itself finds
