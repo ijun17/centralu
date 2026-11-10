@@ -476,7 +476,9 @@ export class HostTenure {
     this.host.cardRests.restore(() => false)
     // A report paused over work an update's stop ended is kept as one whose turn goes on (#1912, `keptOverUpdateStop`)
     const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
-    this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
+    const ended = this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
+    // The person's reports paused on work that went with the last host's process (#1463): told now as that work's end, each task stopped
+    if (ended.length) setTimeout(() => ended.forEach((id) => void this.host.reports.reportToPersonIfOwed(id, { type: 'turn_complete', sessionId: id }, undefined, undefined, this.host.reports.pausedTasksNow(id, 'person', true))), 0)
     for (const id of stopped) this.host.children.stoppedByUpdate.keep(id)
     /*
      * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its

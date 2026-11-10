@@ -50,8 +50,10 @@ export type Delegation = {
   leaving?: Set<() => void>
 }
 
-/** The store's record that a session's owed report is held over its own background work (#721), kept across a swap */
-export const pausedReportKey = (sessionId: string) => `report_paused:${sessionId}`
+/** Whose report a pause holds (#1463): the caller's, owed by its mark (`awaitingReport`), or the person's, of work they own (`personOwes`) */
+export type PausedKind = 'caller' | 'person'
+/** The store's record that a session's report is held over its own background work (#721): a caller's, kept across a swap with its mark; the person's, across a restart */
+export const pausedReportKey = (sessionId: string, kind: PausedKind = 'caller') => `${kind === 'person' ? 'person_report_paused' : 'report_paused'}:${sessionId}`
 /** A task a paused report waits on (#721), as kept in `report_paused:<session>` */
 export type PausedTask = { id: string; description: string }
 /** The tasks of a stored pause, or null when there is none (an unreadable value is a pause on nothing known) */
@@ -228,10 +230,13 @@ export class ChildOwnership {
    * Reports held over the session's own background work (#721): a turn ended while work it started still ran, so the work is paused, not over. The
    * report stays owed in `awaitingReport` (its caller was told once that it paused) and goes out at the end of a turn with none of that work left, or
    * `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn following. Holds the tasks it paused on (each id and description, for how they ended
-   * and for `stop`). Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark. Those an update stopped: `StoppedByUpdate`
+   * and for `stop`). Mirrored in the app setting `report_paused:<session>`, so a swap keeps it with the mark. Those an update stopped: `StoppedByUpdate`.
+   * The person's report of work they own pauses the same way (#1463, `personPausedReports`, `person_report_paused:<session>`)
    */
   private readonly paused = new Map<string, PausedTask[]>()
   readonly pausedReports: ReadonlyMap<string, PausedTask[]> = this.paused
+  private readonly personPaused = new Map<string, PausedTask[]>()
+  readonly personPausedReports: ReadonlyMap<string, PausedTask[]> = this.personPaused
   readonly stoppedByUpdate = new StoppedByUpdate()
   /**
    * Whose the running turn is, by session (#1377): recorded when the turn starts from the message that started it, decided
@@ -499,7 +504,7 @@ export class ChildOwnership {
    * At startup (#646): the report marks of the sessions whose turn goes on under this host (`goingOn`: an update cut it,
    * and this host continues it) and of the sessions waiting on threads they handed on, and nothing else.
    */
-  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
+  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): string[] {
     /*
      * "You will be told when it ends" survives an update (#646, #1618): the turn an update cut is continued under this
      * host, so it ends here, and the report it owes goes out from here. Any other mark is dropped rather than left to
@@ -532,6 +537,12 @@ export class ChildOwnership {
       this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
       this.store.settings.deleteAppSetting(reportTurnKey(mark.sessionId))
     }
+    // The person's paused reports (#1463), all read back: the ones whose work went with the last host's process are returned, to be reported as ended
+    for (const id of sessions.keys()) {
+      const tasks = readPausedTasks(this.store.settings.appSetting(pausedReportKey(id, 'person')))
+      if (tasks) this.personPaused.set(id, tasks)
+    }
+    return [...this.personPaused.keys()].filter((id) => !goingOn.has(id))
   }
 
   /** At startup (#676): the delegated turns of the sessions whose turn goes on under this host (`goingOn`); any other row is dropped */
@@ -597,19 +608,23 @@ export class ChildOwnership {
     if (stored) this.starters.set(sessionId, stored)
   }
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
-  pauseReport(sessionId: string, running: readonly PausedTask[]): void {
-    const held = this.paused.get(sessionId) ?? []
+  pauseReport(sessionId: string, running: readonly PausedTask[], kind: PausedKind = 'caller'): void {
+    const paused = kind === 'person' ? this.personPaused : this.paused
+    const held = paused.get(sessionId) ?? []
     const added = running.filter((t) => !held.some((h) => h.id === t.id)).map((t) => ({ id: t.id, description: t.description }))
-    if (!this.paused.has(sessionId) || added.length) {
+    if (!paused.has(sessionId) || added.length) {
       const next = [...held, ...added]
-      this.paused.set(sessionId, next)
-      this.store.settings.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
+      paused.set(sessionId, next)
+      this.store.settings.setAppSetting(pausedReportKey(sessionId, kind), JSON.stringify(next))
     }
   }
-  unpauseReport(sessionId: string): void {
-    this.stopSettling(sessionId)
-    this.stoppedByUpdate.release(sessionId)
-    if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
+  /** The caller's pause ends with its settling and what an update's stop ended; the person's is only its record */
+  unpauseReport(sessionId: string, kind: PausedKind = 'caller'): void {
+    if (kind === 'caller') {
+      this.stopSettling(sessionId)
+      this.stoppedByUpdate.release(sessionId)
+    }
+    if ((kind === 'person' ? this.personPaused : this.paused).delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId, kind))
   }
   /**
    * A message goes into the session (#1377): the person's, or anyone else's (a caller's, an app's, Centralu's). At rest
@@ -742,7 +757,7 @@ export class ChildOwnership {
   private recordedTurn(sessionId: string): TurnStarter | null {
     return readTurn(this.store.settings.appSetting(reportTurnKey(sessionId)))
   }
-  /** The session is deleted: nothing kept for a hub that followed its turns is kept (`purgeSession` removes the same keys by their shape) */
+  /** The session is deleted: nothing kept of its turns (for a hub that followed them, whose work they were, the person's paused report) is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
     this.dropInputOrigins(sessionId)
     this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
@@ -754,6 +769,7 @@ export class ChildOwnership {
     this.takenOver.delete(sessionId)
     this.workOf.delete(sessionId)
     for (const [id, caller] of this.workOf) if (caller === sessionId) this.workOf.delete(id)
+    this.unpauseReport(sessionId, 'person')
   }
   /**
    * A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604). Kept for every session, not only

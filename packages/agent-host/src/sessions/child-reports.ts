@@ -10,7 +10,7 @@ import { errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind, kindWord } from './error-kind.js'
 import { wentWithItsProcess } from './interruptions.js'
 import { TURN_ENDED, type ReportDraft, type ReportedAs } from '../mail/delegation.js'
-import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
+import { PAUSED_REPORT_SETTLE_MS, type PausedKind, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportPart, ReportWork } from './linked-reports.js'
 import { isPauseUpdate, personWroteSinceMark } from './pause-update.js'
@@ -207,9 +207,6 @@ export type EndedTurn = TurnStarter & { compaction?: true; since?: number }
 export class ChildReports {
   constructor(private readonly host: ChildReportsHost) {}
 
-  /** Sessions whose report to the person paused on their own background work (#1463): settled as a session owner's paused report is (`settlePausedReport`), so with no turn after the work's end the report goes out all the same. Memory only */
-  private readonly personPaused = new Set<string>()
-
   /** The mailbox's way of taking a report (§8.1), set by the host when it has one: a thread the report goes in, else the old way tells */
   private mailReport: ((ownerId: string, childId: string, draft: ReportDraft) => ReportedAs) | undefined
   useMail(hook: ChildReports['mailReport']): void {
@@ -254,12 +251,14 @@ export class ChildReports {
    */
   async reportToPersonIfOwed(sessionId: string, ending: NormalizedEvent, answer?: string, turn?: TurnStarter, settled?: readonly BackgroundTask[]): Promise<void> {
     if (this.host.disposing || turn?.by === 'person') return
-    if (!this.host.children.personOwes(sessionId)) return
+    // Nothing owed to the person: nor is a pause of their report
+    if (!this.host.children.personOwes(sessionId)) return void this.host.children.unpauseReport(sessionId, 'person')
     const stop = this.host.meta.get(sessionId)?.interruption
     // A turn that completed while its own background work runs is a pause: the turn the work's end starts is the work's end
     const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
-    if (running.length > 0) this.personPaused.add(sessionId)
-    else this.personPaused.delete(sessionId)
+    // Kept as a caller's pause is (`ChildOwnership.personPausedReports`), and settled the same way (`settlePausedReport`)
+    if (running.length > 0) this.host.children.pauseReport(sessionId, running, 'person')
+    else this.host.children.unpauseReport(sessionId, 'person')
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const kind = message ? (stop?.reason === 'network' ? 'network' : errorKind(message)) : undefined
     const outcome = outcomeWord(running.length > 0 ? { paused: running, stoppable: false } : settled ? { settled } : undefined, stop, ending)
@@ -290,12 +289,13 @@ export class ChildReports {
     const m = this.host.meta.get(sessionId)
     return m ? liveBackgroundTasks(m.backgroundTasks).filter((t) => !t.timer) : []
   }
-  /** The tasks a paused report waited on, as the session lists them now: how each ended, or still running (#721) */
-  pausedTasksNow(sessionId: string): BackgroundTask[] {
-    const listed = this.host.meta.get(sessionId)?.backgroundTasks ?? []
-    const byUpdate = this.host.children.stoppedByUpdate.has(sessionId)
-    return (this.host.children.pausedReports.get(sessionId) ?? []).map((t) =>
-      // One an update's stop ended is not listed by the new process: stopped, not completed (#1912)
+  /** The tasks a paused report waited on (#721), the caller's or the person's (#1463), as listed now: how each ended, or still running; `gone`: the last host's process took them, each stopped */
+  pausedTasksNow(sessionId: string, kind: PausedKind = 'caller', gone = false): BackgroundTask[] {
+    const listed = gone ? [] : (this.host.meta.get(sessionId)?.backgroundTasks ?? [])
+    const byUpdate = gone || this.host.children.stoppedByUpdate.has(sessionId)
+    const held = kind === 'person' ? this.host.children.personPausedReports : this.host.children.pausedReports
+    return (held.get(sessionId) ?? []).map((t) =>
+      // One an update's stop ended is not listed by the new process: stopped, not completed (#1912); nor is one that went with the process
       listed.find((l) => l.id === t.id) ?? { id: t.id, kind: 'other' as const, description: t.description, status: byUpdate ? ('stopped' as const) : ('completed' as const) })
   }
   /**
@@ -309,7 +309,7 @@ export class ChildReports {
     if (this.host.disposing) return
     const quiet = () => {
       const m = this.host.meta.get(sessionId)
-      return (this.host.children.pausedReports.has(sessionId) || this.personPaused.has(sessionId)) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
+      return (this.host.children.pausedReports.has(sessionId) || this.host.children.personPausedReports.has(sessionId)) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
         this.ownTasksRunning(sessionId).length === 0
     }
     if (!quiet()) return
@@ -318,7 +318,7 @@ export class ChildReports {
       if (!quiet() || this.host.disposing) return
       console.error(`[sessions] ${sessionId.slice(0, 8)}: its background work ended and no turn followed; reporting the work as ended`)
       const ending = { type: 'turn_complete', sessionId } as const
-      if (this.personPaused.has(sessionId)) void this.reportToPersonIfOwed(sessionId, ending, undefined, undefined, this.ownTasksRunning(sessionId))
+      if (this.host.children.personPausedReports.has(sessionId)) void this.reportToPersonIfOwed(sessionId, ending, undefined, undefined, this.pausedTasksNow(sessionId, 'person'))
       if (this.host.children.pausedReports.has(sessionId)) void this.reportBackIfAwaited(sessionId, ending, undefined, this.pausedTasksNow(sessionId))
     }, PAUSED_REPORT_SETTLE_MS)
     timer.unref?.()

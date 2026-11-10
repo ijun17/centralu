@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from '../mail/address.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
+import { join } from 'node:path'
+import type { ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
 import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { SessionManager } from './manager.js'
 import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
@@ -122,6 +126,30 @@ describe('a script starts a session with a first message', () => {
     expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }), body: expect.stringContaining('has ended, and no turn followed it') })
     expect(settledOf(s.id)).toBe('reported')
     expect(owes(s.id)).toBe(false)
+  })
+
+  it('a pause the host quit over is reported at the next start as the work’s end, its tasks stopped; a deleted session leaves no pause (#1463)', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const gone = await start({ initialPrompt: 'Run the import' }, 'limited')
+    for (const [id, description] of [[s.id, 'pnpm export'], [gone.id, 'pnpm import']] as const) {
+      handleOf(id)!.event({ type: 'background_tasks', sessionId: id, live: [{ id: 't1', kind: 'shell', description, status: 'running' }] })
+      handleOf(id)!.answer('Started it')
+      await w.until(() => reportsOf(id).length > 0)
+    }
+    await w.mgr.trash.trashSession(gone.id)
+    expect(w.store.settings.appSetting(`person_report_paused:${gone.id}`)).toBeNull()
+    await w.mgr.tenure.disposeAll()
+    // The next start: the work went with the process, and no turn will end it
+    const next = new SessionManager(w.store, w.adapters as unknown as Map<ToolName, AgentAdapter>, () => {}, undefined, join(w.caller.path, '..', 'worktrees'))
+    wireHostMail(next, w.store)
+    try {
+      await w.until(() => reportsOf(s.id).length > 1)
+      expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }) })
+      expect(settledOf(s.id)).toBe('reported')
+      expect(w.store.settings.appSetting(`person_report_paused:${s.id}`)).toBeNull()
+    } finally {
+      await next.tenure.disposeAll()
+    }
   })
 
   it('a first message that could not go in withdraws the task: no work began, and the Inbox does not show it running (#1463)', async () => {
