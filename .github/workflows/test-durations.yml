@@ -1,10 +1,8 @@
-# Refreshes tooling/test-durations.json and tooling/test-durations-macos.json once a week, so the Windows and macOS shards stay
-# balanced.
+# Refreshes tooling/test-durations.json once a week, so the Windows shards stay balanced.
 #
 # build.yml splits the Windows unit tests, and the remote Node's host tests on Windows, into shards by each file's
-# measured time; the macOS tests too, by their own file (#2167), from the `macos-test-times-<shard>` reports of the newest green
-# push run whose macOS shards ran the full set (a run whose files left the host's tests alone runs none; a refresh that fails
-# for a run, as one with too few files timed does, tries the next). The times go stale as tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against
+# measured time. (The macOS shards split by vitest's own `--shard`, by count: on the Mac's times that is within 3% of a split
+# by time, #2167.) The times go stale as tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against
 # 1769 s), and refreshing them by hand (`tsx tooling/os-tests.ts --refresh-durations`) was forgotten. The unit shards upload their
 # vitest JSON report as `windows-test-times-<shard>`; the remote Node's shards theirs as `windows-test-times-remote-node-<shard>`,
 # and they time the files the unit shards do not run (94 of 525 had no time, and the two shards of that job took 6.0 and 9.1
@@ -16,8 +14,8 @@
 # far behind main the run is.
 #
 # Two jobs, as lint-tighten.yml: no code from the dependencies runs where a write token is.
-#   refresh  reads only: downloads the reports, runs the refresh, hands the files on as an artifact.
-#   open     writes only: no install; puts the files on a fresh checkout of main and pushes them to one branch,
+#   refresh  reads only: downloads the reports, runs the refresh, hands the file on as an artifact.
+#   open     writes only: no install; puts the file on a fresh checkout of main and pushes it to one branch,
 #            `test-durations/weekly`. It opens no pull request: the repository does not let GITHUB_TOKEN do that
 #            (#1983), and allowing it would widen the token. The job summary names the branch and the `gh pr create`
 #            line for a person to run.
@@ -44,7 +42,6 @@ jobs:
       actions: read
     outputs:
       run: ${{ steps.times.outputs.run }}
-      mac_run: ${{ steps.mac.outputs.run }}
       behind: ${{ steps.times.outputs.behind }}
       age_days: ${{ steps.times.outputs.age_days }}
     steps:
@@ -108,38 +105,10 @@ jobs:
           done
           pnpm exec tsx tooling/os-tests.ts --refresh-durations "${reports[@]}"
 
-      # The macOS reports of the newest green push run that ran the full set (`macos-test-times-<shard>`, or the one
-      # `macos-test-times` of a run from before the shards): a run that left the host's tests alone ran none, and the refresh
-      # refuses reports that time fewer than half of the selected tests (a shard's report missing, the quick tier's set) and
-      # leaves the file as it was, so the next run is tried. A file the reports do not time keeps its entry. None found
-      # keeps the file as it is: a warning, not a failure, as the Windows times are still worth a pull request.
-      - name: Refresh the macOS times
-        id: mac
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for run in $(jq -r '.[].databaseId' "$RUNNER_TEMP/runs.json"); do
-            rm -rf "$RUNNER_TEMP/mac"
-            gh run download "$run" -p 'macos-test-times*' -D "$RUNNER_TEMP/mac" || continue
-            mapfile -t reports < <(find "$RUNNER_TEMP/mac" -name vitest-times.json | sort)
-            [ "${#reports[@]}" -gt 0 ] || continue
-            # Each try scans the repository (about a minute): five at most, inside the job's limit
-            tries=$((${tries:-0} + 1))
-            [ "$tries" -le 5 ] || break
-            if pnpm exec tsx tooling/os-tests.ts --refresh-durations --macos "${reports[@]}"; then
-              echo "macOS times of run $run (${#reports[@]} reports)."
-              echo "run=$run" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
-          echo "::warning::No green main run kept the macOS shards' times of the full set; tooling/test-durations-macos.json is left as it is."
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-durations
-          path: |
-            tooling/test-durations.json
-            tooling/test-durations-macos.json
+          path: tooling/test-durations.json
           if-no-files-found: error
           retention-days: 7
 
@@ -161,11 +130,10 @@ jobs:
       - name: Push it, and say how to open the pull request
         env:
           RUN: ${{ needs.refresh.outputs.run }}
-          MAC_RUN: ${{ needs.refresh.outputs.mac_run }}
           BEHIND: ${{ needs.refresh.outputs.behind }}
           AGE_DAYS: ${{ needs.refresh.outputs.age_days }}
         run: |
-          if [ -z "$(git status --porcelain -- tooling/test-durations.json tooling/test-durations-macos.json)" ]; then
+          if [ -z "$(git status --porcelain -- tooling/test-durations.json)" ]; then
             # An older week's branch is left as it is; a person closes or deletes it
             older=''
             if git ls-remote --exit-code --heads origin test-durations/weekly > /dev/null 2>&1; then
@@ -179,22 +147,18 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git switch -C "$branch"
-          git add -- tooling/test-durations.json tooling/test-durations-macos.json
-          git commit -m 'chore(test): refresh the shard times'
+          git add -- tooling/test-durations.json
+          git commit -m 'chore(test): refresh the Windows shard times'
           git push --force origin "$branch"
           behind="the run is ${BEHIND} commits and ${AGE_DAYS} days behind ${GITHUB_REF_NAME}"
           if [ "$BEHIND" = unknown ] || [ "$BEHIND" -gt 20 ] || [ "$AGE_DAYS" -gt 7 ]; then
             behind="WARNING: $behind (more than 20 commits or 7 days), so its times may be old"
           fi
-          mac='the macOS times unchanged: no run kept the full set'
-          if [ -n "$MAC_RUN" ]; then
-            mac="tooling/test-durations-macos.json from the macos-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${MAC_RUN}"
-          fi
-          title='chore(test): refresh the shard times'
+          title='chore(test): refresh the Windows shard times'
           # The pull request template's sections; nothing here has a single quote, as the line below quotes it
           body=$(printf '%s\n' \
-            '## Why' '' 'The weekly refresh of tooling/test-durations.json and tooling/test-durations-macos.json (.github/workflows/test-durations.yml): the Windows and macOS shards are split by these times.' '' \
-            '## What changed' '' "Only the two durations files: tooling/test-durations.json from the windows-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}; ${behind}; ${mac}. Each holds the test files of this checkout only: a file the run did not time keeps its entry or gets the median, a deleted file is dropped." '' \
+            '## Why' '' 'The weekly refresh of tooling/test-durations.json (.github/workflows/test-durations.yml): the Windows shards are split by these times.' '' \
+            '## What changed' '' "Only tooling/test-durations.json, from the windows-test-times reports of ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN}; ${behind}. It holds the test files of this checkout only: a file the run did not time keeps its entry or gets the median, a deleted file is dropped." '' \
             '## Verified' '' "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Its CI does not start by itself (a workflow token): start it when queueing." '' \
             '## Situations checked' '' 'n/a' '' '## Usability' '' 'n/a' '' '## Not exercised' '' 'Nothing beyond the refresh run above.' '' '## Closes' '' 'n/a')
           {

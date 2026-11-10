@@ -315,13 +315,15 @@ test) weighs the median of those it does, at least one second. Today (three shar
 1,345 to 1,346 seconds each (two shards had been 2,016 and 2,020; their jobs took 14.4 and 16.5 minutes, median of the 10
 merge batches to 2026-11-10).
 
-**The macOS shards** (#2167) split the same way, `tsx tooling/os-tests.ts --macos --shard i/2`, by their own file,
-`tooling/test-durations-macos.json`: each file's seconds on the macOS runner, for the tests `--macos` selects. Not Windows'
-times: a Mac starts processes faster, and the tooling tests that make temp folders run there only (the `project-board-*`
-tests alone are about 400 s on a Mac), so by Windows' file they would weigh the median. As one job the macOS tests were the
-last job of 7 of those 10 batches (19.1 minutes median, 23.0 at most). The file was first written from the report of
-the unsharded job of run 42882362587 (528 files, 2,115 s of file time): two shards of 1,058 s each. The quick tier's
-small set is split by vitest's own `--shard`, by count.
+**The macOS shards** (#2167) split by vitest's own `--shard`, by count, the full set (`tsx tooling/os-tests.ts --macos`)
+and the quick tier's alike. As one job the macOS tests were the last job of 7 of those 10 batches (19.1 minutes median,
+23.0 at most of 25). A split by time would need the Mac's own times (a Mac starts processes faster, and the tooling tests
+that make temp folders run there only), so a second file and its refresh. Measured on the unsharded job's report of run
+42882362587 (2,115 s of file time), vitest's count split puts 1,085 and 1,030 s in its two shards against 1,058
+and 1,057 by time: the longer shard 2.6% longer. Its order is a hash of each path, so files added or renamed reshuffle it;
+over 10,000 random orders of the same files the longer shard is 10% over half at the median, 24% at p90 and 52% at
+worst, about 15 minutes of a 25 minute limit (each shard ran 9.3 to 9.6 minutes split by time). With three shards the
+count split is 18% over, so a third shard would want the times again.
 
 **Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
 artifact `windows-test-times-<shard>` (30 days); so do the remote Node's two Windows shards (`host tests, remote Node`, which
@@ -332,22 +334,17 @@ for those 92 from the log of run 42082742277. To refresh, from a green run on ma
 ```sh
 gh run download <run id> -p 'windows-test-times-*' -D /tmp/times
 pnpm exec tsx tooling/os-tests.ts --refresh-durations /tmp/times/*/vitest-times.json
-# the macOS shards keep theirs as macos-test-times-<shard>
-gh run download <run id> -p 'macos-test-times*' -D /tmp/mac-times
-pnpm exec tsx tooling/os-tests.ts --refresh-durations --macos /tmp/mac-times/*/vitest-times.json
 ```
 
-and commit the files. The Windows file holds exactly the tests this checkout selects and the remote Node's job runs (`timedTests`, `refreshDurations`; the macOS file, those `--macos` selects): the run's time for a
+and commit the file. The file holds exactly the tests this checkout selects and the remote Node's job runs (`timedTests`, `refreshDurations`): the run's time for a
 file it timed, the current entry for one it did not, the median for a new one, nothing for a file that is gone, so a
 run from before a split or a delete does not bring the old names back. `.github/workflows/test-durations.yml` does this
 weekly: it takes the reports of the newest green push run of `build.yml` on main that has them (and says how many
-commits and days behind main it is, warning past 20 or 7), the macOS ones from the newest such run whose macOS shards
-ran the full set (a run that left the host's tests alone has none; none found leaves the file as it is, with a warning),
-and pushes the result to the branch `test-durations/weekly`.
+commits and days behind main it is, warning past 20 or 7) and pushes the result to the branch `test-durations/weekly`.
 It opens no pull request, as the repository does not let `GITHUB_TOKEN` create one; the job summary gives the `gh pr create` line. The first version was read from run 40303859800's log, which prints each file's time. Times
 that are a little old only make the split a little uneven; a refresh is due when a shard runs more than a few
-minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks each
-file is as the refresh writes it and names a time for most of the tests its shards run.
+minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks the
+file is as the refresh writes it and names a time for most of the selected tests.
 
 ## 7. Moving the host behind the layer
 

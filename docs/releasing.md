@@ -124,10 +124,9 @@ script rehearses by default and why nothing publishes automatically.
   reach the OS: the ones Windows picks (`tsx tooling/os-tests.ts`) and those that make folders in the temp folder, where a Mac
   answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. `ci.quickChecks` names the shards' one result, `macos tests`, which passes
   only when every shard passed, so a batch lands only with every shard. Two shards (#2167): as one job it was the last job of 7 of the 10 merge batches to 2026-11-10 (19.1
-  minutes median, 23.0 at most, of a limit of 25), which made it every landing's wait. The full run's list is split by each
-  file's time on the Mac (`os-tests.ts --macos --shard`, `tooling/test-durations-macos.json`, refreshed weekly with
-  Windows' times: [os-layer.md §6.4](plans/os-layer.md#64-shards-balanced-by-measured-time)); the quick tier's filters by
-  vitest's own `--shard`, by count. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
+  minutes median, 23.0 at most, of a limit of 25), which made it every landing's wait. Both the full run's list and the quick tier's
+  filters are split by vitest's own `--shard`, by count, whose longer shard held 2.6% more file time than a split by time
+  ([os-layer.md §6.4](plans/os-layer.md#64-shards-balanced-by-measured-time)). It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
   (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
   the Node this job runs. The release's darwin job still runs `pnpm verify` whole. Its `pnpm test` stays until a change decides otherwise: `tooling/` has Mac-only failures (#1695), and the UI and core tests run on Linux only.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full

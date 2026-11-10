@@ -639,10 +639,10 @@ jobs:
   # minutes. The release's darwin job ran every test of the repository in about 17 minutes on the same runner.
   #
   # Two shards (#2167). As one job it was the last job of 7 of the 10 merge batches to 2026-11-10, 19.1 minutes median
-  # and 23.0 at most of its limit of 25 (the full run: 528 files, 2,115 s of file time, 1,293 s of vitest). The full run's
-  # list is split by each file's time on this runner (`os-tests.ts --macos --shard`, tooling/test-durations-macos.json:
-  # Windows' times do not fit a Mac, and the tooling tests that make temp folders run here only); the quick tier's few
-  # filters are split by vitest's own `--shard`, by count.
+  # and 23.0 at most of its limit of 25 (the full run: 528 files, 2,115 s of file time, 1,293 s of vitest). Both sets are
+  # split by vitest's own `--shard`, by count. On that run's times of each file the count split's longer shard holds 1,085 s
+  # against 1,058 s split by time (2.6% more; over random orders of the same files, as files come and go, 10% at the
+  # median and 24% at p90), well inside the limit, and a split by time needed a file of the Mac's times and its refresh.
   #
   # Not the Node the remotes are pinned to (packaging/remote-runtime.json): the hub installs that Node only where
   # the installer serves it (Linux and Windows, `host tests, remote Node`), and refuses a Mac (links/install.ts).
@@ -701,10 +701,9 @@ jobs:
 
       # The tests that reach the OS, by the rule Windows picks by (tooling/os-tests.ts), and the tests that make folders in the
       # temp folder (`--macos`); the rest run once, on Linux, in `verify`'s test shards (`verify-tests`). Within the host, the protocol and tooling/.
-      # This shard's share, split by each file's time on this runner (tooling/test-durations-macos.json, docs/plans/os-layer.md §6.4).
       - name: Pick the tests that touch the OS
         if: needs.changes.outputs.host_tests == 'true'
-        run: pnpm exec tsx tooling/os-tests.ts --macos --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/os-tests.txt"
+        run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"
 
       - name: 'pnpm test (host, protocol, launcher: the tests that touch the OS)'
         id: full
@@ -715,9 +714,10 @@ jobs:
           CC_TEST_FILES: ${{ runner.temp }}/os-tests.txt
           # tooling/styles.test.ts compares the app's JS with main's in the verify job, and fails in CI unless told where
           CC_BUNDLE_COMPARED_BY: verify
-        run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol packages/common tooling/
+        # This shard's share of them, by count, as the quick tier's
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol packages/common tooling/
 
-      # The time each file took, for choosing what the quick tier runs and for the shards' split; also when a test failed
+      # The time each file took, for choosing what the quick tier runs; also when a test failed
       - name: Say which test files took longest
         if: ${{ !cancelled() }}
         run: |

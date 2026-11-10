@@ -246,12 +246,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(full).toContain('packages/agent-host packages/protocol packages/common tooling/\n')
     // Only the tests that reach the OS, picked as Windows picks them (plus the temp-folder tests): the pure ones run on Linux
     expect(full).toContain('CC_TEST_FILES: ${{ runner.temp }}/os-tests.txt\n')
-    // The full set's shard is split by the Mac's own times, so vitest gets the list whole; the quick set by vitest's own count
-    expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/os-tests.txt"\n')
+    // Both sets are split by vitest's own count (#2167): the full set is picked whole, then this shard takes its share
+    expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"\n')
     expect(mac.indexOf('os-tests.ts --macos')).toBeLessThan(mac.indexOf('id: full'))
-    expect(full).not.toMatch(/vitest run[^\n]*--shard/)
-    expect(quick).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} ')
-    // Each shard keeps its file times, which refresh tooling/test-durations-macos.json, even when a test failed
+    for (const set of [quick, full]) expect(set).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} ')
+    // Each shard keeps its file times, even when a test failed
     expect(mac).toMatch(/- name: Upload the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
     expect(mac).toContain('name: macos-test-times-${{ matrix.shard }}\n')
     // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
