@@ -388,14 +388,19 @@ export class ChildOwnership {
     return this.store.mailbox.handedOnBySessions(ownerId, childId).filter((r) => marks.some((m) => m.sessionId === idOf(r.recipient) && m.callerSessionId === idOf(r.sender))).length
   }
 
-  /** A script or the RPC starts `sessionId` with `text`: the person owns the work. Never throws */
-  startedForPerson(sessionId: string, text: string, fromScript?: { credential: string }): void {
+  /**
+   * A new session's first message `text`, sent by `send`. A script's (`fromScript`) is work the person owns, written down first; when
+   * `send` throws, no turn will come of it and the person's task is withdrawn (#1463) before the error goes on
+   */
+  firstMessage(sessionId: string, text: string, fromScript: { credential: string } | undefined, send: () => void): void {
+    if (!fromScript) return send()
     this.personCall('write down the work for the person started in', sessionId, undefined, (w) => w.started(sessionId, text, fromScript))
-  }
-
-  /** The first message of the work `startedForPerson` wrote down could not go in (#1463): the person's task is withdrawn. Never throws */
-  firstSendFailedForPerson(sessionId: string): void {
-    this.personCall('withdraw the work for the person started in', sessionId, undefined, (w) => w.withdrawn(sessionId))
+    try {
+      send()
+    } catch (e) {
+      this.personCall('withdraw the work for the person started in', sessionId, undefined, (w) => w.withdrawn(sessionId))
+      throw e
+    }
   }
 
   /** Whether the person has work with `sessionId` whose turn is reported to them; false with no mailbox. Never throws */

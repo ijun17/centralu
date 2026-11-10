@@ -541,15 +541,9 @@ export class SessionStarts {
       this.host.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}), ...(params.fromScript ? { fromScript: params.fromScript } : {}) })
       this.host.cardRests.turnAsked(id)
       // Never stamped: its only producer is a handoff, whose opening quotes a note written by an agent, not the person's typing
-      if (params.fromScript) this.host.children.startedForPerson(id, params.initialPrompt, params.fromScript)
-      // A script's message reaches the session framed as the script's, never stamped as the person's
-      try {
-        handle.send(params.fromScript ? scriptMessageFrame(params.fromScript.credential, params.initialPrompt) : params.initialPrompt)
-      } catch (e) {
-        // The session exists, but no turn will come of the work (#1463)
-        if (params.fromScript) this.host.children.firstSendFailedForPerson(id)
-        throw e
-      }
+      // A script's message reaches the session framed as the script's, never stamped as the person's, and its work is the person's
+      const first = params.fromScript ? scriptMessageFrame(params.fromScript.credential, params.initialPrompt) : params.initialPrompt
+      this.host.children.firstMessage(id, params.initialPrompt, params.fromScript, () => handle.send(first))
     }
     return info
   }
