@@ -809,16 +809,15 @@ export class MessageService {
 
   // ── Parties that go, parties that take over (§7.7) ──
 
-  /** A session went to the trash or was deleted: its watched rows are `gone`, its own watched messages `withdrawn`, and each sender whose needsReply message it leaves is told once (D25) */
+  /**
+   * A session went to the trash or was deleted: it can answer nothing any more. What it owes (`owedBy`: its questions, whichever turn, and every task a
+   * session gave it) is released `gone` and each sender told once, as for a stop (mailbox.md §10.6.1); then its watched rows are settled `gone` and its
+   * own watched messages `withdrawn`. Mail sent to the Assistant's role follows the role, not the session that held it (D15): `roleMoved` gives it on
+   */
   partyGone(address: string): void {
     this.releaseAndTell((now, senders) => {
-      for (const row of this.records.watchedTo(address)) {
-        // Mail sent to the Assistant's role follows the role, not the session that held it (D15): `roleMoved` gives it to the next one
-        if (isRoleVia(row.via)) continue
-        const m = this.records.message(row.messageId)
-        this.records.settle(row.messageId, address, 'gone', now)
-        if (m?.needsReply && this.records.markReleased(row.messageId, address, now, 'gone')) senders.add(m.sender)
-      }
+      for (const { row, message } of this.owedBy(address, 'gone', null)) if (this.records.markReleased(row.messageId, address, now, 'gone')) senders.add(message.sender)
+      for (const row of this.records.watchedTo(address)) if (!isRoleVia(row.via)) this.records.settle(row.messageId, address, 'gone', now)
       for (const row of this.records.watchedFrom(address)) this.records.settle(row.messageId, row.recipient, 'withdrawn', now)
     })
   }
@@ -848,7 +847,7 @@ export class MessageService {
       let released = 0
       for (const { address, why, turnSeq, told, held, starter, reportOwed } of stops) {
         const owed = new Set<string>()
-        for (const { row, message: m } of [...(turnSeq === null ? [] : this.cutQuestions(address, turnSeq)), ...this.openTasksTo(address, why, turnSeq)]) {
+        for (const { row, message: m } of this.owedBy(address, why, turnSeq)) {
           if (!this.records.markReleased(row.messageId, address, now, why)) continue
           released++
           owed.add(m.sender)
@@ -944,31 +943,38 @@ export class MessageService {
   }
 
   /**
-   * The questions `address` left unanswered in its turn `turnSeq`, the rows a stop (`sessionsStopped`) or a lost turn (`turnsLost`) releases: each
+   * The questions `address` left unanswered in its turn `turnSeq` (in any turn when null), the rows a stop (`owedBy`) or a lost turn (`turnsLost`) releases: each
    * `needsReply` message delivered into that turn and not answered, settled or released, a request to the Assistant included. Not a task (a stop
-   * releases those whichever turn they came in, `openTasksTo`), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
+   * releases those by its own rule, `owedBy`), nor a message the session sent itself (a handoff to the very session that asked leaves such a row)
    */
-  private cutQuestions(address: string, turnSeq: number): { row: RecipientRow; message: MailRow }[] {
+  private cutQuestions(address: string, turnSeq: number | null): { row: RecipientRow; message: MailRow }[] {
     return this.records.unansweredTo(address).flatMap((row) => {
-      if (row.turnSeq !== turnSeq || row.settled !== null || row.releasedAt !== null) return []
+      if ((turnSeq !== null && row.turnSeq !== turnSeq) || row.settled !== null || row.releasedAt !== null) return []
       const message = this.records.message(row.messageId)
       return message && message.kind !== 'task' && message.sender !== address ? [{ row, message }] : []
     })
   }
 
   /**
-   * The open tasks a session gave `address`, which its stop releases (`sessionsStopped`): delivered ones only (one still queued was never its work), and
-   * not the person's, whose work is reported to their Inbox. A stop that leaves it unable to answer (an error, a limit, the network, a quit) releases
-   * them all; the person's Stop only those in the turn it stopped (delivered into it, or the work it was for): the session can still answer the rest
+   * What a stopped session owes and its stop releases (mailbox.md §10.6.1), the one definition for a stop (`sessionsStopped`) and a deletion
+   * (`partyGone`, `gone`):
+   * - the questions of the cut turn `turnSeq` (`cutQuestions`; none without a turn), or, deleted, every one it has not answered;
+   * - the open tasks a session gave it, not the person's, whose work is reported to their Inbox. Delivered ones only (one still queued was never
+   *   its work), except when it is deleted: then nothing of it will run. A stop that leaves it unable to answer (an error, a limit, the network,
+   *   a quit) releases them all; the person's Stop only those of the turn it stopped (delivered into it, or the work it was for): the session can
+   *   still answer the rest.
+   * A deleted session leaves out mail to the Assistant's role, which follows the role (D15)
    */
-  private openTasksTo(address: string, why: StopWhy, turnSeq: number | null): { row: RecipientRow; message: MailRow }[] {
+  private owedBy(address: string, why: StopWhy | 'gone', turnSeq: number | null): { row: RecipientRow; message: MailRow }[] {
     const party = parseAddress(address)
     const turn = why === 'stopped' && turnSeq !== null && party?.kind === 'session' ? this.records.turn(party.sessionId, turnSeq) : undefined
     const stopped = (row: RecipientRow): boolean => why !== 'stopped' || (turnSeq !== null && (row.turnSeq === turnSeq || turn?.starterId === row.messageId))
-    return this.records.watchedTo(address).flatMap((row) => {
-      const message = row.releasedAt === null && row.deliveredAt !== null && stopped(row) ? this.records.message(row.messageId) : undefined
+    const questions = why === 'gone' ? this.cutQuestions(address, null) : turnSeq === null ? [] : this.cutQuestions(address, turnSeq)
+    const tasks = this.records.watchedTo(address).flatMap((row) => {
+      const message = row.releasedAt === null && (why === 'gone' || row.deliveredAt !== null) && stopped(row) ? this.records.message(row.messageId) : undefined
       return message?.kind === 'task' && parseAddress(message.sender)?.kind === 'session' && message.sender !== address ? [{ row, message }] : []
     })
+    return why === 'gone' ? [...questions, ...tasks].filter(({ row }) => !isRoleVia(row.via)) : [...questions, ...tasks]
   }
 
   /** One write: `release` releases rows and adds each released question's sender to `senders`; then each sender is told once, in one notice (D25) */

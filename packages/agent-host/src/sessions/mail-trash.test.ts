@@ -35,12 +35,13 @@ describe('deleting a session while it holds work in the mailbox', () => {
     const own = m.service.send(a, { to: [g], text: 'Can you review it?', needsReply: true }).message
 
     await world.rpc('agents.deleteSession', { sessionId: worker.id })
-    expect(read.row(t.id, a)).toMatchObject({ settled: 'gone' })
+    expect(read.row(t.id, a)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
     expect(read.row(asked.id, a)).toMatchObject({ settled: 'gone', releasedWhy: 'gone' })
     expect(read.row(own.id, g)).toMatchObject({ settled: 'withdrawn' })
+    // One notice for both: the question and the task, whose giver is told the work stopped (mailbox.md §10.6.1)
     const told = read.to(g).filter((x) => x.message.kind === 'notice' && x.message.facts.unanswered)
     expect(told).toHaveLength(1)
-    expect(told[0]!.message.facts.unanswered).toEqual([{ id: asked.id, recipient: a, why: 'gone' }])
+    expect(told[0]!.message.facts.unanswered).toEqual([{ id: t.id, recipient: a, why: 'gone' }, { id: asked.id, recipient: a, why: 'gone' }])
   })
 
   it('work that is done is left as it was, and a session with no mail leaves no mail behind', async () => {

@@ -1655,8 +1655,10 @@ who hears that a session stopped.
 **What triggers it.** A turn that ends without finishing: an error, a usage limit, the network, its tool's interrupt, a Stop
 (`stopOf`, session-events.ts); a cut turn Centralu could not continue (`HostTenure.turnLostInSwap`, `uncontinued`); and, at the next
 start, every session a quit or shutdown cut (`HostMail.afterReady`, one write for all of them). Not the turn Centralu starts to compact a
-conversation, and not a turn Centralu continues (an update's cut, #1975): those ends are not the work's. A deleted session is
-`partyGone`, as before.
+conversation, and not a turn Centralu continues (an update's cut, #1975): those ends are not the work's. A deleted session
+(`partyGone`, cause `gone`) releases by the same definition (`MessageService.owedBy`): every question it has not answered, whichever turn,
+and every task a session gave it, delivered or not; its senders are told and woken as for a stop, the person not (they deleted it), and
+mail to the Assistant's role follows the role (D15).
 
 **What it releases.** Everything the stopped session owes an answer: each `needsReply` message delivered into the cut turn and not
 answered (the person's too), and every open task a session gave it and that reached it, whichever turn it came in (one still queued
@@ -1692,7 +1694,9 @@ rule's second copy (`useQuotes`, `MailHooks.quotes`, `NOT_QUOTED`); and the wake
 `quiet`. The older report path for a report mark (`reportBackIfAwaited`) stays until #1948 step 3, so its owner is still `held` until
 that path ends (`oldPathEnded`). `mail/policy.ts` went in #1996.
 
-**Not built here.** A notice to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8).
+**Decided as is (owner, 2026-11-11).** The starter owed nothing is told quietly of an error, a usage limit or a Stop alike. A notice
+to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8). After a quit, a child the person
+continues and that then finishes leaves its task open until it replies: step 3 makes a turn's last response its reply.
 
 ### 10.7 The state table
 

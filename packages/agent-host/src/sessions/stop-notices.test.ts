@@ -567,6 +567,18 @@ describe('the owner’s cases (mailbox.md §10.6.1): who is told, woken, or left
     expect(read.to(addr(giver)).filter((x) => x.message.kind === 'notice')).toEqual([])
   })
 
+  it('a session deleted with an open task: its giver is told the work stopped, and woken, as the delete dialog says', async () => {
+    const giver = await w.callerSession()
+    const child = await w.callerSession()
+    const task = m.service.task(addr(giver), addr(child), { text: 'long job', origin: 'start_agent', delivered: true })
+    await w.mgr.trash.trashSession(child)
+    await w.until(() => stopNotices(giver).length === 1)
+    const [told] = stopNotices(giver)
+    expect(told!.message.facts).toEqual({ unanswered: rowsOf(child, 'gone', task) })
+    expect(wakesMessage(told!.message)).toBe(true)
+    expect(read.row(task.id, addr(child))).toMatchObject({ releasedWhy: 'gone', settled: 'gone' })
+  })
+
   // The starter's quiet notice at a real restart, which finds who started the cut turn (`HostTenure.quitStarter`): interruptions.test.ts "a turn a quit stopped"
   it('(5) a host restart wakes nobody owed nothing: the quit found at the start wakes the sender owed a reply only, and a second start tells no one again', async () => {
     const { starter, child } = await startedAndReported()

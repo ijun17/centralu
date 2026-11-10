@@ -202,7 +202,7 @@ describe('what one wake carries', () => {
 })
 
 describe('parties that go and parties that take over (§7.7)', () => {
-  it('partyGone settles watched rows gone, withdraws the party’s own, and gathers each needsReply sender’s rows into one notice', () => {
+  it('partyGone settles watched rows gone, withdraws the party’s own, and gathers each sender’s rows, a task’s too, into one notice (mailbox.md §10.6.1)', () => {
     const w = world()
     const q1 = w.send(A, { to: [B], text: 'q1' }).message
     const q2 = w.send(A, { to: [B], text: 'q2' }).message
@@ -213,12 +213,12 @@ describe('parties that go and parties that take over (§7.7)', () => {
     w.mail.partyGone(B)
 
     for (const m of [q1, q2]) expect(w.rowOf(m.id, B)).toMatchObject({ settled: 'gone', releasedWhy: 'gone', toldAt: w.clock.t })
-    expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'gone', releasedAt: null })
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'gone', releasedWhy: 'gone', toldAt: w.clock.t })
     expect(w.rowOf(own.id, C).settled).toBe('withdrawn')
     expect(w.rowOf(ownTask.id, C).settled).toBe('withdrawn')
-    // The person is not told, and a task's sender is told by the old report path
+    // The person is not told (they deleted it); a task's sender is, as a question's: the trash drops the report mark without a word
     expect(w.rowOf(fromPerson.id, B)).toMatchObject({ settled: 'gone', releasedWhy: 'gone', toldAt: null })
-    expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice')).toEqual([])
+    expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.kind === 'notice').map((p) => p.message.facts)).toEqual([{ unanswered: [{ id: task.id, recipient: B, why: 'gone' }] }])
 
     const told = w.records.pendingFor(A, w.clock.t + 10_000)
     expect(told).toHaveLength(1)
