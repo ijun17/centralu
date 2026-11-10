@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PERSON } from '../mail/address.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
-import { join } from 'node:path'
-import type { ToolName } from '@cc/protocol'
-import type { AgentAdapter } from '../adapters/contract.js'
 import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
 import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
@@ -140,7 +137,7 @@ describe('a script starts a session with a first message', () => {
     expect(w.store.settings.appSetting(`person_report_paused:${gone.id}`)).toBeNull()
     await w.mgr.tenure.disposeAll()
     // The next start: the work went with the process, and no turn will end it
-    const next = new SessionManager(w.store, w.adapters as unknown as Map<ToolName, AgentAdapter>, () => {}, undefined, join(w.caller.path, '..', 'worktrees'))
+    const next = new SessionManager(w.store, w.adapters, () => {})
     wireHostMail(next, w.store)
     try {
       await w.until(() => reportsOf(s.id).length > 1)
