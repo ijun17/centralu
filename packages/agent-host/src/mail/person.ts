@@ -1,9 +1,9 @@
-import { errorMessage, oneLineText, type MailHeldRow, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
+import { errorMessage, oneLineText, type MailHeldRow, type NormalizedEvent, type MailMessage, type MailParty, type MailThreadRow, type MailThreadView } from '@cc/protocol'
 import type { MessageRow } from '../dev-services/store/mail-types.js'
 import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
-import type { MessageService } from './messages.js'
+import type { MailChange, MessageService } from './messages.js'
 import { refuse } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
@@ -435,8 +435,15 @@ export class MailPerson {
 
   // ── Shapes ──
 
-  /** A new message as the person's notification names it (`mail_changed.arrived`, #1630): one they can read, not their own */
-  arrival(messageId: string): { messageId: string; from: MailParty; kind: string; preview: string } | undefined {
+  /** The windows' `mail_changed` for a change to the mail (main.ts): a new message the person can read also names itself, for the OS notification (#1630) */
+  changeEvent(c: MailChange): Extract<NormalizedEvent, { type: 'mail_changed' }> {
+    const toPerson = c.recipients.includes(PERSON)
+    const arrived = c.arrived && toPerson ? this.arrival(c.messageId) : undefined
+    return { type: 'mail_changed', threadId: c.rootId, toPerson, ...(arrived ? { arrived } : {}) }
+  }
+
+  /** A new message as the person's notification names it (`mail_changed.arrived`): one they can read, not their own */
+  private arrival(messageId: string): { messageId: string; from: MailParty; kind: string; preview: string } | undefined {
     const m = this.records.message(messageId)
     const row = this.records.recipient(messageId, PERSON)
     if (!m || !row || m.sender === PERSON || hiddenFromPerson(row) || row.held !== null) return undefined

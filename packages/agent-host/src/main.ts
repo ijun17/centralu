@@ -449,11 +449,7 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   tellsNow: (id) => mgr.mail.tellsMailNow(id),
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
 })
-// Every window hears of a change to a chain; a new message the person can read also names itself, for the OS notification (#1630)
-hostMailbox.service.onChange((c) => {
-  const arrived = c.arrived && c.recipients.includes('person') ? mailPerson.arrival(c.messageId) : undefined
-  events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person'), ...(arrived ? { arrived } : {}) })
-})
+hostMailbox.service.onChange((c) => events.push(mailPerson.changeEvent(c)))
 // Terminal and command output can arrive before the server exists: a restarted one writes as it starts (HO11, lifecycle/gate.ts)
 const terminals = new TerminalService(screens.push, ptyBroker ? brokerPtyModule(ptyBroker) : undefined)
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal

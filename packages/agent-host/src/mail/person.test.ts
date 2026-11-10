@@ -703,7 +703,7 @@ describe('what the person is notified of (#1630)', () => {
     const { person } = ready(w)
     const arrived: string[] = []
     w.service.onChange((c) => {
-      const a = c.arrived && c.recipients.includes(PERSON) ? person.arrival(c.messageId) : undefined
+      const a = person.changeEvent(c).arrived
       if (a) arrived.push(`${a.kind} ${a.from.address}: ${a.preview}`)
     })
     const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?' }).message
