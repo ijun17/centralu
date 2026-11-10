@@ -13,8 +13,11 @@ export type ReportPart = { wrote?: true; added?: true; cut?: true; stoppedByUpda
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
-  /** `update` (#1540): not the first pause but a later turn of the paused work, which ended with a new answer while that work still runs */
-  | { paused: readonly BackgroundTask[]; stoppable: boolean; update?: true }
+  /**
+   * `update` (#1540): not the first pause but a later turn of the paused work, which ended with a new answer while that work still runs. `since`:
+   * where that turn began in the conversation, read where its end was seen; the mailbox names the update by it (`TurnReport.update`)
+   */
+  | { paused: readonly BackgroundTask[]; stoppable: boolean; update?: { since?: number } }
   /** `byUpdate` (#1912): an update of Centralu stopped the work the report paused on, and no turn of the session followed */
   | { settled: readonly BackgroundTask[]; byUpdate?: true }
   | { linkLost: string; paused: readonly BackgroundTask[]; asRead?: true }
@@ -143,6 +146,10 @@ export class LinkedReports {
   private readonly machineNames = new Map<string, string>()
   /** What a waited-on session is called, kept while it can be read: a removed machine's mirror is gone */
   private readonly about = new Map<string, { name: string; project: string }>()
+  /** Waits whose paused turn's answer the call that asked took (`oweAsker`): that turn's end is no update (#1540). They go with the wait */
+  private readonly callTookTurn = new WeakSet<LinkedReport>()
+  /** Waits whose session the person wrote to there since they began: no later turn is an update (#1540, `isPauseUpdate`) */
+  private readonly personWrote = new WeakSet<LinkedReport>()
 
   constructor(private readonly host: LinkedReportsHost) {}
 
@@ -236,8 +243,7 @@ export class LinkedReports {
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = e.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
     // The turn whose answer the asking call took (`oweAsker`): its end is told, and is no update
-    const callTook = wait.toldTurn === true
-    delete wait.toldTurn
+    const callTook = this.callTookTurn.delete(wait)
     if (running.length) {
       const told = !!wait.paused
       const held = wait.paused ?? []
@@ -247,8 +253,8 @@ export class LinkedReports {
       // Changed in place: set again, so what keeps it stored reads the pause (#1038)
       this.host.children.setLinkedReport(sessionId, wait)
       // Told already: a later turn with a new answer is an update, at once (#1540), by the rule this host's own children follow (`isPauseUpdate`)
-      const later: LaterTurn | undefined = told ? { compaction: compacted(e.turn), othersWrote: !!(turn.wrote || turn.added), personWrote: wait.personWrote === true } : undefined
-      if (!(told && callTook)) void this.report(sessionId, wait.assistantId, e, { paused: running, stoppable: false, ...(told ? { update: true as const } : {}) }, undefined, partOf(turn), false, wait, later)
+      const later: LaterTurn | undefined = told ? { compaction: compacted(e.turn), othersWrote: !!(turn.wrote || turn.added), personWrote: this.personWrote.has(wait) } : undefined
+      if (!(told && callTook)) void this.report(sessionId, wait.assistantId, e, { paused: running, stoppable: false, ...(told ? { update: {} } : {}) }, undefined, partOf(turn), false, wait, later)
       return
     }
     this.drop(sessionId)
@@ -271,7 +277,9 @@ export class LinkedReports {
     if ((held && held.assistantId !== callerId) || this.gate(sessionId) !== 'deliver') return []
     this.stopSettling(sessionId)
     this.remember(sessionId)
-    this.host.children.setLinkedReport(sessionId, { assistantId: callerId, busy: false, paused: [...running], toldTurn: true })
+    const wait: LinkedReport = { assistantId: callerId, busy: false, paused: [...running] }
+    this.callTookTurn.add(wait)
+    this.host.children.setLinkedReport(sessionId, wait)
     return running
   }
 
@@ -305,7 +313,7 @@ export class LinkedReports {
     const added = person && (e.intent === 'task' || (wait.addNext !== undefined && Date.now() - wait.addNext < ADD_NEXT_MS))
     if (person) delete wait.addNext
     // A pause of this work sends no more updates (#1540, `isPauseUpdate`)
-    if (person) wait.personWrote = true
+    if (person) this.personWrote.add(wait)
     if (wait.busy) {
       const running = wait.turn ?? { by: 'work' as const }
       wait.turn = running

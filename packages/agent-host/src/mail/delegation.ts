@@ -1,7 +1,8 @@
 import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON } from './address.js'
-import type { DelegationOrigin, MessageService, TurnReport } from './messages.js'
+import type { DelegationOrigin, MessageService } from './messages.js'
+import type { TurnReport } from './turn-report.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
 
@@ -158,8 +159,8 @@ export type ReportDraft = {
   error?: string
   /** How many background tasks of the session's own the turn left running */
   paused?: number
-  /** A pause's update (#1540): a later turn of the paused work ended with a new answer. Keyed by that turn's stored number (`TurnReport.update`) */
-  update?: true
+  /** A pause's update (#1540): a later turn of the paused work ended with a new answer; where that turn began (`TurnReport.update`) */
+  update?: number
   /** The person wrote into the turn, or added to the task */
   personNote?: boolean
   /** What the work is now: reported (`review`), still going (`running`: paused over its own work or work it handed on), or taken over (`dropped`) */
@@ -196,9 +197,9 @@ function outcomeOf(draft: Pick<ReportDraft, 'outcome' | 'then'>): { outcome: Tur
 }
 
 /** A draft as the report the message service writes; `waitingOn` is the work it handed on still owed (§9.4) */
-function turnReport(draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'personNote' | 'then'>, waitingOn: number, update?: number): TurnReport {
+function turnReport(draft: Pick<ReportDraft, 'outcome' | 'body' | 'answer' | 'error' | 'paused' | 'update' | 'personNote' | 'then'>, waitingOn: number): TurnReport {
   const base = { body: draft.body, ...(draft.answer ? { answer: draft.answer } : {}), ...(draft.error ? { error: draft.error } : {}), ...(draft.personNote ? { personNote: true } : {}) }
-  if (draft.then === 'running' && draft.paused) return { ...base, outcome: 'paused', paused: draft.paused, ...(update !== undefined ? { update } : {}) }
+  if (draft.then === 'running' && draft.paused) return { ...base, outcome: 'paused', paused: draft.paused, ...(draft.update !== undefined ? { update: draft.update } : {}) }
   if (draft.then === 'running') return { ...base, outcome: 'waiting', waitingOn: Math.max(1, waitingOn) }
   return { ...base, ...outcomeOf(draft) }
 }
@@ -252,10 +253,8 @@ export function reportRecorder(
     try {
       // A request's report carries none of the Assistant's other words (S12)
       const { answer: _answer, ...unanswered } = draft
-      const latest = turns.latest(childId)
-      const startedAt = latest?.startedAt
-      // An update is named by the turn that ended (#1540): its end told again after a restart is the same update
-      const report = request ? { ...turnReport(unanswered, 0), body: askedReportBody(draft) } : turnReport(draft, waitingOn(ownerId, childId), draft.update ? latest?.seq : undefined)
+      const startedAt = turns.latest(childId)?.startedAt
+      const report = request ? { ...turnReport(unanswered, 0), body: askedReportBody(draft) } : turnReport(draft, waitingOn(ownerId, childId))
       written = mail.report(work.id, startedAt === undefined ? report : { ...report, startedAt })
     } catch (e) {
       if (refusalReason(e) !== undefined) return 'none'

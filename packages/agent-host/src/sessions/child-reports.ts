@@ -13,7 +13,7 @@ import { TURN_ENDED, type ReportDraft, type ReportedAs } from '../mail/delegatio
 import { PAUSED_REPORT_SETTLE_MS, type TurnStarter } from './child-ownership.js'
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportPart, ReportWork } from './linked-reports.js'
-import { isPauseUpdate } from './pause-update.js'
+import { isPauseUpdate, personWroteSinceMark } from './pause-update.js'
 import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE } from './ask-project.js'
@@ -193,6 +193,9 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
   Pick<RestartHost, 'inputsHeld'> &
   Pick<QueuedRequestsHost, 'projectRow'>
 
+/** The turn whose end a report tells of, as its end was seen (`ChildReports.reportBackIfAwaited`) */
+export type EndedTurn = TurnStarter & { compaction?: true; since?: number }
+
 /**
  * What a session is told in its conversation about work it gave (#166, #698, #721): the report of a turn it is owed,
  * held over the child's own background work and settled when that work ends, the stop of a turn nobody was owed, and
@@ -334,8 +337,11 @@ export class ChildReports {
     answer?: string,
     /** The paused work's tasks, ended with no turn after them (#721): the report says how they ended */
     settled?: readonly BackgroundTask[],
-    /** Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed. `compaction`: Centralu's own turn to compact it */
-    turn?: TurnStarter & { compaction?: true },
+    /**
+     * Whose the turn that ended was (#1377): the person's own turn is reported to nobody, and the report stays owed. `compaction`: Centralu's own turn
+     * to compact it. `since`: where it began in the conversation, as its end was seen (#1812), which names a pause's update (#1540)
+     */
+    turn?: EndedTurn,
   ): Promise<string | undefined> {
     const assistantId = this.host.children.awaitingReport.get(sessionId)
     if (!assistantId) return undefined
@@ -390,16 +396,16 @@ export class ChildReports {
     ending: NormalizedEvent,
     running: readonly BackgroundTask[],
     answer: string | undefined,
-    turn: (TurnStarter & { compaction?: true }) | undefined,
+    turn: EndedTurn | undefined,
     byUpdate: boolean,
   ): Promise<string | undefined> {
     const said = this.turnWords(sessionId, answer)
-    const later = { compaction: turn?.compaction === true, othersWrote: this.othersWroteInTurn(sessionId), personWrote: this.host.children.personWroteSinceMark(sessionId) }
+    const later = { compaction: turn?.compaction === true, othersWrote: this.othersWroteInTurn(sessionId), personWrote: personWroteSinceMark(this.host.store, sessionId) }
     const target = this.host.meta.get(sessionId)
     if (!said || !isPauseUpdate(later, said.preview) || !target || !this.host.meta.has(assistantId)) return undefined
-    if (byUpdate) this.host.children.toldStoppedByUpdate(sessionId)
+    if (byUpdate) this.host.children.pausesStoppedByUpdate.delete(sessionId)
     const { name, project } = this.reportedAs(target)
-    const work = { paused: running, stoppable: target.askedBy === assistantId, update: true as const }
+    const work = { paused: running, stoppable: target.askedBy === assistantId, update: turn?.since === undefined ? {} : { since: turn.since } }
     const part = byUpdate ? { ...turn, stoppedByUpdate: true as const } : turn
     return (await this.deliverReport(assistantId, sessionId, name, project, said.preview, ending, work, said.seq, part)) ? assistantId : undefined
   }
@@ -593,7 +599,7 @@ export class ChildReports {
             work.paused,
             work.stoppable ? this.agentCall(assistantId, { action: 'stop' }) : undefined,
             name,
-            work.update === true,
+            work.update !== undefined,
             // The model reads the tasks counted (#1186): the call that names each, where the caller may make it
             name === FOR_MODEL && work.stoppable ? this.agentCall(assistantId, { action: 'status' }) : undefined,
           )
@@ -665,8 +671,8 @@ export class ChildReports {
       ...(answered ? { answer: preview } : {}),
       ...(kind ? { error: kindWord(kind) } : {}),
       ...(holding ? { paused: work.paused.length } : {}),
-      // A new answer of a pause (#1540): the mailbox names it by the turn that ended
-      ...(holding && 'update' in work && work.update ? { update: true as const } : {}),
+      // A new answer of a pause (#1540), named by where the turn that ended began
+      ...(holding && 'update' in work && work.update?.since !== undefined ? { update: work.update.since } : {}),
       ...(part?.wrote || part?.added ? { personNote: true } : {}),
       then: holding || handedOn ? 'running' : 'review',
     })

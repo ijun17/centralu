@@ -21,6 +21,7 @@ import {
 import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
 import { buildMessageFrame, mailCalls, quoted, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
+import { updateInPlace, type TurnReport } from './turn-report.js'
 import type { MailReach } from './reach.js'
 import {
   ASKS_PER_HOUR,
@@ -96,24 +97,6 @@ export type TaskInput = { text: string; origin: DelegationOrigin | 'person' | 'm
 /** A session's turn, as `MailTurns.current` gives it (§8.2 step 6) */
 export type { TurnNow }
 
-export type TurnReport = {
-  outcome: 'finished' | 'failed' | 'stopped' | 'paused' | 'waiting'
-  body: string
-  answer?: string
-  error?: string
-  reason?: string
-  paused?: number
-  waitingOn?: number
-  personNote?: boolean
-  /** When the turn that ended began, for the tasks its report covers (§9.3): the turn has ended by the time the old path reports it */
-  startedAt?: number
-  /**
-   * A pause's update (#1540): a later turn of the paused work ended with a new answer while its own background work still runs. The number of
-   * that turn in the child's stored turns: the same turn's end told twice is one update. An update the owner has not read yet is written over
-   * with the newer one, and wakes nobody again; once read, the next one is a report of its own, which wakes
-   */
-  update?: number
-}
 export type ReportWritten = { message: MailRow; duplicate: boolean; first: boolean } | { settledAlready: true }
 
 /** `withheld`: a request to the Assistant whose words are shown only in the turn it starts (§7.6); the body is left out */
@@ -401,23 +384,11 @@ export class MessageService {
       if (row.settled !== null && task.kind === 'task') return { settledAlready: true }
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
-      const reports = this.records.reportsOn(taskId)
-      if (input.update !== undefined) {
-        const updates = reports.filter((r) => r.facts.update !== undefined)
-        const last = updates.at(-1)
-        // The same turn's end again (a replay after a restart): the update it made
-        if (last?.facts.update === input.update) return { message: last, duplicate: true, first: false }
-        // The pause's last update is not read yet (#1540): it holds the newer answer and task count now, and its owner is woken for it once
-        if (last && this.records.recipient(last.id, task.sender)?.readAt === null) {
-          const { answer: _answer, personNote: _note, ...kept } = last.facts
-          const facts: MailFacts = { ...kept, paused: input.paused ?? 0, update: input.update, ...(input.answer ? { answer: input.answer } : {}), ...(input.personNote ? { personNote: true } : {}) }
-          const rewritten = this.records.rewrite(last.id, input.body, facts) ?? last
-          this.changed(rewritten, [task.sender])
-          return { message: rewritten, duplicate: true, first: false }
-        }
-      }
-      // A pause's update carries a new answer (#1540): the first since its owner read the last wakes, as the first pause does
-      const first = !pause || input.update !== undefined || !reports.some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
+      const held = updateInPlace(this.records, taskId, task.sender, input)
+      if (held?.rewritten) this.changed(held.message, [task.sender])
+      if (held) return { message: held.message, duplicate: true, first: false }
+      // A pause's update carries a new answer (#1540): one that is a report of its own wakes, as the first pause does
+      const first = !pause || input.update !== undefined || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
       const startedAt = input.startedAt ?? this.opts.turn?.(row.recipient)?.startedAt
       const covers = pause || startedAt === undefined || task.kind !== 'task'
         ? []

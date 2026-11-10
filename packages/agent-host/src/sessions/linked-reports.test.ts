@@ -211,7 +211,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     turn('m1.w1')
     await flush()
     expect(delivered).toHaveLength(2)
-    expect(delivered[1]).toMatchObject({ preview: 'last words of m1.w1', work: { paused: [verify, build], stoppable: false, update: true } })
+    expect(delivered[1]).toMatchObject({ preview: 'last words of m1.w1', work: { paused: [verify, build], stoppable: false, update: {} } })
     expect(children.linkedReports.get('m1.w1')?.paused?.map((t) => t.id)).toEqual(['bg-verify', 'bg-build'])
     // A turn that says nothing there tells nothing
     said = () => ''
@@ -626,7 +626,7 @@ describe('a machine whose link drops or comes back', () => {
     turn('m10.w1')
     await flush()
     expect(delivered).toHaveLength(4)
-    expect(delivered[3]).toMatchObject({ assistantId: 'o2', sessionId: 'm10.w1', work: { paused: [build], update: true } })
+    expect(delivered[3]).toMatchObject({ assistantId: 'o2', sessionId: 'm10.w1', work: { paused: [build], update: {} } })
     expect(children.linkedReports.get('m10.w1')?.paused).toEqual([build])
   })
 

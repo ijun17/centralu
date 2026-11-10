@@ -16,6 +16,7 @@ import type { HostCards } from './host-cards.js'
 import { withHubMark } from './hub-preset.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import type { LinkedReports } from './linked-reports.js'
+import { keptOverUpdateStop } from './pause-update.js'
 import type { MailSessionsHost, MailSessionsView } from './mail-sessions.js'
 import type { MergeChecks } from './merge-checks.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -473,13 +474,16 @@ export class HostTenure {
     ]
     // No process outlives its host, so no card the previous host left standing is still asked (#428): every rest it wrote goes
     this.host.cardRests.restore(() => false)
-    this.host.children.restoreReports(this.host.meta, goingOn, lists !== null)
+    // A report paused over work an update's stop ended is kept as one whose turn goes on (#1912, `keptOverUpdateStop`)
+    const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
+    this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
+    for (const id of stopped) this.host.children.pausesStoppedByUpdate.add(id)
     /*
-     * A report kept over work an update's stop ended (#1912): the turn the update's note wakes the session for reports, saying so. A session the note
-     * does not wake (the stop listed nothing of it, or its conversation moved on) has no such turn coming: its caller is told now
+     * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its
+     * conversation moved on) has no such turn coming: its caller is told now
      */
     const woken = new Set(this.updateCuts.filter((c) => !c.turn).map((c) => c.sessionId))
-    const unwoken = [...this.host.children.pausesStoppedByUpdate].filter((id) => !woken.has(id))
+    const unwoken = [...stopped].filter((id) => !woken.has(id))
     if (unwoken.length) setTimeout(() => unwoken.forEach((id) => this.host.reports.reportStoppedByUpdate(id)), 0)
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands

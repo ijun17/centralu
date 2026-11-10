@@ -167,23 +167,45 @@ describe('a turn ends, the owner reads mail', () => {
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
   })
 
-  // #1540 review: an update with no stored answer was keyed by the clock, so the same turn's end told twice made two updates
-  it("a pause's update is named by the turn that ended: the same turn's end told again is no second update", async () => {
-    const { parent, child } = await parentAndChild()
-    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
-    await turnEnds(child, 'watcher started')
-    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-    await turnEnds(child, 'verdict: correct')
-    const updates = () => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
-    expect(updates()).toHaveLength(1)
-    m.service.read(addr(parent))
-    // The end of that turn told again, with no stored answer to name it by (a replay after a restart)
-    const paused = [{ id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }]
-    for (let i = 0; i < 2; i++) {
-      await reports().deliverReport(parent, child, 'child', 'p', 'verdict: correct', { type: 'turn_complete' }, { paused, stoppable: true, update: true })
-      await new Promise((r) => setTimeout(r, 5))
+  /*
+   * #1540 review: an update was keyed by the clock when no answer was stored, then by the turn the mail read as latest when the report was
+   * written, which is the next turn once that has begun; and a replayed older turn's end wrote its older words over a newer unread update
+   */
+  describe("a pause's update is named by where the turn that ended began", () => {
+    const dev = { id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }
+    const updates = (parent: string, child: string) => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
+    /** The end of a turn of the child's that began at `since`, told again (a replay after a restart) with `words` */
+    const toldAgain = (parent: string, child: string, since: number, words: string) =>
+      reports().deliverReport(parent, child, 'child', 'p', words, { type: 'turn_complete' }, { paused: [dev], stoppable: true, update: { since } })
+    async function pausedWithUpdate() {
+      const { parent, child } = await parentAndChild()
+      handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev] })
+      await turnEnds(child, 'watcher started')
+      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+      await turnEnds(child, 'verdict: correct')
+      expect(updates(parent, child)).toHaveLength(1)
+      return { parent, child, since: updates(parent, child)[0]!.facts.update! }
     }
-    expect(updates()).toHaveLength(1)
+
+    it("the same turn's end told again, once read, is no second update, though the child's next turn has begun", async () => {
+      const { parent, child, since } = await pausedWithUpdate()
+      m.service.read(addr(parent))
+      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+      await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
+      await toldAgain(parent, child, since, 'verdict: correct')
+      expect(updates(parent, child)).toHaveLength(1)
+    })
+
+    it("an older turn's end told again does not take the place of a newer update that is not read", async () => {
+      const { parent, child, since } = await pausedWithUpdate()
+      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
+      await turnEnds(child, 'verdict: correct, and the docs too')
+      expect(updates(parent, child)).toHaveLength(1)
+      const newer = updates(parent, child)[0]!.facts.update!
+      expect(newer).toBeGreaterThan(since)
+      await toldAgain(parent, child, since, 'verdict: correct')
+      expect(updates(parent, child)[0]?.facts).toMatchObject({ update: newer, answer: 'verdict: correct, and the docs too' })
+    })
   })
 
   it('the person writing into the turn is a fact of the report, never their words', async () => {
