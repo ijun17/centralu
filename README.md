@@ -105,5 +105,5 @@ If you're on Linux, `npm i -g centralu` gets you the AppImage — tell us how it
 ## Documentation
 
 [docs/product-spec.md](docs/product-spec.md) is the spec everything else answers to, and
-[docs/README.md](docs/README.md) maps the rest. Some of `docs/` is still in Korean —
+[AGENTS.md](AGENTS.md) maps the rest: which design document to read before changing what. Some of `docs/` is still in Korean —
 [#27](https://github.com/ijun17/centralu/issues/27) tracks the translation.

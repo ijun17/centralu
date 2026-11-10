@@ -336,7 +336,11 @@ missing, not repeated) and counted items in the store, so they never saw it. Dri
 end to end and back, then count what the DOM holds (`e2e/fixtures/conversation-copies.ts`).
 
 The desktop app is WKWebView. If a UI bug does not reproduce in Chromium, try
-`test.use({ browserName: 'webkit' })`.
+`test.use({ browserName: 'webkit' })`. Playwright's WebKit forces overlay scrollbars, so
+scrollbar bugs need the real app.
+
+**A test that waits on wall-clock time fails under load.** Wait for an event, or give generous
+bounds scaled by `SLOW` (the guard pass's `test-limits/scaled-by-slow` checks a test's own limits).
 
 **Where the keyboard goes is tested by typing the way a person does.** `locator.fill()` and
 `locator.press()` focus their target before they type, so a test written with them cannot see
@@ -495,6 +499,10 @@ or left. Raise a tier by hand when the paths understate the risk; never lower it
   `gh pr list --state open --json number,files --jq '.[] | select(any(.files[]; .path == "<path>")) | .number'`
   for each moved path. Keep it move-only, so whoever does have to rebase over it can redo the
   move instead of reading a diff.
+- When your session has the project board app's tools, they carry these rules as code: `open_pr`,
+  `comment`, `file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `queue_merge` (many pull
+  requests or a stack), `mark_ready` (without merge rights), `release`. Use them instead of `gh`
+  by hand; `help` says which for what.
 
 ## Running things safely
 
@@ -522,9 +530,29 @@ running, possibly the very session doing the work.
   Unlimited, each run takes every core, and timing-sensitive tests fail for load, not for bugs.
 - **Ask before anything that raises an OS permission prompt** (screen capture, camera,
   protected folders). A tool started under Centralu asks in Centralu's name.
+- **Do not run `tauri build` / `pnpm app` unless asked**: it rewrites the bundle a running app
+  may be using.
 
 ## What is expected of code
 
+- **One hazard is fixed once, at its owner.** Find the one place that owns the thing that went
+  wrong and fix it there; route the existing checks of the same thing through it, rather than
+  adding a guard beside each caller.
+- **One definition per concept.** A state, a count or a rule is computed in one place and reused.
+  If two places seem to need different definitions, stop and ask before writing a second one.
+- **Less code for the same behaviour.** No dead code, and no new code on a path that is slated for
+  removal. A file you grow past about 800 lines, or a function past about 80, is split in the same
+  change.
+- **Fix the root cause.** A stopgap is only for unblocking, and comes with an issue filed the same
+  day for the real fix.
+- **Review yourself with the reviewer's criteria first.** Read your diff against the
+  [self-check](#before-opening-a-pull-request) before you ask anyone else for a review.
+- **A claim says what it was checked against.** In a report, a pull request or a review, each
+  claim names what it was checked against and marks what was not checked. Relaying someone
+  else's report keeps its qualifiers.
+- **Raising a tool-definition budget is a decision, not headroom.** Every word of a tool
+  definition or server instructions rides in every request; a `*_BUDGET_CHARS` ceiling goes up
+  only with the reason in the pull request ([docs/tool-cost.md](docs/tool-cost.md)).
 - **Comments say why, not what.** Anything learned by measuring is kept together with
   the number that was measured.
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
@@ -549,7 +577,8 @@ means next to it.
 
 ### Documentation
 
-`docs/` is design documentation — [docs/README.md](docs/README.md) is the map.
+`docs/` is design documentation. [AGENTS.md](AGENTS.md) is the map: which document to read
+before changing what. [docs/README.md](docs/README.md) has the writing conventions and the records.
 
 - Change the design, fix the document **in the same PR as the code.** If the document
   and the code disagree, the document is the one that is wrong.
@@ -558,7 +587,7 @@ means next to it.
 - Where a design document conflicts with the spec (`docs/product-spec.md`) on a
   requirement, the spec wins. On how something is built, the design document wins.
 - **One glossary.** The project's vocabulary and how its concepts relate live in
-  [docs/domain-model.md](docs/domain-model.md) and its Korean mirror `docs/domain-model.ko.md`.
+  [docs/domain-model.md](docs/domain-model.md).
   Do not add a second one (a `CONTEXT.md`, a glossary file, a folder of decision records):
   tools that expect one should be pointed at this file in your own local configuration.
   Decisions go in the decision tables of the design documents, with their reasoning.
