@@ -11,7 +11,8 @@ import { systemTool } from '../os.js'
  * 0.3–0.7 s with up to 8 busy loops on 12 cores, and 8.7–12 s once every core was busy (measured 2026-11-10, Windows 11,
  * 20 reads each, p50–p99), past the 3 s an ordered stop waits (`STOP_LIST_MS`), which then fell back to `taskkill /T`.
  * One PowerShell kept for the host's life, asked over stdin, answered in 1–4 ms at every load measured (0 to 16 busy
- * loops), 2–4 ms where the one-off read took 9–12 s. It costs one resident process of about 80 MB (66 MB private).
+ * loops), 2–4 ms where the one-off read took 9–12 s. It costs one resident process of about 80 MB (65 MB private, which
+ * neither `-NoLogo`, a collection nor a trimmed working set lowers), so only the long-lived host keeps one (`warmProcessTable`).
  *
  * It reads with one `NtQuerySystemInformation(SystemProcessInformation)` call, which returns every process with its
  * parent and creation time and opens none of them (Toolhelp32 has no creation time, and skips what it cannot open); a

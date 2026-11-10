@@ -53,7 +53,7 @@ import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-crede
 import { realOs } from './os/real.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
-import { stopsSettled } from './os/kill-tree.js'
+import { stopsSettled, warmProcessTable } from './os/kill-tree.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
@@ -950,6 +950,9 @@ try {
 start.at('ready')
 // This line is parsed by the supervisor (the path through which port and token are handed off)
 console.log(JSON.stringify({ ready: true, port, token, db: dbPath }))
+// On Windows every stop reads the process table: its reader is started now, once the host is ready, and not at the first
+// stop, when a starved machine takes 2-3 s to start it (#2178). Only the long-lived host keeps one; a tool or a test reads once
+warmProcessTable()
 /*
  * That this host takes the keeper's stop lines on its stdin (#1895 step 3), so "Apply now" may stop it for an update through
  * the keeper. Said in the shape keepers of earlier builds read (`swap.stopsForUpdate`; this build's keeper takes any `swap`

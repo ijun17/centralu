@@ -486,23 +486,26 @@ export type LeftoverOs = {
 }
 
 /*
- * The process table, from the warm reader (`process-table.ts`, #2178): `tasklist` has neither the parent id nor the
- * creation time and `wmic` is gone from current Windows 11. Where the warm reader cannot answer (it would not start, or
- * ended partway), one read in a PowerShell of its own, which is slow to start on a busy machine. Asynchronous, so the
- * host keeps serving while it runs.
+ * The process table, from the warm reader (`process-table.ts`, #2178) once the host started it (`warmProcessTable`):
+ * `tasklist` has neither the parent id nor the creation time and `wmic` is gone from current Windows 11. Before that, in a
+ * process that is no long-lived host (a tool, a test), and where the warm reader cannot answer (it ended partway), one
+ * read in a PowerShell of its own, which is slow to start on a busy machine. Asynchronous, so the host keeps serving while it runs.
  *
  * Its bound is long: on a machine starved of CPU (a CI runner, a host busy with builds) a PowerShell took over 10 s to
  * start and answer, and the listing that was given up on left the leftovers running, with nothing to say so (#1773). The
  * bound is only reached by a hung PowerShell; a stop that waits for it waits for the one thing that finds what the child left.
  */
 const runFile = promisify(execFile)
-const REAL_TABLE = tableReader()
-/** `run` is `execFile` as a promise and `table` the warm reader, parameters so a test can answer in their place; without `table` every read is one of its own */
-export const leftoverOs = (run: typeof runFile, table?: TableReader): LeftoverOs => ({
+/**
+ * `run` is `execFile` as a promise and `table` gives the warm reader once there is one, parameters so a test can answer in
+ * their place; while it gives none every read is one of its own
+ */
+export const leftoverOs = (run: typeof runFile, table: () => TableReader | undefined = () => undefined): LeftoverOs => ({
   listProcesses: async (timeoutMs = 60_000) => {
-    if (table) {
+    const warm = table()
+    if (warm) {
       try {
-        return parseWinProcs(await table.read(timeoutMs))
+        return parseWinProcs(await warm.read(timeoutMs))
       } catch (e) {
         if (timedOut(e)) throw e // a second read would wait as long again
       }
@@ -515,11 +518,17 @@ export const leftoverOs = (run: typeof runFile, table?: TableReader): LeftoverOs
     await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
   },
 })
-const REAL_LEFTOVER_OS = leftoverOs(runFile, REAL_TABLE)
+let warmTable: TableReader | undefined
+const REAL_LEFTOVER_OS = leftoverOs(runFile, () => warmTable)
 
-/** Starts the warm process-table reader on Windows, ahead of the first stop that needs it (the layer's `start` calls it) */
+/**
+ * Starts the warm process-table reader on Windows, which every later read of this process goes through: the host's, once
+ * it is ready (main.ts). It costs a resident PowerShell (about 80 MB), which only the long-lived host pays
+ */
 export function warmProcessTable(platform: NodeJS.Platform = process.platform): void {
-  if (platform === 'win32') REAL_TABLE.warm()
+  if (platform !== 'win32') return
+  warmTable ??= tableReader()
+  warmTable.warm()
 }
 const REAL_OS: KillOs = { platform: process.platform, ...REAL_LEFTOVER_OS }
 

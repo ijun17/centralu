@@ -115,16 +115,22 @@ describe('leftoverOs reading the table', () => {
   it('reads from the warm reader, and starts no PowerShell of its own', async () => {
     const { run, counted } = readsOfItsOwn('')
     const { reader } = fake()
-    expect(await leftoverOs(run, reader).listProcesses(1000)).toEqual([{ pid: 200, ppid: 100, created: 1500 }])
+    expect(await leftoverOs(run, () => reader).listProcesses(1000)).toEqual([{ pid: 200, ppid: 100, created: 1500 }])
     expect(counted.n).toBe(0)
+  })
+
+  it('reads in a PowerShell of its own while no warm reader was started: a tool or a test keeps none', async () => {
+    const { run, counted } = readsOfItsOwn('400 1 1700\n')
+    expect(await leftoverOs(run).listProcesses(1000)).toEqual([{ pid: 400, ppid: 1, created: 1700 }])
+    expect(counted.n).toBe(1)
   })
 
   it('reads once in a PowerShell of its own when the warm reader cannot answer, and not when it timed out', async () => {
     const { run, counted } = readsOfItsOwn('400 1 1700\n')
     const ended = fake((n) => (n === 1 ? 'ERR access denied\nEND\n' : null))
-    expect(await leftoverOs(run, ended.reader).listProcesses(1000)).toEqual([{ pid: 400, ppid: 1, created: 1700 }])
+    expect(await leftoverOs(run, () => ended.reader).listProcesses(1000)).toEqual([{ pid: 400, ppid: 1, created: 1700 }])
     expect(counted.n).toBe(1)
-    await expect(leftoverOs(run, ended.reader).listProcesses(20)).rejects.toMatchObject({ killed: true })
+    await expect(leftoverOs(run, () => ended.reader).listProcesses(20)).rejects.toMatchObject({ killed: true })
     expect(counted.n).toBe(1)
   })
 })
@@ -133,8 +139,8 @@ describe.runIf(process.platform === 'win32')('the table on Windows', () => {
   it(
     'shows this process under its parent, created when it started, the same in the warm reader and in one read of its own',
     async () => {
-      const os = leftoverOs(promisify(execFile), tableReader())
-      const warm = (await os.listProcesses(30_000)).find((r) => r.pid === process.pid)
+      const reader = tableReader()
+      const warm = (await leftoverOs(promisify(execFile), () => reader).listProcesses(30_000)).find((r) => r.pid === process.pid)
       const once = (await leftoverOs(promisify(execFile)).listProcesses(30_000)).find((r) => r.pid === process.pid)
       expect(warm).toEqual(once)
       expect(warm?.ppid).toBe(process.ppid)

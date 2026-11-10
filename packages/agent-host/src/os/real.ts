@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { devNull, homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
-import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows, warmProcessTable } from './kill-tree.js'
+import { collectAllOrphansWindows, stopTree, stopTreeWindows, stopTreesWindows } from './kill-tree.js'
 import {
   killHandle,
   spawnGrouped,
@@ -340,9 +340,6 @@ const stdioFor = (stdio: readonly OsStdio[] | undefined): StdioOptions =>
 const shellFor = (env: Env): string => (HOST_FAMILY === 'windows' ? commandInterpreter(env) : '/bin/sh')
 
 function start(command: string, args: readonly string[], o: StartOptions = {}, shell = false): RealChild {
-  // Every child may need stopping, and on Windows a stop reads the process table: its reader is started now, while
-  // there is time, not at the stop (#2178)
-  warmProcessTable()
   const env = o.env ?? process.env
   const options: SpawnOptions = {
     cwd: o.cwd,
