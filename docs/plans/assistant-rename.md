@@ -142,7 +142,7 @@ floor out the same way). Then:
 
 | Value | Written | Read |
 |---|---|---|
-| `sessions.is_orchestrator` / `is_assistant` | both, equal | `is_assistant` (`SessionRecords`, `mailbox-adopt.ts`, `user-app-adoption.ts`) |
+| `sessions.is_orchestrator` / `is_assistant` | both, equal | `is_assistant` (`SessionRecords`, `user-app-adoption.ts`); the one-time move of old thread mail (`mailbox-adopt.ts`) keeps `is_orchestrator`, which it also meets on stores from before v68 and which every build that opens a v69 store writes equal |
 | the four renamed `app_settings` keys | both, equal; a delete removes both | the new key, else the old one (`SettingsRecords.appSetting`) |
 | mail rows' `via` | `'assistant'` (`ROLE_VIA`): the row stays on this machine and every build that opens the store reads both words | either |
 | the hub's sender `_hub-orchestrator` | unchanged: a linked machine records it and the hub reads it back, and the hub can be of another release | either |
