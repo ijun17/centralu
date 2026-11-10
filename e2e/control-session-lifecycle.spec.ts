@@ -716,10 +716,16 @@ test('Working sessions revive on their own after a disconnect and reconnect', as
 
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  // The host died: the process is gone and the connection drops
+  /*
+    The host died: the process is gone and the connection drops. The host that starts next finds the turn it lost and
+    lists the session at rest (host-tenure.ts); only a turn an update cut stays `working`, and that host continues it
+    itself, so the window does not wake that one (#1618, #2163)
+  */
   await page.evaluate((sid) => {
     const m = (window as any).__mock
-    m.sessions.get(sid).live = false
+    const s = m.sessions.get(sid)
+    s.live = false
+    s.state = 'idle'
     m.setConnectionState('disconnected')
   }, id)
   await expect

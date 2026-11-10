@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'vitest'
+import { EventCursor } from './event-cursor.js'
+
+describe('the event cursor both ends of a host connection keep (#82, #173, #2163)', () => {
+  it('a first contact starts at the host\'s number: its replay is old news, not new events', () => {
+    const c = new EventCursor()
+    expect(c.resumeFrom()).toBeNull()
+    expect(c.greet({ currentSeq: 10, streamEpoch: 'e1' })).toEqual({ firstContact: true, newLifetime: true, resync: true })
+    expect(c.take(10)).toBe(false)
+    expect(c.take(11)).toBe(true)
+    expect(c.take(11)).toBe(false)
+    expect(c.resumeFrom()).toEqual({ afterSeq: 11, streamEpoch: 'e1' })
+  })
+
+  it('a reconnect to the same lifetime replays the gap; another lifetime, a host behind the cursor or a refused replay resyncs', () => {
+    const c = new EventCursor()
+    c.greet({ currentSeq: 5, streamEpoch: 'e1' })
+    c.take(7)
+    expect(c.greet({ currentSeq: 9, streamEpoch: 'e1' })).toEqual({ firstContact: false, newLifetime: false, resync: false })
+    expect(c.take(8)).toBe(true)
+    expect(c.greet({ currentSeq: 3, streamEpoch: 'e2' })).toMatchObject({ newLifetime: true, resync: true })
+    expect(c.take(3)).toBe(false)
+    expect(c.take(4)).toBe(true)
+    expect(c.greet({ currentSeq: 2, streamEpoch: 'e2' })).toMatchObject({ newLifetime: true, resync: true })
+    expect(c.greet({ currentSeq: 9, streamEpoch: 'e2', resyncRequired: true })).toMatchObject({ newLifetime: false, resync: true })
+  })
+
+  it('forgetting it (a new endpoint) makes the next greeting a first contact', () => {
+    const c = new EventCursor()
+    c.greet({ currentSeq: 5 })
+    c.forget()
+    expect(c.resumeFrom()).toBeNull()
+    expect(c.greet({ currentSeq: 1 }).firstContact).toBe(true)
+  })
+})

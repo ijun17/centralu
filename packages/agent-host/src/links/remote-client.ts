@@ -4,7 +4,7 @@ import { proofNonce, provesCredential, provesToken } from '../transport/host-pro
 import { verifierOf } from '../lifecycle/serve-credentials.js'
 import { rpcError } from '../rpc-error.js'
 import { asObj, str, tryParseJson } from '../json-value.js'
-import { PendingRequests } from '@cc/common'
+import { EventCursor, PendingRequests } from '@cc/common'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
@@ -127,9 +127,8 @@ export class RemoteClient {
   private ws: WebSocket | null = null
   private readonly pending = new PendingRequests()
   private nextId = 1
-  private lastSeq = 0
-  private epoch: string | undefined
-  private cursorValid = false
+  /** The cursor into the machine's events, as the window keeps its own (`EventCursor`, #2163) */
+  private readonly cursor = new EventCursor()
   private ready = false
   private closed = false
   private attempt = 0
@@ -230,7 +229,7 @@ export class RemoteClient {
         kind: 'hello',
         token: this.opts.token,
         protocolVersion: this.opts.protocolVersion ?? PROTOCOL_VERSION,
-        ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.epoch ? { streamEpoch: this.epoch } : {}) } : {}),
+        ...this.cursor.resumeFrom(),
       }),
     )
   }
@@ -262,9 +261,7 @@ export class RemoteClient {
     this.opts = { ...this.opts, url, token, credential }
     if (!sameHost) {
       // Another address may be another host: its numbers mean nothing to our cursor
-      this.cursorValid = false
-      this.epoch = undefined
-      this.lastSeq = 0
+      this.cursor.forget()
     }
     this.attempt = 0
     this.shortLived = 0
@@ -333,15 +330,7 @@ export class RemoteClient {
       if (this.ready) return
       clearTimeout(this.handshakeTimer)
       this.handshakeTimer = undefined
-      const hadCursor = this.cursorValid
-      const sameLifetime =
-        hadCursor &&
-        (frame.streamEpoch === undefined || this.epoch === undefined || frame.streamEpoch === this.epoch) &&
-        frame.currentSeq >= this.lastSeq
-      const resync = !hadCursor || frame.resyncRequired || !sameLifetime
-      if (resync) this.lastSeq = frame.currentSeq
-      this.epoch = frame.streamEpoch
-      this.cursorValid = true
+      const { resync, newLifetime } = this.cursor.greet(frame)
       this.ready = true
       this.attempt = 0
       if (this.opts.stableMs !== undefined) {
@@ -352,7 +341,7 @@ export class RemoteClient {
         }, this.opts.stableMs)
         this.stableTimer.unref?.()
       }
-      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}), ...(frame.updateContinued ? { updateContinued: frame.updateContinued } : {}) })
+      this.on.hello?.({ resync, newLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}), ...(frame.logon ? { logon: frame.logon } : {}), ...(frame.handover ? { handover: frame.handover } : {}), ...(frame.updateContinued ? { updateContinued: frame.updateContinued } : {}) })
       return
     }
     if (frame.kind === 'res') {
@@ -367,8 +356,7 @@ export class RemoteClient {
     }
     if (!this.ready) return
     if (frame.kind === 'event') {
-      if (frame.seq <= this.lastSeq) return
-      this.lastSeq = frame.seq
+      if (!this.cursor.take(frame.seq)) return
       this.on.event?.(frame.event)
       return
     }

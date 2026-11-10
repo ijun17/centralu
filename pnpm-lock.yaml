@@ -213,6 +213,9 @@ importers:
 
   packages/platform:
     dependencies:
+      '@cc/common':
+        specifier: workspace:*
+        version: link:../common
       '@cc/protocol':
         specifier: workspace:*
         version: link:../protocol

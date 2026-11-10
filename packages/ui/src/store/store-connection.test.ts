@@ -704,6 +704,34 @@ describe('linked machines (#82)', () => {
     expect(useStore.getState().toast).toMatch(/resuming 1 session$/)
   })
 
+  it('a reconnect leaves a session in a turn with no process to the host that continues it, as a resync does (#2163)', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('rc-rest', sessionInfo('rc-rest'))
+    mock.sessions.set('rc-cut', sessionInfo('rc-cut', { state: 'working' }))
+    await useStore.getState().attach(mock)
+    const resume = vi.spyOn(mock.agents, 'resumeSession')
+
+    mock.setConnectionState('disconnected')
+    mock.sessions.get('rc-rest')!.live = false
+    mock.sessions.get('rc-cut')!.live = false
+    mock.setConnectionState('connected')
+
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('rc-rest'))
+    await settle()
+    expect(resume.mock.calls.map(([id]) => id)).toEqual(['rc-rest'])
+    expect(useStore.getState().toast).toMatch(/resuming 1 session$/)
+  })
+
+  it('a reconnect reads again every list a broadcast keeps, the themes too: one missed in the gap never comes again (#2163)', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const reads = (['refreshThemes', 'refreshPrefs', 'refreshExternalApps', 'refreshAppQuestions', 'refreshMcpProposals', 'refreshSkillProposals'] as const).map((k) => vi.spyOn(useStore.getState(), k))
+    mock.setConnectionState('disconnected')
+    mock.setConnectionState('connected')
+    await settle()
+    for (const read of reads) expect(read).toHaveBeenCalledTimes(1)
+  })
+
   it('a resync re-reads the open conversations of that machine only', async () => {
     const mock = new MockPlatform()
     mock.machinesList = [box()]

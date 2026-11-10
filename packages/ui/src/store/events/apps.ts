@@ -8,7 +8,7 @@ import { applyAppView, capInlineViews, codeStampOf, patchInlineView } from '../a
  * session guard), and an in-conversation view's `app_view` (a session's). True when the event was
  * one of these.
  */
-export function appEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boolean {
+export function appEvent(e: NormalizedEvent, set: StoreSet): boolean {
   /*
    * An external app's tool call finished (M4 A-4 → B-5). Not re-read here. An external app's state
    * lives in the app process, and re-reading it is the open view's own job, through its state tool.
@@ -29,18 +29,6 @@ export function appEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): bool
   if (e.type === 'external_app_runs_changed') {
     const key = appKeyOf(e.projectId, e.appId)
     set((s) => ({ externalAppRunChanges: { ...s.externalAppRunChanges, [key]: (s.externalAppRunChanges[key] ?? 0) + 1 } }))
-    return true
-  }
-
-  // An external app's slot or state changed (M4 A-8) — since what changed is not carried, the whole list is re-read
-  if (e.type === 'external_apps_changed') {
-    void get().refreshExternalApps()
-    return true
-  }
-
-  // A capability question was created or closed (M4 D-4) — same coarseness, the whole list is re-read
-  if (e.type === 'external_app_questions_changed') {
-    void get().refreshAppQuestions()
     return true
   }
   return false

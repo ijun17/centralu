@@ -1,5 +1,6 @@
 import type { NormalizedEvent } from '@cc/protocol/client'
 import type { StoreGet, StoreSet } from '../state.js'
+import { rereadFor } from './rereads.js'
 
 /**
  * App-wide lists the host changed (themes, projects, cross-project consents, the Assistant's
@@ -7,16 +8,8 @@ import type { StoreGet, StoreSet } from '../state.js'
  * the session guard (`dispatchEvent`). True when the event was one of these.
  */
 export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boolean {
-  if (e.type === 'themes_changed') {
-    void get().refreshThemes()
-    return true
-  }
-
-  // A setting changed (#1306): another window saved one, or the Assistant did
-  if (e.type === 'prefs_changed') {
-    void get().refreshPrefs()
-    return true
-  }
+  // A list the broadcast says changed is read again (`rereads.ts`): themes, settings, external apps and their questions, proposals
+  if (rereadFor(e, get)) return true
 
   // The host made a project (#515): the Assistant's, once approved, or another window's
   if (e.type === 'projects_changed') {
@@ -35,14 +28,6 @@ export function listEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
   // A cross-project consent was remembered or revoked (#371) — Settings' list re-reads on the version
   if (e.type === 'project_consents_changed') {
     set((s) => ({ projectConsentsVersion: s.projectConsentsVersion + 1 }))
-    return true
-  }
-
-  // The host saved a change to a proposal list (#703): both lists are read after the write, whichever tool made it. A host of a
-  // later release names the event after the role's new name (#2133)
-  if (e.type === 'orchestrator_proposals_changed' || e.type === 'assistant_proposals_changed') {
-    void get().refreshMcpProposals()
-    void get().refreshSkillProposals()
     return true
   }
   return false

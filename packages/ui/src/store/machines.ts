@@ -1,5 +1,5 @@
-import { errorMessage, isInTurn, type MachineInfo } from '@cc/protocol/client'
-import { isAway } from '@cc/core'
+import { errorMessage, type MachineInfo } from '@cc/protocol/client'
+import { wakeable } from '@cc/core'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { omitKey } from './patch.js'
 import { forgetSessions, mergeListedSince, replayPendingEvents, trackWorkingSince, watchLiveEvents } from './sessionList.js'
@@ -331,12 +331,8 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       if (cur && ofMachine(cur)) void get().loadHistory(id)
     }
 
-    const toWake = wasLive.filter((x) => {
-      const now = get().sessions[x.id]
-      // Not a row the hub still lists from its mirror: its `live` is last heard, not a fact (#1611). Nor one in a turn with no process:
-      // an update there cut it, and the machine continues it itself (#1618); the toast counts only what this window wakes
-      return now && !now.live && !now.unreachable && !isAway(now, get().machines) && !isInTurn(now.state)
-    })
+    // The toast counts only what this window wakes (`wakeable`)
+    const toWake = wasLive.filter((x) => wakeable(get().sessions[x.id], get().machines))
     if (toWake.length === 0) return
     const name = get().machines[machineId]?.name ?? machineId
     set({ toast: `${name} is back — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
