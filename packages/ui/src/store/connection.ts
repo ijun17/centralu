@@ -696,11 +696,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // Resolves whether a message being sent at the moment of disconnect reached the host (#173)
     void settleUnsureSends(get, set)
     // Broadcasts from the gap while disconnected never come again: every list one keeps is read again (`rereads.ts`, #2163)
-    rereadAll(get)
-    // And the requests waiting for the person (#1405): a missed host_request would leave a program waiting unseen
-    void get().refreshHostRequests()
-    // So are the links' states (#82): a machine that went away or came back during the gap
-    const machinesRead = get().refreshMachines()
+    const machinesRead = rereadAll(get, set)
     // The pinned views this window shows are leased to its connection, which just ended (#392)
     void holdPinnedViews(get, set)
 

@@ -225,6 +225,20 @@ describe('new projects', () => {
     for (const id of Object.keys(before)) expect(useStore.getState().projects[id]).toBe(before[id])
   })
 
+  it('a project the host made while the window was away joins the list on the reconnect: its projects_changed never comes again (#2163)', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.setConnectionState('disconnected')
+    // Made in the gap: its broadcast reaches no window
+    const unheard = vi.spyOn(mock, 'emit').mockImplementation(() => {})
+    const made = await mock.projects.create('shop')
+    unheard.mockRestore()
+
+    mock.setConnectionState('connected')
+
+    await vi.waitFor(() => expect(useStore.getState().projects[made.id]).toBeDefined())
+  })
+
   it('a setting another client wrote (trust, commands) replaces the listed value on projects_changed, and git stays as the window has it (#719)', async () => {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/old')

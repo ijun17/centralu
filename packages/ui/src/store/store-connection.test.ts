@@ -725,7 +725,7 @@ describe('linked machines (#82)', () => {
   it('a reconnect reads again every list a broadcast keeps, the themes too: one missed in the gap never comes again (#2163)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
-    const reads = (['refreshThemes', 'refreshPrefs', 'refreshExternalApps', 'refreshAppQuestions', 'refreshMcpProposals', 'refreshSkillProposals'] as const).map((k) => vi.spyOn(useStore.getState(), k))
+    const reads = (['refreshThemes', 'refreshPrefs', 'refreshExternalApps', 'refreshAppQuestions', 'refreshMcpProposals', 'refreshSkillProposals', 'refreshProjects', 'refreshHostRequests', 'refreshMachines'] as const).map((k) => vi.spyOn(useStore.getState(), k))
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
     await settle()

@@ -164,7 +164,9 @@ by its `machine_status`.
   (`recoverAfterReconnect`) and a machine's resync wake by one rule (`wakeable` in `@cc/core`, #2163): not an away
   row, not one the hub lists from its mirror, and not one in a turn with no process, which the host continues itself
   (#1618). A broadcast missed in the gap never comes again, so the reconnect reads again every list one keeps
-  (`store/events/rereads.ts`), the same table the broadcasts' handler reads. Both ends of a host connection (this
+  (`store/events/rereads.ts`: themes, settings, projects, consents, external apps, proposals), the same table the
+  broadcasts' handler reads, and with it the two whose broadcasts carry the change itself (host requests, machines;
+  the wake waits for the machines). Both ends of a host connection (this
   window's and a hub's link to a machine) number events with one cursor (`EventCursor` in `@cc/common`).
 - **An away session is not working** (#1822, `unheard` in `@cc/protocol`): nothing says its turn still runs. The hub
   lists a mirrored `working` row as `idle`, and a `machine_status` that finds the machine away sets its rows the same
