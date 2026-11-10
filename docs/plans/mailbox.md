@@ -774,7 +774,7 @@ task is never reminded: its report settles it.
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
-`MailFacts` in `mailbox.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key
+`MailFacts` in `store/mail-facts.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key
 survives a read. `docs/stored-shapes.md` gets the row for `mail.facts` in M1.
 
 ### 5.5 What a party may read
