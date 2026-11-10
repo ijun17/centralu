@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
+import { MailChoices } from '@cc/protocol'
 import { isObj } from '../../json-value.js'
 import { parseAddress } from '../../mail/address.js'
 import { parseJson } from './json.js'
@@ -71,6 +72,8 @@ export const MailFacts = z.looseObject({
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
   /** On the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection (`scriptLabel`), so no reader takes it for the person's words */
   fromScript: z.object({ credential: z.string() }).optional(),
+  /** On a session's question to the person (#1630): the answers it offers to pick from, checked for shape at send; a shape this build cannot read is none */
+  choices: MailChoices.optional().catch(undefined),
 })
 export type MailFacts = z.infer<typeof MailFacts>
 
