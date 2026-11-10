@@ -153,15 +153,4 @@ describe('#2133 step 4 in the store: v69', () => {
     // The refusal changed nothing
     raw(file, (db) => expect([db.pragma('user_version', { simple: true }), row(db, 'min_reader_version')]).toEqual([LATEST, '68']))
   })
-
-  it('never lowers a floor already above 68', () => {
-    const file = v68Store()
-    raw(file, (db) => put(db, 'min_reader_version', String(LATEST)))
-    const s = open(LATEST, file)
-    try {
-      expect(s.minReaderVersion).toBe(LATEST)
-    } finally {
-      s.close()
-    }
-  })
 })

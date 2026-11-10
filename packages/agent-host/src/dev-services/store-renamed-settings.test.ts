@@ -30,17 +30,12 @@ describe('the Assistant’s settings under both keys (#2133)', () => {
     s.close()
   })
 
-  it('reads the new key first: the build of v68, gone back to, changes both keys', () => {
+  it('reads the new key first, and the old key only when the new one is missing', () => {
     const s = new RawStore()
     s.settings.setAppSetting('orchestrator_tool', 'codex')
     put(s, 'orchestrator_tool', 'claude')
     put(s, 'assistant_tool', 'opencode')
     expect(s.settings.appSetting('orchestrator_tool')).toBe('opencode')
-    s.close()
-  })
-
-  it('reads the old key only when the new one is missing', () => {
-    const s = new RawStore()
     put(s, 'orchestrator_skills', '[]')
     expect(s.settings.appSetting('orchestrator_skills')).toBe('[]')
     s.close()
