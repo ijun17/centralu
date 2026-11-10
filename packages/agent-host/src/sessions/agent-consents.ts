@@ -49,7 +49,7 @@ export class AgentConsents {
   private trustIsAgentConsent(callerId: string, projectId: string): boolean {
     const preset = this.host.meta.get(callerId)?.permissionPreset
     if (preset !== 'normal' && preset !== 'edits') return false
-    return this.host.store.projects.listProjects().find((p) => p.id === projectId)?.trusted === true
+    return this.host.projectTrusted(projectId)
   }
 
   /** The person's answer on a start_agent card, as consent (remembered where they chose "always") or a refusal */

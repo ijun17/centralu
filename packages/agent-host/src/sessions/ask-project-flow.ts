@@ -60,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -345,7 +345,7 @@ export class AskProjectFlow {
        * An untrusted project's `auto` boundary was logged by the read after the card, with no wait since; one that lost
        * its trust during the wake is logged then
        */
-      const logged = this.host.store.projects.listProjects().find((p) => p.id === callerProjectId)?.trusted !== true
+      const logged = !this.host.projectTrusted(callerProjectId)
       const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
       if (midTurn) {
         const releaseHold = d.wait.holdInput()

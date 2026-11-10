@@ -38,6 +38,8 @@ export type HostMailSessions = {
   /** §9.5: the old report paths still owe the owner a report of the child */
   oldOwes(ownerId: string, childId: string): boolean
   mailSessions(): MailSessions
+  /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`, #2159): what the reach's hold reads */
+  projectTrusted(projectId: string): boolean
   /** The sessions whose running work `id` waits on (`SessionProcesses.waitsOn`): a stop notice wakes a sender that waits on the stopped session (docs/plans/turn-owned-by-no-one.md Q1) */
   waitsOn?(id: string): string[]
   /** The sessions the older report path told of the quit that cut `id`'s turn, which the start found, and those it may still tell (`HostTenure.quitTold`) */
@@ -54,7 +56,7 @@ export type HostMailSessions = {
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
 export function mailSessionsOf(
-  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes'>,
+  mgr: Pick<SessionManager, 'sessionInfo' | 'listSessions' | 'assistantId' | 'tenure' | 'mail' | 'processes' | 'projectRegistry'>,
   assistantHasMailCommand: () => boolean,
 ): HostMailSessions {
   const seats = mgr.mail.mailSeats(assistantHasMailCommand)
@@ -68,6 +70,7 @@ export function mailSessionsOf(
     keptInTurn: (id) => mgr.tenure.keptInTurn(id),
     oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
+    projectTrusted: (projectId) => mgr.projectRegistry.projectTrusted(projectId),
     waitsOn: (id) => mgr.processes.waitsOn(id),
     quitTold: (id) => mgr.tenure.quitTold(id),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
@@ -135,7 +138,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     appCalledBy: (app, sessionId) => store.mailbox.movedTo(app, addressOf(sessionId)),
     project: (projectId) => {
       const p = projects().find((x) => x.id === projectId)
-      return p && { trusted: p.trusted === true, name: p.name }
+      return p && { trusted: sessions.projectTrusted(projectId), name: p.name }
     },
     askGroupMembers: (address) => askGroupMembers(sessions, hostId, address),
   })

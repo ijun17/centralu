@@ -459,7 +459,9 @@ an adapter does not require changing this schema.
 Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent,
 project trust and same-project ownership gates, with allowances logged; a session still starting counts by the preset
 it was created with (#2159). Project trust is one gate, `ProjectRegistry.trustGate`: one refusal (`Project "<name>" is
-not trusted, so <what> is refused`) and a log line at each crossing. It does not open the agent depth (#867):
+not trusted, so <what> is refused`) and a log line at each crossing. What only reads trust (whether a card is needed,
+how far a seat reads, the preset a created session gets, the mail hold, which stays held under `auto`) reads
+`ProjectRegistry.projectTrusted`, through the module's host. It does not open the agent depth (#867):
 `auto` children each starting their own once ran twelve sessions at once (#862). Worktree cleanup keeps local work
 in the session archive under every preset (#608).
 `agent_session` can status, wait, send or stop any session in the same project, and delete

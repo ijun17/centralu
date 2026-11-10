@@ -410,6 +410,7 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
       keptInTurn: () => false,
       oldOwes: () => true,
       mailSessions: () => ({ receiver: () => ({ atRest: false }), deliver: async () => {}, note: () => {} }) as unknown as MailSessions,
+      projectTrusted: () => false,
     }
     /**
      * The caller gave 'kept-idle' a task; in the turn of that task, 'kept-idle' handed a part on to `helper` (a task whose cause is the caller's
