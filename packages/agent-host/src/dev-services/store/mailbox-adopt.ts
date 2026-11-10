@@ -71,8 +71,12 @@ export function movePendingThreadMail(db: Database.Database, now: number, projec
         `INSERT OR IGNORE INTO mail_recipients (message_id, recipient, via, due_at, attempt_at, delivered_at, read_at, held, attempts, last_error, settled, settled_at)
          VALUES (@messageId, @recipient, @via, @dueAt, @attemptAt, @deliveredAt, @readAt, @held, @attempts, @lastError, @settled, @now)`,
       )
+      /*
+       * `is_orchestrator`, not `is_assistant` (#2133): every build that can open a store of v69 writes both equal, and
+       * this move also runs on a store from before v68, which has only the old column
+       */
       const sessionRow = db.prepare<[string], { assistant: number; trashed: number }>(
-        `SELECT is_assistant = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS assistant, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
+        `SELECT is_orchestrator = 1 AND (project_id IS NULL OR deleted_at IS NOT NULL) AS assistant, deleted_at IS NOT NULL AS trashed FROM sessions WHERE id = ?`,
       )
       const sessionOf = (address: string) => {
         const party = parseAddress(address)
