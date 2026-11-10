@@ -30,8 +30,8 @@ export function alertPerson(notice: NotifyRequest, set: StoreSet, get: StoreGet)
   // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
   // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
   void st.platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
-  // The path that actually reaches the person. Goes through neither permissions nor signing. Mail calls back once, a question as an approval does
-  const kind = notice.kind === 'mail' ? (notice.waits ? 'approval' : 'done') : notice.kind
+  // The path that actually reaches the person. Goes through neither permissions nor signing. Mail, a question too, calls back once, never as an approval
+  const kind = notice.kind === 'mail' ? 'done' : notice.kind
   void st.platform.system.alert(kind, st.notifyPolicy.sound).catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
 }
 

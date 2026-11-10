@@ -1880,8 +1880,8 @@ Entities, in `entities/mail.ts`:
 `mail_changed` gains optional `messageId` and `rootId`; `threadId` carries the root id. It gains optional `arrived` too (#1630): a new
 message the person can read, from anyone but the person (`MailPerson.arrival`: a row to them that is not held or withdrawn), with its
 sender as a `MailParty`, its window kind and a preview. The window raises one OS notification for it, through the same system port
-and alert as an approval (`alertPerson`, `mailNotification` in core); a question calls the person back as an approval does, any
-other kind once. A change to a message already stored (a read, a settle, a close) carries no `arrived`, so it notifies nothing.
+as an approval (`alertPerson`, `mailNotification` in core), under the switches every notification follows (the focus one, the sound)
+and not the approval one; any kind, a question included, sounds once as a finished turn does, never as an approval: it holds no tool call. A change to a message already stored (a read, a settle, a close) carries no `arrived`, so it notifies nothing.
 
 **Older windows** (a window from before M3a against this host) get non-breaking answers only:
 
