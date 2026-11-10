@@ -243,8 +243,7 @@ export class MailDelivery {
     }
     this.lastSweepAt = now
     this.moveOnWorkOfGoneSessions()
-    const across = this.across
-    const recipients = across ? this.records.dueRecipients().filter((r) => !across(r)) : this.records.dueRecipients()
+    const recipients = this.records.dueRecipients().filter(this.here)
     if (this.catchUpPending) {
       this.catchUpPending = false
       await this.catchUp(recipients)
@@ -319,6 +318,12 @@ export class MailDelivery {
     await this.wakeInOrder(crowd)
   }
 
+  /**
+   * Whether an address is this host's to deliver to and to settle: not a session on another host (`across`), a linked machine's
+   * child included, which its own host serves. This host's list does not have it, which is not its being gone (#2164)
+   */
+  private readonly here = (address: string): boolean => !this.across?.(address)
+
   /** For a session in the crowd or left for its next turn: everything but the person's words written since the host came back */
   private readonly skipUnlessPersonSince = (message: MailRow, row: RecipientRow): boolean =>
     message.sender !== PERSON || (this.cutoff !== null && row.dueAt <= this.cutoff)
@@ -338,7 +343,7 @@ export class MailDelivery {
    * failed) still holds watched mail: it is settled now (§7.7). Cheap: only the parties of watched rows not settled
    */
   private moveOnWorkOfGoneSessions(): void {
-    for (const address of this.records.openParties()) {
+    for (const address of this.records.openParties().filter(this.here)) {
       const party = parseAddress(address)
       if (party?.kind !== 'session' || this.sessions.receiver(party.sessionId).kind !== 'gone') continue
       try {
