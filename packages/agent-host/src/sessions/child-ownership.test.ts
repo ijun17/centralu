@@ -457,7 +457,7 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
       expect(owed()).toBe(false)
       const other = handedOn()
       expect(owed()).toBe(true)
-      other.m.service.partyGone(other.addr('helper'))
+      other.m.service.stops.partyGone(other.addr('helper'))
       expect(owed()).toBe(false)
       handedOn('helper3')
       expect(owed()).toBe(true)

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
-import { OLD_PATH_WAIT_MS } from '../mail/messages.js'
+import { OLD_PATH_WAIT_MS } from '../mail/stop-notices.js'
 import { wakesMessage } from '../mail/rules.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
@@ -61,7 +61,7 @@ async function asked(gaveTask = false): Promise<{ asker: string; child: string; 
 const rowsOf = (child: string, why: string, ...messages: (MailRow | null)[]) => messages.flatMap((x) => (x ? [{ id: x.id, recipient: addr(child), why }] : []))
 /**
  * `asker` asks `child` a question that starts the child's turn, with nothing else given into it: a turn a stop notice may quote
- * (`MessageService.quotes`). `child` defaults to a new session of the asker's project
+ * (`StopNotices.quotes`). `child` defaults to a new session of the asker's project
  */
 async function askedOwnTurn(child?: string): Promise<{ asker: string; child: string; question: MailRow }> {
   const asker = await w.callerSession()
@@ -488,7 +488,7 @@ describe('who is not told, or told another way', () => {
     const { asker, child, question, task } = await asked(true)
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     try {
-      m.service.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
+      m.service.stops.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
       w.mgr.mail.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
       await vi.advanceTimersByTimeAsync(OLD_PATH_WAIT_MS - 1_000)
       expect(stopNotices(asker)).toEqual([])

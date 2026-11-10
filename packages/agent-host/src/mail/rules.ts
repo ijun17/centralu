@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { oneLineText } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
@@ -279,4 +280,9 @@ export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind
   if (f.fromPerson) return true
   if (!f.fromSession || f.toAssistant) return false
   return f.kind === 'task' || (f.kind === 'message' && f.fromParent)
+}
+
+/** The first 16 hex digits of the sha256 of the parts: the stable part of a Centralu dedupe key (§6.5) */
+export function hash16(parts: readonly string[]): string {
+  return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 16)
 }

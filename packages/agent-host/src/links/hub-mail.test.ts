@@ -46,7 +46,7 @@ describe('the hub takes mail from a session it started on a linked machine (#206
     // A reply and the "no longer watched" notice reach the child on its machine (#2067 item 2): the question stays one
     const r = (await call({ sessionId: 'c1', text: 'which branch?', needsReply: true })) as { ok: true; messageId: string }
     expect(hub.store.mailbox.message(r.messageId)).toMatchObject({ needsReply: true })
-    hub.mail!.service.partyGone(addressOf('h1'))
+    hub.mail!.service.stops.partyGone(addressOf('h1'))
     // The notice to the child is passed on (this machine takes no mail, so it is dropped and said in the log), never delivered here
     await eventually(() => hub.store.mailbox.feedOf(addressOf('m1.c1'), { limit: 10 }).some((m) => m.sender === 'centralu'))
     await eventually(() => !hub.store.mailbox.dueRecipients().includes(addressOf('m1.c1')))

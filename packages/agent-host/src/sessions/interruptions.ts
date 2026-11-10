@@ -1,6 +1,6 @@
 import { SHUTDOWN_WORDS, type Interruption, type NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
-import type { StopWhy } from '../mail/messages.js'
+import type { StopWhy } from '../mail/stop-notices.js'
 
 /**
  * Why a turn did not run to its end (#698), read from the event that ended it. Tool-neutral: both adapters hand the

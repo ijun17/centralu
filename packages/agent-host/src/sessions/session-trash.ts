@@ -57,7 +57,7 @@ export type SessionTrashHost = {
   readonly cardRests: Pick<CardRests, 'forget'>
   /** Notices kept for it because it could not be woken (#1186) */
   forgetHeldNotices: (sessionId: string) => void
-  /** The mail it held: its watched rows are settled and their senders told (#1347, `MessageService.partyGone`). Never throws */
+  /** The mail it held: its watched rows are settled and their senders told (#1347, `StopNotices.partyGone`). Never throws */
   mailGone: (sessionId: string) => void
   /** The first lines of the messages that wait for its answer and of the tasks it owes a report of (what `mailGone` settles); null when the mailbox could not be read */
   mailWork: (sessionId: string) => { unanswered: string[]; owed: string[] } | null

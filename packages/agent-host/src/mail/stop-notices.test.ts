@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { MessageService, type SessionStop, type StopWhy } from './messages.js'
+import { MessageService } from './messages.js'
+import type { SessionStop, StopWhy } from './stop-notices.js'
 import { A, B, C, HOST, ORC, world } from './messages.test-helpers.js'
 import { wakesMessage } from './rules.js'
 
@@ -18,9 +19,9 @@ function stopWorld() {
   const cut = new Set<string>()
   const service = new MessageService(w.store.mailbox, w.reach, { hostId: HOST, now: () => w.clock.t, turn: (a) => w.turns.get(a) ?? null, standing: (a) => (cut.has(a) ? 'cut' : busy.has(a) ? 'turn' : 'rest') })
   const stops = {
-    sessionStopped: (who: string, why: StopWhy, o: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}) => service.sessionStopped(who, why, { turnSeq: 1, ...o }),
-    sessionsStopped: service.sessionsStopped.bind(service),
-    oldPathEnded: service.oldPathEnded.bind(service),
+    sessionStopped: (who: string, why: StopWhy, o: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}) => service.stops.sessionStopped(who, why, { turnSeq: 1, ...o }),
+    sessionsStopped: service.stops.sessionsStopped.bind(service.stops),
+    oldPathEnded: service.stops.oldPathEnded.bind(service.stops),
   }
   /** A question from `from` to `to`, delivered to it in its turn `turn` and not answered */
   const ask = (from: string, to: string, text = 'what does the build need?', over: { needsReply?: boolean; turn?: number | null } = {}) => {
@@ -216,7 +217,7 @@ describe('a session stops without answering a question', () => {
     const stopped = w.ask(PERSON, B, 'are you done?')
     w.stops.sessionStopped(B, 'stopped')
     const gone = w.ask(PERSON, C, 'and you?')
-    w.mail.partyGone(C)
+    w.mail.stops.partyGone(C)
     expect(w.rowOf(stopped.id, B)).toMatchObject({ releasedWhy: 'stopped' })
     expect(w.rowOf(gone.id, C)).toMatchObject({ releasedWhy: 'gone' })
     expect(w.noticesTo(PERSON)).toEqual([])
@@ -241,7 +242,7 @@ describe('a session stops without answering a question', () => {
 
     // A line of the older causes is worded for the person too: nothing about needsReply or asking the person, and no id or address
     const lost = w.ask(PERSON, C, 'another')
-    w.mail.turnsLost(() => [{ address: C, turnSeq: 1 }])
+    w.mail.stops.turnsLost(() => [{ address: C, turnSeq: 1 }])
     const body = w.noticesTo(PERSON).map((n) => n.message.body).find((x) => x.startsWith('1 of your messages went unanswered:'))
     expect(body).toContain('- gamma: ')
     for (const hidden of [lost.id, C, 'needsReply', 'ask the person']) expect(body).not.toContain(hidden)

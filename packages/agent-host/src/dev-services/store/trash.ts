@@ -209,7 +209,7 @@ export class TrashRecords {
       /*
        * The mail it was a party to (#1347): its receipts and rows, its place in old threads and its turns go with the
        * session, as its marks do. Its address is `session:<hostId>/<sessionId>`; the messages it sent stay while another
-       * party has a row. What waited on it was settled when it went to the trash (`MessageService.partyGone`)
+       * party has a row. What waited on it was settled when it went to the trash (`StopNotices.partyGone`)
        */
       const host = this.db.prepare<[string], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(HUB_SELF_KEY)?.value
       if (host) {

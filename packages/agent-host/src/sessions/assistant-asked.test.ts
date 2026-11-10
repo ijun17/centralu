@@ -390,7 +390,7 @@ describe('who asked is fixed when the turn begins (§9.7)', () => {
     const [request] = requestsOf(asker)
     expect(m.turns.current(orc.id)).toMatchObject({ messageId: request!.id, asker: addressOf(asker.id) })
     // The asker is gone from the mailbox: its request no longer waits for an answer
-    m.service.partyGone(addressOf(asker.id))
+    m.service.stops.partyGone(addressOf(asker.id))
     expect(read.row(request!.id, addressOf(orc.id))?.settled).not.toBeNull()
 
     const call = run('delete_session', { sessionId: other.id })
@@ -408,7 +408,7 @@ describe('who asked is fixed when the turn begins (§9.7)', () => {
     await due(orc.id)
     const [request] = requestsOf(asker)
     expect(w.store.mailbox.heldRows().map((x) => x.held)).toEqual(['policy'])
-    m.service.partyGone(addressOf(asker.id))
+    m.service.stops.partyGone(addressOf(asker.id))
     // Its row is gone with its sender: nothing the Assistant can read
     const r = await run('mail', { action: 'read', thread: request!.id })
     expect(r).toMatchObject({ isError: true, text: expect.stringContaining('Refused (unknown_message)') })

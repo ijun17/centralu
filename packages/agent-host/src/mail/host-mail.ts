@@ -247,11 +247,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
 
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, id),
-    sessionGone: (id) => service.partyGone(addressOf(id)),
+    sessionGone: (id) => service.stops.partyGone(addressOf(id)),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) =>
-      void service.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
-    oldPathEnded: (id, sender, told) => service.oldPathEnded(addressOf(id), addressOf(sender), told),
+      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
+    oldPathEnded: (id, sender, told) => service.stops.oldPathEnded(addressOf(id), addressOf(sender), told),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -304,7 +304,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
           const told = sessions.quitStarter?.(s.id)
           return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter: told ? addressOf(told.starter) : null, reportOwed: told?.reportOwed }]
         })
-        service.sessionsStopped(stops)
+        service.stops.sessionsStopped(stops)
       } catch (e) {
         console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
       }

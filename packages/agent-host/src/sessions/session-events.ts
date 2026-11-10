@@ -10,7 +10,7 @@ import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest, MailWithdrawn } from '../mail/delivery.js'
-import type { StopTold, StopWhy } from '../mail/messages.js'
+import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import { stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
@@ -70,7 +70,7 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /**
      * A turn ended without finishing, and why: the senders of what it left unanswered, and the session that started it, are told once
-     * (`MessageService.sessionStopped`), except `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
+     * (`StopNotices.sessionStopped`), except `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
      */
     mailStopped: (sessionId: string, why: StopWhy, opts: StopTold) => void
     /** The older report paths of that stop, each resolving to the session it told: once ended, a `held` session they did not tell gets the stop notice */
@@ -424,7 +424,7 @@ export class SessionEvents {
   private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[]; starter: string | null } {
     const meta = this.host.meta
     const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
-    // Not itself: the stop notice leaves the stopped session out (`MessageService.sessionsStopped`)
+    // Not itself: the stop notice leaves the stopped session out (`StopNotices.sessionsStopped`)
     const known = (who: string | undefined): who is string => !!who && meta.has(who)
     const told = d.waited && known(asker) ? [asker] : []
     const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id)])].filter(known).filter((who) => !told.includes(who))

@@ -192,7 +192,7 @@ describe('a parent that waits for what it handed on, across an update', () => {
     // The helper's task is going while its session is there
     expect(a.m.hooks.waitingOn!(parent, child)).toBe(1)
     // The helper's session was archived while the old host served: its task is gone
-    a.m.service.partyGone(addressOf(helper))
+    a.m.service.stops.partyGone(addressOf(helper))
     expect(read().taskRow(read().tasks(addressOf(child), helper)[0]!.id, helper)).toMatchObject({ settled: 'gone' })
     await a.mgr.tenure.disposeAll()
     const b = host()

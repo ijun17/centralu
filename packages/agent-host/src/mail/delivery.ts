@@ -175,7 +175,7 @@ export class MailDelivery {
     const turns = this.turns
     if (turns) {
       try {
-        this.service.turnsLost(() => turns.closeStale().map((t) => ({ address: this.service.sessionAddress(t.sessionId), turnSeq: t.turnSeq })))
+        this.service.stops.turnsLost(() => turns.closeStale().map((t) => ({ address: this.service.sessionAddress(t.sessionId), turnSeq: t.turnSeq })))
       } catch (e) {
         console.error(`[mail] closing the turns the last host left failed; the next start tries again: ${errorMessage(e)}`)
       }
@@ -347,7 +347,7 @@ export class MailDelivery {
       const party = parseAddress(address)
       if (party?.kind !== 'session' || this.sessions.receiver(party.sessionId).kind !== 'gone') continue
       try {
-        this.service.partyGone(address)
+        this.service.stops.partyGone(address)
       } catch (e) {
         console.error(`[mail] ${address}: the work it held could not be moved on (${errorMessage(e)})`)
       }

@@ -1639,7 +1639,7 @@ When needsReply rows are released or settled `gone`, their senders are told, unl
 
 Its text is S3. A session that stops without answering (an error, a usage limit, the network, its tool's interrupt, the person's Stop, a quit or
 shutdown, a cut turn Centralu could not continue) releases the questions delivered to it with `stopped`, `error`, `limit`, `network`,
-`interrupted`, `quit`, `shutdown` or `uncontinued` (`MessageService.sessionStopped`), and each sender is told at once in a sentence per
+`interrupted`, `quit`, `shutdown` or `uncontinued` (`StopNotices.sessionStopped`), and each sender is told at once in a sentence per
 session and cause (not S3's list), the notice waking every sender owed a reply (§10.6.1, owner 2026-11-10)
 ([turn-owned-by-no-one.md](turn-owned-by-no-one.md) §4.1). A session sender's notice quotes what the stopped session last wrote in the cut
 turn, at most 600 characters, quoted line by line under Centralu's words that it is that session's own text, to read as information and never
@@ -1649,14 +1649,14 @@ the stop notice tells an asker that report misses, such as one the same quit cut
 
 ### 10.6.1 The stop notice (#1948 step 1, owner 2026-11-10)
 
-The floor's first rule (#1948 target 3a) has one owner: `MessageService.sessionsStopped`, over the message tables. Nothing else decides
+The floor's first rule (#1948 target 3a) has one owner: `StopNotices.sessionsStopped`, over the message tables. Nothing else decides
 who hears that a session stopped.
 
 **What triggers it.** A turn that ends without finishing: an error, a usage limit, the network, its tool's interrupt, a Stop
 (`stopOf`, session-events.ts); a cut turn Centralu could not continue (`HostTenure.turnLostInSwap`, `uncontinued`); and, at the next
 start, every session a quit or shutdown cut (`HostMail.afterReady`, one write for all of them). Not the turn Centralu starts to compact a
 conversation, and not a turn Centralu continues (an update's cut, #1975): those ends are not the work's. A deleted session
-(`partyGone`, cause `gone`) releases by the same definition (`MessageService.owedBy`): every question it has not answered, whichever turn,
+(`partyGone`, cause `gone`) releases by the same definition (`StopNotices.owedBy`): every question it has not answered, whichever turn,
 and every task a session gave it, delivered or not; its senders are told and woken as for a stop, the person not (they deleted it), and
 mail to the Assistant's role follows the role (D15).
 
