@@ -230,6 +230,9 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     keeps working; nothing is held, refused or delayed for it. The cycles are counted in the store (`compact_cycles:<session>`), so a swap does not
     start the count again. A request the floor refuses still sends its `then` (with the reason); asked again at the same context size it is answered in the tool result and makes no
     turn, so a count past 6 is real work that changed the context each time, or a context that kept moving.
+  - **The three refusals tell the person (#1684).** `repeat`, `rate_limited` and `ask_rate` still refuse the sender, and the first refusal of each
+    kind a clock hour for a sender writes the person one line by the same path (`facts.guardRefused`, S21, key `guard:<reason>:<sender>:<hour>`).
+    The guards run before the send's transaction, so the refusal does not take the line back.
   - **What stays held:** the one hold (D12), a security boundary, not a loop guard; and the delivery states
     `uncertain` (a host died while the tool took it) and `failed` (six tries), which are about delivery, not volume.
   - **Rows an earlier build held `loop` or `budget`** still show in the Inbox with their Resume (`mail.resume`), which
@@ -763,6 +766,7 @@ task is never reminded: its report settles it.
 | `trusted` | notice | `{ project, refused: string[] }`: the project is trusted now, and these refused calls may be given again (S16) |
 | `hostCap` | notice | the host's mail-started turns in the hour passed 120 (D32; an earlier build's notice of its cap); for the person only |
 | `compactCycles` | notice | `{ session, count }`: the session went through more than 6 compact_self cycles with a next step in the hour (D32, S20); for the person only |
+| `guardRefused` | notice | `{ sender, reason }`: a send `repeat`, `rate_limited` or `ask_rate` refused (§7.5, S21); for the person only |
 | `pairTurns` | notice | `{ sessions: [a, b], turns }`: the mail between two sessions started more than 20 turns in the hour with no word from the person (D32, S18); for the person only |
 | `asker` | notice | for the orchestrator: whose requests a reminder is about (§7.6) |
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
@@ -1991,6 +1995,7 @@ names. Each call is written in its version-2 form; a version-1 process is told t
 | S18 | The warning to the person about a pair (D32), in the Inbox, key `pairturns:` | `<name> and <name> started <n> turns of each other by mail in the last hour, with no word from you. Their mail still goes: write to either, or stop one, if they are going round in circles.` |
 | S19 | The warning to the person about the host (D32), in the Inbox, key `hostcap:` | `Mail between sessions started <n> turns on this computer in the last hour. It still goes: look at the busy sessions if that is more than you expect.` |
 | S20 | The warning to the person about a session that keeps compacting (D32, #2024), in the Inbox, key `compactcycles:` | `<name> asked to compact its conversation and went on to its next step <n> times in the last hour. It keeps working: look at it if that is more than you expect.` |
+| S21 | The person's line when a guard refuses a sender (#1684), in the Inbox, key `guard:<reason>:<sender>:<hour>` | `repeat`: `Centralu refused mail from <name> to <name>: the same text again within 10 minutes. <name> was told; nothing else was stopped.` / `rate_limited`: `Centralu refused mail from <name>: more than <n> messages in a minute. <name> was told to wait; nothing else was stopped.` / `ask_rate`: `Centralu refused a request from <name> to the Assistant: its project's sessions asked 5 times in the last hour. <name> was told to wait or write to you.` |
 
 ## 16. Slices
 

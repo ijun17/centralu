@@ -33,6 +33,7 @@ import {
   READ_ITEMS,
   REFUSAL_TEXT,
   REPEAT_WINDOW_MS,
+  WARNING_TEXT,
   bodyLimit,
   cutTask,
   dueAt,
@@ -261,12 +262,13 @@ export class MessageService {
       if (why !== null) throw refuse(why, this.refusalText(why, r))
     }
 
+    // Before the transaction: a guard that refuses tells the person in a write of its own, which the refusal must not undo
+    const now = this.now()
+    this.guards(sender, cls, to, text, requests, now)
     return this.run(() => {
-      const now = this.now()
       // The person's message a request cites, checked here, in the send's transaction: evidence for the Assistant's judgement (docs/plans/cited-requests.md §3)
       const word = input.cite === true && requests.includes(true) && from.kind === 'session' ? this.personWord(sender, from.sessionId, now) : null
       const cited = word !== null && typeof word === 'object' ? word : undefined
-      this.guards(sender, cls, to, text, requests, now)
 
       const needsReply = kind === 'message' && (input.needsReply ?? target === undefined)
       const urgent = input.urgent === true
@@ -1098,15 +1100,30 @@ export class MessageService {
   /** The guards of a send, over the store so a restart does not reset them (§7.5) */
   private guards(sender: string, cls: SenderClass, to: readonly string[], text: string, requests: readonly boolean[], now: number): void {
     for (const r of to) {
-      if ((cls === 'session' || cls === 'app') && this.records.sameBody(sender, r, text, now - REPEAT_WINDOW_MS)) throw refuse('repeat', REFUSAL_TEXT.repeat(this.reach.labelOf(r)))
+      if ((cls === 'session' || cls === 'app') && this.records.sameBody(sender, r, text, now - REPEAT_WINDOW_MS)) {
+        throw this.guardRefused(sender, 'repeat', WARNING_TEXT.repeat(this.labelOf(sender), r === PERSON ? 'you' : this.labelOf(r)), REFUSAL_TEXT.repeat(this.labelOf(r)), now)
+      }
     }
     const limit = postsPerMinute(cls)
     if (limit !== Infinity && this.records.postsSince(sender, now - MINUTE_MS) >= limit) {
-      throw refuse('rate_limited', `at most ${limit} posts a minute from ${cls === 'app' ? 'an app' : 'a session'}: wait a minute`)
+      throw this.guardRefused(sender, 'rate_limited', WARNING_TEXT.rate_limited(this.labelOf(sender), limit), `at most ${limit} posts a minute from ${cls === 'app' ? 'an app' : 'a session'}: wait a minute`, now)
     }
     for (const [i, r] of to.entries()) {
-      if (requests[i] && this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) throw refuse('ask_rate', REFUSAL_TEXT.ask_rate())
+      if (requests[i] && this.records.requestsSince(this.reach.askGroupMembers(sender), r, now - HOUR_MS) >= ASKS_PER_HOUR) {
+        throw this.guardRefused(sender, 'ask_rate', WARNING_TEXT.ask_rate(this.labelOf(sender)), REFUSAL_TEXT.ask_rate(), now)
+      }
     }
+  }
+
+  /**
+   * A guard's refusal (#1684): the sender is refused, and the person hears of it in one line, through the warnings' own path (`WARNING_TEXT`, a notice
+   * to the person keyed by the clock hour), once an hour for each sender and kind. The guards run before the send's transaction, so a refusal does not
+   * take the person's line back with it
+   */
+  private guardRefused(sender: string, reason: 'repeat' | 'rate_limited' | 'ask_rate', toPerson: string, toSender: string, now: number): Error {
+    const hour = Math.floor(now / HOUR_MS) * HOUR_MS
+    this.notice(PERSON, { body: toPerson, facts: { guardRefused: { sender, reason } }, dedupeKey: `guard:${reason}:${sender}:${hour}` })
+    return refuse(reason, toSender)
   }
 
   /** The answer `answer` to `question` is held for the person: the question stays open (it keeps the answer's id) and its asker is told once, quietly (S14) */
