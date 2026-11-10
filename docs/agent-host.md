@@ -2852,7 +2852,12 @@ nothing of the kind.
 The design is in [architecture.md](architecture.md) §4.5. The host's part is the install and one rule.
 
 **Checking (#635).** Startup and the six-hour background interval remain unchanged. Opening Settings → Updates
-forces a check only with automatic checking on; with it off, use Check now. Focus/visibility restoration also
+forces a check only with automatic checking on; with it off, use Check now. It asks each time Settings opens, also when
+Settings is reopened during its closing fade with the view still mounted (#2155). The host runs one check at a time
+(`inFlight`), but the window's own requests (its check on connect, the check as Updates opens, an install, the
+switches) are answered independently: the window numbers them in the order it asked and drops an answer older than
+the newest it has shown, and a failure of such an older request raises no toast (#2155, `packages/ui/src/store/updates.ts`).
+The host's `update_status` events are always taken, as its newest state. Focus/visibility restoration also
 checks only with automatic checking on, when the last successful check is more than an hour old; attempts are
 throttled for an hour, including failures and paired focus/visibility events. Checks leave an active install or pending apply alone. A failed install
 keeps its phase and error throughout later checks, until the next install attempt. Successful ordinary checks

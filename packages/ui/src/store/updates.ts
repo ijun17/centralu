@@ -43,7 +43,34 @@ type UpdateActions = Pick<
   | 'applyAgentVersions'
 >
 
-export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
+/**
+ * One request's answer for `update` (#2155), and whether it may still be shown: not once the host connection it was asked on is
+ * gone (another platform, or a resync), nor once an answer to a later request is seated. The window's own check on connect, the
+ * forced check as Updates opens, an install and the switches each ask the host on their own, and their answers can come back in
+ * any order: seated as they arrived, an older answer replaced a newer one, and the person could decide on a stale "update
+ * available" until the host's next event. The host's `update_status` events are not asked for: they are its newest state, and an
+ * answer the host gives after one leaves after it on the same connection
+ */
+function answerSeat(set: StoreSet, get: StoreGet): () => { stale: () => boolean; seat: (update: AppState['update']) => void } {
+  let asked = 0
+  let seated = 0
+  return () => {
+    const { platform, hostResyncs } = get()
+    const n = ++asked
+    const stale = () => get().platform !== platform || get().hostResyncs !== hostResyncs || n < seated
+    return {
+      stale,
+      seat: (update) => {
+        if (stale()) return
+        seated = n
+        set({ update })
+      },
+    }
+  }
+}
+
+/** `ask` numbers each request's answer for this store (`answerSeat`) */
+export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set, get)): UpdateActions => ({
   /*
    * The three below all follow the same shape: tell the host, and seat whatever state comes back as
    * is.
@@ -56,13 +83,11 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
   async checkUpdate(force = true) {
     const platform = get().platform
     if (!platform) return
-    const hostResyncs = get().hostResyncs
+    const answer = ask()
     try {
-      const update = await platform.updates.status(force)
-      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
-      set({ update })
+      answer.seat(await platform.updates.status(force))
     } catch (e) {
-      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
+      if (answer.stale()) return
       // A version check must never break the screen — the app matters more than the check itself
       set({ toast: `Could not check for updates: ${(e as Error).message}` })
     }
@@ -71,8 +96,9 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
   async setUpdateAuto(enabled) {
     const platform = get().platform
     if (!platform) return
+    const answer = ask()
     try {
-      set({ update: await platform.updates.setAuto(enabled) })
+      answer.seat(await platform.updates.setAuto(enabled))
     } catch (e) {
       set({ toast: `Could not save that: ${(e as Error).message}` })
     }
@@ -81,8 +107,9 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
   async setUpdateAutoApply(enabled) {
     const platform = get().platform
     if (!platform) return
+    const answer = ask()
     try {
-      set({ update: await platform.updates.setAutoApply(enabled) })
+      answer.seat(await platform.updates.setAutoApply(enabled))
     } catch (e) {
       // Say so rather than leave the box ticked
       set({ toast: `Could not save that: ${(e as Error).message}` })
@@ -92,13 +119,11 @@ export const updateActions = (set: StoreSet, get: StoreGet): UpdateActions => ({
   async applyUpdate() {
     const platform = get().platform
     if (!platform) return
-    const hostResyncs = get().hostResyncs
+    const answer = ask()
     try {
-      const update = await platform.updates.apply()
-      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
-      set({ update })
+      answer.seat(await platform.updates.apply())
     } catch (e) {
-      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
+      if (answer.stale()) return
       set({ toast: `Could not update: ${(e as Error).message}` })
     }
   },

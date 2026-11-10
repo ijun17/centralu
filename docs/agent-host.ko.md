@@ -1386,6 +1386,12 @@ PR 4 전에는 키퍼가 다른 빌드의 키퍼에게 스스로를 넘겨주었
 
 설계는 [architecture.ko.md](architecture.ko.md) §4.5에 있다. 호스트의 몫은 설치와 규칙 하나다.
 
+**확인 (#635).** 설정 → 업데이트를 열면 자동 확인이 켜져 있을 때만 확인을 강제한다. 설정이 열릴 때마다 묻고, 닫히는
+페이드 중에 다시 열려 화면이 아직 붙어 있을 때도 묻는다(#2155). 호스트는 확인을 한 번에 하나만 돌리지만(`inFlight`),
+창의 요청들(연결할 때의 확인, 업데이트를 열 때의 확인, 설치, 스위치)은 따로 답을 받는다: 창은 물은 순서대로 번호를
+매기고, 이미 보인 가장 새 답보다 오래된 답은 버리며, 그런 오래된 요청의 실패는 토스트를 띄우지 않는다(#2155,
+`packages/ui/src/store/updates.ts`). 호스트의 `update_status` 이벤트는 그의 가장 새 상태이므로 언제나 받는다.
+
 **설치** (`updates.ts`). `updates.apply`는 `npm i -g centralu@<v>`를 돌리고, 설치된 앱이 있으면 `centralu install`을
 돌린 뒤 `restart_required`를 알린다. 아무것도 다시 띄우지 않는다. `autoApply`가 켜져 있으면("Apply updates
 automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `updates.autoApply`로 저장, 기본 꺼짐) 새 버전을
