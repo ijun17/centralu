@@ -537,7 +537,7 @@ jobs:
   # 15 of them `pnpm test` (main, 2026-10-17). This one keeps the name `windows tests` and runs
   # lint, dependency rules and types (about a minute), so the check every required set already
   # names (the board's, read from main's workflow) still reports; `windows-tests-unit` runs the
-  # unit tests in two shards side by side.
+  # unit tests in shards side by side.
   #
   # Tiers (2026-10-18): the unit tests are in the quick tier, every pull request; lint and types, which
   # `verify` already runs on Linux, only in the full one. Of the 140 failed pull request runs from
@@ -564,8 +564,10 @@ jobs:
       - if: ${{ !cancelled() }}
         run: pnpm typecheck
 
-  # The unit tests on Windows, the rest of the job above, in two shards (#1035) split by each test file's measured
-  # time (tooling/test-durations.json, docs/plans/os-layer.md §6.4). In the quick tier.
+  # The unit tests on Windows, the rest of the job above, in three shards split by each test file's measured time
+  # (tooling/test-durations.json, docs/plans/os-layer.md §6.4). In the quick tier. Two from #1035; three from #2167: over the
+  # 10 merge batches to 2026-11-10 the two took 14.4 and 16.5 minutes (medians), next only to `macos tests`, and the second
+  # was the last job of 2 of the 10.
   #
   # Only the tests that touch the OS (#1599, docs/plans/os-layer.md): those that reach the OS layer, a file still on
   # tooling/os-allowlist.txt or anything else in the shipped code that imports an OS module or asks which OS this is,
@@ -580,8 +582,8 @@ jobs:
       fail-fast: false
       matrix:
         # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
-        shards: [2]
-        shard: [1, 2]
+        shards: [3]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -589,9 +591,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # This shard's half of them, split by each file's measured time (tooling/test-durations.json), not by count:
+      # This shard's share of them, split by each file's measured time (tooling/test-durations.json), not by count:
       # by count, the two longest files (875 and 861 s) fell in one shard, 19.1 minutes against 11.4 (#1599).
-      # Computed here rather than once in a job of its own: that job would make both shards wait for its setup (#1599).
+      # Computed here rather than once in a job of its own: that job would make every shard wait for its setup (#1599).
       - name: Pick the tests that touch the OS
         run: pnpm exec tsx tooling/os-tests.ts --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "${{ runner.temp }}\os-tests.txt"
 
@@ -625,8 +627,8 @@ jobs:
   # Two sizes, as the files allow. The quick tier (every pull request and merge batch): the tests that reach the
   # OS the most, the filters in the step below (the OS layer, the process adapter, apps, dev services, lifecycle,
   # transport, links, keeper/, a few single files, and three tooling tests: the launcher's, e2e-lock and
-  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `macos tests` is one of
-  # `ci.quickChecks`, so nothing lands without it.
+  # screen-protocol-rules, the ones that failed on a Mac and nowhere else in #1695); `macos tests (vitest *)` is one of
+  # `ci.quickChecks`, so nothing lands without every shard.
   # A full run whose files change the host's tests (`host_tests`): the tests of the host, the protocol and tooling/ that
   # reach the OS (the Windows rule, tooling/os-tests.ts, and the tests that make folders in the temp folder, where a Mac
   # found #1695's failures). The tests of pure logic run once, on Linux, in `verify`'s test shards (`verify-tests`).
@@ -636,15 +638,27 @@ jobs:
   # files, which three cores share), the job 10.0 minutes; with tooling/ (573 files) 822 s of vitest, the job 14.2
   # minutes. The release's darwin job ran every test of the repository in about 17 minutes on the same runner.
   #
+  # Two shards (#2167). As one job it was the last job of 7 of the 10 merge batches to 2026-11-10, 19.1 minutes median
+  # and 23.0 at most of its limit of 25 (the full run: 528 files, 2,115 s of file time, 1,293 s of vitest). The full run's
+  # list is split by each file's time on this runner (`os-tests.ts --macos --shard`, tooling/test-durations-macos.json:
+  # Windows' times do not fit a Mac, and the tooling tests that make temp folders run here only); the quick tier's few
+  # filters are split by vitest's own `--shard`, by count.
+  #
   # Not the Node the remotes are pinned to (packaging/remote-runtime.json): the hub installs that Node only where
   # the installer serves it (Linux and Windows, `host tests, remote Node`), and refuses a Mac (links/install.ts).
   # A Mac linked as a machine runs the host on the Node the person has, which is what this job runs on.
   macos-tests:
-    name: macos tests
+    name: macos tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: macos-15
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # `shards` is one value, the count `--shard` divides by; `shard` has to list 1 to it.
+        shards: [2]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -663,9 +677,10 @@ jobs:
         env:
           CC_DATA_DIR: ${{ runner.temp }}/centralu-data
         # vitest takes each argument as a part of a test file's path. tooling/build-workflow.test.ts holds that each
-        # matches a test file, since vitest leaves a filter that matches none out without a word.
+        # matches a test file, since vitest leaves a filter that matches none out without a word. This shard's share by
+        # count (vitest's `--shard`): the set is small enough that a count splits it about evenly.
         run: >-
-          pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
+          pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json"
           packages/agent-host/src/os
           packages/agent-host/src/process.test
           packages/agent-host/src/adapters/local-process
@@ -685,10 +700,11 @@ jobs:
           tooling/screen-protocol-rules
 
       # The tests that reach the OS, by the rule Windows picks by (tooling/os-tests.ts), and the tests that make folders in the
-      # temp folder (`--macos`); the rest run once, on Linux, in `verify`'s test shards (`verify-tests`). Within the host, the protocol and tooling/
+      # temp folder (`--macos`); the rest run once, on Linux, in `verify`'s test shards (`verify-tests`). Within the host, the protocol and tooling/.
+      # This shard's share, split by each file's time on this runner (tooling/test-durations-macos.json, docs/plans/os-layer.md §6.4).
       - name: Pick the tests that touch the OS
         if: needs.changes.outputs.host_tests == 'true'
-        run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"
+        run: pnpm exec tsx tooling/os-tests.ts --macos --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/os-tests.txt"
 
       - name: 'pnpm test (host, protocol, launcher: the tests that touch the OS)'
         id: full
@@ -701,7 +717,7 @@ jobs:
           CC_BUNDLE_COMPARED_BY: verify
         run: pnpm exec vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest-times.json" packages/agent-host packages/protocol packages/common tooling/
 
-      # The time each file took, for choosing what the quick tier runs; also when a test failed
+      # The time each file took, for choosing what the quick tier runs and for the shards' split; also when a test failed
       - name: Say which test files took longest
         if: ${{ !cancelled() }}
         run: |
@@ -719,7 +735,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: macos-test-times
+          name: macos-test-times-${{ matrix.shard }}
           path: ${{ runner.temp }}/vitest-times.json
           retention-days: 30
           if-no-files-found: warn
@@ -749,9 +765,9 @@ jobs:
   # Time limits (2026-10-19): one shard hung 35 minutes and held a merge batch. A job's limit is its
   # slowest green run of the last 20 full runs with about half again on top, so a hang ends as a
   # timeout soon after any honest run would have ended. The numbers, in minutes, slowest/limit:
-  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20 (17.9 as one job by 2026-11-09, #2153: since then the lint and types job 10 and each of its three test shards 15, about a third of that vitest time each; refresh from the first runs), Windows unit tests 13.1/25 (14.9 in the
+  # e2e shards' tests 7.2/12 (WebKit; Chromium 6.0; 12.0 and 10.7 on 5 shards, before), verify 10.8/20 (17.9 as one job by 2026-11-09, #2153: since then the lint and types job 10 and each of its three test shards 15, about a third of that vitest time each; refresh from the first runs), Windows unit tests 13.1/25 (two shards; three since #2167; 14.9 in the
   # last 100 pushes to main), Windows lint and types 2.6/10, the host's tests on the remotes' Node
-  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/). The three jobs that install a browser (#1503, 2026-10-24) limit
+  # 12.8/20, content verify 1.8/10, ux tasks 2.8/10, macOS tests 14.2/25 (the whole host and tooling/; 23.0 as one job by 2026-11-10, two shards since #2167: refresh from the first runs). The three jobs that install a browser (#1503, 2026-10-24) limit
   # the install apart from the tests: each of its tries 3 minutes, so the job holds the install's 9 at worst, the
   # tests' own step limit (12 for a shard, 5 for ux tasks) and about 4 for the rest: shards 25, ux tasks 20. Jobs that build Rust with a cache get more, for
   # the run that misses it: bundles 5.8/30 (8.9 in the last 100 pushes), keeper e2e 4.0/20 (Linux

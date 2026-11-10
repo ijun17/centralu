@@ -288,7 +288,7 @@ Not seen: what §5 lists as not seen by the rule, and a process started by path 
 
 ### 6.2 Where it applies
 
-`windows tests (vitest N/2)` runs `tsx tooling/os-tests.ts --shard N/2 --out <list>` and then vitest with
+`windows tests (vitest N/3)` (`N/2` until #2167) runs `tsx tooling/os-tests.ts --shard N/3 --out <list>` and then vitest with
 `CC_TEST_FILES=<list>` (`vitest.config.ts` runs only the listed files, each in its project, and refuses a line that
 is not an existing repository path). Both tiers, every pull request and every full run, `workflow_dispatch`
 included: the list does not depend on what changed. Linux (`verify`) runs every test. The remote-Node job and e2e
@@ -309,9 +309,19 @@ before starting at all, so the quick tier's wait would grow by about 40 s to sav
 ### 6.4 Shards balanced by measured time
 
 Vitest's `--shard` splits by file count. `tooling/os-tests.ts --shard i/n` splits the selected tests by time instead:
-longest first, each to the lighter shard (`balance`), ties by path, so both shards compute the same split. The times
+longest first, each to the lightest shard (`balance`), ties by path, so every shard computes the same split. The times
 are `tooling/test-durations.json`, each test file's seconds on the Windows runner. A file it does not name (a new
-test) weighs the median of those it does, at least one second. Today: 256 and 174 files, 2,181 and 2,180 seconds.
+test) weighs the median of those it does, at least one second. Today (three shards since #2167): 222 files in the first,
+1,345 to 1,346 seconds each (two shards had been 2,016 and 2,020; their jobs took 14.4 and 16.5 minutes, median of the 10
+merge batches to 2026-11-10).
+
+**The macOS shards** (#2167) split the same way, `tsx tooling/os-tests.ts --macos --shard i/2`, by their own file,
+`tooling/test-durations-macos.json`: each file's seconds on the macOS runner, for the tests `--macos` selects. Not Windows'
+times: a Mac starts processes faster, and the tooling tests that make temp folders run there only (the `project-board-*`
+tests alone are about 400 s on a Mac), so by Windows' file they would weigh the median. As one job the macOS tests were the
+last job of 7 of those 10 batches (19.1 minutes median, 23.0 at most). The file was first written from the report of
+the unsharded job of run 42882362587 (528 files, 2,115 s of file time): two shards of 1,058 s each. The quick tier's
+small set is split by vitest's own `--shard`, by count.
 
 **Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
 artifact `windows-test-times-<shard>` (30 days); so do the remote Node's two Windows shards (`host tests, remote Node`, which
@@ -322,17 +332,22 @@ for those 92 from the log of run 42082742277. To refresh, from a green run on ma
 ```sh
 gh run download <run id> -p 'windows-test-times-*' -D /tmp/times
 pnpm exec tsx tooling/os-tests.ts --refresh-durations /tmp/times/*/vitest-times.json
+# the macOS shards keep theirs as macos-test-times-<shard>
+gh run download <run id> -p 'macos-test-times*' -D /tmp/mac-times
+pnpm exec tsx tooling/os-tests.ts --refresh-durations --macos /tmp/mac-times/*/vitest-times.json
 ```
 
-and commit the file. The file holds exactly the tests this checkout selects and the remote Node's job runs (`timedTests`, `refreshDurations`): the run's time for a
+and commit the files. The Windows file holds exactly the tests this checkout selects and the remote Node's job runs (`timedTests`, `refreshDurations`; the macOS file, those `--macos` selects): the run's time for a
 file it timed, the current entry for one it did not, the median for a new one, nothing for a file that is gone, so a
 run from before a split or a delete does not bring the old names back. `.github/workflows/test-durations.yml` does this
 weekly: it takes the reports of the newest green push run of `build.yml` on main that has them (and says how many
-commits and days behind main it is, warning past 20 or 7) and pushes the result to the branch `test-durations/weekly`.
+commits and days behind main it is, warning past 20 or 7), the macOS ones from the newest such run whose macOS shards
+ran the full set (a run that left the host's tests alone has none; none found leaves the file as it is, with a warning),
+and pushes the result to the branch `test-durations/weekly`.
 It opens no pull request, as the repository does not let `GITHUB_TOKEN` create one; the job summary gives the `gh pr create` line. The first version was read from run 40303859800's log, which prints each file's time. Times
 that are a little old only make the split a little uneven; a refresh is due when a shard runs more than a few
-minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks the
-file is as the refresh writes it and names a time for most of the selected tests.
+minutes longer than the other, or after a step of §7 moves many tests off Windows. `os-layer.test.ts` checks each
+file is as the refresh writes it and names a time for most of the tests its shards run.
 
 ## 7. Moving the host behind the layer
 

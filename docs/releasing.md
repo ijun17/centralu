@@ -114,7 +114,7 @@ script rehearses by default and why nothing publishes automatically.
   on a pull request yourself (before queueing UI work, say):
   `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
   the pull request.
-- **`macos tests`** (#1704) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
+- **`macos tests (vitest i/n)`** (#1704; two shards since #2167) runs the host's tests on a Mac, on the runner and the Node the release's darwin build uses
   (`macos-14`, Node 22), because until it existed the release rehearsal was the first place any unit test ran on macOS: the
   differences it found there (#1650's contract cases, #1713's file times under libuv 1.51) failed the release instead of the
   pull request. In the quick tier it runs the tests that reach the OS the most (the OS layer, the process adapter, apps,
@@ -122,8 +122,12 @@ script rehearses by default and why nothing publishes automatically.
   the npm launcher's, `e2e-lock` and `screen-protocol-rules`, the two that failed on a Mac and nowhere else in #1695: 158 test
   files, about 5.5 minutes); on a full run that changes the host's tests, the tests of the host, the protocol and `tooling/` that
   reach the OS: the ones Windows picks (`tsx tooling/os-tests.ts`) and those that make folders in the temp folder, where a Mac
-  answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks`, so a batch lands only
-  with it. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
+  answers differently (`--macos`; a test or a module it imports that calls `mkdtemp`, `realpath` or `tmpdir`, or reads `TMPDIR`); the tests of pure logic run once, on Linux; on a full run that cannot affect them, nothing, and the check reports as passed. It is in `ci.quickChecks` (`macos tests (vitest *)`), so a batch lands only
+  with every shard. Two shards (#2167): as one job it was the last job of 7 of the 10 merge batches to 2026-11-10 (19.1
+  minutes median, 23.0 at most, of a limit of 25), which made it every landing's wait. The full run's list is split by each
+  file's time on the Mac (`os-tests.ts --macos --shard`, `tooling/test-durations-macos.json`, refreshed weekly with
+  Windows' times: [os-layer.md §6.4](plans/os-layer.md#64-shards-balanced-by-measured-time)); the quick tier's filters by
+  vitest's own `--shard`, by count. It does not run on the Node the remotes are pinned to: the hub's installer serves Linux and Windows only
   (`links/install.ts` refuses a Mac), so a Mac linked as a machine runs the host on the Node the person installed, which is
   the Node this job runs. The release's darwin job still runs `pnpm verify` whole. Its `pnpm test` stays until a change decides otherwise: `tooling/` has Mac-only failures (#1695), and the UI and core tests run on Linux only.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
@@ -157,9 +161,10 @@ script rehearses by default and why nothing publishes automatically.
   machine without it. Neither is signed, so SmartScreen asks before the first start. The
   Windows job also runs the Rust unit tests, and separate jobs run the four parts of
   `pnpm verify`, each blocking as on the other platforms: `windows tests` the lint, the
-  dependency rules and the types, and `windows tests (vitest 1/2)` and `(vitest 2/2)` the
-  unit tests in two `vitest --shard` halves side by side (#1035: as one job it took 16.5
-  minutes, the longest of every run). The name `windows tests` stayed with the first, so a
+  dependency rules and the types, and `windows tests (vitest 1/3)` to `(vitest 3/3)` the
+  unit tests in shards side by side, split by each file's measured time (#1035: as one job it took 16.5
+  minutes, the longest of every run; two shards then, three since #2167, when the two took 14.4 and 16.5
+  minutes, median of 10 merge batches). The name `windows tests` stayed with the first, so a
   required set read from main's workflow before the split still finds it. (The unit-test step
   did not block until the W2 failures listed in #307 were fixed.) The host's own tests also
   run on the Node remotes are pinned to ([below](#the-node-remotes-run-82)). The npm

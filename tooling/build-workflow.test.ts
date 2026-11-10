@@ -189,6 +189,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(shards).toBeGreaterThan(1)
     expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(unit)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
     expect(names(unit)).toEqual(Array.from({ length: shards }, (_, i) => `windows tests (vitest ${i + 1}/${shards})`))
+    // The weekly refresh waits for every shard's report: its list is this matrix's (#2167 went from two to three)
+    const weekly = parseDocument(readFileSync(new URL('../.github/workflows/test-durations.yml', import.meta.url), 'utf8')).toJS() as { jobs: Record<string, { steps: { env?: Record<string, string> }[] }> }
+    const lists = weekly.jobs.refresh!.steps.flatMap((s) => (s.env?.UNIT_SHARDS === undefined ? [] : [String(s.env.UNIT_SHARDS)]))
+    expect(lists.length).toBe(2)
+    for (const l of lists) expect(l).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(' '))
     expect(unit).toMatch(/^ {4}runs-on: windows-2022$/m)
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
@@ -217,7 +222,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   // #1704: no CI job ran a unit test on a Mac, so macOS-only differences failed the release rehearsal instead of the pull request
   it("runs the host's tests on the release's own Mac and Node, a small set in the quick tier and the whole host when the host's tests changed, and lands nothing without it", () => {
     const mac = job('macos-tests').body
-    expect(names(mac)).toEqual(['macos tests'])
+    // #2167: as one job it was the last of 7 of 10 merge batches; in shards, each a share of either tier's set
+    const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(mac)?.[1])
+    expect(shards).toBeGreaterThan(1)
+    expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(mac)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+    expect(names(mac)).toEqual(Array.from({ length: shards }, (_, i) => `macos tests (vitest ${i + 1}/${shards})`))
     const release = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
     const darwin = /- target: darwin-arm64\n\s+runner: (\S+)/.exec(release)![1]
     expect(mac).toMatch(new RegExp(`^ {4}runs-on: ${darwin}$`, 'm'))
@@ -237,8 +246,14 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(full).toContain('packages/agent-host packages/protocol packages/common tooling/\n')
     // Only the tests that reach the OS, picked as Windows picks them (plus the temp-folder tests): the pure ones run on Linux
     expect(full).toContain('CC_TEST_FILES: ${{ runner.temp }}/os-tests.txt\n')
-    expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"\n')
+    // The full set's shard is split by the Mac's own times, so vitest gets the list whole; the quick set by vitest's own count
+    expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --shard ${{ matrix.shard }}/${{ matrix.shards }} --out "$RUNNER_TEMP/os-tests.txt"\n')
     expect(mac.indexOf('os-tests.ts --macos')).toBeLessThan(mac.indexOf('id: full'))
+    expect(full).not.toMatch(/vitest run[^\n]*--shard/)
+    expect(quick).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} ')
+    // Each shard keeps its file times, which refresh tooling/test-durations-macos.json, even when a test failed
+    expect(mac).toMatch(/- name: Upload the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
+    expect(mac).toContain('name: macos-test-times-${{ matrix.shard }}\n')
     // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
     expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
@@ -249,9 +264,9 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const f of filters) expect(tests.some((t) => t.includes(f)), `${f} matches no test file`).toBe(true)
     // The tooling tests that failed on a Mac and nowhere else (#1695: a SIGTERM hang, macOS's /var -> /private/var link)
     for (const f of ['tooling/e2e-lock', 'tooling/screen-protocol-rules', 'tooling/launcher-']) expect(filters, f).toContain(f)
-    // A landing condition: the board waits for the check of this name on a batch (project.json ci.quickChecks)
+    // A landing condition: the board waits for every shard's check on a batch (project.json ci.quickChecks)
     const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
-    expect(board.ci.quickChecks).toContain('macos tests')
+    expect(board.ci.quickChecks).toContain('macos tests (vitest *)')
   })
 
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden

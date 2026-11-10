@@ -19,8 +19,10 @@
  *   tsx tooling/os-tests.ts --out <file> [--shard i/n]   the selected tests, one path per line (vitest.config.ts
  *                                                        `CC_TEST_FILES` reads it); with --shard, shard i of n,
  *                                                        balanced by the measured times (`balance`)
- *   tsx tooling/os-tests.ts --macos --out <file>         the same for the macOS job's full run: those, and the tests that
- *                                                        make folders in the OS temp folder (`selectMacTests`)
+ *   tsx tooling/os-tests.ts --macos --out <file> [--shard i/n]
+ *                                                        the same for the macOS job's full run: those, and the tests that
+ *                                                        make folders in the OS temp folder (`selectMacTests`); with
+ *                                                        --shard, balanced by the Mac's own times (`MAC_DURATIONS`)
  *   tsx tooling/os-tests.ts --remote-node [--shard i/n] --out <file>
  *                                                        every test the host's tests on the remote's Node run
  *                                                        (`REMOTE_NODE_TESTS`), not only those that touch the OS; with
@@ -32,6 +34,9 @@
  *                                                        rewrites tooling/test-durations.json from the reports, for the
  *                                                        tests this checkout selects and the remote Node's (`timedTests`,
  *                                                        `refreshDurations`)
+ *   tsx tooling/os-tests.ts --refresh-durations --macos <vitest JSON report>...
+ *                                                        the same for tooling/test-durations-macos.json, from the macOS
+ *                                                        shards' reports, for the tests `--macos` selects
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -301,18 +306,36 @@ export async function vitestFiles(listed?: string): Promise<string[]> {
  */
 export const DURATIONS = 'tooling/test-durations.json'
 
+/**
+ * The same for the macOS runner (#2167): the times of the tests `--macos` selects, which the macOS shards split by. Their
+ * own file, not Windows': a Mac starts processes faster and runs the tooling tests that make temp folders, which Windows
+ * does not run (`tooling/project-board-*` alone, 400 s on a Mac, would weigh the median). Rewritten by
+ * `--refresh-durations --macos` from the `macos-test-times-<shard>` artifacts.
+ */
+export const MAC_DURATIONS = 'tooling/test-durations-macos.json'
+
+/** Each durations file, by the OS whose runner it times: the file, and the shards whose reports refresh it */
+const DURATION_FILES = {
+  windows: { file: DURATIONS, os: 'Windows', reports: "the Windows unit shards' vitest JSON reports" },
+  macos: { file: MAC_DURATIONS, os: 'macOS', reports: "the macOS shards' vitest JSON reports" },
+} as const
+export type TimedOs = keyof typeof DURATION_FILES
+
 export type Durations = Record<string, number>
 
-export function parseDurations(text: string): Durations {
+export function parseDurations(text: string, name: string = DURATIONS): Durations {
   const parsed: unknown = JSON.parse(text)
   const files = typeof parsed === 'object' && parsed !== null && 'files' in parsed ? parsed.files : null
-  if (typeof files !== 'object' || files === null) throw new Error(`${DURATIONS}: no "files"`)
+  if (typeof files !== 'object' || files === null) throw new Error(`${name}: no "files"`)
   const out: Durations = {}
   for (const [file, secs] of Object.entries(files)) if (typeof secs === 'number' && secs >= 0) out[file] = secs
   return out
 }
 
-export const readDurations = (): Durations => parseDurations(readFileSync(`${ROOT}${DURATIONS}`, 'utf8'))
+export const readDurations = (os: TimedOs = 'windows'): Durations => {
+  const { file } = DURATION_FILES[os]
+  return parseDurations(readFileSync(`${ROOT}${file}`, 'utf8'), file)
+}
 
 /** What a test with no measured time weighs: the median of those of `tests` that have one, and at least a second */
 function fallbackWeight(tests: readonly string[], durations: Durations): number {
@@ -385,28 +408,30 @@ export function refreshDurations(current: Durations, run: Durations, tests: read
  * checkout selects (`refreshDurations`), and answers the line to print. The file is left alone when only the date would
  * change (the weekly job pushes only when the times differ). It throws when the reports time fewer than half of `tests`:
  * an empty or wrong report would otherwise replace every time with the old ones or the median, under a run's name.
+ * `os` names the runner the file times (`DURATION_FILES`), for what it writes and says.
  */
-export function refreshDurationsFile(file: string, reportFiles: readonly string[], tests: readonly string[], today = new Date()): string {
+export function refreshDurationsFile(file: string, reportFiles: readonly string[], tests: readonly string[], today = new Date(), os: TimedOs = 'windows'): string {
+  const of = DURATION_FILES[os]
   const run = durationsFromReports(reportFiles.map((f) => JSON.parse(readFileSync(f, 'utf8')) as unknown))
-  const current = parseDurations(readFileSync(file, 'utf8'))
+  const current = parseDurations(readFileSync(file, 'utf8'), of.file)
   const timed = tests.filter((t) => t in run).length
   if (timed * 2 < tests.length) {
-    throw new Error(`the reports time ${timed} of the ${tests.length} tests this checkout selects: fewer than half, so they are not the Windows shards' reports of a run of this repository`)
+    throw new Error(`the reports time ${timed} of the ${tests.length} tests this checkout selects: fewer than half, so they are not the ${of.os} shards' reports of a run of this repository`)
   }
   const durations = refreshDurations(current, run, tests)
   const kept = tests.filter((t) => !(t in run) && t in current).length
   const added = tests.length - timed - kept
-  // Dropped: what the file named that is not selected here (gone, or not run on Windows now); the run's own extra names are not counted
+  // Dropped: what the file named that is not selected here (gone, or not run on this OS now); the run's own extra names are not counted
   const dropped = Object.keys(current).filter((t) => !tests.includes(t)).length
-  const counts = `${timed} timed by the run, ${kept} kept, ${added} new (the median), ${dropped} dropped (gone, or not run on Windows)`
+  const counts = `${timed} timed by the run, ${kept} kept, ${added} new (the median), ${dropped} dropped (gone, or not run on ${of.os})`
   const same = Object.keys(durations).length === Object.keys(current).length && Object.entries(durations).every(([t, secs]) => current[t] === secs)
-  if (same) return `${DURATIONS}: unchanged (${counts})`
-  const source = `the Windows unit shards' vitest JSON reports, refreshed ${today.toISOString().slice(0, 10)}`
+  if (same) return `${of.file}: unchanged (${counts})`
+  const source = `${of.reports}, refreshed ${today.toISOString().slice(0, 10)}`
   writeFileSync(file, formatDurations(durations, source))
-  return `${DURATIONS}: ${tests.length} files (${counts})`
+  return `${of.file}: ${tests.length} files (${counts})`
 }
 
-/** tooling/test-durations.json's text: sorted, one file per line */
+/** A durations file's text (tooling/test-durations.json, tooling/test-durations-macos.json): sorted, one file per line */
 export function formatDurations(durations: Durations, source: string): string {
   const files = Object.keys(durations)
     .sort()
@@ -533,14 +558,14 @@ async function main(argv: string[]) {
   }
   if (argv.includes('--refresh-durations')) {
     const reports = argv.filter((a) => !a.startsWith('--'))
-    if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations <vitest JSON report>...')
+    if (reports.length === 0) throw new Error('usage: tsx tooling/os-tests.ts --refresh-durations [--macos] <vitest JSON report>...')
     const all = await vitestFiles()
-    const tests = timedTests(await repo.selectTests(all), all)
-    console.error(refreshDurationsFile(`${ROOT}${DURATIONS}`, reports, tests))
+    if (argv.includes('--macos')) console.error(refreshDurationsFile(`${ROOT}${MAC_DURATIONS}`, reports, await repo.selectMacTests(all), new Date(), 'macos'))
+    else console.error(refreshDurationsFile(`${ROOT}${DURATIONS}`, reports, timedTests(await repo.selectTests(all), all)))
     return
   }
   const out = argv[argv.indexOf('--out') + 1]
-  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] [--macos | --remote-node] | --offenders | --tighten | --refresh-durations <report>...')
+  if (!argv.includes('--out') || !out) throw new Error('usage: tsx tooling/os-tests.ts --out <file> [--shard i/n] [--macos | --remote-node] | --offenders | --tighten | --refresh-durations [--macos] <report>...')
   const shardArg = argv.includes('--shard') ? argv[argv.indexOf('--shard') + 1] : undefined
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
@@ -548,7 +573,8 @@ async function main(argv: string[]) {
   const picked = argv.includes('--remote-node') ? remoteNodeTests(all) : await (argv.includes('--macos') ? repo.selectMacTests(all) : repo.selectTests(all))
   const why = argv.includes('--why') && !argv.includes('--remote-node')
   if (shard) {
-    const durations = readDurations()
+    // The remote Node's shards run on Windows, so they split by Windows' times
+    const durations = readDurations(argv.includes('--macos') ? 'macos' : 'windows')
     const lists = balance(picked, durations, Number(shard[2]))
     const mine = lists[Number(shard[1]) - 1] ?? []
     writeFileSync(out, mine.join('\n') + '\n')

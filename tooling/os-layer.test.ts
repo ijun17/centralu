@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, MAC_DURATIONS, readDurations, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -513,7 +513,7 @@ describe('a listed run (vitest.config.ts `CC_TEST_FILES`)', () => {
   }, 70_000 * SLOW)
 })
 
-describe("the Windows shards, split by each file's measured time", () => {
+describe("the Windows and macOS shards, split by each file's measured time", () => {
   it('puts every test in exactly one shard, the longest apart, and the same split on every shard', () => {
     const durations = { 'a.test.ts': 875, 'b.test.ts': 861, 'c.test.ts': 168, 'd.test.ts': 142, 'e.test.ts': 1, 'f.test.ts': 1 }
     const tests = Object.keys(durations)
@@ -589,6 +589,14 @@ describe("the Windows shards, split by each file's measured time", () => {
       const half = setup({}, report({ 'tooling/a.test.ts': 2, 'tooling/b.test.ts': 2 }))
       expect(() => refreshDurationsFile(half.file, [half.reportFile], tests)).not.toThrow()
     })
+
+    it("names the macOS file and its shards' reports for the Mac's times (#2167)", () => {
+      const f = setup({}, report({ 'tooling/a.test.ts': 2, 'tooling/b.test.ts': 3, 'tooling/c.test.ts': 4 }))
+      expect(refreshDurationsFile(f.file, [f.reportFile], tests, new Date('2026-11-11T03:00:00Z'), 'macos')).toMatch(/^tooling\/test-durations-macos\.json: 4 files .*not run on macOS/)
+      expect(JSON.parse(f.text()).source).toBe("the macOS shards' vitest JSON reports, refreshed 2026-11-11")
+      const none = setup({}, report({}))
+      expect(() => refreshDurationsFile(none.file, [none.reportFile], tests, new Date(), 'macos')).toThrow(/not the macOS shards' reports/)
+    })
   })
 
   it('refreshes from a run that predates a split and a delete: the files on this checkout, never the ones the run knew', () => {
@@ -626,4 +634,14 @@ describe("the Windows shards, split by each file's measured time", () => {
     const remote = remoteNodeTests(all)
     expect(remote.filter((t) => durations[t] !== undefined).length / remote.length).toBeGreaterThan(0.9)
   }, 120_000 * SLOW)
+
+  // #2167: the macOS shards split by the Mac's own times, for the tests `--macos` picks
+  it(`keeps ${MAC_DURATIONS} as --refresh-durations --macos writes it, with a time for most tests the Mac runs`, async () => {
+    const text = readFileSync(join(ROOT, MAC_DURATIONS), 'utf8').replace(/\r\n/g, '\n')
+    const durations = readDurations('macos')
+    expect(formatDurations(durations, (JSON.parse(text) as { source: string }).source)).toBe(text)
+    const { all } = await pickedOnRepo()
+    const mac = await osSelector().selectMacTests(all)
+    expect(mac.filter((t) => durations[t] !== undefined).length / mac.length).toBeGreaterThan(0.8)
+  }, 180_000 * SLOW)
 })
