@@ -430,7 +430,6 @@ const userAppAdoption = new UserAppAdoption({
  */
 const hostMailbox = hostMail(store, mailSessionsOf(mgr, () => commandsFor('assistant').includes('mail')), { hostId: hubSelfId(store) })
 const mailDelivery = hostMailbox.delivery
-hostMailbox.service.onChange((c) => events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person') }))
 mgr.mail.useMail(hostMailbox.hooks)
 // The person's side of the mailbox (§12, M3a-person): the window reads and writes the message tables through the host's one message service
 const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelivery, {
@@ -449,6 +448,11 @@ const mailPerson = new MailPerson(hostMailbox.service, store.mailbox, mailDelive
   },
   tellsNow: (id) => mgr.mail.tellsMailNow(id),
   tell: (id, text) => mgr.mail.tellMailNow(id, text),
+})
+// Every window hears of a change to a chain; a new message the person can read also names itself, for the OS notification (#1630)
+hostMailbox.service.onChange((c) => {
+  const arrived = c.arrived && c.recipients.includes('person') ? mailPerson.arrival(c.messageId) : undefined
+  events.push({ type: 'mail_changed', threadId: c.rootId, toPerson: c.recipients.includes('person'), ...(arrived ? { arrived } : {}) })
 })
 // Terminal and command output can arrive before the server exists: a restarted one writes as it starts (HO11, lifecycle/gate.ts)
 const terminals = new TerminalService(screens.push, ptyBroker ? brokerPtyModule(ptyBroker) : undefined)

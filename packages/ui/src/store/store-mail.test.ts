@@ -204,3 +204,20 @@ describe('mail held for the person', () => {
     ])
   })
 })
+
+describe('the OS notification for mail (#1630)', () => {
+  it('a new message the host names raises one notification and one alert through the system port; any other change raises none', () => {
+    const platform = attached()
+    useStore.setState({ appFocused: false })
+    const at = { type: 'mail_changed', threadId: 'm1', toPerson: true } as const
+    useStore.getState().dispatchEvent({ ...at, arrived: { messageId: 'm1', from: worker, kind: 'question', preview: 'Which branch?' } })
+    useStore.getState().dispatchEvent({ ...at, arrived: { messageId: 'm2', from: { address: 'centralu', kind: 'centralu', sessionId: null, name: null, state: null }, kind: 'notice', preview: 'Done.' } })
+    // A read mark, a close, the person's own message: no `arrived`
+    useStore.getState().dispatchEvent(at)
+    expect(platform.notifications).toEqual([
+      { title: 'Question from Parser', body: 'Which branch?' },
+      { title: 'Mail from Centralu', body: 'Done.' },
+    ])
+    expect(platform.alerts.map((a) => a.kind)).toEqual(['approval', 'done'])
+  })
+})

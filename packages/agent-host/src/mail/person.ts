@@ -435,6 +435,14 @@ export class MailPerson {
 
   // ── Shapes ──
 
+  /** A new message as the person's notification names it (`mail_changed.arrived`, #1630): one they can read, not their own */
+  arrival(messageId: string): { messageId: string; from: MailParty; kind: string; preview: string } | undefined {
+    const m = this.records.message(messageId)
+    const row = this.records.recipient(messageId, PERSON)
+    if (!m || !row || m.sender === PERSON || hiddenFromPerson(row) || row.held !== null) return undefined
+    return { messageId, from: this.party(m.sender), kind: windowKind(m), preview: oneLineText(m.body, PREVIEW_CHARS) }
+  }
+
   private party(address: string): MailParty {
     const p = parseAddress(address)
     if (p?.kind === 'session') {

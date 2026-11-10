@@ -91,7 +91,7 @@ type NormalizedEvent =
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 자식을 넘겨받은 세션으로 옮겼다(원래 세션이 없어지면 정리된 자식도, #738). 사이드바는 그 아래에 둔다. #1038: 허브가 연결된 기계의 자식을 띄운 자기 세션을 알릴 때도(그 세션이 없어지면 null)
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352)는 기본값 false
-  | { type: 'mail_changed';     threadId, toPerson? }          // #1347: 메일함의 스레드가 바뀌었다. Inbox가 다시 읽는다. 앱 전체 이벤트이며 연결된 기계에서 오면 넘기지 않는다
+  | { type: 'mail_changed';     threadId, toPerson?, arrived? } // #1347: 메일함의 스레드가 바뀌었다. Inbox가 다시 읽는다. 앱 전체 이벤트이며 연결된 기계에서 오면 넘기지 않는다. `arrived`(#1630): 사람이 읽을 수 있는 새 메시지(사람 자신의 것은 아님, { messageId, from: MailParty, kind, preview }). 창은 메시지마다 OS 알림을 하나 띄운다
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다

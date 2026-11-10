@@ -696,3 +696,22 @@ describe('work a script started (§8.1, #1468)', () => {
     expect(read).not.toContain('The person wrote it.')
   })
 })
+
+describe('what the person is notified of (#1630)', () => {
+  it('each new message they can read, once and of any kind; not their own, and not a change to one stored', () => {
+    const w = hostWorld()
+    const { person } = ready(w)
+    const arrived: string[] = []
+    w.service.onChange((c) => {
+      const a = c.arrived && c.recipients.includes(PERSON) ? person.arrival(c.messageId) : undefined
+      if (a) arrived.push(`${a.kind} ${a.from.address}: ${a.preview}`)
+    })
+    const q = w.mail.send(A, { to: [PERSON], text: 'Which branch?' }).message
+    w.mail.send(A, { to: [PERSON], text: 'Done.', needsReply: false })
+    w.service.notice(PERSON, { body: 'A warning from Centralu', facts: {}, dedupeKey: 'test:1' })
+    // The person's own answer, and their reading of the question: no notification
+    person.reply(q.id, 'main', 'answer')
+    person.thread(q.id)
+    expect(arrived).toEqual([`question ${A}: Which branch?`, `note ${A}: Done.`, 'notice centralu: A warning from Centralu'])
+  })
+})

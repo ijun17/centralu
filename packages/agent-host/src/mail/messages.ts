@@ -138,7 +138,8 @@ export type DrainResult = {
   asker: string | null
 }
 
-export type MailChange = { messageId: string; rootId: string; recipients: string[] }
+/** `arrived`: the message itself is new, not a change to one already stored (what the person's OS notification is raised for, #1630) */
+export type MailChange = { messageId: string; rootId: string; recipients: string[]; arrived?: true }
 
 export class MessageService {
   private readonly now: () => number
@@ -215,7 +216,7 @@ export class MessageService {
     const merged = new Map<string, MailChange>()
     for (const c of this.queued) {
       const kept = merged.get(c.messageId)
-      merged.set(c.messageId, kept ? { ...kept, recipients: [...new Set([...kept.recipients, ...c.recipients])] } : c)
+      merged.set(c.messageId, kept ? { ...kept, ...c, recipients: [...new Set([...kept.recipients, ...c.recipients])], ...(kept.arrived ? { arrived: true } : {}) } : c)
     }
     this.queued = []
     for (const c of merged.values()) this.listeners.emit(c)
@@ -1016,7 +1017,7 @@ export class MessageService {
       if (e instanceof MailTargetMissing) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(e.replyTo))
       throw e
     }
-    if (!stored.duplicate) this.changed(stored, rows.map((r) => r.recipient))
+    if (!stored.duplicate) this.queued.push({ messageId: stored.id, rootId: stored.rootId, recipients: rows.map((r) => r.recipient), arrived: true })
     return stored
   }
 

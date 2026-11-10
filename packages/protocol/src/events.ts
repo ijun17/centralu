@@ -21,6 +21,7 @@ import {
   UpdateStatus,
   HostRequest,
   HostRequestOutcome,
+  MailParty,
 } from './entities.js'
 import { MachineInfo } from './machines.js'
 import { HostHandover } from './host-logon.js'
@@ -804,6 +805,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     type: z.literal('mail_changed'),
     threadId: z.string(),
     toPerson: z.boolean().default(false),
+    /**
+     * A new message the person can read, from anyone but the person (#1630): what the window raises an OS notification for, once per
+     * message. Absent for any other change, and from a host before it
+     */
+    arrived: z.object({ messageId: z.string(), from: MailParty, kind: z.string(), preview: z.string() }).optional(),
   }),
   /**
    * An agent asked to apply the installed update (#665, `update_centralu` action "apply"): each window that hears this
