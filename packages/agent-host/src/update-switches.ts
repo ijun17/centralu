@@ -1,4 +1,5 @@
 import { flagSetting, type SettingAccess } from './dev-services/store/settings.js'
+import { isInside, samePath, type OsFamily } from './os/rules.js'
 
 /** Where the two update switches live in the store's settings table */
 export const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
@@ -38,6 +39,8 @@ export type InstallFacts = {
   /** Where `centralu install` puts the desktop app on this OS (`installedCopyPath`) */
   installedCopy: string
   env: Record<string, string | undefined>
+  /** Whose rules the paths are compared by (`familyOf()`) */
+  family: OsFamily
 }
 
 /**
@@ -56,7 +59,7 @@ export type InstallFacts = {
 export function installsByDefault(f: InstallFacts): boolean {
   if (f.build === 'dev' || inCi(f.env)) return false
   if (f.startedBy === 'app') return true
-  return f.startedBy === 'keeper' && f.bundlePath !== null && samePath(f.bundlePath, f.installedCopy)
+  return f.startedBy === 'keeper' && f.bundlePath !== null && samePath(f.bundlePath, f.installedCopy, f.family)
 }
 
 /**
@@ -75,19 +78,12 @@ export function installsByDefault(f: InstallFacts): boolean {
  * `entry` is the script this host runs from (`process.argv[1]`), `hubInstall` where a linked hub installs Centralu in
  * this data folder (`<data>/remote`, links/install.ts).
  */
-export function copyFollowsHost(f: Pick<InstallFacts, 'build' | 'startedBy' | 'env'> & { entry: string | undefined; hubInstall: string; swapMayPrompt: boolean }): boolean {
+export function copyFollowsHost(f: Pick<InstallFacts, 'build' | 'startedBy' | 'env' | 'family'> & { entry: string | undefined; hubInstall: string; swapMayPrompt: boolean }): boolean {
   if (f.build === 'dev' || inCi(f.env) || f.startedBy !== 'serve' || !f.entry || f.swapMayPrompt) return false
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  return norm(f.entry).startsWith(`${norm(f.hubInstall)}/`)
+  return isInside(f.hubInstall, f.entry, f.family) && !samePath(f.hubInstall, f.entry, f.family)
 }
 
 /** `CI` set to anything but empty, `0` or `false` */
 function inCi(env: Record<string, string | undefined>): boolean {
   return env.CI !== undefined && env.CI !== '' && env.CI !== '0' && env.CI.toLowerCase() !== 'false'
-}
-
-/** Two paths the same once trailing separators are dropped */
-function samePath(a: string, b: string): boolean {
-  const trim = (p: string) => p.replace(/[\\/]+$/, '')
-  return trim(a) === trim(b)
 }

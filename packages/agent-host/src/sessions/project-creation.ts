@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, resolve } from 'node:path'
 import type { GitSource, ProjectInfo, RpcResult } from '@cc/protocol'
 import { gitSourceError, projectAddQuestion, repoNameOf } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
@@ -10,7 +10,8 @@ import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { canonicalPath } from '../dev-services/path-guard.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
-import { traitsFor } from '../os.js'
+import { familyOf, traitsFor } from '../os.js'
+import { expandHome } from '../os/rules.js'
 import { rpcError } from '../rpc-error.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
@@ -76,7 +77,7 @@ export class ProjectCreation {
    */
   async inspectFolder(given: string): Promise<FolderFacts> {
     const typed = given.trim()
-    const expanded = /^~(?=$|[\\/])/.test(typed) ? join(homedir(), typed.slice(1)) : typed
+    const expanded = expandHome(typed, homedir(), familyOf()) ?? typed
     if (!expanded || !isAbsolute(expanded)) throw rpcError(`Give the folder's full path: ${JSON.stringify(given)} is not one`)
     // Spelled as addProject keeps a new one: no trailing separator, a capital drive letter
     const path = resolve(expanded).replace(/^[a-z]:/, (drive) => drive.toUpperCase())

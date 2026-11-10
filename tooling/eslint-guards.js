@@ -305,6 +305,30 @@ const heldFiles = guard('held-files', { held: "'{{name}}' from node:fs refuses a
   }
 })
 
+const PATH_RULES = new Set(['pathKey', 'samePath', 'expandHome'])
+const TILDE = new Set(['~/', '~' + String.fromCharCode(92)])
+/**
+ * How two paths compare and what a leading `~` is are each written once, in os/rules.ts (#847, #2160): a second `pathKey`,
+ * `samePath` or `expandHome` exported elsewhere, a `startsWith('~/')` and a `/^~…/` pattern are copies that drift.
+ */
+const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path rule: use pathKey, samePath, isInside or expandHome from os/rules.ts (#2160)" }, (_context, add) => {
+  const exported = (node, name) => PATH_RULES.has(name) && add(node, 'copy', { what: `an exported '${name}'` })
+  return {
+    ExportNamedDeclaration(node) {
+      const d = node.declaration
+      if (d?.type === 'FunctionDeclaration' && d.id) exported(d.id, d.id.name)
+      if (d?.type === 'VariableDeclaration') for (const v of d.declarations) if (v.id.type === 'Identifier') exported(v.id, v.id.name)
+      for (const s of node.specifiers ?? []) if (s.exported.type === 'Identifier') exported(s, s.exported.name)
+    },
+    CallExpression(node) {
+      if (node.callee.type === 'MemberExpression' && nameOf(node.callee.property) === 'startsWith' && TILDE.has(plain(node.arguments[0]))) add(node, 'copy', { what: "startsWith('~/')" })
+    },
+    Literal(node) {
+      if (node.regex?.pattern.startsWith('^~')) add(node, 'copy', { what: `/${node.regex.pattern}/` })
+    },
+  }
+})
+
 /** The protocol does not know about vendors (#59): no tool name in its code */
 const noToolNames = guard('no-tool-names', { tool: "the protocol names a tool ('{{text}}'): an adapter introduces itself, so a vendor is never written on the shelf both sides reach (#59)" }, (_context, add) => {
   const re = /\b(claude|codex)\b/i
@@ -435,6 +459,7 @@ export const guards = {
     'no-sleeps': noSleeps,
     'assistant-kind': assistantKind,
     'held-files': heldFiles,
+    'one-path-rule': onePathRule,
     ...tsRules,
   },
 }
@@ -471,6 +496,8 @@ export const guardConfigs = [
     ignores: [...TESTS, `${HOST_SRC}/os/real.ts`, `${HOST_SRC}/os/kill-tree.ts`, `${HOST_SRC}/env-path.ts`, `${HOST_SRC}/tool-launch.ts`, `${HOST_SRC}/links/remote-install.mjs`],
     rules: { 'guard/timed-start': 'error' },
   },
+  // The path rules are written in os/rules.ts alone
+  { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/rules.ts`], rules: { 'guard/one-path-rule': 'error' } },
   // The real Os is where Node's rename and removal are made to wait out a hold (os/held.ts)
   { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/real.ts`], rules: { 'guard/held-files': 'error' } },
   { files: [`${HOST_SRC}/**/*.ts`], ignores: TESTS, rules: { 'guard/no-hand-coded-error': 'error', 'guard/purge-callers': 'error', 'guard/subagent-purge-callers': 'error' } },

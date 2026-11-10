@@ -304,6 +304,27 @@ describe('guard/held-files', () => {
   })
 })
 
+describe('guard/one-path-rule', () => {
+  const file = 'packages/agent-host/src/dev-services/x.ts'
+  it.each([
+    ['export function pathKey(p: string) { return p }'],
+    ['export const samePath = (a: string, b: string) => a === b'],
+    ['function expandHome() {}' + NL + 'export { expandHome }'],
+    ["if (p.startsWith('~/')) p = home"],
+    ['const home = /^~(?=$|[/])/.test(p)'],
+  ])('reports %s', async (code) => {
+    expect((await lines(file, code, 'one-path-rule')).length).toBeGreaterThan(0)
+  })
+  it.each([["if (p.startsWith('~')) note()"], ['function pathKey(p: string) { return p }'], ["import { pathKey } from '../os/rules.js'"], ['const r = /~$/']])('does not report %s', async (code) => {
+    await quiet(file, 'one-path-rule', code, "p.startsWith('~/')")
+  })
+  it('lets os/rules.ts and tests through', async () => {
+    const code = 'export function pathKey(p: string) { return p }'
+    expect(await lines('packages/agent-host/src/os/rules.ts', code, 'one-path-rule')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/x.test.ts', code, 'one-path-rule')).toEqual([])
+  })
+})
+
 describe('guard/no-hand-coded-error', () => {
   const file = 'packages/agent-host/src/x.ts'
   it.each([

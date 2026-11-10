@@ -41,7 +41,7 @@ import { CommandRunner } from './dev-services/commands.js'
 import { ensureToolPath } from './env-path.js'
 import { hubUpdatesMachines, UpdateService } from './updates.js'
 import { copyFollowsHost, installsByDefault, updateSwitches } from './update-switches.js'
-import { copySwapMayPrompt, installedCopyPath } from './os.js'
+import { copySwapMayPrompt, familyOf, installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
@@ -482,6 +482,7 @@ const installByDefault = installsByDefault({
   bundlePath: hostBuild(BUILD, launch.keeperSource).bundlePath ?? null,
   installedCopy: installedCopyPath(),
   env: process.env,
+  family: familyOf(),
 })
 const { auto: autoUpdateCheck, autoApply: autoApplyUpdates } = updateSwitches(store.settings, { installByDefault })
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
@@ -979,7 +980,7 @@ setTimeout(() => {
  */
 updates.start()
 // A host a linked hub installed brings this machine's desktop copy to its own version (#1736): the hub's update has none
-if (copyFollowsHost({ build: BUILD, startedBy: launch.startedBy, env: process.env, entry: process.argv[1], hubInstall: join(dataRoot(), 'remote'), swapMayPrompt: copySwapMayPrompt() })) {
+if (copyFollowsHost({ build: BUILD, startedBy: launch.startedBy, env: process.env, entry: process.argv[1], hubInstall: join(dataRoot(), 'remote'), swapMayPrompt: copySwapMayPrompt(), family: familyOf() })) {
   void updates.followHost()
 }
 // The linked machines (#82): each opens its ssh link in the background and reports through `machine_status`
