@@ -262,9 +262,16 @@ export type StartOptions = {
   /** One entry per fd from 0; default three pipes */
   stdio?: readonly OsStdio[]
   /**
-   * Contained (the default): the root of a tree the host can end and sweep. On POSIX the child leads a process
-   * group of its own (`detached`); on Windows it is started attached, and its leftovers are found by parent links
-   * after it ends. Always without a window on Windows. `false` starts it in the host's group.
+   * Whether the child leads a tree of its own, by what it is. One rule:
+   * - **Contained (the default)** is a child that the host itself ends, by its own step at shutdown or its own stop, and
+   *   that keeps running for a supervisor's signal to the host's group: an agent CLI, a terminal's shell, an app, a git call
+   *   (it has `stopAll`). On POSIX it leads a process group of its own (`detached`); on Windows it is started attached,
+   *   and its leftovers are found by parent links after it ends.
+   * - **`false`** is a child that must not outlive the host and that no step of its own ends: an ssh forward, a probe of
+   *   a tool's version, a setup script. It stays in the host's group, so whatever supervises the host ends it with the
+   *   group (`host_proc.rs`'s `kill_group` after the host has gone, also when the host crashed), and a stop still ends
+   *   what it started (`killTree` signals the members of its tree that stand in the host's group, one by one).
+   * Always without a window on Windows.
    */
   contained?: boolean
 }
@@ -332,6 +339,8 @@ export type RunOptions = {
   stderrKeep?: { bytes: number; from: 'head' | 'tail' }
   /** The grace an ending gives the program before the second shot (default `RUN_STOP_GRACE_MS`, 2 s) */
   stopGraceMs?: number
+  /** See `StartOptions.contained` (default true: a run is a tree of its own) */
+  contained?: boolean
 }
 
 export type RunResult = OsExit & {

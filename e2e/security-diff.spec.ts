@@ -391,6 +391,27 @@ test('copying a truncated diff with ⌘A does not mix the notice into the clipbo
   expect(copied).toBe(diff)
 })
 
+/**
+ * The first diff row that shows below the file band (the band covers everything above it), once a scroll has been rendered.
+ *
+ * A scroll is taken up in steps: WebKit sends the `scroll` event with the next frame, the virtualizer reads it then, and React
+ * renders its answer in a task of its own. Two animation frames after `scrollTop` was set are not always enough on WebKit (a run
+ * that measured earlier read the rows of the old scroll, or none), so the page is asked until a row beyond `after` shows, never
+ * after a fixed wait. (A scroll set before the diff has its rows stays at 0: the caller waits for the scrollable height first.) The rows and `place` (what Open in IDE sends) come from the same render, so a row read here is the one
+ * the click then reports.
+ */
+async function topRowBelowBand(page: Page, after: number): Promise<number> {
+  const measure = () =>
+    page.locator('[data-testid="diff-view"] .overflow-auto').evaluate((root) => {
+      const band = root.querySelector('[data-testid="diff-current-file-band"]')
+      const top = (band ?? root).getBoundingClientRect().bottom
+      const rows = [...root.querySelectorAll<HTMLElement>('[data-line]')].filter((r) => r.getBoundingClientRect().bottom > top + 0.5).map((r) => Number(r.dataset.line))
+      return rows.length === 0 ? 0 : Math.min(...rows)
+    })
+  await expect.poll(measure).toBeGreaterThan(after)
+  return measure()
+}
+
 /** If it opens at line 1 instead of the line that was being looked at, "go open it in your IDE" is only half true (#122) */
 test('the IDE opens at the line currently being viewed', async ({ page }) => {
   const body = Array.from({ length: 400 }, (_, i) => `+line-${String(i).padStart(3, '0')}`).join('\n')
@@ -398,26 +419,13 @@ test('the IDE opens at the line currently being viewed', async ({ page }) => {
   await openWorkingDiff(page, 'src/long.ts', diff)
 
   // Row 0 is `diff --git`, row 1 is `@@`, row 2 is line 1 of the new file
-  await page.evaluate(() => {
-    const root = document.querySelector<HTMLElement>('[data-testid="diff-view"] .overflow-auto')
-    if (!root) throw new Error('diff scroll root not found')
+  // The frame shows before the rows do: a scrollTop set while the diff is still empty is clamped to 0 and stays there
+  const scrollRoot = page.locator('[data-testid="diff-view"] .overflow-auto')
+  await expect.poll(() => scrollRoot.evaluate((root) => root.scrollHeight - root.clientHeight)).toBeGreaterThan(2_000)
+  await scrollRoot.evaluate((root) => {
     root.scrollTop = 2_000
   })
-  // Virtual scroll re-renders once more after scrollTop is set — measuring before that render finds no visible rows.
-  // The reference for "top" is not the pane's upper edge but **below the band**: the band covers everything above it.
-  const topRow = await page
-    .locator('[data-testid="diff-view"] .overflow-auto')
-    .evaluate(async (root) => {
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-      const band = root.querySelector('[data-testid="diff-current-file-band"]')
-      const top = (band ?? root).getBoundingClientRect().bottom
-      const rows = [...root.querySelectorAll<HTMLElement>('[data-line]')]
-        .filter((r) => r.getBoundingClientRect().bottom > top + 0.5)
-        .map((r) => Number(r.dataset.line))
-      if (rows.length === 0) throw new Error('no diff row is visible after scrolling')
-      return Math.min(...rows)
-    })
-  expect(topRow).toBeGreaterThan(50)
+  const topRow = await topRowBelowBand(page, 50)
 
   await page.getByTestId('open-in-ide').click()
   await expect
@@ -464,19 +472,7 @@ test('Open in IDE also opens the file and line currently being viewed in a commi
   await expect(page.getByTestId('diff-current-file-band')).toContainText('src/second.ts')
 
   // The second file's rows start at 82 (`diff --git`) and 83 (`@@`), so new-file line = row − 83
-  const topRow = await page
-    .locator('[data-testid="diff-view"] .overflow-auto')
-    .evaluate(async (root) => {
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-      const band = root.querySelector('[data-testid="diff-current-file-band"]')
-      const top = (band ?? root).getBoundingClientRect().bottom
-      const lines = [...root.querySelectorAll<HTMLElement>('[data-line]')]
-        .filter((r) => r.getBoundingClientRect().bottom > top + 0.5)
-        .map((r) => Number(r.dataset.line))
-      if (lines.length === 0) throw new Error('no diff row is visible after scrolling')
-      return Math.min(...lines)
-    })
-  expect(topRow).toBeGreaterThan(83)
+  const topRow = await topRowBelowBand(page, 83)
 
   await page.getByTestId('open-in-ide').click()
   await expect

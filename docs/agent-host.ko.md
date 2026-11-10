@@ -1329,7 +1329,7 @@ id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙
 **에이전트.** 호스트가 CLI를 직접 띄운다. Claude도 `spawnClaudeCodeProcess`로 그렇게 한다(`adapters/local-process.ts`).
 macOS와 Linux에서는 CLI가 자기 프로세스 그룹을
 갖는다. 멈춤은 `kill-tree.ts`의 방식이다: 트리의 모든 그룹에 TERM, 3초 뒤 살아남은 것에 KILL. 끝난 뒤에는 그 그룹을 같은
-방식으로 쓸어 낸다(`stopGroup`). Windows에서 멈춤은 트리에 `taskkill /T /F`이고, 끝난 뒤에는 남긴 것을 부모 링크와 생성
+방식으로 쓸어 낸다(`stopGroup`). Windows에서 멈춤은 프로세스 표를 읽은 뒤 CLI만 먼저 끝내고 표가 보여 준 그 아래를 부모부터 끝낸다(표를 못 읽을 때만 `taskkill /T`, #2141). 끝난 뒤에는 남긴 것을 부모 링크와 생성
 시각으로 찾아 끝낸다(`collectOrphansWindows`). 이때 기준이 되는 시작 시각은 띄우기 전에 잰다. 띄우기와 쓸어 내기는 앱
 프로세스와 같은 코드를 쓴다(`dev-services/grouped-child.ts`: `spawnGrouped`, `sweepExited`). 에이전트 CLI는 자기 도우미를 띄운다: Claude Code의 LSP 도구는
 `typescript-language-server`를 띄우고 그것이 `tsserver`를 띄운다(하나가 3.4 GB까지 갔다). 사용자 설정의 MCP 서버, 셸도

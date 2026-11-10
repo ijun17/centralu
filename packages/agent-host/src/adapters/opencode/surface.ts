@@ -1,13 +1,11 @@
-import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
 import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
 import { findOpenCode } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
+import { execText } from '../../os/exec.js'
 
-const exec = promisify(execFile)
 
 /**
  * What the installed OpenCode offers (#270), read without a session and without a login: its `--help` commands, the
@@ -18,8 +16,8 @@ async function gather(): Promise<SurfaceInputs> {
   const install = findOpenCode()
   if (!install) throw new Error('OpenCode is not installed on this machine (npm i -g opencode-ai)')
   const [{ stdout: version }, shown] = await Promise.all([
-    exec(install.command, [...install.args, '--version'], { timeout: 30_000, windowsHide: true }),
-    exec(install.command, [...install.args, '--help'], { timeout: 30_000, windowsHide: true }),
+    execText(install.command, [...install.args, '--version'], { timeoutMs: 30_000 }),
+    execText(install.command, [...install.args, '--help'], { timeoutMs: 30_000 }),
   ])
   // Measured: its help goes to stderr
   const help = shown.stdout + shown.stderr

@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process'
 import { lstat, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { execText, type ExecFailure } from '../os/exec.js'
 
 /** How much the entries git ignores take on disk (`gitIgnoredEntries`): du where it runs, a file system walk elsewhere. */
 
@@ -11,12 +11,12 @@ const SIZE_BUDGET_MS = 5000
 export async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
   const sizes = new Map<string, number>()
   try {
-    const out = await new Promise<string>((resolve, reject) => {
-      execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20, windowsHide: true }, (err, stdout) =>
-        // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
-        stdout ? resolve(stdout) : reject(err ?? new Error('du answered nothing')),
-      )
-    })
+    // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
+    const out = await execText('du', ['-sk', ...paths], { cwd, timeoutMs: SIZE_BUDGET_MS, maxBuffer: 1 << 20 }).then(
+      (r) => r.stdout,
+      (e: ExecFailure) => e.stdout ?? '',
+    )
+    if (out.length === 0) throw new Error('du answered nothing')
     for (const line of out.split('\n')) {
       const [kb, ...rest] = line.split('\t')
       const p = rest.join('\t').trim()

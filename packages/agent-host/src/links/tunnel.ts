@@ -1,4 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import type { OsChild } from '../os/port.js'
+import { realOs } from '../os/real.js'
 import { oneLineText } from '@cc/protocol'
 import { createHash } from 'node:crypto'
 import { asObj, tryParseJson } from '../json-value.js'
@@ -823,9 +824,9 @@ export type SshTunnelOptions = {
  *   ssh itself starts here (a `ProxyCommand`, `ProxyJump`'s second ssh) ssh ends on SIGTERM.
  */
 export class SshTunnel implements Tunnel {
-  private child: ChildProcess | null = null
+  private child: OsChild | null = null
   /** The asking ssh runs, while they run */
-  private readonly asking = new Set<ChildProcess>()
+  private readonly asking = new Set<OsChild>()
   private downListeners: ((reason: string) => void)[] = []
   private closing = false
   /**
@@ -833,7 +834,7 @@ export class SshTunnel implements Tunnel {
    * exit is not the link going down. Reported as down, a reopen of a live link made the link retry,
    * and that retry's reopen ended the new forward again, every few seconds without end
    */
-  private readonly ended = new WeakSet<ChildProcess>()
+  private readonly ended = new WeakSet<OsChild>()
   /** The remote cannot start a host outside a session (WMI blocked): the forward runs it (`startHost`) */
   private linkBound = false
 
@@ -1014,7 +1015,7 @@ export class SshTunnel implements Tunnel {
    * what it is read for is the last line. Closing the tunnel ends the ssh runs still in flight.
    */
   private run(args: string[], stdin: string | undefined, timeoutMs: number, expect?: readonly SshExpectedLine[]): Promise<SshRunResult> {
-    let child: ChildProcess | null = null
+    let child: OsChild | null = null
     // Once the run has settled, a stopped ssh is `endChild`'s to finish: closing has nothing more to end
     return runSsh({ ssh: this.opts.ssh, args, env: this.opts.env, stdin, timeoutMs, expect, label: this.opts.target, onChild: (c) => this.asking.add((child = c)) }).finally(() => {
       if (child) this.asking.delete(child)
@@ -1092,7 +1093,7 @@ export class SshTunnel implements Tunnel {
       '--', this.opts.target,
       ...(keepAlive ? [keepAlive] : []),
     ]
-    const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+    const child = realOs().processes.start(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'ignore', 'pipe'], contained: false })
     this.child = child
     /*
      * Only the end is kept: this ssh lives as long as the link, and in link-bound mode the remote host's
@@ -1310,7 +1311,7 @@ function ansiText(bytes: Buffer): string | null {
     ansiDecoder = null
     if (process.platform !== 'win32') return null
     try {
-      const out = execFileSync(systemTool(['reg.exe']), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      const out = realOs().processes.runSync(systemTool(['reg.exe']), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { timeoutMs: 5000 }).stdout
       const page = /\bACP\s+REG_SZ\s+(\d+)/.exec(out)?.[1]
       if (page) ansiDecoder = new TextDecoder(CODE_PAGE_NAMES[page] ?? `windows-${page}`, { fatal: true })
     } catch {

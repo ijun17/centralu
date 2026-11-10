@@ -3,8 +3,9 @@
  * in, that every one runs, and that leaving happens once.
  */
 import { describe, expect, it } from 'vitest'
+import { STOPS_SETTLE_MS } from '../os/kill-tree.js'
 import { both, runSteps, type Step } from './steps.js'
-import { Shutdown, stopPlan, type HostParts } from './shutdown.js'
+import { SHUTDOWN_BOUND_MS, Shutdown, stopPlan, type HostParts } from './shutdown.js'
 
 function steps(log: string[], spec: [string, 'ok' | 'throw' | 'reject' | 'async'][]): Step[] {
   return spec.map(([name, how]) => ({
@@ -74,6 +75,7 @@ function parts() {
     compaction: { stop: rec('compaction') },
     mailDelivery: { stop: rec('mail delivery') },
     stopActivity: rec('activity'),
+    stops: { settled: async () => void did.push('stops') },
     git: { stopAll: async () => void did.push('git') },
     links: { stop: async () => void did.push('links') },
     apps: { dispose: async () => void did.push('apps') },
@@ -124,6 +126,21 @@ describe('the stop plan (HO8)', () => {
     expect(f.did.slice(-2)).toEqual(['server', 'store'])
     expect(f.did.indexOf('views')).toBeLessThan(f.did.indexOf('server'))
     expect(f.did.indexOf('sessions end')).toBeLessThan(f.did.indexOf('server'))
+  })
+
+  it('the host does not exit before the process stops it started have ended (a terminal hidden child, Windows)', async () => {
+    const f = parts()
+    f.releaseSessions()
+    let ended!: () => void
+    f.p.stops = { settled: () => (f.did.push('stops wait'), new Promise<void>((r) => (ended = r))) }
+    const run = runSteps(stopPlan(f.p), () => {})
+    await new Promise((r) => setImmediate(r))
+    expect(f.did).toContain('stops wait')
+    expect(f.did).not.toContain('server')
+    expect(f.did).not.toContain('store')
+    ended()
+    await run
+    expect(f.did.slice(-3)).toEqual(['stops wait', 'server', 'store'])
   })
 
   it('a service that fails to stop does not keep the server or the store open', async () => {
@@ -268,5 +285,11 @@ describe('leaving, once (HO8)', () => {
     await t.s.leave()
     t.fireBound()
     expect(t.exits).toEqual([0])
+  })
+})
+
+describe('the bounds of a shutdown, one number each', () => {
+  it("the wait for the process stops fits inside the host's own bound", () => {
+    expect(STOPS_SETTLE_MS).toBeLessThan(SHUTDOWN_BOUND_MS)
   })
 })

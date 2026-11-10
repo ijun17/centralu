@@ -153,6 +153,9 @@ fn same_user(peer: io::Result<u32>, me: u32) -> Result<(), String> {
 
 // ---- The host process (`host_proc`): how it is started, signalled and stopped.
 
+/// How long a host gets after the polite request (`host_proc::STOP_GRACE`): the first shot of every stop is sent before the host goes on, so 3 s is enough.
+pub const STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// On unix stdin is kept open until the end, so EOF does not race the signal into a second
 /// `shutdown()` (`host_proc::stop_pid_gracefully`).
 pub const CLOSE_STDIN_TO_STOP: bool = false;

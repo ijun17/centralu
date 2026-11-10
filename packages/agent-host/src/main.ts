@@ -53,6 +53,7 @@ import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-crede
 import { realOs } from './os/real.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import { stopGitChildren } from './dev-services/git-exec.js'
+import { stopsSettled } from './os/kill-tree.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
@@ -916,6 +917,7 @@ const shutdown = new Shutdown({
       compaction: { stop: () => mgr.stopSelfCompaction() },
       mailDelivery,
       stopActivity: () => stopActivity(),
+      stops: { settled: () => stopsSettled() },
       git: { stopAll: () => stopGitChildren() },
       links,
       apps: externalApps,

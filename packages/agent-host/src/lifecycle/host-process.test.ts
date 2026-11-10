@@ -18,6 +18,7 @@ import { SYSTEM_END_FILE } from './system-end.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
+import { alive, pidIn } from '../process.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 const MAIN = 'packages/agent-host/src/main.ts'
@@ -384,6 +385,39 @@ describe('the host process, started for real', () => {
   it('an update stop brings the terminals and Run commands back at the next start, and a plain stop does not (#1902)', () => bringsBack(stops.hub), 180_000 * SLOW)
   it("the same for the window's stop line on the host's stdin (#1895)", () => bringsBack(stops.window), 180_000 * SLOW)
   it("the same for the keeper's stop line, which a keeper with no child service sends (#1895 step 3)", () => bringsBack(stops.keeper), 180_000 * SLOW)
+
+  /*
+   * #2141 re-check: on Windows a stop of a terminal or a Run command reads the process table before it ends the tree, and the host used to exit
+   * (its stdin closed, as the keeper's stop does) while that was still going: what the shell had started in a window of its own was
+   * never ended. The shutdown waits for the stops it started (`stopsSettled`).
+   */
+  it.runIf(!posix)('Windows: a stop of the host ends what two terminals started hidden, before the host is gone (#2141)', async () => {
+    const s = setup()
+    const project = join(s.dir, 'project')
+    mkdirSync(project)
+    const idle = join(s.dir, 'idle.js')
+    writeFileSync(idle, "require('node:fs').writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000)")
+    const pidFiles = [join(s.dir, 'hidden-1.pid'), join(s.dir, 'hidden-2.pid')]
+    const host = startHost(s, ['--watch-parent'], { CC_HOST_TOKEN_ON_STDIN: '1', CC_KEEPER: '1' })
+    host.p.stdin.write(JSON.stringify({ token }) + String.fromCharCode(10))
+    const port = await host.ready
+    let hidden: number[] = []
+    try {
+      const { id } = (await rpc(port, token, 'projects.add', { path: project })) as { id: string }
+      // Terminals, as the person's: each shell is a pty child, and the line is typed to it
+      const terminals = await Promise.all(pidFiles.map(() => rpc(port, token, 'terminal.create', { projectId: id, cols: 500, rows: 20 }) as Promise<{ terminalId: string }>))
+      await settle(4000) // the shells are up before they are typed to
+      await Promise.all(
+        terminals.map((t, i) => rpc(port, token, 'terminal.input', { terminalId: t.terminalId, data: `Start-Process -WindowStyle Hidden -FilePath node -ArgumentList '${idle}','${pidFiles[i]!}'` + String.fromCharCode(13) })),
+      )
+      hidden = await Promise.all(pidFiles.map((file) => pidIn(file, 30_000 * SLOW)))
+      host.p.stdin.end()
+      expect(await exitsSoon(host)).toBe(0)
+      expect(hidden.filter(alive)).toEqual([])
+    } finally {
+      for (const pid of hidden) if (alive(pid)) process.kill(pid)
+    }
+  }, 180_000 * SLOW)
 
   /*
    * #1143 under a keeper that holds no children (#1895 step 3): its stop for good came as `stop` on the child service, which said the

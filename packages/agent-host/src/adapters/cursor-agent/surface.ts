@@ -1,14 +1,12 @@
-import { execFile } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { AdapterSurface, SurfaceInputs, ToolSurface } from '../contract.js'
 import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
 import { findCursor } from './install.js'
 import { SURFACE_BASELINE } from './surface-baseline.js'
+import { execText } from '../../os/exec.js'
 
-const exec = promisify(execFile)
 
 /**
  * What the installed Cursor CLI offers (#270), read without a session and without a login: its `--help` commands, the
@@ -19,7 +17,7 @@ async function gather(): Promise<SurfaceInputs> {
   const install = findCursor()
   if (!install) throw new Error('Cursor CLI is not installed on this machine (https://cursor.com/install)')
   const env = { ...process.env, ...install.env }
-  const { stdout: help } = await exec(install.command, [...install.args, '--help'], { timeout: 30_000, windowsHide: true, env })
+  const { stdout: help } = await execText(install.command, [...install.args, '--help'], { timeoutMs: 30_000, env })
   const initialize = await acpInitialize({ command: install.command, args: [...install.args, 'acp'], env }, 'cursor-surface')
   const dir = dirname(install.args[0] ?? install.command)
   const names = new Set<string>()

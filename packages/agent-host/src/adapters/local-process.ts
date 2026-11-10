@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough, Readable, type Writable } from 'node:stream'
-import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, hasProcessGroups, killTree, noteGroups, stopGroup, stopTree, type KillOs } from '../os/kill-tree.js'
 import { killHandle, spawnGrouped, sweepLeftovers, tracked, type GroupedChild } from '../dev-services/grouped-child.js'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
@@ -23,8 +23,9 @@ import type { AgentProcess, AgentSpawnSpec } from './contract.js'
  *   CLI has exited, however it ended, its group is swept once more (`stopGroup`), which reaches the
  *   helpers that outlived it: they are no longer under it in `ps`, but they are still in its group,
  *   whose number is not reused while anyone is in it. The host's own group is never a target.
- * - **Windows** has no groups. Stopping it is `taskkill /T /F` on its tree, one forceful shot, as
- *   the SDK's and Node's own kill already were. After it has exited, what it left running is found
+ * - **Windows** has no groups. Stopping it is one forceful shot in the order of `os/kill-tree.ts`: the process table is read
+ *   while the tree is whole, the CLI is ended alone, then what it started, parents first (`taskkill /T` only when the table
+ *   cannot be read in time). After it has exited, what it left running is found
  *   by parent links and creation times and ended the same way (`collectOrphansWindows`).
  *
  * Its surface is the `ChildProcess` subset adapters use (`AgentProcess`), so it is what both the
@@ -32,7 +33,7 @@ import type { AgentProcess, AgentSpawnSpec } from './contract.js'
  */
 
 /** What this needs from the OS, as a parameter so the Windows path can be tested on any OS */
-export type LocalProcessOs = KillOs & Pick<LeftoverOs, 'listProcesses'>
+export type LocalProcessOs = KillOs
 
 export type LocalSpawnSpec = AgentSpawnSpec & {
   /** The SDK passes one: aborting it stops the process, as `spawn`'s own `signal` option would */
@@ -244,7 +245,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   /**
    * Stops the CLI and what it started (see the file header). TERM is the polite one, with KILL to
-   * the survivors after `KILL_GRACE_MS`; KILL is at once. On Windows every signal is `taskkill /T /F`.
+   * the survivors after `KILL_GRACE_MS`; KILL is at once. On Windows every signal is that one ordered stop.
    */
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
     if (this.ended || this.child.pid === undefined) return false
@@ -277,7 +278,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     // Groups of its own its helpers started (a shell, measured: Cursor's), which its group's sweep does not reach
     this.stopGroupClock()
     for (const g of this.groups) stopGroup(g, KILL_GRACE_MS)
-    void sweepLeftovers(this.started, this.os?.platform, this.os?.listProcesses ? { listProcesses: this.os.listProcesses, taskkill: this.os.taskkill } : undefined).then((ended) => {
+    void sweepLeftovers(this.started, this.os?.platform, this.os).then((ended) => {
       if (ended.length > 0) console.error(`[agent] ended ${ended.length} process(es) pid ${pid} left running: ${ended.join(', ')}`)
     })
   }

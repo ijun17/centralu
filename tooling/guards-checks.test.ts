@@ -474,7 +474,7 @@ describe('guard/import-boundary', () => {
   it.each([
     ["import { a } from '../../dev-services/watch.js'"],
     ["import { a } from '../../dev-services/path-guard.js'"],
-    ["import { a } from '../../dev-services/kill-tree.js'"],
+    ["import { a } from '../../os/kill-tree.js'"],
     ["import { a } from '../../dev-services/grouped-child.js'"],
     ["import { a } from '../../dev-services/data-folder.js'"],
     ["import { a } from '../contract.js'"],
@@ -687,5 +687,30 @@ describe('the guard rules as a set', () => {
     expect(count).toBeLessThanOrEqual(37)
     expect(ARCHIVE_ALLOWED.length).toBeLessThanOrEqual(11)
     for (const a of ARCHIVE_ALLOWED) expect(a.why.length, a.text).toBeGreaterThan(10)
+  })
+})
+
+describe('guard/timed-start', () => {
+  const file = 'packages/agent-host/src/sessions/x.ts'
+  it.each([
+    ["execFile('claude', ['--version'], { timeout: 5000 }, cb)"],
+    ["execFileSync('ps', args, { encoding: 'utf8', timeout: 2000 })"],
+    ["const run = promisify(execFile)" + NL + "await run('npm', ['root'], { timeout: 60_000, windowsHide: true })"],
+    ["cp.exec(command, { cwd, timeout: 90_000 }, cb)"],
+    // Options spread from elsewhere may carry a timeout the rule cannot see (git-exec's `...DEFAULTS` did)
+    ["const run = promisify(execFile)" + NL + "await run('git', args, { cwd, ...DEFAULTS, windowsHide: true })"],
+    ["execFileSync('ps', args, { ...base, encoding: 'utf8' })"],
+  ])('reports %s', async (code) => {
+    expect((await lines(file, code, 'timed-start')).length).toBe(1)
+  })
+  it.each([["execFile('claude', ['--version'], { windowsHide: true }, cb)"], ["os.processes.run('claude', args, { timeoutMs: 5000 })"], ["setTimeout(stop, 5000)"], ["new Database(path, { timeout: 0 })"], ["spawn('node', args, { ...base, stdio: 'ignore' })"]])('does not report %s', async (code) => {
+    await quiet(file, 'timed-start', code, "execFileSync('ps', args, { timeout: 1 })")
+  })
+  it('lets the OS layer and the files that cannot ask it through, and reads tests no more than the other host guards do', async () => {
+    const code = "execFileSync('ps', args, { timeout: 2000 })"
+    expect(await lines('packages/agent-host/src/os/real.ts', code, 'timed-start')).toEqual([])
+    expect(await lines('packages/agent-host/src/os/kill-tree.ts', code, 'timed-start')).toEqual([])
+    expect(await lines('packages/agent-host/src/dev-services/other.ts', code, 'timed-start')).toEqual([1])
+    expect(await lines('packages/agent-host/src/sessions/x.test.ts', code, 'timed-start')).toEqual([])
   })
 })

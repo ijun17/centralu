@@ -264,7 +264,7 @@ describe('stopStrays', () => {
   it('says on stderr when a listing could not be read, rather than passing for an empty one', async () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      const timedOut = Object.assign(new Error('Command failed: lsof'), { killed: true, signal: 'SIGTERM' })
+      const timedOut = Object.assign(new Error('Command failed: lsof'), { ended: 'timeout' })
       const run = async (file: string) => {
         if (file === 'ps') return { stdout: '  100     1 ??       node dev.js\n' }
         throw timedOut

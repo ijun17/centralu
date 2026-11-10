@@ -58,11 +58,13 @@ export const OS_LAYER = [
   // The `Os` the host is given, on the machine itself (os/port.ts; its rules are os/rules.ts, pure, and the in-memory
   // one os/memory.ts, which touches nothing)
   'packages/agent-host/src/os/real.ts',
+  // A probe with a time limit, run through the layer's `processes.run` so that its whole tree ends with it (os/exec.ts)
+  'packages/agent-host/src/os/exec.ts',
   // Finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims, absolute paths)
   'packages/agent-host/src/env-path.ts',
   'packages/agent-host/src/tool-launch.ts',
   // Ending a process tree: groups and signals, or taskkill and parent links
-  'packages/agent-host/src/dev-services/kill-tree.ts',
+  'packages/agent-host/src/os/kill-tree.ts',
   // The terminal's and the Run button's shell
   'packages/agent-host/src/dev-services/terminal.ts',
   // How Claude Code is started on Windows (#353)

@@ -2133,7 +2133,7 @@ const HOW = detachHow(process.platform, process.env) as 'setsid' | 'wsl' | 'wmi'
  * the whole stop ends within its budget, the start ended or said to be still going.
  */
 describe('a --stop during a start (#2150)', () => {
-  const stopNow = async (d: string, o: { budgetMs?: number } = {}) => {
+  const stopNow = async (d: string, o: { budgetMs?: number; writer?: (h: unknown) => boolean | null } = {}) => {
     const lines: string[] = []
     await runStop({ env: { CC_DATA_DIR: d }, home: d, entry: SOURCE_HOST, write: (l: string) => void lines.push(l), ...o })
     return JSON.parse(lines.join('')) as { v: 1; stop: Record<string, unknown> }
@@ -2181,6 +2181,29 @@ describe('a --stop during a start (#2150)', () => {
     expect((await stopNow(d, { budgetMs: 60_000 })).stop).not.toHaveProperty('starting')
     expect(Date.now() - t0).toBeLessThan(LOCK_GRACE_MS + 10_000)
   }, 40_000 * SLOW)
+
+  // A host started in another Windows logon: the process lives, but Windows will not say when it was created, so `isWriter` answers null
+  it('counts a live host whose creation time is unreadable as having taken the folder, so a start that hung is stopped after the grace and not at the end of the budget', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    markStarting(d)
+    const holder = sleeper()
+    // Written about 2 s before the process was created: where creation times can be read, the real `isWriter` answers false (this
+    // pid is a stranger's, not the writer of that record), so a start that cannot see the writer waits out its whole budget
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: holder, started: null, at: Date.now() - 2000, by: 'app' }))
+    const t0 = Date.now()
+    expect((await stopNow(d, { budgetMs: 60_000, writer: (h) => ((h as { pid: number }).pid === holder ? null : true) })).stop).not.toHaveProperty('starting')
+    expect(Date.now() - t0).toBeLessThan(LOCK_GRACE_MS + 10_000)
+  }, 40_000 * SLOW)
+
+  it('does not count it past the time a start takes: a stranger with the number of a dead host is not the host', async () => {
+    const d = tempDir()
+    ensureServeState(d)
+    markStarting(d)
+    const holder = sleeper()
+    writeFileSync(join(d, 'host.lock'), JSON.stringify({ pid: holder, started: null, at: Date.now() - 10 * 60_000, by: 'app' }))
+    expect(await stopNow(d, { budgetMs: SHORT, writer: () => null })).toMatchObject({ stop: { starting: true } })
+  })
 
   it('ends a start whose launcher serve.pid names when the wait has used its share, the launcher and the host it started', async () => {
     const d = tempDir()

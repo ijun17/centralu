@@ -10,12 +10,7 @@ import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
  *
  * The user's real `~/.codex` is never touched. This measures by pointing at a temporary directory instead.
  */
-// Attaches a custom so promisify(execFile) resolves with {stdout, stderr} just like the real thing
-vi.mock('node:child_process', async () => {
-  const { promisify } = await import('node:util')
-  const execFile = async () => ({ stdout: 'codex-cli 0.147.0\n', stderr: '' })
-  return { execFile: Object.assign(execFile, { [promisify.custom]: execFile }) }
-})
+vi.mock('../../os/exec.js', () => ({ execText: async () => ({ stdout: 'codex-cli 0.147.0\n', stderr: '' }) }))
 
 vi.mock('../../env-path.js', () => ({ whichTool: () => '/usr/local/bin/codex' }))
 

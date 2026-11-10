@@ -2,8 +2,6 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { AdapterCapabilities, NormalizedEvent, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
@@ -24,10 +22,10 @@ import { personsDefaultMode } from './permissions.js'
 import { CLAUDE_SURFACE } from './surface.js'
 import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { STOP_CONFIRM_MS } from '../core/ledger.js'
+import { execText } from '../../os/exec.js'
 
 export { personsDefaultMode }
 
-const exec = promisify(execFile)
 
 /** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
 const PROBE_USAGE_MS = 20_000
@@ -96,7 +94,7 @@ const PROBE_EXIT_WAIT_MS = 10_000
 async function claudeAuthStatus(bin: ToolLaunch): Promise<unknown> {
   let out = ''
   try {
-    out = (await exec(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeout: 5000, windowsHide: true })).stdout
+    out = (await execText(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeoutMs: 5000 })).stdout
   } catch (e) {
     // Even with exit code 1 (= not logged in), the JSON on stdout can still be trusted.
     out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
@@ -287,7 +285,7 @@ export class ClaudeAdapter implements AgentAdapter {
         if (!(err instanceof ClaudePlaceholderError)) throw err
         return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
       }
-      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000, windowsHide: true })
+      const { stdout } = await execText(launch.command, [...launch.args, '--version'], { timeoutMs: 5000 })
       // Shows which install is actually being used — reduces confusion in an environment with several versions installed.
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       const loggedIn = await claudeLoggedIn(launch)

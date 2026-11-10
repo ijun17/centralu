@@ -1,9 +1,9 @@
-import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, errorMessage, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
 import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
+import { execText, execTextSync } from './os/exec.js'
 import { sleep } from './timing.js'
 
 /**
@@ -150,9 +150,7 @@ export type GlobalPackage = { launcher: string; version: string | null }
  */
 async function npmGlobalPackage(): Promise<GlobalPackage | null> {
   const cmd = commandFor('npm', ['root', '-g'])
-  const out = await new Promise<string>((done) => {
-    execFile(cmd.file, cmd.args, { timeout: 60_000, windowsHide: true }, (err, stdout) => done(err ? '' : String(stdout)))
-  })
+  const out = await execText(cmd.file, cmd.args, { timeoutMs: 60_000 }).then((r) => r.stdout, () => '')
   const root = out.trim().split(/\r?\n/).at(-1)?.trim()
   if (!root) return null
   const launcher = join(root, APP_SLUG, 'bin', `${APP_SLUG}.mjs`)
@@ -192,12 +190,17 @@ export function readInstalledCopyVersion(copy: string, platform: Platform = HOST
     }
     const text =
       source.kind === 'command'
-        ? execFileSync(source.file, source.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000, windowsHide: true })
+        ? commandOutput(source.file, source.args)
         : readFileSync(join(copy, source.name), 'utf8')
     return text.trim() || null
   } catch {
     return null
   }
+}
+
+/** What a program prints when it exits 0 within 5 s; throws otherwise */
+function commandOutput(file: string, args: readonly string[]): string {
+  return execTextSync(file, args, { timeoutMs: 5_000 }).stdout
 }
 
 /** The AppImage a menu entry starts (`Exec="<package>/Centralu.AppImage" %U`, as `centralu install` writes it) */
@@ -293,17 +296,16 @@ export function failureLine(e: unknown): string {
 
 export function runCommand(file: string, args: string[], resolve?: (file: string) => ToolLaunch): Promise<void> {
   const cmd = commandFor(file, args, resolve)
-  return new Promise((done, reject) => {
-    // windowsHide: npm and the launcher are console programs; no window for them, whatever console the host has
-    execFile(cmd.file, cmd.args, { timeout: INSTALL_TIMEOUT_MS, windowsHide: true }, (err, _stdout, stderr) => {
-      if (!err) return done()
-      if (err.code === 'ENOENT') {
-        return reject(new Error(`${file} was not found on PATH (${err.message})`))
-      }
+  // npm and the launcher are console programs; the run gives them no window, whatever console the host has
+  return execText(cmd.file, cmd.args, { timeoutMs: INSTALL_TIMEOUT_MS }).then(
+    () => undefined,
+    (err: Error & { code?: unknown; stderr?: string }) => {
+      if (err.code === 'ENOENT') throw new Error(`${file} was not found on PATH (${err.message})`)
       // What `failureLine` reads besides the message
-      reject(Object.assign(new Error(failureDetail(file, String(stderr)) || err.message), { exitCode: err.code, stderr: String(stderr) }))
-    })
-  })
+      const stderr = String(err.stderr ?? '')
+      throw Object.assign(new Error(failureDetail(file, stderr) || err.message), { exitCode: err.code, stderr })
+    },
+  )
 }
 
 export class UpdateService {

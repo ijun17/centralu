@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { freemem } from 'node:os'
-import { promisify } from 'node:util'
 import { availableMemorySource } from '../os.js'
+import { execText } from '../os/exec.js'
 
 /**
  * The start gate for new agent sessions (#686): a child is started only while the machine has room for it.
@@ -50,7 +49,6 @@ export function parseMemInfo(text: string): number | null {
   return m ? Number(m[1]) * 1024 : null
 }
 
-const run = promisify(execFile)
 
 /** What `readAvailableMemory` reads with; a test passes its own */
 export type MemoryReadDeps = {
@@ -74,7 +72,7 @@ export async function readAvailableMemory(deps: MemoryReadDeps = {}): Promise<nu
   try {
     const value =
       source.kind === 'command'
-        ? parseVmStat((await (deps.exec ?? ((f, a) => run(f, a, { timeout: 5_000, windowsHide: true })))(source.file, source.args)).stdout)
+        ? parseVmStat((await (deps.exec ?? ((f, a) => execText(f, a, { timeoutMs: 5_000 })))(source.file, source.args)).stdout)
         : parseMemInfo(await (deps.readText ?? ((p) => readFile(p, 'utf8')))(source.path))
     if (value !== null) return value
     console.error(`[memory-gate] could not parse ${what}; letting agent starts through`)

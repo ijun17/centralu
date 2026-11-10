@@ -4,7 +4,7 @@
  * Code outside the platform modules does not ask which OS it is on (`local/platform-checks` in
  * eslint.config.js): it asks one of the questions below, named for what differs, and the answer for
  * each OS is written once, here. The other platform modules own a whole subject instead: finding and
- * starting tools (`env-path.ts`, `tool-launch.ts`), ending process trees (`dev-services/kill-tree.ts`),
+ * starting tools (`env-path.ts`, `tool-launch.ts`), ending process trees (`os/kill-tree.ts`),
  * shells (`dev-services/terminal.ts`) and Claude Code's Windows start (`adapters/claude/exe-link.ts`).
  *
  * Each takes the platform as a parameter, defaulting to this host's, so tests can ask about another.

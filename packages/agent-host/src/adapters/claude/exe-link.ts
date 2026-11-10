@@ -1,8 +1,8 @@
-import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { closeSync, copyFileSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
+import { execText, isExecFailure } from '../../os/exec.js'
 
 /**
  * Where a Claude process is started from on Windows (#353), and whether what npm left there can
@@ -82,17 +82,19 @@ export type ExeFs = {
   runProgram(path: string, args: string[], timeoutMs: number): Promise<{ status: number | null }>
 }
 
-/** `execFile` as a promise that never rejects: no shell, stdin closed, the child killed past the limit */
-function runNode(file: string, args: string[], cwd: string | undefined, timeoutMs: number): Promise<{ status: number | null; output: string }> {
-  return new Promise((resolve) => {
-    const child = execFile(file, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 1 << 20, encoding: 'utf8' }, (err, stdout, stderr) => {
-      const output = `${stdout}${stderr}`.trim()
-      if (!err) return resolve({ status: 0, output })
-      if (err.killed) return resolve({ status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` })
-      resolve(typeof err.code === 'number' ? { status: err.code, output } : { status: null, output: err.message })
-    })
-    child.stdin?.end()
-  })
+/** A program run to its end that never rejects: no shell, stdin closed, the whole tree ended past the limit */
+async function runNode(file: string, args: string[], cwd: string | undefined, timeoutMs: number): Promise<{ status: number | null; output: string }> {
+  try {
+    const r = await execText(file, args, { cwd, timeoutMs, maxBuffer: 1 << 20 })
+    return { status: 0, output: `${r.stdout}${r.stderr}`.trim() }
+  } catch (e) {
+    // A non-zero exit or a limit carries what was printed (`ExecFailure`); a program that did not start carries only its message
+    if (isExecFailure(e)) {
+      if (e.ended === 'timeout') return { status: null, output: `it did not finish within ${Math.round(timeoutMs / 1000)} seconds` }
+      return { status: e.code, output: `${e.stdout}${e.stderr}`.trim() }
+    }
+    return { status: null, output: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export const realExeFs: ExeFs = {

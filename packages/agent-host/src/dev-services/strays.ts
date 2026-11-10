@@ -1,14 +1,11 @@
 import { isObj } from '../json-value.js'
-import { execFile } from 'node:child_process'
 import { realpathSync } from 'node:fs'
-import { promisify } from 'node:util'
 import { userInfo } from 'node:os'
 import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
-import { KILL_GRACE_MS } from './kill-tree.js'
+import { execText } from '../os/exec.js'
+import { KILL_GRACE_MS } from '../os/kill-tree.js'
 import { ancestors, descendants } from './proc-table.js'
-
-const exec = promisify(execFile)
 
 /**
  * A leftover process still running from our folder (user request, 2026-09-07).
@@ -170,7 +167,9 @@ export function pickStrays(
  */
 const LIST_TIMEOUT_MS = 12_000
 
-type Run = (file: string, args: string[], opts: { maxBuffer: number; timeout: number; windowsHide: boolean }) => Promise<{ stdout: string }>
+type Run = (file: string, args: string[], opts: { maxBuffer: number; timeoutMs: number }) => Promise<{ stdout: string }>
+
+const exec: Run = (file, args, opts) => execText(file, args, opts)
 
 /** A listing that could not be read is said on stderr: it must not pass for an empty one */
 function unread(what: string, e: unknown): void {
@@ -180,7 +179,7 @@ function unread(what: string, e: unknown): void {
 async function psRows(run: Run): Promise<PsRow[]> {
   try {
     // Only our own account's processes are looked at — we could never kill another account's process anyway, and it is not ours to ask about
-    const { stdout } = await run('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], { maxBuffer: 8 * 1024 * 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true })
+    const { stdout } = await run('ps', ['-U', userInfo().username, '-o', 'pid=,ppid=,tty=,command='], { maxBuffer: 8 * 1024 * 1024, timeoutMs: LIST_TIMEOUT_MS })
     return parsePsRows(stdout)
   } catch (e) {
     unread('the process list', e)
@@ -191,13 +190,13 @@ async function psRows(run: Run): Promise<PsRow[]> {
 async function cwdsOf(run: Run, pids: readonly number[]): Promise<Map<number, string>> {
   if (pids.length === 0) return new Map()
   try {
-    const { stdout } = await run('lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'], { maxBuffer: 8 * 1024 * 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true })
+    const { stdout } = await run('lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'], { maxBuffer: 8 * 1024 * 1024, timeoutMs: LIST_TIMEOUT_MS })
     return parseLsofCwd(stdout)
   } catch (e) {
     // lsof exits 1 when some process cannot be read, but it still **prints what it did read** — that is not discarded
     const partial = isObj(e) && typeof e.stdout === 'string' ? e.stdout : undefined
     // An exit code is lsof's own answer; a kill by the timeout, or no lsof to run, is not an answer
-    if (isObj(e) && (e.killed === true || e.signal != null || typeof e.code === 'string')) unread('the working folders', e)
+    if (isObj(e) && (e.ended !== undefined || e.signal != null || typeof e.code === 'string')) unread('the working folders', e)
     return partial ? parseLsofCwd(partial) : new Map()
   }
 }
@@ -222,7 +221,7 @@ export async function scanProcesses(run: Run = exec): Promise<{ rows: PsRow[]; c
 export async function orphanAdopter(run: Run = exec, end: (pid: number) => void = (pid) => process.kill(pid)): Promise<number | null> {
   let pid = 0
   try {
-    const opts = { maxBuffer: 1024, timeout: LIST_TIMEOUT_MS, windowsHide: true }
+    const opts = { maxBuffer: 1024, timeoutMs: LIST_TIMEOUT_MS }
     pid = Number((await run('/bin/sh', ['-c', 'sleep 60 </dev/null >/dev/null 2>&1 & echo $!'], opts)).stdout)
     const ppid = Number((await run('ps', ['-o', 'ppid=', '-p', String(pid)], opts)).stdout)
     if (!(ppid > 1)) return null

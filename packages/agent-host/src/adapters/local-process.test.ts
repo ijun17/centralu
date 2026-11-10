@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { KILL_GRACE_MS, type WinProcRow } from '../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, type WinProcRow } from '../os/kill-tree.js'
 import { CodexClient } from './codex/client.js'
 import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers, ownCli, ownPid } from './fake-agent-cli.test-helpers.js'
 import { spawnLocalAgent } from './local-process.js'
@@ -65,7 +65,7 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(await goneWithin(helper, KILL_GRACE_MS + 3000)).toBe(true)
   })
 
-  it.runIf(!unix)('Windows: a stop is taskkill on the tree, which ends the CLI and its helper', async () => {
+  it.runIf(!unix)('Windows: a stop ends the CLI and its helper (the order is pinned in kill-tree.test.ts)', async () => {
     const p = spawnLocalAgent({ ...fakeAgentCli(), env: process.env })
     const helper = await helperPid(p.stdout)
     started.push(helper, ownCli(p))
@@ -73,9 +73,8 @@ describe('an agent CLI started without a keeper, for real', () => {
     expect(p.kill('SIGTERM')).toBe(true)
     // `taskkill /F` ends a process with exit code 1; Windows has no signal to report
     expect(await exited).toEqual([1, null])
-    // Gone already: `/T` ended it with the CLI. The sweep after an exit would also find it, but only
-    // once its process listing is back, which takes PowerShell most of a second to start
-    expect(alive(helper)).toBe(false)
+    // The helper goes after the CLI, once the stop has read the process table, which PowerShell takes most of a second to give
+    expect(await goneWithin(helper, 15_000)).toBe(true)
   })
 
   it('a CLI that exits by itself does not leave its helper running', async () => {
@@ -288,7 +287,8 @@ describe('an agent CLI started without a keeper (Windows)', () => {
     await exited
     expect(killed[0]).toBe(p.pid)
     await new Promise((r) => setTimeout(r, 100))
-    expect(listed).toBe(1)
+    // One reading when the stop begins (it shows no row for the CLI, so the stop is `taskkill /T`), one after its exit
+    expect(listed).toBe(2)
     expect(killed).toEqual([p.pid, orphan])
   })
 })

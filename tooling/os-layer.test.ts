@@ -116,8 +116,8 @@ describe('touching the OS outside the OS layer', () => {
   it('lets the layer, its tests and the listed files touch it', async () => {
     const code = "import { readFileSync } from 'node:fs'\nexport const r = readFileSync\n"
     for (const m of layer.OS_LAYER) expect(await refused(m, code), m).toEqual([])
-    expect(await refused('packages/agent-host/src/dev-services/kill-tree.test.ts', code)).toEqual([])
-    expect(await refused('packages/agent-host/src/dev-services/kill-tree.test-helpers.ts', code)).toEqual([])
+    expect(await refused('packages/agent-host/src/os/kill-tree.test.ts', code)).toEqual([])
+    expect(await refused('packages/agent-host/src/os/kill-tree.test-helpers.ts', code)).toEqual([])
     const listed = allowlist[0] as string
     expect(await refused(listed, code), listed).toEqual([])
   })
@@ -379,9 +379,9 @@ describe('the tests that run on every OS', () => {
     const files = {
       'packages/agent-host/src/x/a.test.ts': "import { b } from './b.js'\n",
       'packages/agent-host/src/x/b.ts': "export { c as b } from './c.js'\n",
-      'packages/agent-host/src/x/c.ts': "import { killTree } from '../dev-services/kill-tree.js'\nexport const c = killTree\n",
+      'packages/agent-host/src/x/c.ts': "import { killTree } from '../os/kill-tree.js'\nexport const c = killTree\n",
     }
-    expect(pick(files, 'packages/agent-host/src/x/a.test.ts')).toBe('imports packages/agent-host/src/x/b.ts → packages/agent-host/src/x/c.ts → packages/agent-host/src/dev-services/kill-tree.ts')
+    expect(pick(files, 'packages/agent-host/src/x/a.test.ts')).toBe('imports packages/agent-host/src/x/b.ts → packages/agent-host/src/x/c.ts → packages/agent-host/src/os/kill-tree.ts')
   })
 
   it('picks a test that imports a listed file, or is one', () => {

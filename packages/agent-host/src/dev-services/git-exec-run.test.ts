@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorMessage } from '@cc/protocol'
 import { execFailure } from './exec-error.js'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
+import { promisify } from 'node:util'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +12,18 @@ import { settle } from './process-tree.test-helpers.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { realOs } from '../os/real.js'
+
+/** Whether the stop is given a process table that cannot be read, as when PowerShell does not answer in time (the test of the fallback below) */
+const table = vi.hoisted(() => ({ unreadable: false }))
+vi.mock('../os/kill-tree.js', async (original) => {
+  const real = await original<typeof import('../os/kill-tree.js')>()
+  const unreadable = { ...real.leftoverOs(promisify(execFile)), listProcesses: () => Promise.reject(Object.assign(new Error('timed out'), { killed: true })) }
+  return {
+    ...real,
+    stopTreeWindows: (root: Parameters<typeof real.stopTreeWindows>[0], endRoot: Parameters<typeof real.stopTreeWindows>[1]) => real.stopTreeWindows(root, endRoot, table.unreadable ? unreadable : undefined),
+    stopTreesWindows: (roots: Parameters<typeof real.stopTreesWindows>[0]) => real.stopTreesWindows(roots, table.unreadable ? unreadable : undefined),
+  }
+})
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true })
@@ -223,16 +236,23 @@ describe('a git that is stopped takes its lock away (#982)', () => {
   })
 
   /** A commit whose hook has started: what the call settled with, once git has ended */
-  async function commitStopped(stop: () => unknown, signal?: AbortSignal): Promise<{ outcome: string; signal?: unknown; repo: string }> {
+  async function commitStopped(stop: () => unknown, signal?: AbortSignal): Promise<{ outcome: string; signal?: unknown; repo: string; tableRead: boolean }> {
     const repo = slowCommit(30)
     const call = runGit(repo, ['commit', '-a', '-m', 'two'], { allowRepoPrograms: true, timeout: 120_000 * SLOW, signal }).then(
       () => ({ outcome: 'committed' }),
       (e: { signal?: unknown }) => ({ outcome: 'ended', signal: e.signal }),
     )
     expect(await settle(() => existsSync(started(repo)), Boolean, 20_000 * SLOW)).toBe(true)
-    await stop()
-    // git's own end, however long the stop took
-    return { ...(await call), repo }
+    // A stop that could not read the process table says so, and ends the tree with `taskkill /T` (os/kill-tree.ts): which way it went
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await stop()
+      // git's own end, however long the stop took
+      const ended = await call
+      return { ...ended, repo, tableRead: !said.mock.calls.some(([m]) => String(m).includes('process table could not be read')) }
+    } finally {
+      said.mockRestore()
+    }
   }
 
   /*
@@ -242,9 +262,11 @@ describe('a git that is stopped takes its lock away (#982)', () => {
    * of the tree kill has none (read on Windows, where the order is the stop's own). Without a stop, the hook sleeps out
    * and git commits.
    */
-  const endedFirst = (r: { outcome: string; signal?: unknown; repo: string }) => {
+  const endedFirst = (r: { outcome: string; signal?: unknown; repo: string; tableRead: boolean }) => {
     expect(r.outcome).toBe('ended')
-    if (process.platform === 'win32') expect(r.signal).toBe('SIGTERM')
+    // The order is the stop's own only when it read the table; one that could not ends the tree with `taskkill /T`, git without a signal
+    // (git-exec-fallback.test.ts): whichever way, git does not go on to commit
+    if (process.platform === 'win32' && r.tableRead) expect(r.signal).toBe('SIGTERM')
     if (process.platform !== 'win32') expect(existsSync(lock(r.repo))).toBe(false)
     expect(git(r.repo, 'log', '--format=%s').trim()).toBe('one')
   }
@@ -273,6 +295,22 @@ describe('a git that is stopped takes its lock away (#982)', () => {
       for (const repo of repos) expect(git(repo, 'log', '--format=%s').trim()).toBe('one')
     } finally {
       stopAll.mockRestore()
+    }
+  })
+
+  /*
+   * The path #2141 came from: a table that cannot be read in time (a starved machine, CI's Windows runners) leaves `taskkill /T` on the
+   * root, in no order, and a hook's `sleep` that ended before git made git go on and commit. Forced here with a real git and a real slow hook:
+   * whichever the tree kill ends first, git does not commit.
+   */
+  it.runIf(process.platform === 'win32')('when the host stops and the table cannot be read: git ends by taskkill /T, and never commits', { timeout: 60_000 * SLOW }, async () => {
+    table.unreadable = true
+    try {
+      const r = await commitStopped(() => stopGitChildren())
+      expect(r.tableRead).toBe(false) // the path under test was the one taken
+      endedFirst(r)
+    } finally {
+      table.unreadable = false
     }
   })
 

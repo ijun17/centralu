@@ -1,12 +1,10 @@
-import { execFile } from 'node:child_process'
 import { readFileSync, realpathSync } from 'node:fs'
-import { promisify } from 'node:util'
 import { parseCliVersion } from '@cc/protocol'
 import { whichTool } from './env-path.js'
 import { HOST_PLATFORM, pathsOf, traitsFor } from './os.js'
 import { launchFor, type ToolLaunch } from './tool-launch.js'
+import { execText } from './os/exec.js'
 
-const exec = promisify(execFile)
 
 /**
  * Which version of an agent CLI is installed on this machine (#297), found the way sessions find
@@ -42,7 +40,7 @@ const realDeps = (): CliVersionDeps => ({
   launch: (path) => launchFor(path),
   realpath: (path) => realpathSync(path),
   read: (path) => readFileSync(path, 'utf8'),
-  run: async (command, args) => (await exec(command, args, { timeout: 5000, windowsHide: true })).stdout,
+  run: async (command, args) => (await execText(command, args, { timeoutMs: 5000 })).stdout,
 })
 
 /** How many folders up from the file to look for its `package.json`: `bin/claude.exe` is one, a nested `dist/bin/x.js` two */

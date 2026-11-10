@@ -192,14 +192,17 @@ test('the boundary between two split panels is dragged to move it — it survive
   await page.mouse.down()
   await page.mouse.move(hb.x + hb.width / 2, hb.y + 120, { steps: 4 })
   await page.mouse.up()
-  expect(await topHeight()).toBeGreaterThan(before + 80)
-  const saved = await page.evaluate(() => (window as any).__store.getState().panelSplit)
-  expect(saved).toBeGreaterThan(0.6)
+  // The mouse events were handled (a mousemove is rendered in a task of its own, after the mouse is up): wait for what they did
+  const split = () => page.evaluate(() => (window as any).__store.getState().panelSplit as number)
+  await expect.poll(topHeight).toBeGreaterThan(before + 80)
+  await expect.poll(split).toBeGreaterThan(0.6)
+  const saved = await split()
 
   // A relaunch — the ratio comes back right where the layout comes back
   await page.goto('/?mock=1')
   await expect(page.getByTestId('add-project')).toBeVisible()
-  expect(await page.evaluate(() => (window as any).__store.getState().panelSplit)).toBeCloseTo(saved, 5)
+  // The saved ratio is read back with the layout, a moment after the page is up
+  await expect.poll(split).toBeCloseTo(saved, 5)
 
   // Resetting: re-add the project to bring the panel up, then double-click — back to 50/50
   await page.evaluate((p: string) => {

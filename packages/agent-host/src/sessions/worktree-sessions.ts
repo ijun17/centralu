@@ -2,7 +2,6 @@ import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, ty
 import { AgentRunWait } from './app-agents.js'
 import { basename, dirname, join } from 'node:path'
 import { lstatSync, statSync } from 'node:fs'
-import { exec } from 'node:child_process'
 import type {
   BackgroundTask,
   NormalizedEvent,
@@ -51,6 +50,10 @@ import { RestartPolicy } from './restart-policy.js'
 import { rpcError } from '../rpc-error.js'
 import { recordedAgentDepth } from './agent-depth.js'
 import { sleep } from '../timing.js'
+import { realOs } from '../os/real.js'
+
+/** How long a project's setup command may run in a new worktree */
+const SETUP_TIMEOUT_MS = 90_000
 
 /**
  * How long deleting a hub's child waits for a turn the hub just stopped to end (#1161 item 3): an interrupt reaches the
@@ -457,32 +460,24 @@ export class WorktreeSessions {
      * message, not a disaster — the kind of thing an agent can read and fix.
      */
     const index = [...this.host.meta.values()].filter((s) => s.projectId === projectId && s.worktree).length + 1
-    await new Promise<void>((done) => {
-      exec(
-        setup.command,
-        {
-          cwd: worktree.path,
-          timeout: 90_000,
-          windowsHide: true,
-          env: {
-            ...process.env,
-            CENTRALU_WORKTREE: worktree.branch,
-            CENTRALU_WORKTREE_INDEX: String(index),
-          },
-        },
-        (err, _stdout, stderr) => {
-          if (err) {
-            console.error(`[worktree] setup failed (${worktree.branch}): ${err.message}\n${String(stderr).slice(0, 2000)}`)
-            // The session's line carries the end of stderr, where a failing command says why
-            const tail = String(stderr).trim().split('\n').slice(-3).join(' / ').slice(-300)
-            problems.push(`setup command failed: ${setup.command} — ${err.message.split('\n')[0]}${tail ? ` (${tail})` : ''}`)
-          } else {
-            console.error(`[worktree] setup ok (${worktree.branch}): ${setup.command}`)
-          }
-          done() // Continues even on failure — the reason is in the comment above
-        },
-      )
+    // The shell and everything it started end together at the limit: a setup command is a person's own script
+    const ran = await realOs().processes.runShell(setup.command, {
+      cwd: worktree.path,
+      timeoutMs: SETUP_TIMEOUT_MS,
+      contained: false,
+      env: { ...process.env, CENTRALU_WORKTREE: worktree.branch, CENTRALU_WORKTREE_INDEX: String(index) },
     })
+    if (ran.code === 0 && !ran.ended) {
+      console.error(`[worktree] setup ok (${worktree.branch}): ${setup.command}`)
+    } else {
+      // Continues even on failure — the reason is in the comment above
+      const why = ran.ended ? `it did not finish within ${SETUP_TIMEOUT_MS / 1000} seconds` : `exit ${String(ran.code ?? ran.signal)}`
+      const stderr = ran.stderr.toString('utf8')
+      console.error(`[worktree] setup failed (${worktree.branch}): ${why}\n${stderr.slice(0, 2000)}`)
+      // The session's line carries the end of stderr, where a failing command says why
+      const tail = stderr.trim().split('\n').slice(-3).join(' / ').slice(-300)
+      problems.push(`setup command failed: ${setup.command} — ${why}${tail ? ` (${tail})` : ''}`)
+    }
     return problems
   }
 

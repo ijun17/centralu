@@ -1,11 +1,11 @@
 import { errorMessage } from '@cc/protocol'
 import { isObj, tryParseJson } from '../json-value.js'
 import { errnoCode } from '../os/errors.js'
-import { execFileSync } from 'node:child_process'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { hasPs } from '../os.js'
+import { realOs } from '../os/real.js'
 
 /**
  * Only one host per data folder.
@@ -70,14 +70,8 @@ export type Holder = { pid: number; started: string | null; at?: number } & Hold
 export function processStartTime(pid: number): string | null {
   if (!hasPs()) return null
   try {
-    const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 2000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, LC_ALL: 'C' },
-    }).trim()
-    return out || null
+    const r = realOs().processes.runSync('ps', ['-o', 'lstart=', '-p', String(pid)], { timeoutMs: 2000, env: { ...process.env, LC_ALL: 'C' } })
+    return (r.code === 0 ? r.stdout.trim() : '') || null
   } catch {
     return null
   }

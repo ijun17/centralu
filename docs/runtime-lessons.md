@@ -694,14 +694,14 @@ Platforms: macOS, Linux.
 Happened: a server started in a terminal tab had its own pgid; killing the shell's group missed it, and a server that
 handles HUP survived quitting (d2993770).
 Rule: walk `ps -A -o pid=,ppid=,pgid=` from the root and signal every group a descendant belongs to.
-Guard: `host/dev-services/kill-tree.test.ts` "an interactive shell: a job with its own group is a target too";
-`host/dev-services/kill-tree.test.ts` "follows all the way to a grandchild — a tree, not a list of children".
+Guard: `host/os/kill-tree.test.ts` "an interactive shell: a job with its own group is a target too";
+`host/os/kill-tree.test.ts` "follows all the way to a grandchild — a tree, not a list of children".
 Platforms: macOS, Linux.
 
 **KL3. Never our own group, init or group 0.**
 Rule: our pgid and every pgid ≤ 1 are excluded from every shot.
-Guard: `host/dev-services/kill-tree.test.ts` "never fires at our own group — killing ourselves during cleanup would
-leave the rest behind"; `host/dev-services/kill-tree.test.ts` "init(1) and group 0 are never targets — this is where
+Guard: `host/os/kill-tree.test.ts` "never fires at our own group — killing ourselves during cleanup would
+leave the rest behind"; `host/os/kill-tree.test.ts` "init(1) and group 0 are never targets — this is where
 the system itself could almost be fired at". The own-group return in `stopGroup` is **UNGUARDED**.
 Platforms: macOS, Linux.
 
@@ -710,8 +710,8 @@ Happened: the second shot assumed a pid missing from `ps` led its own group, whi
 recycled number (e7ea439a).
 Rule: `ps` read and the root absent means no targets; fall back to `-root` only when `ps` itself failed; the same pid
 in another group is someone else.
-Guard: `host/dev-services/kill-tree.test.ts` "fires at nothing when ps was read but root is missing — this is where a
-recycled pid could be hit"; `host/dev-services/kill-tree.test.ts` "the same pid in a different group is someone else
+Guard: `host/os/kill-tree.test.ts` "fires at nothing when ps was read but root is missing — this is where a
+recycled pid could be hit"; `host/os/kill-tree.test.ts` "the same pid in a different group is someone else
 — a spot where the number was recycled in the meantime".
 Platforms: macOS, Linux.
 
@@ -720,9 +720,9 @@ Happened: the root died on TERM, its children were reparented to init, a re-walk
 grandchild survived (#149, 65acb436).
 Rule: the KILL targets the groups of whatever from the first list is still there with the same pid and pgid, plus
 anything they started since.
-Guard: `host/dev-services/kill-tree.test.ts` "even when the grandchild is in root's group (zsh -lc, an app process)
+Guard: `host/os/kill-tree.test.ts` "even when the grandchild is in root's group (zsh -lc, an app process)
 and the caller saw root end, it is hit by SIGKILL after the grace period";
-`host/dev-services/kill-tree.test.ts` "even if root dies first, a surviving descendant in that group fires at the
+`host/os/kill-tree.test.ts` "even if root dies first, a surviving descendant in that group fires at the
 whole group".
 Platforms: macOS, Linux.
 
@@ -748,11 +748,12 @@ Platforms: macOS, Linux.
 Happened: only the CLI's pid was signalled; typescript-language-server and tsserver (one at 3.4 GB), MCP servers and
 shells were reparented to launchd or init (#435, b1ffaca3).
 Rule: the CLI leads a process group of its own; a stop signals that group only; after the CLI exits its group is swept
-(TERM, KILL after the grace). On Windows: `taskkill /T /F`, and after exit the leftovers found by parent pid and
+(TERM, KILL after the grace). On Windows: the table read, the CLI ended alone, then what was under it parents first
+(`taskkill /T` only when the table cannot be read, #2141), and after exit the leftovers found by parent pid and
 creation time.
 Guard: `host/adapters/local-process.test.ts` "leads a process group of its own, not the host’s";
 `host/adapters/local-process.test.ts` "a CLI that exits by itself does not leave its helper running";
-`host/adapters/local-process.test.ts` "a stop is taskkill on its tree, and its exit collects what it left running";
+`host/adapters/local-process.test.ts` "a stop ends the CLI first and then what was under it";
 `host/adapters/claude/local-spawn.test.ts` "spawns the CLI itself, and stopping it ends the helper the CLI leaves
 behind".
 Platforms: all.
@@ -783,8 +784,8 @@ Happened: `kill("SIGTERM")` throws on Windows; Stop, restart, project removal an
 a pty that was not ready crashed the host (#14, 46e78012).
 Rule: `taskkill /PID n /T /F`, then `kill()` with no argument, both failures swallowed; no second shot by pid (it may
 be someone else's by then).
-Guard: `host/dev-services/kill-tree.test.ts` "the tree goes with taskkill, and the pty is closed without a signal";
-`host/dev-services/kill-tree.test.ts` "Stop is one forceful shot: no second shot by pid after the grace period".
+Guard: `host/os/kill-tree.test.ts` "the tree goes with taskkill, and the pty is closed without a signal";
+`host/os/kill-tree.test.ts` "Stop is one forceful shot: no second shot by pid after the grace period".
 Platforms: Windows.
 
 **KL12. On Windows leftovers are found by parent and creation time.**
@@ -792,7 +793,7 @@ Happened: Windows has no groups, so a helper outlived its app; libuv's job objec
 but not for detached or Python ones (285be4e9, #360).
 Rule: list processes through CIM; take the dead root's children created inside its lifetime (a clock tick of slack at the end: Node's clock runs
 behind the creation times, #1773), and deeper children no older than their parent; `taskkill` each, never ourselves, never throw.
-Guard: `host/dev-services/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
+Guard: `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
 the root's own, a later one a later holder's"; `host/apps/external/lifecycle.test.ts` "on Windows, a descendant started outside the app's job,
 left by an app that ended on its own, is ended — no orphan is left behind".
 Platforms: Windows.
@@ -1858,13 +1859,13 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar/link.rs` | all | 7 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
 | 5 | ST13: no console window (CREATE_NO_WINDOW, not `detached`; `windowsHide` is guarded) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
-| 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
+| 10 | PA11: `taskkill` and PowerShell by System32 path | `host/os/kill-tree.ts` | Windows | 8 |
 | 13 | PA14: a keeper-started codex goes through command resolution | `host/adapters/codex/index.ts` | Windows | 9 |
 | 14 | PA15: a child's environment keeps `SystemRoot` | `host/` spawn sites | Windows | 9 |
 | 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server/start.rs` | macOS, Linux | 2 |
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
 | 35 | SU8: the window reaps every child | `window/os_integration.rs` | all | 7 |
-| 36 | KL3: `stopGroup` never fires at our own group | `host/dev-services/kill-tree.ts` | macOS, Linux | 8 |
+| 36 | KL3: `stopGroup` never fires at our own group | `host/os/kill-tree.ts` | macOS, Linux | 8 |
 | 37 | KL6: strays measured again before the kill; the `systemd --user` subreaper | `host/dev-services/strays.ts` | macOS, Linux | 8 |
 | 38 | KL8: no HUP on Windows when closing a terminal | `host/dev-services/terminal.ts` | Windows | 8 |
 | 39 | KL9: the terminal's `disposeAll` kills every tree | `host/dev-services/terminal.ts` | macOS, Linux | 8 |

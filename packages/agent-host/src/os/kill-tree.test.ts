@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLOCK_TICK_MS, STOP_LIST_MS, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, survivorTargets, type KillOs } from './kill-tree.js'
-import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
+import { CLOCK_TICK_MS, STOP_LIST_MS, type WinProcRow, collectAllOrphansWindows, collectOrphansWindows, killTargets, leftoverOs, ownGroupPids, killTree, notedGroups, orphansOf, parsePs, parseWinProcs, stopTree, stopTreeWindows, stopTreesWindows, stopsSettled, survivorTargets, type KillOs } from './kill-tree.js'
+import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from '../dev-services/process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { alive } from '../process.test-helpers.js'
 
@@ -69,6 +69,27 @@ describe('killTargets', () => {
  * ps after the grace period. root (100) died first from SIGTERM, and its surviving descendant has
  * been adopted by init (1) — a spot where walking again from the root would see nobody at all.
  */
+describe('ownGroupPids', () => {
+  // The host (pid 10) is in group 10, and so is an ssh it started without a group of its own (`StartOptions.contained: false`)
+  const rows = [
+    { pid: 10, ppid: 1, pgid: 10 }, // the host
+    { pid: 20, ppid: 10, pgid: 10 }, // ssh, in the host's group
+    { pid: 21, ppid: 20, pgid: 10 }, // its ProxyCommand, in the host's group
+    { pid: 22, ppid: 20, pgid: 22 }, // something of its own group
+    { pid: 30, ppid: 10, pgid: 30 }, // another child, a group of its own
+    { pid: 31, ppid: 1, pgid: 10 }, // not under the ssh
+  ]
+
+  it('names what the tree stands in the host group with, not the host and not what is outside the tree', () => {
+    expect(ownGroupPids(rows, [20], 10)).toEqual([20, 21])
+  })
+
+  it('names none for a tree in a group of its own, or when the host is not in the table', () => {
+    expect(ownGroupPids(rows, [30], 10)).toEqual([])
+    expect(ownGroupPids(rows.filter((r) => r.pid !== 10), [20], 10)).toEqual([])
+  })
+})
+
 describe('survivorTargets', () => {
   const rows = (s: string) => parsePs(s)
   // At the first shot: shell 100 -> 200 -> grandchild 300. The host is 900
@@ -288,30 +309,199 @@ describe('ending a tree on Windows', () => {
       },
     }
   }
-  const fakeOs = () => {
-    const ended: number[] = []
-    const os: KillOs = { platform: 'win32', taskkill: (pid) => void ended.push(pid) }
+  /** A table in which `rows` is what the process table shows; a root with no row is gone. `listing` throws to make the table unreadable */
+  const fakeOs = (rows: WinProcRow[] = [], listing: 'ok' | 'unreadable' = 'ok') => {
+    const ended: { pid: number; alone: boolean }[] = []
+    const os: KillOs = {
+      platform: 'win32',
+      taskkill: async (pid, alone = false) => void ended.push({ pid, alone }),
+      listProcesses: async () => {
+        if (listing === 'unreadable') throw new Error('powershell would not start')
+        return rows
+      },
+    }
     return { os, ended }
   }
+  /** The fakes answer in promises only, so one turn of the event loop runs the whole shot */
+  const settle = () => new Promise((r) => setImmediate(r))
 
   /*
    * #857: node-pty's own Windows kill() lists the console of a shell taskkill already ended (an "AttachConsole failed"
    * on the host's stderr) and process.kill()s that pid 5 s later, when Windows may have given it to someone else.
    */
-  it('the tree goes with taskkill, and the pty is not killed again by pid after it (#857)', () => {
-    const { os, ended } = fakeOs()
+  it('the tree goes with taskkill, and the pty is not killed again by pid after it (#857)', async () => {
+    const { os, ended } = fakeOs([{ pid: 4242, ppid: 1, created: 1_000 }])
     const pty = windowsPty(4242)
     killTree(pty.handle, 'SIGKILL', os)
-    expect(ended).toEqual([4242])
+    await settle()
+    expect(ended).toEqual([{ pid: 4242, alone: true }])
+    expect(pty.calls).toEqual([])
+  })
+
+  /*
+   * #2141 re-check under load: a shutdown stops every terminal in one turn, and a table read of its own for each was four
+   * PowerShells at once on a busy machine, each slower for the others (7 s alone, 11 s four at a time on 12 busy cores).
+   */
+  it('stops asked in one turn are one read of the table, each tree still ended from it', async () => {
+    const rows: WinProcRow[] = [
+      { pid: 10, ppid: 1, created: 1_000 },
+      { pid: 11, ppid: 10, created: 1_100 },
+      { pid: 20, ppid: 1, created: 1_000 },
+      { pid: 21, ppid: 20, created: 1_100 },
+    ]
+    const { os, ended } = fakeOs(rows)
+    let reads = 0
+    const counting: KillOs = { ...os, listProcesses: (t) => (reads++, os.listProcesses(t)) }
+    killTree(windowsPty(10).handle, 'SIGKILL', counting)
+    killTree(windowsPty(20).handle, 'SIGKILL', counting)
+    await settle()
+    expect(reads).toBe(1)
+    expect(ended.map((e) => e.pid).sort()).toEqual([10, 11, 20, 21])
+  })
+
+  it('trees read from the table are ended side by side, each from its parent down, and every root before any of them', async () => {
+    const rows: WinProcRow[] = [
+      { pid: 10, ppid: 1, created: 1_000 },
+      { pid: 11, ppid: 10, created: 1_100 },
+      { pid: 20, ppid: 1, created: 1_000 },
+      { pid: 21, ppid: 20, created: 1_100 },
+    ]
+    const started: number[] = []
+    const release = new Map<number, () => void>()
+    const os: KillOs = {
+      platform: 'win32',
+      listProcesses: async () => rows,
+      taskkill: (pid) => new Promise<void>((resolve) => (started.push(pid), release.set(pid, resolve))),
+    }
+    killTree(windowsPty(10).handle, 'SIGKILL', os)
+    killTree(windowsPty(20).handle, 'SIGKILL', os)
+    await settle()
+    expect(started).toEqual([10, 20]) // the roots together, and none of what they started yet
+    release.get(10)?.()
+    await settle()
+    expect(started).toEqual([10, 20]) // the second root is still being ended
+    release.get(20)?.()
+    await settle()
+    expect(started).toEqual([10, 20, 11, 21]) // the trees together: 21 does not wait for 11 to end
+    release.get(11)?.()
+    release.get(21)?.()
+    await stopsSettled(1_000)
+  })
+
+  it('a stop that rejects is not an unhandled rejection, and is let go of', async () => {
+    // A table the code cannot read (nothing in the stop catches that) rejects the stop itself
+    const os: KillOs = { platform: 'win32', listProcesses: async () => [null as never], taskkill: async () => {} }
+    const unhandled: unknown[] = []
+    const on = (e: unknown) => unhandled.push(e)
+    process.on('unhandledRejection', on)
+    try {
+      killTree(windowsPty(10).handle, 'SIGKILL', os)
+      await settle()
+      await settle()
+      await stopsSettled(1_000)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', on)
+    }
+  })
+
+  it('two stops of one handle in one turn are one root', async () => {
+    const { os, ended } = fakeOs([{ pid: 10, ppid: 1, created: 1_000 }])
+    const pty = windowsPty(10)
+    killTree(pty.handle, 'SIGKILL', os)
+    killTree(pty.handle, 'SIGKILL', os)
+    await settle()
+    expect(ended).toEqual([{ pid: 10, alone: true }])
+  })
+
+  it('a table that cannot be read ends every tree with taskkill /T side by side, not one after another', async () => {
+    const started: number[] = []
+    const release: (() => void)[] = []
+    const os: KillOs = {
+      platform: 'win32',
+      listProcesses: async () => {
+        throw new Error('powershell would not start')
+      },
+      taskkill: (pid) => new Promise<void>((resolve) => (started.push(pid), release.push(resolve))),
+    }
+    killTree(windowsPty(10).handle, 'SIGKILL', os)
+    killTree(windowsPty(20).handle, 'SIGKILL', os)
+    await settle()
+    expect(started).toEqual([10, 20]) // the second does not wait for the first (each took seconds on a starved machine)
+    release.forEach((r) => r())
+    await stopsSettled(1_000)
+  })
+
+  /*
+   * #2141 re-check: the host exits as soon as its shutdown steps are done, and `killTree`/`stopTree` return before the table is
+   * read. The shutdown waits for the stops it started (`stopsSettled`), or what the table showed under a terminal's shell
+   * is left running (a hidden child survived 3 of 3 host stops).
+   */
+  it('stopsSettled waits for a stop that has not ended the tree yet, and not longer than its bound', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const ended: number[] = []
+    const rows = [{ pid: 4242, ppid: 1, created: 1_000 }, { pid: 50, ppid: 4242, created: 2_000 }]
+    const os: KillOs = { platform: 'win32', listProcesses: async () => (await held, rows), taskkill: async (pid) => void ended.push(pid) }
+    killTree(windowsPty(4242).handle, 'SIGKILL', os)
+    let done = false
+    const waited = stopsSettled(5_000).then(() => (done = true))
+    await settle()
+    expect(done).toBe(false) // the table is still being read
+    release()
+    await waited
+    expect(ended).toEqual([4242, 50])
+
+    // A stop that never ends is given up on at the bound
+    killTree(windowsPty(4243).handle, 'SIGKILL', { ...os, listProcesses: () => new Promise(() => {}) })
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await stopsSettled(20)
+    expect(err.mock.calls.flat().join('')).toContain('had not ended')
+    err.mockRestore()
+  })
+
+  /*
+   * #2141: a hook's `sleep` ended before the `sh` running it, and git went on to commit. Stop and shutdown of a terminal, an
+   * agent CLI or an app took `taskkill /T`, in no order; they take the order a git call is stopped in.
+   */
+  it('a stop ends the root alone, then what is under it parents before children (#2141)', async () => {
+    const rows = [
+      { pid: 4242, ppid: 1, created: 1_000 },
+      { pid: 50, ppid: 4242, created: 2_000 }, // sh, running the hook
+      { pid: 60, ppid: 50, created: 3_000 }, // sleep, under the sh
+      { pid: 70, ppid: 1, created: 2_500 }, // not ours
+      { pid: 80, ppid: 4242, created: 500 }, // a child of an earlier holder of 4242
+    ]
+    for (const stop of [(h: ReturnType<typeof windowsPty>['handle'], os: KillOs) => killTree(h, 'SIGKILL', os), (h: ReturnType<typeof windowsPty>['handle'], os: KillOs) => stopTree(h, 10, () => true, os)]) {
+      const { os, ended } = fakeOs(rows)
+      const pty = windowsPty(4242)
+      stop(pty.handle, os)
+      await settle()
+      expect(ended).toEqual([
+        { pid: 4242, alone: true },
+        { pid: 50, alone: true },
+        { pid: 60, alone: false },
+      ])
+      expect(pty.calls).toEqual([])
+    }
+  })
+
+  it('a process table that cannot be read leaves taskkill /T on the root', async () => {
+    const { os, ended } = fakeOs([], 'unreadable')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const pty = windowsPty(4242)
+    killTree(pty.handle, 'SIGKILL', os)
+    await settle()
+    expect(ended).toEqual([{ pid: 4242, alone: false }])
     expect(pty.calls).toEqual([])
   })
 
   it('Stop is one forceful shot: no second shot by pid after the grace period', async () => {
-    const { os, ended } = fakeOs()
+    const { os, ended } = fakeOs([{ pid: 4242, ppid: 1, created: 1_000 }])
     const pty = windowsPty(4242)
     stopTree(pty.handle, 10, () => true, os)
-    await new Promise((r) => setTimeout(r, 40))
-    expect(ended).toEqual([4242])
+    await new Promise((r) => setTimeout(r, 60))
+    expect(ended).toEqual([{ pid: 4242, alone: true }])
     expect(pty.calls).toEqual([])
   })
 
@@ -323,15 +513,17 @@ describe('ending a tree on Windows', () => {
     expect(pty.calls).toEqual([undefined])
   })
 
-  it('a taskkill that fails (the process already ended, or it could not end it) leaves the pty to close itself', () => {
+  it('a taskkill that fails (the process already ended, or it could not end it) leaves the pty to close itself', async () => {
     const pty = windowsPty(4242)
     const os: KillOs = {
       platform: 'win32',
-      taskkill: () => {
+      listProcesses: async () => [],
+      taskkill: async () => {
         throw new Error('ERROR: The process "4242" not found.')
       },
     }
     expect(() => killTree(pty.handle, 'SIGTERM', os)).not.toThrow()
+    await settle()
     expect(pty.calls).toEqual([undefined])
   })
 })
@@ -458,7 +650,7 @@ describe('leftovers of an ended process on Windows', () => {
   })
 
   // #2142 re-check: a shutdown stopping many git calls read the table twice per call, a PowerShell each
-  it('several running trees take one reading of the table: every root is ended, then each tree parents first', async () => {
+  it('several running trees take one reading of the table: every root is ended, then each tree parents first, the trees side by side', async () => {
     const order: unknown[] = []
     const rows = table('300 200 2000\n200 100 1500\n600 500 2100\n')
     const os = {
@@ -470,7 +662,7 @@ describe('leftovers of an ended process on Windows', () => {
       { pid: 500, spawnedAt: 1_000, endRoot: () => void order.push('root 500') },
     ]
     expect(await stopTreesWindows(roots, os)).toEqual([200, 300, 600])
-    expect(order).toEqual(['list', 'root 100', 'root 500', [200, true], [300, false], [600, false]])
+    expect(order).toEqual(['list', 'root 100', 'root 500', [200, true], [600, false], [300, false]]) // 300 after 200, its parent; 600 does not wait for them
   })
 
   it('the leftovers of several ended processes are found from one reading of the table', async () => {
