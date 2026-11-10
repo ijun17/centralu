@@ -49,7 +49,6 @@ packages/agent-host/src/adapters/codex/surface.ts
 packages/agent-host/src/adapters/codex/thread-servers.ts
 packages/agent-host/src/adapters/codex/usage-client.ts
 packages/agent-host/src/adapters/cursor-agent/centralu-tools.test.ts
-packages/agent-host/src/adapters/cursor-agent/index.ts
 packages/agent-host/src/adapters/cursor-agent/install.ts
 packages/agent-host/src/adapters/cursor-agent/surface.ts
 packages/agent-host/src/adapters/edit-grant.test.ts
@@ -67,7 +66,6 @@ packages/agent-host/src/adapters/local-process.test.ts
 packages/agent-host/src/adapters/local-process.ts
 packages/agent-host/src/adapters/opencode/config-files.test.ts
 packages/agent-host/src/adapters/opencode/config-files.ts
-packages/agent-host/src/adapters/opencode/index.ts
 packages/agent-host/src/adapters/opencode/surface.ts
 packages/agent-host/src/adapters/surface-read.test.ts
 packages/agent-host/src/app-home-view.test.ts
@@ -192,7 +190,6 @@ packages/agent-host/src/dev-services/worktree-dependencies.test.ts
 packages/agent-host/src/dev-services/worktree-dependencies.ts
 packages/agent-host/src/dev-services/worktree-recovery.test.ts
 packages/agent-host/src/dev-services/worktree-recovery.ts
-packages/agent-host/src/elevation.ts
 packages/agent-host/src/external-app-runs.test.ts
 packages/agent-host/src/external-apps.test.ts
 packages/agent-host/src/fake-exe.test-helpers.ts
@@ -207,7 +204,6 @@ packages/agent-host/src/lifecycle/start.ts
 packages/agent-host/src/lifecycle/stopped-mark.ts
 packages/agent-host/src/lifecycle/work-job.test-helpers.ts
 packages/agent-host/src/lifecycle/work-job.test.ts
-packages/agent-host/src/lifecycle/work-job.ts
 packages/agent-host/src/link.test-helpers.ts
 packages/agent-host/src/links/auto-reconnect.test.ts
 packages/agent-host/src/links/autostart.test.ts
@@ -231,7 +227,6 @@ packages/agent-host/src/links/remote-dev.ts
 packages/agent-host/src/links/remote-install.mjs
 packages/agent-host/src/links/ssh-config.test.ts
 packages/agent-host/src/links/ssh-config.ts
-packages/agent-host/src/links/ssh-run.ts
 packages/agent-host/src/links/stdin-frame.test.ts
 packages/agent-host/src/links/stored.test.ts
 packages/agent-host/src/links/tunnel.test.ts
