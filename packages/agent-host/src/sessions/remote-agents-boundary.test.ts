@@ -202,7 +202,6 @@ class Hub {
         void this.delivered.push(JSON.stringify({ sessionId, preview, ending, work })),
       reportGate: (id: string) => this.agents.reportGate(id),
       keepsOverLoss: (id: string) => this.agents.keepsOverLoss(id),
-      keepsTurnOverLoss: (id: string) => this.agents.keepsTurnOverLoss(id),
     } as unknown as LinkedReportsHost)
     const host = {
       children: this.children,

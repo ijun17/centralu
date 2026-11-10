@@ -59,12 +59,11 @@ export type LinkedReportsHost = {
    */
   reportGate?(sessionId: string): 'deliver' | 'withhold' | 'defer'
   /**
-   * Whether a link lost over this session's paused report keeps the report (#1523): a child start_agent started follows its work
-   * across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then
+   * What a link lost over this session's paused report keeps (#1523): a child start_agent started keeps the report, as it follows its
+   * work across the loss (`RemoteAgents`), so the link's return reads where it stands and its end is reported then; `turn` keeps the
+   * turn running there too, the same turn, when an update that continues it there holds the link (#2164). Null: nothing is kept
    */
-  keepsOverLoss?(sessionId: string): boolean
-  /** Whether the turn running there goes on across the loss, the same turn (#2164): an update that continues it there holds the link */
-  keepsTurnOverLoss?(sessionId: string): boolean
+  keepsOverLoss?(sessionId: string): 'report' | 'turn' | null
 }
 
 /** How long the hub's own note of "Add to the task" waits for the message it is about to be relayed (#1377) */
@@ -476,9 +475,10 @@ export class LinkedReports {
         this.settle(sessionId, wait)
         continue
       }
-      if (this.host.keepsOverLoss?.(sessionId)) {
+      const keeps = this.host.keepsOverLoss?.(sessionId) ?? null
+      if (keeps) {
         // The turn it ran is out of sight now: its end is read when the link is back (`resync`), not waited for. One an update continues there stays the work's
-        if (this.host.keepsTurnOverLoss?.(sessionId)) continue
+        if (keeps === 'turn') continue
         wait.busy = false
         delete wait.turn
         continue

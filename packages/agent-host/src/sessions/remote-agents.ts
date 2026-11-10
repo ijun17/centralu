@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, agentLook } from '@cc/protocol'
+import { frameField, gitRemoteKey, isInTurn, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionInfo, type SessionState, isAssistantKind, agentLook, oneLineText } from '@cc/protocol'
 import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import { NOT_CONNECTED, NOT_CONNECTED_PHRASE, NOT_REACHABLE } from '../adapters/contract.js'
 import { awayRefusal } from '../links/machine-reach.js'
@@ -214,19 +214,15 @@ export class RemoteAgents {
     }
   }
 
-  /** A report paused over the child's background work stays owed when its link drops, and is settled once the link is back (`LinkedReportsHost.keepsOverLoss`, #1523) */
-  keepsOverLoss(sessionId: string): boolean {
-    const rec = this.of(sessionId)
-    return !!rec && this.reportArmed(rec)
-  }
-
   /**
-   * Whether the turn running there goes on across its link's loss (#2164): this hub's update holds the link, and the host it
-   * starts continues the turn its stop cut, so the turn after is the same turn (`LinkedReportsHost.keepsTurnOverLoss`)
+   * What a lost link keeps of the child's paused report (`LinkedReportsHost.keepsOverLoss`): the report, settled once the link is back
+   * (#1523), and also the turn running there (`turn`) when this hub's update holds the link and the host it starts continues the turn
+   * its stop cut, so the turn after is the same turn (#2164)
    */
-  keepsTurnOverLoss(sessionId: string): boolean {
+  keepsOverLoss(sessionId: string): 'report' | 'turn' | null {
     const rec = this.of(sessionId)
-    return !!rec && this.continuesOverUpdate(rec.machineId)
+    if (!rec || !this.reportArmed(rec)) return null
+    return this.continuesOverUpdate(rec.machineId) ? 'turn' : 'report'
   }
 
   /** This hub's own update or rollback holds the machine's link, and its host continues the turns that stop cuts (#1618) */
@@ -237,6 +233,12 @@ export class RemoteAgents {
   /** The hub's record of a child on a linked machine, by its qualified id */
   of(sessionId: string): RemoteAgent | undefined {
     return this.records().find((r) => r.sessionId === sessionId)
+  }
+
+  /** A child started here on a linked machine, by its name and machine as one name (`MailSessionsHost.linkedChild`) */
+  named(sessionId: string): { name: string } | undefined {
+    const r = this.of(sessionId)
+    return r && { name: oneLineText(`${r.name} on ${r.machine}`, 120) }
   }
 
   /**
