@@ -550,9 +550,10 @@ running, possibly the very session doing the work.
 - **A claim says what it was checked against.** In a report, a pull request or a review, each
   claim names what it was checked against and marks what was not checked. Relaying someone
   else's report keeps its qualifiers.
-- **Raising a tool-definition budget is a decision, not headroom.** Every word of a tool
-  definition or server instructions rides in every request; a `*_BUDGET_CHARS` ceiling goes up
-  only with the reason in the pull request ([docs/tool-cost.md](docs/tool-cost.md)).
+- **Raising a tool-definition budget is the owner's decision, not headroom.** Every word of a
+  tool definition or server instructions rides in every request; a `*_BUDGET_CHARS` ceiling goes
+  up only after the owner agrees on the issue, with the measured numbers
+  ([docs/tool-cost.md](docs/tool-cost.md)).
 - **Comments say why, not what.** Anything learned by measuring is kept together with
   the number that was measured.
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
