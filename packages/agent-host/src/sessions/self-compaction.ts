@@ -1,5 +1,6 @@
 import type { AutoCompact, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import { inTurn, type SessionIdle } from '../idle.js'
+import type { StoredThen, ThenKeep, ThenStage } from './then-keep.js'
 
 /**
  * Compacting at the turn's end (#1451). The CLI's own auto compact (`auto-compact.ts`, #1376) fires in the middle of work,
@@ -88,26 +89,6 @@ export const REFUSED_AGAIN_TOKENS = 2_000
  */
 export const THEN_KEEP_MS = 60 * 60_000
 
-/** How far a request with a `then` has come; the next host reads it to know what it can still do */
-export type ThenStage = 'asked' | 'sent' | 'compacted' | 'refused' | 'sending'
-/**
- * A pending `then` as the store keeps it. `refused`: the request did not compact and `why` says so; the step goes all the same, as a turn that
- * says it. `at`: when the record last moved, so a host does not send what an older build left behind long ago (`THEN_KEEP_MS`)
- */
-export type StoredThen = { stage: ThenStage; then: string; focusAside: string | null; ahead: boolean; why: string | null; at: number }
-/** The store side of a `then` and of the notes owed a session: per session, in the setting store, so the host after a swap or a restart finds them */
-export type ThenKeep = {
-  read(sessionId: string): StoredThen | null
-  write(sessionId: string, record: StoredThen): void
-  clear(sessionId: string): void
-  /** Moves a `compacted` or `refused` record to `sending` in one transaction; true only for the caller that moved it. The other host of a swap finds it moved (or gone) and sends nothing */
-  claim(sessionId: string): boolean
-  /** Records that a compaction of the session went on to its next step at `at`, and answers how many did in the hour up to it (kept, so a swap does not start the count again) */
-  cycle(sessionId: string, at: number): number
-  notes(sessionId: string): string[]
-  writeNotes(sessionId: string, notes: string[]): void
-}
-
 export type SelfCompactionHost = {
   sessions(): SessionInfo[]
   session(sessionId: string): SessionInfo | undefined
@@ -194,6 +175,8 @@ export class SelfCompaction {
   private readonly unread = new Set<string>()
   /** Notes for a session that the tool could not take yet, tried again at a turn's start and with a request of a running turn */
   private readonly owed = new Map<string, string[]>()
+  /** Sessions sent their next step (`goOn`) whose turn has not opened yet: the turn that opens goes on with the work of the turn that asked (`stepOpens`, #2164) */
+  private readonly stepping = new Set<string>()
   private timer: ReturnType<typeof setInterval> | null = null
   /** `stop()` was called: a late event of a turn that was running is not acted on (it would start the timer or send) */
   private stopped = false
@@ -272,6 +255,20 @@ export class SelfCompaction {
   compactTurn(sessionId: string): boolean {
     const c = this.compacting.get(sessionId)
     return !!c && c.started && c.compacted && !c.ended
+  }
+
+  /** Whether the turn opening now is the one a next step this host sent opens (#2164): it goes on with the work of the turn that asked. Once per step */
+  stepOpens(sessionId: string): boolean {
+    return this.stepping.delete(sessionId)
+  }
+
+  /** Sends a next step as a turn of the session's own (`SelfCompactionHost.sendThen`), the turn it opens marked as going on with the work (`stepOpens`) */
+  private async goOn(id: string, text: string, line: string): Promise<void> {
+    this.stepping.add(id)
+    await this.host.sendThen(id, text, line).catch((err: unknown) => {
+      this.stepping.delete(id)
+      throw err
+    })
   }
 
   /** Hears every event of every session. Never throws into the caller's event */
@@ -618,7 +615,7 @@ export class SelfCompaction {
     }
     if (!won) return
     try {
-      await this.host.sendThen(id, this.thenTurn(rec), rec.why === null ? 'Centralu sent the agent its next step after the compaction' : 'Centralu sent the agent its next step: nothing was compacted')
+      await this.goOn(id, this.thenTurn(rec), rec.why === null ? 'Centralu sent the agent its next step after the compaction' : 'Centralu sent the agent its next step: nothing was compacted')
       this.erase(id)
       this.counted(id)
     } catch (err) {
@@ -669,7 +666,7 @@ export class SelfCompaction {
   private async reach(id: string, text: string): Promise<'turn' | 'note' | 'held'> {
     if (!this.stopped && this.host.ready(id)) {
       try {
-        await this.host.sendThen(id, text, 'Centralu told the agent to go on: it changed hosts while a compaction was asked for')
+        await this.goOn(id, text, 'Centralu told the agent to go on: it changed hosts while a compaction was asked for')
         return 'turn'
       } catch {
         // The tool took no turn: the note below
@@ -897,6 +894,7 @@ export class SelfCompaction {
     this.lastRequest.delete(id)
     this.unread.delete(id)
     this.owed.delete(id)
+    this.stepping.delete(id)
     this.refusedAt.delete(id)
     this.stopSettling(id)
     // What a host swap would find of a deleted session is gone with it: a session restored from the trash must not be sent an old step

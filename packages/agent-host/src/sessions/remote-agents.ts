@@ -17,6 +17,7 @@ import type { LinkedEvent } from './linked-reports.js'
 import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
 import { aboveCallerError, agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { autoNotice, bare, carriedPreset, remotePreset, remoteWorktreeLine, shownRemote, type AutoThere } from './remote-agent-words.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound, raceTimeout } from '../timing.js'
@@ -100,65 +101,11 @@ const withoutOwed = (r: RemoteAgent): RemoteAgent => {
   return rest
 }
 
-/** A machine's sentence to go inside another, without its own full stop */
-const bare = (error: string): string => error.trim().replace(/\.+$/, '')
-
 /**
  * How long a start waits for the machine to say its instructions for agents now (#1161 review), once the child is made
  * there: the machine just answered, so this is short. Past it, what it listed before the card goes with the task
  */
 export const INSTRUCTIONS_WAIT_MS = 5_000
-
-
-/**
- * What became of a deleted child's worktree on its machine (#1161 item 3), as the rest of "It went to <machine>'s
- * trash": removed, or left and why. Nothing for a child started without a worktree.
- */
-function remoteWorktreeLine(
-  rec: RemoteAgent,
-  done: { worktree: 'removed' | 'kept' | 'none'; path?: string; branch?: string; why?: string; note?: string } | undefined,
-): string {
-  if (!rec.worktree) return ''
-  if (!done) return `; its worktree there, on ${rec.worktree}, stays. The person deletes it on that machine`
-  const where = `its worktree there${done.path ? ` (${done.path})` : ''}, on ${done.branch ?? rec.worktree}`
-  // The machine's cleanup said what it did itself (the folder already gone, a branch kept by what it holds): said as it is
-  if (done.note) return done.worktree === 'none' ? `; ${bare(done.note)}` : `; as for ${where}: ${bare(done.note)}`
-  if (done.worktree === 'removed') return `, and ${where}, was removed with its branch: nothing in it was uncommitted or unpushed`
-  if (done.worktree === 'none') return `; it had no worktree of its own there any more`
-  return `; ${where}, was left: ${bare(done.why ?? 'the machine did not say why')}`
-}
-
-/**
- * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
- * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
- */
-const shownRemote = (url: string | null): string => (url === null ? 'no origin' : (gitRemoteKey(url) ?? 'a local path'))
-
-/**
- * The most a child on another machine runs under when its caller's `auto` is not carried (#1038 review, as
- * create_session over a link, #838): `normal`. An `auto` caller's is carried only to a machine that takes it (#1273,
- * `AutoThere`), as that machine's own switch says.
- */
-const remotePreset = (caller: PermissionPreset): PermissionPreset => (presetWithin(caller, 'normal') ? caller : 'normal')
-
-/**
- * The caller's preset as `fromHub` carries it (#1273). The machine reads only `auto` from it; `edits` (#1525) is never put
- * on the link, because a machine from before it refuses a whole start for a value it does not know: it goes as `normal`,
- * the preset the child there runs under.
- */
-const carriedPreset = (caller: PermissionPreset): PermissionPreset => (caller === 'auto' ? 'auto' : remotePreset(caller))
-
-/**
- * What a machine says of an `auto` caller's child (#1273, `LinkedSessions.hubAuto`): `auto`, it runs under `auto` there
- * too and no card is raised; otherwise why it runs under `normal` (its switch is off)
- */
-type AutoThere = { auto: true } | { auto: false; withheld: 'machine_off' }
-
-/** What the start tells an `auto` caller of its child's preset (#1273), for its notice */
-const autoNotice = (machine: string, there: AutoThere): string =>
-  there.auto
-    ? `it runs under auto on ${machine}, as this session does`
-    : `it runs under normal on ${machine}: that computer does not take auto from another computer (its "Allow auto from a linked computer" setting is off)`
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
@@ -1139,16 +1086,19 @@ export class RemoteAgents {
    * the caller's: its end is owed as the first turn's was, and a note goes into it. A turn with no origin, or one for a row
    * not held here (the person's, another session's, a machine that does not say), is not taken for the caller's. The rows up
    * to the one named are done with either way: the tool runs messages in the order they were given. While whose the child's turn
-   * is cannot be told (a link's loss, a restart), the rows are kept, and no turn is taken for the caller's
+   * is cannot be told (a link's loss, a restart), the rows are kept, and no turn is taken for the caller's. A turn the machine opened
+   * to go on with the work of the turn before (`continues`, a compaction's next step, #2164) is the caller's while the child's last
+   * turn was, with nobody else's since (`whose`)
    */
   private turnOpens(rec: RemoteAgent, e: LinkedEvent): void {
     const origin = e.type === 'state_change' ? asObj(e.origin) : {}
     const named = origin.seq
     const held = this.givenRows(rec.sessionId)
-    if (typeof named !== 'number' || !held.includes(named) || !this.fromHubHere(rec, origin.from)) return
+    const goesOn = e.type === 'state_change' && e.continues === 'compaction'
+    if (!goesOn && (typeof named !== 'number' || !held.includes(named) || !this.fromHubHere(rec, origin.from))) return
     // Not told apart yet (the link dropped, or Centralu restarted): the rows stay for the re-read that tells (`verify`)
     if (this.whoseOf(rec) === 'unknown') return
-    this.setGiven(rec.sessionId, held.filter((row) => row > named))
+    if (typeof named === 'number') this.setGiven(rec.sessionId, held.filter((row) => row > named))
     if (this.whoseOf(rec) !== 'caller' || this.gateNow(rec).live || !this.host.meta.has(rec.callerId)) return
     this.host.children.setLinkedReport(rec.sessionId, { assistantId: rec.callerId, busy: true })
   }

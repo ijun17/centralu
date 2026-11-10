@@ -454,6 +454,8 @@ describe('compact_self then (#2024)', () => {
     expect(w.thens).toHaveLength(1)
     expect(w.thens[0]![1]).toContain('Continue with step 3 of the plan')
     expect(w.thens[0]![1]).not.toMatch(/came first/)
+    // The turn it opens goes on with the work of the turn that asked (#2164): said once, of that turn only
+    expect([w.c.stepOpens('s1'), w.c.stepOpens('s1')]).toEqual([true, false])
     // The turn it starts is the session’s own, not the compact’s, and sends nothing again
     w.startTurn()
     expect(w.c.compactTurn('s1')).toBe(false)
@@ -953,6 +955,7 @@ describe('compact_self then (#2024)', () => {
     asked(w, undefined, 'next')
     await compactTurn(w)
     expect(w.thens).toEqual([])
+    expect(w.c.stepOpens('s1')).toBe(false)
     expect(w.nudges).toHaveLength(1)
     expect(w.nudges[0]).toMatch(/The compaction you asked for is done, but the session could not take your `then`/)
     expect(w.nudges[0]).not.toMatch(/did not compact/)

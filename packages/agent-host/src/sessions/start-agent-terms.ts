@@ -6,7 +6,8 @@
  */
 import type { SessionInfo, ToolName } from '@cc/protocol'
 import type { ChildRunResult } from '../adapters/contract.js'
-import type { AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
+import type { Delegation } from './child-ownership.js'
+import type { AgentStartRequest, LowMemory } from './agent-start-record.js'
 
 /** How long start_agent waits for a model list to check the model and effort asked for, before it starts anyway (#660) */
 export const START_AGENT_MODEL_CHECK_MS = 3_000

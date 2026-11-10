@@ -66,10 +66,10 @@ class Machine {
     this.transcript.push({ seq, role: 'user', kind: 'text', payload: { text, ...(from ? { from } : {}) } })
     this.out({ type: 'user_message', sessionId: CHILD, seq, text, ...(from ? { from } : {}) })
   }
-  private begin(who: 'hub' | 'person' | 'self'): void {
+  private begin(who: 'hub' | 'person' | 'self', continues?: 'compaction'): void {
     this.state = 'working'
     this.turn = who
-    this.out({ type: 'state_change', sessionId: CHILD, state: 'working' })
+    this.out({ type: 'state_change', sessionId: CHILD, state: 'working', ...(continues ? { continues } : {}) })
   }
   private end(words: string): void {
     this.transcript.push({ seq: ++this.seq, role: 'assistant', kind: 'text', payload: { text: words } })
@@ -97,6 +97,10 @@ class Machine {
   /** The child's own background work ended and its tool starts a turn by itself: a task notification, no message of anyone's */
   selfStarts(): void {
     if (this.state === 'idle') this.begin('self')
+  }
+  /** Centralu opens the turn of the child's next step after a compaction (`compact_self`'s `then`), said to go on with the turn before's work (#2164) */
+  stepStarts(): void {
+    if (this.state === 'idle') this.begin('self', 'compaction')
   }
   selfTurnEnds(): void {
     if (this.turn === 'self') this.end('SELF-ANSWER')
@@ -662,6 +666,23 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     // At rest now: a send is new work, not a note
     expect(await hub.act('send', { text: 'more' })).toMatchObject({ ok: true })
     expect(machine.turn).toBe('hub')
+  })
+
+  it("takes a note into the turn a compaction's next step opens after the caller's turn, and reports its end (#2164)", async () => {
+    await started()
+    machine.callerTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(1)
+    // The child called compact_self with a next step and ended its turn: Centralu's compact turn, then the step's
+    machine.selfStarts()
+    machine.selfTurnEnds()
+    machine.stepStarts()
+    await flush()
+    expect(await hub.act('send', note)).toMatchObject({ ok: true, state: 'working' })
+    expect(notes()).toHaveLength(1)
+    machine.selfTurnEnds()
+    await flush()
+    expect(hub.delivered).toHaveLength(2)
   })
 
   it('keeps the old refusal on a machine that lists no background work (it never pauses), naming no person', async () => {

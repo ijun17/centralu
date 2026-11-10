@@ -3,7 +3,8 @@ import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store, type QueuedRequest } from '../dev-services/store.js'
 import type { MailSessions } from '../mail/delivery.js'
 import { hostMail, type HostMailSessions } from '../mail/host-mail.js'
-import { ChildOwnership, pausedReportKey, reportTurnKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
+import { ChildOwnership, pausedReportKey, reportTurnKey, type Delegation } from './child-ownership.js'
+import type { AgentStartRecord } from './agent-start-record.js'
 
 /*
  * The ownership state on its own (#428): each change writes its store mirror, and an owner change moves every map in
@@ -1080,7 +1081,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
-      expect(next.continuesPause('s', 'caller')).toBe(false)
+      expect(next.continuesWork('s', 'caller')).toBe(false)
     })
 
     // Recheck of #1929, N1: the new host's first call is the person's message, whose row is already stored

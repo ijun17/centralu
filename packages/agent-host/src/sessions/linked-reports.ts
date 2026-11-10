@@ -114,6 +114,8 @@ export type LinkedEvent = {
   turn?: unknown
   /** The message a turn ran for, on the `state_change` that opens it, when the tool ran it after the turn it was sent into (#1604) */
   origin?: unknown
+  /** What a turn that began with no message goes on with, on the `state_change` that opens it (#2164) */
+  continues?: unknown
   /** An app's message (`user_message`): not the person's */
   fromApp?: unknown
   live?: unknown

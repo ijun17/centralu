@@ -15,7 +15,7 @@ What reads `by`:
 
 - the mailbox's turn row (`onTurnStarted` → `turnRecorder` → `MailTurns.beginOther`, `mail_turns.started_by`), which
   the pair's warning count (#2014) and `lastPersonTurn` read, and from which what the turn sends gets its cause;
-- `continuesPause` and `personInTurn`, each time a call arrives during the turn;
+- `continuesWork` and `personInTurn`, each time a call arrives during the turn;
 - `turnEnded`, at the turn's end: the report goes out or not.
 
 ## 2. The rule
@@ -95,7 +95,7 @@ From the review on #1639, and which way each errs:
 | Entries a build before this one leaves during a swap | Its rows carry no `inputId`. At an upgrade the host reads its `pending` and `input_origins` once; a message it held at rest that is neither a pending one nor a hub's (a person's at rest) is not known, and the next turn is the CLI's own until the tool names its input. Read once: a second swap in the same turn keeps only the entries this build's rows hold |
 | A rollback to an older build and forward again | A user row the older build wrote ends what was held before it. If the older build ran held messages and wrote no user row, they read back as held: the next turn is decided by them until the tool names its input (Claude 2.1.289+, Codex, ACP); an older CLI's end spends them |
 | A message that started no turn (`/goal` refused, a limit at rest) | Stays held: the next turn is decided by it at its start, and corrected when the tool names that turn's input. An older CLI keeps it for one turn |
-| A turn whose opening is named only at its end (a card was up at the first stream message, or the tool answered without a stream) | The end corrects `report_turn`, the report and the mailbox's row (`restate`, before the row is closed), so the pair guard and `lastPersonTurn` count the corrected starter from then on. What read the start's guess while the turn ran stays as it was: the cause of mail the turn sent, a `continuesPause` or `personInTurn` refusal, and a pair-guard check made then. Accepted: on Claude 2.1.289+, Codex and ACP the opening is named before any tool call, so only a turn that opens under a card or has no stream is affected, and it errs as before this design (by the oldest held message) |
+| A turn whose opening is named only at its end (a card was up at the first stream message, or the tool answered without a stream) | The end corrects `report_turn`, the report and the mailbox's row (`restate`, before the row is closed), so the pair guard and `lastPersonTurn` count the corrected starter from then on. What read the start's guess while the turn ran stays as it was: the cause of mail the turn sent, a `continuesWork` or `personInTurn` refusal, and a pair-guard check made then. Accepted: on Claude 2.1.289+, Codex and ACP the opening is named before any tool call, so only a turn that opens under a card or has no stream is affected, and it errs as before this design (by the oldest held message) |
 | A message Codex steered into a turn, when the next turn opens for something else | Counted as taken in by the turn it was steered into (`wrote`), and done with at the next opening. If Codex instead ran it as a turn of its own and the opening was not named, it is read as taken in |
 
 ## 4. Tests

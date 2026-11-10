@@ -89,7 +89,7 @@ type NormalizedEvent =
   | { type: 'question_resolved';sessionId, requestId }
   // session state and gauges
   | { type: 'turn_complete';    sessionId }
-  | { type: 'state_change';     sessionId, state: SessionState, reason?, origin?: { seq, from } }   // origin: the message the tool ran this turn for, when a sender gave it (into a turn before it, or at rest behind another message) (#1604)
+  | { type: 'state_change';     sessionId, state: SessionState, reason?, origin?: { seq, from }, continues?: 'compaction' }   // origin: the message the tool ran this turn for, when a sender gave it (into a turn before it, or at rest behind another message) (#1604); continues: the turn is a compaction's next step, going on with the work of the turn that asked (#2164)
   | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: one model request's input, for the prompt cache (agent-host.md §6.1)
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate', model?, capped?, compactAt? }  // model: the model the tool resolved the name to (#1376); window: the model's full window as the host says it, capped: only a floor under it is known, compactAt: where the process compacts, in tokens, as the adapter says it (#1553)
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
