@@ -656,7 +656,7 @@ Platforms: Windows.
 **SU6. A host's group stop does not escalate.**
 Happened: found while collecting this list: the group gets TERM only, then the leader alone gets KILL, so a stuck
 grandchild in the group survives.
-Rule: a group stop ends with KILL to the group, like the children's stop (CH8).
+Rule: a group stop ends with KILL to the group.
 Guard: **UNGUARDED**.
 Platforms: macOS, Linux.
 
@@ -869,30 +869,6 @@ Platforms: Windows.
 The keeper held them from #280 step 2 until #1895 step 4: what was learned stays here, and each lesson says where its
 guard went.
 
-**CH1. Every child runs in a session of its own.**
-Happened: claude and codex shared the host's process group, so a host's exit or group kill reached them (#280).
-Rule: `setsid` for every child; a pty child gets `TIOCSCTTY`; pid ≤ 1 is never signalled.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
-**CH2. The keeper owns the pty and always drains it.**
-Happened: node-pty kept the master in the host, so a host that went away took the screen and, with SIGHUP, the shell. A
-pty child cannot finish exiting while its output is unread: bash stuck in `?Es` for over 5 s (#280).
-Rule: the keeper opens the pty and drains it continuously into a 256 KiB ring, replayed to the next host; a slow reader
-skips ahead instead of holding the child.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
-**CH3. EIO from a pty master is end of file.**
-Rule: a read returning EIO once every slave descriptor is closed ends the stream normally.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
-**CH4. `openpty` does not set close-on-exec.**
-Rule: set `FD_CLOEXEC` on both ends, or every later child inherits every pty.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
 **CH5. An agent's stdout is a protocol: never drop a byte.**
 Happened: claude was measured buffering 60 s with stdout unread; one codex `thread/resume` answer was 23 MB on one
 line; Node's `readline` cut that line in two and the resume hung forever (448815d2).
@@ -901,22 +877,6 @@ reader's half line goes whole to the next; only whole lines reach the child's st
 Guard: `host/adapters/codex/client.test.ts` "a 24MB single-line response arrives intact" (the keeper side went with #1895 step 4 PR 2, which removed its children service).
 Platforms: all.
 
-**CH6. A long-lived process gives memory back.**
-Happened: `Vec::drain` keeps capacity, so one 23 MB line pinned more than 32 MiB for days; the control-queue cap could
-never fire (#392, #395, aab29764); exit records were never forgotten.
-Rule: buffers shrink once mostly empty (1 MiB floor); the 8 MiB control-queue cap is checked whatever the flush did;
-released children's exit records are dropped.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
-**CH7. No connection closing ever signals a child.**
-Happened: the Agent SDK kills its process when its owner exits; a host leaving for a restart must leave its agents
-untouched (#280).
-Rule: only an explicit request signals a child, closes its stdin or its pty; a detached handle ignores `kill()` and
-`stdin.end()`; the SDK's exit hook is neutralised by a `process.once('exit')` registered at module load.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
 **CH8. The keeper's stop escalates in a fixed order.**
 Rule: the host stops its own children first (up to 6 s); then stdin EOF for pipes and SIGHUP for ptys; TERM to the
 group after 2 s; KILL 1 s later; then `children.sock` is removed. A pty's signals go to every group in its session,
@@ -924,41 +884,6 @@ its shell's jobs included (#840 item 2).
 Guard: `scripts/keeper-integration.mjs` scenario `update` check "stop ends the keeper, the host and its N children" (the
 host's own children since #1895 step 4 PR 1). The keeper's own escalation went with its children service in PR 2: its
 stop now tells the host `{"op":"stop"}` on its stdin and waits up to 6 s (`host_proc::STOP_WAIT`).
-Platforms: macOS, Linux.
-
-**CH9. The keeper's agent sweep never hits a reused number.**
-Happened: the keeper side of #435.
-Rule: when a pipe child exits, TERM its group at once and KILL it after 2 s; never while any process holds that pid
-(an unreaped zombie, a reuse); never pgid ≤ 1 or the keeper's own group; ptys are not swept; pending sweeps travel in
-the handoff; `stop_all` kills leftover sweeps.
-Removed: went with #1895 step 4 PR 2, which removed the keeper's children service (`keeper/children/`, `os/unix/children.rs`) and its guards: the host spawns and stops its own children (CH13).
-Platforms: macOS, Linux.
-
-**CH10. The exit of a process you did not start.**
-Happened: after a handoff the keeper is not its host's parent. kqueue `NOTE_EXIT` reports a non-child's exit on macOS,
-but registering on a process that is already a zombie fails with ESRCH (Darwin 27, 2026-10-04); Linux has a pidfd.
-Rule: a handed-over host is watched by its identity, not its number (`os::process::ProcessWatch`, #840 item 8): kqueue
-on macOS, a pidfd on Linux, polling elsewhere; ESRCH alone means gone. Its exit status is not needed, so none is read
-(the children service, which needed one, went with #1895 step 4 PR 2).
-Removed: went with #1895 step 4 PR 4 (`os/unix/process.rs`, `host_proc/handover.rs` and their guards): no keeper
-watches a host it did not start any more (SU7).
-Platforms: macOS, Linux.
-
-**CH11. A graceful stdin close is a request, not a socket end.**
-Rule: `stdin.end()` on a kept agent becomes the keeper's `close_stdin`, so codex can remove its lock (KL14).
-Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, and with it `agent-process.test.ts`.
-Platforms: macOS, Linux.
-
-**CH12. Re-attaching across hosts and builds.**
-Happened: measured 2026-10-04/05: claude's re-`initialize` re-delivers a pending approval; codex rejects a second
-`initialize` with "Already initialized" and `thread/resume` re-sends approvals; an adopted app-server can deliver
-answers meant for the previous host's requests; an in-process tool call in flight when the old host died is never
-answered (#280, #342).
-Rule: tags are opaque to the keeper and parsed by the host, unknown kinds left alone, tags without a version still read;
-new ids never collide with kept ones; codex request ids carry a per-client prefix; the second `initialize` is ignored
-only for an adopted process; a lost in-process call is failed out loud and the turn interrupted.
-Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more, and with it its guards (`held-children.test.ts`, `kept-ptys.test.ts`, `adapters/codex/keeper.test.ts`,
-`adapters/claude/keeper.test.ts`). The adapters' adopt path is still replayed by `host/adapters/codex/adopt.test.ts`.
 Platforms: macOS, Linux.
 
 **CH13. Without a keeper the host owns its children.**
@@ -976,12 +901,6 @@ Guard: `host/agent-versions.test.ts` "restarts a live, idle, quiet session that 
 `host/sessions/agent-versions-direct.test.ts` (the held-child case of `agent-versions-restart.test.ts` went with #1895
 step 4 PR 1).
 Platforms: all.
-
-**CH15. A kept process reports its exit like node-pty, after its output.**
-Rule: wait for the stream to end (at most 1 s), flush the decoder, report a signalled pty as `exitCode: 0` plus the
-signal, report a lost keeper as SIGHUP, then release the child.
-Removed: the host side went with #1895 step 4 PR 1, which removed `host/keeper/`: no host holds, detaches or adopts children any more. The host's own processes report their exit after their output (KL19, `exit-after-drain.ts`).
-Platforms: macOS, Linux.
 
 ## 8. Front door, swap and the store across builds
 
@@ -1035,14 +954,6 @@ tool calls: p99 78 s, longest 4.5 h.
 Rule: drain only calls the host serves itself, 10 s, then cut with a retryable error. Since #1895 step 4 PR 5 only
 `host.stop {ifIdle}` drains (the swap's drain, and its rule to release the lock even if detach threw, went with it).
 Guard: `host/drain.test.ts` "cuts a call still running at the bound with a retryable error, and does not wait for it".
-Platforms: macOS, Linux.
-
-**SW6. A swap that fails falls back to the build that served.**
-Rule: a standby failure leaves the running host untouched; a failure after the drain starts the old build again from
-its kept copy, never retries the new one; a connection that read the old target is turned away by generation.
-Removed: went with #1895 step 4 PR 4, which removed the keeper's swap (`keeper/swap.rs`, the `swap` scenario of
-`keeper-integration.mjs`) and its guards: an update or another build is a stop, and the keeper has no other build to
-fall back to.
 Platforms: macOS, Linux.
 
 **SW7. A host refuses a store from a newer build before writing anything.**
@@ -1135,97 +1046,6 @@ Platforms: all.
 
 The keeper handed itself over from #280 step 4 until #1895 step 4 PR 4: what was learned stays here, and each lesson
 says where its guard went.
-
-**HD1. Start the next keeper, pass every handle, let the old one exit.**
-Happened: `exec` would keep the pid and descriptors on macOS and Linux but has no Windows equivalent, so the direction
-is the same everywhere (#280 step 4).
-Rule: A starts B with a `socketpair` end at B's descriptor 3 (no path, peer uid still checked); the lock's open file
-description, every listener, every child's pipes or pty, every relayed connection and every attached window pass to B;
-nothing reconnects; keeper first, then the host, so the newer side always reads the older side's state.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux (Windows: `DuplicateHandle`, not built).
-
-**HD2. A descriptor batch that finds no room waits for it.**
-Happened: "Switch to this build" failed with "Message too long (os error 40)" with 4 agents, 2 terminals and 7 app
-views: on macOS a `sendmsg` carrying descriptors on a stream socket fails at once with EMSGSIZE when the 8 KiB send
-buffer has less room than the batch; about 8,000 bytes before a batch failed, 4,000 and 20,000 passed (#387,
-9d66f03c). Linux blocks: the sweep passes there at 16 KiB and 208 KiB even with the retry disabled (#458).
-Rule: EMSGSIZE, ENOBUFS and EAGAIN mean wait for room and retry, up to 30 s; a batch carries one byte, so a failed
-attempt sent nothing; at most 64 descriptors per batch, after all bytes.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS (Linux checked by the same sweep).
-
-**HD3. A message sent just before the peer closed is still read.**
-Happened: macOS refuses `SO_RCVTIMEO` with EINVAL once the peer has closed; A sends `commit` and exits at once, so B
-lost the commit and the exit statuses in it (#387).
-Rule: `recv` ignores EINVAL from setting its timeout.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS.
-
-**HD4. Received descriptors are close-on-exec, and a truncated batch fails.**
-Rule: Linux receives with `MSG_CMSG_CLOEXEC`; elsewhere `FD_CLOEXEC` is set on each descriptor after `recvmsg`;
-`MSG_CTRUNC` is an error.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD5. The channel reaches the incoming keeper, and nothing else inherits it.**
-Happened: until #461 older keepers started the window executable, which `exec`ed `centralu-keeper` (ST7); a keeper
-hands over only to a `centralu-keeper` now.
-Rule: `dup2` to descriptor 3 and clear `FD_CLOEXEC` before `exec`; the incoming keeper sets close-on-exec on the channel
-at once. An executable not named `centralu-keeper` is refused before anything starts (`handoff::give`): a window's
-executable started without `--keeper` would open a window.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux. *Changed by #461.*
-
-**HD6. The snapshot only grows, and the newer side reads the older.**
-Happened: the outgoing keeper is always the older build in an update.
-Rule: `HANDOFF_PROTOCOL` is checked both ways; fields are only added. Since #461 every snapshot field
-is required: a snapshot without one is refused and the handoff rolls back. A keeper of 0.1.0-beta.11 or earlier wrote no
-`sweeps` (#435) and rolls back; 0.1.0-beta.12 and later hand over.
-Since #1895 step 4 PR 2 a snapshot that carried a child table
-at all was refused. *Changed by #461.*
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD7. A rollback says how the incoming keeper ended.**
-Happened: when B exited before `ready` the read error said only "failed to fill whole buffer" (#368, #441).
-Rule: on EOF, reset or broken pipe, wait up to 2 s for B's exit and report its code or signal.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD8. The outgoing keeper freezes; it never reads ahead.**
-Happened: a byte A read but did not deliver would be lost with A (#280).
-Rule: every reader stops between units (host lines, relay copies, child-table passes) and hands over what it holds;
-packing duplicates descriptors so a rollback finds everything open; before `ready` any failure rolls back; after it A
-never resumes and exits without running destructors; B starts no I/O until `commit`.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD9. If A dies after `ready`, B takes over only if A is gone.**
-Rule: B's failed wait for `commit` means: A alive, exit; A gone, take over (B holds the only copy of everything).
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD10. The lock passes with no gap.**
-Rule: B gets the same open file description of `keeper.lock`, so `flock` is held throughout; B proves it with a
-`try_lock` on the passed descriptor; the holder record is rewritten from offset 0 (the offset is shared).
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD11. A reaps at the commit and passes the statuses.**
-Rule: A is still the parent; children that exited during the freeze are reaped by A and their statuses sent in
-`commit` (kqueue on a zombie fails, CH10).
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
-
-**HD12. A fix in the sending keeper cannot reach an update.**
-Happened: the EMSGSIZE fix lives in the outgoing keeper, and in an update that is the old build, which still failed on
-every try; the window kept offering "Switch to this build" (#391, dbe96997).
-Rule: ask of every compatibility fix which side runs the code during an update. A failed handoff still lets the host
-switch run. Since #1895 step 4 PR 3 the window never switches: a keeper of another build is restarted (UP7), so a
-keeper left behind on a switch cannot arise from this build's window.
-Removed: went with #1895 step 4 PR 4, which removed the keeper handoff (`keeper/handoff/`, `os/unix/handles.rs`, `host_proc/handover.rs`, `keeper-handoff-integration.mjs`) and its guards: a keeper runs one build, and one started with `--take-over-fd` exits with code 7, which a sending keeper reads as an aborted handoff (`keeper/keeper/server/tests.rs` `a_keeper_started_to_take_another_over_exits_at_once`).
-Platforms: macOS, Linux.
 
 **HD13. A running executable that is unlinked keeps running; one overwritten in place may not.**
 Happened: `tauri build` deletes and rewrites the bundle; `centralu install` does `rmSync` then `ditto`. A probe that
@@ -1491,13 +1311,6 @@ Guard: `window/shell/tests.rs` `each_refusal_starts_the_keeper_directly_with_the
 (one start); that it sticks across later starts (`KeeperLink`) is **UNGUARDED**.
 Platforms: macOS.
 
-**TC16. A keeper from content verifies the next content itself.**
-Rule: only a keeper whose own executable is `<data>/content/<version>/centralu-keeper` verified and copied the next
-build before handing over; any other keeper handed over to the executable it was given.
-Removed: went with #1895 step 4 PR 4 (`Verifier::place` in the keeper, `keeper-content-integration.mts`): a keeper
-hands over to nothing, so only the shell places content.
-Platforms: macOS.
-
 **TC17. A tool started under Centralu asks in Centralu's name.**
 Happened: the default trash goes through Finder by AppleScript, which raises an automation prompt and, if declined,
 silently deletes nothing (5b05f2b3).
@@ -1576,7 +1389,6 @@ as running".
 Platforms: macOS, Linux.
 
 **UP8. "Restart completely" replaces a keeper that cannot move.**
-Happened: #387's fix lives in the sending keeper (HD12).
 Rule: it is the keeper's `stop`; the window stays, sees the keeper exit and starts one of its own build. The build bar's
 "Restart into this build" (#1895 step 4 PR 3) is the same, with `stop {forUpdate}` to a keeper that can stop for an
 update (`window/sidecar/link.rs` `a_restart_into_this_build_stops_the_keeper_for_an_update_when_it_can`).
@@ -1808,9 +1620,8 @@ Platforms: Windows and WSL remotes (a WSL step is read the same way by the Power
 
 These are practices, not invariants of the code; they say how a replacement module is proven.
 
-**TE1. A boundary gets a sweep, not one value.** The handoff failed only near 8,000 bytes before a batch (#387);
-`wire.rs` sweeps three buffers' worth (HD2). Run buffers, batches, caps and limits from zero to a few times the limit,
-and at the scale people reach (several agents, terminals and app views, a large store). CONTRIBUTING.md.
+**TE1. A boundary gets a sweep, not one value.** A channel failed only near 8,000 bytes before a batch (#387). Run buffers, batches, caps and limits from zero to a few times the limit,
+and at the scale people reach (several agents, terminals and app views, a large store). CONTRIBUTING.md. Ask of every compatibility fix which side runs the code during an update (#387: the fix lived in the sending keeper, which an update does not replace).
 
 **TE2. CI starts a real keeper on each OS it ships on.** CI never started a keeper, so a host crash loop stayed green
 (#329, #348); the `keeper e2e` job runs the keeper scripts on macOS (#349). They ran on ubuntu-24.04 too
