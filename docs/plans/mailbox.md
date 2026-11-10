@@ -246,6 +246,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     the person acts on the warning (§10.10).
   - *Not taken:* a one-click pause of the sessions involved on the warning (#2014's open item). The person can stop a
     session or write to it; a pause would bring back a hold under another name.
+- **D33. Every mail to the person raises an OS notification**, of any kind (owner, 2026-11-10, #1630): `mail_changed.arrived`, §12.2.
 - **D14. `ask_project` keeps its project-pair consent** (`project_consents`) for what only it does: work in another
   project's session with its report, the agent depth, and read grants. Plain mail across projects needs no consent
   (§7.8; Q4 accepted as option A).
@@ -1878,7 +1879,7 @@ Entities, in `entities/mail.ts`:
 - `HeldProject { projectId, name, count, refused, recipients: MailParty[] }` (`count`: held messages; `refused`: refused delegations).
 
 `mail_changed` gains optional `messageId` and `rootId`; `threadId` carries the root id. It gains optional `arrived` too (#1630): a new
-message the person can read, from anyone but the person (`MailPerson.arrival`: a row to them that is not held or withdrawn), with its
+message the person can read, from anyone but the person (`MailPerson.changeEvent`: a row to them that is not held or withdrawn), with its
 sender as a `MailParty`, its window kind and a preview. The window raises one OS notification for it, through the same system port
 as an approval (`alertPerson`, `mailNotification` in core), under the switches every notification follows (the focus one, the sound)
 and not the approval one; any kind, a question included, sounds once as a finished turn does, never as an approval: it holds no tool call. A change to a message already stored (a read, a settle, a close) carries no `arrived`, so it notifies nothing.
