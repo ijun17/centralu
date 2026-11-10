@@ -30,6 +30,9 @@ class RecordingSocket {
  * The window calls the Assistant's methods by their old names (#2133, docs/plans/assistant-rename.md §3.3): it can reach a
  * host older than step 3 (a keeper of an earlier release, or on Windows the data folder's `centralu serve`), which knows
  * only `orchestrator.*`. Every host answers the old names.
+ *
+ * It pins the window on `orchestrator.*` until the switch plan §3.3 names (once no supported keeper or `serve` lacks `assistant.*`): at that
+ * switch this test is flipped to the new names or deleted with the old ones.
  */
 describe("the window's calls to the Assistant", () => {
   it('use the names every host answers', async () => {
