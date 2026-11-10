@@ -1,18 +1,18 @@
 import type { NormalizedEvent } from '@cc/protocol/client'
 import type { StoreGet, StoreSet } from '../state.js'
 
-/**
- * The app-wide lists a broadcast keeps up to date, each with the read that brings it back (#2163). The event's handler runs
- * the read (`rereadFor`), and a reconnect runs every read here (`recoverAfterReconnect`): a broadcast missed while the window
- * was away never comes again, and each list used to join the reconnect by hand after its own missed-broadcast bug (#173,
- * #392, #703, #1306, #1405). A list a new broadcast keeps joins this table once, and both follow.
- */
 /** A list's read; `e` is the broadcast that asked for it, absent after a gap */
 type Read = (get: StoreGet, set: StoreSet, e?: NormalizedEvent) => unknown
 
 // A proposal list saved (#703): both are read, whichever tool made it. A later release names it after the role (#2133)
 const proposals = (get: StoreGet) => Promise.all([get().refreshMcpProposals(), get().refreshSkillProposals()])
 
+/**
+ * The app-wide lists a broadcast keeps up to date, each with the read that brings it back (#2163). The event's handler runs
+ * the read (`rereadFor`), and a reconnect runs every read here (`recoverAfterReconnect`): a broadcast missed while the window
+ * was away never comes again, and each list used to join the reconnect by hand after its own missed-broadcast bug (#173,
+ * #392, #703, #1306, #1405). A list a new broadcast keeps joins this table once, and both follow.
+ */
 const READS: Partial<Record<NormalizedEvent['type'], Read>> = {
   themes_changed: (get) => get().refreshThemes(),
   // A setting another window or the Assistant saved (#1306)
