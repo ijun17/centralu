@@ -286,7 +286,7 @@ export class ChildReports {
   /** The tasks a paused report waited on, as the session lists them now: how each ended, or still running (#721) */
   pausedTasksNow(sessionId: string): BackgroundTask[] {
     const listed = this.host.meta.get(sessionId)?.backgroundTasks ?? []
-    const byUpdate = this.host.children.pausesStoppedByUpdate.has(sessionId)
+    const byUpdate = this.host.children.stoppedByUpdate.has(sessionId)
     return (this.host.children.pausedReports.get(sessionId) ?? []).map((t) =>
       // One an update's stop ended is not listed by the new process: stopped, not completed (#1912)
       listed.find((l) => l.id === t.id) ?? { id: t.id, kind: 'other' as const, description: t.description, status: byUpdate ? ('stopped' as const) : ('completed' as const) })
@@ -357,7 +357,7 @@ export class ChildReports {
     const paused = running.length > 0
     const toldPaused = paused && this.host.children.pausedReports.has(sessionId)
     // An update's stop ended the work it had paused on (#1912): the report says so, once. Read before the report is closed
-    const byUpdate = this.host.children.pausesStoppedByUpdate.has(sessionId)
+    const byUpdate = this.host.children.stoppedByUpdate.has(sessionId)
     // Work it handed on that is still going (§6): the turn is not the work's end, and the report stays owed for the turn that ends it
     const waiting = !paused && ending.type === 'turn_complete' ? this.host.children.waitingOn(assistantId, sessionId) : 0
     if (paused) this.pauseReport(sessionId, running)
@@ -403,7 +403,7 @@ export class ChildReports {
     const later = { compaction: turn?.compaction === true, othersWrote: this.othersWroteInTurn(sessionId), personWrote: personWroteSinceMark(this.host.store, sessionId) }
     const target = this.host.meta.get(sessionId)
     if (!said || !isPauseUpdate(later, said.preview) || !target || !this.host.meta.has(assistantId)) return undefined
-    if (byUpdate) this.host.children.pausesStoppedByUpdate.delete(sessionId)
+    if (byUpdate) this.host.children.stoppedByUpdate.release(sessionId)
     const { name, project } = this.reportedAs(target)
     const work = { paused: running, stoppable: target.askedBy === assistantId, update: turn?.since === undefined ? {} : { since: turn.since } }
     const part = byUpdate ? { ...turn, stoppedByUpdate: true as const } : turn
@@ -435,7 +435,7 @@ export class ChildReports {
    * reports at that turn's end
    */
   reportStoppedByUpdate(sessionId: string): void {
-    if (this.host.disposing || !this.host.children.pausesStoppedByUpdate.has(sessionId)) return
+    if (this.host.disposing || !this.host.children.stoppedByUpdate.has(sessionId)) return
     const m = this.host.meta.get(sessionId)
     if (!m || inTurn(m.state) || !this.host.children.awaitingReport.has(sessionId)) return
     console.error(`[sessions] ${sessionId.slice(0, 8)}: an update stopped the background work its report paused on, and no turn followed; reporting that`)

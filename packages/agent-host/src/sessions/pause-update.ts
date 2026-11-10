@@ -35,7 +35,7 @@ export function personWroteSinceMark(store: Pick<Store, 'children' | 'messages'>
 /**
  * The reports paused over the work of a session at rest that an update's stop ended (#1912), at the start after it: no turn was cut, so nothing
  * would end the work's wait, and its caller would wait for good. Each is kept as a report whose turn goes on (`ChildOwnership.restoreReports`),
- * and the next report about the session says the update stopped that work (`pausesStoppedByUpdate`): the end of the turn the update's note wakes
+ * and the next report about the session says the update stopped that work (`StoppedByUpdate`): the end of the turn the update's note wakes
  * it for, or at once when no such turn comes (`ChildReports.reportStoppedByUpdate`)
  */
 export function keptOverUpdateStop(store: Pick<Store, 'children' | 'settings'>, sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): Set<string> {

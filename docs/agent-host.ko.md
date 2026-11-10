@@ -392,7 +392,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    읽으며(#1186) 자기가 띄운 자식이면 `agent_session(action="status")`가 각 작업의 이름을 댄다는 말을 받는다. 최종 보고는 여전히
    그 작업이 끝날 때 온다.
    업데이트를 위한 멈춤은 예외다(#1912): 쉬고 있던 자식의 멈춘 보고는 그 멈춤이 끝낸 작업과 함께 버리지 않고 남긴다
-   (`restoreReports`, `pausesStoppedByUpdate`, 메모리만). 업데이트의 알림이 그 자식을 깨워 연 턴은 맡긴 일의 것이고, 그 끝의
+   (`restoreReports`, `StoppedByUpdate`, 메모리만). 업데이트의 알림이 그 자식을 깨워 연 턴은 맡긴 일의 것이고, 그 끝의
    보고는 "An update of Centralu stopped the background work this work had paused on before that work ended; the session was
    told which, and this turn came after."라고 말한다. 그런 턴이 오지 않으면(알림이 들어가지 못했거나, 멈춤이 그 세션의
    작업을 적지 않았다) 호출자는 곧바로 "An update of Centralu stopped the background work the assigned work had paused on (…)

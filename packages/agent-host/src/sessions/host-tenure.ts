@@ -477,7 +477,7 @@ export class HostTenure {
     // A report paused over work an update's stop ended is kept as one whose turn goes on (#1912, `keptOverUpdateStop`)
     const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
     this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
-    for (const id of stopped) this.host.children.pausesStoppedByUpdate.add(id)
+    for (const id of stopped) this.host.children.stoppedByUpdate.keep(id)
     /*
      * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its
      * conversation moved on) has no such turn coming: its caller is told now
