@@ -339,6 +339,45 @@ describe('ending a tree on Windows', () => {
   })
 
   /*
+   * #2141 re-check under load: a shutdown stops every terminal in one turn, and a table read of its own for each was four
+   * PowerShells at once on a busy machine, each slower for the others (7 s alone, 11 s four at a time on 12 busy cores).
+   */
+  it('stops asked in one turn are one read of the table, each tree still ended from it', async () => {
+    const rows: WinProcRow[] = [
+      { pid: 10, ppid: 1, created: 1_000 },
+      { pid: 11, ppid: 10, created: 1_100 },
+      { pid: 20, ppid: 1, created: 1_000 },
+      { pid: 21, ppid: 20, created: 1_100 },
+    ]
+    const { os, ended } = fakeOs(rows)
+    let reads = 0
+    const counting: KillOs = { ...os, listProcesses: (t) => (reads++, os.listProcesses(t)) }
+    killTree(windowsPty(10).handle, 'SIGKILL', counting)
+    killTree(windowsPty(20).handle, 'SIGKILL', counting)
+    await settle()
+    expect(reads).toBe(1)
+    expect(ended.map((e) => e.pid).sort()).toEqual([10, 11, 20, 21])
+  })
+
+  it('a table that cannot be read ends every tree with taskkill /T side by side, not one after another', async () => {
+    const started: number[] = []
+    const release: (() => void)[] = []
+    const os: KillOs = {
+      platform: 'win32',
+      listProcesses: async () => {
+        throw new Error('powershell would not start')
+      },
+      taskkill: (pid) => new Promise<void>((resolve) => (started.push(pid), release.push(resolve))),
+    }
+    killTree(windowsPty(10).handle, 'SIGKILL', os)
+    killTree(windowsPty(20).handle, 'SIGKILL', os)
+    await settle()
+    expect(started).toEqual([10, 20]) // the second does not wait for the first (each took seconds on a starved machine)
+    release.forEach((r) => r())
+    await stopsSettled(1_000)
+  })
+
+  /*
    * #2141 re-check: the host exits as soon as its shutdown steps are done, and `killTree`/`stopTree` return before the table is
    * read. The shutdown waits for the stops it started (`stopsSettled`), or what the table showed under a terminal's shell
    * is left running (a hidden child survived 3 of 3 host stops).

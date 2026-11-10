@@ -236,7 +236,7 @@ export const GIT_STOP_GRACE_MS = RUN_STOP_GRACE_MS
 
 /**
  * Ends every git still running, as a timeout would (`runChild`'s stop: SIGTERM so git takes its `index.lock` away,
- * SIGKILL after the grace, the whole tree; Windows has no SIGTERM: `taskkill /T /F` at once), and settles once each has
+ * SIGKILL after the grace, the whole tree; Windows has no SIGTERM: the ordered stop of `os/kill-tree.ts` at once), and settles once each has
  * exited and what it left has been swept, or the grace has passed with a margin. For the host's shutdown, in both of
  * its modes: the keeper does not hold git, so a git left running would outlive the host with the repository's locks.
  *
