@@ -1,6 +1,6 @@
 import { errorMessage } from '@cc/protocol'
 import { sleepSync } from '../timing.js'
-import { retryHeldSync } from '../os/held.js'
+import { held } from '../os/real.js'
 import { ENDED_MAX_AGE_MS, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
@@ -29,7 +29,7 @@ import { readStopped, type Stopped } from './update-stopped.js'
  * its own (`recordUpdateEnded`): they are no session's, so no mark applies; the first start after it takes them whole
  * (`UpdateResumeLists.takeEnded`) and the list goes.
  *
- * **A list that cannot be read at the start** is tried again while it is held (`EBUSY`, a virus scanner that
+ * **A list that cannot be read at the start** is tried again on Windows while it is held (`EBUSY`, a virus scanner that
  * opened the file just written), by the one policy for that (os/held.ts), each failure said. One still unreadable stays where it is for a later start,
  * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
  * like any a quit cut, with its Continue, and the log says so.
@@ -121,7 +121,7 @@ export class UpdateResumeLists {
   private readonly dealt = new Set<string>()
 
   /**
-   * `wait` sleeps between the tries at a list a scanner holds (os/held.ts); the host's own start is one thread with nothing
+   * `wait` sleeps between the tries at a list a scanner holds on Windows (os/held.ts, `held`); the host's own start is one thread with nothing
    * yet to serve, so it blocks. Tests pass their own
    */
   constructor(
@@ -138,7 +138,7 @@ export class UpdateResumeLists {
     for (const name of names) {
       let text: string | null
       try {
-        text = retryHeldSync(() => folder.read(name), wait, (err) => console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again`))
+        text = held(() => folder.read(name), wait, (err) => console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again`))
       } catch (err) {
         /*
          * Still held after the tries, or unreadable for another reason. The list stays where it is and is read by a later

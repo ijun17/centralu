@@ -52,7 +52,7 @@ import {
 } from './rules.js'
 import { abortReason, asOsError, errnoCode } from './errors.js'
 import { copyTreeAsync, copyTreeSync } from './copy.js'
-import { retryHeld, retryHeldSync } from './held.js'
+import { retryHeld, retryHeldSync, type HeldRetry } from './held.js'
 import { runChild } from './run.js'
 
 /**
@@ -69,7 +69,12 @@ const traits = traitsFor()
 
 /** A `rename` or `rm` Windows refuses while another process holds the file for a moment is tried again (os/held.ts, #2161) */
 const HOLDS = HOST_FAMILY === 'windows'
-const held = <T>(op: () => T): T => (HOLDS ? retryHeldSync(op) : op())
+/**
+ * `op`, tried again while Windows refuses it as held, and once elsewhere: the one place that says on which OS a hold is
+ * waited out, for the layer's own calls and for a caller's read of a file a scanner may hold (update-resume.ts).
+ * `wait` and `retried` as `retryHeldSync`'s
+ */
+export const held = <T>(op: () => T, wait?: (ms: number) => void, retried?: HeldRetry): T => (HOLDS ? retryHeldSync(op, wait, retried) : op())
 const heldAsync = <T>(op: () => Promise<T>): Promise<T> => (HOLDS ? retryHeld(op) : op())
 
 const NS_PER_MS = 1_000_000n

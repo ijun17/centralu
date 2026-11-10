@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HELD_WAITS_MS } from '../os/held.js'
+import { HOST_FAMILY } from '../os/real.js'
 import { parseUpdateResume, recordUpdateCut, UpdateResumeLists, type UpdateResumeFolder } from './update-resume.js'
 import { memoryUpdateFolder } from './update-resume.test-helpers.js'
 
@@ -75,7 +76,9 @@ describe('the turns an update cut, in the data folder', () => {
    */
   const busy = () => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
 
-  it('a list held for a moment (EBUSY) is read again, each failure said, and its turn is continued (#1626 review)', () => {
+  const windows = HOST_FAMILY === 'windows'
+
+  it.runIf(windows)('a list held for a moment (EBUSY) is read again on Windows, each failure said, and its turn is continued (#1626 review)', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }])
@@ -92,7 +95,7 @@ describe('the turns an update cut, in the data folder', () => {
     expect(said.mock.calls.filter((c) => String(c[0]).includes('EBUSY'))).toHaveLength(2)
   })
 
-  it('a list still held after the tries is kept for a later start, never removed, and the log says so (#1626 review)', () => {
+  it.runIf(windows)('a list still held after the tries is kept for a later start, never removed, and the log says so (#1626 review)', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const f = memoryUpdateFolder()
     recordUpdateCut(f, [{ id: 's1', seq: 4 }])
@@ -109,6 +112,21 @@ describe('the turns an update cut, in the data folder', () => {
     // The hold is gone at a later start: the list is read whole
     f.read = read
     expect(new UpdateResumeLists(f).cut('s1', 4)).toBe(true)
+  })
+
+  // POSIX holds no file: a list refused there (EPERM, EACCES) cannot be read, and is not waited on (os/held.ts)
+  it.runIf(!windows)('a list refused on POSIX is final at once, with no wait and no "held" line, and kept for a later start', () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const f = memoryUpdateFolder()
+    recordUpdateCut(f, [{ id: 's1', seq: 4 }])
+    f.read = () => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+    }
+    const waits: number[] = []
+    new UpdateResumeLists(f, (ms) => waits.push(ms))
+    expect(waits).toEqual([])
+    expect(said.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('reading it again'))).toEqual([])
+    expect(f.files.size).toBe(1)
   })
 
   it('any other read error is final at once, with no wait', () => {
