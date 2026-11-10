@@ -14,7 +14,6 @@ costs the most when missed, and says which document holds the rules for what you
 - Run two `pnpm e2e` (or `ux`, `perf`, `perf:memory`) at once on one machine, or start `playwright`
   yourself: the runners take the machine's lock. WSL and native Windows are two machines to it, so use one of them.
 - Run `tauri build` / `pnpm app` unless asked: it rewrites the bundle a running app may be using.
-- Merge your own pull request.
 
 ## Commands
 
@@ -54,7 +53,7 @@ nothing does, so your own check and the review must catch it.
 | An adapter | [agent-host.md](docs/agent-host.md) §3 step 3, §3.1; [architecture.md](docs/architecture.md) §2 | Tests replay recordings of real runs. A new vendor name joins the drift contract. CLI names stay in `adapters/` | `agent/agent-adapter-checks`, `.github/workflows/drift.yml` |
 | A protocol message | [protocol.md](docs/protocol.md) §4 | Additions only; a shape is declared once; an added host field has a default the client applies | `protocol.test.ts` (golden fixtures), `e2e/older-host.spec.ts`, `pnpm tier` (deep) |
 | The store or anything stored | [agent-host.md](docs/agent-host.md) §5.1; [stored-shapes.md](docs/stored-shapes.md) "The rules" | Add first, remove later: a step never breaks the previous build. The step number comes from your brief, or ask | `store-migrations.test.ts`, `store-older-builds.test.ts`, `schema-doc.test.ts`, pre-pr `store-step` |
-| An MCP tool definition or instructions | [agent-host.md](docs/agent-host.md) §1.1; [tool-cost.md](docs/tool-cost.md) (top), §5 | Every word rides in every request. Raising a `*_BUDGET_CHARS` ceiling is a decision | `sessions/centralu-tools.test.ts`, `adapters/claude/tool-prefix.test.ts` |
+| An MCP tool definition or instructions | [agent-host.md](docs/agent-host.md) §1.1; [tool-cost.md](docs/tool-cost.md) (top), §5 | Every word rides in every request. Raising a `*_BUDGET_CHARS` ceiling is the owner's decision | `sessions/centralu-tools.test.ts`, `adapters/claude/tool-prefix.test.ts` |
 | Trust, permissions, credentials, keeper, links | [security-boundaries.md](docs/security-boundaries.md), the section for the area | A session's credential is attribution, not proof, and never grants more than the limited credential's rights | `pnpm tier` (deep) |
 | An app or its manifest | [apps.md](docs/apps.md) §1.1, §5 | Every app call goes through `ExternalApps.call`; a change of meaning goes through `manifestVersion` | UNGUARDED |
 | CI or a release | [releasing.md](docs/releasing.md) "CI runner and action pins", "Releasing a version" | Explicit runner labels, actions pinned by SHA; a release needs a fully green main commit | `workflow-runners.test.ts`, `actions-pinned.test.ts`, `pnpm tier` (deep) |

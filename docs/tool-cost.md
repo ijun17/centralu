@@ -1,7 +1,7 @@
 # What Centralu's MCP tools cost a session
 
 Every word of a tool definition or a server's instructions rides in every request. Raising a
-`*_BUDGET_CHARS` ceiling is a decision, not headroom.
+`*_BUDGET_CHARS` ceiling is the owner's decision, not headroom.
 
 Decisions about how Centralu exposes its tools (#419, #512) are made on numbers. This is the one
 repeatable measurement of those numbers (#513): how to run it, how to read it, and the first baseline.
