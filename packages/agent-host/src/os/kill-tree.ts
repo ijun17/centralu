@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { systemTool, traitsFor } from '../os.js'
+import { POWERSHELL_ARGS, READ_ONCE, powershell, tableReader, type TableReader } from './process-table.js'
 import { descendants } from '../dev-services/proc-table.js'
 
 /**
@@ -257,9 +258,9 @@ function enqueue(handle: KillablePty, pid: number, os: KillOs): void {
 
 /**
  * How long a stop waits for the process table (#2142 re-check): it is read while the tree runs, so a stop waits for it.
- * A table read in 0.4–1 s is the usual, 1.5 s at worst with a third of the cores busy (measured, p99; 3 s is twice that). Past
- * that the machine is starved: with two thirds of the cores busy a read took 7–14 s, 10 s and more (#1773), and no bound that fits a
- * shutdown waits for it. The stop is given up on it and takes `taskkill /T`, in no order, which is what then ends the tree
+ * From the warm reader a read takes 2–4 ms, with every core busy too (p99, #2178); this bound is for the reader's first start
+ * (0.3 s idle, 2 s with every core busy) and for a read in a PowerShell of its own, which took 0.4–1 s, and 9–12 s on a starved
+ * machine (#1773). The stop is given up on it and takes `taskkill /T`, in no order, which is what then ends the tree
  */
 export const STOP_LIST_MS = 3000
 
@@ -278,7 +279,7 @@ export const STOPS_SETTLE_MS = STOP_LIST_MS + TASKKILL_MS + 1000
 
 /**
  * Resolves when every Windows stop `killTree` and `stopTree` started has ended, or after `boundMs`: the one place the
- * host waits for them (HO8, `stopPlan`). Those two return at once (the table takes 0.4-1.5 s), and a host that exits
+ * host waits for them (HO8, `stopPlan`). Those two return at once (before the table is read), and a host that exits
  * as soon as its services are let go of left a terminal's hidden child running, which was ended after the host was gone
  * or not at all. Nothing is waiting on POSIX, where the first shot is sent before they return.
  */
@@ -485,24 +486,28 @@ export type LeftoverOs = {
 }
 
 /*
- * The process table through CIM, the one source that has both the parent id and the creation time; `tasklist` has
- * neither and `wmic` is gone from current Windows 11. Measured on Windows 11 (2026-10-05): 400–750 ms for ~260
- * processes, almost all of it PowerShell starting. Asynchronous, so the host keeps serving while it runs. PowerShell is
- * named by its full path under the system folder, like taskkill: a bare name would be looked up in the working
- * directory first.
+ * The process table, from the warm reader (`process-table.ts`, #2178): `tasklist` has neither the parent id nor the
+ * creation time and `wmic` is gone from current Windows 11. Where the warm reader cannot answer (it would not start, or
+ * ended partway), one read in a PowerShell of its own, which is slow to start on a busy machine. Asynchronous, so the
+ * host keeps serving while it runs.
  *
- * Its bound is long: on a machine starved of CPU (a CI runner, a host busy with builds) PowerShell took over 10 s to start
- * and answer, and the listing that was given up on left the leftovers running, with nothing to say so (#1773). The bound is
- * only reached by a hung PowerShell; a stop that waits for it waits for the one thing that finds what the child left.
+ * Its bound is long: on a machine starved of CPU (a CI runner, a host busy with builds) a PowerShell took over 10 s to
+ * start and answer, and the listing that was given up on left the leftovers running, with nothing to say so (#1773). The
+ * bound is only reached by a hung PowerShell; a stop that waits for it waits for the one thing that finds what the child left.
  */
 const runFile = promisify(execFile)
-const LIST_PROCESSES =
-  "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }"
-/** `run` is `execFile` as a promise, a parameter so a test can answer in its place */
-export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
+const REAL_TABLE = tableReader()
+/** `run` is `execFile` as a promise and `table` the warm reader, parameters so a test can answer in their place; without `table` every read is one of its own */
+export const leftoverOs = (run: typeof runFile, table?: TableReader): LeftoverOs => ({
   listProcesses: async (timeoutMs = 60_000) => {
-    const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
-    const { stdout } = await run(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: timeoutMs, windowsHide: true })
+    if (table) {
+      try {
+        return parseWinProcs(await table.read(timeoutMs))
+      } catch (e) {
+        if (timedOut(e)) throw e // a second read would wait as long again
+      }
+    }
+    const { stdout } = await run(powershell(), [...POWERSHELL_ARGS, READ_ONCE], { timeout: timeoutMs, windowsHide: true })
     return parseWinProcs(stdout)
   },
   // Asynchronous, so a tree of many processes does not hold the host's thread for each taskkill (about 40 ms each)
@@ -510,7 +515,12 @@ export const leftoverOs = (run: typeof runFile): LeftoverOs => ({
     await run(systemTool(['taskkill.exe']), ['/PID', String(pid), ...(alone ? [] : ['/T']), '/F'], { timeout: TASKKILL_MS, windowsHide: true })
   },
 })
-const REAL_LEFTOVER_OS = leftoverOs(runFile)
+const REAL_LEFTOVER_OS = leftoverOs(runFile, REAL_TABLE)
+
+/** Starts the warm process-table reader on Windows, ahead of the first stop that needs it (the layer's `start` calls it) */
+export function warmProcessTable(platform: NodeJS.Platform = process.platform): void {
+  if (platform === 'win32') REAL_TABLE.warm()
+}
 const REAL_OS: KillOs = { platform: process.platform, ...REAL_LEFTOVER_OS }
 
 /**
@@ -620,9 +630,11 @@ function within<T>(p: Promise<T>, ms: number): Promise<T> {
   })
 }
 
+const timedOut = (e: unknown): boolean => typeof e === 'object' && e !== null && 'killed' in e && e.killed === true
+
 /** Why the process table could not be read */
 function unread(e: unknown): string {
-  return typeof e === 'object' && e !== null && 'killed' in e && e.killed ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
+  return timedOut(e) ? 'timed out' : e instanceof Error ? e.message : 'unknown error'
 }
 
 /**

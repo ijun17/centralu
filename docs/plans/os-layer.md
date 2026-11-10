@@ -177,7 +177,7 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 | `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `traitsFor`, `pathsOf`, `installedCopyPath`, `systemTool` |
 | `agent-host/src/os/real.ts` | the `Os` of the machine itself (§7.1), built from the modules in this table |
 | `agent-host/src/env-path.ts`, `tool-launch.ts` | finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims) |
-| `agent-host/src/os/kill-tree.ts` | ending a process tree: groups and signals, or taskkill and parent links |
+| `agent-host/src/os/kill-tree.ts`, `os/process-table.ts` | ending a process tree: groups and signals, or taskkill and parent links from the Windows process table, read by one PowerShell kept warm (#2178) |
 | `agent-host/src/dev-services/terminal.ts` | the terminal's and the Run button's shell |
 | `agent-host/src/adapters/claude/exe-link.ts` | how Claude Code is started on Windows |
 | `agent-host/src/dev-services/project-folder.ts` | a new project's folder and each OS's folder-name rules |

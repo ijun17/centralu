@@ -791,7 +791,7 @@ Platforms: Windows.
 **KL12. On Windows leftovers are found by parent and creation time.**
 Happened: Windows has no groups, so a helper outlived its app; libuv's job object hides this for plain Node children
 but not for detached or Python ones (285be4e9, #360).
-Rule: list processes through CIM; take the dead root's children created inside its lifetime (a clock tick of slack at the end: Node's clock runs
+Rule: read the process table with its parent ids and creation times (the warm reader, `os/process-table.ts`, #2178); take the dead root's children created inside its lifetime (a clock tick of slack at the end: Node's clock runs
 behind the creation times, #1773), and deeper children no older than their parent; `taskkill` each, never ourselves, never throw.
 Guard: `host/os/kill-tree.test.ts` "a child created within a clock tick after the exit as the host read it is
 the root's own, a later one a later holder's"; `host/apps/external/lifecycle.test.ts` "on Windows, a descendant started outside the app's job,
