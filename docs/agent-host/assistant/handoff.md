@@ -26,7 +26,7 @@ original's things is in this table; the bullets below say how.
   with an original that goes it belonged to nobody (#738); left with one that stays, the session that carries the work
   on could not list or archive it (#1475). So it moves whether the original goes or stays.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
-  own row), its open tasks from the original (`MailHooks.repointTasks`, plans/mailbox.md §10.6.3), so its cards are told to the successor (§10.6.4), and the delegation the
+  own row), its open tasks from the original (re-pointed by `MessageService.handOver`, plans/mailbox.md §10.6.5), so its answer and its cards reach the successor (§10.6.4), and the delegation the
   host holds for it (its key names the caller), and its standing
   start requests (`agent_start_requests`, whose stored request names its caller too). A standing card closes in the
   original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
@@ -115,9 +115,9 @@ original's things is in this table; the bullets below say how.
   delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
-  What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
-  its own rows back (`restoreTurns`), as the manager's constructor did; the
-  standing start_agent requests are `AgentStartFlow.restoreAgentStarts`.
+  It holds nothing the mail holds: what a session owes, and to whom, is the mailbox's open tasks, moved by the mail's one move
+  (`MessageService.handOver`, plans/mailbox.md §10.6.5). What moves, the store's transaction, and `askedBy` / `parentSessionId` stay
+  with the manager. The standing start_agent requests are read back at startup by `AgentStartFlow.restoreAgentStarts`.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 - **The mail moves too** (#1574, docs/plans/mailbox.md §7.7): `MessageService.handOver`, run last inside the same

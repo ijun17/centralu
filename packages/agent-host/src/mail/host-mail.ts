@@ -8,7 +8,7 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { leaveForEarlierBuild, takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, openTaskParties, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskRepointer, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, openTaskParties, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
@@ -262,7 +262,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     stopped: (id, why, o) =>
       void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
     leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
-    handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
+    handOver: (from, to, which, children) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
@@ -315,7 +315,6 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
     },
     turnInputs: (id, turn) => delivery.turnInputs(addressOf(id), turn),
-    repointTasks: taskRepointer(service, store.mailbox),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
     roleMoved: (to) => {

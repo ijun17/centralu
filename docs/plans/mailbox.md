@@ -1205,13 +1205,12 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
   `delivered_at`, `read_at`, `attempt_at`, `turn_seq` are cleared and `attempts = 0`, whether or not `from` had read it.
   A request the old orchestrator read never started a turn of the new one, so keeping it read would strand it (#1683).
   Each moved row gets a notice for `to` with `facts.handedOver` (key §6.5).
-- **`handOver(from, to, scope)`** (the handoff, `ChildOwnershipRecords.moveChildren`, run inside its transaction as
+- **`handOver(from, to, scope, children)`** (the handoff, `ChildOwnershipRecords.moveChildren`, run inside its transaction as
   today; `scope` is today's `HandOverScope`, `'all' | { assignees: readonly string[] }`, `service.ts:177`, re-keyed to
   `{ senders: readonly string[] }`: the senders of the mail to `from` that moves, the children whose tasks move):
   - every unsettled watched row **to** `from` moves to `to`, undelivered again unless read;
   - when `to` already has a row for the same message, `to`'s row stays as it is and `from`'s is deleted;
-  - a later reply to a message **from** `from` goes to the nearest living heir when `from` is gone
-    (`Store.handoffHeirs`, as `reportRecorder` finds it today).
+  - the open tasks `from` gave the `children` that move go again from `to` (§10.6.5, #1936).
 
   The preview (`handOverPreview`) lists each moved message by id and the first line of its body, quoted.
 - **`partyGone(address)`** (trash):
@@ -1930,8 +1929,7 @@ when it could not go in. A linked machine's copy (`LinkedReports`) reports to a 
 | The composer's choice: `ReportChoice`, `agents.reportOwed`, `SendIntent`, `user_message.intent`, `takeTurn`, `personTookOver`, `took_over`, `LinkedReports.choosing` | nothing: a person's message is a message |
 | The person's own report path: `reportToPersonIfOwed`, `personReportLine`, the person's paused report and `person_report_paused:`, `personReportRecorder`, `personOwes` | the last response and the stop notice, as for any task |
 
-**Handoff** (step 5 moves it onto `handOver`): until then the smallest shim keeps a moved child's answer with the successor: its open tasks from
-the original are withdrawn and one task from the successor, with the same words, is written delivered (`MessageService.repointTasks`), where
+**Handoff**: a moved child's answer goes to the successor, its open tasks from the original moved by the mail's one move (§10.6.5), where
 the report mark moved before.
 
 **Restart, swap and older builds.** No store step (v71 stays free). This build neither reads nor writes `report_paused`, `report_turn`,
@@ -2029,7 +2027,7 @@ turn owner was:
 | `ChildOwnership.turnOwners`, `TurnOwner`, `ownTurn`, `releaseTurn`, `adoptTurn`, `markTurnTold`, `restoreTurns` | the open tasks (`openTaskParties`) |
 | `delegated_turns` reads and writes (`listDelegatedTurns`, `setDelegatedTurn`, `setDelegatedTurnTold`, `clearDelegatedTurn`, the handoff's and the trash's updates) | nothing; every start deletes the rows (`dropDelegatedTurns`) |
 | The relayed notice to the owner (`tellCardRaised`) and `told_cards` | the mail notice and its dedupe key; the relay only for a seat that cannot read mail |
-| `answersApproval` as the whole answer rule | the gate above (`cardGivers`' `answerer`, then `approves`) |
+| `answersApproval` as the whole answer rule | the gate above (`cardGivers`' `answerer`, then `refusal`) |
 
 **What the person sees.** Nothing changes on screen. The person's card is the same card. In a giver's conversation the notice shows as from
 the session that raised the card, as the relayed notice did (`MailInput.shown`, `SessionEvents.deliverMail`, the same row a delegated task
@@ -2045,6 +2043,41 @@ open, so a card in it is told and answered as above.
 **Linked machines.** A child on a linked machine keeps its own card path (`RemoteAgents.cardRaised`, its relayed notice through
 `tellSession`, its caller the one that gave the turn) until mail crosses links (step 6): the second definition of "who hears of a card",
 reported, not changed. It shares the notice's words and `cardHandle`; its cards say `answerable` for a question too (always true there).
+
+### 10.6.5 A handoff is the mail's one move (#1948 step 5)
+
+Target 5 of #1948: a handoff moved marks, turns, the queue and cards by hand beside the mail's own move. Steps 2 to 4 removed the marks, the
+queue and the turn owners; this step makes `MessageService.handOver` the one move of what a session owes and is owed, and fixes #1936.
+
+**The move.** `HandoffChildren.moveChildren` decides what moves (the children, the original's delegations in another project, its standing
+start requests; a child doing work the original owes its own giver stays with an original that stays, #1932) and runs one store transaction
+(`Store.moveChildren`): the children's parent link (`asked_by_session_id`, `parent_session_id`: ownership, reach and depth read it), the start
+requests (`agent_start_requests`), then `MessageService.handOver(from, to, scope, children)`. That last call moves, as before, every unsettled
+watched row and unread message of the original in `scope` (§7.7), and now also the tasks the original gave the children that move: each task
+not settled is withdrawn and goes again from the successor with the same words, cause, facts and delivery (`deliveredAt`, `readAt`), one task
+for one task; a task a stop released stays released, so its sender is not owed it twice. Before, a shim beside it (`taskRepointer`, `MailHooks.repointTasks`) wrote one task for all of a child's open tasks, with
+the newest's words and no cause, and only for the delivered ones.
+
+**#1936, fixed.** U gives O task T1; O hands work on to child X (task T2, cause T1) and its turn ends with T1 open (§10.6.3: work handed on
+keeps it open). A handoff that removes O moved T1 to the successor H, but T2 went again from H with no cause, so nothing held T1 open: H's
+takeover turn answered U with its own last response, before X had answered. Now T2 goes again with its cause T1, so T1 stays open on H until
+X answers; X's last response answers H, its delivery wakes H with T1 as the turn's work (`handedOnFrom`), and H's last response at rest answers U.
+The same holds when O is removed after a handoff that said it goes and after one that kept it (`sessions/handoff-mail.test.ts`, case 9).
+
+**What stays, and why.** `ChildOwnership.moveOwner` stays, smaller: it moves only what memory alone holds, none of which the mail holds (the
+delegation records and the waits on them, start requests that made a child, linked machines' report waits, and the "handed over" record a
+later call of the original reads). The turn owners it moved went in step 4. The parent link is stored on the session, so it moves in the same
+transaction. The note's lines and the original's notice are unchanged.
+
+**What the person sees.** Nothing new: the note, the notices and the archive preview say what they said. U's report now comes after the
+handed-on work ends rather than at the successor's first turn.
+
+**Restart, swap and older builds.** No store step (the next free is v70). A crash before the commit leaves every row on the original, after it
+every row on the successor, the re-pointed tasks with them. The withdrawn tasks are `withdrawn` rows and the new ones ordinary task rows, which
+an older build reads as any. A child's reply to the task it was first given (the withdrawn one) goes to that task's sender, as before this step.
+
+**Linked machines.** A child on a linked machine keeps its own move (`RemoteAgents.moveCaller`, its report waits in `LinkedReports`) until mail
+crosses links (step 6): the second definition of a handoff's move, reported, not changed.
 
 ### 10.7 The state table
 

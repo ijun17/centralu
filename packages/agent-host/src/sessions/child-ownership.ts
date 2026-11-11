@@ -140,14 +140,12 @@ export type OwnerMove = {
 type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'messages'>
 
 /**
- * Who owns a child session's work (#428): the turn another session gave it, the
- * delegations and start requests a session made, and what a handoff gave away. What a session owes the sessions that gave it work is the
- * mailbox's open tasks (`openTasks`, docs/plans/mailbox.md §10.6.3). Each change that has a store mirror writes it here, so
- * memory and store do not drift apart; reads go through the read-only maps.
+ * Who owns a child session's work (#428): the delegations and start requests a session made, and what a handoff gave away. What a session
+ * owes the sessions that gave it work is the mailbox's open tasks (`openTasks`, docs/plans/mailbox.md §10.6.3). Each change that has a store
+ * mirror writes it here, so memory and store do not drift apart; reads go through the read-only maps.
  *
- * An owner change is one operation (`moveOwner`), so a handoff does not keep these maps in step by hand. Deciding what
- * moves, and the store's own transaction for it (`Store.moveChildren`), stay with the session manager, which knows the
- * sessions' state.
+ * A handoff's move of what only memory holds is one operation (`moveOwner`); the stored move is the mail's (`MessageService.handOver`) with the
+ * parent link and the start requests in one transaction (`Store.moveChildren`, docs/plans/mailbox.md §10.6.5).
  */
 export class ChildOwnership {
   /**
@@ -551,7 +549,7 @@ export class ChildOwnership {
      * answer, so the result is read once, by the new session.
      */
     for (const id of [...sessions, ...starts.map((r) => r.req.requestId)]) this.given.set(id, { from, to })
-    for (const r of starts) if (!r.detached) r.detached = true
+    for (const r of starts) r.detached = true
     for (const d of this.runs.values()) if (d.callerId === to && moving.has(d.sessionId)) for (const leave of [...(d.leaving ?? [])]) leave()
     for (const r of starts) for (const leave of [...(r.leaving ?? [])]) leave()
   }

@@ -819,13 +819,28 @@ export class MessageService {
 
   // ── Parties that go, parties that take over (§7.7) ──
 
-  /** The handoff (§7.7): `from`'s unsettled watched rows and unread mail move to `to`; the successor is told of each. Called inside the children's move */
-  handOver(from: string, to: string, scope: HandOverScope): HandedOverMessage[] {
+  /**
+   * The handoff (§7.7, §10.6.5), its one move: `from`'s unsettled watched rows and unread mail move to `to`, and the tasks `from` gave the sessions that
+   * move (`children`) become `to`'s; the successor is told of each message. Called inside the children's move
+   */
+  handOver(from: string, to: string, scope: HandOverScope, children: readonly string[] = scope === 'all' ? [] : scope.senders): HandedOverMessage[] {
     return this.run(() => {
       const plan = this.handOverPreview(from, to, scope)
       // The heir is told of what comes to it, not of a row it already had
       const fresh = plan.filter((p) => this.records.recipient(p.messageId, to) === undefined)
       this.records.moveRows(from, to, scope)
+      /*
+       * Each task `from` gave a child that is not settled is withdrawn and goes again from `to` with the same words, cause and delivery (#1936): the child's
+       * reply or last response answers `to`, and a task `to` took over that the work was handed on from waits for that answer (`handedOn`)
+       */
+      for (const row of this.records.watchedFrom(from)) {
+        const m = children.includes(row.recipient) ? this.records.message(row.messageId) : undefined
+        if (m?.kind !== 'task') continue
+        this.records.settle(m.id, row.recipient, 'withdrawn', this.now())
+        const again = this.put({ sender: to, kind: 'task', body: m.body, causeId: m.causeId, origin: m.origin, facts: m.facts }, [this.row(row.recipient, { dueAt: row.dueAt, deliveredAt: row.deliveredAt, readAt: row.readAt })])
+        // A task a stop released stays released: its sender was told, and no one is owed it twice
+        if (row.releasedAt !== null && row.releasedWhy !== null) this.records.markReleased(again.id, row.recipient, row.releasedAt, row.releasedWhy)
+      }
       this.movedNotice(to, fresh.map((p) => p.messageId))
       return plan
     })

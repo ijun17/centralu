@@ -8,6 +8,7 @@ import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes
 import { ASK_WAIT_MS } from './ask-project.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
+import { openTaskParties } from '../mail/delegation.js'
 import { DEBOUNCE_MS } from '../mail/rules.js'
 import { SessionManager } from './manager.js'
 import { Adapter } from './fake-claude.test-helpers.js'
@@ -241,6 +242,47 @@ describe("a handoff moves the original's mail to the session that took over (#15
     expect(read.reportsOn(task.id).map((r) => [r.facts.outcome, r.facts.answer])).toEqual([['finished', 'landed']])
   })
 
+  it.each([
+    ['removed with the handoff', true, true],
+    ['removed after a handoff that said it goes', false, true],
+    ['removed after a handoff that kept it', false, false],
+  ] as const)("case 9 (#1936), the original is %s: the successor's answer reaches the original's giver once the child it moved answers", async (_, removed, says) => {
+    const h = host()
+    h.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    const { project, parent: upstream } = await parentOf(h)
+    const original = await startChild(h, upstream, 'land #12')
+    const child = await startChild(h, original, 'write the tests')
+    const task = read.tasks(at(upstream), original)[0]!
+    h.claude.handles.get(original)!.answer('handed the tests on; waiting')
+    await eventually(() => h.mgr.sessionInfo(original)?.state !== 'working')
+
+    const heir = await handOff(h, project, original, removed, says)
+    if (!removed) await h.mgr.trash.trashSession(original)
+    expect(h.mgr.listSessions().find((x) => x.id === child)!.askedBy).toBe(heir)
+    // The heir's takeover turn is not the end of the work it handed on: upstream's task stays open
+    h.claude.handles.get(heir)!.answer('read the note')
+    await eventually(() => h.mgr.sessionInfo(heir)?.state !== 'working')
+    expect(read.reportsOn(task.id)).toEqual([])
+    // Exactly one open task to the child, the heir's, carrying the work upstream gave
+    const open = store.mailbox.watchedTo(at(child)).filter((r) => r.settled === null)
+    expect(open.map((r) => store.mailbox.message(r.messageId)?.sender)).toEqual([at(heir)])
+    expect(store.mailbox.message(open[0]!.messageId)?.causeId).toBe(task.id)
+    // Upstream's task moved once, and the child is the heir's work alone: its cards are told to the heir
+    expect(store.mailbox.watchedTo(at(heir)).filter((r) => r.messageId === task.id)).toHaveLength(1)
+    expect(openTaskParties(store.mailbox, at(child), 'to')).toEqual([heir])
+
+    h.claude.handles.get(child)!.answer('tests written')
+    const handed = read.tasks(at(heir), child)[0]!
+    await eventually(() => read.reportsOn(handed.id).length === 1)
+    await eventually(async () => {
+      await h.m.delivery.process(at(heir))
+      return h.claude.handles.get(heir)!.sent.some((t) => t.includes(read.reportsOn(handed.id)[0]!.id) || t.includes('tests written'))
+    }, 5 * DEBOUNCE_MS)
+    h.claude.handles.get(heir)!.answer('landed')
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    expect(read.reportsOn(task.id).map((r) => [r.facts.outcome, r.facts.answer])).toEqual([['finished', 'landed']])
+  })
+
   it("case 8 (#1932 review), a child started in a turn a report woke is no upstream work: it moves", async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
@@ -301,6 +343,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     expect(pendingFor(parent, fromChild.id)).toBe(false)
     next.claude.handles.get(child)!.answer('finished under the next host')
     await eventually(() => reportsIn(heir, child).length === 1)
+    expect(reportsIn(parent, child)).toEqual([])
   })
 
   it('follows two handoffs in a row, and an original removed last gives its mail to the newest heir alive', async () => {

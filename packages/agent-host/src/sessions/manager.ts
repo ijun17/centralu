@@ -1008,7 +1008,6 @@ export class SessionManager {
         }
       },
       mailHandOver: (...a) => self.mail.hooks?.handOver?.(...a) ?? [],
-      mailRepointTasks: (...a) => self.mail.hooks?.repointTasks?.(...a),
       mailHandOverPreview: (from, to) => {
         try {
           return self.mail.hooks?.handOverPreview?.(from, to) ?? []

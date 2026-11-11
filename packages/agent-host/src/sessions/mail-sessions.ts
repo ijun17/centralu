@@ -28,10 +28,11 @@ export type MailHooks = {
   /** This host leaves, with these sessions in a turn: what an earlier build that may take over reads of their open tasks is written (`leaveForEarlierBuild`) */
   leaving?(inTurn: readonly string[]): void
   /**
-   * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
-   * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
+   * A handoff moves the original's mail to the successor (mailbox §7.7, §10.6.5, `MessageService.handOver`): all of it for an original that goes, what
+   * the children that moved sent it for one that stays (`senders`, session ids), and the tasks it gave the `children` that move. Run inside the
+   * transaction of the children's move; it throws to undo both
    */
-  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope): HandedOverMessage[]
+  handOver?(fromSessionId: string, toSessionId: string, which: HandOverScope, children: readonly string[]): HandedOverMessage[]
   /** What `handOver` would give the successor of an original that goes, read only: the archive preview says it (#1574) */
   handOverPreview?(fromSessionId: string, toSessionId: string): HandedOverMessage[]
   /** The first lines of the messages waiting for the session's answer and of the tasks it owes a report of, which `sessionGone` settles (#1512) */
@@ -67,8 +68,6 @@ export type MailHooks = {
   cards?: CardHooks
   /** What the tool said of the inputs given it (`MailDelivery.turnInputs`): which the turn that ended took, or which the turn opening runs for */
   turnInputs?(sessionId: string, turn: TurnInputs): void
-  /** A handoff moves a child: the original's open tasks to it become the successor's (`taskRepointer`), inside the move's transaction */
-  repointTasks?(fromSessionId: string, toSessionId: string, childId: string): void
   /** The Assistant's turn ended as a turn does: each session whose request it carried is told what it gets back, and those requests are settled (S12, §7.6) */
   requestTurnEnded?(assistantId: string): void
   /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */

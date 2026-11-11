@@ -192,23 +192,3 @@ export function requestTurnRecorder(mail: MessageService, turns: Pick<MailTurns,
   }
 }
 
-/**
- * A handoff gives the successor the children the original gave work (docs/plans/mailbox.md §10.6.3, until step 5 moves handoffs onto `handOver`):
- * the open tasks the original gave the child are withdrawn and one task from the successor, with the newest one's words, is written delivered, so
- * the child's reply or last response answers the successor
- */
-export function taskRepointer(mail: MessageService, records: MailboxRecords): (fromId: string, toId: string, childId: string) => void {
-  return (fromId, toId, childId) => {
-    const [from, child] = [mail.sessionAddress(fromId), mail.sessionAddress(childId)]
-    records.transaction(() => {
-      const open = records.watchedTo(child).flatMap((r) => {
-        const m = r.deliveredAt === null ? undefined : records.message(r.messageId)
-        return m?.kind === 'task' && m.sender === from ? [m] : []
-      })
-      const newest = open.at(-1)
-      if (!newest) return
-      for (const m of open) mail.done(from, m.id)
-      mail.task(mail.sessionAddress(toId), child, { text: newest.body, origin: delegationOrigin(newest.origin), delivered: true })
-    })
-  }
-}
