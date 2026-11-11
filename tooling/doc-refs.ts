@@ -54,15 +54,20 @@ export function trackedFiles(root: string): string[] {
 /** A heading's or a quotation's text compared by words, not by marks */
 const clean = (t: string) => t.replace(/[`*_]|\[([^\]]*)\]\([^)]*\)/g, '$1').trim().toLowerCase()
 
-/** The anchor GitHub gives a heading: its text without marks, lower case, punctuation dropped, spaces as hyphens */
+/**
+ * The anchor GitHub gives a heading: the rendered text (a link's text; emphasis by `_` gone, but not in code or inside a word), lower case,
+ * every character but a letter, mark, number, `_`, `-` or space dropped (backticks and `*` with them), each space a hyphen
+ */
 export const anchorOf = (t: string) =>
   t
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[`*]/g, '')
+    .split(/(`+[^`]*`+)/)
+    .map((part, i) => (i % 2 ? part : part.replace(/(?<![\p{L}\p{N}_])(_+)(?=\S)(.+?)(?<=\S)\1(?![\p{L}\p{N}_])/gu, '$2')))
+    .join('')
     .trim()
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
-    .replace(/\s/g, '-')
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-')
 
 /** Code blanked in place: its offsets and lines stay */
 const blank = (code: string) => code.replace(/[^\n]/g, '·')

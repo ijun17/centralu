@@ -2,7 +2,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { danglingRefs, indexDocs, indexTexts, scanRepository } from './doc-refs.js'
+import { anchorOf, danglingRefs, indexDocs, indexTexts, scanRepository } from './doc-refs.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -105,6 +105,11 @@ describe('guard/doc-refs', () => {
       '5: ../a.md is a folder now: cite the file under it',
       '5: ../a/gone.md is no file of the a/ folder',
     ])
+  })
+
+  it('gives a heading the anchor GitHub gives it', () => {
+    const headings = ['_Emphasis_ and snake_case', '`_private` field', '__Bold__ *star* (#12): [a link](x.md)', 'Größe – „quoted“ v1.2']
+    expect(headings.map(anchorOf)).toEqual(['emphasis-and-snake_case', '_private-field', 'bold-star-12-a-link', 'größe--quoted-v12'])
   })
 
   it("reads a section on a comment's next line, past its comment mark", () => {
