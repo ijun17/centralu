@@ -143,12 +143,7 @@ describe('the rules for public text', () => {
     ['Closes #1 #2 #3', 'Closes #1\nCloses #2\nCloses #3'],
     ['Closes #1, #2 and #3.', 'Closes #1\nCloses #2\nCloses #3.'],
     ['fixes: #4 & #5', 'fixes: #4\nfixes: #5'],
-    ['Closes #1\nCloses #2', 'Closes #1\nCloses #2'],
-    ['Closes #7', 'Closes #7'],
     ['Closes owner/repo#7 #8', 'Closes owner/repo#7\nCloses #8'],
-    ['Refs #1 #2', 'Refs #1 #2'],
-    ['Closes #1 and #2 stays open as a follow-up', 'Closes #1 and #2 stays open as a follow-up'],
-    ['no issue, small enough to go straight to a PR (#1 #2 are context)', 'no issue, small enough to go straight to a PR (#1 #2 are context)'],
   ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
     const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })
     expect(r.problems).toEqual([])
@@ -156,6 +151,13 @@ describe('the rules for public text', () => {
     // The same through a section keyed by the heading, as open_pr's `sections` give it
     const { closes: _, ...rest } = SECTIONS
     expect(fillTemplate(TEMPLATE, { ...rest, Closes: given }).body).toBe(r.body)
+  })
+
+  it('leaves a Closes section alone that is one issue, one keyword each, or prose', () => {
+    const closesOf = (closes: string) => fillTemplate(TEMPLATE, { ...SECTIONS, closes }).body.split('## Closes\n\n')[1]
+    // A list is rewritten, so what stays is not left alone by a rewrite that matches everything
+    expect(closesOf('Closes #1 #2')).toBe('Closes #1\nCloses #2')
+    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'Closes #1 and #2 stays open as a follow-up', 'no issue, small enough to go straight to a PR (#1 #2 are context)']) expect(closesOf(same)).toBe(same)
   })
 
   it('warns of a hand-written description that closes several issues after one keyword', () => {
