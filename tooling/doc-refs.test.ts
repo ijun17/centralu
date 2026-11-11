@@ -82,6 +82,31 @@ describe('guard/doc-refs', () => {
     ])
   })
 
+  it('reads a name starting ./ or ../ from the citing file, as a link is', () => {
+    const index = indexTexts(
+      new Map([
+        ['docs/a/README.md', '# A\n'],
+        ['docs/a/keeper.md', '# Keeper of a\n\n## 1. One\n'],
+        ['docs/b/keeper.md', '# Keeper of b\n\n## 2. Two\n'],
+      ]),
+    )
+    const text = [
+      './keeper.md §1 and ../b/keeper.md §2 are there',
+      './keeper.md §2',
+      '../b/keeper.md §1 and ../b/keeper.md "One"',
+      '../c/keeper.md §1',
+      '../a.md §1 and ../a/gone.md §1',
+    ].join('\n')
+    expect(danglingRefs(text, index, 'docs/a/x.md')).toEqual([
+      '2: ./keeper.md has no section 2',
+      '3: ../b/keeper.md has no section 1',
+      '3: ../b/keeper.md has no heading "One"',
+      '4: ../c/keeper.md does not exist',
+      '5: ../a.md is a folder now: cite the file under it',
+      '5: ../a/gone.md is no file of the a/ folder',
+    ])
+  })
+
   it("reads a section on a comment's next line, past its comment mark", () => {
     const index = indexDocs(ROOT, ['docs/architecture.md', 'docs/releasing.md', 'AGENTS.md', '.centralu/apps/project-board/AGENTS.md'])
     const text = [

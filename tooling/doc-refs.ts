@@ -149,21 +149,33 @@ export function indexTexts(texts: Map<string, string>): DocIndex {
   return { byPath, byName, folders: new Set([...folders].map((f) => f.toLowerCase())) }
 }
 
+/** What is wrong with a path under docs/ (without `.md`) that is no file: it is a split document's old name, or names no file of its folder */
+function splitNote(name: string, path: string, index: DocIndex): string | undefined {
+  const [folder = '', ...rest] = path.toLowerCase().split('/')
+  if (!index.folders.has(folder)) return undefined
+  return rest.length ? `${name}.md is no file of the ${folder}/ folder` : `${name}.md is a folder now: cite the file under it`
+}
+
 /**
- * The document a name means: a name with a folder is the one file whose path ends with it; a bare name written with `.md` is the file of that
- * name beside the citing file `from` when there is one (an app's own `AGENTS.md`), else every file of that name.
+ * The document a name means. Written with `.md` and cited from `from`: a name starting `./` or `../` is the file it names from there, as a
+ * link's target is, and a bare name is the file of that name beside it when there is one (an app's own `AGENTS.md`). Else a name with a
+ * folder is the one file whose path ends with it, and a bare name every file of that name.
  * A string says what is wrong: the name is a document that is a folder now, or a path into such a folder names no file.
  */
 function lookup(name: string, index: DocIndex, from?: string): Doc | string | undefined {
   const base = basename(name).toLowerCase()
+  if (from && /^\.\.?\//.test(name)) {
+    const path = posix.normalize(posix.join(posix.dirname(from), `${name}.md`))
+    return index.byPath.get(path) ?? (path.startsWith('docs/') ? splitNote(name, path.slice('docs/'.length, -'.md'.length), index) : undefined)
+  }
   const beside = from && !name.includes('/') ? index.byPath.get(posix.join(posix.dirname(from), `${name}.md`)) : undefined
   if (beside) return beside
   if (name.includes('/')) {
     const path = name.replace(/^(?:\.{1,2}\/)+/, '').replace(/^docs\//, '')
     const found = [...index.byPath.keys()].filter((p) => p === `docs/${path}.md` || p === `${path}.md` || p.endsWith(`/${path}.md`))
     if (found.length === 1) return index.byPath.get(found[0] ?? '')
-    const folder = path.split('/')[0]?.toLowerCase() ?? ''
-    if (path.includes('/') && index.folders.has(folder)) return `${name}.md is no file of the ${folder}/ folder`
+    const note = path.includes('/') ? splitNote(name, path, index) : undefined
+    if (note) return note
   }
   if (index.folders.has(base) && !index.byName.has(base)) return `${name}.md is a folder now: cite the file under it`
   return index.byName.get(base)
@@ -186,17 +198,17 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
   const text = file?.endsWith('.md') ? prose(written) : written
   const found: string[] = []
   const lineOf = (at: number) => text.slice(0, at).split('\n').length
+  // The document a reference at `at` cites; what is wrong with its name is a finding, also a `docs/` or relative path that is no file
+  const docOf = (at: number, name: string, md: string) => {
+    const doc = lookup(name, index, md ? file : undefined)
+    if (typeof doc === 'string') found.push(`${lineOf(at)}: ${doc}`)
+    else if (!doc && md && /^(?:docs|\.\.?)\//.test(name)) found.push(`${lineOf(at)}: ${name}.md does not exist`)
+    return typeof doc === 'object' ? doc : undefined
+  }
   for (const m of text.matchAll(NUMBERED)) {
     const [, name = '', md = '', sections = ''] = m
-    const doc = lookup(name, index, md ? file : undefined)
-    if (typeof doc === 'string') {
-      found.push(`${lineOf(m.index)}: ${doc}`)
-      continue
-    }
-    if (!doc) {
-      if (md && name.startsWith('docs/')) found.push(`${lineOf(m.index)}: ${name}.md does not exist`)
-      continue
-    }
+    const doc = docOf(m.index, name, md)
+    if (!doc) continue
     for (const [, n = ''] of sections.matchAll(/§\s?(\d+(?:\.\d+)*)/g)) if (!doc.numbers.has(n)) found.push(`${lineOf(m.index)}: ${name}${md} has no section ${n}`)
   }
   for (const m of text.matchAll(QUOTED)) {
@@ -204,16 +216,15 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
     // The quotation as written: a heading may hold code (`"The manifest, `x.json`"`), and the prose keeps every offset
     const end = m.index + whole.length - 1
     const title = written.slice(end - quoted.length, end)
-    const doc = lookup(name, index, file)
-    if (typeof doc !== 'object') continue
+    const doc = docOf(m.index, name, '.md')
+    if (!doc) continue
     const wanted = clean(title)
     if (!doc.titles.some((t) => t.startsWith(wanted))) found.push(`${lineOf(m.index)}: ${name}.md has no heading "${title}"`)
   }
   for (const m of text.matchAll(RULE)) {
     const [, name = '', md = '', ids = ''] = m
-    const doc = lookup(name, index, md ? file : undefined)
-    if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
-    if (typeof doc !== 'object') continue
+    const doc = docOf(m.index, name, md)
+    if (!doc) continue
     for (const [id] of ids.matchAll(new RegExp(ID, 'g'))) if (!doc.titles.some((t) => t.startsWith(`${id.toLowerCase()}.`))) found.push(`${lineOf(m.index)}: ${name}${md} has no rule ${id}`)
   }
   for (const m of text.matchAll(PLAIN)) {
