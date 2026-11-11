@@ -12,6 +12,7 @@ import {
   englishProblems,
   fillTemplate,
   foreignBareIssueWarnings,
+  multiClosingWarnings,
   normalizeWords,
   parseConventions,
   privateWordHits,
@@ -135,6 +136,30 @@ describe('the rules for public text', () => {
     expect(r.warnings).toEqual([])
     expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nTwo builds on one store: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
+  })
+
+  // #2194: #2182 wrote "Closes #2158 #2159 …" and GitHub closed the first only
+  it.each([
+    ['Closes #1 #2 #3', 'Closes #1\nCloses #2\nCloses #3'],
+    ['Closes #1, #2 and #3.', 'Closes #1\nCloses #2\nCloses #3.'],
+    ['fixes: #4 & #5', 'fixes: #4\nfixes: #5'],
+    ['Closes #1\nCloses #2', 'Closes #1\nCloses #2'],
+    ['Closes #7', 'Closes #7'],
+    ['Closes owner/repo#7 #8', 'Closes owner/repo#7\nCloses #8'],
+    ['Refs #1 #2', 'Refs #1 #2'],
+    ['no issue, small enough to go straight to a PR (#1 #2 are context)', 'no issue, small enough to go straight to a PR (#1 #2 are context)'],
+  ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
+    const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })
+    expect(r.problems).toEqual([])
+    expect(r.body.endsWith(`## Closes\n\n${written}`)).toBe(true)
+    // The same through a section keyed by the heading, as open_pr's `sections` give it
+    const { closes: _, ...rest } = SECTIONS
+    expect(fillTemplate(TEMPLATE, { ...rest, Closes: given }).body).toBe(r.body)
+  })
+
+  it('warns of a hand-written description that closes several issues after one keyword', () => {
+    expect(multiClosingWarnings('## Closes\n\nCloses #2158 #2159 #2162')).toEqual(['The description says "Closes #2158 #2159 #2162": GitHub closes only #2158, not #2159, #2162. Give each issue its own keyword (Closes #2158, Closes #2159, Closes #2162).'])
+    expect(multiClosingWarnings('Closes #1\nCloses #2\n\nRefs #3 #4')).toEqual([])
   })
 
   it.each([undefined, '', '  ', 'N/A', 'n/a', '-', 'TBD', 'none'])('refuses "Not exercised" given as %j', (value) => {

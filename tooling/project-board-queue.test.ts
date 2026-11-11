@@ -1406,6 +1406,17 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect(Math.abs(Date.parse(lease.until) - LEASE_MS - Date.now())).toBeLessThan(6_000)
   })
 
+  // #2194: a description edited by hand to "Closes #a #b" closes #a only; queueing it still works, with the warning
+  it('warns, when queueing, of a description that closes several issues after one keyword', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
+    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Closes\n\nCloses #1 #2' })))
+    const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(r.isError).toBe(false)
+    expect(r.text).toContain('Warning: The description says "Closes #1 #2": GitHub closes only #1, not #2.')
+    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Closes\n\nCloses #1\nCloses #2' })))
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).text).not.toContain('Warning')
+  })
+
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
     const r = runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
     const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy

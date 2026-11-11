@@ -199,6 +199,23 @@ export function templateSections(template) {
   return out
 }
 
+// GitHub links a closing keyword to the one reference right after it: "Closes #1 #2" closes #1 only (#2194: #2182 left six fixed issues open)
+const ISSUE_REF = String.raw`(?:[\w.-]+/[\w.-]+)?#\d+`
+const SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+(?:and[ \t]+|&[ \t]*)?)`
+const CLOSING_LIST = new RegExp(String.raw`\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(:?)[ \t]+(${ISSUE_REF}(?:${SEPARATOR}${ISSUE_REF})+)`, 'gi')
+const issueRefs = (list) => list.match(new RegExp(ISSUE_REF, 'g'))
+
+/** The text with each closing keyword followed by several references written once for each: "Closes #1, #2" becomes "Closes #1" and "Closes #2" on two lines. */
+export const closingPerIssue = (text) =>
+  String(text ?? '').replace(CLOSING_LIST, (_, keyword, colon, list) => issueRefs(list).map((ref) => `${keyword}${colon} ${ref}`).join('\n'))
+
+/** Warnings for a hand-written description with a closing keyword before several references: GitHub closes the first and leaves the rest open. */
+export const multiClosingWarnings = (text, what = 'The description') =>
+  [...String(text ?? '').matchAll(CLOSING_LIST)].map((m) => {
+    const refs = issueRefs(m[3])
+    return `${what} says "${m[0]}": GitHub closes only ${refs[0]}, not ${refs.slice(1).join(', ')}. Give each issue its own keyword (${refs.map((r) => `${m[1]} ${r}`).join(', ')}).`
+  })
+
 // What "Not exercised" may not say: nothing at all, or a placeholder. "Nothing" is a real answer
 // when it is true (the template says so), so it passes.
 const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
@@ -208,7 +225,8 @@ const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
  * out is dropped (the template: "Delete any heading that does not apply"), except two kinds:
  * `required` ones, which must name something real (not "N/A"), and those whose own guidance says to
  * keep the heading (Usability: "write n/a and keep the heading"), which must say something, n/a
- * included. Both are read from the template, so a changed template changes the rule. Returns
+ * included. Both are read from the template, so a changed template changes the rule. The "Closes" section gets each issue its own
+ * keyword, whatever form the caller wrote them in (closingPerIssue). Returns
  * { body, problems, warnings }.
  */
 export function fillTemplate(template, sections, { required = ['Not exercised'] } = {}) {
@@ -223,7 +241,8 @@ export function fillTemplate(template, sections, { required = ['Not exercised'] 
       problems.push(`The template has no heading "${k}". Its headings: ${heads.map((h) => h.heading).join(', ')}.`)
       continue
     }
-    given.set(key, String(v).replace(/<!--[\s\S]*?-->/g, '').trim())
+    const text = String(v).replace(/<!--[\s\S]*?-->/g, '').trim()
+    given.set(key, key === 'closes' ? closingPerIssue(text) : text)
   }
   const parts = []
   for (const h of heads) {
