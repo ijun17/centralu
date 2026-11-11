@@ -147,6 +147,7 @@ describe('the rules for public text', () => {
     ['Closes #7', 'Closes #7'],
     ['Closes owner/repo#7 #8', 'Closes owner/repo#7\nCloses #8'],
     ['Refs #1 #2', 'Refs #1 #2'],
+    ['Closes #1 and #2 stays open as a follow-up', 'Closes #1 and #2 stays open as a follow-up'],
     ['no issue, small enough to go straight to a PR (#1 #2 are context)', 'no issue, small enough to go straight to a PR (#1 #2 are context)'],
   ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
     const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })

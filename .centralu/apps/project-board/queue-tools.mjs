@@ -241,7 +241,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   // The squash subject is "Title (#N)" and must fit (#1593: before any batch, as integrate does, #1222); a stack lands through its top
   const long = longSubject(p)
   if (long) problems.push(longSubjectText(long))
-  // A hand-written "Closes #a #b" closes #a only (#2194): open_pr writes one keyword per issue, so only a description edited by hand has it
+  // "Closes #a #b" closes #a only (#2194). open_pr rewrites its Closes section to one keyword per issue; a description edited by hand, or a list in another section, still has it
   const multiClosing = multiClosingWarnings(p.body)
   // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))

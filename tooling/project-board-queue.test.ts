@@ -215,7 +215,9 @@ describe('what the merge queue decides for one poll', () => {
     const noReport = job('e2e report', 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333', conclusion: 'success' }, { name: 'Merge the shard reports, per engine', conclusion: 'success' }, { name: REPORT_STEP, conclusion: 'failure' }] })
     const allSetup = [setupFailed('e2e (webkit 1/5)'), setupFailed('e2e (webkit 2/5)'), setupFailed('e2e (chromium 1/5)'), noReport]
     expect(classifyRun(failedRun, allSetup)).toMatchObject({ real: false, cause: 'setup', job: { name: 'e2e (webkit 1/5)' }, step: 'Install WebKit system libraries' })
-    expect(jobFailure(noReport)).toBeNull()
+    // The report job alone failing (nothing else did) is its own failure, named: the run is not read as a shard's
+    expect(jobFailure(noReport)).toMatchObject({ gather: true, step: REPORT_STEP })
+    expect(classifyRun(failedRun, [noReport])).toMatchObject({ real: true, cause: 'test', step: REPORT_STEP, job: { name: 'e2e report' } })
     // A test that failed in one shard left a report, and stays the commit's whatever else the run lost; a report job that failed in its own merge does too
     expect(classifyRun(failedRun, [setupFailed('e2e (webkit 1/5)'), job('e2e (webkit 2/5)', 'failure', testsFailed), noReport])).toMatchObject({ real: true, cause: 'test', job: { name: 'e2e (webkit 2/5)' } })
     const mergeFailed = job('e2e report', 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Merge the shard reports, per engine', conclusion: 'failure' }, { name: REPORT_STEP, conclusion: 'skipped' }] })

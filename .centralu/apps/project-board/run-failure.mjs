@@ -41,7 +41,7 @@ const SETUP_STEP = [
 const STORE_STEP = [/^Upload /i, /^Post /i]
 /**
  * The steps of the jobs that only gather their shards' output, named for it in build.yml. Their failure is a shard's, which the
- * run's other jobs say the cause of: it is no failure of its own. `SHARDS_STEP`: the result under the name the job had before it
+ * run's other jobs say the cause of: it is no failure of its own, and counts only when no other job failed (`classifyRun`). `SHARDS_STEP`: the result under the name the job had before it
  * was split (`macos-tests-result`, #2167). `REPORT_STEP`: `e2e report` keeping the merged report, which fails with "No files were
  * found" when every shard failed in setup and left no blob report (run 43040592985, #2196); a shard that failed in a test left
  * one. Not an upload by its action's own name: one that checks the commit (`if-no-files-found: error` on a build's output) is the commit's.
@@ -155,7 +155,8 @@ export function jobFailure(job, { flaky = [] } = {}) {
   if (job.conclusion === 'cancelled') return { real: false, cause: 'cancelled' }
   if (onFlakyList(job.name, flaky)) return { real: false, cause: 'flaky' }
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
-  if (step && GATHER_STEPS.includes(step.name)) return null
+  // `gather`: no cause of its own; classifyRun reads it only when no other job failed
+  if (step && GATHER_STEPS.includes(step.name)) return { real: true, cause: 'test', step: step.name, gather: true }
   // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
   // (an artifact upload that runs on failure) says nothing more.
   if (step && isSetupStep(step.name, notes, job.log)) return { real: false, cause: 'setup', step: step.name }
@@ -171,7 +172,8 @@ export function jobFailure(job, { flaky = [] } = {}) {
  * a conclusion other than cancelled (a workflow file GitHub would not start) is real.
  */
 export function classifyRun(run, jobs, { flaky = [] } = {}) {
-  const seen = (jobs ?? []).map((j) => ({ j, f: jobFailure(j, { flaky }) })).filter((x) => x.f)
+  const failed = (jobs ?? []).map((j) => ({ j, f: jobFailure(j, { flaky }) })).filter((x) => x.f)
+  const seen = failed.filter((x) => !x.f.gather)
   const pick = (x) => ({ real: x.f.real, cause: x.f.cause, step: x.f.step ?? null, inSetup: x.f.inSetup === true, shutdown: x.f.shutdown === true, job: { name: x.j.name, id: x.j.id != null ? String(x.j.id) : null }, attempt: run.attempt ?? 1 })
   const real = seen.find((x) => x.f.real)
   if (real) return pick(real)
@@ -179,6 +181,9 @@ export function classifyRun(run, jobs, { flaky = [] } = {}) {
     const x = seen.find((y) => y.f.cause === cause)
     if (x) return pick(x)
   }
+  // Only a job that gathers its shards failed, and no shard says why: its own failure, the commit's to look at
+  const gathered = failed.find((x) => x.f.gather)
+  if (gathered) return pick(gathered)
   return { real: run.conclusion !== 'cancelled', cause: run.conclusion === 'cancelled' ? 'cancelled' : 'no-job', step: null, job: null, attempt: run.attempt ?? 1 }
 }
 

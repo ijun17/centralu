@@ -126,7 +126,7 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
     const other = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
     const o = await run(other.dir, other.log, other.etc, undefined, { ARCH: 's390x' })
     expect(o.status, o.out).toBe(0)
-    expect(o.out).toContain('::warning::no fallback mirror')
+    expect(o.out).toContain('::warning::no fallback mirror for the architecture s390x')
     expect(calls(other.log).some((l) => l.startsWith('  sees:'))).toBe(false)
   })
 

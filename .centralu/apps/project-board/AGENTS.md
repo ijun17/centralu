@@ -306,7 +306,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 
 On the queue's first day 19 runs were rerun, most of them a test failing the same way again, each a CI
 run the next batch waited behind. The owner's rule: **the queue reruns only infrastructure failures**.
-`run-failure.mjs` holds it (pure); the driver reads, for each finished run that did not pass, its jobs
+`run-failure.mjs` holds it (pure; a job that only gathers its shards' output, `SHARDS_STEP` or `REPORT_STEP`, has no cause of its own and counts only when no other job failed: with every shard failed in setup, `e2e report` failing at its upload for want of a report is the shards' failure, #2196); the driver reads, for each finished run that did not pass, its jobs
 and their steps (`runJobSteps`, `/actions/runs/{id}/jobs`) and what GitHub wrote on each job that did
 not pass (`checkRunNotes`, `/check-runs/{id}/annotations`), once per run attempt (kept on the item or
 the batch as `failures`), and `decideRun` decides from it, for an item's head and a batch's alike.
@@ -1026,7 +1026,7 @@ and refuses with every reason at once, sending nothing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `situationsChecked`, `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
-  heading left out (the template says so) and refuses a name the template does not have. **Not
+  heading left out (the template says so) and refuses a name the template does not have. The Closes section is rewritten to one keyword per issue (`Closes #a, #b` becomes `Closes #a` and `Closes #b`, `closingPerIssue` in rules.mjs), since GitHub links a keyword to the one reference after it and `Closes #a #b` left #b open (#2194); `queue_merge` warns when a description still has such a list (`multiClosingWarnings`). **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a
   heading whose guidance says "keep the heading" (Situations checked, Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the

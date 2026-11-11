@@ -12,15 +12,18 @@
 # by `playwright install-deps` reads the snippet too, which is why this is a setting of the machine and not an option of one
 # call). It stays for the rest of the job: a mirror that failed once is not asked again. Writing it twice changes nothing.
 #
-# Why the mirror cannot change what is installed: the sources name Ubuntu's archive keyring (`signed-by`), the same one the stock
-# sources use, and apt checks every `InRelease` against it, then every package list and every .deb against the sizes and hashes
-# in that signed file. A mirror that serves anything else fails `apt-get update`; it can be slow or stale, never wrong.
+# Why the mirror cannot change what is installed: the sources name Ubuntu's archive keyring (`signed-by`), the keys the stock sources
+# trust too, and apt checks every `InRelease` against it, then every package list and every .deb against the sizes and hashes
+# in that signed file. A mirror that serves anything else fails `apt-get update` (a list) or the download (a .deb); it can be slow
+# or behind, never wrong.
 #
 # The mirror is mirrors.ocf.berkeley.edu (the Open Computing Facility of UC Berkeley, an official Ubuntu mirror): the one that
 # answered during the outage, over HTTPS, and it carries both architectures (`ubuntu` for amd64, `ubuntu-ports` for arm64).
 # Probed on 2026-11-11 (`/ubuntu` and `/ubuntu-ports` `dists/noble-updates/InRelease`, both over HTTPS, the same 126125 bytes as Canonical's): of
 # 13 mirrors, only this one, MIT and Leaseweb answered for both (kernel.org redirects); the rest had no `ubuntu-ports` or did
 # not answer. They differ in speed, not in what they carry; this is the one with evidence from the outage. MIRROR names another.
+#
+# A machine it cannot name a mirror for is left as it is, with a warning: it never fails the step it runs in.
 #
 # `SUDO` is how to write as root (default `sudo`, empty for a test), `APT_ETC` where apt's setting lives (default /etc/apt),
 # `MIRROR` the mirror's base URL (the folder holding `ubuntu` and `ubuntu-ports`), `ARCH` and `CODENAME` what the machine is (default: dpkg's
@@ -31,15 +34,15 @@ sudo_cmd=${SUDO-sudo}
 etc=${APT_ETC:-/etc/apt}
 mirror=${MIRROR:-https://mirrors.ocf.berkeley.edu}
 arch=${ARCH:-$(dpkg --print-architecture)}
-codename=${CODENAME:-$(. /etc/os-release && echo "$VERSION_CODENAME")}
+codename=${CODENAME:-$(. /etc/os-release && echo "${VERSION_CODENAME:-}")}
 keyring=${KEYRING:-/usr/share/keyrings/ubuntu-archive-keyring.gpg}
 
 case "$arch" in
   amd64) archive=ubuntu ;;
   arm64) archive=ubuntu-ports ;;
-  *) echo "::error::no fallback mirror for the architecture $arch" >&2; exit 1 ;;
+  *) echo "::warning::no fallback mirror for the architecture $arch: the next try asks the same mirrors again"; exit 0 ;;
 esac
-[ -n "$codename" ] || { echo "::error::the Ubuntu release is not known" >&2; exit 1; }
+[ -n "$codename" ] || { echo "::warning::the Ubuntu release is not known: the next try asks the same mirrors again"; exit 0; }
 
 sources="$etc/fallback-mirror.list"
 # shellcheck disable=SC2086 # $sudo_cmd is empty or one word

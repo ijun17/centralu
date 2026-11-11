@@ -199,10 +199,13 @@ export function templateSections(template) {
   return out
 }
 
+/** The template's heading for the issues a pull request closes */
+export const CLOSES_HEADING = 'Closes'
 // GitHub links a closing keyword to the one reference right after it: "Closes #1 #2" closes #1 only (#2194: #2182 left six fixed issues open)
 const ISSUE_REF = String.raw`(?:[\w.-]+/[\w.-]+)?#\d+`
 const SEPARATOR = String.raw`(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+(?:and[ \t]+|&[ \t]*)?)`
-const CLOSING_LIST = new RegExp(String.raw`\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(:?)[ \t]+(${ISSUE_REF}(?:${SEPARATOR}${ISSUE_REF})+)`, 'gi')
+// The list ends its clause: "Closes #1 and #2 stays open" is prose about #2, not a list
+const CLOSING_LIST = new RegExp(String.raw`\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(:?)[ \t]+(${ISSUE_REF}(?:${SEPARATOR}${ISSUE_REF})+)(?=[ \t]*(?:[.,;!)]|$))`, 'gim')
 const issueRefs = (list) => list.match(new RegExp(ISSUE_REF, 'g'))
 
 /** The text with each closing keyword followed by several references written once for each: "Closes #1, #2" becomes "Closes #1" and "Closes #2" on two lines. */
@@ -242,7 +245,7 @@ export function fillTemplate(template, sections, { required = ['Not exercised'] 
       continue
     }
     const text = String(v).replace(/<!--[\s\S]*?-->/g, '').trim()
-    given.set(key, key === 'closes' ? closingPerIssue(text) : text)
+    given.set(key, key === headingKey(CLOSES_HEADING) ? closingPerIssue(text) : text)
   }
   const parts = []
   for (const h of heads) {

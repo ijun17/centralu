@@ -45,7 +45,7 @@ for n in $(seq 1 "$tries"); do
       # shellcheck disable=SC2086
       $sudo_cmd dpkg --configure -a || true
     fi
-    bash "$here/apt-fallback-mirror.sh" || echo "::warning::no fallback mirror: the next try asks the same mirrors again"
+    bash "$here/apt-fallback-mirror.sh"
   fi
   echo "apt try $n of $tries (limit ${limit}s): $*"
   start=$SECONDS
