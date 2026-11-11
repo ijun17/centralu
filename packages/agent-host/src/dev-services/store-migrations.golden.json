@@ -277,12 +277,16 @@
    "to": 69,
    "breaksOlderReaders": true,
    "minReader": 68
+  },
+  {
+   "to": 70,
+   "breaksOlderReaders": false
   }
  ],
- "version": 69,
- "ran": 68,
+ "version": 70,
+ "ran": 69,
  "store": {
-  "userVersion": 69,
+  "userVersion": 70,
   "master": [
    {
     "type": "index",
@@ -762,7 +766,7 @@
     "type": "table",
     "name": "mail",
     "tbl_name": "mail",
-    "sql": "CREATE TABLE mail (\n              id             TEXT PRIMARY KEY,\n              sender         TEXT NOT NULL,\n              sender_project TEXT,\n              kind           TEXT NOT NULL,\n              needs_reply    INTEGER NOT NULL DEFAULT 0,\n              reply_to       TEXT,\n              root_id        TEXT NOT NULL,\n              cause_id       TEXT,\n              depth          INTEGER NOT NULL DEFAULT 0,\n              urgent         INTEGER NOT NULL DEFAULT 0,\n              body           TEXT NOT NULL,\n              facts          TEXT NOT NULL DEFAULT '{}',\n              dedupe_key     TEXT,\n              origin         TEXT,\n              legacy_thread  TEXT,\n              created_at     INTEGER NOT NULL,\n              UNIQUE (sender, dedupe_key)\n            )"
+    "sql": "CREATE TABLE mail (\n              id             TEXT PRIMARY KEY,\n              sender         TEXT NOT NULL,\n              sender_project TEXT,\n              kind           TEXT NOT NULL,\n              needs_reply    INTEGER NOT NULL DEFAULT 0,\n              reply_to       TEXT,\n              root_id        TEXT NOT NULL,\n              cause_id       TEXT,\n              depth          INTEGER NOT NULL DEFAULT 0,\n              urgent         INTEGER NOT NULL DEFAULT 0,\n              body           TEXT NOT NULL,\n              facts          TEXT NOT NULL DEFAULT '{}',\n              dedupe_key     TEXT,\n              origin         TEXT,\n              legacy_thread  TEXT,\n              created_at     INTEGER NOT NULL, choices TEXT,\n              UNIQUE (sender, dedupe_key)\n            )"
    },
    {
     "type": "table",
@@ -1611,7 +1615,8 @@
      "dedupe_key TEXT notnull=0 default=null pk=0",
      "origin TEXT notnull=0 default=null pk=0",
      "legacy_thread TEXT notnull=0 default=null pk=0",
-     "created_at INTEGER notnull=1 default=null pk=0"
+     "created_at INTEGER notnull=1 default=null pk=0",
+     "choices TEXT notnull=0 default=null pk=0"
     ],
     "rows": []
    },

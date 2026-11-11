@@ -1,6 +1,6 @@
 import { MigrationRange, type MigrationStep } from './context.js'
 
-/** The migration steps v65 to v69. The rule it follows is written above `migrationSteps` in `index.ts` */
+/** The migration steps v65 to v70. The rule it follows is written above `migrationSteps` in `index.ts` */
 export class StepsV65 extends MigrationRange {
   steps(): MigrationStep[] {
     return [
@@ -177,6 +177,22 @@ export class StepsV65 extends MigrationRange {
             copy.run(renamed, old)
             drop.run(renamed, old)
           }
+        },
+      },
+      {
+        to: 70,
+        breaksOlderReaders: false,
+        /**
+         * The answers a session's question to the person offers (docs/plans/mailbox.md D33, #1630): `mail.choices`, a JSON array of 2 to 6
+         * strings, NULL on every other message. They are the sender's words, so they have a column of their own: `facts` is Centralu's
+         * record, which a session cannot write (docs/security-boundaries/mailbox-and-requests.md).
+         *
+         * **Expand only (#292's rule).** One nullable column. An older build names its columns in every read and insert of `mail`
+         * (`SELECT *` is read by name), so it never sees the column: it opens the store, and a question shows without its choices.
+         * Nothing is backfilled: no build stored choices anywhere else before this one.
+         */
+        run: () => {
+          this.addColumn('mail', 'choices', 'TEXT')
         },
       },
     ]

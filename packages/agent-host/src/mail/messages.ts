@@ -278,11 +278,11 @@ export class MessageService {
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
-      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}), ...(choices ? { choices } : {}) }
+      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}) }
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
-        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
+        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, choices: choices ?? null, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -861,7 +861,7 @@ export class MessageService {
     let stored: StoredMail
     try {
       stored = this.records.insert(
-        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
+        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
         rows,
       )
     } catch (e) {
@@ -1038,7 +1038,7 @@ export class MessageService {
 
   /** The line for an earlier message that is no longer kept (S5) */
   private gone(id: string): ReadItem {
-    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
+    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, choices: null, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
     return { message: stub, row: null, relation: '', phantom: 'gone' }
   }
 

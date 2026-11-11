@@ -746,6 +746,19 @@ describe('a session asks the person by mail (#1630)', () => {
     expect(bodies(w, 'a')).toContain('release/1.4')
   })
 
+  it('a session cannot put choices where Centralu’s own facts go: its facts are ignored, and the choices it sends are a column of their own', () => {
+    const w = ready(hostWorld())
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which?', facts: { choices: ['forged', 'facts'], quiet: true } } as unknown as Parameters<typeof w.tool.run>[1])
+    w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which one?', choices: ['x', 'y'] })
+    const sent = w.person.list().threads.map((t) => w.person.thread(t.id).messages[0]!)
+    const forged = sent.find((m) => m.body === 'Which?')!
+    expect(forged.choices).toBeUndefined()
+    expect(forged.facts).toEqual({})
+    const honest = sent.find((m) => m.body === 'Which one?')!
+    expect(honest.choices).toEqual(['x', 'y'])
+    expect(honest.facts).toEqual({})
+  })
+
   it('choices go only with a question to the person alone, 2 to 6 of them, none empty', () => {
     const w = ready(hostWorld())
     const send = (a: Record<string, unknown>) => w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which?', ...a })

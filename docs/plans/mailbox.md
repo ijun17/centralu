@@ -425,7 +425,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     would make the store match addresses against `sessions.deleted_at`, while a restored session's mail is what any
     session's mail is after the same time.
 - **D33. Agents ask the person by mail** (owner, 2026-11-10, #1630). A session with the mail tool asks the person with a
-  `question` to `person`, which may carry 2 to 6 short `choices` (`MailChoices` in the protocol; on the wire a field of the message of its own, `MailMessage.choices`, because `facts` is Centralu's words and the choices are the sender's). The
+  `question` to `person`, which may carry 2 to 6 short `choices` (`MailChoices` in the protocol). They are the sender's words, so they are not in `facts` (Centralu's record, which a session cannot write): they are the nullable column `mail.choices` (store step v70, expand only: an older build never names it and shows a question without its choices) and the field `MailMessage.choices` on the wire. The
   session keeps working or ends its turn, and the person's answer arrives as mail and wakes it, as any answer does.
   - **Only a session's question to the person alone** carries choices (`checkedChoices` in `messages.ts`): to anyone else,
     on a note or from another party they are refused `field_not_allowed`, and fewer than 2, more than 6 or an empty one
@@ -746,6 +746,7 @@ sends.
 | `urgent` | sessions and the person only, as today |
 | `body` | the sender's words: up to 16,000 characters from a session or the person, 4,000 from an app |
 | `facts` | JSON only Centralu writes (§5.4) |
+| `choices` | JSON `string[]` of 2 to 6, or null: the answers a session's question to the person offers (D33, #1630, store v70). The sender's words, so a column of their own, never in `facts` |
 | `dedupe_key` | unique per sender: Centralu's "once per change" (§6.5) |
 | `origin` | what produced it: `mail`, `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`, `script`, `person`, `app`, `watch`, `centralu` |
 | `legacy_thread` | the thread it was adopted from (§6.3), else null |
@@ -799,7 +800,6 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
-| `choices` | message | `string[]`, 2 to 6, none the same: a session's question to the person offers these answers to pick (D33, #1630); the sender's words, checked for shape. Stored with the facts, but sent to a window as `MailMessage.choices`, not among its `facts` |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `store/mail-facts.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key

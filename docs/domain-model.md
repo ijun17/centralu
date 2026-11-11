@@ -416,7 +416,7 @@ Where it is stored:
   or an update keeps its row.
 - `mail`: mail without threads (v65, [plans/mailbox.md](plans/mailbox.md) §6.1, #1684): one message, its sender, kind
   (`message`, `task`, `report`, `notice`), whether it needs a reply, the message it answers and the first of that chain,
-  the message that started the sender's turn and how many hops led to it, and Centralu's `facts`. `legacy_thread` names
+  the message that started the sender's turn and how many hops led to it, and Centralu's `facts`, and, on a session's question to the person, the `choices` it offers (v70, #1630: the sender's words, so not in `facts`). `legacy_thread` names
   the thread a message was moved from. The host's mail since M3a; after each ready the thread mail an older build left
   pending is moved here once (§6.3).
 - `mail_recipients`: one recipient's row for a message in `mail`: the delivery fields a receipt has, the turn the
