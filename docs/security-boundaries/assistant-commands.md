@@ -105,7 +105,7 @@ command and never which commands it reaches. The measurement is in
 
 Apps are separate from this profile. Decision 4 ([apps/attaching.md](../apps/attaching.md#which-session-gets-which-apps-decision-4)) gives the Assistant the
 user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
-`sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the Assistant adds the
+`sessions/session-apps.ts`); a reader adds others with `attach_app` ([apps/other-projects-apps.md](../apps/other-projects-apps.md)), and the Assistant adds the
 root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and
 its trust is the project's; #1205: as commands behind `centralu_run`, and never a project's inner app). An
 agent an app started gets none (`appsFor`). **An untrusted project's apps attach nowhere** (owner,

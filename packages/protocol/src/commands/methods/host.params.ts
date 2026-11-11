@@ -309,8 +309,8 @@ export const hostParams = {
   }),
   /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
-   * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host/remote/serve.md
-   * §4.7): on Windows a launcher can only be killed, and killing it ends the host without its
+   * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host/remote/serve.md):
+   * on Windows a launcher can only be killed, and killing it ends the host without its
    * shutdown. Answers before the host starts to leave. Refused by a host under the app's keeper,
    * which the app stops (and which would only start the host again).
    *

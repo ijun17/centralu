@@ -67,7 +67,7 @@ A rule keeps its id wherever it is cited (`HO1`, `docs/runtime-lessons/host-cont
 | [single-instance-and-supervision.md](single-instance-and-supervision.md) | LK1, LK2, LK3, LK4, LK5, LK6, LK7, LK8, SU1, SU2, SU3, SU4, SU5, SU6, SU7, SU8 |
 | [stopping-process-trees.md](stopping-process-trees.md) | KL1, KL2, KL3, KL4, KL5, KL6, KL7, KL8, KL9, KL10, KL11, KL12, KL13, KL14, KL15, KL16, KL17, KL18, KL19, KL20 |
 | [keeper-children-and-handoff.md](keeper-children-and-handoff.md) | CH5, CH8, CH13, CH14, HD13 |
-| [front-door-and-store.md](front-door-and-store.md) | SW1, SW2, SW3, SW4, SW5, SW7, SW8, SW9, SW10, SW11, SW12, SW13, SW14, SW15, SW16 |
+| [front-door-and-store.md](front-door-and-store.md) | SW1, SW2, SW3, SW3a, SW4, SW5, SW7, SW8, SW9, SW10, SW11, SW12, SW13, SW14, SW15, SW16 |
 | [files.md](files.md) | FI1, FI2, FI3, FI4, FI5, FI6, FI7, FI8, FI9, FI10, FI11, FI12, FI13 |
 | [macos-permissions.md](macos-permissions.md) | TC1, TC2, TC3, TC4, TC5, TC6, TC7, TC8, TC9, TC10, TC11, TC12, TC13, TC14, TC15, TC17 |
 | [quit-relaunch-update.md](quit-relaunch-update.md) | UP1, UP2, UP3, UP4, UP5, UP6, UP7, UP8, UP9, UP10, UP11 |

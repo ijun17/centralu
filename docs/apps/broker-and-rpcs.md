@@ -22,7 +22,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   run's id or another app's id is refused, and the refusal goes to the app's log and its runs.
 - **`busy { busy, reason? }`, the one request without a run id (#1236).** The app tells the host
   about itself (busy with background work, or no longer), so it asks for nothing outside the app and
-  reaches only its own lifecycle ([trust-lifecycle-calls.md](trust-lifecycle-calls.md#lifecycle), "Busy"). Refused unless the manifest declares
+  reaches only its own lifecycle ([trust-lifecycle-calls.md](trust-lifecycle-calls.md#lifecycle), its "Busy" row). Refused unless the manifest declares
   `uses.background`; a refusal goes to the app's log. Not a run: it leaves no run record. The
   template's `centralu.busy(reason)` sends only changes, in order, and resolves false (said once on
   stderr) when Centralu did not take it.

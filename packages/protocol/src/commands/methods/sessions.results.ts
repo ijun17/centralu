@@ -178,8 +178,8 @@ export const sessionsResults = {
      */
     sameAccountAsHub: z.boolean().optional(),
     /**
-     * The prompt cache over the last hours, counted by this host from its sessions' requests (docs/agent-host/prompt-cache.md
-     * §6.1). Independent of `supported`: a limit the tool would not tell does not hide what the host counted.
+     * The prompt cache over the last hours, counted by this host from its sessions' requests (docs/agent-host/prompt-cache.md).
+     * Independent of `supported`: a limit the tool would not tell does not hide what the host counted.
      * Absent from a host that predates it.
      */
     cache: CacheStats.optional(),

@@ -4,7 +4,7 @@
  * Four forms, in any tracked text file (a code comment, a string, a document):
  *   - `<doc> §4.5`, `docs/plans/mailbox.md §10.1`, `x.md §3 and §4`: section 4.5 exists in that document (a numbered heading, or an item of a numbered list under heading 4);
  *   - `docs/releasing.md "Host-only packages"`: a heading or a bold lead-in of that document starts with the quoted text;
- *   - `docs/runtime-lessons/host-contract.md HO4, HO6`: a rule id (two capitals and a number) that a bold lead-in of that document starts with (`**HO4. …**`);
+ *   - `docs/runtime-lessons/host-contract.md HO4, HO6`: a rule id (two capitals, a number, maybe a letter) that a bold lead-in of that document starts with (`**HO4. …**`);
  *   - in a Markdown file, a link `[text](../x.md#anchor)`: the file exists and, with an anchor, one of its headings has that anchor.
  * A bare name (`architecture §6.2`) counts when it is the name of a document under docs/ or at the root; other words
  * before a `§` (`plan §4`, which means the plan the comment sits in) are not read. A name written with `.md` that no document
@@ -15,7 +15,7 @@
  * (`agent-host.md`, `agent-host §4.5`) and a path into the folder that names no file are findings, so no reference is
  * left pointing at the document that was split.
  *
- * Not read: a reference whose name and section are on two lines, the end of a range (`§4.1–4.9`), a number after a comma
+ * A name and what it cites may be on two lines, also of a comment (` * §4.5` under ` * x.md`). Not read: the end of a range (`§4.1–4.9`), a number after a comma
  * without its own `§`, `section 4` in words, a bare rule id (`HD12`), and a link in a file that is not Markdown.
  */
 import { execFileSync } from 'node:child_process'
@@ -128,11 +128,14 @@ export function indexTexts(texts: Map<string, string>): DocIndex {
 }
 
 /**
- * The document a name means: a name with a folder is the one file whose path ends with it, a bare name every file of that name.
+ * The document a name means: a name with a folder is the one file whose path ends with it; a bare name written with `.md` is the file of that
+ * name beside the citing file `from` when there is one (an app's own `AGENTS.md`), else every file of that name.
  * A string says what is wrong: the name is a document that is a folder now, or a path into such a folder names no file.
  */
-function lookup(name: string, index: DocIndex): Doc | string | undefined {
+function lookup(name: string, index: DocIndex, from?: string): Doc | string | undefined {
   const base = basename(name).toLowerCase()
+  const beside = from && !name.includes('/') ? index.byPath.get(posix.join(posix.dirname(from), `${name}.md`)) : undefined
+  if (beside) return beside
   if (name.includes('/')) {
     const path = name.replace(/^(?:\.{1,2}\/)+/, '').replace(/^docs\//, '')
     const found = [...index.byPath.keys()].filter((p) => p === `docs/${path}.md` || p === `${path}.md` || p.endsWith(`/${path}.md`))
@@ -147,10 +150,12 @@ function lookup(name: string, index: DocIndex): Doc | string | undefined {
 const DOC = String.raw`((?:[\w.-]+/)*[A-Za-z][\w-]*?)(\.md)?`
 const SECTION = String.raw`§\s?(\d+(?:\.\d+)*)`
 // What may stand between a name and what it cites: a closing backtick, or the link that makes the name `[x.md](x.md)`
-const GAP = '(?:`|\\]\\([^)]*\\))?,?\\s+'
+// and white space, which may break the line: then the next line's comment mark too (`//`, `//!`, ` * `, `#`)
+const GAP = '(?:`|\\]\\([^)]*\\))?,?\\s+(?:(?:\\/\\/[\\/!]?|\\*|#)\\s+)?'
 const NUMBERED = new RegExp(String.raw`(?<![\w./-])${DOC}${GAP}(${SECTION}(?:\s*(?:,|/|and|or|&|–|—|-|to)\s*${SECTION})*)`, 'g')
 const QUOTED = new RegExp(String.raw`(?<![\w./-])${DOC}\.md${GAP}["“«]([^"”»\n]{3,80})["”»]`, 'g')
-const RULE = new RegExp(String.raw`(?<![\w./-])${DOC}${GAP}([A-Z]{2}\d+(?:\s*(?:,|and|or|&)\s*[A-Z]{2}\d+)*)(?![\w-])`, 'g')
+const ID = String.raw`[A-Z]{2}\d+[a-z]?`
+const RULE = new RegExp(String.raw`(?<![\w./-])${DOC}${GAP}(${ID}(?:\s*(?:,|and|or|&)\s*${ID})*)(?![\w-])`, 'g')
 const PLAIN = /(?<![\w./-])((?:[\w.-]+\/)*[A-Za-z][\w-]*)\.md(?![\w-])/g
 const LINK = /\]\(([^)\s#]*?\.md)?(?:#([^)\s]+))?\)/g
 
@@ -160,7 +165,7 @@ export function danglingRefs(text: string, index: DocIndex, file?: string): stri
   const lineOf = (at: number) => text.slice(0, at).split('\n').length
   for (const m of text.matchAll(NUMBERED)) {
     const [, name = '', md = '', sections = ''] = m
-    const doc = lookup(name, index)
+    const doc = lookup(name, index, md ? file : undefined)
     if (typeof doc === 'string') {
       found.push(`${lineOf(m.index)}: ${doc}`)
       continue
@@ -173,20 +178,20 @@ export function danglingRefs(text: string, index: DocIndex, file?: string): stri
   }
   for (const m of text.matchAll(QUOTED)) {
     const [, name = '', , title = ''] = m
-    const doc = lookup(name, index)
+    const doc = lookup(name, index, file)
     if (typeof doc !== 'object') continue
     const wanted = clean(title)
     if (!doc.titles.some((t) => t.startsWith(wanted))) found.push(`${lineOf(m.index)}: ${name}.md has no heading "${title}"`)
   }
   for (const m of text.matchAll(RULE)) {
     const [, name = '', md = '', ids = ''] = m
-    const doc = lookup(name, index)
+    const doc = lookup(name, index, md ? file : undefined)
     if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
     if (typeof doc !== 'object') continue
-    for (const [id] of ids.matchAll(/[A-Z]{2}\d+/g)) if (!doc.titles.some((t) => t.startsWith(`${id.toLowerCase()}.`))) found.push(`${lineOf(m.index)}: ${name}${md} has no rule ${id}`)
+    for (const [id] of ids.matchAll(new RegExp(ID, 'g'))) if (!doc.titles.some((t) => t.startsWith(`${id.toLowerCase()}.`))) found.push(`${lineOf(m.index)}: ${name}${md} has no rule ${id}`)
   }
   for (const m of text.matchAll(PLAIN)) {
-    const doc = lookup(m[1] ?? '', index)
+    const doc = lookup(m[1] ?? '', index, file)
     if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
   }
   if (file?.endsWith('.md')) {

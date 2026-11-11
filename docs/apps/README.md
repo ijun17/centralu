@@ -53,7 +53,6 @@ another host has not been tested.
   packaged app's WKWebView or in WebView2; the end point's coordinates there are taken from those
   engines' measurements. During such a drag the page hears nothing, so no drop target lights up.
 
-
 ## The files
 
 | File | What it holds |

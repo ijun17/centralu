@@ -66,6 +66,24 @@ describe('guard/doc-refs', () => {
     ])
   })
 
+  it("reads a section on a comment's next line, past its comment mark", () => {
+    const index = indexDocs(ROOT, ['docs/architecture.md', 'docs/releasing.md', 'AGENTS.md', '.centralu/apps/project-board/AGENTS.md'])
+    const text = [
+      '//! started as the shell does (docs/architecture.md',
+      '//! §6.2). Debug builds start the keeper.',
+      '   * the release (docs/releasing.md',
+      '   * "No such heading here").',
+      '# docs/architecture.md',
+      '# §2 is there',
+      '// each family lives in its own file (AGENTS.md,',
+      '// "Files"): the AGENTS.md beside this file, not the root one',
+    ].join('\n')
+    expect(danglingRefs(text, index, '.centralu/apps/project-board/server.mjs')).toEqual([
+      '1: docs/architecture.md has no section 6.2',
+      '3: docs/releasing.md has no heading "No such heading here"',
+    ])
+  })
+
   it('reads a rule id cited after the document that holds it', () => {
     const index = indexTexts(
       new Map([
@@ -79,11 +97,13 @@ describe('guard/doc-refs', () => {
       '`docs/runtime-lessons/host-contract.md` RE18',
       'docs/runtime-lessons.md HO1',
       'runtime-lessons/remotes.md RE18; HO9 on its own is not read',
+      'runtime-lessons/remotes.md RE18a',
     ].join('\n')
     expect(danglingRefs(text, index)).toEqual([
       '1: docs/runtime-lessons/host-contract.md has no rule HO2',
       '2: docs/runtime-lessons/host-contract.md has no rule RE18',
       '3: docs/runtime-lessons.md is a folder now: cite the file under it',
+      '5: runtime-lessons/remotes.md has no rule RE18a',
     ])
   })
 })
