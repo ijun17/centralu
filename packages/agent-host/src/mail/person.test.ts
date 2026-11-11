@@ -737,6 +737,7 @@ describe('a session asks the person by mail (#1630)', () => {
     const w = ready(hostWorld())
     w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which branch should the fix go to?', choices: ['main', 'release/1.4'] })
     const [row] = w.person.list().threads
+    expect(w.person.thread(row!.id).messages[0]?.choices).toContain('release/1.4')
     w.clock.t += 10
     w.person.reply(row!.id, 'release/1.4', 'answer')
     const messages = w.person.thread(row!.id).messages

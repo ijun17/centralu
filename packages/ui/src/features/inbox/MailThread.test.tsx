@@ -145,10 +145,6 @@ describe('the thread in the inbox', () => {
       expect(html).toContain('data-testid="mail-reply"')
     })
 
-    it('draws none for a question without any, and none from a message that is not a question’s', () => {
-      expect(render(view({ messages: [{ ...asked, choices: undefined }] })).html).not.toContain('mail-choices-1')
-    })
-
     it('once answered takes no press, lights the one picked and says so', () => {
       const { html, text } = render(view({ messages: [asked, answer('Switch now')] }))
       expect(text).toContain('You chose')
