@@ -3,7 +3,7 @@ import { isObj } from '../json-value.js'
 import { errnoCode, isMissing } from '../os/errors.js'
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, stat, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, MissingPathError, pathParts, UnsafePathError } from './path-guard.js'
@@ -125,7 +125,7 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
   // reaches the person as noise rather than as the reason.
   if (dst.startsWith(src + sep)) fail(`Cannot move ${baseName(from)} into itself`)
   if (dstState.exists) fail(`${rel} already exists — nothing was moved`)
-  await rename(src, dst)
+  await realOs().files.promises.rename(src, dst)
   return { path: rel, moved: true }
 }
 
@@ -430,7 +430,7 @@ export async function copyTree(
    * the half-finished result is deleted and the copy starts fresh. A destination that already
    * existed before the copy started is left untouched, since it was never ours to begin with.
    */
-  if (!existed) await rm(dst, { recursive: true, force: true })
+  if (!existed) await realOs().files.promises.rm(dst, { recursive: true, force: true })
   if (!traitsFor().cpKeepsLinks) return copyTreeWindows(src, dst, links)
   // The `Os`'s copy, which makes every link again as a link and never follows one (a link in a circle ended the host
   // in Node's own `cpSync`). verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
@@ -621,7 +621,7 @@ export async function dropEscapingLinks(root: string, start: string, from?: stri
       if (entry.isSymbolicLink()) {
         const target = await linkTarget(abs)
         if (isInside(rootReal, target)) continue
-        await rm(abs, { force: true })
+        await realOs().files.promises.rm(abs, { force: true })
         const there = fromReal === null ? null : retarget(target, { from: fromReal, to: rootReal }, familyOf())
         // To a folder a junction, which Windows makes without a privilege (elsewhere the kind is not asked); one that
         // cannot be made is dropped, as one leading outside

@@ -7,12 +7,12 @@ export type Emit = (event: NormalizedEvent) => void
 
 /** Who listens to the mock: the event subscribers and the connection watchers (`agents.subscribe`, `onConnectionChange`) */
 export class EventBus {
-  private handlers = new Set<(e: NormalizedEvent) => void>()
+  private handlers = new Set<(e: NormalizedEvent, id?: string) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
 
   /** Hands one event on to every subscriber; one that throws does not keep it from the rest, as in the web client */
-  broadcast(event: NormalizedEvent): void {
-    deliver(this.handlers, event)
+  broadcast(event: NormalizedEvent, id?: string): void {
+    deliver(this.handlers, event, id)
   }
 
   setConnectionState(s: ConnectionState): void {
@@ -24,7 +24,7 @@ export class EventBus {
     this.connHandlers.clear()
   }
   readonly agents: Pick<AgentPort, 'subscribe' | 'onConnectionChange'> = {
-    subscribe: (handler: (e: NormalizedEvent) => void): Unsubscribe => {
+    subscribe: (handler: (e: NormalizedEvent, id?: string) => void): Unsubscribe => {
       this.handlers.add(handler)
       return () => this.handlers.delete(handler)
     },

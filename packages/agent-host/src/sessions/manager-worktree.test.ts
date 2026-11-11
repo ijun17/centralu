@@ -36,6 +36,10 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 import { CwdFiledAdapter, FakeAdapter, managerWorld } from './manager.test-helpers.js'
 import { itSymlink, linkDir } from '../link.test-helpers.js'
 import { removeTree } from '../temp-dir.test-helpers.js'
+import { useWarmProcessTable } from '../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 let store: Store
 let adapter: FakeAdapter

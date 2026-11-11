@@ -1,5 +1,6 @@
 import { errorMessage } from '@cc/protocol'
 import { sleepSync } from '../timing.js'
+import { held } from '../os/real.js'
 import { ENDED_MAX_AGE_MS, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
@@ -28,8 +29,8 @@ import { readStopped, type Stopped } from './update-stopped.js'
  * its own (`recordUpdateEnded`): they are no session's, so no mark applies; the first start after it takes them whole
  * (`UpdateResumeLists.takeEnded`) and the list goes.
  *
- * **A list that cannot be read at the start** is tried again a few times when it is held (`EBUSY`, a virus scanner that
- * opened the file just written; `READ_TRIES`), each failure said. One still unreadable stays where it is for a later start,
+ * **A list that cannot be read at the start** is tried again on Windows while it is held (`EBUSY`, a virus scanner that
+ * opened the file just written), by the one policy for that (os/held.ts), each failure said. One still unreadable stays where it is for a later start,
  * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
  * like any a quit cut, with its Continue, and the log says so.
  *
@@ -58,29 +59,6 @@ export type UpdateResumeFolder = {
   /** Writes a new list under a name no other list has */
   add(text: string): void
   remove(name: string): void
-}
-
-/**
- * How often a list is read when the first read finds it held (`EBUSY`: a virus scanner that opened the file just written, or
- * a backup), and how long between the reads. A hold like that is the one failure here known to be passing, so it is tried
- * again, each failure in the log; every other error is final at once. The tries are the whole of the wait: the start goes on
- * after them, with the list kept.
- */
-export const READ_TRIES = 5
-export const READ_RETRY_MS = 200
-
-/** A list's text; a read that fails with `EBUSY` is tried again (`READ_TRIES`), each failure said */
-function readHeld(folder: UpdateResumeFolder, name: string, wait: (ms: number) => void): string | null {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return folder.read(name)
-    } catch (err) {
-      const busy = err instanceof Error && 'code' in err && err.code === 'EBUSY'
-      if (!busy || attempt >= READ_TRIES) throw err
-      console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again (${attempt}/${READ_TRIES})`)
-      wait(READ_RETRY_MS)
-    }
-  }
 }
 
 /** The turns a list's text names; `torn` when it is not JSON (a host killed while it wrote), `other` for another format */
@@ -143,7 +121,7 @@ export class UpdateResumeLists {
   private readonly dealt = new Set<string>()
 
   /**
-   * `wait` sleeps between the tries at a list a scanner holds (`READ_TRIES`); the host's own start is one thread with nothing
+   * `wait` sleeps between the tries at a list a scanner holds on Windows (os/held.ts, `held`); the host's own start is one thread with nothing
    * yet to serve, so it blocks. Tests pass their own
    */
   constructor(
@@ -160,7 +138,7 @@ export class UpdateResumeLists {
     for (const name of names) {
       let text: string | null
       try {
-        text = readHeld(folder, name, wait)
+        text = held(() => folder.read(name), wait, (err) => console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again`))
       } catch (err) {
         /*
          * Still held after the tries, or unreadable for another reason. The list stays where it is and is read by a later

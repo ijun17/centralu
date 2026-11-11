@@ -106,7 +106,7 @@ type NormalizedEvent =
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this child to the session that took over (a settled one too when the original goes, #738); the sidebar hangs it there. #1038: also the hub naming its session that started a linked machine's child (null once that session is gone)
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
-  | { type: 'mail_changed';     threadId, toPerson?, arrived? } // #1347: a mailbox thread changed; the Inbox reads again. App-wide, never forwarded from a linked machine. `arrived` (#1630): a new message the person can read, not their own ({ messageId, from: MailParty, kind, preview }); the window raises one OS notification for it
+  | { type: 'mail_changed';     threadId, toPerson?, arrived? } // #1347: a mailbox thread changed; the Inbox reads again. App-wide, never forwarded from a linked machine. `arrived` (#1630): a new message the person can read, not their own ({ messageId, from: MailParty, kind, preview }); one window of the machine raises one OS notification for it, by `messageId` (#2168)
   | { type: 'update_apply_request'; requestId }                 // #665: an agent's "Apply now"; each window answers with updates.answerApply
   | { type: 'update_apply_go';  requestId, ticket }             // #665: only the window holding ticket relaunches: updates.reportApply started, then the outcome
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }

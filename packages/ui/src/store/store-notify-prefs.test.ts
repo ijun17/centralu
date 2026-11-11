@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_NOTIFY_POLICY } from '@cc/core'
-import { DEFAULT_UI_PREFERENCES } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, notifyPolicyOf } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { useStore } from './store.js'
@@ -23,7 +23,7 @@ describe('the notification switches live in the host (#1306)', () => {
     mock.workspaceSnapshot = { notifyPolicy: { ...DEFAULT_NOTIFY_POLICY, sound: true, approval: false } } as never
     await useStore.getState().attach(mock)
     await tick()
-    expect(useStore.getState().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false })
   })
 
   it("take the snapshot's copy from a host that answers without them, as before", async () => {
@@ -34,14 +34,13 @@ describe('the notification switches live in the host (#1306)', () => {
     const save = vi.spyOn(mock.prefs, 'save').mockResolvedValue({ ...DEFAULT_UI_PREFERENCES })
     await useStore.getState().attach(mock)
     await tick()
-    expect(useStore.getState().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false })
     // A change is sent to the host (which drops it) and kept here, and a later reading from that host does not undo it
-    useStore.getState().setNotifyPolicy({ ...useStore.getState().notifyPolicy, sound: false })
+    useStore.getState().setNotifyPolicy({ ...notifyPolicyOf(useStore.getState().prefs), sound: false })
     await tick()
     expect(save).toHaveBeenCalledWith({ notifyPolicy: { sound: false } })
     await useStore.getState().refreshPrefs()
-    expect(useStore.getState().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false, sound: false })
-    expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false, sound: false })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ ...DEFAULT_NOTIFY_POLICY, done: false, sound: false })
   })
 
   it('save only the switches that changed, so another writer\'s change to a different one is not undone', async () => {
@@ -49,25 +48,25 @@ describe('the notification switches live in the host (#1306)', () => {
     await useStore.getState().attach(mock)
     await tick()
     const save = vi.spyOn(mock.prefs, 'save')
-    useStore.getState().setNotifyPolicy({ ...useStore.getState().notifyPolicy, sound: false })
+    useStore.getState().setNotifyPolicy({ ...notifyPolicyOf(useStore.getState().prefs), sound: false })
     await tick()
     expect(save).toHaveBeenCalledWith({ notifyPolicy: { sound: false } })
-    // The snapshot's copy is still written, for a build that reads the switches there
-    expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false })
+    // No second copy in the workspace snapshot (#2168)
+    expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toBeUndefined()
     // The Assistant turned another one off meanwhile; this window turns a third off
     await mock.prefs.save({ notifyPolicy: { error: false } })
     await tick()
-    useStore.getState().setNotifyPolicy({ ...useStore.getState().notifyPolicy, allDone: false })
+    useStore.getState().setNotifyPolicy({ ...notifyPolicyOf(useStore.getState().prefs), allDone: false })
     await tick()
     expect(mock.uiPrefs.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, sound: false, error: false, allDone: false })
     // Nothing changed, nothing sent
     save.mockClear()
-    useStore.getState().setNotifyPolicy({ ...useStore.getState().notifyPolicy })
+    useStore.getState().setNotifyPolicy({ ...notifyPolicyOf(useStore.getState().prefs) })
     await tick()
     expect(save).not.toHaveBeenCalled()
   })
 
-  it('follow a change another writer made, on prefs_changed; the snapshot\'s copy catches up with the next save', async () => {
+  it('follow a change another writer made, on prefs_changed', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     await tick()
@@ -75,13 +74,8 @@ describe('the notification switches live in the host (#1306)', () => {
     await mock.prefs.save({ notifyPolicy: { whenFocused: true, approval: false } })
     await tick()
     await tick()
-    expect(useStore.getState().notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
+    expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
     expect(useStore.getState().prefs.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
-    // No window rewrites the snapshot because another writer changed a switch: the next save of the layout carries it
-    expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).not.toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
-    useStore.getState().setShowIgnored(false)
-    await tick()
-    expect((mock.workspaceSnapshot as { notifyPolicy?: unknown } | null)?.notifyPolicy).toEqual({ ...DEFAULT_NOTIFY_POLICY, whenFocused: true, approval: false })
   })
 
   it('also follow another setting the Assistant changed (the theme), without a reload', async () => {
@@ -110,13 +104,13 @@ describe('the notification switches live in the host (#1306)', () => {
     const load = vi.spyOn(mock.prefs, 'load')
     await useStore.getState().refreshPrefs()
     expect(load).not.toHaveBeenCalled()
-    expect(useStore.getState().notifyPolicy.sound).toBe(false)
+    expect(notifyPolicyOf(useStore.getState().prefs).sound).toBe(false)
     release()
     await tick()
     await tick()
     // ...and happens once the save is done, showing the record with the change in it
     expect(load).toHaveBeenCalledTimes(1)
-    expect(useStore.getState().notifyPolicy.sound).toBe(false)
+    expect(notifyPolicyOf(useStore.getState().prefs).sound).toBe(false)
     expect(useStore.getState().prefs.notifyPolicy?.sound).toBe(false)
   })
 

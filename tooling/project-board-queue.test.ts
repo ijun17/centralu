@@ -205,6 +205,10 @@ describe('what the merge queue decides for one poll', () => {
     // An upload that is a check on the commit (`if-no-files-found: error`, to fail a build that bundled nothing) is not named so, and stays the commit's
     expect(classifyRun(failedRun, [job('windows-x64', 'failure', stored('Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'))])).toMatchObject({ real: true, cause: 'test' })
     expect(classifyRun(failedRun, [job('macos tests', 'failure', { steps: [{ name: 'pnpm test', conclusion: 'failure' }, { name: 'Upload the test times', conclusion: 'failure' }] })])).toMatchObject({ real: true, cause: 'test', step: 'pnpm test' })
+    // The shards' result under the job's old name (#2167) fails whenever a shard did: the shard says why, a storage failure included
+    const shardsFailed = { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Every shard passed', conclusion: 'failure' }] }
+    expect(classifyRun(failedRun, [job('macos tests (vitest 1/2)', 'failure', stored('Upload the test times')), job('macos tests', 'failure', shardsFailed)])).toMatchObject({ real: false, cause: 'storage', job: { name: 'macos tests (vitest 1/2)' } })
+    expect(classifyRun(failedRun, [job('macos tests (vitest 2/2)', 'failure', failedStep), job('macos tests', 'failure', shardsFailed)])).toMatchObject({ real: true, job: { name: 'macos tests (vitest 2/2)' } })
     // A test's own timeout is a test failure
     expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
     // #1503: the step the limit ended says where. e2e (webkit 1/5) of 2026-10-23: the job's limit hit inside `Install WebKit`

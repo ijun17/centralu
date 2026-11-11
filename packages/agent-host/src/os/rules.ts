@@ -219,6 +219,16 @@ export function isInside(root: string, candidate: string, family: OsFamily, cwd?
 }
 
 /**
+ * `path` with this user's home put in place of a leading `~` (`~`, `~/x`, and on Windows `~\x`, as its OpenSSH reads it,
+ * #849), joined so that what follows stays below the home by name (`~//etc` is `<home>/etc`); null for any other path,
+ * `~user` and POSIX's `~\x` (a name there) included. The one reading of `~` (#2160): each caller says what a null means.
+ */
+export function expandHome(path: string, home: string, family: OsFamily): string | null {
+  if (path === '~') return home
+  return (family === 'windows' ? /^~[\\/]/ : /^~\//).test(path) ? pathRules(family).join(home, path.slice(2)) : null
+}
+
+/**
  * Where a link copied from the tree `links.from` leads in its copy at `links.to`: a whole `target` inside `from` leads
  * to the same place inside `to`; any other answers null (kept as written, or left out, by the caller). The one rule for
  * the `Os`'s copy (`copy.ts`, its `links` option) and the worktree copy on Windows (dev-services `copyTreeWindows`). By

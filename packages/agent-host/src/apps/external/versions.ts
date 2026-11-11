@@ -5,7 +5,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmdirSync,
   statSync,
   unlinkSync,
@@ -14,6 +13,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { removeDataQuietly, removeDataSync } from '../../dev-services/data-folder.js'
+import { realOs } from '../../os/real.js'
 import { folderFingerprint, walkCode } from './fingerprint.js'
 import { APP_FOLDER_DEPTH } from './folder-walk.js'
 
@@ -139,7 +139,7 @@ export class AppVersions {
       const id = `${at}-${actual.slice(0, 16)}`
       const snap: Snapshot = { id, at, stamp: actual, files: count, bytes, reason, depth: APP_FOLDER_DEPTH }
       writeFileSync(join(tmp, 'meta.json'), JSON.stringify(snap, null, 2))
-      renameSync(tmp, join(appRoot, id))
+      realOs().files.renameSync(tmp, join(appRoot, id))
       this.prune(appId)
       return snap
     } catch (e) {

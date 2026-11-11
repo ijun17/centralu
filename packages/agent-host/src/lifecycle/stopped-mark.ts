@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SYSTEM_END_FILE, parseSystemEnd, systemEndText, type SystemEnd } from './system-end.js'
 import { UPDATE_RESUME_PREFIX, type UpdateResumeFolder } from './update-resume.js'
+import { realOs } from '../os/real.js'
 
 /**
  * The person's stop, kept in the data folder (#1143). A linked hub that finds no host running here starts one
@@ -17,7 +18,7 @@ export const STOPPED_MARK_FILE = 'stopped.json'
 /** Removes the mark, once this host holds the folder's lock. Never fatal: a mark left behind only waits for a Start */
 export function clearStoppedMark(dataDir: string): void {
   try {
-    rmSync(join(dataDir, STOPPED_MARK_FILE), { force: true })
+    realOs().files.rmSync(join(dataDir, STOPPED_MARK_FILE), { force: true })
   } catch {
     // a folder this host could lock but not write in says so elsewhere
   }
@@ -40,7 +41,7 @@ export function writeSystemEnd(dataDir: string): (end: SystemEnd | null) => void
   return (end) => {
     try {
       if (end) writeFileSync(join(dataDir, SYSTEM_END_FILE), systemEndText(end))
-      else rmSync(join(dataDir, SYSTEM_END_FILE), { force: true })
+      else realOs().files.rmSync(join(dataDir, SYSTEM_END_FILE), { force: true })
     } catch {
       // nothing to remember it in
     }
@@ -57,7 +58,7 @@ export function takeSystemEnd(dataDir: string): SystemEnd | null {
     return null
   }
   try {
-    rmSync(path, { force: true })
+    realOs().files.rmSync(path, { force: true })
   } catch {
     // one left behind is read again by the next start, which removes it then
   }
@@ -84,6 +85,6 @@ export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
       }
     },
     add: (text) => writeFileSync(join(dataDir, `${UPDATE_RESUME_PREFIX}${randomUUID()}.json`), text, { flag: 'wx' }),
-    remove: (name) => rmSync(join(dataDir, name), { force: true }),
+    remove: (name) => realOs().files.rmSync(join(dataDir, name), { force: true }),
   }
 }

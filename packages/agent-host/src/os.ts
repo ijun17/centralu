@@ -54,6 +54,11 @@ export function commandInterpreter(env: Record<string, string | undefined> = pro
   return rulesCommandInterpreter(env)
 }
 
+/** Windows PowerShell under `systemTool`, like taskkill: a bare name would be looked up in the working directory first */
+export function powershell(env: Record<string, string | undefined> = process.env): string {
+  return systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], env)
+}
+
 /** `cp -c` clones a folder with APFS's clonefile: macOS only. */
 export function clonesFiles(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'

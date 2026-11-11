@@ -5,10 +5,10 @@
  * also leave the sender half-way through what it was doing. The web client and the mock both fan out through here, so
  * a test on the mock sees what the app does when one subscriber breaks.
  */
-export function deliver<T>(handlers: Iterable<(v: T) => void>, value: T): void {
+export function deliver<A extends unknown[]>(handlers: Iterable<(...v: A) => void>, ...value: A): void {
   for (const h of handlers) {
     try {
-      h(value)
+      h(...value)
     } catch (e) {
       console.error('A subscriber of the host connection threw', e)
     }

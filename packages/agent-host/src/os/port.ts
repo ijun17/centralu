@@ -66,7 +66,7 @@ export type LinkKind = 'file' | 'dir' | 'junction'
 
 export type MkdirOptions = { recursive?: boolean; mode?: number }
 export type WriteOptions = { mode?: number; flag?: 'w' | 'wx' | 'a' | 'ax' }
-export type RmOptions = { recursive?: boolean; force?: boolean; maxRetries?: number; retryDelay?: number }
+export type RmOptions = { recursive?: boolean; force?: boolean }
 /**
  * `cp`, Node's options: `verbatimSymlinks` keeps a relative link's target as written (without it the copy's link is
  * made whole from the source's folder); `preserveTimestamps` gives a copied file its source's times; an existing file is

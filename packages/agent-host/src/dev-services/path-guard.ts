@@ -2,7 +2,7 @@ import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
 import { isMissing } from '../os/errors.js'
-import { isInside as rulesIsInside } from '../os/rules.js'
+import { isInside as rulesIsInside, pathKey } from '../os/rules.js'
 import { shareRoot, walkLinks, walkLinksSync, type LinkWalk } from './link-walk.js'
 
 /** This OS's path rules */
@@ -205,6 +205,11 @@ export function canonicalPath(path: string): string {
     const parent = dirname(full)
     return parent === full ? full : join(canonicalPath(parent), basename(full))
   }
+}
+
+/** A key every spelling of one path shares, a short name and a link included: `canonicalPath` by the OS's rule (`pathKey` in os/rules.ts) */
+export function canonicalKey(path: string): string {
+  return pathKey(canonicalPath(path), windows ? 'windows' : 'posix')
 }
 
 function checkedParent(rootReal: string, current: string): string {

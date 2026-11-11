@@ -1,5 +1,6 @@
-import { closeSync, existsSync, fchmodSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, fchmodSync, openSync, statSync, writeSync } from 'node:fs'
 import { traitsFor } from './os.js'
+import { realOs } from './os/real.js'
 
 /**
  * **Records the host's output to a file.**
@@ -33,7 +34,7 @@ export const MAX_LOG_BYTES = 8 * 1024 * 1024
 export function rotateIfLarge(path: string, maxBytes: number = MAX_LOG_BYTES): boolean {
   try {
     if (!existsSync(path) || statSync(path).size < maxBytes) return false
-    renameSync(path, `${path}.1`)
+    realOs().files.renameSync(path, `${path}.1`)
     return true
   } catch {
     return false
@@ -117,7 +118,7 @@ export class RollingFile {
      */
     this.closeFd()
     try {
-      renameSync(this.path, `${this.path}.1`)
+      realOs().files.renameSync(this.path, `${this.path}.1`)
     } catch {
       /* If the rollover fails, keep writing to the same file — a large file beats no log */
     }

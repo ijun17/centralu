@@ -4,7 +4,8 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { gitSummary } from './git.js'
-import { gitFetchBranch, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, pathKey, resolveForkBase } from './git-worktree.js'
+import { gitFetchBranch, gitWorktreeAdd, gitWorktreeDirty, gitWorktreeList, gitWorktreePrune, gitWorktreeRemove, resolveForkBase } from './git-worktree.js'
+import { canonicalKey } from './path-guard.js'
 
 /**
  * A worktree can only be tested against **real git.**
@@ -97,7 +98,7 @@ describe('worktrees', () => {
  * junction what the junction led to (measured, git 2.47).
  */
 describe('removing a worktree (#1655, #1560)', () => {
-  const listed = async (path: string) => (await gitWorktreeList(repo)).some((w) => pathKey(w.path) === pathKey(path))
+  const listed = async (path: string) => (await gitWorktreeList(repo)).some((w) => canonicalKey(w.path) === canonicalKey(path))
   /** A pnpm-style node_modules: one path past 260 characters, a junction inside the worktree, and one leading out of it */
   const install = (path: string, outside: string) => {
     let deep = join(path, 'node_modules', '.pnpm')

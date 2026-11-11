@@ -14,19 +14,17 @@ function folder(family: 'posix' | 'windows') {
   const dir = os.paths.path.join(os.env.home, 'data')
   os.files.mkdirSync(dir, { recursive: true })
   const path = os.paths.path.join(dir, 'file.json')
-  const calls: Record<string, number> = {}
-  /** The files with each call in `over` replaced; `calls` counts how often each was made */
+  /** The files with each call in `over` replaced */
   const wrap = (over: Over): OsFiles =>
     new Proxy(os.files, {
       get(target, key: string) {
         const value = Reflect.get(target, key, target) as unknown
         if (typeof value !== 'function') return value
         const real = value.bind(target) as Real
-        return (...a: unknown[]) => ((calls[key] = (calls[key] ?? 0) + 1), over[key] ? over[key](real, ...a) : real(...a))
+        return (...a: unknown[]) => (over[key] ? over[key](real, ...a) : real(...a))
       },
     })
-  const refuseRename = (c: string, times: number): Over => ({ renameSync: (real: Real, ...a: unknown[]) => ((calls.renameSync ?? 0) <= times ? (() => { throw refusal(c) })() : real(...a)) })
-  return { os, path, calls, wrap, refuseRename, names: () => os.files.readdirSync(dir), read: () => os.files.readFileSync(path, 'utf8') }
+  return { os, path, wrap, names: () => os.files.readdirSync(dir), read: () => os.files.readFileSync(path, 'utf8') }
 }
 
 describe.each(['posix', 'windows'] as const)('writeFileWhole on %s', (family) => {
@@ -71,12 +69,6 @@ describe.each(['posix', 'windows'] as const)('writeFileWhole on %s', (family) =>
     expect(f.names().filter((n) => n.endsWith('.tmp'))).toHaveLength(1)
   })
 
-  it('does not retry a refusal that waiting cannot change', () => {
-    const f = folder(family)
-    expect(() => writeFileWhole(f.wrap(f.refuseRename('ENOENT', 9)), f.path, 'new')).toThrow(/ENOENT/)
-    expect(f.calls.renameSync).toBe(1)
-  })
-
   it('with create, writes while there is no file, and answers false over one, leaving it and no temp file', () => {
     const f = folder(family)
     expect(writeFileWhole(f.os.files, f.path, 'first', { create: true })).toBe(true)
@@ -85,31 +77,5 @@ describe.each(['posix', 'windows'] as const)('writeFileWhole on %s', (family) =>
     expect(f.names()).toEqual(['file.json'])
     expect(() => writeFileWhole(f.wrap({ linkSync: () => { throw refusal('EPERM') } }), f.path + '2', 'x', { create: true })).toThrow(/EPERM/)
     expect(f.names()).toEqual(['file.json'])
-  })
-})
-
-describe('the rename Windows refuses for a moment', () => {
-  it.each(['EPERM', 'EBUSY', 'EACCES'])('is tried again (%s) and succeeds', (c) => {
-    const f = folder('windows')
-    f.os.files.writeFileSync(f.path, 'old')
-    writeFileWhole(f.wrap(f.refuseRename(c, 2)), f.path, 'new')
-    expect(f.calls.renameSync).toBe(3)
-    expect(f.read()).toBe('new')
-    expect(f.names()).toEqual(['file.json'])
-  })
-
-  it('gives up after its bound and throws the last refusal, leaving the old file and no temp file', () => {
-    const f = folder('windows')
-    f.os.files.writeFileSync(f.path, 'old')
-    expect(() => writeFileWhole(f.wrap(f.refuseRename('EPERM', 99)), f.path, 'new')).toThrow(/EPERM/)
-    expect(f.calls.renameSync).toBe(5)
-    expect(f.names()).toEqual(['file.json'])
-    expect(f.read()).toBe('old')
-  })
-
-  it('is not tried again on POSIX: a refusal there is a permission, and throws at once', () => {
-    const f = folder('posix')
-    expect(() => writeFileWhole(f.wrap(f.refuseRename('EPERM', 99)), f.path, 'new')).toThrow(/EPERM/)
-    expect(f.calls.renameSync).toBe(1)
   })
 })

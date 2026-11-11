@@ -15,7 +15,7 @@ import { updateEvent } from './updates.js'
  * file. The order is the order these were handled in when they were one function.
  */
 export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'dispatchEvent'> => ({
-  dispatchEvent(e) {
+  dispatchEvent(e, id) {
     /*
      * Events that do not belong to a session are handled **before the session guard** (issue #43).
      *
@@ -31,8 +31,8 @@ export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'disp
     for (const touched of liveEventWatchers) if (!touched.has(sessionId)) touched.set(sessionId, new Set())
 
     if (sessionEvent(e, sessionId, set, get)) return
-    noticeEvent(e, sessionId, set, get)
+    noticeEvent(e, sessionId, set, get, id)
     if (sessionListEvent(e, sessionId, set, get) || appViewEvent(e, sessionId, set, get)) return
-    conversationEvent(e, sessionId, set, get)
+    conversationEvent(e, sessionId, set, get, id)
   },
 })

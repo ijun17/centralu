@@ -132,7 +132,6 @@ packages/agent-host/src/dev-services/broker-pty.ts
 packages/agent-host/src/dev-services/commands.test.ts
 packages/agent-host/src/dev-services/commands.ts
 packages/agent-host/src/dev-services/data-folder.test.ts
-packages/agent-host/src/dev-services/data-folder.ts
 packages/agent-host/src/dev-services/entry-sizes.test.ts
 packages/agent-host/src/dev-services/entry-sizes.ts
 packages/agent-host/src/dev-services/file-search.test.ts
@@ -255,7 +254,6 @@ packages/agent-host/src/sessions/app-builder.test.ts
 packages/agent-host/src/sessions/app-builder.ts
 packages/agent-host/src/sessions/app-capabilities.test.ts
 packages/agent-host/src/sessions/app-host-data.test.ts
-packages/agent-host/src/sessions/app-sessions.ts
 packages/agent-host/src/sessions/app-upkeep-commands.test.ts
 packages/agent-host/src/sessions/ask-project.test.ts
 packages/agent-host/src/sessions/ask-project.ts
@@ -327,7 +325,6 @@ packages/agent-host/src/sessions/session-trash.test.ts
 packages/agent-host/src/sessions/session-trash.ts
 packages/agent-host/src/sessions/setting-files.test.ts
 packages/agent-host/src/sessions/sleep.test.ts
-packages/agent-host/src/sessions/start-agent-flow.ts
 packages/agent-host/src/sessions/start-agent.test.ts
 packages/agent-host/src/sessions/state-rests.test.ts
 packages/agent-host/src/sessions/subagent-trash.test.ts

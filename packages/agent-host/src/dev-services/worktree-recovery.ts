@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync } from 'node:fs'
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { errorMessage, isSessionId } from '@cc/protocol'
@@ -9,6 +9,7 @@ import { dataRoot } from '../data-dir.js'
 import { dataBytes, removeData } from './data-folder.js'
 import { gitFilterListings, runGit, type GitFilterListings, type GitTrust, type RunGitOptions } from './git-exec.js'
 import { assertExistingPath } from './path-guard.js'
+import { realOs } from '../os/real.js'
 
 export type WorktreeRecovery = { snapshot: string; tip: string; changedFiles: number; commits: number }
 type RepositorySnapshot = { path: string; tip: string; patch: boolean; staged: boolean; bundle: boolean; refs?: string[] }
@@ -32,10 +33,10 @@ export async function stageWorktreeRecoveryRemoval(sessionId: string): Promise<{
   const dir = worktreeRecoveryDir(sessionId)
   if (!existsSync(dir)) return { commit: async () => {}, abort: async () => {} }
   const staged = `${dir}${PURGING}${randomUUID()}`
-  await rename(dir, staged)
+  await realOs().files.promises.rename(dir, staged)
   return {
     commit: () => removeData(staged),
-    abort: () => rename(staged, dir),
+    abort: () => realOs().files.promises.rename(staged, dir),
   }
 }
 
@@ -63,11 +64,11 @@ export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string
       }
       const dir = join(root, sessionId)
       if (!existsSync(dir)) {
-        await rename(staged, dir)
+        await realOs().files.promises.rename(staged, dir)
         continue
       }
       for (const snapshot of await readdir(staged)) {
-        if (!existsSync(join(dir, snapshot))) await rename(join(staged, snapshot), join(dir, snapshot))
+        if (!existsSync(join(dir, snapshot))) await realOs().files.promises.rename(join(staged, snapshot), join(dir, snapshot))
       }
       await removeData(staged)
     } catch (e) {
@@ -104,7 +105,7 @@ async function* gitRecords(repo: string, args: string[], input?: string, filters
     }
     if (pending) yield pending
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await realOs().files.promises.rm(dir, { recursive: true, force: true })
   }
 }
 
@@ -293,7 +294,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     await git(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', `--output=${file}`, tip], { env, timeout: RECOVERY_TIMEOUT })
     await chmod(file, 0o600)
     if ((await stat(file)).size > 0) return true
-    await rm(file)
+    await realOs().files.promises.rm(file)
     return false
   }
   try {
@@ -335,13 +336,13 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
         snapshot.changedFiles += new Set([...names.split('\0'), ...stagedNames.split('\0')].filter(Boolean)).size
         entry.patch = await patchFile(repo, tip, join(dir, `${n}.patch`), env)
       } finally {
-        await rm(env.GIT_INDEX_FILE, { force: true })
+        await realOs().files.promises.rm(env.GIT_INDEX_FILE, { force: true })
       }
     }
     await writeFile(join(dir, 'snapshot.json'), JSON.stringify(snapshot), { mode: 0o600 })
     return { snapshot: snapshotId, tip: snapshot.tip, changedFiles: snapshot.changedFiles, commits: snapshot.commits }
   } catch (e) {
-    await rm(dir, { recursive: true, force: true })
+    await realOs().files.promises.rm(dir, { recursive: true, force: true })
     throw e
   }
 }
@@ -413,7 +414,7 @@ export async function restoreWorktreeRecovery(
     }
   }
   if (!existsSync(path)) {
-    await rm(join(dir, 'patches-applied'), { force: true })
+    await realOs().files.promises.rm(join(dir, 'patches-applied'), { force: true })
     /*
      * An occupied original name is left alone, whoever made it. A recovery name is taken over when it is free, or when
      * this code made it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt leaves

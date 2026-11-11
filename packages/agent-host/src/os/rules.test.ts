@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { forAll, name, recase, sameOnNtfs, type Rng } from './property.test-helpers.js'
 import {
   envValue,
+  expandHome,
   fileUrlToPath,
   findOnPath,
   foldCase,
@@ -159,6 +160,29 @@ describe('paths by the family’s rules', () => {
     expect(isInside('C:\\a\\b', 'C:\\a', 'windows')).toBe(false)
     expect(isInside('/a', '/a/..cache', 'posix')).toBe(true)
     expect(isInside('C:\\a', 'C:\\a\\..cache', 'windows')).toBe(true)
+  })
+})
+
+/*
+ * #2160: three copies read `~` three ways. Kept: `~\` is the home on Windows only (OpenSSH, #849), and what follows is
+ * joined below the home (a resolve let `~//etc` name `/etc`); `~user` is no home path anywhere
+ */
+describe('a leading ~ by the family’s rules', () => {
+  it.each([
+    ['posix', '~', '/home/me', '/home/me'],
+    ['posix', '~/a/b', '/home/me', '/home/me/a/b'],
+    ['posix', '~/', '/home/me', '/home/me'],
+    ['posix', '~//etc', '/home/me', '/home/me/etc'],
+    ['posix', '~\\a', '/home/me', null],
+    ['posix', '~me/a', '/home/me', null],
+    ['posix', 'a/~/b', '/home/me', null],
+    ['windows', '~', 'C:\\Users\\me', 'C:\\Users\\me'],
+    ['windows', '~\\a\\b', 'C:\\Users\\me', 'C:\\Users\\me\\a\\b'],
+    ['windows', '~/a/b', 'C:\\Users\\me', 'C:\\Users\\me\\a\\b'],
+    ['windows', '~\\\\server\\share', 'C:\\Users\\me', 'C:\\Users\\me\\server\\share'],
+    ['windows', '~me', 'C:\\Users\\me', null],
+  ] as const)('%s: %s', (family, path, home, expected) => {
+    expect(expandHome(path, home, family)).toBe(expected)
   })
 })
 

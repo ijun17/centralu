@@ -5,6 +5,10 @@ import { ExternalApps, type AppRef } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { useWarmProcessTable } from '../../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * Errors reach the builder — the host's half of it (M4 C-6). Failing to start, crashing, and a tool

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { endsWorkWithJob, systemTool } from '../os.js'
+import { endsWorkWithJob, powershell, systemTool } from '../os.js'
 import { settle } from '../dev-services/process-tree.test-helpers.js'
 import { fileHolding, ownProcesses } from '../process.test-helpers.js'
 import { WORK_JOB_LIMITS, joinWorkJob, workJobLine, workJobWanted } from './work-job.js'
@@ -124,7 +124,7 @@ describe.runIf(endsWorkWithJob())('the work job on Windows (#1067)', () => {
   it('the job the host holds ends its processes when closed, allows no breakaway, and has the host in it', { timeout: 60_000 * SLOW }, async () => {
     const { job } = await standIn()
     expect(job.state).toBe('joined')
-    const read = execFileSync(systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe']), ['-NoProfile', '-NonInteractive', '-Command', READ_JOB(host!.pid!, job.handle!)], {
+    const read = execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-Command', READ_JOB(host!.pid!, job.handle!)], {
       encoding: 'utf8',
       windowsHide: true,
     }).trim()

@@ -13,6 +13,10 @@ import { memoryOs } from './memory.js'
 import { forAll, name, recase, sameOnNtfs } from './property.test-helpers.js'
 import { HOST_FAMILY, realOs } from './real.js'
 import { fileUrlToPath, pathRules, pathToFileUrl, type OsFamily } from './rules.js'
+import { useWarmProcessTable } from './process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * The real OS against the in-memory one (#1599, docs/plans/os-layer.md §7.1), on whatever OS this runs (every OS the
@@ -205,6 +209,31 @@ describe('the real OS is made of the layer modules', () => {
       } finally {
         if (os.processes.alive(pid)) os.processes.signal(pid, 'SIGKILL')
       }
+    },
+    30_000 * SLOW,
+  )
+
+  /*
+   * #2161: a folder Windows holds for a moment (here the working folder of a process that is ending) is renamed once it is
+   * let go, by the policy in os/held.ts, where Node's own rename refuses it at once with EBUSY
+   */
+  it.runIf(HOST_FAMILY === 'windows')(
+    'windows: a rename of a folder held for a moment is tried again until it is let go',
+    async () => {
+      const root = realpathSync.native(mkdtempSync(os.paths.path.join(tmpdir(), 'cc-os-held-')))
+      roots.push(root)
+      const dir = os.paths.path.join(root, 'held')
+      os.files.mkdirSync(dir)
+      const holder = os.processes.start(process.execPath, ['-e', "process.stdout.write('in'); process.stdin.on('end', () => process.exit(0)).resume()"], {
+        cwd: dir,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      })
+      await new Promise((resolve) => holder.stdout?.once('data', resolve))
+      const moved = os.files.promises.rename(dir, `${dir}-moved`)
+      holder.stdin?.end()
+      await moved
+      expect(os.files.existsSync(`${dir}-moved`)).toBe(true)
+      await holder.exited
     },
     30_000 * SLOW,
   )

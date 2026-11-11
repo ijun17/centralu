@@ -42,6 +42,14 @@ export class EventCursor {
     return true
   }
 
+  /**
+   * What every client of this host lifetime calls the event numbered `seq`, the same in every window (#2168): its number
+   * within the lifetime. None from a host that names no lifetime, whose numbers start again when it does
+   */
+  eventId(seq: number): string | undefined {
+    return this.epoch === undefined ? undefined : `${this.epoch}:${seq}`
+  }
+
   /** Another host (a new endpoint): its numbers mean nothing to this cursor, and the next greeting is a first contact */
   forget(): void {
     this.seq = 0

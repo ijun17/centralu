@@ -1,4 +1,3 @@
-import { rmSync } from 'node:fs'
 import { assistantHome } from './assistant-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
@@ -34,6 +33,7 @@ import type { AppMessageSource, AppMessageVia } from './app-messages.js'
 import { parseJson } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 import { rpcError } from '../rpc-error.js'
+import { realOs } from '../os/real.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
@@ -157,7 +157,7 @@ export class AppSessions {
     try {
       projectId = (await this.host.registerMadeFolder(target.path, { trusted: opts.enable })).id
     } catch (e) {
-      rmSync(target.path, { recursive: true, force: true })
+      realOs().files.rmSync(target.path, { recursive: true, force: true })
       throw e
     }
     rt.refresh()
@@ -178,7 +178,7 @@ export class AppSessions {
     try {
       projectId = (await this.host.registerMadeFolder(target.path)).id
     } catch (e) {
-      rmSync(target.path, { recursive: true, force: true })
+      realOs().files.rmSync(target.path, { recursive: true, force: true })
       throw e
     }
     rt.refresh()

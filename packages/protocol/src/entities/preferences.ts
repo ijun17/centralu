@@ -364,6 +364,11 @@ export function autoCompactOf(prefs: Pick<UiPreferences, 'autoCompact'>): AutoCo
   return prefs.autoCompact ?? DEFAULT_AUTO_COMPACT
 }
 
+/** The notification switches in force (#2168): the saved ones, else the defaults (a host from before them has none) */
+export function notifyPolicyOf(prefs: Pick<UiPreferences, 'notifyPolicy'>): NotifyPolicy {
+  return prefs.notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+}
+
 /** The agent depth in force: the saved one, else the default */
 export function agentDepthOf(prefs: Pick<UiPreferences, 'agentDepth'>): number {
   return prefs.agentDepth ?? DEFAULT_AGENT_DEPTH

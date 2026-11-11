@@ -4,7 +4,6 @@ import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
-import { rm } from 'node:fs/promises'
 import { isAssistantAgentFolder } from './assistant-home.js'
 import { plainQuoted } from './tool-answers.js'
 import { existsSync, statSync } from 'node:fs'
@@ -40,6 +39,7 @@ import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { CardRests } from './card-rest.js'
+import { realOs } from '../os/real.js'
 
 /**
  * What the session archive reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -692,7 +692,7 @@ export class SessionTrash {
       await clearAttachments(sessionId).catch(() => {})
       // An Assistant's child worked in a folder of its own (#853, #994 review), which goes with it
       if (cwd && isAssistantAgentFolder(cwd)) {
-        await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[archive] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
+        await realOs().files.promises.rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[archive] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
       }
       /*
        * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters

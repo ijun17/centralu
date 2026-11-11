@@ -424,8 +424,9 @@ test('Settings: turning off a notification policy is persisted (E-5)', async ({ 
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
 
   await page.getByTestId('notify-done').uncheck()
-  const snap = await page.evaluate(() => (window as any).__mock.workspaceSnapshot)
-  expect(snap?.notifyPolicy?.done).toBe(false)
+  // The host's preferences keep it (#1306), and nothing else does (#2168)
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.uiPrefs.notifyPolicy?.done)).toBe(false)
+  expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.notifyPolicy)).toBeUndefined()
 
   // "Error" and "Once when every session finishes" are gone (owner, 2026-10-20): the page has no switch for either
   await expect(page.getByTestId('notify-error')).toHaveCount(0)

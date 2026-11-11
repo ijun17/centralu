@@ -10,6 +10,7 @@ import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
 import { MAIL_HOST, addressOf, wireHostMail } from './host-mail.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
+import { HOST_FAMILY } from '../os/real.js'
 import { pausedReportKey } from './child-ownership.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager } from './manager.js'
@@ -663,7 +664,8 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(f.ids()).toBeNull()
   })
 
-  it('a list a virus scanner holds for a moment when the next host starts is read again, and its turn is continued (#1626 review)', async () => {
+  // A hold is Windows' (a scanner's FileShare.None); elsewhere the list is not read again (update-resume.test.ts)
+  it.runIf(HOST_FAMILY === 'windows')('a list a virus scanner holds for a moment when the next host starts is read again, and its turn is continued (#1626 review)', async () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const f = folder()
     const a = host({ updateResume: f })

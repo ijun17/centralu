@@ -52,6 +52,7 @@ import {
 } from './rules.js'
 import { abortReason, asOsError, errnoCode } from './errors.js'
 import { copyTreeAsync, copyTreeSync } from './copy.js'
+import { retryHeld, retryHeldSync, type HeldRetry } from './held.js'
 import { runChild } from './run.js'
 
 /**
@@ -65,6 +66,16 @@ import { runChild } from './run.js'
 export const HOST_FAMILY: OsFamily = familyOf(HOST_PLATFORM)
 
 const traits = traitsFor()
+
+/** A `rename` or `rm` Windows refuses while another process holds the file for a moment is tried again (os/held.ts, #2161) */
+const HOLDS = HOST_FAMILY === 'windows'
+/**
+ * `op`, tried again while Windows refuses it as held, and once elsewhere: the one place that says on which OS a hold is
+ * waited out, for the layer's own calls and for a caller's read of a file a scanner may hold (update-resume.ts).
+ * `wait` and `retried` as `retryHeldSync`'s
+ */
+export const held = <T>(op: () => T, wait?: (ms: number) => void, retried?: HeldRetry): T => (HOLDS ? retryHeldSync(op, wait, retried) : op())
+const heldAsync = <T>(op: () => Promise<T>): Promise<T> => (HOLDS ? retryHeld(op) : op())
 
 const NS_PER_MS = 1_000_000n
 
@@ -153,12 +164,12 @@ const promises: OsFilesAsync = {
   appendFile: (p, data, o) => fsp.appendFile(p, data, o),
   mkdir: async (p, o) => void (await fsp.mkdir(p, o)),
   mkdtemp: (prefix) => fsp.mkdtemp(prefix),
-  rename: (a, b) => fsp.rename(a, b),
+  rename: (a, b) => heldAsync(() => fsp.rename(a, b)),
   copyFile: (a, b, mode) => fsp.copyFile(a, b, mode),
   cp: (a, b, o?: CopyTreeOptions) => copyTreeAsync(promises, a, b, o, HOST_FAMILY, pathsOf()),
   unlink: (p) => fsp.unlink(p),
   rmdir: (p) => fsp.rmdir(p),
-  rm: (p, o) => fsp.rm(p, o),
+  rm: (p, o) => heldAsync(() => fsp.rm(p, o)),
   symlink: (target, p, kind?: LinkKind) => fsp.symlink(target, p, kind),
   readlink: (p) => fsp.readlink(p),
   realpath: (p) => fsp.realpath(p),
@@ -205,12 +216,12 @@ const files: OsFiles = {
   appendFileSync: (p, data, o) => fs.appendFileSync(p, data, o),
   mkdirSync: (p, o) => void fs.mkdirSync(p, o),
   mkdtempSync: (prefix) => fs.mkdtempSync(prefix),
-  renameSync: (a, b) => fs.renameSync(a, b),
+  renameSync: (a, b) => held(() => fs.renameSync(a, b)),
   copyFileSync: (a, b, mode) => fs.copyFileSync(a, b, mode),
   cpSync: (a, b, o) => copyTreeSync(files, a, b, o, HOST_FAMILY, pathsOf()),
   unlinkSync: (p) => fs.unlinkSync(p),
   rmdirSync: (p) => fs.rmdirSync(p),
-  rmSync: (p, o) => fs.rmSync(p, o),
+  rmSync: (p, o) => held(() => fs.rmSync(p, o)),
   symlinkSync: (target, p, kind) => fs.symlinkSync(target, p, kind),
   readlinkSync: (p) => fs.readlinkSync(p),
   realpathSync: (p) => fs.realpathSync(p),

@@ -177,7 +177,7 @@ Today it is a handful of modules, each owning one subject, that `local/platform-
 | `agent-host/src/os.ts` | the host's questions named for what differs: `hasPs`, `clonesFiles`, `traitsFor`, `pathsOf`, `installedCopyPath`, `systemTool` |
 | `agent-host/src/os/real.ts` | the `Os` of the machine itself (§7.1), built from the modules in this table |
 | `agent-host/src/env-path.ts`, `tool-launch.ts` | finding a tool on PATH (PATHEXT, npm shims) and starting it (`.cmd` shims) |
-| `agent-host/src/os/kill-tree.ts` | ending a process tree: groups and signals, or taskkill and parent links |
+| `agent-host/src/os/kill-tree.ts`, `os/process-table.ts` | ending a process tree: groups and signals, or taskkill and parent links from the Windows process table, read by one PowerShell kept warm (#2178) |
 | `agent-host/src/dev-services/terminal.ts` | the terminal's and the Run button's shell |
 | `agent-host/src/adapters/claude/exe-link.ts` | how Claude Code is started on Windows |
 | `agent-host/src/dev-services/project-folder.ts` | a new project's folder and each OS's folder-name rules |
@@ -201,10 +201,10 @@ is where the Windows-only bugs have come from (#1559: a link that is a junction,
 
 | Subject | What differs | What the layer answers |
 |---|---|---|
-| Path form and case | separators; drive letters and UNC; `C:\a` and `c:\A` the same folder on Windows and macOS (by default), not on Linux; 8.3 short names; `realpath` through junctions | one path type the host passes around; `samePath(a, b)`, `isInside(root, p)` under the OS's case rule; the wire form stays `protocol/paths.ts` |
+| Path form and case | separators; drive letters and UNC; `C:\a` and `c:\A` the same folder on Windows and macOS (by default), not on Linux; 8.3 short names; `realpath` through junctions | one path type the host passes around; `samePath(a, b)`, `isInside(root, p)`, `pathKey(p)` under the OS's case rule and `expandHome(p, home)` for a leading `~` (`~\` on Windows only), each written once in `os/rules.ts` (`guard/one-path-rule` refuses a second `pathKey`/`samePath`/`expandHome` export and a hand-made `~` test, #2160); `canonicalKey` (dev-services/path-guard.ts) is `pathKey` of the real spelling; the wire form stays `protocol/paths.ts` |
 | Line endings | git's `autocrlf` checks text out with CRLF on Windows; tools write either | `readText` returns what is on disk; `lines()` splits on both; writers say which they write |
 | Links and junctions | a directory symlink needs a privilege on Windows, so a junction stands in; `lstat` and `readlink` see them differently; deleting a junction must not follow it | `link(target, at)` makes the kind the OS allows and says which; `isLink`, `removeLink` that never recurse into the target |
-| Locks | Windows refuses to delete or rename an open or running file (`EBUSY`, `EPERM`), and a virus scanner holds new files for a moment | `rename`, `remove` with the retries Windows needs; `traits.locksRunningPrograms` (exists today) |
+| Locks | Windows refuses to delete or rename an open or running file (`EBUSY`, `EPERM`), and a virus scanner holds new files for a moment | `files.rename`, `files.rm` (sync and promise) with the retries Windows needs, one policy in `os/held.ts` (#2161): the real `Os` tries a refusal as held (`EBUSY`, `EPERM`, `EACCES`, `ENOTEMPTY`) again after 25 ms, doubling to 800 ms (1.6 s in all), on Windows only; a read that may meet a scanner (the update-resume lists) asks `retryHeldSync` itself. `guard/held-files` refuses Node's own `rm`/`rename` in the host outside `os/real.ts`; `traits.locksRunningPrograms` (exists today) |
 | Quoting and shells | `cmd.exe` rules and `.cmd` shims vs POSIX `sh`; PowerShell's own | a command as an argument list; the layer quotes for the shell it starts, the caller never builds a command string |
 | Process trees and signals | process groups and signals on POSIX; no groups and no SIGTERM on Windows (taskkill, Job Objects) | `spawn` that contains the child, `stop(child, grace)`, `killTree`; exit reasons in one shape |
 | Environment | `PATH` vs `Path` (case-insensitive keys on Windows), `PATHEXT`, `HOME` vs `USERPROFILE`, temp folders | `env` read case-correctly; `homeDir`, `tempDir`, `findTool` |
@@ -288,7 +288,7 @@ Not seen: what §5 lists as not seen by the rule, and a process started by path 
 
 ### 6.2 Where it applies
 
-`windows tests (vitest N/2)` runs `tsx tooling/os-tests.ts --shard N/2 --out <list>` and then vitest with
+`windows tests (vitest N/3)` (`N/2` until #2167) runs `tsx tooling/os-tests.ts --shard N/3 --out <list>` and then vitest with
 `CC_TEST_FILES=<list>` (`vitest.config.ts` runs only the listed files, each in its project, and refuses a line that
 is not an existing repository path). Both tiers, every pull request and every full run, `workflow_dispatch`
 included: the list does not depend on what changed. Linux (`verify`) runs every test. The remote-Node job and e2e
@@ -309,9 +309,21 @@ before starting at all, so the quick tier's wait would grow by about 40 s to sav
 ### 6.4 Shards balanced by measured time
 
 Vitest's `--shard` splits by file count. `tooling/os-tests.ts --shard i/n` splits the selected tests by time instead:
-longest first, each to the lighter shard (`balance`), ties by path, so both shards compute the same split. The times
+longest first, each to the lightest shard (`balance`), ties by path, so every shard computes the same split. The times
 are `tooling/test-durations.json`, each test file's seconds on the Windows runner. A file it does not name (a new
-test) weighs the median of those it does, at least one second. Today: 256 and 174 files, 2,181 and 2,180 seconds.
+test) weighs the median of those it does, at least one second. Today (three shards since #2167): 222 files in the first,
+1,345 to 1,346 seconds each (two shards had been 2,016 and 2,020; their jobs took 14.4 and 16.5 minutes, median of the 10
+merge batches to 2026-11-10).
+
+**The macOS shards** (#2167) split by vitest's own `--shard`, by count, the full set (`tsx tooling/os-tests.ts --macos`)
+and the quick tier's alike. As one job the macOS tests were the last job of 7 of those 10 batches (19.1 minutes median,
+23.0 at most of 25). A split by time would need the Mac's own times (a Mac starts processes faster, and the tooling tests
+that make temp folders run there only), so a second file and its refresh. Measured on the unsharded job's report of run
+42882362587 (2,115 s of file time), vitest's count split puts 1,085 and 1,030 s in its two shards against 1,058
+and 1,057 by time: the longer shard 2.6% longer. Its order is a hash of each path, so files added or renamed reshuffle it;
+over 10,000 random orders of the same files the longer shard is 10% over half at the median, 24% at p90 and 52% at
+worst, about 15 minutes of a 25 minute limit (each shard ran 9.3 to 9.6 minutes split by time). With three shards the
+count split is 18% over, so a third shard would want the times again.
 
 **Refreshing the times.** Every Windows shard writes vitest's JSON report next to its usual output and keeps it as the
 artifact `windows-test-times-<shard>` (30 days); so do the remote Node's two Windows shards (`host tests, remote Node`, which

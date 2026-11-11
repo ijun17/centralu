@@ -1,7 +1,7 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { closeSync, createReadStream, createWriteStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, watch, type FSWatcher } from 'node:fs'
-import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, stat, statfs, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
@@ -15,6 +15,7 @@ import { HOST_PLATFORM, pathsOf, type Platform } from '../../os.js'
 import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
 import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from './release.js'
+import { realOs } from '../../os/real.js'
 
 /**
  * The OS layer's part for Google's Antigravity agent (tooling/os-layer.js; docs/plans/antigravity-adapter.md §3, §4): a
@@ -228,17 +229,18 @@ export async function installAgy(
     cancelled(signal)
     const pkg = join(work, 'pkg')
     await unpack(zip, archive, pkg, signal, opts.platform ?? HOST_PLATFORM)
-    await rm(zip, { force: true })
+    await realOs().files.promises.rm(zip, { force: true })
     await writeFile(join(pkg, INSTALL_MARKER), `${JSON.stringify({ version, sha256: archive.sha256, url: archive.url })}\n`)
     cancelled(signal)
     // A folder there without a whole install (another version's sha, a damaged copy) is replaced; a whole one is kept
     if (isInstalled(home, archive)) return
-    await rm(home.versionDir, { recursive: true, force: true })
-    await renameHeld(pkg, home.versionDir)
+    await realOs().files.promises.rm(home.versionDir, { recursive: true, force: true })
+    // A scanner holding the program just written is waited for by the Os (os/held.ts)
+    await realOs().files.promises.rename(pkg, home.versionDir)
   } catch (err) {
     throw asFailure(err, signal)
   } finally {
-    await rm(work, { recursive: true, force: true }).catch(() => {})
+    await realOs().files.promises.rm(work, { recursive: true, force: true }).catch(() => {})
   }
   await removeOtherVersions(home)
 }
@@ -374,7 +376,7 @@ export async function removeLeftovers(home: AgyHome): Promise<void> {
 async function removeStale(root: string, prefix: string): Promise<void> {
   const names = await readdir(root).catch((): string[] => [])
   const stale = names.filter((n) => n.startsWith(prefix) && ownerGone(n.slice(prefix.length)))
-  await Promise.all(stale.map((n) => rm(join(root, n), { recursive: true, force: true }).catch(() => {})))
+  await Promise.all(stale.map((n) => realOs().files.promises.rm(join(root, n), { recursive: true, force: true }).catch(() => {})))
 }
 
 let ownStart: string | undefined
@@ -426,24 +428,7 @@ async function removeOtherVersions(home: AgyHome): Promise<void> {
     if (!/^\d+\.\d+\.\d+/.test(n)) continue
     const dir = join(home.root, n)
     if (dir === home.versionDir) continue
-    await rm(dir, { recursive: true, force: true }).catch(() => {})
-  }
-}
-
-/**
- * A rename Windows may refuse for a moment: a virus scanner holds a program just written (`EBUSY`, `EPERM`). Tried a few
- * times, a moment apart; anything else, or the last refusal, is the install's failure
- */
-async function renameHeld(from: string, to: string): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(from, to)
-      return
-    } catch (err) {
-      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
-      if (attempt >= 5 || (code !== 'EBUSY' && code !== 'EPERM')) throw err
-      await new Promise((resolve) => setTimeout(resolve, 200 * attempt))
-    }
+    await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
   }
 }
 
@@ -559,7 +544,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   let dir = resolve(await mkdtemp(join(home.root, `.sign-in-${ownerTag()}-`)))
   const dataBad = unusableIn(dir, sep)
   if (dataBad) {
-    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     const spare = resolve(places.spare ?? spareFolder(platform))
     const data = `Centralu's data folder is at ${home.root}, and Antigravity cannot be given a path with ${dataBad} in it`
     const move = 'Move the data folder to a path without them.'
@@ -594,7 +579,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     browser = usableBrowser(helper, ':') ? helper : ''
   }
   if (browser === '') {
-    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${unusableIn(dir, sep)}).`)
   }
   let watcher: FSWatcher | null = null
@@ -615,7 +600,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
           const path = join(dir, name)
           void readFile(path, 'utf8').then(
             async (text) => {
-              await rm(path, { force: true }).catch(() => {})
+              await realOs().files.promises.rm(path, { force: true }).catch(() => {})
               found(text.trim())
             },
             () => {},
@@ -632,7 +617,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     },
     async remove() {
       watcher?.close()
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     },
   }
 }

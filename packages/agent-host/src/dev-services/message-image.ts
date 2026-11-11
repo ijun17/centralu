@@ -1,5 +1,6 @@
 import { bytesText } from '../bytes-text.js'
 import { errnoCode } from '../os/errors.js'
+import { expandHome } from '../os/rules.js'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -112,9 +113,7 @@ export function resolveWrittenPath(
     } catch {
       return null
     }
-  } else if (written === '~') abs = home
-  else if (written.startsWith('~/') || (windows && written.startsWith('~\\'))) abs = p.resolve(home, written.slice(2))
-  else abs = p.resolve(cwd, written)
+  } else abs = expandHome(written, home, windows ? 'windows' : 'posix') ?? p.resolve(cwd, written)
   if (windows && abs.startsWith('\\\\')) return null
   return abs
 }

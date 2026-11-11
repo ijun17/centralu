@@ -30,7 +30,6 @@ import {
   type Worktree,
   gitWorktreeRemove,
   gitWorktreePrune,
-  pathKey,
   gitWorktreeList,
   gitBranchAhead,
   gitUnpublishedCommits,
@@ -45,7 +44,7 @@ import {
   prepareCopyTarget,
   resolveExisting,
 } from '../dev-services/fs.js'
-import { canonicalPath, isInside, isMissingPathError } from '../dev-services/path-guard.js'
+import { canonicalKey, canonicalPath, isInside, isMissingPathError } from '../dev-services/path-guard.js'
 import { prepareWorktreeDependencies } from '../dev-services/worktree-dependencies.js'
 import { RestartPolicy } from './restart-policy.js'
 import { rpcError } from '../rpc-error.js'
@@ -294,7 +293,7 @@ export class WorktreeSessions {
     const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
     if (!holder) return
     const where = `${branch} is checked out at ${holder.path}`
-    const id = pathKey(dirname(holder.path)) === pathKey(join(this.host.worktreeRoot, projectId)) ? basename(holder.path) : null
+    const id = canonicalKey(dirname(holder.path)) === canonicalKey(join(this.host.worktreeRoot, projectId)) ? basename(holder.path) : null
     const live = id ? this.host.meta.get(id) : undefined
     if (live) throw rpcError(`${where}, the worktree of the session "${live.name}". Delete that session first, or start on another branch.`)
     const archived = id && isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
@@ -669,8 +668,8 @@ export class WorktreeSessions {
     const setAside = { changedFiles: 0, commits: 0 }
     const gone = `The worktree folder was already gone (${path})`
     await this.host.trashSession(target.id, false, false, undefined, true)
-    const key = pathKey(path)
-    const listedNow = async () => (await gitWorktreeList(cwd)).some((w) => pathKey(w.path) === key)
+    const key = canonicalKey(path)
+    const listedNow = async () => (await gitWorktreeList(cwd)).some((w) => canonicalKey(w.path) === key)
     const had = await listedNow().catch(() => false)
     let entry: string
     try {

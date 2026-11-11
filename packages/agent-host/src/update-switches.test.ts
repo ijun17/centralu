@@ -54,7 +54,7 @@ describe('the stored update switches', () => {
 
 describe('which hosts install by default', () => {
   const app = '/Applications/Centralu.app'
-  const facts = (over: Partial<InstallFacts> = {}): InstallFacts => ({ build: '1a2b3c4', startedBy: 'app', bundlePath: null, installedCopy: app, env: {}, ...over })
+  const facts = (over: Partial<InstallFacts> = {}): InstallFacts => ({ build: '1a2b3c4', startedBy: 'app', bundlePath: null, installedCopy: app, env: {}, family: 'posix', ...over })
 
   it("the person's desktop app: a bundled build the window started, or the keeper runs from the installed app", () => {
     expect(installsByDefault(facts({ startedBy: 'app' }))).toBe(true)
@@ -93,12 +93,13 @@ describe('which host brings the installed desktop copy to its own version (#1736
       hubInstall: 'C:\\Users\\u\\.centralu\\remote',
       env: {},
       swapMayPrompt: false,
+      family: 'windows',
       ...f,
     })
 
   it('a centralu serve host a linked hub installed, on Windows and Linux', () => {
     expect(follow()).toBe(true)
-    expect(follow({ entry: '/home/u/.centralu/remote/versions/0.1.0-beta.46/host/main.mjs', hubInstall: '/home/u/.centralu/remote/' })).toBe(true)
+    expect(follow({ entry: '/home/u/.centralu/remote/versions/0.1.0-beta.46/host/main.mjs', hubInstall: '/home/u/.centralu/remote/', family: 'posix' })).toBe(true)
   })
 
   it('never a host the window, a keeper or nothing known started, nor a serve from the npm package', () => {
@@ -111,7 +112,15 @@ describe('which host brings the installed desktop copy to its own version (#1736
   it('never on macOS, where swapping /Applications from the background may raise the App Management prompt', () => {
     expect(copySwapMayPrompt('darwin')).toBe(true)
     expect(copySwapMayPrompt('win32') || copySwapMayPrompt('linux')).toBe(false)
-    expect(follow({ entry: '/Users/u/.centralu/remote/versions/0.1.0-beta.46/host/main.mjs', hubInstall: '/Users/u/.centralu/remote', swapMayPrompt: true })).toBe(false)
+    expect(follow({ entry: '/Users/u/.centralu/remote/versions/0.1.0-beta.46/host/main.mjs', hubInstall: '/Users/u/.centralu/remote', swapMayPrompt: true, family: 'posix' })).toBe(false)
+  })
+
+  // #2160: by the OS's rule (os/rules.ts), not a fold of its own: case counts on POSIX only, and the folder itself is not inside
+  it('compares paths by the family’s rule', () => {
+    expect(follow({ entry: 'c:\\USERS\\u\\.centralu\\Remote\\versions\\x\\main.mjs' })).toBe(true)
+    expect(follow({ entry: '/home/u/.centralu/Remote/versions/x/main.mjs', hubInstall: '/home/u/.centralu/remote', family: 'posix' })).toBe(false)
+    expect(follow({ entry: 'C:\\Users\\u\\.centralu\\remote' })).toBe(false)
+    expect(installsByDefault({ build: '1a2b3c4', startedBy: 'keeper', bundlePath: 'C:\\Program Files\\centralu\\', installedCopy: 'c:\\program files\\Centralu', env: {}, family: 'windows' })).toBe(true)
   })
 
   it('never a host from source or one under CI', () => {

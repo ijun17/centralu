@@ -23,13 +23,14 @@ describe('readNotifyPolicy: the policy a snapshot from another build holds (#384
 const s = (state: SessionState, name = 'session') => ({ id: 's1', name, state })
 const bg = { appFocused: false }
 
-describe('immediate notifications (approvals and errors only)', () => {
+describe('immediate notifications (approvals only)', () => {
   it('notifies on a transition to waiting for approval', () => {
     expect(notificationFor(s('waiting_approval'), 'working', bg)).toMatchObject({ kind: 'approval' })
   })
 
-  it('notifies on a transition to error', () => {
-    expect(notificationFor(s('error'), 'working', bg)).toMatchObject({ kind: 'error' })
+  // The error switch is kept in the record and followed by nothing since 2026-10-20 (#2168)
+  it('does not notify on a transition to error, whatever its switch says', () => {
+    expect(notificationFor(s('error'), 'working', { ...bg, policy: { ...DEFAULT_NOTIFY_POLICY, error: true } })).toBeNull()
   })
 
   it('does not notify for awaiting response (badge only — it is not urgent)', () => {

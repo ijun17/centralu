@@ -8,6 +8,10 @@ import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 import { ownProcesses } from '../../process.test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { useWarmProcessTable } from '../../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * An app process's lifecycle (M4 A-3) — exercised **with a real child process.**

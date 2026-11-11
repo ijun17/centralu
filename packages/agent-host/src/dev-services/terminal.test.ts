@@ -9,6 +9,10 @@ import { TerminalService, commandShell, interactiveShell, shellPath, type PtyMod
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
 import { ownProcesses, pidIn } from '../process.test-helpers.js'
+import { useWarmProcessTable } from '../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**

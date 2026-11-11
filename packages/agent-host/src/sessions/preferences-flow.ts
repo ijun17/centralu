@@ -1,4 +1,4 @@
-import { DEFAULT_NOTIFY_POLICY, ASSISTANT_CHANGE, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
+import { ASSISTANT_CHANGE, notifyPolicyOf, errorMessage, SessionId, THEME_TOKENS, ThemeFileContent, formatThemeFile, ThemeId, type ThemeFileEntry, autoCompactOf, nudgeShares, listedModel, type AutoCompact, type ModelOption, TEXT_SIZES, THEME_PRESETS, UiPreferencesPatch, nearestTextSize, type UiPreferences, type UpdateStatus } from '@cc/protocol'
 import { themeSlug } from '../themes.js'
 import type { PreferenceChanges, PreferencesRequest } from '../adapters/contract.js'
 import type { HostCards } from './host-cards.js'
@@ -94,7 +94,7 @@ export class PreferencesFlow {
       const c = choices.find((x) => x.id === id)
       return c ? `${plainQuoted(c.name)} [${c.id}]` : `[${plainQuoted(id)}] (no such theme; the stylesheet's own is shown)`
     }
-    const notify = p.notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+    const notify = notifyPolicyOf(p)
     const lines = [
       'Appearance',
       `- Theme mode: ${p.themeMode}; dark theme ${named(p.themeDark)}; light theme ${named(p.themeLight)}`,
@@ -233,7 +233,7 @@ export class PreferencesFlow {
     if (switches.approval === false || switches.sound === false) {
       let current: Partial<Record<'approval' | 'sound', boolean>> = {}
       try {
-        current = (await callWindow(rpc, 'prefs.get', {})).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+        current = notifyPolicyOf(await callWindow(rpc, 'prefs.get', {}))
       } catch {
         /* unread: treated as on, so it asks */
       }
@@ -266,7 +266,7 @@ export class PreferencesFlow {
     }
     if (Object.keys(switches).length) {
       await attempt('Notifications', async () => {
-        const now = (await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } })).notifyPolicy ?? DEFAULT_NOTIFY_POLICY
+        const now = notifyPolicyOf(await callWindow(rpc, 'prefs.set', { patch: { notifyPolicy: switches } }))
         return `Now: notifications: approval ${onOff(now.approval)}, a session finishes out of sight ${onOff(now.done)}, even while focused ${onOff(now.whenFocused)}, sound ${onOff(now.sound)}.`
       })
     }

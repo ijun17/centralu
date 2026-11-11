@@ -1,5 +1,5 @@
 import { tmpdir } from 'node:os'
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AdapterCapabilities, NormalizedEvent, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
@@ -23,6 +23,7 @@ import { CLAUDE_SURFACE } from './surface.js'
 import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { STOP_CONFIRM_MS } from '../core/ledger.js'
 import { execText } from '../../os/exec.js'
+import { realOs } from '../../os/real.js'
 
 export { personsDefaultMode }
 
@@ -123,7 +124,7 @@ async function sweepProbeDirs(now = Date.now()): Promise<void> {
       if (!name.startsWith(PROBE_DIR_PREFIX)) continue
       const path = join(root, name)
       const old = await stat(path).then((s) => now - s.mtimeMs > PROBE_DIR_STALE_MS, () => false)
-      if (old) await rm(path, { recursive: true, force: true }).catch(() => {})
+      if (old) await realOs().files.promises.rm(path, { recursive: true, force: true }).catch(() => {})
     }
   } catch {
     // The temp folder cannot be listed: nothing to sweep
@@ -405,11 +406,11 @@ export class ClaudeAdapter implements AgentAdapter {
       /*
        * On Windows the process still holds its folder until it has left (the SDK waits 2 s, then 5 s, before it kills
        * one), and removing the folder then fails. So the folder goes once the process has ended, or after a bound with
-       * retries, and a leftover is swept by the next run.
+       * the Os's retries (os/held.ts), and a leftover is swept by the next run.
        */
       if (probe) await raceTimeout(probe.ended, PROBE_EXIT_WAIT_MS, undefined)
       ClaudeAdapter.probeIds.delete(sessionId)
-      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }).catch(() => {})
+      await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     }
   }
 

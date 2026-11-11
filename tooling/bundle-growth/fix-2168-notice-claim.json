@@ -1,0 +1,4 @@
+{
+  "bytes": 1000,
+  "reason": "One OS notification per event across windows (#2168): notice-claim.ts, an IndexedDB add that one window of the machine wins per event, and its keys for mail, approvals and finished turns. Measured +802 B (1,926,413 B against main's 1,925,611 B at b8305f0b), all in the main chunk; no new dependency, and the store lost the top-level notifyPolicy and the dead error alert in the same change. Main sat under 1 KB below the ceiling, so any growth needed a declaration."
+}

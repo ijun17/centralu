@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
 import { VERSION_WORD } from './registry.js'
+import { powershell } from '../os.js'
 import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.mjs'
@@ -161,12 +162,11 @@ describe('the install scripts per shell (plan §10.2)', () => {
       const script = join(base, 'step.ps1')
       writeFileSync(script, `\ufeff${decode(nodeCommand({ shell: 'powershell' }, { version: NODE_V, url, sha256: sha256(zip) }))}`)
       const data = join(base, name)
-      const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
       const gate = join(base, 'stand-in-holds-node.exe')
-      const holder = o.holdMs === undefined ? null : holdNodeExe(powershell, base, join(data, 'remote'), gate, o.holdMs)
+      const holder = o.holdMs === undefined ? null : holdNodeExe(base, join(data, 'remote'), gate, o.holdMs)
       if (holder) await holder.watching
       const env = { ...process.env, CC_DATA_DIR: data, ...(holder ? { CENTRALU_TEST_NODE_PLACE_GATE: gate } : {}) }
-      const run = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env, windowsHide: true })
+      const run = spawn(powershell(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env, windowsHide: true })
       let out = ''
       run.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')))
       run.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
@@ -183,7 +183,7 @@ describe('the install scripts per shell (plan §10.2)', () => {
    * Opens `<remote>\.partial-node-*\keep\node.exe` the moment it appears, sharing read only, for `ms`. Once it holds the
    * file it creates `gate`, which the step waits for before its rename.
    */
-  function holdNodeExe(powershell: string, base: string, remote: string, gate: string, ms: number) {
+  function holdNodeExe(base: string, remote: string, gate: string, ms: number) {
     const script = join(base, 'hold.ps1')
     writeFileSync(
       script,
@@ -205,7 +205,7 @@ while ((Get-Date) -lt $end) {
 exit 1
 `,
     )
-    const p = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_HOLD_REMOTE: remote, CC_HOLD_GATE: gate }, windowsHide: true })
+    const p = spawn(powershell(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_HOLD_REMOTE: remote, CC_HOLD_GATE: gate }, windowsHide: true })
     let said = ''
     const watching = new Promise<void>((ok) => p.stdout.on('data', (d: Buffer) => ((said += d.toString('utf8')), said.includes('watching') && ok())))
     const done = new Promise<boolean>((ok) => p.once('close', () => ok(said.includes('held'))))

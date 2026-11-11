@@ -13,14 +13,14 @@ import { writeFileSync } from 'node:fs'
 import { spawnGrouped } from '../dev-services/grouped-child.js'
 import { spawnPty, type PtyModule } from '../dev-services/pty-slot.js'
 import { PtyBroker, brokerPtyModule } from '../dev-services/broker-pty.js'
-import { systemTool } from '../os.js'
+import { powershell as powershellPath } from '../os.js'
 import { joinWorkJob } from './work-job.js'
 
 const [out, mode] = process.argv.slice(2) as [string, string]
 const broker = PtyBroker.start()
 const job = mode === 'join' ? await joinWorkJob() : { state: 'not joined' }
 
-const powershell = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
+const powershell = powershellPath()
 const sleeper = join(out, 'sleeper.cjs')
 writeFileSync(sleeper, "require('node:fs').writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 120000)\n")
 /** A PowerShell script that starts a sleeper through Start-Process, then waits */

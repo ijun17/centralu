@@ -1,4 +1,4 @@
-import { endsWorkWithJob, systemTool } from '../os.js'
+import { endsWorkWithJob, powershell } from '../os.js'
 import { execText } from '../os/exec.js'
 
 /**
@@ -120,8 +120,7 @@ const REAL_OS: WorkJobOs = {
   powershell: async (script) => {
     // Encoded, so nothing in the script is read by a command line's quoting, and no execution policy applies
     const encoded = Buffer.from(script, 'utf16le').toString('base64')
-    const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
-    const { stdout } = await execText(exe, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { timeoutMs: 30_000 })
+    const { stdout } = await execText(powershell(), ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { timeoutMs: 30_000 })
     return stdout
   },
 }

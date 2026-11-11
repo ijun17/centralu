@@ -21,7 +21,8 @@ export type ConnectionSlice = {
    */
   workspaceReady: boolean
   attach(platform: Platform): Promise<void>
-  dispatchEvent(e: NormalizedEvent): void
+  /** `id`: what every window of the host calls the event (`agents.subscribe`), which a notification is claimed by */
+  dispatchEvent(e: NormalizedEvent, id?: string): void
   /**
    * Recovery after reconnecting. Merges the host's session list into the store (sessions created,
    * changed or deleted while disconnected), and revives sessions that were running (when the host

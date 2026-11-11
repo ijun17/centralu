@@ -544,6 +544,8 @@ async function main(argv: string[]) {
   const shardArg = argv.includes('--shard') ? argv[argv.indexOf('--shard') + 1] : undefined
   const shard = shardArg === undefined ? null : /^(\d+)\/(\d+)$/.exec(shardArg)
   if (shardArg !== undefined && (!shard || Number(shard[1]) < 1 || Number(shard[1]) > Number(shard[2]))) throw new Error(`--shard ${shardArg}: expected i/n with 1 <= i <= n`)
+  // The times here are Windows'; the macOS shards split by vitest's own --shard, by count (#2167, docs/plans/os-layer.md §6.4)
+  if (shard && argv.includes('--macos')) throw new Error('--macos takes no --shard: give the list whole and vitest --shard=i/n')
   const all = await vitestFiles()
   const picked = argv.includes('--remote-node') ? remoteNodeTests(all) : await (argv.includes('--macos') ? repo.selectMacTests(all) : repo.selectTests(all))
   const why = argv.includes('--why') && !argv.includes('--remote-node')

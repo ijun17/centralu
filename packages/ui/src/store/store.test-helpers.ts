@@ -5,7 +5,6 @@
 import { expect, vi } from 'vitest'
 import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import { useStore, type ChatItem } from './store.js'
 
@@ -94,7 +93,6 @@ export function resetStore() {
     toast: null,
     approvalsInFlight: {},
     commandRuns: {},
-    notifyPolicy: DEFAULT_NOTIFY_POLICY,
     externalAppChanges: {},
     externalAppRunChanges: {},
     externalAppChangedBy: {},

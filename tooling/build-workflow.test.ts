@@ -8,7 +8,9 @@ import { parseDocument } from 'yaml'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { SHARDS_STEP, classifyRun, jobFailure as failureOf, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { onlyCancelledByBatch } from '../.centralu/apps/project-board/batch.mjs'
 import { REMOTE_NODE_TESTS, balance, remoteNodeTests, timedTests } from './os-tests.js'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
 import { changedFiles, classify, draftOf, failFastOf, outputs, screenChanged, screenFiles, tierOf } from '../.github/scripts/ci-changes.mjs'
@@ -130,10 +132,10 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     })
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
-    // Every job but `changes`, the report (which waits on the e2e jobs) and the fail fast (which waits on `verify`) has
-    // a gate: nothing else runs on a draft
+    // Every job but `changes`, the report (which waits on the e2e jobs), the fail fast (which waits on `verify`) and the
+    // macOS shards' result (gated with `!cancelled()`, below) has a gate: nothing else runs on a draft
     const ungated = jobs.filter((j) => !gate(j.body)).map((j) => j.id)
-    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'fail-fast'])
+    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'fail-fast', 'macos-tests-result'])
     expect(job('changes').body).toMatch(/^ {6}quick: \$\{\{ steps\.classify\.outputs\.quick \}\}$/m)
     expect(job('e2e-report').body).toMatch(/^ {4}needs: \[e2e, e2e-chromium\]$/m)
     expect(job('changes').body).toMatch(/^ {6}full: \$\{\{ steps\.classify\.outputs\.full \}\}$/m)
@@ -189,6 +191,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(shards).toBeGreaterThan(1)
     expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(unit)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
     expect(names(unit)).toEqual(Array.from({ length: shards }, (_, i) => `windows tests (vitest ${i + 1}/${shards})`))
+    // The weekly refresh waits for every shard's report: its list is this matrix's (#2167 went from two to three)
+    const weekly = parseDocument(readFileSync(new URL('../.github/workflows/test-durations.yml', import.meta.url), 'utf8')).toJS() as { jobs: Record<string, { steps: { env?: Record<string, string> }[] }> }
+    const lists = weekly.jobs.refresh!.steps.flatMap((s) => (s.env?.UNIT_SHARDS === undefined ? [] : [String(s.env.UNIT_SHARDS)]))
+    expect(lists.length).toBe(2)
+    for (const l of lists) expect(l).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(' '))
     expect(unit).toMatch(/^ {4}runs-on: windows-2022$/m)
     expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
@@ -217,7 +224,11 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   // #1704: no CI job ran a unit test on a Mac, so macOS-only differences failed the release rehearsal instead of the pull request
   it("runs the host's tests on the release's own Mac and Node, a small set in the quick tier and the whole host when the host's tests changed, and lands nothing without it", () => {
     const mac = job('macos-tests').body
-    expect(names(mac)).toEqual(['macos tests'])
+    // #2167: as one job it was the last of 7 of 10 merge batches; in shards, each a share of either tier's set
+    const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(mac)?.[1])
+    expect(shards).toBeGreaterThan(1)
+    expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(mac)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+    expect(names(mac)).toEqual(Array.from({ length: shards }, (_, i) => `macos tests (vitest ${i + 1}/${shards})`))
     const release = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
     const darwin = /- target: darwin-arm64\n\s+runner: (\S+)/.exec(release)![1]
     expect(mac).toMatch(new RegExp(`^ {4}runs-on: ${darwin}$`, 'm'))
@@ -237,8 +248,13 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(full).toContain('packages/agent-host packages/protocol packages/common tooling/\n')
     // Only the tests that reach the OS, picked as Windows picks them (plus the temp-folder tests): the pure ones run on Linux
     expect(full).toContain('CC_TEST_FILES: ${{ runner.temp }}/os-tests.txt\n')
+    // Both sets are split by vitest's own count (#2167): the full set is picked whole, then this shard takes its share
     expect(mac).toContain('run: pnpm exec tsx tooling/os-tests.ts --macos --out "$RUNNER_TEMP/os-tests.txt"\n')
     expect(mac.indexOf('os-tests.ts --macos')).toBeLessThan(mac.indexOf('id: full'))
+    for (const set of [quick, full]) expect(set).toContain('pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} ')
+    // Each shard keeps its file times, even when a test failed
+    expect(mac).toMatch(/- name: Upload the test times\n {8}if: \$\{\{ !cancelled\(\) \}\}\n {8}uses: actions\/upload-artifact@/)
+    expect(mac).toContain('name: macos-test-times-${{ matrix.shard }}\n')
     // tooling/styles.test.ts fails in CI unless told which job compares the bundle with main's
     expect(full).toContain('CC_BUNDLE_COMPARED_BY: verify')
     // vitest takes each argument as a part of a test file's path and leaves out, without a word, one that matches none
@@ -249,9 +265,53 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const f of filters) expect(tests.some((t) => t.includes(f)), `${f} matches no test file`).toBe(true)
     // The tooling tests that failed on a Mac and nowhere else (#1695: a SIGTERM hang, macOS's /var -> /private/var link)
     for (const f of ['tooling/e2e-lock', 'tooling/screen-protocol-rules', 'tooling/launcher-']) expect(filters, f).toContain(f)
-    // A landing condition: the board waits for the check of this name on a batch (project.json ci.quickChecks)
+    // A landing condition under the name it had before the split (#2167), which a board started before it waits for
+    // (project.json ci.quickChecks, read once at start): one job that passes only when every shard did, and runs whenever they may
     const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { quickChecks: string[] } }
     expect(board.ci.quickChecks).toContain('macos tests')
+    const result = job('macos-tests-result').body
+    expect(names(result)).toEqual(['macos tests'])
+    expect(result).toContain('needs: [changes, macos-tests]\n')
+    expect(result).toContain("if: ${{ !cancelled() && needs.changes.outputs.quick == 'true' }}\n")
+    expect(mac).toContain("if: needs.changes.outputs.quick == 'true'\n")
+    expect(result).toContain('SHARDS: ${{ needs.macos-tests.result }}\n')
+    expect(result).toContain('[ "$SHARDS" = success ]\n')
+    expect(result).toContain(`- name: ${SHARDS_STEP}\n`)
+  })
+
+  /*
+   * #2187, run 42934168081: the merge queue cancelled a pull request's own run for its batch, and the shards' result, run
+   * under `always()`, reported that cancel as a failed `macos tests`. The queue lands such a member only when every check
+   * of its own run that did not pass is cancelled or skipped (`onlyCancelledByBatch`), so the green batch could not land
+   * it. The job's `if` is read here term by term (a term this does not know fails the test, rather than being guessed)
+   */
+  it("skips the macOS shards' result in a cancelled run, and fails it when a shard failed or timed out in one that was not", () => {
+    const cond = /^ {4}if: (?:\$\{\{ )?(.+?)(?: \}\})?$/m.exec(job('macos-tests-result').body)![1]!
+    const runs = (runCancelled: boolean) =>
+      cond.split(' && ').every((term) => {
+        const known: Record<string, boolean> = { 'always()': true, '!cancelled()': !runCancelled, "needs.changes.outputs.quick == 'true'": true }
+        if (!(term in known)) throw new Error(`a term of the shards' result's if this test does not know: ${term}`)
+        return known[term]!
+      })
+    // Its one step passes only when the shards did. A job whose `if` is false is reported skipped (cancelled, in a run
+    // GitHub cancelled before it was looked at, passes the queue's rule all the same)
+    const result = (shards: string, runCancelled: boolean) => (!runs(runCancelled) ? 'skipped' : shards === 'success' ? 'success' : 'failure')
+    const check = (name: string, conclusion: string, suiteId: number) => ({ kind: 'run', name, status: 'completed', conclusion, suiteId })
+
+    // (a) The run the queue cancelled for a batch (suite 51): the shards cancelled, and their result no failure
+    const cancelled = [check('macos tests (vitest 1/2)', 'cancelled', 51), check('macos tests (vitest 2/2)', 'cancelled', 51), check('macos tests', result('cancelled', true), 51)]
+    expect(onlyCancelledByBatch(cancelled, [51])).toBe(true)
+
+    // (b) A run nobody cancelled: a shard that failed, timed out or was cancelled alone fails the result…
+    for (const shards of ['failure', 'cancelled']) expect(result(shards, false), shards).toBe('failure')
+    expect(result('success', false)).toBe('success')
+    expect(onlyCancelledByBatch([check('macos tests', result('failure', false), 52)], [51])).toBe(false)
+    // …and the run is blamed on the shard, as before: the result's own step is no cause
+    const aggregate = { id: 2, name: 'macos tests', conclusion: 'failure', steps: [{ name: SHARDS_STEP, conclusion: 'failure' }], notes: [] }
+    const shard = (conclusion: string, notes: string[]) => ({ id: 1, name: 'macos tests (vitest 1/2)', conclusion, steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'pnpm test (the tests that touch the OS)', conclusion }], notes })
+    expect(classifyRun({ conclusion: 'failure' }, [shard('failure', []), aggregate])).toMatchObject({ real: true, cause: 'test', job: { name: 'macos tests (vitest 1/2)' } })
+    const timedOut = classifyRun({ conclusion: 'failure' }, [shard('cancelled', ['The job has exceeded the maximum execution time of 25m0s']), aggregate])
+    expect(timedOut).toMatchObject({ real: false, cause: 'timeout', job: { name: 'macos tests (vitest 1/2)' } })
   })
 
   // 2026-10-19 (owner): Playwright retries a failed test, not the shard, and a pass on the retry is named, not hidden
@@ -303,7 +363,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     const limit = (id: string) => Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job(id).body)?.[1])
     // A job with only an echo (the stand-ins, `full tier`) or `changes` needs none
     const working = jobs.filter((j) => j.id !== 'changes' && !/^ {6}- run: echo /m.test(j.body) && !/^ {4}steps:\n {6}- run: echo [^\n]*\n*$/.test(j.body))
-    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'ux-tasks', 'verify', 'verify-tests', 'windows-tests', 'windows-tests-unit'])
+    expect(working.map((j) => j.id).sort()).toEqual(['bundle', 'content-verify', 'e2e', 'e2e-chromium', 'e2e-report', 'fail-fast', 'host-tests-remote-node', 'keeper', 'keeper-linux', 'macos-tests', 'macos-tests-result', 'ux-tasks', 'verify', 'verify-tests', 'windows-tests', 'windows-tests-unit'])
     for (const j of working) expect(limit(j.id), j.id).toBeGreaterThan(0)
     expect(limit('e2e')).toBe(25)
     expect(limit('e2e-chromium')).toBe(25)

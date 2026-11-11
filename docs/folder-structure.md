@@ -192,7 +192,7 @@ features/inbox/
 | Add a new kind of event | `protocol/events.ts` → core reducer → the consuming feature | other features |
 | Move git from Node to Rust (C2, on hold: [agent-host.md](agent-host.md) §5) | a git implementation in `platform/tauri/` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
 | Add a new screen | `ui/features/<new>/` | platform, agent-host |
-| Change how OS notifications work | the `SystemPort` implementation in `platform/{web,tauri}/index.ts` (when to notify is `core/notify/`) | ui (it is behind SystemPort) |
+| Change how OS notifications work | the `SystemPort` implementation in `platform/{web,tauri}/index.ts` (when to notify is `core/notify/`; that one window of a machine raises each event is `ui/src/app/notice-claim.ts`, #2168) | ui (it is behind SystemPort) |
 | Change session state rules | `core/session/` (+ transition table tests) | if statements in ui — there should not have been any |
 
 ## 4. Why a monorepo (and why this size)

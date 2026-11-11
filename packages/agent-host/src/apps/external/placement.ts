@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { lstatSync, mkdirSync, renameSync } from 'node:fs'
+import { lstatSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { PROJECT_APPS_PARTS, USER_APPS_PARTS } from './discovery.js'
+import { realOs } from '../../os/real.js'
 
 /**
  * Where an app folder goes (M4 A-7, C-1b, E-3) — the one place that knows it, for every way an app
@@ -76,7 +77,7 @@ export function placeAppFolder(root: string, projectId: string | null, id: strin
   try {
     fill(staging)
     if (nameTaken(dir)) throw new AppFolderTaken(dir)
-    renameSync(staging, dir)
+    realOs().files.renameSync(staging, dir)
   } catch (err) {
     removeDataQuietly(staging, '[apps]', remove)
     throw err

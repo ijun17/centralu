@@ -1,7 +1,8 @@
 # Refreshes tooling/test-durations.json once a week, so the Windows shards stay balanced.
 #
-# build.yml splits the Windows unit tests, and the remote Node's host tests on Windows, into two shards each by each file's
-# measured time. The times go stale as tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against
+# build.yml splits the Windows unit tests, and the remote Node's host tests on Windows, into shards by each file's
+# measured time. (The macOS shards split by vitest's own `--shard`, by count: on the Mac's times that is within 3% of a split
+# by time, #2167.) The times go stale as tests change (a file that took 72 s took 369 s weeks later, one shard ran 2567 s against
 # 1769 s), and refreshing them by hand (`tsx tooling/os-tests.ts --refresh-durations`) was forgotten. The unit shards upload their
 # vitest JSON report as `windows-test-times-<shard>`; the remote Node's shards theirs as `windows-test-times-remote-node-<shard>`,
 # and they time the files the unit shards do not run (94 of 525 had no time, and the two shards of that job took 6.0 and 9.1
@@ -13,7 +14,7 @@
 # far behind main the run is.
 #
 # Two jobs, as lint-tighten.yml: no code from the dependencies runs where a write token is.
-#   refresh  reads only: downloads the two reports, runs the refresh, hands the file on as an artifact.
+#   refresh  reads only: downloads the reports, runs the refresh, hands the file on as an artifact.
 #   open     writes only: no install; puts the file on a fresh checkout of main and pushes it to one branch,
 #            `test-durations/weekly`. It opens no pull request: the repository does not let GITHUB_TOKEN do that
 #            (#1983), and allowing it would widen the token. The job summary names the branch and the `gh pr create`
@@ -52,17 +53,23 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The newest green push run of build.yml on main that still has both reports (artifacts last 30 days)
+      # The newest green push run of build.yml on main that still has every unit shard's report (artifacts last 30 days).
+      # UNIT_SHARDS is build.yml's `windows-tests-unit` shard list (tooling/build-workflow.test.ts holds the two equal).
       - name: Download the Windows test times
         id: times
         env:
           GH_TOKEN: ${{ github.token }}
+          UNIT_SHARDS: 1 2 3
         run: |
           mkdir -p "$RUNNER_TEMP/times"
           gh run list --workflow build.yml --branch main --event push --status success --limit 30 --json databaseId,headSha,createdAt > "$RUNNER_TEMP/runs.json"
           for run in $(jq -r '.[].databaseId' "$RUNNER_TEMP/runs.json"); do
             rm -rf "$RUNNER_TEMP/times"/*
-            if gh run download "$run" -n windows-test-times-1 -D "$RUNNER_TEMP/times/1" && gh run download "$run" -n windows-test-times-2 -D "$RUNNER_TEMP/times/2"; then
+            all=true
+            for shard in $UNIT_SHARDS; do
+              gh run download "$run" -n "windows-test-times-$shard" -D "$RUNNER_TEMP/times/$shard" || { all=false; break; }
+            done
+            if $all; then
               sha=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .headSha' "$RUNNER_TEMP/runs.json")
               created=$(jq -r --argjson run "$run" '.[] | select(.databaseId == $run) | .createdAt' "$RUNNER_TEMP/runs.json")
               # How many commits main has that the run's head has not; the run's age in days
@@ -84,12 +91,15 @@ jobs:
               exit 0
             fi
           done
-          echo "No green main run with both reports."
+          echo "No green main run with every unit shard's report."
           exit 1
 
       - name: Refresh the file
+        env:
+          UNIT_SHARDS: 1 2 3
         run: |
-          reports=("$RUNNER_TEMP/times/1/vitest-times.json" "$RUNNER_TEMP/times/2/vitest-times.json")
+          reports=()
+          for shard in $UNIT_SHARDS; do reports+=("$RUNNER_TEMP/times/$shard/vitest-times.json"); done
           for shard in 1 2; do
             [ -f "$RUNNER_TEMP/times/remote-node-$shard/vitest-times.json" ] && reports+=("$RUNNER_TEMP/times/remote-node-$shard/vitest-times.json")
           done

@@ -13,6 +13,10 @@ import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { StreamTransport } from './stream-transport.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { useWarmProcessTable } from '../../os/process-table.test-helpers.js'
+
+// Its stops read the process table on Windows, as a host's do: with the host's warm reader (#2178)
+useWarmProcessTable()
 
 /**
  * The app template and its runtime (M4 C-1) — exercised by starting a template-scaffolded app with a

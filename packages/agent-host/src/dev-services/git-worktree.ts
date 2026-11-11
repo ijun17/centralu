@@ -1,7 +1,5 @@
 import { existsSync, lstatSync } from 'node:fs'
-import { wireSegments } from '@cc/protocol'
-import { join } from 'node:path'
-import { traitsFor } from '../os.js'
+import { join, relative, sep } from 'node:path'
 import { rpcError } from '../rpc-error.js'
 import { execFailure } from './exec-error.js'
 import { runGit } from './git-exec.js'
@@ -9,7 +7,7 @@ import { git, gitHeadSha, gitRevParse, gitSummary, isRepo, type GitTrust, type S
 import { cloneEnv } from './project-clone.js'
 import { gitWrite } from './git-write.js'
 import { removeData } from './data-folder.js'
-import { canonicalPath } from './path-guard.js'
+import { canonicalKey, canonicalPath, isInside } from './path-guard.js'
 
 
 /*
@@ -198,7 +196,7 @@ export async function gitBranchRemote(repoCwd: string, branch: string, remotes?:
  */
 export function gitFetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs = FORK_FETCH_TIMEOUT_MS): Promise<{ sha: string } | { why: string }> {
   // Starts at once share one fetch (#1488): two fetches of one ref in one repository lose a lock race to each other, and wait twice
-  const flight = `${pathKey(repoCwd)}\n${remote}\n${branch}`
+  const flight = `${canonicalKey(repoCwd)}\n${remote}\n${branch}`
   const running = fetchesInFlight.get(flight)
   if (running) return running
   const fetch = fetchBranch(repoCwd, remote, branch, timeoutMs).finally(() => fetchesInFlight.delete(flight))
@@ -213,7 +211,7 @@ const LOCAL_FETCH_FAILURE = /cannot lock ref|unable to write|unable to create|un
 async function fetchBranch(repoCwd: string, remote: string, branch: string, timeoutMs: number): Promise<{ sha: string } | { why: string }> {
   const tracking = `refs/remotes/${remote}/${branch}`
   // A remote that just failed is not asked again for a while (#1488): every start would otherwise wait out the bound
-  const key = `${pathKey(repoCwd)}\n${remote}`
+  const key = `${canonicalKey(repoCwd)}\n${remote}`
   const failed = failedFetches.get(key)
   if (failed && Date.now() - failed.at < FETCH_RETRY_AFTER_MS) return { why: failed.why }
   try {
@@ -307,12 +305,6 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
   }
 }
 
-/** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
-export function pathKey(path: string): string {
-  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
-  return traitsFor().foldsPathCase ? key.toLowerCase() : key
-}
-
 /**
  * Removes a worktree for good, uncommitted changes and all: its folder, then git's entry for it. The caller has saved
  * the work in it or has the person's decision to lose it. A locked worktree stays unless `unlocked` (git's second
@@ -337,16 +329,18 @@ export async function gitWorktreeRemove(
   { unlocked = false, worktreeRoot }: { unlocked?: boolean; worktreeRoot?: string } = {},
 ): Promise<void> {
   if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, not a worktree; nothing was removed`)
-  const key = pathKey(path)
+  const real = canonicalPath(path)
+  const key = canonicalKey(path)
   const list = await gitWorktreeList(repoCwd)
-  const entry = list.find((w) => pathKey(w.path) === key)
+  const entry = list.find((w) => canonicalKey(w.path) === key)
   if (entry?.main) throw new Error(`${path} is the project's own folder, not a worktree`)
   if (entry?.locked && !unlocked) throw new Error(`${path} is a locked worktree; unlock it first`)
-  const held = list.find((w) => w !== entry && pathKey(w.path).startsWith(`${key}/`))
+  // Inside and not the same: real paths, so a short name or a link git listed is not taken for another folder
+  const below = (root: string, p: string) => canonicalKey(root) !== canonicalKey(p) && isInside(canonicalPath(root), canonicalPath(p))
+  const held = list.find((w) => w !== entry && below(real, w.path))
   if (held) throw new Error(`${path} holds ${held.path}, which git lists as a checkout; nothing was removed`)
-  const inRoot = worktreeRoot === undefined ? null : `${pathKey(worktreeRoot)}/`
-  const leftover = inRoot !== null && key.startsWith(inRoot) && wireSegments(key.slice(inRoot.length)).length === 2
-  if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => key.startsWith(`${pathKey(w.path)}/`)))) {
+  const leftover = worktreeRoot !== undefined && below(worktreeRoot, real) && relative(canonicalPath(worktreeRoot), real).split(sep).length === 2
+  if (!entry && (list.length === 0 || !leftover || existsSync(join(path, '.git')) || list.some((w) => below(w.path, real)))) {
     throw new Error(`${path} is not a worktree of ${repoCwd}`)
   }
   await removeData(path).catch((e: Error) => {
