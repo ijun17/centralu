@@ -63,16 +63,6 @@ export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
 
   /**
-   * The session told of each turn a quit cut that this start found (#698, `HostMail.afterReady`): the one that gave the turn, else the one that
-   * started it; the first that still exists. Read before the start drops those rows; a later start finds none
-   */
-  private quitStarters = new Map<string, string>()
-
-  /** Who is told of the turn a quit cut in `sessionId`, as this start found it (`quitStarters`) */
-  quitStarter(sessionId: string): string | null {
-    return this.quitStarters.get(sessionId) ?? null
-  }
-  /**
    * Sessions an update's stop left, to tell once the start is done (#1618, `continueCutTurns`): a turn it cut is continued (`turn`; its end
    * says so, #1966); a session at rest whose tasks it stopped is woken for the note alone (#1902). `stopped`: what else it ended there
    */
@@ -118,7 +108,7 @@ export class HostTenure {
     this.host.children.turnEnded(m.id, null)
     // Centralu cut this turn and could not continue it: the senders of what it left open (the person for their own work), and the session that
     // started it, are told (mailbox.md "The stop notice")
-    this.host.mail.mailStopped(m.id, 'uncontinued', { starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
+    this.host.mail.mailStopped(m.id, 'uncontinued', { starter: m.askedBy ?? null })
   }
 
   /**
@@ -338,8 +328,6 @@ export class HostTenure {
      * Which states those are is the one definition a stop lists the turns it ends by (`turnCut`, idle.ts, #1618): what a
      * stop cut and what this start finds cut are the same sessions.
      */
-    /** Sessions this start found mid-turn with no process (#698): the mailbox's stop notice tells their senders (`HostMail.afterReady`) */
-    const stoppedByQuit: SessionInfo[] = []
     /** Sessions whose turn a hub's update cut, continued once the start is done (#1618, `continueCutTurns`) */
     const cutByUpdate: SessionInfo[] = []
     /** What an update's stop ended in each session besides its turn (#1902), by session: told once the start is done (`continueCutTurns`) */
@@ -380,7 +368,6 @@ export class HostTenure {
         store.sessions.upsertSession(fixed)
         // The turn the last host was in never sent its end (#1604)
         this.host.children.noteTurnEnd(s.id)
-        stoppedByQuit.push(fixed)
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
       if (stopped) stoppedBy.set(s.id, stopped)
@@ -397,11 +384,6 @@ export class HostTenure {
     for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the turns an update cut (#1618) */
     const goingOn = new Set(cutByUpdate.map((s) => s.id))
-    const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
-    for (const s of stoppedByQuit) {
-      const starter = [turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && this.host.meta.has(id))
-      if (starter) this.quitStarters.set(s.id, starter)
-    }
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
     const cutIds = new Set(cutByUpdate.map((s) => s.id))
     this.updateCuts = [
@@ -413,7 +395,8 @@ export class HostTenure {
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()
-    this.host.children.restoreTurns(this.host.meta, goingOn)
+    // An earlier build's delegated turns (#676) are no one's now: cards go to the givers of open work (docs/plans/mailbox.md §10.6.4)
+    store.children.dropDelegatedTurns()
     this.keptAtStart = goingOn
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }

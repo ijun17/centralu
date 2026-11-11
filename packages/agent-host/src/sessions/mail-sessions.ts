@@ -3,6 +3,7 @@ import type { BusyAnswer } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven } from '../mail/delegation.js'
+import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import type { MailToolArgs } from '../mail/tool.js'
@@ -62,6 +63,8 @@ export type MailHooks = {
   lastResponse?(sessionId: string, last: SessionLastResponse): void
   /** The sessions with a task open between them and the session (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's), or its own tasks' receivers (`from`) */
   openTasks?(sessionId: string, side: 'to' | 'from'): string[]
+  /** A session's cards and the givers of its open work (docs/plans/mailbox.md §10.6.4) */
+  cards?: CardHooks
   /** What the tool said of the inputs given it (`MailDelivery.turnInputs`): which the turn that ended took, or which the turn opening runs for */
   turnInputs?(sessionId: string, turn: TurnInputs): void
   /** A handoff moves a child: the original's open tasks to it become the successor's (`taskRepointer`), inside the move's transaction */
@@ -79,6 +82,8 @@ export type MailHooks = {
   /** §7.4: a delegation from `callerId` out of its untrusted project is refused. Returns S15 (the whole `Refused (untrusted_project): …` text) after the mailbox wrote the record S16 is built from, or null when it may go */
   refusesDelegation?(callerId: string, target: DelegationTarget, call: DelegationCall): string | null
 }
+
+const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null }), turn: () => 0, tell: () => null, ended: () => {} }
 
 /**
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
@@ -265,6 +270,11 @@ export class MailSessionsView {
     } catch (e) {
       return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
     }
+  }
+
+  /** A session's cards and the givers of its open work (`MailHooks.cards`); no giver without a mailbox */
+  get cards(): CardHooks {
+    return this.hooks?.cards ?? NO_CARDS
   }
 
   /** The caller's tasks to the session that are not delivered yet, withdrawn (`agent_session stop`); how many */

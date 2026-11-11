@@ -1,9 +1,7 @@
-import { randomUUID } from 'node:crypto'
 import { errorMessage, TurnOrigin } from '@cc/protocol'
-import type { BackgroundTask, SessionInfo, StoredMessage } from '@cc/protocol'
+import type { BackgroundTask, StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
-import { inTurn } from '../idle.js'
 import { asObj, tryParseJson } from '../json-value.js'
 import { isHubSender } from './hub-sender.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
@@ -48,7 +46,7 @@ export type Delegation = {
  */
 export type TurnStarter = { by: 'person' | 'work'; wrote?: true; cut?: true }
 /** A message given the tool, as its user row keeps it (#1639): the input id it went in under, whose it is, and a hub's message's origin (#1604) */
-type Entry = { id: string; by: 'person' | 'work'; source: TurnSource; origin?: TurnOrigin }
+type Entry = { id: string; by: 'person' | 'work'; source: TurnSource; origin?: TurnOrigin; from?: string }
 /**
  * The entry a user row is, when it went in under an input id (#1639): the person's when no one else is named on it. A first prompt and the
  * words read back from the tool's own record (`transcript`) carry none
@@ -58,13 +56,18 @@ function entryOf(row: StoredMessage): Entry | undefined {
   if (row.role !== 'user' || typeof p.inputId !== 'string') return undefined
   const work = p.from !== undefined || p.fromApp !== undefined || p.fromScript !== undefined
   const hub = TurnOrigin.safeParse({ seq: row.seq, from: p.from })
+  const from = asObj(p.from).sessionId
   return {
     id: p.inputId, by: work ? 'work' : 'person', source: p.relayed === true ? 'report' : p.fromApp !== undefined ? 'app' : 'caller',
     ...(hub.success && isHubSender(hub.data.from.sessionId) ? { origin: hub.data } : {}),
+    ...(typeof from === 'string' ? { from } : {}),
   }
 }
-/** Whose a turn is, as the mailbox is told it (`TurnStart`): `cli`, it ran for no message (a mail wake, a compact, the CLI on its own) */
-type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource }
+/**
+ * Whose a turn is, as the mailbox is told it (`TurnStart`): `cli`, it ran for no message (a mail wake, a compact, the CLI on its own); `from`, the
+ * session whose message of the work it ran for
+ */
+type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource; from?: string }
 /**
  * Whose a turn that ran for these messages is (#1377): the work's if any is (the work's instruction is in it), with the person's noted
  * (`wrote`), and its source the first of the work's; else the person's; none, the CLI's own (the work's)
@@ -72,7 +75,7 @@ type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource }
 function starterFor(ran: readonly Entry[]): Decided {
   const work = ran.find((e) => e.by === 'work')
   if (!work) return ran.length ? { turn: { by: 'person' }, cli: false, source: 'caller' } : { turn: { by: 'work' }, cli: true, source: 'caller' }
-  return { turn: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, cli: false, source: work.source }
+  return { turn: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, cli: false, source: work.source, ...(work.from ? { from: work.from } : {}) }
 }
 /**
  * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub
@@ -106,9 +109,6 @@ function readTurnSpan(raw: string | null): TurnSpan {
 function startsOf(span: TurnSpan): readonly number[] {
   return span.starts ?? [span.previous?.since, span.latest?.since].filter((s): s is number => s !== undefined)
 }
-/** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */
-export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }
-
 /**
  * A linked machine's session an Assistant asked to hear about (#82 phase 4). `paused`: the session's own background
  * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left.
@@ -159,17 +159,6 @@ export class ChildOwnership {
   private readonly continuedCuts = new Set<string>()
   /** Running turns whose opening input the tool named (`turnNamed`); one not named is decided by the inputs its end names */
   private readonly named = new Set<string>()
-  /**
-   * Delegated turns (#676): session -> the session that gave it the turn it is running, and the cards that session was
-   * already told of. While the turn runs, its question cards go to that session as well as to the person, and its
-   * approval cards are told to it (`routeCard`). Set when another session's work starts the turn (`ask_project` into a
-   * session at rest, `start_agent`, `agent_session` send, `send_to_session` to a session at rest); never for work that
-   * joins a turn the person started. Ends with the delegation's outcome, or with the turn (`untilTurnEnd`: a
-   * `send_to_session` turn, or one a new host found in the store). Mirrored in the store's `delegated_turns` (v51) so
-   * a host swap keeps the link while the kept session waits on a question.
-   */
-  private readonly turns = new Map<string, TurnOwner>()
-  readonly turnOwners: ReadonlyMap<string, TurnOwner> = this.turns
   /**
    * ask_project's delegations still owed to their caller (#371 part B) — `<caller session>><target project>><target session>` -> the
    * delegation. One per chosen session at a time: a second task while the first runs is refused, and a call with no task waits
@@ -326,23 +315,6 @@ export class ChildOwnership {
     }
   }
 
-  /** At startup (#676): the delegated turns of the sessions whose turn goes on under this host (`goingOn`); any other row is dropped */
-  restoreTurns(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
-    /*
-     * A delegated turn's link survives an update the same way (#676, #1618): the turn an update cut is continued here, and
-     * may ask its caller again. With no delegation in this host's memory, the link ends with the turn. Any other row is
-     * dropped: that turn is over.
-     */
-    for (const row of this.store.children.listDelegatedTurns()) {
-      const s = sessions.get(row.sessionId)
-      if (goingOn.has(row.sessionId) && !!s && inTurn(s.state) && sessions.has(row.callerSessionId)) {
-        this.adoptTurn(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
-        continue
-      }
-      this.store.children.clearDelegatedTurn(row.sessionId)
-    }
-  }
-
   /** The session is deleted: nothing kept of its turns (for a hub that followed them) is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
     this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
@@ -474,8 +446,8 @@ export class ChildOwnership {
     if (again && was && was.turn.by === decided.turn.by && !!was.turn.wrote === !!decided.turn.wrote && was.cli === decided.cli) return
     this.starters.set(sessionId, decided)
     if (!this.turnStartedHook) return
-    // The caller whose turn it was given as (#676): the turn is the work of the task it gave
-    const ownerId = this.turns.get(sessionId)?.callerId
+    // The session whose request the turn runs for: the message it opened with names it, else a delegation still running there gave it (its first prompt)
+    const ownerId = decided.from ?? [...this.runs.values()].find((d) => d.sessionId === sessionId && !d.settled)?.callerId
     try {
       this.turnStartedHook(sessionId, { by: decided.turn.by, cli: decided.cli, source: decided.source, ...(ownerId ? { ownerId } : {}), ...(again ? { again: true as const } : {}) })
     } catch (e) {
@@ -508,30 +480,6 @@ export class ChildOwnership {
   dropContinuedCut(sessionId: string): void {
     this.continuedCuts.delete(sessionId)
   }
-  ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
-    const turnId = randomUUID()
-    this.turns.set(sessionId, { callerId, untilTurnEnd, told: new Set(), turnId })
-    this.store.children.setDelegatedTurn(sessionId, callerId, turnId)
-  }
-  /** Ends the link; with `callerId`, only that caller's (a later delegation by someone else is not cut) */
-  releaseTurn(sessionId: string, callerId?: string): void {
-    const owner = this.turns.get(sessionId)
-    if (!owner || (callerId && owner.callerId !== callerId)) return
-    this.turns.delete(sessionId)
-    this.store.children.clearDelegatedTurn(sessionId)
-  }
-  /** A link the previous host left, kept for a session the keeper kept still in its turn (the store already holds it) */
-  adoptTurn(sessionId: string, owner: TurnOwner): void {
-    this.turns.set(sessionId, owner)
-  }
-  /** The turn's owner was told of a card (#676), once per card handle */
-  markTurnTold(sessionId: string, handle: string): void {
-    const owner = this.turns.get(sessionId)
-    if (!owner) return
-    owner.told.add(handle)
-    this.store.children.setDelegatedTurnTold(sessionId, [...owner.told])
-  }
-
 
   setDelegation(key: string, d: Delegation): void {
     this.runs.set(key, d)
@@ -571,7 +519,7 @@ export class ChildOwnership {
   }
 
   /**
-   * Moves what `from` owns of the given children to `to`, in memory (#693, #738): the turns `from` gave them, its delegations and observer notes on them (their keys
+   * Moves what `from` owns of the given children to `to`, in memory (#693, #738): its delegations and observer notes on them (their keys
    * name the caller), linked machines' reports, and the start requests that made
    * them. `moveCards` runs next, for the cards that stand for the moving `starts`; then what moved is recorded as
    * handed over, and the original's calls still waiting on it are ended.
@@ -582,7 +530,6 @@ export class ChildOwnership {
   moveOwner(from: string, to: string, move: OwnerMove, moveCards: () => void): void {
     const { sessions, starts } = move
     const moving = new Set(sessions)
-    for (const [id, owner] of this.turns) if (moving.has(id) && owner.callerId === from) owner.callerId = to
     // A delegation's key names its caller (`<caller>><child>`, `<caller>><project>><child>`)
     for (const [key, d] of [...this.runs]) {
       if (d.callerId !== from || !moving.has(d.sessionId)) continue

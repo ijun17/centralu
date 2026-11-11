@@ -13,4 +13,4 @@ its own project, and `agent_session` works with that agent.
 | [start-agent-linked-machine.md](start-agent-linked-machine.md) | Starting an agent on a linked machine |
 | [input-stop-and-delete.md](input-stop-and-delete.md) | The person's input stamped as theirs; stopping a child, and deleting one without a worktree |
 | [worktree-recovery.md](worktree-recovery.md) | Deleting a worktree child: recovery capture, restore, Git compatibility |
-| [delegated-turns.md](delegated-turns.md) | Cards in a delegated turn; requests to a busy session |
+| [delegated-turns.md](delegated-turns.md) | Cards in a session another session gave work; requests to a busy session |

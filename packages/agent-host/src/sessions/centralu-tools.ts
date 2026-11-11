@@ -268,12 +268,12 @@ const HANDLERS: ToolHandlers = {
           // A reader (#320) has no send_to_session — pointing it at reportBack would name a tool it cannot call
           (caller.profile === 'reader' ? '\n' : '   If you want to know once it is done, use send_to_session\'s reportBack.\n\n')
         : ''
-    // The cards of a turn this seat gave it (#676), after the conversation: the way to answer depends on the seat
+    // The cards of a session this seat has work open in (#676), after the conversation: the way to answer depends on the seat
     const answer = caller.profile === 'reader'
       ? callForm(caller.profile, 'agent_session', { sessionId: String(args.sessionId), action: 'answer', card: FILL, text: FILL })
       : callForm(caller.profile, 'answer_question', { sessionId: String(args.sessionId), card: FILL, text: FILL })
     const cards = r.cards?.length
-      ? `\n\nWaiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
+      ? `\n\nWaiting on you in work you gave it:\n${cardsText(r.cards)}\n` +
         (answer ? `${answer} answers it. ${ANSWER_FORM}` : 'Only the person can answer it from here; tell them if it matters.')
       : ''
     // A project nobody trusted (#984): its lines are data, whatever they say

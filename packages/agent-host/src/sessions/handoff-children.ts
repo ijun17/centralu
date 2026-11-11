@@ -177,7 +177,6 @@ export class HandoffChildren {
     const linked = removed ? new Set(childIds) : new Set<string>([
       ...delegated.map((d) => d.sessionId),
       ...owing,
-      ...[...this.host.children.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
       ...childIds,
     ])
     /*
@@ -212,12 +211,11 @@ export class HandoffChildren {
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
       // What the new session can actually do with it, by what moved (#693 review)
       const told = owing.has(id)
-      const owns = this.host.children.turnOwners.get(id)?.callerId === from
       const can = project !== undefined
-        ? `Call ask_project with project "${project}" and no task to wait for its answer${owns ? '; you are told of the cards of its turn and answer them with agent_session (answer)' : ''}. It is that project's session: agent_session does nothing else with it.`
+        ? `Call ask_project with project "${project}" and no task to wait for its answer${told ? '; you are told of its cards and answer them with agent_session (answer) as far as you may' : ''}. It is that project's session: agent_session does nothing else with it.`
         : s.askedBy === from
           ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work with agent_session (send) and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, send, stop, delete).`
-          : `${told ? 'Its report comes to you' : 'Nothing about it comes to you unless you ask'}${owns ? ', and you are told of the cards of the turn you now own' : ''}. You did not start it, so agent_session works on it only with the auto preset.`
+          : `${told ? 'Its report and its cards come to you' : 'Nothing about it comes to you unless you ask'}. You did not start it, so agent_session works on it only with the auto preset.`
       const folded = state === SETTLED_CHILD && project === undefined && s.askedBy === from
       moved.push({ handle: id, name: this.host.nameOf(id), state, can, ...(project !== undefined ? { project } : {}), ...(folded ? { folded: true } : {}) })
     }

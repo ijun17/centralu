@@ -171,9 +171,15 @@ export class TurnInputs {
    * state.
    */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): void {
-    const handle = this.host.requireHandle(sessionId)
+    this.host.requireHandle(sessionId)
     // Marked first: an answer the tool took and the mark lost would let a stop notice quote a turn that holds the person's answer (#1948)
     this.host.children.noteQuestionAnswered(sessionId)
+    this.giverAnswer(sessionId, requestId, answers)
+  }
+
+  /** The answer of the session whose work the turn is alone, which the gate allowed (docs/plans/mailbox.md §10.6.4): unmarked, so the turn stays its alone */
+  giverAnswer(sessionId: string, requestId: string, answers: QuestionAnswer[]): void {
+    const handle = this.host.requireHandle(sessionId)
     const landed = handle.answerQuestion?.(requestId, answers) ?? false
     if (!landed) {
       this.host.emit({ type: 'question_resolved', sessionId, requestId })

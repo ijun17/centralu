@@ -386,19 +386,19 @@ describe('what a send leaves', () => {
     const r = await centraluToolsFor(host, 'orch').sendToSession('a', 'do it', true)
     expect(r).toEqual({ ok: true })
     expect(host.send).toHaveBeenCalledWith('a', 'do it', undefined, { sessionId: 'orch', name: 'Assistant' })
-    expect(children.turnOwners.get('a')?.callerId).toBe('orch')
     // The task is the request: its reply or the session's last response answers it (docs/plans/mailbox.md §10.6.3)
     expect(delegated).toHaveBeenCalledWith('orch', 'a', 'send_to_session', 'do it')
   })
 
-  it('a send that fails lets go of the turn it took', async () => {
+  it('a send that fails withdraws the task it wrote before the words went in', async () => {
     host.send = vi.fn(async () => {
       throw new Error('no process')
     })
-    const delegated = vi.spyOn(children, 'delegated')
+    const withdraw = vi.fn()
+    const delegated = vi.spyOn(children, 'delegated').mockReturnValue(withdraw)
     expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'do it', true)).toEqual({ ok: false, error: 'no process' })
-    expect(children.turnOwners.has('a')).toBe(false)
-    expect(delegated).not.toHaveBeenCalled()
+    expect(delegated).toHaveBeenCalledWith('orch', 'a', 'send_to_session', 'do it')
+    expect(withdraw).toHaveBeenCalledOnce()
   })
 
   it('an instruction without a report is silent: it writes no task, so nothing comes back for it', async () => {

@@ -161,6 +161,9 @@ person's chat as the work's result, is covered by `personSince` and by the agent
 
 ### 3.5 Cards (questions and approvals) in a session with open requests
 
+Built in #1948 step 4 as [mailbox.md](mailbox.md) §10.6.4, with one change: "the turn is the giver's alone" is `StopNotices.alone` (the
+stop notice's quote rule), which also covers a task that joined the person's turn and a card the person answered.
+
 Today a card goes to "the turn's owner" (`RoutedCards.routeCard`, `sessions/routed-cards.ts:75`, keyed on
 `children.turnOwners`), who may read it and, for an approval, answer it within `answersApproval` (line 62: caller
 `auto` and not an app agent, target not `safe` and not an app agent, not a card the host raised).

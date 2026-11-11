@@ -217,7 +217,6 @@ describe("a child's turn and the call waiting on it", () => {
     const away = join(tmpdir(), 'cc-delegation-nowhere.ts')
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
-    expect(children.turnOwners.get('child')?.callerId).toBe('caller')
     finishes(`Done. See ${inside} and ${away}.`)
     const r = await flow.awaitAgent('caller>child', d)
     expect(r).toMatchObject({ ok: true, state: 'done', sessionId: 'child', answer: expect.stringContaining('Done.'), readable: [inside], outside: [away], cleanUp: true })
@@ -226,7 +225,6 @@ describe("a child's turn and the call waiting on it", () => {
     // The call read the answer: it answers the task, so no last response answers it again
     expect(answered).toEqual([{ callerId: 'caller', childId: 'child', how: { ok: true, text: `Done. See ${inside} and ${away}.` } }])
     expect(children.delegations.size).toBe(0)
-    expect(children.turnOwners.has('child')).toBe(false)
     expect(agentRuns.size).toBe(0)
   })
 
@@ -243,7 +241,6 @@ describe("a child's turn and the call waiting on it", () => {
     await flush()
     expect(answered).toEqual([{ callerId: 'caller', childId: 'child', how: { ok: false, error: expect.any(String) } }])
     expect(children.delegations.size).toBe(0)
-    expect(children.turnOwners.has('child')).toBe(false)
   })
 
   it('a cancelled call stops the turn it gave and lets the delegation go', async () => {
@@ -298,7 +295,6 @@ describe("a child's turn and the call waiting on it", () => {
     expect(await heir).toMatchObject({ ok: true, state: 'done', answer: 'all done' })
     await flush()
     // Released by the owner it has when it ends, not the one that gave it
-    expect(children.turnOwners.has('child')).toBe(false)
     expect(children.delegations.size).toBe(0)
   })
 
@@ -328,26 +324,6 @@ describe("a child's turn and the call waiting on it", () => {
     })
   })
 
-  it("a quitting host keeps the turn's link for the next host; one that is not quitting lets it go", async () => {
-    const flow = flowWith()
-    // A quit's failed wait ends no link (#1618): the next start tells the turn stopped, or continues it after an update, for its caller
-    meta.set('cut', session('cut', { askedBy: 'caller' }))
-    const quit = flow.startDelegation('caller>cut', 'caller', 'cut', target(), true)
-    quitting = true
-    quit.wait.fail(new Error('Centralu is shutting down'))
-    await quit.outcome
-    await flush()
-    expect(children.turnOwners.get('cut')?.callerId).toBe('caller')
-    expect(answered).toEqual([])
-    quitting = false
-
-    const ended = flow.startDelegation('caller>child', 'caller', 'child', target(), false)
-    ended.wait.fail(new Error('stopped'))
-    await ended.outcome
-    await flush()
-    expect(children.turnOwners.has('child')).toBe(false)
-  })
-
   it('a send that fails leaves no wait, turn or delegation behind, and fails a wait that joined it (#839)', async () => {
     let joined: AgentRunWait | undefined
     const flow = flowWith({
@@ -363,7 +339,6 @@ describe("a child's turn and the call waiting on it", () => {
     expect(joined?.finished).toBe(true)
     expect(agentRuns.size).toBe(0)
     expect(children.delegations.size).toBe(0)
-    expect(children.turnOwners.has('child')).toBe(false)
   })
 
   it('stop on the turn it gave interrupts it and lets the delegation go', async () => {

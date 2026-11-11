@@ -38,13 +38,14 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
   with no delegation stays unowned by its observer, does not pin that caller awake, and
   continues if the caller is stopped. An explicit stop preserves
   the owner's error report/result. Self wait, stop, delete and send are refused in every preset.
-- **Cards of a delegated turn** (#676): a question raised in a turn the caller gave (also `ask_project`'s and
-  `send_to_session`'s) reaches the caller as a tool result it asks for, never as a user message carrying the
-  target's text; the caller may answer it, as the person may, and the first answer counts. An approval reaches it as
-  a notice only: it may allow or deny only while its own preset is `auto` and the target is `normal` or `auto`; never
-  for a `safe` target, never as or for an app's agent, never a card the host raised, never "always". An answer names
-  the handle of the card the caller read (request id, turn, content), so an id an adapter reuses after a restart
-  cannot carry it onto another card. The link ends with the turn, so the person's later turns stay theirs.
+- **Cards in a session the caller gave work** (#676, plans/mailbox.md §10.6.4): every session with a task open there (also
+  `ask_project`'s and `send_to_session`'s with `reportBack`) is told of a card by a Centralu notice and reads it as a tool result
+  it asks for, never as a user message carrying the target's text. One of them may answer it only as the one party with work open
+  there whose work started the running turn and is alone in it (nothing of the person's, an app's or another session's entered it), as the person may, and
+  the first answer counts; otherwise it is told only. An approval needs more: its own preset `auto` and the target `normal` or
+  `auto`; never for a `safe` target, never as or for an app's agent, never a card the host raised, never "always". An answer names
+  the handle of the card the caller read (request id, turn, content), so an id an adapter reuses after a restart cannot carry it onto
+  another card. Once its work is answered, nothing of the session's later turns is the caller's.
 - **Requests to a busy session** (#677): a turn that is not the requester's is never joined without the requester
   choosing it. A note into it needs the requester's own `auto` (#606); a queue waits for the turn to end and is
   then the requester's turn, whose tool's gates are read again when it goes in; a fork starts an agent, so it takes

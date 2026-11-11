@@ -204,7 +204,6 @@ export class TrashRecords {
       this.db.prepare(`UPDATE app_runs SET caller_session_id = NULL WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       /*
        * The mail it was a party to (#1347): its receipts and rows, its place in old threads and its turns go with the

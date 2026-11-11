@@ -504,7 +504,6 @@ export class AgentStartFlow {
       withdraw()
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)
-      this.host.children.releaseTurn(child.id, callerId)
       return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
     }
     const notice = this.host.handles.get(child.id)?.delegationNotice?.()

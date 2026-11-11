@@ -3281,7 +3281,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await answer('allow')
     const r = await call
     if (!r.ok) throw new Error(r.error)
-    const notices = () => told().filter((t) => t.includes('is waiting on an approval in that turn'))
+    const notices = () => told().filter((t) => t.includes('is waiting on an approval.'))
     await eventually(() => notices().length === 1)
     expect(notices()[0]).toContain(`sourceSessionId: ${r.sessionId}`)
     const status = await agent(r.sessionId, 'status')

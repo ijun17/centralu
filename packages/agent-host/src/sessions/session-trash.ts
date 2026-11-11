@@ -419,9 +419,6 @@ export class SessionTrash {
     this.host.restartPolicy.appsRestartAfterTurn.delete(sessionId)
     // What was kept of its turns for a hub that followed it (#1604)
     this.host.children.forgetTurns(sessionId)
-    // The same for a delegated turn's link (#676), either way
-    this.host.children.releaseTurn(sessionId)
-    for (const [child, owner] of [...this.host.children.turnOwners]) if (owner.callerId === sessionId) this.host.children.releaseTurn(child)
     this.host.forgetCommits(sessionId)
     this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)

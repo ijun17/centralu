@@ -307,9 +307,9 @@ export class SessionEvents {
       this.host.mailRequestTurnEnded(e.sessionId)
       this.host.reports.turnEndedAtRest(e.sessionId, !!owned?.cut)
     }
-    // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
+    // A card goes to the givers of the session's open work too (#676, docs/plans/mailbox.md §10.6.4); one that is gone takes back a notice not given yet
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
-    if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)
+    if ((endedTurn || e.type === 'question_resolved' || e.type === 'approval_resolved') && e.sessionId) this.host.cards.cardsEnded(e.sessionId)
     // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
     if (endedTurn && e.sessionId) this.endHubAsk(e.sessionId)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
@@ -680,7 +680,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; task?: MailInput['task']; id?: string },
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; shown?: MailInput['shown']; id?: string },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -723,13 +723,14 @@ export class SessionEvents {
      */
     if (input.skipLine?.()) return
     // After the tool took it, so neither is about a delivery that did not happen; before the answer it starts. A delegated task shows as its
-    // sender's message, as its direct send does (owner, #1948 option B); the line stays for the rest of the mail
-    const shown = !input.quiet && input.task !== undefined && this.showSent(sessionId, input.task)
-    if (!shown || !input.task?.alone) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
+    // sender's message, as its direct send does (owner, #1948 option B), and a card's notice as from its session, as before mail (§10.6.4); the line
+    // stays for the rest of the mail
+    const shown = !input.quiet && input.shown !== undefined && this.showSent(sessionId, input.shown)
+    if (!shown || !input.shown?.alone) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
   }
 
   /**
-   * A delegated task the mailbox gave, written in the receiver's conversation as its sender's message (`deliverMail`): stored and shown, never
+   * A delegated task or a card's notice the mailbox gave, written in the receiver's conversation as its sender's message (`deliverMail`): stored and shown, never
    * sent to the tool, which read the mail frame. `mail`: no turn bookkeeping reads it as an input of its own (`ChildOwnership.held`). False when the
    * sender is not here to be named: the line says it then
    */
