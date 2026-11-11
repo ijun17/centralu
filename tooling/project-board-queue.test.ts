@@ -218,6 +218,9 @@ describe('what the merge queue decides for one poll', () => {
     // The report job alone failing (nothing else did) is its own failure, named: the run is not read as a shard's
     expect(jobFailure(noReport)).toMatchObject({ gather: true, step: REPORT_STEP })
     expect(classifyRun(failedRun, [noReport])).toMatchObject({ real: true, cause: 'test', step: REPORT_STEP, job: { name: 'e2e report' } })
+    // A run made before the step had its name (`Run actions/upload-artifact@…`, still on a batch that started before this landed) is read as before this change: the commit's (a test failure), since an upload by its action's own name is not told from a check on the commit
+    const oldReport = { ...noReport, steps: noReport.steps.map((s) => (s.name === REPORT_STEP ? { ...s, name: 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' } : s)) }
+    expect(classifyRun(failedRun, [setupFailed('e2e (webkit 1/5)'), oldReport])).toMatchObject({ real: true, cause: 'test', job: { name: 'e2e report' }, step: 'Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9' })
     // A test that failed in one shard left a report, and stays the commit's whatever else the run lost; a report job that failed in its own merge does too
     expect(classifyRun(failedRun, [setupFailed('e2e (webkit 1/5)'), job('e2e (webkit 2/5)', 'failure', testsFailed), noReport])).toMatchObject({ real: true, cause: 'test', job: { name: 'e2e (webkit 2/5)' } })
     const mergeFailed = job('e2e report', 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Merge the shard reports, per engine', conclusion: 'failure' }, { name: REPORT_STEP, conclusion: 'skipped' }] })
