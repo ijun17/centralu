@@ -1945,12 +1945,13 @@ each session still in a turn. One, because `report_marks` keeps one row per sess
 the running turn is the work of (its `mail_turns` row), as that build's own mark named the caller whose work started the turn, so its report of that
 turn's end goes to the one it was for; when the turn is no session's task (the person's, the CLI's own), the sender of the newest open task, the last
 instruction the turn took in. The other senders' tasks are settled by that build with no report. A session at rest at a rollback has its open tasks
-settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (the owner, #1948): beta.57's shape
+settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (#1948, 2026-11-11): beta.57's shape
 cannot change, and a rollback is rare.
 
 **Open points, accepted.** A seat that cannot read mail hears of a session deleted (`gone`) or of a turn lost at a restart (`lost`) only by the
 mailbox's notice, which it never reads, as on main. The cut line kept for the answer after a session's own background work (`cutsUntold`) is memory
-only: a restart before the settle answers loses it, and that answer does not say the update cut the turn.
+only: a restart before the settle answers loses it, and that answer does not say the update cut the turn. A relay held for a
+mail-less seat's next message (`tellSession`) is memory only too: a host swap loses it and the stored report stays undelivered, as on main.
 
 **Linked machines** keep their copy (`LinkedReports`, `RemoteAgents.reportGate`, `deliverReport`'s relayed report and its paused reports) until mail
 crosses links (step 6): that is the second definition of "a turn's end is reported", reported, not changed here.
