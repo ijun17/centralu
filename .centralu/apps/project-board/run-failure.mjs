@@ -129,7 +129,8 @@ export function onFlakyList(name, list = []) {
 /**
  * Why one job did not pass, or null when it did (or has not finished). `job`: `{ name, conclusion,
  * steps: [{ name, conclusion }], notes: [annotation messages], log?: the failing line of its log }`. Only `notes`, GitHub's
- * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step? }`;
+ * own words, say a timeout or a lost runner; the log's line only tells a failed install step's network error from a lockfile's. Answers `{ real, cause, step?, gather? }`;
+ * `gather` marks a failure at a step that only gathers the shards' output (`GATHER_STEPS`): it says nothing of its own, and `classifyRun` reads it only when no other job failed.
  * `cause` is `test` (a step failed), `no-step` (failed outside any step it reports), `timeout` (with the `step` the limit ended, and `inSetup` when that step set the job up, #1503),
  * `runner`, `setup` (its first failed step set the job up, #1435), `storage` (its first failed step only stored results), `flaky` or `cancelled`.
  */

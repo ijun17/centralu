@@ -104,9 +104,10 @@ const exitOf = async (child: OsChild) => {
 }
 
 /**
- * Ends waiters a case is done with, by their own handles. `stop` reads the process table for each running one and sweeps what each
- * left: a PowerShell per read on Windows without the host's warm reader, and these programs started nothing. On a Windows machine
- * loaded with busy processes those four stops took 15 to 21 s together (9 runs), past the signals case's 15 s limit (#2197, #1773).
+ * Ends waiters a case is done with, by their own handles. `stop` reads the process table (the warm reader, as `real.test.ts` sets up) and
+ * sweeps what the program left, and on Windows every waiter has one child (probed: 4 children for 4 waiters; most likely `conhost.exe`, which
+ * is inferred, not checked), so each stop took 2.6 to 5.5 s under load. On a Windows machine loaded with busy processes the four stops took
+ * 15 to 21 s together (9 runs), past the signals case's 15 s limit (#2197, #1773). Killing each by its handle reads nothing and sweeps nothing.
  */
 const endWaiters = async (children: readonly OsChild[]) => {
   for (const child of children) {
