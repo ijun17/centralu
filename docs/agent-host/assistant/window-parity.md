@@ -188,7 +188,7 @@ window's channel), grouped, and for each group one of three states.
 
 The same methods are classified once more for a caller that is neither the window nor the Assistant (#1405): a
 script or tool holding the limited credential runs the everyday ones and is refused the rest
-(`transport/method-rights.ts`; the classes and the rule in [security-boundaries/credentials.md](../../security-boundaries/credentials.md)). Everything this table cards in every preset is `asks` there.
+(`transport/method-rights.ts`; the classes and the rule in [security-boundaries/credentials.md](../../security-boundaries/credentials.md), "Who holds full power"). Everything this table cards in every preset is `asks` there.
 
 The linked machines came first (#1238), then the preferences and the session archive (#1309) and the notification switches (#1313).
 The third slice is trust, as the owner asked (2026-10-20): project trust first (`list_projects`, `set_project_trust`),

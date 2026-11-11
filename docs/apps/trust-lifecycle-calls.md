@@ -79,12 +79,12 @@ enabled, or whose `server` or `uses` changed since, [handing-over.md](handing-ov
 ## One call path
 
 ```
-view (iframe) ─ apps.invoke ──────────────────────────┐
-session agent ─ app-<id> proxy (Claude: in-process;   │
-                Codex: stdio bridge) ─────────────────┼─▶ ExternalApps.call ─▶ app process
-another app ─── broker on fd 3 (call_app) ─────────────┘          │
-                                                                  ├─ run record (app_runs)
-                                                                  └─ "changed" to open views (views.md)
+view (iframe) ─ apps.invoke ──────────────────────────────────┐
+session agent ─ app-<id> proxy (Claude: in-process;           │
+                Codex: stdio bridge) ─────────────────────────┼─▶ ExternalApps.call ─▶ app process
+another app ─── broker on fd 3 (call_app, broker-and-rpcs.md) ─┘          │
+                                                                          ├─ run record (app_runs)
+                                                                          └─ "changed" to open views (views.md)
 ```
 
 Every call to an app tool, whoever makes it, goes through `ExternalApps.call` (`runtime.ts`).

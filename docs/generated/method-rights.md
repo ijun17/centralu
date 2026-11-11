@@ -1,7 +1,7 @@
 # What the limited credential may call
 
 Generated from `packages/agent-host/src/transport/method-rights.ts` by `pnpm docs:rights`; do not edit by hand.
-The rule behind each class is in [security-boundaries/credentials.md](../security-boundaries/credentials.md) (#1405).
+The rule behind each class is in [security-boundaries/credentials.md](../security-boundaries/credentials.md), "Who holds full power" (#1405).
 The token (a window, or a hub linked to this host) calls every method.
 
 ## everyday
