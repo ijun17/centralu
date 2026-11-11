@@ -4,10 +4,10 @@ import type { IfBusy } from '../adapters/contract.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { APP_GUIDE_TOPICS } from './app-guide.js'
 
-/** What a busy session can be asked to do instead (#677): the contract's IfBusy, as the one schema every tool takes */
 /** read_session's `tools` (#1480): three words, and the `true`/`false` it was before, which stay since the server strips what a schema does not list */
 const READ_TOOLS = z.union([z.enum(['none', 'titles', 'full']), z.boolean()])
-const IF_BUSY = z.enum(['note', 'queue', 'fork', 'fork_read'] as const satisfies readonly IfBusy[])
+/** A fork instead of mail for a session that cannot take a send now: the contract's IfBusy, as the one schema every tool takes */
+const IF_BUSY = z.enum(['fork', 'fork_read'] as const satisfies readonly IfBusy[])
 // …and every one of them: a value the contract adds and this schema lacks would be refused before the manager saw it
 const _ifBusyComplete: IfBusy extends z.infer<typeof IF_BUSY> ? true : never = true
 
@@ -80,7 +80,7 @@ export const CENTRALU_TOOLS = [
         .boolean()
         .optional()
         .describe('Whether to notify me when that session finishes the work. Set true if the person is waiting for the result.'),
-      // #677: a session busy with a turn that is not yours returns the choices, which name this argument; no words here
+      // A fork instead of mail to a busy session; the mailed answer names it, so no words here
       ifBusy: IF_BUSY.optional(),
     }),
   },
@@ -700,18 +700,15 @@ export const DELEGATE_TOOLS = [
   {
     name: 'ask_project',
     description: "Asks another project's existing session; returns its answer. For another project's apps, use find_apps.",
-    /*
-     * ifBusy (#677): a busy session returns its choices, and that answer names this argument and its values ("note",
-     * "queue"), so it needs no words or enum here: this definition rides in every ordinary Claude request (the
-     * reader's 2,300 there), and the runner refuses any other value.
-     */
-    schema: z.object({ project: z.string(), session: z.string().optional(), task: z.string().optional(), ifBusy: z.string().optional() }),
+    // A busy session is sent the task as mail (docs/plans/mailbox.md §10.6.2): no `ifBusy`, whose note and queue it replaced
+    schema: z.object({ project: z.string(), session: z.string().optional(), task: z.string().optional() }),
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /**
  * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host/delegation/start-agent.md.
- * 400 until #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values).
+ * 400 until #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values), which #1948 step 2
+ * took out again (a busy session is sent the task as mail).
  */
 export const DELEGATE_BUDGET_CHARS = 450
 
@@ -777,7 +774,7 @@ export const AGENT_TOOLS = [
       action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer', 'list']),
       text: z.string().optional(),
       card: z.string().optional(),
-      // #677: send to a busy session returns its choices, which name this argument
+      // A fork instead of mail to a busy session; the mailed answer names it
       ifBusy: IF_BUSY.optional(),
     }),
     deferred: true,
@@ -1028,8 +1025,8 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'Use send_to_session to assign work — the target session\'s approval settings apply as they are,',
   'so a risky action will make that session ask the person for approval.',
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
-  // #1233: work handed out is heard of when it ends; more words into it do not undo that
-  "create_session's firstMessage reports back the same way unless reportBack is false; a note into a running turn never cancels a report.",
+  // #1233: work handed out is heard of when it ends; a send to a busy session is work of its own (docs/plans/mailbox.md §10.6.2)
+  "create_session's firstMessage reports back the same way unless reportBack is false; a send to a busy session waits, and is reported on its own.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
   // #853: the Assistant's light work outside any project went to its CLI's own subagent, which Centralu never shows
@@ -1129,8 +1126,7 @@ export const TOOL_ARGS = {
    * and answers an unknown one with the list (appGuide): on a path no schema checked, that reading is the answer
    */
   app_guide: CENTRALU_TOOL_ARGS.app_guide.extend({ topic: z.string().optional() }),
-  // ifBusy is a bare string in the definition (#677: the busy answer names its values); the runner takes these two
-  ask_project: DELEGATE_TOOLS[0].schema.extend({ ifBusy: z.enum(['note', 'queue'] as const satisfies readonly IfBusy[]).optional() }),
+  ...schemasOf(DELEGATE_TOOLS),
   ...schemasOf(APP_ACCESS_TOOLS),
   ...schemasOf(MAIL_TOOLS),
   ...schemasOf(COMPACT_TOOLS),

@@ -32,11 +32,9 @@ beforeEach(() => {
     children: new ChildOwnership(store),
     handles: new Map([['s', {} as SessionHandle]]),
     backgroundTasksKey: (id) => `background_tasks:${id}`,
-    inputsHeld: () => false,
     lettingGo: false,
     onEvent: () => {},
     rememberBackgroundTasks: () => {},
-    scheduleDrain: () => {},
     restartSession: async (id, cause) => {
       restarts.push({ id, ...(cause ? { cause } : {}) })
       return { session: meta.get(id)!, resumed: true }

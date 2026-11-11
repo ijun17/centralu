@@ -13,6 +13,19 @@ import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote
  * link is in links.test.ts.
  */
 let store: Store
+/** Each host made here, and whether it is leaving (`DelegationHost.closing`) */
+let hosts: { leaving: boolean }[] = []
+/** The hosts so far are leaving, as a real host is before its store closes: what they still had to run reads nothing */
+const leave = () => {
+  for (const h of hosts) h.leaving = true
+  hosts = []
+}
+/** A new host's life, for its `closing` */
+const life = () => {
+  const h = { leaving: false }
+  hosts.push(h)
+  return h
+}
 let children: ChildOwnership
 let state: string
 /** The child's background work as its machine last relayed it (`LinkedReports.tasksOf`) */
@@ -39,6 +52,7 @@ const child = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'B
 const task = { id: 't1', description: 'build', status: 'running' } as never
 
 function agents(extra: Record<string, unknown> = {}): RemoteAgents {
+  const host_ = life()
   const reader = {
     read: async () => ({ ok: true, state, lines: [] }),
     list: async (): Promise<OrchestratedSession[]> => [{ sessionId: child.sessionId, name: 'Child', project: 'app', state, tool: 'claude', preview: '', machine: 'Box', ...(cut ? { interruption: cut as never } : {}) }],
@@ -58,6 +72,9 @@ function agents(extra: Record<string, unknown> = {}): RemoteAgents {
     settleLinkedTurn: (id: string) => settled.push(id),
     linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
     tellSession: async (_to: string, text: string) => void told.push(text),
+    get closing() {
+      return host_.leaving
+    },
     ...extra,
   } as unknown as RemoteAgentsHost
   return new RemoteAgents(host, { agentCeilingError: () => null, reservePlace: () => ({ release: () => {} }) })
@@ -78,7 +95,11 @@ beforeEach(() => {
   lastAtRest = undefined
   continues = true
 })
-afterEach(() => store.close())
+// The host is leaving before its store closes, as a real host's dispose has it: what was still to run reads nothing
+afterEach(() => {
+  leave()
+  store.close()
+})
 
 describe('what is owed of a child on a linked machine, across a hub restart (#1038)', () => {
   const stored = () => JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]') as { sessionId: string; owed?: { paused?: unknown[] } }[]
@@ -207,6 +228,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
         return { ok: true }
       },
     } as unknown as LinkedSessions
+    const host_ = life()
     const host = {
       children,
       store,
@@ -215,6 +237,9 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       settleLinkedTurn: (id: string) => settled.push(id),
       linkedReports: { ownTasksRunning: () => [], tasksOf: () => linkedTasks },
       tellSession: async (_to: string, text: string) => void told.push(text),
+      get closing() {
+        return host_.leaving
+      },
       autoBoundaryOpen: () => false,
       // The caller's project is trusted here
       trustGate: () => null,
@@ -241,7 +266,8 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
     expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
     expect(await act(ra, 'answer', { card: 'r1.any', text: 'yes' })).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
-    expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    // Held for the child to be at rest, not put into their turn
+    expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: true, state: 'queued' })
     expect(answered).toEqual([])
     expect(sentTexts).toEqual([])
     // Nothing of the person's turn is owed to the caller, who is told its work is no longer followed
@@ -377,7 +403,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     state = 'idle'
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
     ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-    expect(await act(ra, 'send', { text: 'do X' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(await act(ra, 'send', { text: 'do X' })).toMatchObject({ ok: true, state: 'queued' })
     expect(sentTexts).toEqual([])
   })
 
@@ -480,7 +506,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       const ra = await afterFollowUp()
       opens(ra)
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: true, state: 'queued' })
       expect(sentTexts).toHaveLength(2)
     })
 
@@ -489,7 +515,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 5, text: 'my own thing', from: PERSON })
       opens(ra, { seq: 5, from: { ...PERSON, name: 'person' } })
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: true, state: 'queued' })
       expect(sentTexts).toHaveLength(2)
     })
 
@@ -683,15 +709,15 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
   })
 
-  it('does not say the person may be using a turn it saw no message begin', async () => {
+  it('holds a send for a turn it saw no message begin', async () => {
     const ra = following()
     state = 'idle'
     // The send goes, but no record of it comes back as this hub's instruction: the hub did not see the turn begin
     await act(ra, 'send', { text: 'do X' })
     state = 'working'
     const r = await act(ra, 'send', { text: 'and this' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('this hub did not see begin') })
-    expect((r as { error: string }).error).not.toContain('person may be using')
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
+    expect(sentTexts).not.toContain('and this')
   })
 
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {
@@ -852,6 +878,7 @@ describe('a child whose turn an update of its machine cut (#1618)', () => {
     await eventually(() => dropped().length === 1)
 
     // A host from before #1618 lists no turn as it stops: the drop is told at once, as before (a fresh hub and record)
+    leave()
     store.close()
     store = new Store()
     children = new ChildOwnership(store)

@@ -191,7 +191,7 @@ the `NOT_REACHABLE || NOT_CONNECTED_PHRASE` test.
    The interrupted turn's end calls `scheduleDrain`, so a held note can go to a child being deleted. Narrow (`drain`
    re-checks the record), suspected, not yet shown by a test. **Shown, and fixed in #2109** (two tests: a running child, and
    one at rest whose turn had just ended), with one helper for `stop` and `delete`. A note held after the deletion
-   started is not covered: #2114.
+   started is not covered: #2114, **fixed in #1948 step 2** (a deleting marker, and the stop notice for a note held for a child that is gone).
 3. "started from here" against "started here" (`agent-session-actions.ts:123`, pinned by `delegation-flow.test.ts:436`).
    This one is wording the person reads, so it was a proposal (§6). **Decided (owner): one phrase, "started from here"
    (#2111)**: it is true of a child on another machine too, and `agent_session list` already says it.

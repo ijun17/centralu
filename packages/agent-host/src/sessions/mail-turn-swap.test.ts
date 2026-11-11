@@ -247,11 +247,14 @@ describe('a rollback to an earlier build, then forward', () => {
     expect(b.m.hooks.waitingOn!(parent, child)).toBe(0)
     const before = read().between('centralu', addressOf(parent), 'report').length
 
-    // The owner sends more work, and the session ends its turn: the work's end is reported, once, and as an end, not as the same pause again
-    const again = b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })
+    // The owner sends more work, and the session ends its turn: the work's end is reported, once, and as an end, not as the same pause again.
+    // Mail that wakes the session (the helper's report) waits for it, so the work goes as mail too, and the delivery gives it both in one turn
+    expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })).toMatchObject({ ok: true, state: 'mailed' })
+    await deliverTo(wireHostMail(b.mgr, store, { now: () => Date.now() + 60_000 }), addressOf(child))
     await until(() => (b.claude.handles.get(child)?.sent.length ?? 0) >= 1)
+    expect(b.claude.handles.get(child)!.sent.at(-1)).toContain('and then?')
     b.claude.handles.get(child)!.answer('all done')
-    expect(await again).toMatchObject({ ok: true })
+    await until(() => read().between('centralu', addressOf(parent), 'report').length > before)
     const after = read().between('centralu', addressOf(parent), 'report').slice(before)
     expect(after.map((m) => m.facts.outcome)).toEqual(['finished'])
     expect(read().between('centralu', addressOf(parent), 'report').filter((m) => m.facts.outcome === 'waiting')).toHaveLength(1)

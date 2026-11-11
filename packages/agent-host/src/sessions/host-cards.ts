@@ -40,7 +40,7 @@ export type HostAskAnswer = 'allow' | 'always' | 'always_project' | 'deny' | nul
  */
 export type HostCardsHost = {
   applyStateHint: (e: NormalizedEvent, m: SessionInfo) => void
-  /** A state the host states itself: applied, stored, broadcast, and a queued request drained if it is now at rest */
+  /** A state the host states itself: applied, stored, broadcast, and the mail delivery told (it may take mail now) */
   settleState: (m: SessionInfo, change: Extract<NormalizedEvent, { type: 'state_change' }>) => void
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   readonly emit: (e: NormalizedEvent) => void
@@ -254,7 +254,7 @@ export class HostCards {
   restAfterCard(ask: HostAsk): void {
     const m = this.host.meta.get(ask.sessionId)
     if (!ask.restState || m?.pendingApproval?.requestId !== ask.requestId) return
-    // Through the manager's settleState: a request queued while the card stood goes in once it closes (#677)
+    // Through the manager's settleState: mail that waited while the card stood goes in once it closes
     this.host.settleState(m, { type: 'state_change', sessionId: ask.sessionId, state: ask.restState })
   }
 

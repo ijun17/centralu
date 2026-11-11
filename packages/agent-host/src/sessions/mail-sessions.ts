@@ -1,4 +1,5 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { BusyAnswer } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
@@ -12,7 +13,8 @@ import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { PersonReportDraft } from './child-ownership.js'
 import type { ChildReports } from './child-reports.js'
 import type { DelegationHost } from './delegation-flow.js'
-import type { DelegationCall, DelegationTarget } from './delegation-host.js'
+import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
+import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
 import { seatHas } from './tool-seats.js'
@@ -41,8 +43,14 @@ export type MailHooks = {
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs): Promise<{ text: string; isError?: boolean }>
+  /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
+  linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); returns its id */
+  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string): string
+  /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
+  withdrawTasks?(callerId: string, childId: string): number
   /** How many threads a session handed on in the work it does for another are still going (§6) */
   waitingOn?(ownerId: string, childId: string): number
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
@@ -72,7 +80,7 @@ export type MailHooks = {
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
  * with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
+export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
   /** What a session's tool says and what goes into its conversation: the mail's delivery and its notes */
   readonly events: SessionEvents
   /** What a session is told of work it gave: the report path the mailbox takes over, and the words a stop notice quotes */
@@ -81,6 +89,10 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'c
   readonly tools: SessionTools
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
+  /** Whether the session's tool takes input into the turn it is running (`SessionEventsHost.joinsRunningTurn`) */
+  joinsRunningTurn(sessionId: string): boolean
+  /** A compact Centralu sent and that is not over, during which no mail joins a turn */
+  readonly selfCompaction: Pick<SelfCompaction, 'compacts'>
 }
 
 /**
@@ -102,6 +114,19 @@ export class MailSessionsView {
   /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
   oldOwes(ownerId: string, childId: string): boolean {
     return this.host.children.oldOwes(ownerId, childId)
+  }
+
+  /**
+   * A child this host started on a linked machine is gone, with notes its caller had the hub hold for it (#2114): they were not given, and the
+   * stop notice tells the caller so, as of any task a gone session leaves. Never throws: the child is gone already
+   */
+  linkedChildGone(childId: string, callerId: string, notes: readonly string[]): void {
+    if (this.host.closing) return
+    try {
+      this.hooks?.linkedGone?.(childId, callerId, notes)
+    } catch (e) {
+      console.error(`[mail] ${childId.slice(0, 8)}: the notes held for it could not be told to ${callerId.slice(0, 8)} (${errorMessage(e)})`)
+    }
   }
 
   /** Tells the mailbox a session stopped without answering (§4.1). Never throws: a stop is already over, and a notice must not undo it */
@@ -178,7 +203,7 @@ export class MailSessionsView {
           if (other) this.host.children.clearMailTurn(id, owner)
         }
         try {
-          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.mailReceiver(id).kind === 'ready', wanted: () => input.wanted?.() ?? true }, (e) => {
+          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, (e) => {
             unmark()
             late?.(e)
           })
@@ -228,15 +253,49 @@ export class MailSessionsView {
     // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
     // The session's own background work does not hold mail back (`cardOrTurn`): the message starts its next turn
     const busy = cardOrTurn(m)
+    const live = this.host.handles.has(id)
+    const quiet = live && this.host.adapters.get(m.tool)?.quietInput === true
+    // In a turn its tool takes input into, mail joins that turn (docs/plans/mailbox.md §10.6.2); not while a compact Centralu sent is not over
+    if (busy === 'turn' && live && this.host.joinsRunningTurn(id) && !this.host.selfCompaction.compacts(id)) return { kind: 'ready', live, quiet, auto: m.permissionPreset === 'auto', joins: true }
     if (busy !== null) return { kind: 'busy', why: busy === 'turn' ? 'turn' : 'card' }
-    switch (m.state) {
-      case 'limited':
-        return { kind: 'busy', why: 'limited' }
-      default: {
-        const live = this.host.handles.has(id)
-        return { kind: 'ready', live, quiet: live && this.host.adapters.get(m.tool)?.quietInput === true, auto: m.permissionPreset === 'auto' }
-      }
+    if (m.state === 'limited') return { kind: 'busy', why: 'limited' }
+    return { kind: 'ready', live, quiet, auto: m.permissionPreset === 'auto' }
+  }
+
+  /** The session can be given a turn of its own now: at rest with no card or limit standing, in a host that is not leaving (asleep, it is woken) */
+  takesTurn(id: string): boolean {
+    return this.takesAsPlanned(id, false)
+  }
+
+  /**
+   * Whether a send from another session reaches it now as a turn it starts (docs/plans/mailbox.md §10.6.2): it takes a turn (`takesTurn`), no run another
+   * session waits on is going there, and no mail that wakes it is waiting, which goes first. Otherwise the send goes as mail (`mailTask`)
+   */
+  takesSendNow(id: string): boolean {
+    const run = this.host.agentRuns.get(id)
+    return this.takesTurn(id) && !(run && !run.finished) && this.hooks?.waiting?.(id) !== true
+  }
+
+  /** A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2) */
+  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
+    const hooks = this.hooks
+    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
+    try {
+      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text) }
+    } catch (e) {
+      return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
     }
+  }
+
+  /** The caller's tasks to the session that are not delivered yet, withdrawn (`agent_session stop`); how many */
+  withdrawTasks(callerId: string, sessionId: string): number {
+    return this.hooks?.withdrawTasks?.(callerId, sessionId) ?? 0
+  }
+
+  /** The session still takes mail as the delivery planned it: woken at rest, or joining its turn. Otherwise the mail waits (`MailNotAtRest`) and is planned again */
+  private takesAsPlanned(id: string, joins: boolean): boolean {
+    const r = this.mailReceiver(id)
+    return r.kind === 'ready' && (r.joins === true) === joins
   }
 
   /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.stoppedTurnAnswer`, at most 600 characters), or null when it said none */

@@ -21,7 +21,7 @@ describe('a report mark with no task (§9.5 step 1)', () => {
     const w = setup()
     w.store.children.setReportMark('w', 'a')
     w.store.children.setReportMark('b', 'a')
-    expect(w.take()).toEqual({ adopted: 2, settled: 0 })
+    expect(w.take()).toEqual({ queued: 0, adopted: 2, settled: 0 })
     const kid = w.store.mailbox.newestTask(A, W)!
     expect(kid).toMatchObject({ kind: 'task', body: ADOPTED_TASK, origin: 'start_agent' })
     expect(w.store.mailbox.newestTask(A, B)).toMatchObject({ origin: 'send_to_session' })
@@ -45,7 +45,7 @@ describe('a task the old paths no longer owe (§9.5 step 2)', () => {
     const w = setup()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     // The older build reported and cleared the mark: nothing owes it any more
-    expect(w.take()).toEqual({ adopted: 0, settled: 1 })
+    expect(w.take()).toEqual({ queued: 0, adopted: 0, settled: 1 })
     expect(w.rowOf(task.id, W).settled).toBe('reported')
     expect(w.store.mailbox.reportsOn(task.id)).toEqual([])
   })
@@ -69,7 +69,10 @@ describe('a task the old paths no longer owe (§9.5 step 2)', () => {
 
     const queued = setup()
     const t6 = queued.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    queued.store.children.addQueuedRequest({ id: 'q1', sessionId: 'w', callerSessionId: 'a', via: 'agent_session', text: 'more', queuedAt: queued.clock.t })
+    // A row an older build queued (this build writes none): taken over as a task not delivered yet
+    queued.db
+      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at, opened_by_auto) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run('q1', 'w', 'a', 'agent_session', 'more', queued.clock.t, 0)
     queued.take()
     expect(queued.rowOf(t6.id, W).settled).toBeNull()
 
@@ -92,6 +95,6 @@ describe('a task the old paths no longer owe (§9.5 step 2)', () => {
     expect(w.take().adopted).toBe(1)
     // The old path reported and cleared the mark; the host stopped before the row was settled: the next ready settles it
     w.store.children.clearReportMark('w')
-    expect(w.take()).toEqual({ adopted: 0, settled: 1 })
+    expect(w.take()).toEqual({ queued: 0, adopted: 0, settled: 1 })
   })
 })

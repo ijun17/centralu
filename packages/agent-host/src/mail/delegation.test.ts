@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder, type ReportDraft } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, reportRecorder, turnRecorder, type ReportDraft } from './delegation.js'
 import { A, B, ORC, W, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
@@ -266,5 +266,22 @@ describe('the person’s work (§9.6)', () => {
     expect(w.store.mailbox.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['paused', 'finished'])
     // Nothing more to report
     expect(report('w', { outcome: 'finished', body: 'again', then: 'review' })).toBe(false)
+  })
+})
+
+describe('notes the hub held for a child on a linked machine that is gone (#2114)', () => {
+  it('are the tasks they were, never delivered, released gone: the caller is told once, in the stop notice, naming each', () => {
+    const w = turnWorld()
+    w.sessions.set('r', { projectId: null, name: 'Child on Box', canReadMail: false })
+    linkedGoneRecorder(w.mail, w.store.mailbox)('r', 'a', ['use staging', 'and the docs'])
+    const R = w.mail.sessionAddress('r')
+    const told = w.records.pendingFor(A, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
+    expect(told).toHaveLength(1)
+    const ids = (told[0]!.message.facts.unanswered ?? []).map((u) => u.id)
+    expect(ids.map((id) => [w.message(id).body, w.rowOf(id, R).deliveredAt, w.rowOf(id, R).releasedWhy])).toEqual([
+      ['use staging', null, 'gone'],
+      ['and the docs', null, 'gone'],
+    ])
+    expect(told[0]!.message.body).toContain('Child on Box')
   })
 })

@@ -31,20 +31,17 @@ and `normal` it has these controls ([agent-host/delegation/ask-project.md](../ag
   that means): the selected session there reads none of its settings or instruction files and runs none
   of its apps, but works on its files under the person's own permission settings. A remembered
   "always" for the pair still skips the card, also after the target loses trust. Trust and depth are read
-  again once the card is answered, and again before a queued ask goes in.
+  again once the card is answered.
 - **Existing sessions only** (#614). Selection by name or id is confined to ordinary sessions in the
   named target project. Without a selector, exactly one is required; ambiguity lists names, states
   and last activity, and no session refuses until the person opens one. Builders, app agents and
   assistants cannot be targets. No preset permits cross-project child creation. Old ask-created
-  sessions remain ordinary sessions without cross-project ownership. A session busy with a turn that
-  is not the caller's returns the choices and receives nothing (#677): a note into that turn only
-  from an `auto` caller whose target takes tracked mid-turn input, or a queue for a new turn; never a
-  fork, which would create a session in another project. Another delegation's watcher cannot be
+  sessions remain ordinary sessions without cross-project ownership. A session that cannot take it now
+  is sent the task as mail (#1948 step 2, [approvals.md](approvals.md)): a turn of its own once it is free, reported to
+  the caller; never a fork, which would create a session in another project. Another delegation's watcher cannot be
   overwritten. Delivered input is visible in conversation with the
   asking session's `from`; waits follow its completion receipt, including queued turns. Caller Stop
-  reaches a target only during an active wait. If the task joined the person's running turn, caller
-  Stop/cancellation ends only that caller's wait, leaving the turn, receipts and other observers
-  running. A bounded call that already returned does not confer a right to stop the target.
+  reaches a target only during an active wait. A bounded call that already returned does not confer a right to stop the target.
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
   to the caller only if it exists inside the target project's folder after resolving symlinks

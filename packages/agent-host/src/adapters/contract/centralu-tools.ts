@@ -377,25 +377,15 @@ export type RoutedCard = {
 } & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail; answerable: boolean })
 
 /**
- * A request to a session busy with a turn that is not the requester's (#677): what the requester may do instead. The
- * requester chooses, by calling again with `ifBusy`; nothing was sent.
- *
- *   note       add it to the running turn as a mid-turn note (#594/#606/#653): only an `auto` requester, on a CLI that
- *              takes input mid-turn; the turn and its answer stay its owner's. The requester hears the turn's end only
- *              when it asks for a report (`reportBack`, #1233) and nobody else is owed it
- *   queue      hold it and deliver it as a new turn when the running one ends; the requester is told when that ends
- *   fork       a sub-session started from a copy of the session's conversation now, linked to the requester, in a
- *              worktree of its own (`fork_read`: read-only work, in the session's folder, under at most `safe`)
+ * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): it goes as a mail task, which waits until the
+ * session is free and reaches it as a turn of its own (a task joins no running turn until #1948 step 3). `fork` asks for something else instead: a sub-session started from a
+ * copy of the session's conversation now, linked to the requester, in a worktree of its own (`fork_read`: read-only
+ * work, in the session's folder, under at most `safe`)
  */
-export type IfBusy = 'note' | 'queue' | 'fork' | 'fork_read'
-export type BusyChoice = { choice: 'note' | 'queue' | 'fork'; available: boolean; why?: string }
+export type IfBusy = 'fork' | 'fork_read'
 export type BusyAnswer =
-  /** `ahead` and `progress` (#1186): how many requests are queued there before one would be, and where its turn is */
-  | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[]; ahead?: number; progress?: TurnProgress }
-  /** `lowMemory` (#686): queued instead of the fork asked for, since memory was low; what was read */
-  | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number; lowMemory?: string }
-  /** `reportTaken` (#1233): a report was asked for, but another session is owed that turn's end, so it stays theirs */
-  | { state: 'noted'; sessionId: string; sessionName: string; reportTaken?: true }
+  /** `lowMemory` (#686): mailed instead of the fork asked for, since memory was low; what was read */
+  | { state: 'mailed'; sessionId: string; sessionName: string; messageId: string; lowMemory?: string }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
 
 /**
@@ -445,7 +435,7 @@ export type AskProjectResult =
       sessionName: string
       cards: RoutedCard[]
     }
-  | ({ ok: true; project: string } & Extract<BusyAnswer, { state: 'busy' | 'queued' }>)
+  | ({ ok: true; project: string } & Extract<BusyAnswer, { state: 'mailed' }>)
   | { ok: false; error: string }
 
 /**
@@ -470,8 +460,8 @@ export type ChildRunResult =
       sessionName: string
       tool: string
       notice?: string
-      /** Which busy choice ran (#677): a note into the running turn, or a fork of the session (`sessionId` is the fork) */
-      via?: 'note' | 'fork'
+      /** A fork of the busy session ran (`IfBusy`): `sessionId` is the fork */
+      via?: 'fork'
       /** For a fork: the session it was copied from */
       forkedFrom?: string
     } & (
@@ -484,8 +474,9 @@ export type ChildRunResult =
       | { state: 'at_rest'; answer: string; sessionState: string; interruption?: Interruption; cleanUp?: boolean }
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
-      | { state: 'busy'; sessionState: string; choices: BusyChoice[] }
-      | { state: 'queued'; queueId: string; position: number; lowMemory?: string }
+      | { state: 'mailed'; messageId: string; lowMemory?: string }
+      /** A note held for a child on a linked machine until it is at rest (#1682): mail does not cross links yet */
+      | { state: 'queued'; queueId: string; position: number }
       | { state: 'stopped' }
       /**
        * No session yet (#673): the person has not answered the card; or, with `lowMemory`, the start is allowed and
@@ -542,7 +533,7 @@ export type AgentSessionOpts = {
   sessionId: string
   action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer'
   text?: string
-  /** send to a busy session (#677): what to do instead of returning the choices */
+  /** send to a busy session: a fork instead of mail (`IfBusy`) */
   ifBusy?: IfBusy
   /** answer (#676): which card, when more than one stands */
   card?: string
@@ -592,16 +583,15 @@ export type CentraluTools = {
    * default, because waking it up on every turn end would create a loop where they wake each
    * other, and would also double the turn cost.
    *
-   * A note (a send into a turn already running, #1233) never drops a report someone is owed, its own included:
-   * without `reportBack` it leaves the marks as they are; with it, it adds this Assistant's, unless another
-   * session is owed that turn's end (`reportTaken`). A new instruction to a session at rest without `reportBack`
-   * still replaces this Assistant's earlier request (#166).
+   * A session that cannot take it now (in a turn, on a card, at a limit) is sent it as a mail task (`busy.state` `mailed`,
+   * docs/plans/mailbox.md §10.6.2), whose end is reported as any task's, whatever `reportBack` says. A new instruction to a session at rest without
+   * `reportBack` still replaces this Assistant's earlier request (#166).
    */
   sendToSession(
     sessionId: string,
     text: string,
     reportBack?: boolean,
-    /** What to do when the session is busy with a turn that is not this seat's (#677); absent: the choices come back */
+    /** A fork instead of mail when the session cannot take it now */
     ifBusy?: IfBusy,
   ): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }>
   /**
@@ -709,7 +699,7 @@ export type CentraluTools = {
    * up to a bound (`ASK_WAIT_MS`): past it, the answer is "still working" and a call with no task waits again.
    * `signal` is the caller's tool call: aborted, the delegated turn is stopped too.
    */
-  askProject(opts: { project: string; session?: string; task?: string; ifBusy?: Exclude<IfBusy, 'fork' | 'fork_read'> }, signal?: AbortSignal): Promise<AskProjectResult>
+  askProject(opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
   /**
    * Starts another agent in the caller's own project (#561, start_agent): a visible session marked `askedBy` the
    * caller, under the caller's permission preset, behind the person's consent. Waits like askProject unless

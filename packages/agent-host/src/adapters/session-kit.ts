@@ -84,7 +84,7 @@ export function couldNotStop(sessionId: string, err: Error): NormalizedEvent {
 
 /**
  * A Stop of a running turn that has not taken effect, while the turn goes on (#1060). A notice, not an error: an
- * error moves the session to `error`, which ends the turn for the host (delegation waits settle, queued requests go
+ * error moves the session to `error`, which ends the turn for the host (delegation waits settle, mail that waited goes
  * in) and on screen, and the confirmation that may still come (`waiting_input`) is not a move `error` allows.
  */
 export function stopNotConfirmed(sessionId: string, text: string): NormalizedEvent {

@@ -17,7 +17,7 @@ original's things is in this table; the bullets below say how.
 | The original itself | | It stays, unless the window removes it as a last step (`removesOriginal`, the window's default since #1477). `handoff_session` never removes it |
 
 - **What a child's line in the note says**: its state, from what is owed. A session working or waiting on the person
-  (approval or question), one holding a request the original queued ([../delegation/delegated-turns.md](../delegation/delegated-turns.md#requests-to-a-busy-session-677)), one whose report to the original is not
+  (approval or question), one whose report to the original is not
   delivered yet, an `ask_project` answer the original never came back for (that tool tells nobody when it ends), and a
   start_agent request still open (its card still standing, #673, or already allowed and queued until memory frees up,
   [../delegation/child-workspace.md](../delegation/child-workspace.md#what-a-child-costs-the-machine-code-intelligence-and-the-memory-gate-686), #686) say so. A child with nothing owed (finished, and reported or read) is "finished; waiting for more work".
@@ -27,7 +27,7 @@ original's things is in this table; the bullets below say how.
   on could not list or archive it (#1475). So it moves whether the original goes or stays.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
   own row), the report mark (`report_marks`), the delegated turn's link (`delegated_turns`) and the delegation the
-  host holds for it (its key names the caller), the requests the original queued (`queued_requests`), and its standing
+  host holds for it (its key names the caller), and its standing
   start requests (`agent_start_requests`, whose stored request names its caller too). A standing card closes in the
   original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
   its end raises it again; an approval starts the child for the new session (the waiting setup reads the request's
@@ -98,8 +98,7 @@ original's things is in this table; the bullets below say how.
   So such a child (`MailboxRecords.carriesUpstream`: a task from the original to it, still open, whose cause is a **task** the original was given,
   still open; a report, notice or message that started the turn is never settled and does not count, as in `handedOnFrom`) keeps answering to the
   original: its report wakes the original, whose turn finishes the task as before. The note lists it as "stays with the previous session", and the
-  successor does not follow it; the original's notice names it too ("Still with this session, …"), also when nothing else moved. Requests the
-  original queued for it stay with the original (`moveChildren` moves a queued request only for a session that moves). A child with two open
+  successor does not follow it; the original's notice names it too ("Still with this session, …"), also when nothing else moved. A child with two open
   tasks, one caused upstream and one not, stays whole. Only local children are looked at: a child on a linked machine moves with its caller
   (`moveCaller`) before this is decided. An original that goes (`goes`) gives its tasks away with the rest, and the answer to the task given
   to it is not finished there either (a separate gap).
@@ -110,12 +109,11 @@ original's things is in this table; the bullets below say how.
 - **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
   commit, with no await in between. A crash before the commit leaves every link on the original, after it every
   link on the new session, so a host taking over after a swap or a restart reads one owner (`report_marks`,
-  `delegated_turns`, `queued_requests` and `agent_start_requests` are read at startup as before). If the store refuses,
+  `delegated_turns` and `agent_start_requests` are read at startup as before). If the store refuses,
   nothing moves and the note lists nothing. A delegation's end releases its turn by the delegation's owner at that
   time, not the one that started it.
 - **Where the state lives**: `ChildOwnership` (`sessions/child-ownership.ts`, #428) holds who owns a child's work:
-  report marks and paused reports, delegated turns, queued requests and the one being delivered, delegations and
-  observer notes, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
+  report marks and paused reports, delegated turns, delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads

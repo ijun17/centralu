@@ -8,7 +8,7 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -248,6 +248,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.stops.partyGone(addressOf(id)),
+    linkedGone: linkedGoneRecorder(service, store.mailbox),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) =>
       void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
@@ -263,6 +264,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     tool: (id, args) => tool.call(id, args),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
+    sendTask: taskSender(service),
+    withdrawTasks: taskWithdrawer(service, store.mailbox),
     waitingOn,
     answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)

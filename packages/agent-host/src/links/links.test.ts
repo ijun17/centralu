@@ -2638,8 +2638,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     }
     const start = (opts: Partial<Parameters<SessionManager['startAgent']>[1]> = {}) =>
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
-    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string, ifBusy?: 'note' | 'queue') =>
-      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) })
+    const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer', text?: string, card?: string) =>
+      hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) })
     const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.projectRegistry.listProjects()).find((p) => p.id === id)!.name
@@ -2959,11 +2959,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     // Its turn is open once it has said so: ended before that, its first words would come after its end
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'working on it…'))
     const note = 'use the staging data'
-    await eventually(async () => {
-      const refused = await agent(r.sessionId, 'send', note, undefined, 'note')
-      return !refused.ok && refused.error.includes('ifBusy "queue"')
-    })
-    expect(await agent(r.sessionId, 'send', note, undefined, 'queue')).toMatchObject({ ok: true, state: 'queued', position: 1 })
+    expect(await agent(r.sessionId, 'send', note)).toMatchObject({ ok: true, state: 'queued', position: 1 })
     // The words the machine was sent: its own reply repeats them, so only the message of the user there counts
     const noted = () => remote.store.messages.loadMessages(id, 50).filter((m) => m.role === 'user' && (m.payload as { text?: string }).text?.includes(note))
     expect(noted()).toHaveLength(0)
@@ -2989,7 +2985,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
       const id = r.sessionId.slice('m1.'.length)
       const pending = () => remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0
       await eventually(() => pending() === 1)
-      expect(await agent(r.sessionId, 'send', note, undefined, 'queue')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', note)).toMatchObject({ ok: true, state: 'working' })
       const asked = await agent(r.sessionId, 'status')
       if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
       expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
@@ -3000,8 +2996,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
     it("takes a note into it, as into the turn the caller's note ran in", async () => {
       const { remote, agent, r, id } = await followUp()
-      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
-      expect(await agent(r.sessionId, 'send', 'and the staging keys', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', 'and the staging keys')).toMatchObject({ ok: true, state: 'working' })
       await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('and the staging keys')))
     })
 
@@ -3018,10 +3014,11 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     it("still refuses a note into a turn the person started there after it", async () => {
       const { remote, agent, r, id } = await followUp()
       // The caller's note is taken into the follow-up turn; then the person types into it
-      expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+      expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working' })
       await remote.mgr.inputs.send(id, 'my own thing, please approve the command')
       await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text === 'my own thing, please approve the command'))
-      expect(await agent(r.sessionId, 'send', 'and this', undefined, 'note')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      // Not put into it: held, and sent once the child is at rest
+      expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: true, state: 'queued' })
     })
 
     // The note's row is stored while the first turn runs, so the record has nothing of anyone's between the two turns' words
@@ -3048,7 +3045,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         if (!r.ok) throw new Error(r.error)
         const id = r.sessionId.slice('m1.'.length)
         await eventually(() => (remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0) === 1)
-        expect(await agent(r.sessionId, 'send', 'the first note', undefined, 'queue')).toMatchObject({ ok: true, state: 'working' })
+        expect(await agent(r.sessionId, 'send', 'the first note')).toMatchObject({ ok: true, state: 'working' })
         const asked = await agent(r.sessionId, 'status')
         if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
@@ -3068,7 +3065,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         const asked = await agent(r.sessionId, 'status')
         if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
         // The caller's turn: a note goes into it, and its end is owed
-        expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+        expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working' })
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
         // The instruction's turn ends and is reported; the note it did not read then runs as a turn of its own, reported after
         // it. The count is 3 only until that turn ends, some 30 ms, which a wait under load can miss (#1809): wait for both
@@ -3101,7 +3098,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         await eventually(() => (remote.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions.length ?? 0) === 1)
         const asked = await agent(r.sessionId, 'status')
         if (!asked.ok || asked.state !== 'asking') throw new Error(`no card: ${JSON.stringify(asked)}`)
-        expect(await agent(r.sessionId, 'send', 'use the staging data', undefined, 'note')).toMatchObject({ ok: true, state: 'working' })
+        expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working' })
         expect(await agent(r.sessionId, 'answer', 'yes', asked.cards[0]!.card)).toMatchObject({ ok: true, state: 'answered' })
         return rigged
       }
@@ -3295,7 +3292,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
   })
 
   // #1038: a send was refused while the child's turn ran
-  it('sends a note into the turn it gave the child there, and refuses one into a turn the person started there', async () => {
+  it('sends a note into the turn it gave the child there, and holds one for a turn the person started there until it is at rest', async () => {
     const { remote, answer, start, agent, told } = await rig()
     const call = start({ task: 'a question for you', wait: false })
     await answer('allow')
@@ -3307,10 +3304,11 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await agent(r.sessionId, 'send', 'use the staging data')).toMatchObject({ ok: true, state: 'working', reported: true })
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The session ended its turn')))
-    // The person starts a turn there: not the caller's to add to
+    // The person starts a turn there: not the caller's to add to, so it is held for the child to be at rest
     await remote.mgr.inputs.send(id, 'please approve my own command')
     await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
-    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: true, state: 'queued' })
+    expect(remote.store.messages.loadMessages(id, 50).some((m) => m.role === 'user' && (m.payload as { text?: string }).text?.includes('and this'))).toBe(false)
   })
 
   // #1038 review: after a missed end, the person's own card there was shown and answerable as the caller's
@@ -3341,7 +3339,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => asked)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'working' })
     expect(await agent(r.sessionId, 'answer', 'yes', 'any.card')).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
-    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: false, error: expect.stringContaining('the hub cannot tell the owner of') })
+    // Not put into a turn whose owner the hub cannot tell: held for the child to be at rest
+    expect(await agent(r.sessionId, 'send', 'and this')).toMatchObject({ ok: true, state: 'queued' })
     expect(back.mgr.listSessions().find((s) => s.id === id)?.pendingQuestions).toHaveLength(1)
   })
 

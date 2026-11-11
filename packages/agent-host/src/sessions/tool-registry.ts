@@ -3,14 +3,14 @@ import { launchRefusal } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import type { DelegationHost } from './delegation-flow.js'
-import type { QueuedRequestsHost } from './queued-requests.js'
+import type { ProjectRegistry } from './project-registry.js'
 
 /**
  * What the tool registry reaches of the session manager (#1143), typed as the manager declares each member. The
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type ToolRegistryHost = Pick<DelegationHost, 'store'> &
-  Pick<QueuedRequestsHost, 'projectRow'> & {
+  Pick<ProjectRegistry, 'projectRow'> & {
     /** The agent tools this host runs, by name: the adapters it was started with */
     readonly adapters: ReadonlyMap<ToolName, AgentAdapter>
   }

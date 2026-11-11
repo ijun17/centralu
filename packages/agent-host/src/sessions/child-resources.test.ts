@@ -4,6 +4,7 @@ import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import { crossWorld, type CrossAdapter, type CrossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { runCentraluTool } from './centralu-tools.js'
+import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * What a child session costs the machine (#686, owner decision 2026-10-15):
@@ -154,9 +155,11 @@ describe('child sessions and the machine (#686)', () => {
       expect(childrenOf(s)).toEqual([])
     })
 
-    it('a fork below the floor becomes a place in the busy session\'s queue, and starts no process', async () => {
+    it('a fork below the floor becomes mail to the busy session, and starts no process', async () => {
       gate()
       allowProject()
+      // Delivery is not started: the mailed task stays undelivered
+      wireHostMail(w.mgr, w.store)
       const b = await session()
       const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
       if (!started.ok) throw new Error(started.error)
@@ -172,7 +175,8 @@ describe('child sessions and the machine (#686)', () => {
 
       free = 1 * GB
       const r = await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'review the schema', ifBusy: 'fork_read' })
-      expect(r).toMatchObject({ ok: true, state: 'queued', sessionId: a, position: 1, lowMemory: expect.stringContaining('1.0 GB free') })
+      expect(r).toMatchObject({ ok: true, state: 'mailed', sessionId: a, messageId: expect.any(String), lowMemory: expect.stringContaining('1.0 GB free') })
+      expect(w.store.mailbox.newestTask(addressOf(b), addressOf(a))).toMatchObject({ body: 'review the schema', origin: 'agent_session' })
       expect(forks).toBe(0)
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
       const text = (await runCentraluTool({ agentSession: async () => r } as unknown as CentraluTools, 'agent_session', { sessionId: a, action: 'send', text: 'x' }, { sessionId: b, profile: 'reader' })).text

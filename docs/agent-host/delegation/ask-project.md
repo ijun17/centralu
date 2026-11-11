@@ -37,10 +37,8 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    appears in the target conversation with `from` identifying the asking session. An idle
    session resumes as needed, and once it is awake (a wake or a deferred restart takes seconds) the caller's trust and
    depth and the target project are read once more before the task is written (`deliver`'s `stillAllowed`): an `auto`
-   caller's untrusted project still lets it through (#606); its depth and a removed project still refuse. A session busy with a turn that is not the caller's (the person's,
-   another delegation, or requests queued ahead) returns the choices instead ([delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677), #677): the
-   caller passes `ifBusy` `note` (an `auto` caller only, through the adapter's tracked mid-turn input
-   path, #594, on a CLI that takes it, and never into another caller's delegation) or `queue`; no
+   caller's untrusted project still lets it through (#606); its depth and a removed project still refuse. A session that cannot take it now (in a turn, on a card, at a limit) is sent the task as mail
+   instead, which reaches it as a turn of its own once it is free ([delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677), [mailbox.md](../../plans/mailbox.md) §10.6.2); no
    fork across projects. No interrupt or CLI-specific logic is added to the manager, and another
    delegation's watcher is never replaced. `AgentRunWait` holds until the delivered input's receipt completes,
    even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
@@ -94,8 +92,7 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    `pauseReport`: the store's `report_marks` and `report_paused:<session>`, so a host swap keeps both and the next host
    delivers the final report once), and the rest is [start-agent-steps.md](start-agent-steps.md) step 7's: the report comes when a turn ends with that work gone,
    or `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn, a turn the person starts there is theirs and not
-   reported (#1377), and a new task from the same caller ends the pause. A note that joined the person's turn is not
-   paused: that turn's work is theirs. Like a child's, work the person left running there (a dev server) holds the
+   reported (#1377), and a new task from the same caller ends the pause. Like a child's, work the person left running there (a dev server) holds the
    report until it ends.
 
 **Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
@@ -112,8 +109,7 @@ before the wait) and the wait's own wakes. Unlike `withTimeout` it never rejects
 
 **Stop.** Stop on the caller reaches delegated work only while that caller is actually waiting
 (`waiters > 0`), as for `start_agent`; after a bounded call returns still working, the target keeps
-running. If the task joined an already-running turn, Stop or call cancellation ends only the caller's
-wait and never interrupts the person's turn. Its receipt watcher, other observers and report-back
+running. A send to a busy session is mail and starts no wait (§1.2.3). Its receipt watcher, other observers and report-back
 continue until the input finishes. A task assigned to an idle target can still be interrupted while
 the caller waits. An explicit Stop on the target remains available. A failed turn or deleting the
 target returns an error naming the session. Deleting the caller drops the wait and grants while the

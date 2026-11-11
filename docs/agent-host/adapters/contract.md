@@ -199,7 +199,7 @@ Implementation rules:
   within `stopConfirmMs`, 10 s, for every tool: "<tool> has not confirmed the stop; the turn may still be running.")
   leaves the turn running, and is said as a notice (`stopNotConfirmed`, label
   `STOP_NOT_CONFIRMED_LABEL`), not an error: an error moves the session to `error`, which the manager takes as the
-  turn's end (delegation waits settle, queued requests go in), and the turn's own ending (`waiting_input`) is not a
+  turn's end (delegation waits settle, mail that waited goes in), and the turn's own ending (`waiting_input`) is not a
   move `error` allows. The notice also clears the wait's `stoppedByPerson` (`AgentRunWait`), so a child that then
   finishes hands its answer to the one waiting. A second Stop joins the first one's wait and bound; one pressed after
   the bound was said starts the bound again on the same wait. A turn's end after the bound still ends it as

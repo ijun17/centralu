@@ -60,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -124,8 +124,8 @@ export class AskProjectFlow {
   }
 
   /**
-   * What ask_project rests on in the caller, read before its card, again once the person answered it, and again before a
-   * queued ask goes in (`drainQueue`): a card or a queue can outlast any of it. `quiet`: an earlier read of this ask
+   * What ask_project rests on in the caller, read before its card and again once the person answered it: a card can outlast
+   * any of it. `quiet`: an earlier read of this ask
    * already logged the `auto` boundary it opens, so this one does not log it again. `trust`: false leaves the project's
    * trust out, for the one read that decides it once the target is known (§7.4).
    */
@@ -170,7 +170,7 @@ export class AskProjectFlow {
    * Stop on the caller, the call's own signal, or the person deleting either session ends the wait; the first two
    * stop an assigned idle target only while waiting; a task that joined the person's turn only ends the wait.
    */
-  async askProject(callerId: string, opts: { project: string; session?: string; task?: string; ifBusy?: 'note' | 'queue' }, signal?: AbortSignal): Promise<AskProjectResult> {
+  async askProject(callerId: string, opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult> {
     const refused = this.askGateError(callerId, false, false)
     if (refused) return { ok: false, error: refused }
     /*
@@ -279,9 +279,6 @@ export class AskProjectFlow {
     const key = `${callerId}>${target.id}>${chosen.id}`
     const pending = this.host.children.delegations.get(key)
     if (pending && !opts.task) return this.awaitDelegation(key, pending, signal)
-    // A request of the caller's still queued there (#677): where it stands
-    const held = !opts.task ? this.host.queuedOf(callerId, chosen.id) : undefined
-    if (held?.ok && held.state === 'queued') return { ok: true, project: target.name, state: 'queued', sessionId: held.sessionId, sessionName: held.sessionName, queueId: held.queueId, position: held.position }
     const stillWorking = { ok: false as const, error: `${target.name} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${target.name}", session "${chosen.id}" and no task to wait for it.` }
     if (pending && !pending.settled) return stillWorking
     if (!opts.task) return { ok: false, error: `Give a task: what ${target.name} / ${chosen.name} should do.` }
@@ -292,17 +289,6 @@ export class AskProjectFlow {
     }
     const gone = available()
     if (gone) return { ok: false, error: gone }
-    /*
-     * Busy with a turn that is not the caller's (#677): the caller chooses. A note joins the running turn (auto only,
-     * #606); a queue holds the task for a new turn when it ends. No fork across projects: ask_project never creates a
-     * session in another project. Without `ifBusy` nothing is asked or sent, and the choices come back.
-     */
-    const busyNow = this.host.busyForCaller(callerId, chosen.id)
-    if (busyNow && !opts.ifBusy) return { ok: true, project: target.name, ...this.host.busyAnswer(callerId, chosen, 'ask_project') }
-    if (busyNow && opts.ifBusy === 'note') {
-      const note = this.host.busyChoices(callerId, chosen, 'ask_project').find((c) => c.choice === 'note')!
-      if (!note.available) return { ok: false, error: `No note to "${chosen.name}": ${note.why}. Queue it instead (ifBusy "queue").` }
-    }
     const consent = await this.host.ensureProjectAccess(callerId, target.id, 'delegate', {
       text: taskLine(opts.task), session: { id: chosen.id, name: chosen.name },
     }, signal)
@@ -321,22 +307,14 @@ export class AskProjectFlow {
      */
     const current = this.host.children.delegations.get(key)
     if (current && current !== pending && !current.settled) return stillWorking
-    const busyAfter = this.host.busyForCaller(callerId, chosen.id)
-    if (busyAfter && opts.ifBusy === 'queue') {
-      const current = this.host.meta.get(chosen.id)!
-      return { ok: true, project: target.name, ...this.host.enqueue(callerId, current, 'ask_project', opts.task) }
-    }
-    if (busyAfter) {
-      // It became busy while the card stood, or the note it chose is no longer possible: the choices, again
-      const note = this.host.busyChoices(callerId, this.host.meta.get(chosen.id)!, 'ask_project').find((c) => c.choice === 'note')!
-      if (opts.ifBusy !== 'note' || !note.available) return { ok: true, project: target.name, ...this.host.busyAnswer(callerId, this.host.meta.get(chosen.id)!, 'ask_project') }
-      this.host.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
+    // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2)
+    if (!this.host.takesSendNow(chosen.id)) {
+      const mailed = this.host.mailTask(callerId, this.host.meta.get(chosen.id)!, 'ask_project', opts.task)
+      return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, project: target.name, ...mailed }
     }
     if (pending) this.host.children.dropDelegation(key)
     const delegatedId = chosen.id
-    const midTurn = inTurn(this.host.meta.get(delegatedId)!.state)
-    let releaseInput: (() => void) | undefined
-    const d = this.host.delegationFlow.startDelegation(key, callerId, delegatedId, target, false, midTurn)
+    const d = this.host.delegationFlow.startDelegation(key, callerId, delegatedId, target, false)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
       const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
@@ -347,20 +325,9 @@ export class AskProjectFlow {
        */
       const logged = !this.host.projectTrusted(callerProjectId)
       const stillAllowed = () => this.askGateError(callerId, logged) ?? this.projectGoneError(target)
-      if (midTurn) {
-        const releaseHold = d.wait.holdInput()
-        const release = () => { releaseHold(); this.host.restartPolicy.applyDeferredRestart(delegatedId) }
-        releaseInput = release
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', (h, input, inputId) => {
-          const fail = (e: Error) => { d.wait.fail(e); release() }
-          void h.sendTracked!(input, { complete: release, fail }, inputId ? { id: inputId } : undefined).then(release, fail)
-        }, stillAllowed)
-      } else {
-        await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
-      }
+      await this.host.deliver(delegatedId, askFrame(callerProject, opts.task, { name: from.name, sessionId: callerId }), undefined, from, false, undefined, 'inline', undefined, stillAllowed)
     } catch (e) {
       d.wait.fail(e as Error)
-      releaseInput?.()
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(delegatedId) === d.wait) this.host.agentRuns.delete(delegatedId)
       return { ok: false, error: `Could not hand the task to ${target.name}: ${(e as Error).message}` }
@@ -378,7 +345,7 @@ export class AskProjectFlow {
    * machine, with its own logins and folder, under the preset it has. The answer comes back as everywhere else; the
    * paths it names are that machine's files and are listed, none opened to the caller.
    *
-   * Not here yet: a note or a queue into a busy session (`ifBusy`), cards of the machine's session answered by the
+   * Not here yet: a task into a busy session (mail does not cross links), cards of the machine's session answered by the
    * caller (the person answers them in the hub's window), and stopping the machine's turn when the call is cancelled.
    */
   private async askLinkedProject(
@@ -387,7 +354,7 @@ export class AskProjectFlow {
     callerProject: string,
     target: LinkedProject,
     reader: LinkedSessions,
-    opts: { session?: string; task?: string; ifBusy?: 'note' | 'queue' },
+    opts: { session?: string; task?: string },
     signal?: AbortSignal,
   ): Promise<AskProjectResult> {
     const label = `${target.name} on ${target.machine}`
@@ -598,16 +565,12 @@ export class AskProjectFlow {
         return { ok: true, state: 'working', ...base, sessionName: sessionName(), ...(notice ? { notice } : {}), ...(progress ? { progress } : {}) }
       }
       case 'cancelled':
-        return { ok: false, error: d.joinedTurn
-          ? `The call was cancelled; ${d.target.name}'s session "${sessionName()}" was left running.`
-          : `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
+        return { ok: false, error: `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
       case 'failed':
         this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
         return {
           ok: false,
-          error: d.joinedTurn
-            ? `The wait for ${d.target.name}'s session "${sessionName()}" [${d.sessionId}] ended: ${r.error}.`
-            : `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
+          error: `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
     }
     const { granted, outside } = this.host.delegationFlow.grantReads(d.callerId, r.answer, d.target.path)

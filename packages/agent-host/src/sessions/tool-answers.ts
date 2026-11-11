@@ -1,5 +1,5 @@
 import { frameField } from '@cc/protocol'
-import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, CentraluTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
+import type { AgentListRow, ChildRunResult, AskProjectResult, CentraluTools, RoutedCard, TurnProgress } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
 
@@ -83,24 +83,19 @@ export function progressText(p: TurnProgress | undefined): string {
 }
 
 /**
- * A busy session's choices (#677), as the requester reads them: each with whether it can be taken now, and the call
- * that takes it. Nothing was sent; the requester decides.
+ * A send that went as mail to a session that could not take it now (docs/plans/mailbox.md §10.6.2): it waits until the session is free
+ * and starts a turn of its own, whose end is reported by mail. `tool`: the call that sent it, which names the fork a caller may want instead
  */
-export function busyText(b: { sessionName: string; sessionId: string; sessionState: string; choices: readonly BusyChoice[]; ahead?: number; progress?: TurnProgress }, call: (choice: string) => string): string {
-  const what: Record<BusyChoice['choice'], string> = {
-    note: 'add it to the running turn as a note; that turn\'s answer stays its owner\'s, and you read the reply to your note',
-    queue: 'hold it and deliver it as a new turn when the running one ends; you are told when that turn ends',
-    fork: 'start a sub-session from a copy of its conversation now, linked to you, in a worktree of its own (fork_read: read-only work in its folder)',
-  }
-  const lines = b.choices.map((c) => `- ${c.choice}: ${c.available ? `${what[c.choice]}. ${call(c.choice === 'fork' ? 'fork' : c.choice)}` : `not available: ${c.why}`}`)
-  const ahead = b.ahead ? ` ${b.ahead} request${b.ahead === 1 ? ' is' : 's are'} queued there already.` : ''
-  return `"${b.sessionName}" [${b.sessionId}] is busy (${b.sessionState}) with a turn that is not yours, so nothing was sent.${progressText(b.progress)}${ahead} Choose:\n${lines.join('\n')}`
+export function mailedText(m: { sessionName: string; sessionId: string; messageId: string; lowMemory?: string }, tool: 'agent_session' | 'ask_project' | 'send_to_session'): string {
+  // A fork turned into mail (#686): said first, so the caller does not wait for a fork that never came
+  const instead = m.lowMemory ? `Not forked: memory is low (${m.lowMemory}), so it was sent as mail instead, which starts no new process. ` : ''
+  const fork = tool === 'ask_project' ? '' : ' ifBusy "fork" starts a copy of it on work that cannot wait.'
+  return `${instead}"${m.sessionName}" [${m.sessionId}] is busy, so this went to it as mail ${m.messageId}: it waits until the session is free and starts a turn of its own, and you are told by mail when that turn ends.${fork}`
 }
 
-export function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number; lowMemory?: string }): string {
-  // A fork turned into a place in the queue (#686): said first, so the caller does not wait for a fork that never came
-  const instead = q.lowMemory ? `Not forked: memory is low (${q.lowMemory}), so it was queued instead, which starts no new process. ` : ''
-  return `${instead}Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
+/** A note held for a child on a linked machine until it is at rest (#1682): mail does not cross links yet */
+export function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number }): string {
+  return `Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
 }
 
 export const ANSWER_FORM = 'Answer a question with its option label, or your own words; one line per question; several choices of one question separated by ";". The person may answer first; the first answer counts.'
@@ -113,8 +108,7 @@ export const ANSWER_FORM = 'Answer a question with its option label, or your own
 export function askProjectText(r: AskProjectResult): ToolOutput {
   if (!r.ok) return { text: r.error, isError: true }
   const where = `the session "${r.sessionName}" [${r.sessionId}] in ${r.project}`
-  if (r.state === 'busy') return { text: busyText(r, (c) => `ask_project with the same task and ifBusy "${c}".`) }
-  if (r.state === 'queued') return { text: `${queuedText(r)} Call ask_project with project "${r.project}", session "${r.sessionId}" and no task to see where it stands.` }
+  if (r.state === 'mailed') return { text: mailedText(r, 'ask_project') }
   if (r.state === 'asking') {
     return {
       text:
@@ -213,9 +207,7 @@ export function agentRunText(r: ChildRunResult): ToolOutput {
     }
   }
   const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]` + (r.via === 'fork' ? `, a fork of [${r.forkedFrom}]` : '')
-  const out = agentStateText(r, who)
-  // Which busy choice ran (#677), said first
-  return r.via === 'note' ? { ...out, text: `Added as a note to the running turn. ${out.text}` } : out
+  return agentStateText(r, who)
 }
 
 function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { state: 'pending' }>, who: string): ToolOutput {
@@ -233,8 +225,8 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
           `${who} is waiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
           `agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…) answers it. ${ANSWER_FORM}`,
       }
-    case 'busy':
-      return { text: busyText(r, (c) => `agent_session(sessionId="${r.sessionId}", action="send", text=…, ifBusy="${c}").`) }
+    case 'mailed':
+      return { text: `${mailedText(r, 'agent_session')} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it until it is delivered.` }
     case 'queued':
       return { text: `${queuedText(r)} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it.` }
     case 'answered':

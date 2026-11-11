@@ -11,7 +11,7 @@ import type { TrashRequest } from './trash-flow.js'
 import type { TrustRequest } from './trust-flow.js'
 import type { AppUpkeepRequest } from './app-upkeep-flow.js'
 import type { HousekeepingRequest } from './housekeeping-flow.js'
-import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
+import { ANSWER_FORM, agentListText, agentRunText, askProjectText, cardsText, listSessionsText, mailedText, trustedJsonText } from './tool-answers.js'
 import { AGENT_TOOLS, APP_ACCESS_TOOLS, COMPACT_TOOLS, MAIL_TOOLS, CENTRALU_TOOLS, TOOL_ARGS, type CommandToolName } from './tool-definitions.js'
 import { FILL, callForm, commandsFor, guideSeats, namedCall, notAToolText, profileAllows, type CommandName } from './tool-seats.js'
 
@@ -165,8 +165,7 @@ const HANDLERS: ToolHandlers = {
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
     const task = args.task?.trim() ? args.task : undefined
     const session = trimmed(args.session)
-    const { ifBusy } = args
-    return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
+    return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}) }, signal))
   },
 
   async start_agent(args, { tools, signal, caller }) {
@@ -574,16 +573,11 @@ const HANDLERS: ToolHandlers = {
     const { sessionId, ifBusy } = args
     const reportBack = args.reportBack === true
     const r = await tools.sendToSession(sessionId, args.text, reportBack, ifBusy)
-    // A busy session (#677): its choices, or which one ran and its handle
+    // A busy session: sent as mail, or the fork asked for
     if (r.ok && r.busy) {
       const b = r.busy
-      if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
-      if (b.state === 'queued') return { text: queuedText(b) }
-      if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
-      if (b.reportTaken) {
-        return { text: `Added as a note to the running turn of ${sessionId}. Another session is owed that turn's report, so you are not told when it ends: read_session it later.` }
-      }
-      return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
+      if (b.state === 'mailed') return { text: mailedText(b, 'send_to_session') }
+      return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
     }
     /*
      * Report the failure as-is. If it silently pretended to succeed, the Assistant would

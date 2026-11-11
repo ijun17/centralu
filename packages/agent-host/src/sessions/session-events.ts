@@ -9,7 +9,8 @@ import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.j
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { inTurn } from '../idle.js'
 import { rpcError } from '../rpc-error.js'
-import { MailNotAtRest, MailWithdrawn } from '../mail/delivery.js'
+import { MailNotAtRest, MailWithdrawn, type MailInput } from '../mail/delivery.js'
+import { takeInput } from './mail-accept.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import { stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
@@ -20,9 +21,9 @@ import type { ChildReports } from './child-reports.js'
 import { type DelegationHost } from './delegation-flow.js'
 import { isHubSender } from './hub-sender.js'
 import { truncate } from './external-conversations.js'
+import { labelOf } from './transcript-view.js'
 import type { InterruptionWatch } from './interruption-watch.js'
 import type { OverloadRetry } from './overload-retry.js'
-import type { QueuedRequests } from './queued-requests.js'
 import type { RoutedCards } from './routed-cards.js'
 import type { SessionRecordHost } from './session-record.js'
 import type { SessionStartsHost } from './session-start.js'
@@ -60,7 +61,6 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     readonly overloadRetry: OverloadRetry
     /** Refuses a session whose worktree is being removed */
     notBeingRemoved: (sessionId: string) => void
-    readonly queue: QueuedRequests
     readonly reports: ChildReports
     /** A session's live process, or `session_not_found` */
     requireHandle: (sessionId: string) => SessionHandle
@@ -88,51 +88,6 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
  * session's conversation (`deliver`). Moved out of the session manager as it was (#428); what it reaches of the
  * manager is `SessionEventsHost`.
  */
-/** How long a tool may take to say it took a wake before it is taken as taken (it has not failed, and sending again could run the work twice) */
-export const MAIL_ACCEPT_MS = 90_000
-
-/**
- * Hands a wake to the tool and waits until the tool took it (docs/agent-host/lifecycle/turn-endings-and-mail.md "The mailbox's delivery in the host"): Codex when `turn/start` answers, Claude
- * when a turn runs for it, and a rejection or a process that closed with the wake still queued is a failure, so the mailbox keeps the
- * mail and tries again. A tool that cannot track its inputs (an older CLI) has taken it when the write returns, as before.
- *
- * A tool silent for `MAIL_ACCEPT_MS` counts as having taken it. If it fails the input after that (a CLI slow to start that closes with the
- * wake still queued, a Codex whose `turn/start` is rejected late) it never ran it, so `late` is told and the mailbox puts the mail
- * back; a failure after the tool took the input is not told, since sending it again could run the work twice.
- */
-async function takeInput(handle: SessionHandle, text: string, late?: (e: Error) => void): Promise<void> {
-  const origin = { kind: 'channel', server: 'centralu' } as const
-  if (!handle.sendTracked) {
-    handle.send(text, { origin })
-    return
-  }
-  const tracked = handle.sendTracked.bind(handle)
-  // 'counted': the wait ran out and the wake went on as taken, with the tool still silent
-  let state: 'waiting' | 'counted' | 'taken' | 'failed' = 'waiting'
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      if (state !== 'waiting') return
-      state = 'counted'
-      console.error(`[mail] ${handle.sessionId.slice(0, 8)}: the tool has not said it took the wake in ${MAIL_ACCEPT_MS / 1000} s; counted as taken`)
-      resolve()
-    }, MAIL_ACCEPT_MS)
-    timer.unref()
-    const done = () => {
-      clearTimeout(timer)
-      state = 'taken'
-      resolve()
-    }
-    const fail = (e: Error) => {
-      clearTimeout(timer)
-      const was = state
-      if (was === 'waiting' || was === 'counted') state = 'failed'
-      if (was === 'waiting') reject(e)
-      else if (was === 'counted') late?.(e)
-    }
-    tracked(text, { accepted: done, complete: done, fail }, { origin }).then(done, fail)
-  })
-}
-
 export class SessionEvents {
   /** The context figure during a turn, from each request's size (#1492, context-meter.ts) */
   private readonly meter = new ContextMeter()
@@ -230,8 +185,6 @@ export class SessionEvents {
          * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
          * changed or whether a call is still in flight.
          */
-        // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
-        if (!wasBusy && inTurn(m.state)) this.host.children.queuedTurnStarted(m.id)
         // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           continues = this.host.selfCompaction.stepOpens(m.id)
@@ -249,17 +202,6 @@ export class SessionEvents {
           const named = handle?.turnStartInputs?.()
           // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639); and the hub's message it ran for
           started = this.host.children.turnNamed(m.id, named)
-        }
-        /*
-         * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
-         * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
-         * goes in. Left delivering, the session counted as busy for every requester and its queue never moved again. Only
-         * once the input was handed to the process: one the tool reports while the session wakes for it (Codex's account-wide
-         * limit, a crash) refuses nothing yet, and the input still goes in or the delivery fails on its own.
-         */
-        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.host.children.delivering.has(m.id) && this.host.queue.queuedHandedIn.has(m.id)) {
-          this.host.children.queuedTurnStarted(m.id)
-          endedTurn = true
         }
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
@@ -365,16 +307,15 @@ export class SessionEvents {
     /** The older report paths that may tell of this turn's end, each resolving to the session it told */
     const sends: Promise<string | undefined>[] = []
     if (mailTurn && e.sessionId) {
-      // Not held by `tracksInputs`: that is a wait of the first owner's, and this turn is not its
       sends.push(this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy))
       // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
       this.host.reports.settlePausedReport(e.sessionId)
-    } else if (endedTurn && e.sessionId && !run?.tracksInputs) {
+    } else if (endedTurn && e.sessionId) {
       // A wait settled in an earlier turn holds that turn's answer, not this one's
       sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy && since !== undefined ? { ...turnBy, since } : turnBy))
     }
     // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
-    if (endedTurn && e.sessionId && !owed && !run?.tracksInputs) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
+    if (endedTurn && e.sessionId && !owed) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
     if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
@@ -482,8 +423,6 @@ export class SessionEvents {
     this.applyStateHint(change, m)
     this.host.store.sessions.upsertSession(m)
     this.host.emit(change)
-    // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
-    if (!inTurn(m.state) && this.host.children.queued.has(m.id)) this.host.queue.scheduleDrain(m.id)
     this.host.mailPoke(m.id)
   }
 
@@ -770,7 +709,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean },
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; task?: MailInput['task'] },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -812,8 +751,29 @@ export class SessionEvents {
      * took stays recorded by its line, which is its only trace
      */
     if (input.skipLine?.()) return
-    // After the tool took it, so the line is never about a delivery that did not happen; before the answer it starts
-    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
+    // After the tool took it, so neither is about a delivery that did not happen; before the answer it starts. A delegated task shows as its
+    // sender's message, as its direct send does (owner, #1948 option B); the line stays for the rest of the mail
+    const shown = !input.quiet && input.task !== undefined && this.showSent(sessionId, input.task)
+    if (!shown || !input.task?.alone) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', text: input.line })
+  }
+
+  /**
+   * A delegated task the mailbox gave, written in the receiver's conversation as its sender's message (`deliverMail`): stored and shown, never
+   * sent to the tool, which read the mail frame. `mail`: no turn bookkeeping reads it as an input of its own (`ChildOwnership.held`). False when the
+   * sender is not here to be named: the line says it then
+   */
+  private showSent(sessionId: string, task: { senderId: string; text: string }): boolean {
+    const sender = this.host.meta.get(task.senderId)
+    const m = this.host.meta.get(sessionId)
+    if (!sender || !m) return false
+    const from = { sessionId: sender.id, name: labelOf(this.host.store.messages, sender) }
+    const seq = this.host.store.messages.nextSeq(sessionId)
+    this.host.store.messages.appendMessages([{ sessionId, seq, role: 'user', kind: 'text', payload: { text: task.text, from, mail: true }, ts: Date.now() }])
+    m.lastSeq = seq
+    m.lastReadSeq = seq
+    this.host.store.sessions.upsertSession(m)
+    this.host.emit({ type: 'user_message', sessionId, seq, text: task.text, from })
+    return true
   }
 
   /**

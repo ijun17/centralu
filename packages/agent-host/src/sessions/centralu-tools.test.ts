@@ -757,7 +757,7 @@ describe('arguments (#850)', () => {
     expect(await run('agent_session', { sessionId: 'c', action: 'send', text: 'go', ifBusy: 'later' }, reader)).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for agent_session: ifBusy: /) })
     for (const f of Object.values(tools)) expect(f).not.toHaveBeenCalled()
     // A right one runs, and an argument the tool does not take is dropped, as Claude's MCP drops it
-    expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'queue', extra: 1 })).isError).toBeFalsy()
-    expect(tools.sendToSession).toHaveBeenCalledWith('s', 'go', false, 'queue')
+    expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'fork', extra: 1 })).isError).toBeFalsy()
+    expect(tools.sendToSession).toHaveBeenCalledWith('s', 'go', false, 'fork')
   })
 })

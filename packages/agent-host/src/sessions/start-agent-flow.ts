@@ -67,7 +67,7 @@ function startAgentLate(progress: StartProgress): ChildRunResult {
 
 /** What start_agent reaches of the rest of the delegation flow (`DelegationFlow`): the child's run, its wait, its answers */
 export type StartAgentDelegations = Pick<DelegationWaits, 'agentWorking'> & {
-  startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent?: boolean, joinedTurn?: boolean): Delegation
+  startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent?: boolean): Delegation
   awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing?: boolean, boundMs?: number): Promise<ChildRunResult>
   handedOverAnswer(callerId: string, id: string): { ok: false; error: string } | undefined
   /** start_agent on a linked machine (#1038) */

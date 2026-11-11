@@ -12,7 +12,6 @@ import type { SessionRecordHost } from './session-record.js'
 import { freshStartKey, type SessionStarts, type SessionStartsHost } from './session-start.js'
 import type { SessionTrashHost } from './session-trash.js'
 import { sessionDemands, unfitError } from './tool-fit.js'
-import type { TurnInputs } from './turn-inputs.js'
 import type { WorktreeHost } from './worktree-sessions.js'
 
 /**
@@ -30,8 +29,6 @@ export type SessionProcessesHost = Pick<DelegationHost, 'adapters' | 'children' 
   Pick<WorktreeHost, 'projectTrusted'> & {
     /** A session's process brought up, for a new session or a wake (session-start.ts) */
     readonly starts: Pick<SessionStarts, 'doResumeSession'>
-    /** A note the delegation's wait or an observer has not taken yet holds the session in its turn (turn-inputs.ts) */
-    readonly inputs: Pick<TurnInputs, 'inputsHeld'>
     /** Refuses a process swap while the host lets its sessions go (#839) */
     refuseWhileLettingGo: () => void
   }
@@ -312,7 +309,6 @@ export class SessionProcesses {
   sessionIdle(sessionId: string): SessionIdle {
     if (this.host.worktrees.worktreeCleanupBlocks(sessionId)) return { idle: false, reason: 'turn' }
     const m = this.host.sessionOf(sessionId)
-    if (this.host.inputs.inputsHeld(sessionId)) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.host.handles.has(sessionId),
       // An adopted process whose work the previous host did not record is as silent as a tool that cannot report (#648)

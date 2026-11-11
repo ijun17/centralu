@@ -810,35 +810,13 @@ describe('the Assistant', () => {
       expect(reports()[0]).toContain(worker.id)
     })
 
-    it('with reportBack false tells it nothing, and the turn is still its own: more words go in without a busy answer', async () => {
-      const { made, worker, tools, reports, finish } = await created({ firstMessage: 'do the work', reportBack: false })
+    it('with reportBack false tells it nothing', async () => {
+      const { made, worker, reports, finish } = await created({ firstMessage: 'do the work', reportBack: false })
       expect(made.text).not.toContain('you are told')
-      expect(await tools.sendToSession(worker.id, 'and this too')).toMatchObject({ ok: true, busy: { state: 'noted' } })
-      expect(adapter.handleOf(worker.id)!.sent).toEqual(['do the work', 'and this too'])
+      expect(adapter.handleOf(worker.id)!.sent).toEqual(['do the work'])
       await finish()
       expect(reports()).toEqual([])
     })
-
-    it('a note without reportBack into that turn does not cancel its report', async () => {
-      const { worker, tools, reports, finish } = await created({ firstMessage: 'do the work' })
-      await tools.sendToSession(worker.id, 'use the staging database')
-      await tools.sendToSession(worker.id, 'and keep the logs')
-      await finish()
-      expect(reports()).toHaveLength(1)
-    })
-  })
-
-  // #1233: a note joins the work and leaves the report asked for in place (#166 clears it for a new instruction only)
-  it('send_to_session with reportBack, then a bare note into that turn: the report still arrives', async () => {
-    const p = await addProject()
-    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
-    const orc = await mgr.assistant()
-    const tools = adapter.lastCentraluTools!
-    await tools.sendToSession(a.id, 'let me know when it is done', true)
-    expect(await tools.sendToSession(a.id, 'one more thing')).toMatchObject({ ok: true, busy: { state: 'noted' } })
-    adapter.handleOf(a.id)!.finishTurn()
-    await new Promise((r) => setTimeout(r, 0))
-    expect(adapter.handleOf(orc.id)!.sent.filter((t) => t.includes('[Centralu]'))).toHaveLength(1)
   })
 
   /**

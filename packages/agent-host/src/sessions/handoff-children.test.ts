@@ -18,7 +18,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A handoff moves the original session's children to the session that took over (#693): their reports, the
- * agent_session handle, their delegated turns, the requests the original queued and its start_agent cards still
+ * agent_session handle, their delegated turns and its start_agent cards still
  * standing. A settled child moves too, whether the original stays or goes (#1475, #738). The move is one store transaction, so a crash leaves
  * every link with one owner, and the host that starts next reads that owner.
  */
@@ -248,50 +248,6 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(events.filter((e) => e.type === 'session_owner')).toEqual([expect.objectContaining({ sessionId: settled, askedBy: heir })])
   })
 
-  it('moves a request the original queued for a busy child: it is delivered as the new session\'s turn', async () => {
-    const h = host()
-    const { project, parent } = await parentOf(h)
-    const child = await startChild(h, parent, 'first job')
-    h.claude.handles.get(child)!.answer('first done')
-    await eventually(() => reports(h.claude.handles.get(parent), child).length === 1)
-    // The person works in the child; the parent's next job waits in its queue (#677)
-    await h.mgr.inputs.send(child, 'person work')
-    const queued = await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })
-    expect(queued).toMatchObject({ ok: true, state: 'queued' })
-    const heir = await handOff(h, project, parent)
-
-    expect(store.children.listQueuedRequests()).toEqual([expect.objectContaining({ sessionId: child, callerSessionId: heir })])
-    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`busy; your request is queued — handle: ${child}`)
-    const ch = h.claude.handles.get(child)!
-    ch.answer('person answer')
-    await eventually(() => ch.sent.some((t) => t.includes('second job')))
-    ch.answer('second done')
-    await eventually(() => reports(h.claude.handles.get(heir), child).length === 1)
-    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'second done' })
-  })
-
-  it('drops what only auto let the original queue when the session taking over is not auto, and tells the original', async () => {
-    const h = host()
-    const { project, parent } = await parentOf(h)
-    await h.mgr.updateSettings(parent, { permissionPreset: 'auto' })
-    // A session of the project the original did not start, busy with the person's work
-    const other = (await h.mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
-    await h.mgr.inputs.send(other, 'person work')
-    expect(await h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy up', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
-    await writeHandoffNote(project, parent, 'NOTE BODY: where things stand')
-    // The session taking over is not auto
-    await h.mgr.createSession({
-      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal',
-      initialPrompt: 'You are taking over. Read the note.',
-      handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
-    })
-    expect(store.children.listQueuedRequests()).toEqual([])
-    await eventually(() => store.messages.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
-    h.claude.handles.get(other)!.answer('person answer')
-    await eventually(() => h.mgr.listSessions().find((s) => s.id === other)?.state !== 'working')
-    expect(h.claude.handles.get(other)!.sent).toEqual(['person work'])
-  })
-
   it("moves a start_agent card still standing: it stands in the new session, and its approval starts the new session's child", async () => {
     const h = host()
     const { project, parent } = await parentOf(h, 'safe')
@@ -406,11 +362,11 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const h = host(f)
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
-    // A crash between the move's steps: the sessions, report and turn rows are written, the queue's is not
+    // A crash between the move's steps: the sessions, report and turn rows are written, the start requests' are not
     const db = (store as unknown as { db: { prepare(sql: string): unknown } }).db
     const prepare = db.prepare.bind(db)
     vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
-      if (sql.includes('UPDATE queued_requests SET caller_session_id')) throw new Error('crash between steps')
+      if (sql.includes('UPDATE agent_start_requests SET caller_session_id')) throw new Error('crash between steps')
       return prepare(sql)
     })
     const heir = await handOff(h, project, parent, false)
@@ -647,19 +603,6 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(await next.mgr.agentSession(first, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.not.stringContaining('A handoff gave') })
   })
 
-  it('moves the requests the original queued only for the sessions that move (#1932)', async () => {
-    const h = host()
-    const { parent } = await parentOf(h)
-    const moves = await startChild(h, parent, 'moves')
-    const stays = await startChild(h, parent, 'stays')
-    const request = (id: string, sessionId: string) => ({ id, sessionId, callerSessionId: parent, via: 'agent_session' as const, text: 'more', queuedAt: 1, openedByAuto: null })
-    store.children.addQueuedRequest(request('q-moves', moves))
-    store.children.addQueuedRequest(request('q-stays', stays))
-
-    store.children.moveChildren(parent, 'successor', { sessions: [moves], startRequests: [], queued: true })
-    expect(store.children.listQueuedRequests().map((r) => [r.id, r.callerSessionId])).toEqual([['q-moves', 'successor'], ['q-stays', parent]])
-  })
-
   it('leaves a settled child with the original when the store fails mid-move', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
@@ -667,7 +610,7 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     const db = (store as unknown as { db: { prepare(sql: string): unknown } }).db
     const prepare = db.prepare.bind(db)
     vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
-      if (sql.includes('UPDATE queued_requests SET caller_session_id')) throw new Error('crash between steps')
+      if (sql.includes('UPDATE agent_start_requests SET caller_session_id')) throw new Error('crash between steps')
       return prepare(sql)
     })
     await handOff(h, project, parent, false, true)
@@ -752,24 +695,6 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(store.children.listAgentStartRequests()).toEqual([])
     expect(h.mgr.listSessions().find((s) => s.id === heir)?.pendingApproval ?? null).toBeNull()
     expect(events.filter((e) => e.type === 'approval_request' && e.sessionId === heir)).toEqual([])
-  })
-
-  it('drops a request a removed original queued instead of delivering it for the new session', async () => {
-    const h = host()
-    const { project, parent } = await parentOf(h)
-    const heir = await handOff(h, project, parent, false)
-    const child = await settledChild(h, parent)
-    await h.mgr.inputs.send(child, 'person work')
-    expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
-    await h.mgr.trash.trashSession(parent)
-
-    expect(owner(child)).toBe(heir)
-    expect(store.children.listQueuedRequests()).toEqual([])
-    const ch = h.claude.handles.get(child)!
-    ch.answer('person answer')
-    await eventually(() => h.mgr.listSessions().find((s) => s.id === child)?.state !== 'working')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(ch.sent.some((t) => t.includes('second job'))).toBe(false)
   })
 
   it('answers a call the removed original was still waiting in, and owes the report to the new session', async () => {
