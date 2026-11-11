@@ -17,7 +17,7 @@ import { writeJsonAtomic } from '../.centralu/apps/project-board/util.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, LEASE_MS, queueBusy, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { classifyRun, looksLikeNetworkError, onFlakyList } from '../.centralu/apps/project-board/run-failure.mjs'
+import { classifyRun, jobFailure, looksLikeNetworkError, onFlakyList, REPORT_STEP } from '../.centralu/apps/project-board/run-failure.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { GitError, isNetworkFailure } from '../.centralu/apps/project-board/git.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -209,6 +209,17 @@ describe('what the merge queue decides for one poll', () => {
     const shardsFailed = { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Every shard passed', conclusion: 'failure' }] }
     expect(classifyRun(failedRun, [job('macos tests (vitest 1/2)', 'failure', stored('Upload the test times')), job('macos tests', 'failure', shardsFailed)])).toMatchObject({ real: false, cause: 'storage', job: { name: 'macos tests (vitest 1/2)' } })
     expect(classifyRun(failedRun, [job('macos tests (vitest 2/2)', 'failure', failedStep), job('macos tests', 'failure', shardsFailed)])).toMatchObject({ real: true, job: { name: 'macos tests (vitest 2/2)' } })
+    // #2196, run 43040592985 (2026-11-11): the package mirror was down, every e2e shard failed in the install of its browser's system
+    // libraries, and `e2e report` then failed keeping a report no shard had made. The run is the mirror's and is rerun, not the commit's
+    const setupFailed = (name: string) => job(name, 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Install WebKit system libraries', conclusion: 'failure' }, { name: 'Install WebKit system libraries, second try', conclusion: 'failure' }, { name: 'pnpm e2e (shard 1/5)', conclusion: 'skipped' }] })
+    const noReport = job('e2e report', 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Run actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333', conclusion: 'success' }, { name: 'Merge the shard reports, per engine', conclusion: 'success' }, { name: REPORT_STEP, conclusion: 'failure' }] })
+    const allSetup = [setupFailed('e2e (webkit 1/5)'), setupFailed('e2e (webkit 2/5)'), setupFailed('e2e (chromium 1/5)'), noReport]
+    expect(classifyRun(failedRun, allSetup)).toMatchObject({ real: false, cause: 'setup', job: { name: 'e2e (webkit 1/5)' }, step: 'Install WebKit system libraries' })
+    expect(jobFailure(noReport)).toBeNull()
+    // A test that failed in one shard left a report, and stays the commit's whatever else the run lost; a report job that failed in its own merge does too
+    expect(classifyRun(failedRun, [setupFailed('e2e (webkit 1/5)'), job('e2e (webkit 2/5)', 'failure', testsFailed), noReport])).toMatchObject({ real: true, cause: 'test', job: { name: 'e2e (webkit 2/5)' } })
+    const mergeFailed = job('e2e report', 'failure', { steps: [{ name: 'Set up job', conclusion: 'success' }, { name: 'Merge the shard reports, per engine', conclusion: 'failure' }, { name: REPORT_STEP, conclusion: 'skipped' }] })
+    expect(classifyRun(failedRun, [setupFailed('e2e (webkit 1/5)'), mergeFailed])).toMatchObject({ real: true, job: { name: 'e2e report' } })
     // A test's own timeout is a test failure
     expect(classifyRun(failedRun, [job('verify', 'failure', { ...failedStep, notes: ['Error: Test timed out in 5000ms.'] })])).toMatchObject({ real: true })
     // #1503: the step the limit ended says where. e2e (webkit 1/5) of 2026-10-23: the job's limit hit inside `Install WebKit`

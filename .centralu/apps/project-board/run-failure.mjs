@@ -40,10 +40,15 @@ const SETUP_STEP = [
  */
 const STORE_STEP = [/^Upload /i, /^Post /i]
 /**
- * The step of a job that only gathers its shards' result under the name the job had before it was split (build.yml
- * `macos-tests-result`, #2167). Its failure is a shard's, which the run's other jobs say the cause of: it is no failure of its own.
+ * The steps of the jobs that only gather their shards' output, named for it in build.yml. Their failure is a shard's, which the
+ * run's other jobs say the cause of: it is no failure of its own. `SHARDS_STEP`: the result under the name the job had before it
+ * was split (`macos-tests-result`, #2167). `REPORT_STEP`: `e2e report` keeping the merged report, which fails with "No files were
+ * found" when every shard failed in setup and left no blob report (run 43040592985, #2196); a shard that failed in a test left
+ * one. Not an upload by its action's own name: one that checks the commit (`if-no-files-found: error` on a build's output) is the commit's.
  */
 export const SHARDS_STEP = 'Every shard passed'
+export const REPORT_STEP = 'Keep the e2e report'
+const GATHER_STEPS = [SHARDS_STEP, REPORT_STEP]
 /** Steps that fetch what they need, packages or the tools tauri downloads to bundle (#2004): a setup step only when the failure names the network or a package source */
 const INSTALL_STEP = /^Run (?:pnpm|npm|yarn) (?:install|ci|i)\b/i
 const BUNDLE_STEP = /^Build bundle$/i
@@ -150,7 +155,7 @@ export function jobFailure(job, { flaky = [] } = {}) {
   if (job.conclusion === 'cancelled') return { real: false, cause: 'cancelled' }
   if (onFlakyList(job.name, flaky)) return { real: false, cause: 'flaky' }
   const step = (job.steps ?? []).find((s) => s.conclusion === 'failure')
-  if (step?.name === SHARDS_STEP) return null
+  if (step && GATHER_STEPS.includes(step.name)) return null
   // The first step that failed set the job up (#1435): nothing of the commit ran. A later step that failed after it
   // (an artifact upload that runs on failure) says nothing more.
   if (step && isSetupStep(step.name, notes, job.log)) return { real: false, cause: 'setup', step: step.name }
