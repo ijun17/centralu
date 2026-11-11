@@ -2,6 +2,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, flagSettings } from './sdk-query.js'
 import type { CreateSessionOpts } from '../contract.js'
+import { TOOL_PROFILES } from '../../sessions/tool-cost.js'
+import { toolDefsFor } from '../../sessions/tool-seats.js'
 
 /**
  * What Claude Code is told in the flag layer (#1376): where it compacts by itself, per session and without touching a file,
@@ -61,6 +63,28 @@ describe('the options of a session\'s query', () => {
     // A builder has no mail, nor has a session without Centralu's tools: the card stays theirs
     expect(options(undefined, { centraluTools: tools, toolProfile: 'builder' }).disallowedTools).not.toContain('AskUserQuestion')
     expect(options().disallowedTools).not.toContain('AskUserQuestion')
+  })
+})
+
+describe('a session whose choice tool is off is told how to ask (#1630)', () => {
+  const off = (toolProfile: (typeof TOOL_PROFILES)[number]) =>
+    claudeQueryOptions({
+      sessionId: 's1',
+      opts: { sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal', centraluTools: {} as NonNullable<CreateSessionOpts['centraluTools']>, toolProfile },
+      executablePath: undefined,
+      servers: {},
+      permissionOptions: { permissionMode: 'default' },
+      codeIntelligence: {},
+      spawn: () => {
+        throw new Error('not started')
+      },
+      canUseTool: () => Promise.resolve({ behavior: 'deny' as const, message: '' }),
+    }).disallowedTools?.includes('AskUserQuestion') === true
+
+  it('says it in the mail tool, for every seat that is served the tool', () => {
+    const served = TOOL_PROFILES.filter((p) => off(p) && toolDefsFor(p).some((t) => t.name === 'mail'))
+    expect(served).toContain('reader')
+    for (const p of served) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description).toContain('Ask the person with kind "question".')
   })
 })
 

@@ -22,8 +22,9 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const older = useStore((s) => s.loadOlderMail)
   // A host of an older build stops the turn when the chain is closed: asked once first, with no way to close and leave it running. A host of this build stops nothing (it says so by sending `canReply`)
   const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
-  // A choice is on its way to the host: the reply box waits, so one question is not answered twice from one window
-  const [picking, setPicking] = useState(false)
+  // The questions whose pick is on its way to the host: the reply box waits for every one of them, since its words would answer the newest open question
+  const [picking, setPicking] = useState<readonly string[]>([])
+  const inFlight = (question: string, on: boolean) => setPicking((now) => (on ? [...now, question] : now.filter((q) => q !== question)))
   const list = useRef<HTMLOListElement>(null)
   // A conversation opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
   const newest = view?.messages.at(-1)?.seq
@@ -74,7 +75,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
           </li>
         )}
         {view.messages.map((m) => (
-          <Message key={m.id} m={m} open={!done && view.canReply !== false} answer={answerTo(view.messages, m)} onPicking={setPicking} />
+          <Message key={m.id} m={m} open={!done && view.canReply !== false} answer={answerTo(view.messages, m)} onPicking={inFlight} />
         ))}
         {view.more && <li className="text-center text-xs text-ink-faint">There are more messages. Open this again to read on.</li>}
       </ol>
@@ -88,7 +89,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
       <Fold open={!done}>
         {/* Only where there is something of the person's to answer: a chain of mail between sessions held for them has no one for a reply to go to (a host of an older build does not say, and has the box) */}
         <Fold open={view.canReply !== false}>
-          <Reply blocked={picking} />
+          <Reply blocked={picking.length > 0} />
         </Fold>
         {/* The row folds in and out like the reply box; its text does not depend on the outcome asked, so it stays whole while it folds closed */}
         <Fold open={confirming !== null}>
@@ -128,7 +129,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
 }
 
 /** `open`: the person can still answer in this thread. `answer`: how a question was answered, when it was (`answerTo`) */
-function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (picking: boolean) => void }) {
+function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (question: string, picking: boolean) => void }) {
   if (m.kind === 'event') {
     return (
       <li className="text-center text-xs text-ink-faint" data-testid={`mail-event-${m.seq}`}>
@@ -152,7 +153,7 @@ function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
 }
 
 /** A question's choices (#1630): a press posts the choice's words as the answer, once, and the rows then say which one it was */
-function Choices({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (picking: boolean) => void }) {
+function Choices({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (question: string, picking: boolean) => void }) {
   const view = useStore((s) => s.mailThread)
   const reply = useStore((s) => s.replyMail)
   const [sending, setSending] = useState(false)
@@ -162,10 +163,10 @@ function Choices({ m, open, answer, onPicking }: { m: MailMessage; open: boolean
   const pick = async (choice: string) => {
     if (sending) return
     setSending(true)
-    onPicking(true)
+    onPicking(m.id, true)
     // The answer names this question: the newest open one is not always the one pressed
     await reply(choice, 'answer', m.id)
-    onPicking(false)
+    onPicking(m.id, false)
     setSending(false)
   }
   return (

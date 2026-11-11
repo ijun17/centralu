@@ -804,11 +804,11 @@ export const AGENT_BUDGET_CHARS = 1400
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Mailbox: work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it.`,
+    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind "question".`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'update', 'close', 'find']),
       thread: z.string().optional(),
-      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id (a shared name is refused). For find: words (name, project, machine, role) to search every computer'),
+      to: z.string().optional().describe('"parent": the session that started you, for a question or checkpoint; "assistant": the Centralu Assistant, for what only it can decide; "person": the human; or a session by name or id. For find: words (name, project, machine, role) to search every computer'),
       kind: z.string().optional(),
       subject: z.string().optional(),
       text: z.string().optional(),

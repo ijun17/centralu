@@ -436,8 +436,8 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     question is answered once. The reply box stays, so the person may always answer in their own words (the list then says "Answered"). The window finds
     the answer as the person's message that names the question (`replyTo`); a window that cannot draw choices still shows the question and takes the answer.
   - **The CLI's own choice tool is off** in every Claude session that has the mail tool (`disallowedTools: ['AskUserQuestion']`,
-    `claudeQueryOptions`, by `seatHas(profile, 'mail')`). No line tells a session to ask by mail yet: it does not fit the mail tool's ceiling, which did not rise
-    (docs/tool-cost.md #1630 lists the options; the owner decides). A session
+    `claudeQueryOptions`, by `seatHas(profile, 'mail')`). The mail tool's description says to ask the person with kind "question" (a test pins it for every seat that is served the tool; the Assistant's seat has mail as a command and no definition), within the ceiling, which did not rise
+    (docs/tool-cost.md #1630). A session
     without mail (a builder, an app's agent) keeps the question card. Codex's `request_user_input` exists only in its
     plan mode and behind a feature flag, neither of which Centralu turns on, so it has nothing to switch off.
     Approvals stay cards: they hold a tool call.

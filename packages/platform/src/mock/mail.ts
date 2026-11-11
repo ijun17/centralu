@@ -83,6 +83,16 @@ export class MailMock {
     return id
   }
 
+  /** Another message from a session in a thread, as the host adds one: unread for the person */
+  say(threadId: string, spec: { from: MailParty; body: string; kind?: string; choices?: string[] }): void {
+    const t = this.must(threadId)
+    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, ...(spec.choices ? { choices: spec.choices } : {}), createdAt: this.clock.now() }
+    t.messages.push(message)
+    t.row.unread += 1
+    t.row.last = { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: message.createdAt }
+    this.touch(t)
+  }
+
   private must(threadId: string): Thread {
     const t = this.threads.get(threadId)
     if (!t) throw mockError(`Thread not found: ${threadId}`, 'refused')

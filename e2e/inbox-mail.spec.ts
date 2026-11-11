@@ -86,6 +86,35 @@ test('Mail: a question with choices lists them, a press answers once with its wo
   await expect(page.getByTestId('mail-message-3')).toHaveCount(0)
 })
 
+test('Mail: with picks on two questions of one thread in flight, the reply box waits for both (#1630)', async ({ page }) => {
+  await setup(page)
+  const other = { ...PARSER, address: 'session:mock/s2', sessionId: 's2', name: 'Builder' }
+  const id = await seed(page, { subject: 'Two questions', from: PARSER, body: 'First?', choices: ['a1', 'a2'] })
+  await page.evaluate(([thread, from]) => (window as any).__mock.seedMailMessage(thread, { from, body: 'Second?', choices: ['b1', 'b2'] }), [id, other] as const)
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await expect(page.getByTestId('mail-choices-2')).toBeVisible()
+
+  await page.evaluate(() => {
+    const w = window as any
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__held = []
+    mail.reply = (...a: unknown[]) => new Promise((resolve) => w.__held.push(() => resolve(real(...a))))
+  })
+  await page.getByTestId('mail-choices-1-1').click()
+  await page.getByTestId('mail-choices-2-1').click()
+  await page.getByTestId('mail-reply').fill('words of my own')
+  await expect(page.getByTestId('mail-send')).toBeDisabled()
+  // The first comes back: the second is still on its way, so the box still waits
+  await page.evaluate(() => (window as any).__held[0]())
+  await expect(page.getByTestId('mail-message-3')).toContainText('a1')
+  await expect(page.getByTestId('mail-send')).toBeDisabled()
+  await page.evaluate(() => (window as any).__held[1]())
+  await expect(page.getByTestId('mail-message-4')).toContainText('b1')
+  await expect(page.getByTestId('mail-send')).toBeEnabled()
+})
+
 test('Mail: an answer in the reply box answers a question with choices too, and the list says it was answered', async ({ page }) => {
   await setup(page)
   const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })

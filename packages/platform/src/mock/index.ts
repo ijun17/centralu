@@ -383,6 +383,9 @@ export class MockPlatform implements Platform {
   seedMail(...a: Parameters<MailMock['seed']>): ReturnType<MailMock['seed']> {
     return this.mailMock.seed(...a)
   }
+  seedMailMessage(...a: Parameters<MailMock['say']>): void {
+    this.mailMock.say(...a)
+  }
   // machines.ts
   get machinesList() { return this.machinesMock.machinesList }
   set machinesList(value: MachinesMock['machinesList']) { this.machinesMock.machinesList = value }
