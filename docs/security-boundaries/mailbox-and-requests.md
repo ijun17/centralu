@@ -26,7 +26,7 @@ refused, and what comes back is not marked). `find_apps` and `attach_app` offer 
 row held for the person is listed in the Inbox until the person trusts the project, resumes the chain, or releases it. What another party wrote reaches a model only inside the wake frame (`mail/frame.ts`) or the `mail` tool's `read`, both
 quoting every line (U+2028, U+2029 and U+0085 included) behind `> `, escaping the frame's tags, and naming the sender by Centralu's
 word for how it stands to the reader. The `mail.*` methods are the window's: they are not in the Assistant's window-call list, and
-the `mail` tool is the ordinary session's and the Assistant's alone (matrix above), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
+the `mail` tool is the ordinary session's and the Assistant's alone ([tool-matrix.md](tool-matrix.md)), which runs it as a command behind `centralu_run` and is told of mail in that form, because it owns the threads `send_to_session` opens (slice 3); a coordinator, a builder and an app's agent are not parties of the mailbox. The delivery stamps its input as Centralu's channel, and sends it
 as the CLI's own input, never as a message of the person's.
 
 **A session asking the Assistant (#1447, #1739, [plans/cited-requests.md](../plans/cited-requests.md), [plans/mailbox.md](../plans/mailbox.md) §7.6).** Any session of this host may send the Assistant a request

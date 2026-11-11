@@ -2,7 +2,7 @@
 
 A fourth preset, between `normal` and `auto` (`safe` < `normal` < `edits` < `auto`). **`edits` is `normal` plus one
 grant**: a file edit inside the session's project folder (or its worktree) raises no card. Everything else is
-`normal`'s, in every row of the table below: commands, deletes, paths outside the folder, network access and runs
+`normal`'s, in every row of the table in [approvals.md](approvals.md): commands, deletes, paths outside the folder, network access and runs
 outside the sandbox ask; the person's own bypass applies as under `normal`, and `edits` never asks more than `normal`
 would. `normal` keeps its meaning (the person approves each step).
 

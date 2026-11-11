@@ -136,7 +136,7 @@ host. It changes where a client connects, not what it must prove:
   the same user.
 - A stable token is a longer-lived secret than a token per host. It lives as long as the keeper, which is as long as
   the agents it serves; a keeper restart makes a new one, and so does an update, which restarts the keeper (until
-  #1895 step 4 PR 4 a keeper update passed the same one on over the handoff channel below).
+  #1895 step 4 PR 4 a keeper update passed the same one on over the handoff channel, gone since).
 - While no host is ready, the door holds a connection up to 45 s before closing it, so an unauthenticated
   connection costs at most a socket and a thread for that long; after a host is up, the host's own handshake
   timeout (10 s) applies.

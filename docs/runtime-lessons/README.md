@@ -7,15 +7,14 @@
 
 The process runtime is how the window, the macOS shell, the keeper, the host, the agent CLIs, terminals, commands and
 a remote's `centralu serve` start, are supervised, hand over, update and stop, on macOS, Linux, Windows and remotes.
-It is being redesigned in steps that each replace one module wholesale. This document is the precondition: every
-rule below was learned by a failure or a measurement, and a new implementation is checked against it, not rediscovered.
+It is being redesigned in steps that each replace one module wholesale. This document is the precondition: every rule in this folder was learned by a failure or a measurement, and a new implementation is checked against it, not rediscovered.
 
 **How to read an entry.**
 
 - **Happened**: the failure or the measurement, with its issue, pull request or commit.
 - **Rule**: an invariant stated so a new implementation can be checked against it.
 - **Guard**: the test that fails when the rule is broken. **UNGUARDED** means nothing fails; every UNGUARDED rule is
-  listed again in the [work list](work-list.md#the-work-list-unguarded-rules) at the end, which is what has to be written before
+  listed again in the [work list](work-list.md#the-work-list-unguarded-rules), which is what has to be written before
   the module it concerns is replaced. *Manual* means a check done by hand (on a release, on another machine) that no
   CI job repeats.
 - **Platforms**: where the rule applies.
@@ -34,8 +33,7 @@ rule below was learned by a failure or a measurement, and a new implementation i
 | `tooling/`, `scripts/`, `e2e/` | as in the repository |
 
 A Rust test is named by its function (`` `keeper/os/unix.rs` `a_second_lock_…` ``), a vitest or Playwright test by its
-title in double quotes, and a check inside an integration script as `check "…"`. Every name below was checked with
-`grep` against the tree at the commit that adds this file.
+title in double quotes, and a check inside an integration script as `check "…"`. Every name in this folder was checked with `grep` against the tree at the commit that added the record.
 
 ## Contents
 

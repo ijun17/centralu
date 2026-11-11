@@ -14,8 +14,7 @@ checks the profile again on every call (`SessionManager.runCentraluTool`), so a 
 session was not given is refused even when the bridge asks for it. The arguments are checked once
 for both paths, against the tool's one schema (`TOOL_ARGS`, #850): Claude's server checks them against
 the definition it shows, and the bridge hands them over unchecked. The bridge connects with a
-credential for its own session's bridge calls, not with the host's token (owner question 4; "The
-front door" below).
+credential for its own session's bridge calls, not with the host's token (owner question 4; "The front door" in [keeper.md](keeper.md#the-front-door)).
 
 | Profile | Which sessions | What its tools see |
 |---|---|---|

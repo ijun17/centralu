@@ -11,7 +11,7 @@ Not fixed here; each belongs to the pull request that next touches its document.
 
 ## The work list: UNGUARDED rules
 
-Every rule above that no test guards. A module is not replaced until the rows naming it have a test that fails with the
+Every rule of this folder that no test guards. A module is not replaced until the rows naming it have a test that fails with the
 rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step" is the step of
 [plans/runtime-unification.md](../plans/runtime-unification.md) §6 the row gates.
 

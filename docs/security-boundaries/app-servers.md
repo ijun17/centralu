@@ -9,7 +9,7 @@ then who may call it:
   `.centralu/apps/` does nothing until the user trusts the project, and an app that arrives later
   with `git pull` is governed by that same trust: there is no second gate for it. User-folder apps,
   approved MCP servers included, are trusted because the user put them there. An app **imported**
-  into the user folder from elsewhere is not: see "Imported apps and app links" below.
+  into the user folder from elsewhere is not: see [imported-apps.md](imported-apps.md).
 - The host withholds its own environment: every `CC_*` and `CENTRALU_*` variable is removed (the
   WebSocket token is one; with it an app could call every RPC). The app receives its declared
   secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`app-start-env.ts` `spawnSpec`; test "receives its
@@ -86,12 +86,11 @@ then who may call it:
   `host-data.test.ts`, `call-app.test.ts`).
 - An agent an app asks for runs in a new session the person can see, under `auto`, the default
   every new session gets, never above any session with a call open into the app (owner decision
-  2026-11-05; it was `safe`; the rule and its residual under "An agent an app started" above), with no apps attached, and receives the prompt framed as the app's text ("Text an app
+  2026-11-05; it was `safe`; the rule and its residual under "An agent an app started" in [approvals.md](approvals.md)), with no apps attached, and receives the prompt framed as the app's text ("Text an app
   sends"; `app-agents.test.ts` "the agent stands up under auto, the default every new session gets
   (owner decision 2026-11-05), the app's text is framed as the app's text, and the session that
   hands back an answer goes idle"). Its text may carry what the app fetched from elsewhere, and
-  under `auto` nothing it does waits for the person (the residual under "An agent an app
-  started" above). Its settings files
+  under `auto` nothing it does waits for the person (the residual under "An agent an app started" in [approvals.md](approvals.md)). Its settings files
   follow the project's trust like a worker's; a user-folder app's agent, which runs in the
   Assistant's folder, reads only the person's own settings, never that folder's files
   (`settingFilesFor`; `setting-files.test.ts`).

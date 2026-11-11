@@ -53,7 +53,7 @@ A probe against the real binary (`scripts/probe-codex-*.mts`) is the check for t
 
 **The rule that keeps them honest:** when adapter code starts depending on a new
 vendor name — a new notification, a config key, a field — add it to the contract
-**in the same PR**. A new tool (step 4 above) starts by creating its own equivalent
+**in the same PR**. A new tool (step 4 of [adding-a-tool.md](adding-a-tool.md)) starts by creating its own equivalent
 of one of these.
 
 **The other direction, at runtime: unmapped types** ([#58](https://github.com/ijun17/centralu/issues/58),

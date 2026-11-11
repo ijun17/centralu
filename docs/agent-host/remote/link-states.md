@@ -12,11 +12,11 @@ does the first attempt ssh gets an answer to. The row (Settings → Machines) sa
 then when it was last connected and when it tries again, then ssh's line; the sidebar's status word stays "away" for it and for `unreachable`. Retried on the backoff below while Auto reconnect is on; with it off, `nextAttemptAt`
 is null); `unreachable` (the machine answered or was linked and then failed: an ssh it refused (a key, a host key, a refused connection), a
 link that dropped, the forward or the socket; `error` says why; retried with backoff from 2 s to 5 minutes while Auto reconnect is on, #1134, #1341; with it off, not until the person's Connect); `starting` (no host ran
-there; the link is starting one, above); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, above); `not_running` (Centralu answers there but no `centralu serve` runs, and
+there; the link is starting one, [hub-links.md](hub-links.md)); `updating` (the hub is stopping, switching or removing the Centralu it installed there; the link waits, [install-and-update.md](install-and-update.md)); `not_running` (Centralu answers there but no `centralu serve` runs, and
 starting one failed, `error` says why; retried); `versions_differ`; `refused` (a token refused twice in a row:
 the connection line is read again once at once, since `--rotate-token` changes the token a running serve keeps until
 it restarts); `disconnected` (#1134: closed on purpose and not tried, below); `stopped` (#1143: the person stopped
-Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, above).
+Centralu there, or the hosts the link started kept stopping; the link starts none until the person's Start, [hub-links.md](hub-links.md)).
 
 **Auto reconnect** (#1341, owner decision 2026-10-20; `MachineInfo.autoReconnect`, kept in the `linked_machines.connect`
 column of v59 with no new step: null is on, `when_needed` is off, which is where the older connect mode kept its choice, so

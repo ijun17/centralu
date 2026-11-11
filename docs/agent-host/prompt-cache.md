@@ -7,7 +7,7 @@ dropdown its click opens breaks it down per tool, for the last five hours and to
 local midnight): the hit rate, tokens read from cache, written to it and uncached, the rebuilds,
 and the few sessions that wrote most, each opening that session.
 
-**Counted from the sessions' own events, not from the tool's files** (the rule above). The
+**Counted from the sessions' own events, not from the tool's files** (the rule of [importing-sessions.md](importing-sessions.md#principle-use-only-official-apis)). The
 adapters send one `request` per model request on `usage_update` (`RequestInput`): Claude per
 assistant message, deduplicated by its message id because the CLI can send one response as several
 messages that repeat its usage; Codex from `last` in `thread/tokenUsage/updated`, skipping a

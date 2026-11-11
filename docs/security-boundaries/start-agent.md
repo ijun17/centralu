@@ -4,7 +4,7 @@
 work with it ([agent-host/delegation/start-agent.md](../agent-host/delegation/start-agent.md)). They add no reach the caller lacked (the child works on the
 same files under the same or a lower preset), but they multiply what runs. The rules below
 apply to `safe` and `normal`; `auto` opens the consent, ownership and trust
-boundaries (#603), with a log line instead of a card or refusal (Claude's own cross-session messaging is closed under `auto` too, below). The agent depth binds every preset, `auto` included (#867):
+boundaries (#603), with a log line instead of a card or refusal (Claude's own cross-session messaging is closed under `auto` too, [inter-agent-content.md](inter-agent-content.md#claudes-independent-session-messaging-569)). The agent depth binds every preset, `auto` included (#867):
 
 - **The person's consent.** For a `normal` caller it is the project's trust (#673): only a trusted project's
   sessions can start agents at all, and trusting it was the person's decision about that project, so no card is

@@ -84,7 +84,7 @@ relays at most 1,024 connections at once: one past that is closed as it is accep
 client connecting in a loop cannot run the keeper out of descriptors (`front_door.rs`, `MAX_RELAYS`).
 
 **When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. While a window it closed
-itself may still come back (`REATTACH_GRACE`, below), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
+itself may still come back (`REATTACH_GRACE`, above), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
 host (a working or waiting session, a terminal, a command run). A keeper no window attached to within 60 s of
 starting ends too: the app that launched it died first.
 

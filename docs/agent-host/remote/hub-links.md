@@ -17,8 +17,8 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
 | Mirror | `stored.ts`, store v46 `machine_headers` | Each machine's sessions and projects as last listed, for when it cannot be reached |
-| Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata (below) |
-| Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back (below) |
+| Installer | `install.ts`, `registry.ts`, `remote-install.mjs` | `machines.install`: preflight, the pinned Node and the npm packages on the remote, checked against the release's pin and the registry's signed metadata ([install-and-update.md](install-and-update.md)) |
+| Update | `update.ts` | `machines.update`, `machines.rollback`, `machines.uninstall`: stop the remote's host, switch its pointers, start and check, or put back ([install-and-update.md](install-and-update.md)) |
 | Dev build | `dev-build.ts`, `remote-dev.ts` | `pnpm remote-dev <machine> --ref <commit> --repo <path>` (#1036): a dev build of the host made there from a commit, marked `source: { kind: 'dev' }`, swapped in by the update's steps ([plans/remote-hub.md](../../plans/remote-hub.md) §10.11). A command on the hub, no RPC |
 | Autostart | `autostart.ts` | `machines.autostart`: `centralu serve --autostart` there, through the lookup (below) |
 | Ssh config, probe | `ssh-config.ts`, `probe.ts` | `machines.sshHosts`: the hosts of this computer's `~/.ssh/config`; `machines.probe`: what runs at one of them, before it is linked (below) |
@@ -135,7 +135,7 @@ command to whatever login shell the remote account has:
 | `powershell` | `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>` of the same lookup (`<data>\remote\bin\centralu.cmd`, then `Get-Command centralu.cmd` (the `.cmd` shim, never the bare name: PowerShell would pick the `.ps1`, which the default `Restricted` execution policy blocks, #688), then `<data>\bin\centralu.cmd`, the launcher `serve` keeps; `<data>` is `CC_DATA_DIR` there, else `%USERPROFILE%\.centralu`) | Windows 11, OpenSSH, PowerShell 5.1 (before the managed launcher was added) |
 | `wsl` | The same PowerShell wrapper around `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`, the script being the POSIX lookup with `/mnt/*` taken off PATH | Ubuntu 24.04 in WSL2 on that laptop |
 
-The managed launcher the installer writes (below) comes first, so a machine with both an npm install and one the hub
+The managed launcher the installer writes ([serve.md](serve.md), "The managed launcher") comes first, so a machine with both an npm install and one the hub
 made runs the version the hub installed; a phase 1 machine finds `centralu` as before.
 
 A machine can name its own command in place of `centralu` (`MachineInfo.command`): a source checkout, a data folder

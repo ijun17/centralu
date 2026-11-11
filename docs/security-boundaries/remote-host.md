@@ -1,7 +1,7 @@
 # The remote host (`centralu serve`, #82)
 
 A host started with `centralu serve` on another machine is reached by the app through an SSH local forward
-([agent-host/remote/serve.md](../agent-host/remote/serve.md)). The boundary is the one above, unchanged: loopback binding and the token.
+([agent-host/remote/serve.md](../agent-host/remote/serve.md)). The boundary is the one of [local-data-and-transport.md](local-data-and-transport.md#local-transport), unchanged: loopback binding and the token.
 
 - **Nothing listens on a public interface.** The host binds 127.0.0.1 on the remote; the forward binds 127.0.0.1 on
   the person's computer. Reaching the host takes an SSH login to that machine as that user, so SSH is what
@@ -11,7 +11,7 @@ A host started with `centralu serve` on another machine is reached by the app th
   `key` and one entry per full credential, `{ id, label, verifier, created }`, the verifier being the SHA-256 of the
   credential. The host gets the key as the first line on its stdin (`{"key"}`, a pipe to the launcher: not on the command
   line, which `ps` shows every user, and not in the environment, which every process of the user can read for as long
-  as the host runs, measured below in "The front door"), and the file's path in `CC_SERVE_STATE`. It derives what it
+  as the host runs, measured in [keeper.md](keeper.md#the-front-door)), and the file's path in `CC_SERVE_STATE`. It derives what it
   hands out from the key (the limited credential, a bridge's, the proof of a probe) and takes as full only a hello whose
   credential's verifier is in the file, read again at each hello, so a pairing or a revocation applies at once. A hello
   with the key itself is refused. The host takes exactly the entries the launcher lists and `--revoke` takes (an 8-hex
@@ -142,6 +142,6 @@ A host started with `centralu serve` on another machine is reached by the app th
     process of this user there can also read the key. That gives it the limited credential, a session's credential
     (`ccs1`) for any session it can name, which fakes only the name on a card, and also a bridge credential (`ccb1`)
     for any session it can name, which reaches
-    that session's own tool channel (`assistant.tool`, under that session's preset; "The Codex bridge gets a credential of its own" below), as it
+    that session's own tool channel (`assistant.tool`, under that session's preset; "The Codex bridge gets a credential of its own" in [keeper.md](keeper.md)), as it
     did before #1405 when the file held the token. Any process of this user, on any OS, can run `--window` and get the window's credential, until
     the launcher checks its parent (#1417).

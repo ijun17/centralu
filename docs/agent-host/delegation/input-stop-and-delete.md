@@ -12,7 +12,7 @@ stamped, since the host cannot tell Centralu's text from the person's there. Mea
 2.1.296: the CLI accepts it, echoes it on the replayed user message, and answers the same with or without it, mid-turn
 wording and `/compact` included (`docs/plans/mailbox.md` §7.1).
 
-`agent_session` normally acts on a session whose `askedBy` is the caller, in its project (the `auto` exception is above).
+`agent_session` normally acts on a session whose `askedBy` is the caller, in its project (the `auto` exception is in [start-agent.md](start-agent.md)).
 Deleting a child without a worktree also accepts `parentSessionId` as its ownership link. `send` during the caller's turn
 uses the adapter's ordinary message path when it declares `capabilities.midTurnInput` and provides `sendTracked`:
 Codex 0.160 `turn/start`

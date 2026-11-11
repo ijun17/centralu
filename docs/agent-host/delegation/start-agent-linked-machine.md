@@ -145,7 +145,7 @@ qualifies it; `LinkedSessions.lastUserMessage`). Then a turn that ended meanwhil
 reports when it ends. Otherwise another's message came after (the person's on that machine), or the instruction never
 went in: the caller is told that what it gave the child ended or was set aside unseen, with nothing the child said
 since, rather than handed another's turn as its report. The paths its answer names are that machine's, and none
-is made readable here. It counts under the caller's project's ceiling (below, "How many"), wherever it runs: the
+is made readable here. It counts under the caller's project's ceiling ([start-agent-steps.md](start-agent-steps.md), "How many"), wherever it runs: the
 ceiling bounds how much one project's sessions set going at once, and the machine counts nothing for a session the
 hub started there; its start holds a place from the card's answer until its wait or report counts it, and a new
 `send` turn is checked as a local one. What is owed of it survives a hub restart: its record keeps `owed` (a call

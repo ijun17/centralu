@@ -95,7 +95,7 @@ gets its close frame, and is cut if the peer does not answer within a quarter of
 a frame may be up to 100 MiB (the library's default, set explicitly); a bigger one closes the socket
 (1009). The token is compared in constant time. An authenticated socket's hello is
 answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
-(#382, "The front door" below); that socket receives no events and may call only its own session's
+(#382, "The front door" in [keeper.md](keeper.md#the-front-door)); that socket receives no events and may call only its own session's
 bridge RPCs. It may also carry the limited credential, which calls only the everyday methods ("Who holds full power",
 below).
 
@@ -106,7 +106,7 @@ app's front door port and credential from the keeper's `status` and gives them t
 reads every conversation and does the everyday things, and what cannot be undone raises a card in the app's own
 window (or, for the person's own answers, is refused). Vite bundles `VITE_*` values into the page, so the page it
 serves, on `http://127.0.0.1:5173` or `:5174`, holds that credential. That page does **not** have the protection of the keeper
-socket ("The keeper's control socket" below: `0600`, peer uid checked). A loopback TCP port is not per user:
+socket ([keeper.md](keeper.md): `0600`, peer uid checked). A loopback TCP port is not per user:
 on a machine with other users, any of them can fetch `http://127.0.0.1:5173/` and read the token from the
 served bundle, and then connect to the front door and read every conversation. So `dev:live` is for single-user
 machines, and it prints a warning saying so. The dev server listens on `127.0.0.1` only (never `0.0.0.0`): do not expose it (no

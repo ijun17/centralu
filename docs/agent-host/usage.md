@@ -87,7 +87,7 @@ chokidar is not a dependency, `core/usage` holds only the cache arithmetic of [p
 method, and no build ever wrote a row to `usage_facts`. The table is gone from `schema.sql`, and store step 56
 drops it from an existing store (#423; a contract step, [store-migrations.md](store-migrations.md#migration-steps-expand-then-contract-292) rule 2, one release after the last that deleted a
 project's rows from it). It was
-also the *opposite* of the rule [importing-sessions.md](importing-sessions.md#principle-use-only-official-apis) states, and the two sections sat in this file
+also the *opposite* of the rule [importing-sessions.md](importing-sessions.md#principle-use-only-official-apis) states, and the two sections sat in one document
 contradicting each other. Reading a tool's private JSONL is exactly what [importing-sessions.md](importing-sessions.md#principle-use-only-official-apis) forbids, for
 the reason given there: an undocumented format breaks silently on upgrade, and a silent break
 in a number is worse than a missing number.

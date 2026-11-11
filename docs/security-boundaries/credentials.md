@@ -13,7 +13,7 @@ OS allows it, start the app's own executable, or ssh to a linked machine with th
 What is removed is the path where full, unconfirmed power is one request away; it is not a wall between processes of one
 user, and where it cannot prevent it prefers to be loud.
 
-**Two rights at hello**, besides the Codex bridge's credential above (`transport/server.ts`): the token, which a window and a hub linked to this host hold, calls
+**Two rights at hello**, besides the Codex bridge's credential ([local-data-and-transport.md](local-data-and-transport.md#local-transport)) (`transport/server.ts`): the token, which a window and a hub linked to this host hold, calls
 everything; the **limited credential** (`ccl1:<mac>`, an HMAC of a label of its own keyed by the token,
 `transport/limited-token.ts`) calls the everyday methods only. It is derived, not stored, as the bridge's is: the next
 host after a swap accepts it with nothing handed over, and holding it gives nothing toward the token. A socket holding it
@@ -25,14 +25,12 @@ credential's rights and names a session. Every agent the host starts finds it in
 address (`CC_HOST_URL`, `CC_HOST_CREDENTIAL`; `hostAccessEnv`, in the Claude CLI's and the Codex app-server's
 environment, and so in what they run), so a script an agent writes calls the host the sanctioned way instead of reading
 a token from somewhere. One naming a session this host does not have is refused at hello. It is **attribution, not
-proof**: an agent's environment is readable by every process of the same user for as long as it runs ("The front door"
-below), so a process can present another session's credential. Its rights are the same either way; all it can fake is
+proof**: an agent's environment is readable by every process of the same user for as long as it runs ("The front door" in [keeper.md](keeper.md#the-front-door)), so a process can present another session's credential. Its rights are the same either way; all it can fake is
 the session a card names, which says "which says it runs under the session". The name is weak in two more ways: a
 session's name can be changed by any limited caller (`sessions.rename` is everyday), and on a serve host whoever reads
-`serve.json`'s key can derive a session credential for any session ("The remote host" below). Beside it, a Codex
+`serve.json`'s key can derive a session credential for any session ([remote-host.md](remote-host.md)). Beside it, a Codex
 session's bridge process holds `CC_BRIDGE_TOKEN` (`ccb1`) in its environment, readable the same way, and that one gives
-more than the session credential: the session's own tool channel as that session, under its preset ("The Codex bridge
-gets a credential of its own" below; the rare commands still raise a card in every preset). Derived like the bridge's, so the next
+more than the session credential: the session's own tool channel as that session, under its preset ("The Codex bridge gets a credential of its own" in [keeper.md](keeper.md); the rare commands still raise a card in every preset). Derived like the bridge's, so the next
 host after a swap, and a keeper's adopted agent, keep it working. An agent started by a build from before slice 6 and
 adopted after an update has none (a process's environment is fixed when it starts) until its next start. A host started
 inside an agent takes both variables out of its own environment at start (`LAUNCH_VARIABLES`), so its agents get only
@@ -118,7 +116,7 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   the card, and its Allow is refused (`window`), so the person answers in the app's own window.
 
 **Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
-the keeper handing the token to windows only (slice 4, "The keeper's control socket" below): a script that asks
-`keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, "The remote host" below) holds no
+the keeper handing the token to windows only (slice 4, [keeper.md](keeper.md)): a script that asks
+`keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, [remote-host.md](remote-host.md)) holds no
 full credential: a script that reads it, or runs `--connection`, gets the limited one. Every agent's process has its
 session's credential (slice 6). The direct host on Windows gives its token only to the window that started it.

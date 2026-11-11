@@ -7,7 +7,7 @@
   account model and no sharing between people.
 - **The reverse direction** (#550). A host calls a hub linked to it only on the connection that hub opened and offered
   on (`host.hubOffer`), with `rpc` frames the hub answers only through its link's allowlist ("A linked machine's session
-  asking this computer", above). A window, or anything else holding the token, that offers itself as a hub only makes
+  asking this computer", in [ask-project.md](ask-project.md)). A window, or anything else holding the token, that offers itself as a hub only makes
   the machine's sessions send it their asks: the token already gives it more than that.
 - **An administrator's ssh on Windows runs everything elevated** (#702). Windows OpenSSH gives an account in the
   Administrators group a full token for a network logon, with no UAC split, so a host the hub starts over ssh, every
