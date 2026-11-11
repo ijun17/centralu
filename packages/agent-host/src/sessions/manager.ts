@@ -408,7 +408,7 @@ export class SessionManager {
       session: (id) => this.meta.get(id),
       idle: (id) => this.processes.sessionIdle(id),
       running: (id) => this.handles.has(id),
-      ready: (id) => this.mail.mailReceiver(id).kind === 'ready',
+      ready: (id) => this.mail.takesTurn(id),
       window: (m) => this.modelWindows.of(m),
       setting: compactSetting,
       command: (id, tool, focus) => {
@@ -419,7 +419,7 @@ export class SessionManager {
       send: (id, text) => this.events.sendCompact(id, text),
       // An ordinary turn of the session's own, in Centralu's channel with no user row; a session with no process is woken for it
       sendThen: (id, text, line) =>
-        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.tenure.disposing, atRest: () => this.mail.mailReceiver(id).kind === 'ready' }),
+        this.events.deliverMail(id, { text, quiet: false, line, label: 'compaction' }, { leaving: () => this.tenure.disposing, atRest: () => this.mail.takesTurn(id) }),
       // What waits to start a turn behind the compact turn: what the tool holds (a tool that cannot say answers null) and mail waiting for the session
       queued: (id) => {
         const held = this.handles.get(id)?.queuedInputs?.()

@@ -13,6 +13,7 @@ import type { PersonReportDraft } from './child-ownership.js'
 import type { ChildReports } from './child-reports.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget } from './delegation-host.js'
+import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
 import { seatHas } from './tool-seats.js'
@@ -81,6 +82,10 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'c
   readonly tools: SessionTools
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
+  /** Whether the session's tool takes input into the turn it is running (`SessionEventsHost.joinsRunningTurn`) */
+  joinsRunningTurn(sessionId: string): boolean
+  /** A compact Centralu sent and that is not over, during which no mail joins a turn */
+  readonly selfCompaction: Pick<SelfCompaction, 'compacts'>
 }
 
 /**
@@ -178,7 +183,7 @@ export class MailSessionsView {
           if (other) this.host.children.clearMailTurn(id, owner)
         }
         try {
-          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.mailReceiver(id).kind === 'ready', wanted: () => input.wanted?.() ?? true }, (e) => {
+          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, (e) => {
             unmark()
             late?.(e)
           })
@@ -228,15 +233,24 @@ export class MailSessionsView {
     // ("awaiting input", protocol session-state.ts), a session ready for its next message; a question raises `waiting_approval`
     // The session's own background work does not hold mail back (`cardOrTurn`): the message starts its next turn
     const busy = cardOrTurn(m)
+    const live = this.host.handles.has(id)
+    const quiet = live && this.host.adapters.get(m.tool)?.quietInput === true
+    // In a turn its tool takes input into, mail joins that turn (docs/plans/mailbox.md §10.6.2); not while a compact Centralu sent is not over
+    if (busy === 'turn' && live && this.host.joinsRunningTurn(id) && !this.host.selfCompaction.compacts(id)) return { kind: 'ready', live, quiet, auto: m.permissionPreset === 'auto', joins: true }
     if (busy !== null) return { kind: 'busy', why: busy === 'turn' ? 'turn' : 'card' }
-    switch (m.state) {
-      case 'limited':
-        return { kind: 'busy', why: 'limited' }
-      default: {
-        const live = this.host.handles.has(id)
-        return { kind: 'ready', live, quiet: live && this.host.adapters.get(m.tool)?.quietInput === true, auto: m.permissionPreset === 'auto' }
-      }
-    }
+    if (m.state === 'limited') return { kind: 'busy', why: 'limited' }
+    return { kind: 'ready', live, quiet, auto: m.permissionPreset === 'auto' }
+  }
+
+  /** The session can be given a turn of its own now: at rest with no card or limit standing, in a host that is not leaving (asleep, it is woken) */
+  takesTurn(id: string): boolean {
+    return this.takesAsPlanned(id, false)
+  }
+
+  /** The session still takes mail as the delivery planned it: woken at rest, or joining its turn. Otherwise the mail waits (`MailNotAtRest`) and is planned again */
+  private takesAsPlanned(id: string, joins: boolean): boolean {
+    const r = this.mailReceiver(id)
+    return r.kind === 'ready' && (r.joins === true) === joins
   }
 
   /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.stoppedTurnAnswer`, at most 600 characters), or null when it said none */

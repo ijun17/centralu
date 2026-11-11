@@ -8,6 +8,20 @@ export type ThenStage = 'asked' | 'sent' | 'compacted' | 'refused' | 'sending'
  * says it. `at`: when the record last moved, so a host does not send what an older build left behind long ago (`THEN_KEEP_MS`)
  */
 export type StoredThen = { stage: ThenStage; then: string; focusAside: string | null; ahead: boolean; why: string | null; at: number }
+
+/** The text of the turn that carries the agent's next step */
+export function thenTurn(rec: StoredThen): string {
+  return [
+    rec.why === null
+      ? '[Centralu] The compaction you asked for with compact_self is done. This is the step you set with `then`.'
+      : `[Centralu] Your compact_self request did not compact the conversation (${rec.why}), so it is as it was. This is the step you set with \`then\`. Asking again before anything changed gets the same answer.`,
+    ...(rec.ahead ? ['A message from the person ran before the compaction and came first: what they asked weighs more than this step.'] : []),
+    ...(rec.focusAside ? [`This tool's compact takes no focus. What you asked the summary to keep: ${rec.focusAside}`] : []),
+    '',
+    rec.then,
+  ].join('\n')
+}
+
 /** The store side of a `then` and of the notes owed a session: per session, in the setting store, so the host after a swap or a restart finds them */
 export type ThenKeep = {
   read(sessionId: string): StoredThen | null

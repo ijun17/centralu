@@ -15,10 +15,10 @@ import {
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
-import { buildMessageFrame, mailCalls, type MessageCalls, type MessageFrameItem } from './frame.js'
+import { buildMessageFrame, deliveryLine, mailCalls, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
 import { updateInPlace, type TurnReport } from './turn-report.js'
-import type { MailReach } from './reach.js'
+import { droppedText, trustedText, type MailReach } from './reach.js'
 import { sendGuards } from './send-guards.js'
 import { StopNotices, type StopNoticeOptions } from './stop-notices.js'
 import {
@@ -111,6 +111,11 @@ export type DrainOptions = {
   again?: boolean
   /** Left out, and nothing is written about it */
   skip?: (message: MailRow, row: RecipientRow) => boolean
+  /**
+   * The mail joins the recipient's running turn (docs/plans/mailbox.md §10.6.2): a task, a request to the Assistant, or a reminder for its asker, is
+   * left for a turn of its own, whose end is reported to its sender (one turn keeps one asker, turn-owned-by-no-one.md §4.2)
+   */
+  joining?: boolean
 }
 export type DrainResult = {
   /** The wake frame; empty when there is nothing to say */
@@ -545,6 +550,8 @@ export class MessageService {
     for (const { row, message } of this.records.pendingFor(recipient, now, opts.again === true)) {
       const request = this.isRequest(message, recipient)
       if (message.sender === recipient || this.reach.mayWrite(message.sender, recipient, request) !== null || opts.skip?.(message, row)) continue
+      // Step 3 of #1948 removes the task filter, when a task's end is its reply rather than the end of a turn
+      if (opts.joining && (message.kind === 'task' || (toAssistant && this.askerOf(message, recipient) !== undefined))) continue
       if (this.reminderSettled(message, recipient)) {
         this.records.markRead(recipient, [message.id], now)
         continue
@@ -578,7 +585,8 @@ export class MessageService {
     const turnStarts = candidates.some(wakesIt)
     const handedOn = turnStarts && picked === null ? candidates.map((c) => (wakesIt(c) ? this.handedOnFrom(c.message, recipient) : undefined)).find((id) => id !== undefined) : undefined
     const kept = turnStarts ? candidates.filter((c) => !isWork(c) || groupOf(c) === picked) : candidates
-    const workMessage = !turnStarts ? null : handedOn ?? (toAssistant ? (kept.find((c) => c.request)?.message.id ?? null) : picked)
+    // Mail joining a turn starts none: it is no one's work, so the running turn is reported as before (docs/plans/mailbox.md §10.6.2)
+    const workMessage = !turnStarts || opts.joining ? null : handedOn ?? (toAssistant ? (kept.find((c) => c.request)?.message.id ?? null) : picked)
 
     const items: MessageFrameItem[] = []
     const relations = new Set<string>()
@@ -763,10 +771,16 @@ export class MessageService {
     const found = new Map<string, string>()
     for (const { message: m, row } of given) {
       if (!this.inOpenTurn(m, row, turn)) continue
-      const asker = this.isRequest(m, assistant) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
-      if (asker !== undefined && parseAddress(asker)?.kind === 'session' && !found.has(asker)) found.set(asker, m.id)
+      const asker = this.askerOf(m, assistant)
+      if (asker !== undefined && !found.has(asker)) found.set(asker, m.id)
     }
     return [...found].map(([asker, messageId]) => ({ asker, messageId }))
+  }
+
+  /** The session a message to the Assistant asks for: a request's sender, or the asker a reminder names (`facts.asker`) */
+  private askerOf(m: MailRow, assistant: string): string | undefined {
+    const asker = this.isRequest(m, assistant) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
+    return asker !== undefined && parseAddress(asker)?.kind === 'session' ? asker : undefined
   }
 
   /**
@@ -1043,20 +1057,4 @@ const citeKey = (seq: number): string => `cite:${seq}`
 
 /** A row the reader was not told of (held by the one hold, or `loop` by an earlier build): its message reads as a phantom (§5.5) */
 const isHidden = (row: RecipientRow): boolean => (HIDDEN_HOLDS as readonly string[]).includes(row.held ?? '')
-
-/** The compact line the conversation keeps of a delivery: how many, from whom, in Centralu's words and with no name another party wrote */
-function deliveryLine(messages: number, relations: ReadonlySet<string>): string {
-  return `✉ ${messages} ${messages === 1 ? 'message' : 'messages'}, from ${[...relations].join(', ')}`
-}
-
-/** S13: the person dismissed what a sender had waiting for a project to be trusted */
-function droppedText(ids: readonly string[], project: string): string {
-  const shown = ids.slice(0, 10).join(', ') + (ids.length > 10 ? `, and ${ids.length - 10} more` : '')
-  return `The person dismissed ${ids.length} of your messages that were waiting for project ${project} to be trusted (${shown}). They were not delivered and will not be.`
-}
-
-/** S16: the project is trusted, and these refused calls may be given again */
-function trustedText(project: string, calls: readonly string[]): string {
-  return `${project} is trusted now. The calls refused for it can be given again: ${calls.slice(0, 10).join(', ')}${calls.length > 10 ? `, and ${calls.length - 10} more` : ''}`
-}
 

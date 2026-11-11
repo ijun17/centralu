@@ -223,3 +223,8 @@ export function buildMessageFrame(
     return [frame, ...inlineBlocks(shown, messageHeader, calls.read(), cutBody)].join('\n\n')
   })
 }
+
+/** The compact line the conversation keeps of a delivery: how many, from whom, in Centralu's words and with no name another party wrote */
+export function deliveryLine(messages: number, relations: ReadonlySet<string>): string {
+  return `✉ ${messages} ${messages === 1 ? 'message' : 'messages'}, from ${[...relations].join(', ')}`
+}

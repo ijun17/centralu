@@ -126,3 +126,14 @@ export function mailReach(host: ReachHost): MailReach {
     },
   }
 }
+
+/** S13: the person dismissed what a sender had waiting for a project to be trusted */
+export function droppedText(ids: readonly string[], project: string): string {
+  const shown = ids.slice(0, 10).join(', ') + (ids.length > 10 ? `, and ${ids.length - 10} more` : '')
+  return `The person dismissed ${ids.length} of your messages that were waiting for project ${project} to be trusted (${shown}). They were not delivered and will not be.`
+}
+
+/** S16: the project is trusted, and these refused calls may be given again */
+export function trustedText(project: string, calls: readonly string[]): string {
+  return `${project} is trusted now. The calls refused for it can be given again: ${calls.slice(0, 10).join(', ')}${calls.length > 10 ? `, and ${calls.length - 10} more` : ''}`
+}

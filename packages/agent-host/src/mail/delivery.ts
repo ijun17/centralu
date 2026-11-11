@@ -19,14 +19,15 @@ import type { DrainResult, MessageService } from './messages.js'
 export type ReceiverState =
   /** Not here: in the trash or deleted. Its mail waits, and goes with it if it is purged (§4.1) */
   | { kind: 'gone' }
-  /** In a turn (mail waits for its end, until delivery by hooks in slice 6), waiting on a card (mail never answers a card), or at its usage limit */
+  /** In a turn its tool takes no input into (mail waits for its end), waiting on a card (mail never answers a card), or at its usage limit */
   | { kind: 'busy'; why: 'turn' | 'card' | 'limited' }
   /**
    * At rest: idle or in error (woken the same way). `live` is whether its process runs; asleep, it is
    * resumed. `quiet`: it can take mail without a turn, which is a live process of a tool that takes quiet input (Claude). `auto`: it
-   * runs without asking; since mail without threads nothing is held for that (D10), and the field stays for the receiver's other readers
+   * runs without asking; since mail without threads nothing is held for that (D10), and the field stays for the receiver's other readers.
+   * `joins`: in a turn whose tool takes input into it (docs/plans/mailbox.md §10.6.2): the mail joins that turn and starts none
    */
-  | { kind: 'ready'; live: boolean; quiet: boolean; auto?: boolean }
+  | { kind: 'ready'; live: boolean; quiet: boolean; auto?: boolean; joins?: boolean }
 
 /**
  * `deliver` found the receiver no longer at rest after waking it: the person typed, or a card came up, while it resumed (§7.1). Nothing
@@ -60,6 +61,8 @@ export type MailInput = {
   line: string
   /** Asked right before the send, with the other waits' checks: false when everything in it was withdrawn since (the send is then `MailWithdrawn`) */
   wanted?: () => boolean
+  /** Joins the turn running (`ReceiverState.joins`); a receiver no longer in the state the delivery was planned for is `MailNotAtRest` */
+  joins?: boolean
   /**
    * The turn this starts is the work of a task this session gave, or of its request to the Assistant (§7.6): the end of the turn is reported to it,
    * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
@@ -450,7 +453,10 @@ export class MailDelivery {
       console.error(`[mail] ${recipient}: delivery failed (${errorMessage(e)})`)
     } finally {
       this.inFlight.delete(recipient)
+      // Mail that falls due after this one is looked at when it does: the timer that ran this was its only look (a turn it joins may not end soon).
+      // A timer this pass set (the wake gap) is kept
       if (this.again.delete(recipient)) this.look(recipient)
+      else if (!this.timers.has(recipient)) this.lookLater(recipient, this.now())
     }
   }
 
@@ -465,16 +471,16 @@ export class MailDelivery {
      */
     const now = this.now()
     const plan = this.records.transaction(() => {
-      // Mail held back for a long stop waits for the session's next turn whether or not its process runs: a resume is not a turn (#1951)
-      const skip = waiting ? this.skipUnlessPersonSince : state.live ? this.skipOldWake : this.skipOld
-      const drain = (skipping: typeof skip | undefined) => this.service.drain(recipient, skipping ? { skip: skipping } : {})
+      // Mail held back for a long stop waits for the session's next turn whether or not its process runs: a resume is not a turn (#1951). A turn running takes it
+      const skip = waiting ? this.skipUnlessPersonSince : state.joins ? undefined : state.live ? this.skipOldWake : this.skipOld
+      const drain = (skipping: typeof skip | undefined) => this.service.drain(recipient, { ...(skipping ? { skip: skipping } : {}), ...(state.joins ? { joining: true } : {}) })
       let drained = drain(skip)
       // A live session that other mail wakes takes it with the wake. A sleeping one was just resumed for what needs it, and the rest waits (§7.9)
       if (!waiting && state.live && this.cutoff !== null && drained.wake) drained = drain(undefined)
       this.service.hold(recipient, drained.heldBack)
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
-      // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9)
-      if (drained.wake && !drained.immediate) {
+      // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9); mail joining a turn wakes nothing
+      if (drained.wake && !drained.immediate && !state.joins) {
         const gap = (this.lastWake.get(recipient) ?? -Infinity) + this.o.minWakeGapMs - now
         if (gap > 0) return { drained, go: false as const, waitMs: gap }
       }
@@ -489,16 +495,17 @@ export class MailDelivery {
     }
     const { drained } = plan
     const quiet = !drained.wake
+    const joins = state.joins === true
 
     // A turn mail starts is known before the session's first event of it, and forgotten if the tool does not take the input
-    const turn = quiet ? undefined : this.turns?.begin(sessionId, { workMessage: drained.workMessage, starter: this.starterOf(drained) })
+    const turn = quiet || joins ? undefined : this.turns?.begin(sessionId, { workMessage: drained.workMessage, starter: this.starterOf(drained) })
     const cancelTurn = () => {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }
     const delivered: { at?: number } = {}
     const reportTo = quiet ? undefined : this.reportTarget(recipient, drained)
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(reportTo ? { reportTo } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins } : {}), ...(reportTo ? { reportTo } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -520,7 +527,7 @@ export class MailDelivery {
       this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
       this.records.markRead(recipient, drained.inline, deliveredAt)
     })
-    if (!quiet) this.lastWake.set(recipient, this.now())
+    if (!quiet && !joins) this.lastWake.set(recipient, this.now())
     // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
     if (waiting) {
       this.left.delete(recipient)
@@ -529,7 +536,7 @@ export class MailDelivery {
       this.crowdChanged()
     }
     // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done
-    if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
+    if (!quiet && !joins) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
   }
 
   /**

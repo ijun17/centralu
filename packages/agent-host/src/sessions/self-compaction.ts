@@ -1,6 +1,6 @@
 import type { AutoCompact, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import { inTurn, type SessionIdle } from '../idle.js'
-import type { StoredThen, ThenKeep, ThenStage } from './then-keep.js'
+import { thenTurn, type StoredThen, type ThenKeep, type ThenStage } from './then-keep.js'
 
 /**
  * Compacting at the turn's end (#1451). The CLI's own auto compact (`auto-compact.ts`, #1376) fires in the middle of work,
@@ -98,7 +98,7 @@ export type SelfCompactionHost = {
   window(session: SessionInfo): number | null
   /** Whether a process of the session runs */
   running(sessionId: string): boolean
-  /** Whether the session can be given a turn now: between turns, no card or limit standing, and this host not leaving (`MailSessionsView.mailReceiver`'s `ready`; a session with no process is ready, it is woken) */
+  /** Whether the session can be given a turn now: between turns, no card or limit standing, and this host not leaving (`MailSessionsView.takesTurn`; a session with no process is ready, it is woken) */
   ready(sessionId: string): boolean
   setting(): AutoCompact
   /**
@@ -255,6 +255,12 @@ export class SelfCompaction {
   compactTurn(sessionId: string): boolean {
     const c = this.compacting.get(sessionId)
     return !!c && c.started && c.compacted && !c.ended
+  }
+
+  /** A compact Centralu sent is not over: its turn has not ended. Mail joins no turn meanwhile (docs/plans/mailbox.md §10.6.2); it waits, as it did for any turn */
+  compacts(sessionId: string): boolean {
+    const c = this.compacting.get(sessionId)
+    return !!c && !c.ended
   }
 
   /** Whether the turn opening now is the one a next step this host sent opens (#2164): it goes on with the work of the turn that asked. Once per step */
@@ -537,19 +543,6 @@ export class SelfCompaction {
     this.settleThen(id, c)
   }
 
-  /** The text of the turn that carries the agent's next step */
-  private thenTurn(rec: StoredThen): string {
-    return [
-      rec.why === null
-        ? '[Centralu] The compaction you asked for with compact_self is done. This is the step you set with `then`.'
-        : `[Centralu] Your compact_self request did not compact the conversation (${rec.why}), so it is as it was. This is the step you set with \`then\`. Asking again before anything changed gets the same answer.`,
-      ...(rec.ahead ? ['A message from the person ran before the compaction and came first: what they asked weighs more than this step.'] : []),
-      ...(rec.focusAside ? [`This tool's compact takes no focus. What you asked the summary to keep: ${rec.focusAside}`] : []),
-      '',
-      rec.then,
-    ].join('\n')
-  }
-
   /**
    * The compact turn has ended (or a request was refused): the agent's step goes now if nothing waits behind it, and at the end of the turn that does if
    * something does (the person's message in the tool's queue, mail waiting for the session; `queued`). A turn that begins holds it back (`observe`) and its
@@ -615,7 +608,7 @@ export class SelfCompaction {
     }
     if (!won) return
     try {
-      await this.goOn(id, this.thenTurn(rec), rec.why === null ? 'Centralu sent the agent its next step after the compaction' : 'Centralu sent the agent its next step: nothing was compacted')
+      await this.goOn(id, thenTurn(rec), rec.why === null ? 'Centralu sent the agent its next step after the compaction' : 'Centralu sent the agent its next step: nothing was compacted')
       this.erase(id)
       this.counted(id)
     } catch (err) {

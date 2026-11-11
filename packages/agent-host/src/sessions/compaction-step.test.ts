@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { addressOf as addr, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * #2164: a child that calls compact_self with a next step ends its turn, Centralu compacts the conversation, and the step goes in as a
@@ -43,6 +44,28 @@ describe("the turn a compaction's next step opens in a child (#2164)", () => {
     h.answer('Step 3 done.')
     await w.until(() => reportsTo(caller, child).length === 2)
     expect(String((reportsTo(caller, child)[1]!.payload as { text?: string }).text)).toContain('Step 3 done.')
+  })
+
+  it('takes no mail into the compact turn: the mail goes once that turn ends (docs/plans/mailbox.md §10.6.2)', async () => {
+    const { caller, child, h } = await compacting()
+    // Mail from here on: the compact turn runs
+    const clock = { t: Date.now() }
+    const m = wireHostMail(w.mgr, w.store, { now: () => clock.t })
+    m.delivery.start()
+    try {
+      h.acceptsAtOnce = true
+      const sent = m.service.send(addr(caller), { to: [addr(child)], text: 'also check the docs' })
+      clock.t += 3_000
+      await m.delivery.process(addr(child))
+      expect(h.sent.join(' ')).not.toContain(sent.message.id)
+      expect(w.store.mailbox.recipient(sent.message.id, addr(child))?.deliveredAt).toBeNull()
+      h.event({ type: 'compaction', sessionId: child, failed: false })
+      h.event({ type: 'turn_complete', sessionId: child })
+      // Its end pokes the delivery: the mail goes now, as a turn of its own
+      await w.until(() => h.sent.join(' ').includes(sent.message.id) && w.store.mailbox.recipient(sent.message.id, addr(child))?.deliveredAt != null)
+    } finally {
+      m.delivery.stop()
+    }
   })
 
   it("is the caller's no longer once the person writes: a note into their turn is refused", async () => {

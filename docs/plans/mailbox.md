@@ -1695,8 +1695,36 @@ rule's second copy (`useQuotes`, `MailHooks.quotes`, `NOT_QUOTED`); and the wake
 that path ends (`oldPathEnded`). `mail/policy.ts` went in #1996.
 
 **Decided as is (owner, 2026-11-11).** The starter owed nothing is told quietly of an error, a usage limit or a Stop alike. A notice
-to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8). After a quit, a child the person
+to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8), built in §10.6.2. After a quit, a child the person
 continues and that then finishes leaves its task open until it replies: step 3 makes a turn's last response its reply.
+
+### 10.6.2 Mail joins a running turn (#1948 step 2)
+
+Target 2 of #1948 (owner 2026-11-04): at rest, mail wakes the session; in a turn, all of its mail joins that turn. Step 2 builds it
+for everything but work (turn-owned-by-no-one.md P8); tasks join in step 3.
+
+**Delivery.** A session in a turn whose tool takes input into a running turn (`midTurnInput`: Claude, Codex; `joinsRunningTurn`) is a
+ready receiver with `joins` (`MailSessionsView.mailReceiver`). Its due mail goes into that turn through the tool's tracked input
+(`takeInput`): it wakes nothing, begins no `mail_turns` row, and its rows get the running turn's `turn_seq` (`markDelivered` with
+`MailTurns.current`). Claude folds it in at the next tool round; a turn that ends before one runs it as the turn after
+([turn-starter.md](turn-starter.md) §2), so it is never left unread. Quiet mail goes quietly as before, now in a turn too. The 30 s wake
+gap and the person's warning counts are for wakes only. Mail a host held back after a long stop (§7.9, #1951) waits for the session's
+next turn and joins it once one runs. A tool with no mid-turn input (ACP), a card, a usage limit, a compact Centralu sent that is
+not over (`SelfCompaction.compacts`: the compact turn is not work, and mail sent after `/compact` would run behind it) and a host that
+is leaving still hold mail for the turn's end. A delivery planned for one state that finds the other (a wake, and a turn began meanwhile;
+or a join, and the turn ended) sends nothing and is planned again (`MailNotAtRest`, `takesAsPlanned`).
+
+- **Tasks and the Assistant's requests never join, until step 3.** `drain({ joining })` leaves out a task, a request to the Assistant
+  and a reminder that names an asker. Each waits for the turn's end and opens a turn of its own, one task to a wake (D17), whose end is
+  reported to its sender as any turn of work it gave is (`MailInput.reportTo`; a join carries none). So a turn keeps one owner and one
+  asker (turn-owned-by-no-one.md §4.2, Q8): two senders' tasks are two turns and two reports, as before step 2, and no report goes to
+  a turn that never saw its task. Step 3 removes the filter, when a task's end is its reply (`report_turn`) rather than the end of a turn.
+- **Two senders into one turn.** Notices and messages from each join with their own ids, and the session can answer each with
+  `mail reply`. A join changes no report: the running turn's end is told to whom it was owed before. A message the tool takes only after
+  the turn ends runs as the turn after, and its row names the turn it was given in; nothing is reported on it.
+
+**Older builds.** No store step. Mail that joined a turn wrote no `mail_turns` row, and an older build reads its `turn_seq` the same
+way (v65).
 
 ### 10.7 The state table
 

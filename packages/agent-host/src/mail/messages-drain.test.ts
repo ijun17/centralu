@@ -79,6 +79,18 @@ describe('what one wake carries', () => {
     expect(w.mail.drain(B).workMessage).toBeNull()
   })
 
+  it('a report of a handed-on task joining a running turn names no work: that turn is not the work it was handed on from (§10.6.2)', () => {
+    const w = world()
+    const t1 = w.mail.task(A, B, { text: 'big job', origin: 'start_agent', delivered: true })
+    w.startTurn(B, t1.id)
+    const t2 = w.mail.task(B, C, { text: 'a part of it', origin: 'start_agent', delivered: true })
+    w.startTurn(C, t2.id)
+    const report = w.mail.report(t2.id, { outcome: 'finished', body: '[Centralu] done' })
+    if (!('message' in report)) throw new Error('settled already')
+    due(w)
+    expect(w.mail.drain(B, { joining: true })).toMatchObject({ messageIds: [report.message.id], workMessage: null, asker: null })
+  })
+
   it('drain inlines the person’s words, a task to a non-assistant, a parent’s message; pulls the rest', () => {
     const w = world()
     const fromParent = w.send(A, { to: [W], text: 'from your parent', needsReply: false }).message
