@@ -103,6 +103,22 @@ const exitOf = async (child: OsChild) => {
   return { code: e.code, signal: e.signal }
 }
 
+/**
+ * Ends waiters a case is done with, by their own handles. `stop` reads the process table for each running one and sweeps what each
+ * left: a PowerShell per read on Windows without the host's warm reader, and these programs started nothing. On a Windows machine
+ * loaded with busy processes those four stops took 15 to 21 s together (9 runs), past the signals case's 15 s limit (#2197, #1773).
+ */
+const endWaiters = async (children: readonly OsChild[]) => {
+  for (const child of children) {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      // already gone
+    }
+  }
+  await Promise.all(children.map((child) => child.exited))
+}
+
 /** A value, or the error's code; a `Promise` is awaited */
 export async function outcome(fn: () => unknown): Promise<unknown> {
   try {
@@ -439,7 +455,7 @@ export const CONTRACT: Contract[] = [
           writeInside: await ok(() => f.writeFileSync(join(working, 'x'), '')),
         }
       } finally {
-        await Promise.all(children.map((c) => os.processes.stop(c, 1000)))
+        await endWaiters(children)
       }
     },
   },
@@ -662,7 +678,7 @@ export const CONTRACT: Contract[] = [
           gone: os.processes.signal(d.pid ?? 0, 'SIGTERM'),
         }
       } finally {
-        await Promise.all(children.map((child) => os.processes.stop(child, 1000)))
+        await endWaiters(children)
       }
     },
   },
