@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fakeExe, linkNode, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { powershell } from '../packages/agent-host/src/os.js'
 
 /**
  * A fake `gh` for the tests that run the project board app (or one of its scripts) against "GitHub": a Node script on
@@ -69,11 +70,10 @@ const made = new Set<string>()
  */
 export function endLeftoverFakes(): number[] {
   if (process.platform !== 'win32' || made.size === 0) return []
-  const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const roots = [...made].map((r) => `'${r.replaceAll("'", "''")}'`).join(',')
   const query = `$roots = @(${roots}); Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $c = $_.CommandLine; $c -and ($roots | Where-Object { $c.Contains($_) }) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }`
   try {
-    return execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', query], { encoding: 'utf8', timeout: 60_000, windowsHide: true })
+    return execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-Command', query], { encoding: 'utf8', timeout: 60_000, windowsHide: true })
       .split(/\r?\n/)
       .filter(Boolean)
       .map(Number)
