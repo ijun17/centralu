@@ -619,12 +619,16 @@ function useShortPane(
 }
 
 /**
- * The composer's height with its text field at one line: what it takes at rest. A long draft grows the field (up to
- * five lines) and must not fold the composer from under the person writing it; the panel's height decides that.
+ * The composer at rest (#2190): its input card at one line, with its controls and footer. A long draft grows the field (up to
+ * five lines) and must not fold the composer from under the person writing it, and a row above the card (the report choice, an
+ * attachment strip, a notice) comes and goes with what the person is doing, so neither counts: the panel's height decides that.
+ * The rows are whatever the form holds before the card, found by where the card starts, so a new row needs no entry here.
  */
 function restingHeight(shell: HTMLElement): number {
   const input = shell.querySelector('textarea')
-  if (!input) return shell.offsetHeight
+  const card = input?.parentElement
+  const first = card?.parentElement?.firstElementChild
+  if (!input || !card || !(first instanceof HTMLElement)) return shell.offsetHeight
   const line = Math.max(22, parseFloat(getComputedStyle(input).lineHeight) || 0)
-  return shell.offsetHeight - Math.max(0, input.offsetHeight - line)
+  return shell.offsetHeight - (card.offsetTop - first.offsetTop) - Math.max(0, input.offsetHeight - line)
 }

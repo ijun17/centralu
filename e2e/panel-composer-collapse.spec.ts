@@ -453,6 +453,43 @@ test('a panel of 450px folds its composer and one of 700px does not', async ({ p
 })
 
 /**
+ * A row above the input is not resting height (#2190). The report choice ("Working for …") shows over the input while the person
+ * writes to a session that owes a report, and its 100px counted as the composer's height, so a panel of ordinary height folded the
+ * composer whenever the field lost focus. The line is still the one card at one line: 700px keeps it open with the row showing, and
+ * 450px still folds it.
+ */
+test('a row above the input does not fold the composer of a panel of 700px, and a panel of 450px still folds', async ({ page }) => {
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 750 })
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Assistant' }), a)
+
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const hangsBelow = async () => {
+    const p = (await panel.boundingBox())!
+    const s = (await shell.boundingBox())!
+    return s.y + s.height > p.y + p.height + 1
+  }
+  const height = async () => Math.round((await panel.boundingBox())!.height)
+  await expect.poll(height).toBeGreaterThan(620)
+  await panel.getByTestId('prompt-input').click()
+  await page.keyboard.type('quick question')
+  await expect(panel.getByTestId('report-choice')).toBeVisible()
+  // The field loses focus with the row still showing
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.mouse.move(0, 0)
+  await transitionsDone(panel)
+  expect(await hangsBelow()).toBe(false)
+
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 500 })
+  await expect.poll(height).toBeLessThan(480)
+  await expect(panel.getByTestId('report-choice')).toBeVisible()
+  await expect.poll(hangsBelow).toBe(true)
+})
+
+/**
  * The pinned copy of the last message leaves while the pane is folded, and its original shows (owner, 2026-11-06).
  *
  * A short panel gives the composer's fold the room it takes from the conversation, and the copy at the top took more
