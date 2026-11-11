@@ -13,7 +13,7 @@
  *
  * A document that grew past one file is a folder of sub-documents with a `README.md` index (docs/README.md): its old name
  * (`agent-host.md`, `agent-host §4.5`) and a path into the folder that names no file are findings, so no reference is
- * left pointing at the document that was split.
+ * left pointing at the document that was split; and the old single file beside the folder is one, so a stale branch cannot bring it back.
  *
  * A name and what it cites may be on two lines, also of a comment (` * §4.5` under ` * x.md`). Not read: the end of a range (`§4.1–4.9`), a number after a comma
  * without its own `§`, `section 4` in words, a bare rule id (`HD12`), and a link in a file that is not Markdown. In a Markdown file,
@@ -38,7 +38,7 @@ export interface DocIndex {
   byName: Map<string, Doc>
   /** The paths of the documents by every ending of a path, without `.md` (`remote/serve`, `agent-host/remote/serve`, …) */
   bySuffix: Map<string, string[]>
-  /** The names of documents that are folders now (`agent-host` for docs/agent-host/README.md with no docs/agent-host.md) */
+  /** The names of documents that are folders now (`agent-host` for docs/agent-host/README.md): a docs/agent-host.md beside it is a finding */
   folders: Set<string>
 }
 
@@ -133,7 +133,7 @@ export function indexTexts(texts: Map<string, string>): DocIndex {
   const folders = new Set<string>()
   for (const f of texts.keys()) {
     const m = /^docs\/([\w-]+)\/README\.md$/.exec(f)
-    if (m?.[1] && !texts.has(`docs/${m[1]}.md`)) folders.add(m[1])
+    if (m?.[1]) folders.add(m[1])
   }
   const byPath: DocIndex['byPath'] = new Map()
   const byName: DocIndex['byName'] = new Map()
@@ -206,6 +206,8 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
   const text = file?.endsWith('.md') ? prose(written) : written
   const found: string[] = []
   const lineOf = (at: number) => text.slice(0, at).split('\n').length
+  const old = /^docs\/([\w-]+)\.md$/.exec(file ?? '')?.[1]
+  if (old && index.folders.has(old.toLowerCase())) found.push(`1: docs/${old}/README.md holds this document now: the single file cannot come back`)
   // The document a reference at `at` cites; what is wrong with its name is a finding, also a `docs/` or relative path that is no file
   const docOf = (at: number, name: string, md: string) => {
     const doc = lookup(name, index, md ? file : undefined)
@@ -261,7 +263,7 @@ export function scanRepository(root: string): string[] {
   const own = new Set(['tooling/doc-refs.ts', 'tooling/doc-refs.test.ts'])
   const findings: string[] = []
   for (const [f, text] of texts) {
-    if (own.has(f) || text.length > MAX_BYTES || !(text.includes('§') || text.includes('.md'))) continue
+    if (own.has(f) || text.length > MAX_BYTES || (!f.endsWith('.md') && !(text.includes('§') || text.includes('.md')))) continue
     for (const what of danglingRefs(text, index, f)) findings.push(`${f}:${what}`)
   }
   return findings

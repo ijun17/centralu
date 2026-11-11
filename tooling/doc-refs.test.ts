@@ -82,6 +82,17 @@ describe('guard/doc-refs', () => {
     ])
   })
 
+  it('refuses the single file of a document that is a folder now, back beside its folder', () => {
+    const index = indexTexts(
+      new Map([
+        ['docs/apps/README.md', '# Apps\n'],
+        ['docs/apps.md', '# Apps\n'],
+      ]),
+    )
+    expect(danglingRefs('# Apps\n', index, 'docs/apps.md')).toEqual(['1: docs/apps/README.md holds this document now: the single file cannot come back'])
+    expect(danglingRefs('# Apps\n', index, 'docs/apps/README.md')).toEqual([])
+  })
+
   it('reads a name starting ./ or ../ from the citing file, as a link is', () => {
     const index = indexTexts(
       new Map([
