@@ -3,9 +3,8 @@ import { blockedOnQuestion, defaultPresetFor, type Attachment, type MachineInfo,
 import { awayPhrase } from '../adapters/contract.js'
 import { awayRefusal, tryAgainAfter } from '../links/machine-reach.js'
 import { awayFor, matchProjects } from './ask-project.js'
-import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
-import type { QueuedRequest, Store } from '../dev-services/store.js'
-import { inTurn } from '../idle.js'
+import type { AgentListRow, AgentSessionOpts, ChildRunResult, HandoffResult, LinkedProject, LinkedSessions, OrchestratedSession, CentraluTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
+import type { Store } from '../dev-services/store.js'
 import type { Asker } from '../mail/asked-by.js'
 import { lowestPreset, presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
@@ -46,7 +45,7 @@ export function createdPreset(seat: PermissionPreset, project: { trusted: boolea
  */
 export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   Pick<ProjectCreation, 'createProjectAsked' | 'askAppProject' | 'createProjectOnMachine' | 'addFolderAsked' | 'addFolderOnMachine'> &
-  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation' | 'projectTrusted'> & {
+  Pick<AppSessions, 'builderRefOf' | 'checkApp' | 'createApp'> & Pick<DelegationHost, 'refusesDelegation' | 'projectTrusted' | 'takesSendNow' | 'mailTask'> & {
   /** Read when a tool runs, as every field here: what the manager holds is read now, never a copy kept from before */
   readonly store: Store
   readonly meta: ReadonlyMap<string, SessionInfo>
@@ -75,10 +74,6 @@ export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   send(sessionId: string, text: string, attachments?: Attachment[], from?: { sessionId: string; name: string }): Promise<void>
   routedCards(sessionId: string, callerId: string): RoutedCard[]
   answerRoutedCard(callerId: string, sessionId: string, card: string | undefined, text: string): Promise<ChildRunResult>
-  busyForCaller(callerId: string, sessionId: string): boolean
-  busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }>
-  busyChoices(callerId: string, target: SessionInfo, from: QueuedRequest['via']): BusyChoice[]
-  enqueue(callerId: string, target: SessionInfo, via: QueuedRequest['via'], text: string): Extract<BusyAnswer, { state: 'queued' }>
   autoBoundaryOpen(sessionId: string, boundary?: string): boolean
   /** The linked machines as `machines.list` answers them (#1220), once wired (`useMachineList`); empty without links */
   machineList(): MachineInfo[]
@@ -696,75 +691,47 @@ export function centraluToolsFor(
       }
       const target = host.meta.get(sessionId)
       if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId, 'send') }
-      // §7.4: work given with a report asked is a delegation, the mailbox's to refuse before anything is sent, queued or forked
+      // §7.4: work given with a report asked is a delegation, the mailbox's to refuse before anything is sent, mailed or forked
       if (reportBack) {
         const refused = host.refusesDelegation(assistantId, { sessionId, projectId: target.projectId }, { tool: 'send_to_session', target: target.name || target.id, text })
         if (refused) return { ok: false, error: refused }
       }
-      /*
-       * Busy with a turn that is not this seat's (#677): this seat chooses. A note goes in as before (auto only,
-       * #606); a queue holds it for a new turn when the running one ends; a fork copies the session's conversation
-       * into a sub-session. A queued or forked turn is this seat's and tells it when it ends; a note joins a turn that
-       * stays its owner's, and tells this seat only as the note rule below says (#1233). Without `ifBusy`, nothing is sent.
-       */
-      if (host.busyForCaller(assistantId, sessionId)) {
-        if (!ifBusy) return { ok: true, busy: host.busyAnswer(assistantId, target, 'send_to_session') }
-        if (ifBusy === 'queue') return { ok: true, busy: host.enqueue(assistantId, target, 'send_to_session', text) }
-        if (ifBusy === 'fork' || ifBusy === 'fork_read') {
+      // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
+      if (!host.takesSendNow(sessionId)) {
+        if (ifBusy) {
           const f = await host.forkFor(assistantId, target, text, ifBusy === 'fork_read', 'send_to_session')
           if (!f.ok) return f
-          if ('queued' in f) return { ok: true, busy: f.queued }
+          if ('mailed' in f) return { ok: true, busy: f.mailed }
           host.children.markReport(f.fork.id, assistantId)
           return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: host.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
         }
-        const note = host.busyChoices(assistantId, target, 'send_to_session').find((c) => c.choice === 'note')!
-        if (!note.available) return { ok: false, error: `No note to "${target.name}": ${note.why}. Queue it or fork it instead.` }
-        host.autoBoundaryOpen(assistantId, 'a note into a turn that is not its own')
+        const mailed = host.mailTask(assistantId, target, 'send_to_session', text)
+        return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, busy: mailed }
       }
 
+      // At rest: the turn it starts is this seat's (#676), its cards come here too, until it ends
+      host.children.ownTurn(sessionId, assistantId, true)
       try {
         // Tagged with its source and kept in the store/UI. The adapter's reporting gate only ever fires for
         // a lower-privilege reportBack.
         const orch = host.meta.get(assistantId)
-        // A session at rest starts a turn that is this seat's (#676): its cards come here too, until it ends
-        const atRest = !inTurn(target.state)
-        if (atRest) host.children.ownTurn(sessionId, assistantId, true)
-        try {
-          await host.send(sessionId, text, undefined, {
-            sessionId: assistantId,
-            name: orch?.name ?? 'Assistant',
-          })
-        } catch (e) {
-          if (atRest) host.children.releaseTurn(sessionId, assistantId)
-          throw e
-        }
-        const held = host.children.awaitingReport.get(sessionId)
-        if (atRest) {
-          // Only comes back when asked for — silent by default
-          if (reportBack) {
-            host.children.markReport(sessionId, assistantId)
-            host.children.delegated(assistantId, sessionId, 'send_to_session', text)
-          }
-          // Instructing again without asking for a report clears this Assistant's earlier request — the
-          // new instruction replaces it (#166)
-          else if (held === assistantId) host.children.clearReport(sessionId)
-          return { ok: true }
-        }
-        /*
-         * A note (#1233): words into a turn already running, which is still the same work. It never drops a report
-         * someone is owed of that turn, this seat's own included: a bare note after a reportBack (or after
-         * create_session's first message) used to clear it, and the end went unheard. With `reportBack` it adds this
-         * seat's mark only where nobody's stands: one mark per session, and taking another's would leave them untold.
-         */
-        if (reportBack && held === undefined) {
-          host.children.markReport(sessionId, assistantId)
-          host.children.delegated(assistantId, sessionId, 'send_to_session', text)
-        }
-        const reportTaken = !!reportBack && held !== undefined && held !== assistantId
-        return { ok: true, busy: { state: 'noted' as const, sessionId, sessionName: target.name, ...(reportTaken ? { reportTaken: true as const } : {}) } }
+        await host.send(sessionId, text, undefined, {
+          sessionId: assistantId,
+          name: orch?.name ?? 'Assistant',
+        })
       } catch (e) {
+        host.children.releaseTurn(sessionId, assistantId)
         return { ok: false, error: (e as Error).message }
       }
+      // Only comes back when asked for — silent by default
+      if (reportBack) {
+        host.children.markReport(sessionId, assistantId)
+        host.children.delegated(assistantId, sessionId, 'send_to_session', text)
+      }
+      // Instructing again without asking for a report clears this Assistant's earlier request — the
+      // new instruction replaces it (#166)
+      else if (host.children.awaitingReport.get(sessionId) === assistantId) host.children.clearReport(sessionId)
+      return { ok: true }
     },
 
 

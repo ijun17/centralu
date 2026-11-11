@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
-import { Store, type QueuedRequest } from '../dev-services/store.js'
+import { Store } from '../dev-services/store.js'
 import type { MailSessions } from '../mail/delivery.js'
 import { hostMail, type HostMailSessions } from '../mail/host-mail.js'
 import { ChildOwnership, pausedReportKey, reportTurnKey, type Delegation } from './child-ownership.js'
@@ -46,9 +46,6 @@ const seedSession = () => {
     parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
   })
 }
-const request = (id: string, sessionId: string, callerSessionId: string): QueuedRequest => ({
-  id, sessionId, callerSessionId, via: 'agent_session', text: id, queuedAt: Date.now(), openedByAuto: false,
-})
 
 describe('report marks', () => {
   it('a mark is stored with it, and clearing takes both down', () => {
@@ -256,29 +253,6 @@ describe('the mailbox counts the work a session handed on', () => {
   })
 })
 
-describe('queued requests', () => {
-  it('enqueue answers the place; a delivery is marked and ends when its turn starts', () => {
-    expect(own.enqueue(request('q1', 'busy', 'a'))).toBe(1)
-    expect(own.enqueue(request('q2', 'busy', 'b'))).toBe(2)
-    own.startDelivering('busy', 'q1')
-    expect(own.delivering.get('busy')).toBe('q1')
-    expect(store.children.listQueuedRequests().find((r) => r.id === 'q1')?.deliveringAt).toEqual(expect.any(Number))
-    own.queuedTurnStarted('busy')
-    expect(own.delivering.has('busy')).toBe(false)
-    expect(own.queued.get('busy')?.map((r) => r.id)).toEqual(['q2'])
-    expect(store.children.listQueuedRequests().map((r) => r.id)).toEqual(['q2'])
-  })
-
-  it('dropping the request being delivered ends its delivery; an empty queue goes', () => {
-    own.enqueue(request('q1', 'busy', 'a'))
-    own.startDelivering('busy', 'q1')
-    expect(own.dropQueued((r) => r.callerSessionId === 'a').map((r) => r.id)).toEqual(['q1'])
-    expect(own.delivering.has('busy')).toBe(false)
-    expect(own.queued.has('busy')).toBe(false)
-    expect(store.children.listQueuedRequests()).toEqual([])
-  })
-})
-
 describe('moveOwner', () => {
   it('moves every map for the moving children, and leaves what is not theirs', () => {
     own.markReport('c1', 'from')
@@ -291,16 +265,13 @@ describe('moveOwner', () => {
     own.setDelegation('from>c1', d1)
     own.setDelegation('from>proj>c2', d2)
     own.setDelegation('from>stays', kept)
-    const note = { run: d1, waiters: 0, told: false }
-    own.setObserverNote('from>c1', note)
-    own.enqueue(request('q1', 'c1', 'from'))
     own.setLinkedReport('c2', { assistantId: 'from', busy: false })
     const made = start('r-made', 'from', { ended: { childId: 'c1' } })
     const open = start('r-open', 'from')
     own.addAgentStart(made)
     own.addAgentStart(open)
 
-    own.moveOwner('from', 'to', { sessions: ['c1', 'c2'], armReports: ['c2'], starts: [open], queued: true }, () => {})
+    own.moveOwner('from', 'to', { sessions: ['c1', 'c2'], armReports: ['c2'], starts: [open] }, () => {})
 
     expect([...own.awaitingReport]).toEqual([['c1', 'to'], ['stays', 'from'], ['c2', 'to']])
     expect(own.turnOwners.get('c1')?.callerId).toBe('to')
@@ -308,9 +279,6 @@ describe('moveOwner', () => {
     expect([...own.delegations.keys()].sort()).toEqual(['from>stays', 'to>c1', 'to>proj>c2'])
     expect(d1.callerId).toBe('to')
     expect(kept.callerId).toBe('from')
-    expect(own.observerNotes.get('to>c1')).toBe(note)
-    expect(own.observerNotes.has('from>c1')).toBe(false)
-    expect(own.queued.get('c1')?.[0]?.callerSessionId).toBe('to')
     expect(own.linkedReports.get('c2')?.assistantId).toBe('to')
     expect(made.req.callerId).toBe('to')
     // The open request's caller is the card mover's to change, with its card
@@ -323,19 +291,13 @@ describe('moveOwner', () => {
     ])
   })
 
-  it('a removed original keeps the requests it queued', () => {
-    own.enqueue(request('q1', 'c1', 'from'))
-    own.moveOwner('from', 'to', { sessions: ['c1'], armReports: [], starts: [], queued: false }, () => {})
-    expect(own.queued.get('c1')?.[0]?.callerSessionId).toBe('from')
-  })
-
   it('the cards move after the maps and before the handover is recorded; then the waits on what moved end', () => {
     const order: string[] = []
     const d = delegation('from', 'c1', { leaving: new Set([() => order.push('delegation wait ended')]) })
     own.setDelegation('from>c1', d)
     const open = start('r-open', 'from', { leaving: new Set([() => order.push('start wait ended')]) })
     own.addAgentStart(open)
-    own.moveOwner('from', 'to', { sessions: ['c1'], armReports: [], starts: [open], queued: true }, () => {
+    own.moveOwner('from', 'to', { sessions: ['c1'], armReports: [], starts: [open] }, () => {
       order.push(`cards: delegation ${own.delegations.has('to>c1') ? 'moved' : 'not moved'}, handover ${own.handedOver.size}`)
     })
     expect(order).toEqual(['cards: delegation moved, handover 0', 'delegation wait ended', 'start wait ended'])
@@ -343,23 +305,16 @@ describe('moveOwner', () => {
 })
 
 describe('forgetting a session', () => {
-  it('drops what a handoff gave from it or to it, and the observer notes on either side', () => {
+  it('drops what a handoff gave from it or to it', () => {
     own.recordHandedOver('c1', 'gone', 'heir')
     own.recordHandedOver('c2', 'other', 'gone')
     own.recordHandedOver('gone', 'x', 'y')
     own.recordHandedOver('c3', 'other', 'heir')
     own.forgetHandedOver('gone')
     expect([...own.handedOver.keys()]).toEqual(['c3'])
-
-    const run = delegation('a', 'b')
-    own.setObserverNote('gone>s', { run, waiters: 0, told: false })
-    own.setObserverNote('o>gone', { run, waiters: 0, told: false })
-    own.setObserverNote('o>s', { run, waiters: 0, told: false })
-    own.dropObserverNotesOf('gone')
-    expect([...own.observerNotes.keys()]).toEqual(['o>s'])
   })
 
-  it('drops a delegation or note only while it is the one named', () => {
+  it('drops a delegation only while it is the one named', () => {
     const a = delegation('c', 's')
     const b = delegation('c', 's')
     own.setDelegation('k', b)
@@ -367,10 +322,6 @@ describe('forgetting a session', () => {
     expect(own.delegations.get('k')).toBe(b)
     own.dropDelegation('k', b)
     expect(own.delegations.has('k')).toBe(false)
-    const note = { run: a, waiters: 0, told: false }
-    own.setObserverNote('k', { run: b, waiters: 0, told: false })
-    own.dropObserverNote('k', note)
-    expect(own.observerNotes.has('k')).toBe(true)
   })
 })
 
@@ -526,21 +477,6 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
     expect(own.turnOwners.get('kept-working')).toEqual({ callerId: 'caller', untilTurnEnd: true, told: new Set(['card-1']), turnId: 'turn-1' })
     expect(own.turnOwners.has('kept-idle')).toBe(false)
     expect(store.children.listDelegatedTurns().map((r) => r.sessionId)).toEqual(['kept-working'])
-  })
-
-  it('keeps every queued request whose sessions exist, delivers a half-delivered one again, and reads an old row', () => {
-    own.enqueue(request('q1', 'kept-idle', 'caller'))
-    own.enqueue(request('q2', 'kept-idle', 'nobody'))
-    own.enqueue({ ...request('q3', 'gone-process', 'caller'), via: 'ask_project' })
-    store.children.markQueuedDelivering('q1', 5)
-    ;(store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare("UPDATE queued_requests SET opened_by_auto = NULL WHERE id = 'q3'").run()
-    const next = new ChildOwnership(store)
-    const read: string[] = []
-    next.restoreQueued(sessions, (r) => (read.push(r.id), true))
-    expect(next.queued.get('kept-idle')?.map((r) => [r.id, r.deliveringAt])).toEqual([['q1', null]])
-    expect(next.queued.get('gone-process')?.map((r) => [r.id, r.openedByAuto])).toEqual([['q3', true]])
-    expect(read).toEqual(['q3'])
-    expect(store.children.listQueuedRequests().map((r) => [r.id, r.deliveringAt]).sort()).toEqual([['q1', null], ['q3', null]])
   })
 })
 
@@ -982,7 +918,6 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     own.turnStarted('s')
     // The person writes into the work’s turn; an older CLI cannot say whether it took the note in
     own.noteMessage('s', 'person', true, true, false, 'person-1')
-    expect(own.personInTurn('s')).toBe(true)
     expect(own.turnEnded('s', null)).toEqual({ by: 'work' })
     own.turnStarted('s')
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: true })
@@ -1059,7 +994,6 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       own.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
-      expect(next.personInTurn('s')).toBe(true)
       // The CLI names both at the end: the caller's it opened from, and the person's it took in at a tool round
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
     })
@@ -1082,7 +1016,6 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
-      expect(next.continuesWork('s', 'caller')).toBe(false)
     })
 
     // Recheck of #1929, N1: the new host's first call is the person's message, whose row is already stored
@@ -1095,11 +1028,9 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
       next.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
-      expect(next.personInTurn('s')).toBe(true)
       expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ marks: { 'person-1': 'joined' } })
       const third = new ChildOwnership(store)
       third.adoptReport('s', 'caller', null)
-      expect(third.personInTurn('s')).toBe(true)
       // Codex names nothing at the end: the person's message went into the work's turn
       expect(third.turnEnded('s', undefined)).toEqual({ by: 'work', wrote: true })
     })
@@ -1109,7 +1040,6 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'work', pending: [{ id: 'person-1', by: 'person' }] }))
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
-      expect(next.personInTurn('s')).toBe(true)
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
       // From here this build's own record is kept: the old list is read only once
       expect(store.settings.appSetting('turn_inputs:s')).not.toBeNull()
@@ -1145,6 +1075,14 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       expect(next.starterOf('s')).toEqual({ by: 'person' })
     })
 
+    it("keeps what was held before a delegated task's row the mailbox wrote (#1948 option B): the tool took it as mail", () => {
+      store.messages.appendMessages([user(1, 'person-1'), { ...user(2, 'x'), payload: { text: 'use Chromium', from: { sessionId: 'c', name: 'caller' }, mail: true } }])
+      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      const next = new ChildOwnership(store)
+      next.turnStarted('s')
+      expect(next.starterOf('s')).toEqual({ by: 'person' })
+    })
+
     it('reads back however many rows a long turn wrote after the last message spent', () => {
       const steps = Array.from({ length: 600 }, (_, i) => ({ sessionId: 's', seq: 2 + i, role: 'assistant' as const, kind: 'text' as const, payload: { text: 'step' }, ts: 1 }))
       store.messages.appendMessages([user(1, 'caller-1', 'c'), ...steps, user(602, 'person-1')])
@@ -1169,7 +1107,6 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     expect(own.turnEnded('s', ['caller-0'])).toEqual({ by: 'work' })
     own.turnStarted('s')
     own.turnNamed('s', ['caller-1'])
-    expect(own.personInTurn('s')).toBe(true)
     expect(own.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
   })
 })

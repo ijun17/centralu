@@ -191,6 +191,7 @@ describe("a child's turn and the call waiting on it", () => {
       pauseReport: (id, tasks) => children.pauseReport(id, tasks),
       reportBackIfAwaited: async (sessionId, ending) => void reported.push({ sessionId, type: ending.type }),
       refusesDelegation: () => null,
+      withdrawTasks: () => 0,
     }
     Object.defineProperties(given, Object.getOwnPropertyDescriptors(extra))
     return new DelegationFlow(hostWith(given))
@@ -257,21 +258,6 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.delegations.size).toBe(0)
   })
 
-  it('a cancelled call on a turn it only joined leaves that turn running, and never owned it', async () => {
-    const flow = flowWith()
-    const d = flow.startDelegation('caller>child', 'caller', 'child', target(), false, true)
-    expect(children.turnOwners.has('child')).toBe(false)
-    const call = new AbortController()
-    const waiting = flow.awaitTurn('caller>child', d, { signal: call.signal, stopWhy: 'the call was cancelled' })
-    call.abort()
-    expect(await waiting).toEqual({ kind: 'cancelled' })
-    expect(interrupted).toEqual([])
-    expect(d.settled).toBe(false)
-    // The turn it joined still ends for whoever else reads it
-    finishes("the person's turn ends")
-    expect(await d.outcome).toEqual({ ok: true, answer: "the person's turn ends" })
-  })
-
   it('past the bound the call answers "working", and the report it promises is stored', async () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
@@ -296,7 +282,7 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const original = flow.awaitAgent('caller>child', d)
-    children.moveOwner('caller', 'heir', { sessions: ['child'], armReports: [], starts: [], queued: false }, () => {})
+    children.moveOwner('caller', 'heir', { sessions: ['child'], armReports: [], starts: [] }, () => {})
     expect(await original).toEqual({
       ok: false,
       error:
@@ -381,7 +367,7 @@ describe("a child's turn and the call waiting on it", () => {
   it('a send that fails leaves no wait, turn or delegation behind, and fails a wait that joined it (#839)', async () => {
     let joined: AgentRunWait | undefined
     const flow = flowWith({
-      busyForCaller: () => false,
+      takesSendNow: () => true,
       uiPreferences: () => ({}) as never,
       deliver: async () => {
         // A wait of the caller's joins the new turn while the child wakes

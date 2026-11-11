@@ -58,10 +58,8 @@ describe('start_agent', () => {
     expect((await w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'use Chromium' })).ok).toBe(true)
     handleOf(child)!.answer('done')
     await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
-    const again = w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'and the linter' })
-    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 3)
-    handleOf(child)!.answer('linted')
-    expect((await again).ok).toBe(true)
+    // At rest, with the task it was sent in its turn still to be given (delivery is not started here): this one is mail too
+    expect(await w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'and the linter' })).toMatchObject({ ok: true, state: 'mailed' })
     const tasks = read.tasks(addr(s), child)
     expect(tasks.map((t) => [t.origin, t.body])).toEqual([
       ['start_agent', 'long job'],
@@ -278,41 +276,6 @@ describe('a mailbox that fails', () => {
     expect(started).toMatchObject({ ok: true, state: 'working' })
     expect(handleOf(started.ok ? started.sessionId : '')!.sent[0]).toContain('Write the export')
     expect(tasksFrom(s)).toEqual([])
-  })
-})
-
-describe('a request queued behind a busy session', () => {
-  it('is written down when it is delivered, not when it is queued', async () => {
-    askAgents()
-    const s = await w.callerSession()
-    const started = await w.mgr.startAgent(s, { task: 'first job', wait: false })
-    const child = started.ok ? started.sessionId : ''
-    handleOf(child)!.answer('first job done')
-    await w.mgr.agentSession(s, { sessionId: child, action: 'wait' })
-    // The person is using the child for a turn of their own: the request waits behind it
-    await w.mgr.inputs.send(child, "the person's own work")
-    const queued = await w.mgr.agentSession(s, { sessionId: child, action: 'send', text: 'add the index', ifBusy: 'queue' })
-    expect(queued).toMatchObject({ ok: true, state: 'queued' })
-    expect(bodies(read.tasks(addr(s), child))).toEqual(['first job'])
-    handleOf(child)!.answer("the person's answer")
-    await w.until(() => (handleOf(child)?.sent.length ?? 0) === 3)
-    expect(read.tasks(addr(s), child).map((t) => [t.origin, t.body])).toEqual([
-      ['start_agent', 'first job'],
-      ['agent_session', 'add the index'],
-    ])
-  })
-})
-
-describe('an auto observer’s note into another caller’s turn', () => {
-  it('is not work it gave: the owner has one task, and the observer gave none', async () => {
-    askAgents()
-    const owner = await w.callerSession()
-    const observer = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto' })).id
-    const started = await w.mgr.startAgent(owner, { task: 'owner work', wait: false })
-    const child = started.ok ? started.sessionId : ''
-    expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'send', text: 'observer note', ifBusy: 'note' })).toMatchObject({ ok: true, state: 'working' })
-    expect(bodies(read.tasks(addr(owner), child))).toEqual(['owner work'])
-    expect(tasksFrom(observer)).toEqual([])
   })
 })
 

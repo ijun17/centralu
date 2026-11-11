@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelOption, PermissionPreset } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { wireHostMail } from './host-mail.test-helpers.js'
 import { ASK_THE_PERSON } from './start-agent-terms.js'
 
 const DEPTH_SETTING = 'How deep agents may start agents'
@@ -292,6 +293,8 @@ describe('auto Centralu boundaries (#603)', () => {
   })
 
   it("opens ownership for every same-project action, including another parent's running child", async () => {
+    // A send to a session in a turn is mail; delivery is not started, so it stays undelivered
+    wireHostMail(w.mgr, w.store)
     const owner = await session()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const caller = await session()
@@ -302,8 +305,8 @@ describe('auto Centralu boundaries (#603)', () => {
       state: 'working',
     })
     expect(
-      await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'send', text: 'note', ifBusy: 'note' }),
-    ).toMatchObject({ ok: true, state: 'working', via: 'note' })
+      await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'send', text: 'note' }),
+    ).toMatchObject({ ok: true, state: 'mailed', messageId: expect.any(String) })
     const wait = w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'wait' })
     handle(child.sessionId).answer('done')
     expect(await wait).toMatchObject({ ok: true, state: 'done', answer: 'done' })

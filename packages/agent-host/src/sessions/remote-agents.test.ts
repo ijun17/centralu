@@ -266,7 +266,8 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     ra.observe({ type: 'question_request', sessionId: child.sessionId, requestId: 'r1' })
     expect(await act(ra, 'status')).toMatchObject({ ok: true, state: 'working' })
     expect(await act(ra, 'answer', { card: 'r1.any', text: 'yes' })).toMatchObject({ ok: false, error: expect.stringContaining('not running a turn you gave it') })
-    expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    // Held for the child to be at rest, not put into their turn
+    expect(await act(ra, 'send', { text: 'note' })).toMatchObject({ ok: true, state: 'queued' })
     expect(answered).toEqual([])
     expect(sentTexts).toEqual([])
     // Nothing of the person's turn is owed to the caller, who is told its work is no longer followed
@@ -402,7 +403,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     state = 'idle'
     ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 1, text: 'my own thing', from: PERSON })
     ra.observe({ type: 'state_change', sessionId: child.sessionId, state: 'working' })
-    expect(await act(ra, 'send', { text: 'do X' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+    expect(await act(ra, 'send', { text: 'do X' })).toMatchObject({ ok: true, state: 'queued' })
     expect(sentTexts).toEqual([])
   })
 
@@ -505,7 +506,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       const ra = await afterFollowUp()
       opens(ra)
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn it started by itself') })
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: true, state: 'queued' })
       expect(sentTexts).toHaveLength(2)
     })
 
@@ -514,7 +515,7 @@ describe("the turn on the child's machine, read as the caller's only on evidence
       ra.observe({ type: 'user_message', sessionId: child.sessionId, seq: 5, text: 'my own thing', from: PERSON })
       opens(ra, { seq: 5, from: { ...PERSON, name: 'person' } })
       expect(reportOwed()).toBe(false)
-      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: false, error: expect.stringContaining('a turn you did not give it') })
+      expect(await act(ra, 'send', { text: 'and this' })).toMatchObject({ ok: true, state: 'queued' })
       expect(sentTexts).toHaveLength(2)
     })
 
@@ -708,15 +709,15 @@ describe("the turn on the child's machine, read as the caller's only on evidence
     })
   })
 
-  it('does not say the person may be using a turn it saw no message begin', async () => {
+  it('holds a send for a turn it saw no message begin', async () => {
     const ra = following()
     state = 'idle'
     // The send goes, but no record of it comes back as this hub's instruction: the hub did not see the turn begin
     await act(ra, 'send', { text: 'do X' })
     state = 'working'
     const r = await act(ra, 'send', { text: 'and this' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('this hub did not see begin') })
-    expect((r as { error: string }).error).not.toContain('person may be using')
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
+    expect(sentTexts).not.toContain('and this')
   })
 
   it("takes a link's replay of an instruction seen before, and another link's sender, as no new instruction", async () => {

@@ -1698,10 +1698,11 @@ that path ends (`oldPathEnded`). `mail/policy.ts` went in #1996.
 to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8), built in §10.6.2. After a quit, a child the person
 continues and that then finishes leaves its task open until it replies: step 3 makes a turn's last response its reply.
 
-### 10.6.2 Mail joins a running turn (#1948 step 2)
+### 10.6.2 Mail joins a running turn; a send to a busy session is mail (#1948 step 2)
 
 Target 2 of #1948 (owner 2026-11-04): at rest, mail wakes the session; in a turn, all of its mail joins that turn. Step 2 builds it
-for everything but work (turn-owned-by-no-one.md P8); tasks join in step 3.
+for everything but work, and moves the request queue and the note / queue / fork menu onto mail (turn-owned-by-no-one.md P8, B6); tasks
+join in step 3.
 
 **Delivery.** A session in a turn whose tool takes input into a running turn (`midTurnInput`: Claude, Codex; `joinsRunningTurn`) is a
 ready receiver with `joins` (`MailSessionsView.mailReceiver`). Its due mail goes into that turn through the tool's tracked input
@@ -1723,8 +1724,70 @@ or a join, and the turn ended) sends nothing and is planned again (`MailNotAtRes
   `mail reply`. A join changes no report: the running turn's end is told to whom it was owed before. A message the tool takes only after
   the turn ends runs as the turn after, and its row names the turn it was given in; nothing is reported on it.
 
-**Older builds.** No store step. Mail that joined a turn wrote no `mail_turns` row, and an older build reads its `turn_seq` the same
-way (v65).
+**A send to a busy session.** `MailSessionsView.takesSendNow(session)` is the one definition: the session takes a turn now (at rest, no
+card, no limit, the host not leaving; asleep, it is woken), no delegation run is going there (`agentRuns`: the caller's own
+included, so a follow-up while the turn it gave runs is mail, and goes when that turn ends), and no mail that wakes it is waiting (that goes first). Then
+`agent_session send`, `ask_project` and the Assistant's `send_to_session` deliver directly as before: the delegation, its bounded wait, the relayed row, the task written delivered (B1). Otherwise the words are written as a task
+from the caller to the session, not delivered (`mailTask`, the mailbox's `sendTask`), and the call answers `mailed` with the task's id
+at once. The mailbox gives it once that turn ends, with no 30 s wake gap (§7.9; its direct send has none either), as a turn of its own (a
+task joins no turn until step 3), whose end is reported by
+mail to the caller as any task's (`reportTo`), one report per send; `agent_session stop` withdraws it while it is not delivered (`withdrawTasks`). There is no busy answer and nothing to
+choose: what a busy target means for these three calls is that the request is mail.
+
+- **Fork** (Q5) stays an explicit choice, `ifBusy: "fork" | "fork_read"` on `agent_session` and `send_to_session`, with start_agent's
+  gates as before. Short of memory, the fork is mailed instead (it was queued).
+- **`ask_project`** has no `ifBusy`. Its gates (trust, depth, the pair's consent card) are read before the task is written, as before.
+- **`start_agent`** starts a new session, which is never busy: unchanged.
+- **`send_to_session`** writes a task whatever `reportBack` says: its end is reported once, by mail, as any task's. `reportBack`
+  still decides a send at rest.
+- **A session without the mail tool** (a legacy seat) cannot take a mailed send: refused, "`<name>` is busy and takes no mail: send to it
+  once it is at rest."
+
+| Removed | What replaces it |
+|---|---|
+| `QueuedRequests` (`sessions/queued-requests.ts`): `busyForCaller`, `busyChoices`, `busyAnswer`; the `busy`, `queued` and `noted` answers | `takesSendNow`; the `mailed` answer |
+| `enqueue`, `drainQueue`, `queuedHandedIn`, `ChildOwnership.queued` / `delivering`, `queuedTurnStarted` | the task row and `MailDelivery` |
+| Re-gating at drain: `queuedGateError`, `openedByAuto`, `dropOpenedByAuto`, the queued part of `withdrawReaches` | the mailbox's own rules at drain: `mayWrite` (mail from or to a session that is gone does not go) and the one hold (mail out of an untrusted project waits for its trust, §7.4). A send is done when it is written: a consent revoked or `auto` taken away afterwards leaves it, as it leaves a delegation already running. The cards part of `withdrawReaches` stays (`SessionManager.withdrawReachCards`) |
+| `tellQueuedFailed` ("Your queued request to another session was not delivered") | the delivery's retries and its `failed` hold for the person; for a session that stops with the task delivered, the stop notice (§10.6.1) |
+| The note into a running turn (agent_session's `note` and continued turns, ask_project's mid-turn task, send_to_session's `noted`), observer notes, `tellNoteRefused`, `continuesWork`, `personInTurn` | the task, given at the turn's end as a turn of its own |
+| `AgentRunWait.holdInput` and tracked inputs, `TurnInputs.inputsHeld`, `Delegation.joinedTurn` / `waitCancelled` | nothing: only the notes used them |
+| `queuedOf` (status of a queued request) | the task's id in the answer; `agent_session status` reads the session |
+
+**Stop.** `agent_session stop` withdraws the caller's tasks not delivered yet, then stops the delegation it runs there, if any.
+
+**A target that stops with mail for it.** A mailed task that reached the session is released by the stop notice like any delivered task
+(§10.6.1, `owedBy`); one not delivered yet was never its work, stays mail, and goes at its next turn. There is no second "not delivered"
+text.
+
+**Restart, swap and older builds.** No store step (the next free is v70). This build writes no `queued_requests` row. At every
+`ready`, `takeOverFromEarlierBuild` turns each row an older build left into an undelivered task from its requester (its text, its
+`via` as the origin) and deletes the row, in one transaction; a row whose requester or session is gone is deleted with no task, and a
+row through a tool this build does not know stays (#384). The task goes once and only to its session: a restart wakes no one else (a
+delivery half done at a crash is held `uncertain` for the person, §7.6.5, never sent twice). A row the older build was delivering at the
+swap (`delivering_at`) is turned into a task too; the older build delivered such a row again itself, so at most one duplicate, as
+before. An older build (beta.57) after a rollback finds no queued rows; the tasks this build left undelivered are mail it delivers
+itself (its drain takes a task as a turn's work), and its adoption leaves an undelivered task open (`pendingFor` from the sender). Mail
+that joined a turn wrote no `mail_turns` row, and both builds read `turn_seq` the same way (v65).
+
+**Linked machines (#2067).** Mail does not cross links. A busy child on a linked machine keeps the hub's note hold (`RemoteAgents.hold`,
+`RemoteAgent.queued`), now held without `ifBusy: "queue"`, which the tool no longer has. That is a second definition of "a send to a
+busy session waits", kept until mail crosses links (#1948 step 6). #2114 is fixed in that path: nothing held goes while the caller
+deletes the child, and a note held for a child that is gone is never sent; the stop notice tells its caller (docs/agent-host/delegation/start-agent-linked-machine.md).
+
+**Decided as is.** A send to a session at rest still goes in directly: the delegation's bounded wait is its own row of #1948's table. A
+handoff leaves a mailed task's sender as it was: the original that stays still gets its report; an original that goes no longer sends
+it (a gone sender's mail does not go), as its queue was dropped; step 5 re-points sent tasks.
+
+**What the person sees (owner, option B, recorded on #1948).** A task from a delegation tool (`agent_session` send, `ask_project`, the
+Assistant's `send_to_session`) that the mailbox gives shows in the receiver's conversation as its sender's message, "from <sender>" with
+the words, as its direct send does; other mail keeps the one line ("✉ 1 message, from …"). One function decides it,
+`SessionEvents.deliverMail`, from `MailInput.task` (the wake's work message when it is such a task; a wake carries one, D17). The agent
+reads only the mail frame (the words inline under Centralu's header, with the message id): the row is written for the screen and never
+sent. A wake that carries other mail with the task writes the line too. A sender no longer here to be named leaves the line alone. The
+row is the user row a direct send writes (`from`, the sender's words) with `mail: true` and no input id, so the held-message record skips
+it (`ChildOwnership.held`) and the stop notice reads it as the sender's input (`latestTurnInputs`). An older build after a rollback reads
+such a row as one an even older build wrote: what its tool held before it counts as given (the case it already has for those rows).
+Options A (the line only) and C (wait for the at-rest send) were not taken.
 
 ### 10.7 The state table
 

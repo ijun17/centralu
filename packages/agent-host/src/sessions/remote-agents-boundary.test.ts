@@ -458,6 +458,8 @@ describe("nothing of the person's turn on the child's machine reaches the caller
     await flush()
     const hubSends = machine.fromHub.length
     await ENTRIES[entry]!()
+    // What the caller's text reached while the person's turn still ran (a send into it is held for the child to be at rest, then sent as its own)
+    const hubSendsInTheirTurn = machine.fromHub.length
     // Whatever was left: the person's turn ends, and a link that was down comes back
     machine.personTurnEnds()
     if (!machine.reachable) await linkUp()
@@ -473,7 +475,8 @@ describe("nothing of the person's turn on the child's machine reaches the caller
     // Nothing is owed of a turn that is not the caller's (a send after the person's turn ended starts the caller's own); the work's paused report stays owed for its own next turn (#1386)
     if (machine.turn !== 'hub') expect(hub.children.linkedReports.has(CHILD)).toBe(scenario === PAUSED_SCENARIO)
     // The caller's text went into the person's turn only where the scenario races it in, never by a path asked here
-    if (entry !== 'send, at rest') expect(machine.fromHub.length).toBe(hubSends)
+    if (entry !== 'send, at rest') expect(hubSendsInTheirTurn).toBe(hubSends)
+    if (entry !== 'send, at rest' && entry !== 'send, into the turn') expect(machine.fromHub.length).toBe(hubSends)
   })
 })
 
@@ -581,14 +584,14 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('SELF-ANSWER') })
   })
 
-  it('refuses once the person types into it there, and names the person', async () => {
+  it('holds a send once the person types into it there, for the child to be at rest', async () => {
     await paused()
     await followUp()
     expect(await hub.act('send', note)).toMatchObject({ ok: true })
     machine.personSays()
     await flush()
     const r = await hub.act('send', { ...note, text: 'a second note' })
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it there') })
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
     expect(notes()).toHaveLength(1)
     expect(machine.fromHub.filter((t) => t.includes('a second note'))).toHaveLength(0)
     // The person's message does not close the report (#1386): this turn is still the work's, and its end is reported
@@ -596,16 +599,17 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     machine.selfTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(2)
-    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    // The held send then goes, as new work the caller owns
+    expect(machine.fromHub.filter((t) => t.includes('a second note'))).toHaveLength(1)
+    expect(machine.turn).toBe('hub')
   })
 
-  it('does not blame the person when another session owes the report: it names that', async () => {
+  it('holds a send when another session owes the report: the turn is not the caller\'s to add to', async () => {
     await paused()
     hub.children.setLinkedReport(CHILD, { assistantId: 'h2', busy: false, paused: [build] as never })
     await followUp()
     const r = await hub.act('send', note)
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('another session') })
-    expect(JSON.stringify(r)).not.toContain('the person may be using it')
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
     expect(notes()).toHaveLength(0)
   })
 
@@ -633,15 +637,14 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(hub.children.linkedReports.has(CHILD)).toBe(false)
   })
 
-  it('refuses, without blaming the person, a turn the swapped hub did not see begin', async () => {
+  it('holds a send for a turn the swapped hub did not see begin', async () => {
     await paused()
     machine.backgroundWork([])
     machine.selfStarts()
     hub.boot()
     await flush()
     const r = await hub.act('send', note)
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
-    expect(JSON.stringify(r)).not.toContain('the person may be using it')
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
     expect(notes()).toHaveLength(0)
   })
 
@@ -694,7 +697,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     expect(hub.delivered).toHaveLength(2)
   })
 
-  it('keeps the old refusal on a machine that lists no background work (it never pauses), naming no person', async () => {
+  it('holds a send on a machine that lists no background work (it never pauses)', async () => {
     await started()
     machine.callerTurnEnds()
     await flush()
@@ -702,8 +705,7 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
     machine.selfStarts()
     await flush()
     const r = await hub.act('send', note)
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
-    expect(JSON.stringify(r)).not.toContain('the person may be using it')
+    expect(r).toMatchObject({ ok: true, state: 'queued' })
     expect(notes()).toHaveLength(0)
   })
 
@@ -725,14 +727,6 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       machine.selfStarts()
       await flush()
     }
-
-    it('refuses a note into that turn, and says a queue holds it', async () => {
-      await reportedThenBusy()
-      const r = await hub.act('send', note)
-      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('started by itself') })
-      expect((r as { error: string }).error).toContain('ifBusy "queue"')
-      expect(notes()).toHaveLength(0)
-    })
 
     it('holds a queued note, and sends it as new work the caller owns once the child is at rest', async () => {
       await reportedThenBusy()
@@ -990,13 +984,14 @@ describe('a turn the child starts by itself after a paused report (#1576)', () =
       expect(JSON.parse(store.settings.appSetting(REMOTE_AGENTS_KEY) ?? '[]')[0].queued).toBeUndefined()
     })
 
-    it("puts a send right after the turn's end behind the held note, or refuses it", async () => {
+    it("puts a send right after the turn's end behind the held note", async () => {
       await reportedThenBusy()
       await queueNote('first note')
       await flush()
       machine.selfTurnEnds()
       const jump = await hub.act('send', { text: 'C-note' })
-      expect(jump).toMatchObject({ ok: false, error: expect.stringContaining('are still to be sent') })
+      expect(jump).toMatchObject({ ok: true, state: 'queued', position: 2 })
+      // The same words again are the one held
       expect(await queueNote('C-note')).toMatchObject({ ok: true, state: 'queued', position: 2 })
       await flush()
       machine.callerTurnEnds()
@@ -1149,12 +1144,15 @@ describe("a person's message on the child's machine does not close the report (#
     await flush()
     expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     expect(hub.told.join(' ')).not.toContain('you did not give it')
-    // Not the caller's to add to while the person is in it
-    expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
+    // Not the caller's to add to while the person is in it: held for the child to be at rest
+    expect(await hub.act('send', { text: 'a note' })).toMatchObject({ ok: true, state: 'queued' })
+    expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(0)
     machine.callerTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(1)
-    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    // The held send then goes, as new work the caller owns
+    expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(1)
+    expect(machine.turn).toBe('hub')
   })
 
   /** The caller's turn paused on its work, the person spoke at rest there, and the tool's own follow-up turn is running */
@@ -1173,14 +1171,16 @@ describe("a person's message on the child's machine does not close the report (#
   it("does not hand the caller the work's follow-up turn after the person spoke, and still reports it: a wait and a note leave the report owed", async () => {
     await heldFollowUp()
     expect(await hub.act('wait')).toMatchObject({ ok: true, state: 'working' })
-    expect(await hub.act('send', { text: 'a note', ifBusy: 'note' })).toMatchObject({ ok: false })
+    expect(await hub.act('send', { text: 'a note' })).toMatchObject({ ok: true, state: 'queued' })
     expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(0)
     expect(hub.children.linkedReports.get(CHILD)?.assistantId).toBe('h1')
     machine.selfTurnEnds()
     await flush()
     expect(hub.delivered).toHaveLength(2)
     expect(hub.delivered.join(' ')).not.toContain(PERSON.words)
-    expect(hub.children.linkedReports.has(CHILD)).toBe(false)
+    // The held send then goes, as new work the caller owns
+    expect(machine.fromHub.filter((t) => t.includes('a note'))).toHaveLength(1)
+    expect(machine.turn).toBe('hub')
   })
 
   it("keeps the report when the person writes into the work's turn while a call waits on it", async () => {

@@ -4,7 +4,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { InputObserver, SessionHandle } from '../adapters/contract.js'
-import { MAIL_ACCEPT_MS, SessionEvents, type SessionEventsHost } from './session-events.js'
+import { MAIL_ACCEPT_MS } from './mail-accept.js'
+import { SessionEvents, type SessionEventsHost } from './session-events.js'
 
 function world(handle: Partial<SessionHandle>) {
   const events: unknown[] = []

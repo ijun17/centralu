@@ -1,6 +1,5 @@
 import type { ProjectConsent, ProjectConsentKind } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
-import type { QueuedRequests } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
 
 /**
@@ -8,8 +7,7 @@ import type { SessionTrashHost } from './session-trash.js'
  * manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type ProjectConsentsHost = Pick<DelegationHost, 'hostCards' | 'emit' | 'meta' | 'store'> &
-  Pick<SessionTrashHost, 'appsHub'> &
-  { readonly queue: Pick<QueuedRequests, 'withdrawReaches'> }
+  Pick<SessionTrashHost, 'appsHub'>
 
 /**
  * Whether a session of one project may reach another (#371): the person's card, a remembered "always" for the pair,
@@ -91,20 +89,11 @@ export class ProjectConsents {
 
   /**
    * Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish,
-   * and so is a queued ask being delivered at that moment (waking its session counts as running: the consent held when
-   * it went in); an ask for the pair still queued is not delivered (`withdrawReaches`)
+   * and so is an ask already sent as mail to a busy session: the consent held when it was sent (docs/plans/mailbox.md §10.6.2)
    */
   revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     if (!this.host.store.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.host.emit({ type: 'project_consents_changed' })
-    if (kind === 'delegate') {
-      this.host.queue.withdrawReaches(
-        () => false,
-        (_r, from, to) => from === fromProjectId && to === toProjectId,
-        'The person revoked the consent for the asking project to ask this one.',
-        true,
-      )
-    }
     // Apps attached under that "always" step back now (#371 part A): the sessions recount, and the app is gone from them
     if (kind === 'apps') this.host.appsHub?.rt.sharingChanged()
   }

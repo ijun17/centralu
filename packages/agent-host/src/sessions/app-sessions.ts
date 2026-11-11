@@ -86,10 +86,6 @@ export type AppSessionsHost = {
   readonly store: Store
   /** Sessions waking right now (#378 review: a finished app-agent session that is waking is in use) */
   readonly resuming: ReadonlyMap<string, unknown>
-  /** A queued note not yet taken by the session (`TurnInputs.inputsHeld`) */
-  inputsHeld: (sessionId: string) => boolean
-  /** Requests queued for a session until it is free (#677) */
-  readonly children: { readonly queued: ReadonlyMap<string, readonly unknown[]> }
   /** Restarts applied at a turn's end and still under way (#378 review: a finished app-agent session restarting is in use) */
   readonly restartPolicy: { readonly deferredRestarts: ReadonlyMap<string, unknown> }
 }
@@ -571,9 +567,7 @@ export class AppSessions {
       this.host.handles.has(id) ||
       this.host.agentRuns.has(id) ||
       this.host.resuming.has(id) ||
-      this.host.restartPolicy.deferredRestarts.has(id) ||
-      this.host.inputsHeld(id) ||
-      (this.host.children.queued.get(id)?.length ?? 0) > 0
+      this.host.restartPolicy.deferredRestarts.has(id)
     )
   }
 

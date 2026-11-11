@@ -37,6 +37,24 @@ const askAgents = () => w.store.permissions.setProjectConsent(w.caller.id, w.cal
 const later = () =>
   hostMail(w.store, mailSessionsOf(w.mgr, () => true), { hostId: MAIL_HOST, now: () => Date.now() + 10_000, delivery: { schedule: () => () => {} } }).service
 const reports = () => (w.mgr as unknown as { reports: ChildReports }).reports
+/**
+ * The mail waiting for `sessionId` is delivered once, as the mailbox would once it is due: a delivery of this host with a clock a minute ahead,
+ * started (its first sweep awaited, so nothing of it is left running when the store closes), then the session looked at, then stopped
+ */
+const deliverDue = async (sessionId: string) => {
+  // Every tool says it took a tracked input at once, as Claude does: the sweep gives every session the mail due for it
+  for (const tool of ['claude', 'codex'] as const) for (const h of w.adapters.get(tool)!.handles.values()) h.acceptsAtOnce = true
+  const due = wireHostMail(w.mgr, w.store, { now: () => Date.now() + 60_000 })
+  const sweep = vi.spyOn(due.delivery, 'sweep')
+  due.delivery.start()
+  try {
+    await sweep.mock.results[0]?.value
+    await due.delivery.process(addr(sessionId))
+  } finally {
+    due.delivery.stop()
+    sweep.mockRestore()
+  }
+}
 const children = () => (w.mgr as unknown as { children: { awaitingReport: Map<string, string>; pausedReports: Map<string, unknown> } }).children
 
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
@@ -482,16 +500,17 @@ describe('work handed on', () => {
     expect(taskOf(child, helper)).toMatchObject({ causeId: null })
     await turnEnds(child, 'started it')
     await turnEnds(helper, 'a part done')
-    // The owner gives the session more work; in it, the session sends the helper more
-    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'now this' })
+    // The owner gives the session more work; in it, the session sends the helper more. The helper's report waits for the session, so the work
+    // goes as mail too, and the delivery gives it both in one turn
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'now this' })).toMatchObject({ ok: true, state: 'mailed' })
+    await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 3)
     const now = tasksOf(parent, child)[1]!
     expect(now).toMatchObject({ body: 'now this' })
     const sentMore = w.mgr.agentSession(child, { sessionId: helper, action: 'send', text: 'and a second part' })
     await w.until(() => (handleOf(helper)?.sent.length ?? 0) >= 2)
     expect(tasksOf(child, helper)[1]).toMatchObject({ body: 'and a second part', causeId: now.id })
-    handleOf(child)!.answer('handed the second part on')
-    await again
+    await turnEnds(child, 'handed the second part on')
     // Not finished: the helper works for this work
     expect(read.taskRow(now.id, child)).toMatchObject({ settled: null })
     expect(read.reportsOn(now.id).map((r) => r.facts.outcome)).not.toContain('finished')
@@ -552,10 +571,11 @@ describe('work handed on', () => {
     // The grandchild is done: its turn is reported to the child
     await turnEnds(grandchild, 'tests written')
     await w.until(() => read.taskRow(taskOf(child, grandchild).id, grandchild)?.settled === 'reported')
-    const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })
+    // The grandchild's report waits for the session, so the owner's send goes as mail too, and the delivery gives it both in one turn
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })).toMatchObject({ ok: true, state: 'mailed' })
+    await deliverDue(child)
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
-    handleOf(child)!.answer('all done now')
-    await again
+    await turnEnds(child, 'all done now')
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
     expect(children().awaitingReport.has(child)).toBe(false)
   })

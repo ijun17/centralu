@@ -1,13 +1,15 @@
 import type { SessionInfo } from '@cc/protocol'
 import type { BusyAnswer } from '../adapters/contract.js'
-import type { QueuedRequest } from '../dev-services/store.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import { taskLine } from './ask-project.js'
 import type { Delegation } from './child-ownership.js'
-import type { DelegationHost } from './delegation-host.js'
+import type { DelegationHost, SendOrigin } from './delegation-host.js'
 import { agentFrame, canMailParent, lowestPreset, presetWithin } from './start-agent.js'
 import type { AgentStartFlow, StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf } from './transcript-view.js'
+
+/** A session with no project (the Assistant's child, #853) has no repository to fork from (#994 review) */
+const NO_PROJECT = 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
 
 /** A fork's refusal, `No fork of "<name>": <why>.`, for a clause or a whole sentence */
 const noFork = (target: SessionInfo, why: string) => `No fork of "${target.name}": ${why.replace(/\.$/, '')}.`
@@ -16,7 +18,7 @@ const noFork = (target: SessionInfo, why: string) => `No fork of "${target.name}
 export type ForkDelegations = Pick<StartAgentDelegations, 'startDelegation'> & { readonly starts: AgentStartFlow }
 
 /**
- * A sub-session forked from a busy session's conversation for a requester (#677, `ifBusy: "fork"`), behind start_agent's
+ * A sub-session forked from a busy session's conversation for a requester (`ifBusy: "fork"`), behind start_agent's
  * gates. Moved out of `DelegationFlow` as it was (#428); what it reaches of the rest of the flow is `ForkDelegations`,
  * of the manager `DelegationHost`.
  */
@@ -26,13 +28,12 @@ export class DelegationForks {
     private readonly flow: ForkDelegations,
   ) {}
 
-  // ── Requests to a busy session (#677) ────────────────────────────────────────────────────────────────────────
 
   /**
    * start_agent's rules for a fork (#677): it starts an agent, so it takes the same gates. The agent depth, the project's
    * trust and the per-project ceiling here; the person's consent when the fork is made (`ensureAgentConsent`).
    */
-  forkGateError(callerId: string, target: SessionInfo): string | null {
+  private forkGateError(callerId: string, target: SessionInfo): string | null {
     return this.forkTrustError(callerId, target, true) ?? this.flow.starts.agentCeilingError(callerId, target.projectId ?? '')
   }
 
@@ -44,14 +45,22 @@ export class DelegationForks {
     const deep = agentDepthRefusal(this.host, callerId, 'start a sub-session')
     // Worded for "No fork of …: <why>."
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
-    // A session with no project (the Assistant's child, #853) has no repository to fork from (#994 review)
-    if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
+    if (!target.projectId) return NO_PROJECT
     if (!this.host.store.projects.listProjects().some((p) => p.id === target.projectId)) return 'its project is no longer registered'
     return this.host.trustGate(callerId, target.projectId, 'forking a session', quiet)
   }
 
+  /** Why `target` cannot be forked for `callerId` now, or null. Its project is said first, whatever its CLI can do (#994 review) */
+  private forkWhy(callerId: string, target: SessionInfo): string | null {
+    const adapter = this.host.adapters.get(target.tool)
+    if (!target.projectId) return NO_PROJECT
+    if (!adapter?.forkConversation) return `${adapter?.descriptor.label ?? target.tool} cannot fork a conversation`
+    if (!(target.externalId ?? target.importedFrom)) return 'it has no conversation to copy yet'
+    return this.forkGateError(callerId, target)
+  }
+
   /**
-   * A sub-session from a copy of a busy session's conversation (#677, `ifBusy: "fork"`), linked to the requester: its
+   * A sub-session from a copy of a busy session's conversation (`ifBusy: "fork"`), linked to the requester: its
    * turn is the requester's delegation (the report, and its cards, #676), and the sidebar hangs it under the session it
    * was copied from (`forkedFrom`). start_agent's gates (`forkGateError`, the consent card) and its preset rule: never
    * above the requester, and never above the session it copies. `readOnly` (`fork_read`) shares that session's folder
@@ -63,17 +72,17 @@ export class DelegationForks {
     target: SessionInfo,
     text: string,
     readOnly: boolean,
-    via: QueuedRequest['via'],
+    via: Exclude<SendOrigin, 'ask_project'>,
     signal?: AbortSignal,
-  ): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo } | { ok: true; queued: Extract<BusyAnswer, { state: 'queued' }> }> {
-    const fork = this.host.busyChoices(callerId, target, 'agent_session').find((c) => c.choice === 'fork')!
-    if (!fork.available) return { ok: false, error: noFork(target, fork.why ?? '') }
+  ): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo } | { ok: true; mailed: Extract<BusyAnswer, { state: 'mailed' }> }> {
+    const why = this.forkWhy(callerId, target)
+    if (why) return { ok: false, error: noFork(target, why) }
     const caller = this.host.meta.get(callerId)!
     const adapter = this.host.adapters.get(target.tool)!
     const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)!
     const preset = lowestPreset(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))
     const worktree = readOnly ? null : await this.flow.starts.agentWorktreeBranch(project, { task: text })
-    if (worktree && 'error' in worktree) return { ok: false, error: `${worktree.error.replace('Start the agent without one.', 'Use fork_read for read-only work, or queue it.')}` }
+    if (worktree && 'error' in worktree) return { ok: false, error: `${worktree.error.replace('Start the agent without one.', 'Use fork_read for read-only work, or send it without ifBusy.')}` }
     const consent = await this.flow.starts.ensureAgentConsent(
       callerId,
       {
@@ -96,15 +105,16 @@ export class DelegationForks {
     if ('error' in place) return { ok: false, error: place.error }
     try {
       /*
-       * Memory (#686): no room for another agent now. The request is queued for the busy session instead (#677's queue,
-       * `enqueue`), which starts no process: it goes in as a new turn there when the running one ends. Queued, not refused
-       * (owner decision 2026-10-15); the requester reads that it was queued instead of forked, and why.
+       * Memory (#686): no room for another agent now. The request is sent to the busy session as mail instead, which starts
+       * no process: it starts a turn of its own once the session is free. Sent, not refused (owner decision 2026-10-15); the
+       * requester reads that it was mailed instead of forked, and why.
        */
       const short = await this.flow.starts.memoryShort()
       if (short) {
         const low = this.flow.starts.lowMemory(short)
-        const queued = this.host.enqueue(callerId, target, via, text)
-        return { ok: true, queued: { ...queued, lowMemory: `${low.available} free, ${low.floor} needed for a fork` } }
+        const mailed = this.host.mailTask(callerId, target, via, text)
+        if ('error' in mailed) return { ok: false, error: mailed.error }
+        return { ok: true, mailed: { ...mailed, lowMemory: `${low.available} free, ${low.floor} needed for a fork` } }
       }
       let forked: string
       try {

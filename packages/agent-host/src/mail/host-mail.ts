@@ -8,7 +8,7 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -264,6 +264,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     tool: (id, args) => tool.call(id, args),
     // Work a session gave another is a task, beside the old path that delivered it (§9.1)
     delegated: delegationRecorder(service, mailTurns),
+    sendTask: taskSender(service),
+    withdrawTasks: taskWithdrawer(service, store.mailbox),
     waitingOn,
     answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)

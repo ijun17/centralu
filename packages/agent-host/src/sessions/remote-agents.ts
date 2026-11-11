@@ -630,10 +630,8 @@ export class RemoteAgents {
            * nor a fork reaches another machine
            */
           const g = await this.gate(rec, reader)
-          if (!g.live) {
-            if (opts.ifBusy === 'queue') return this.hold(rec, text)
-            return { ok: false, error: `"${rec.name}" is busy on ${rec.machine} with ${this.otherTurn(rec, g)}. A fork does not reach another machine, and a note goes only into a turn you gave it: send with ifBusy "queue" to have it sent once it is at rest.` }
-          }
+          // Another's turn there: held, and sent once it is at rest (#1682), as mail to a busy session here waits (mail does not cross links yet)
+          if (!g.live) return this.hold(rec, text)
           const refused = this.gateError(callerId)
           if (refused) return { ok: false, error: refused }
           // Kept before it goes, as the machine records it before it answers: its record tells the turn that took it
@@ -658,10 +656,7 @@ export class RemoteAgents {
           return this.working(rec, this.reportArmed(rec) || this.endOwed.has(rec.sessionId))
         }
         // Notes held for it go first (#1682), as a local queue's do: this one waits behind them, or is refused
-        if (this.of(rec.sessionId)?.queued?.length) {
-          if (opts.ifBusy === 'queue') return this.hold(rec, text)
-          return { ok: false, error: `Notes you queued for "${rec.name}" on ${rec.machine} are still to be sent: send with ifBusy "queue" to have this one sent after them.` }
-        }
+        if (this.of(rec.sessionId)?.queued?.length) return this.hold(rec, text)
         return this.sendAtRest(rec, callerId, text, label, reader)
       }
       case 'stop': {
@@ -1077,7 +1072,7 @@ export class RemoteAgents {
     }
   }
 
-  /** A held note could not be sent: said in the caller's session as a local queued request's failure is (`QueuedRequests.tellQueuedFailed`); the model reads the error's kind, not its words (#1186) */
+  /** A held note could not be sent: said in the caller's session; the model reads the error's kind, not its words (#1186) */
   private tellQueuedFailed(rec: RemoteAgent, why: string): Promise<boolean> {
     const { sessionId, name } = rec
     return this.host.tellSession(

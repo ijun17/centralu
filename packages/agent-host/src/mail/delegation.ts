@@ -30,6 +30,23 @@ export function linkedGoneRecorder(mail: MessageService, records: MailboxRecords
     })
 }
 
+/**
+ * A send to a session that cannot take it now (docs/plans/mailbox.md §10.6.2): a task from the caller to the session, not delivered yet, which the
+ * delivery gives it as a turn of its own once it is free. Returns the task's id
+ */
+export function taskSender(mail: MessageService): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => string {
+  return (callerId, childId, origin, task) => mail.task(mail.sessionAddress(callerId), mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: false }).id
+}
+
+/** The caller withdraws what it sent the session and the session has not been given yet (`agent_session stop`): how many tasks */
+export function taskWithdrawer(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string) => number {
+  return (callerId, childId) => {
+    const caller = mail.sessionAddress(callerId)
+    const waiting = records.pendingFor(mail.sessionAddress(childId), Number.MAX_SAFE_INTEGER).filter((p) => p.message.sender === caller && p.message.kind === 'task')
+    return waiting.reduce((n, p) => n + mail.done(caller, p.message.id).settled, 0)
+  }
+}
+
 /** The old path's word for where work came from, as a task's origin (§5.2) */
 function delegationOrigin(origin: ThreadOrigin): DelegationOrigin {
   return origin === 'start_agent' || origin === 'agent_session' || origin === 'send_to_session' || origin === 'create_session' || origin === 'ask_project' ? origin : 'send_to_session'

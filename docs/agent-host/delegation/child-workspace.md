@@ -120,7 +120,7 @@ the floor (2 GB, `MEMORY_FLOOR_BYTES`) the start is **queued, not refused**:
 | Start | Below the floor |
 |---|---|
 | `start_agent` | After consent (the card or the project's trust), the request (`agent_start_requests`, #673) is marked `allowed` and the call answers `pending` with `lowMemory` and its `ag-…` handle (the model reads "queued: low memory"). A notice in the caller's session says why. agent_session `status`/`wait`/`stop` work on the handle as on a card's; a start that had no card gets a request of its own. Once memory recovers the child starts with its report armed, and the handle leads to it. A host that takes over an `allowed` request waits for memory without raising the card again (an older build raises it again, which only asks twice). |
-| A fork ([delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677)) | Becomes a place in the busy session's queue instead (`enqueue`), which starts no process; the answer says `queued` with `lowMemory`, read as "Not forked: memory is low … queued instead". |
+| A fork ([delegated-turns.md](delegated-turns.md#requests-to-a-busy-session-677)) | Becomes a mail task to the busy session instead (`mailTask`), which starts no process; the answer says `mailed` with `lowMemory`, read as "Not forked: memory is low … sent as mail instead". |
 | An app's agent | Waits inside the app's call: the run's progress says "waiting for memory", and the agent starts when memory recovers; a cancelled call ends it without a session. |
 
 The wait re-reads memory every 15 s (`MEMORY_RECHECK_MS`) and lets **one** queued start go per check, oldest first:

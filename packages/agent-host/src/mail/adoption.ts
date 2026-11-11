@@ -1,6 +1,7 @@
 import { errorMessage } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
+import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import { inTurn } from '../idle.js'
 import { parseAddress } from './address.js'
 import type { MessageService } from './messages.js'
@@ -19,7 +20,11 @@ export type AdoptedSession = { askedBy?: string | null; state: SessionInfo['stat
  *    turn and has no undelivered mail from the owner, is settled `reported`, with no report message: the old path told the owner. Mail delivered
  *    and not read holds nothing (#1458): no delivery gives it again, so it is not work still on its way.
  *
- * Neither starts a turn nor wakes anyone. A crash between the old path's write and the task row's is mended at the next `ready` the same way.
+ * 0. **Requests it queued** (`queued_requests`, docs/plans/mailbox.md §10.6.2). Each becomes a task from its requester, not delivered yet, which the
+ *    delivery gives the session as any task (joining its turn, or at its next), and its row goes, in one transaction. A row whose requester or session is
+ *    gone goes with no task; a row through a tool this build does not know stays, for a build that knows it (#384).
+ *
+ * 1 and 2 start no turn and wake no one. A crash between the old path's write and the task row's is mended at the next `ready` the same way.
  */
 export function takeOverFromEarlierBuild(
   mail: MessageService,
@@ -29,7 +34,24 @@ export function takeOverFromEarlierBuild(
     /** §9.5's `oldOwes`: the old report paths still owe the owner a report of the child */
     oldOwes(ownerId: string, childId: string): boolean
   },
-): { adopted: number; settled: number } {
+): { queued: number; adopted: number; settled: number } {
+  let queued = 0
+  for (const r of store.children.listQueuedRequests()) {
+    if (!SEND_ORIGINS.has(r.via)) continue
+    try {
+      store.mailbox.transaction(() => {
+        if (sessions.info(r.sessionId) && sessions.info(r.callerSessionId)) {
+          mail.task(mail.sessionAddress(r.callerSessionId), mail.sessionAddress(r.sessionId), { text: r.text, origin: r.via, delivered: false })
+          queued++
+        }
+        store.children.removeQueuedRequest(r.id)
+      })
+    } catch (e) {
+      // One row that cannot be taken leaves the others, and stays for the next start
+      console.error(`[mail] could not take the request an earlier build queued for ${r.sessionId.slice(0, 8)} (${errorMessage(e)})`)
+    }
+  }
+
   let adopted = 0
   for (const mark of store.children.listReportMarks()) {
     if (mark.sessionId === mark.callerSessionId) continue
@@ -48,13 +70,12 @@ export function takeOverFromEarlierBuild(
   }
 
   let settled = 0
-  const queued = new Set(store.children.listQueuedRequests().map((r) => r.sessionId))
   for (const row of store.mailbox.unsettledTasks()) {
     const owner = parseAddress(row.sender)
     const child = parseAddress(row.recipient)
     if (owner?.kind !== 'session' || child?.kind !== 'session') continue
     const info = sessions.info(child.sessionId)
-    if (!info || inTurn(info.state) || queued.has(child.sessionId) || sessions.oldOwes(owner.sessionId, child.sessionId)) continue
+    if (!info || inTurn(info.state) || sessions.oldOwes(owner.sessionId, child.sessionId)) continue
     if (store.mailbox.pendingFor(row.recipient, Number.MAX_SAFE_INTEGER).some((p) => p.message.sender === row.sender)) continue
     try {
       if (mail.settleReported(row.messageId, row.recipient) > 0) settled++
@@ -62,5 +83,5 @@ export function takeOverFromEarlierBuild(
       console.error(`[mail] could not settle the work an earlier build reported (${row.messageId}): ${errorMessage(e)}`)
     }
   }
-  return { adopted, settled }
+  return { queued, adopted, settled }
 }

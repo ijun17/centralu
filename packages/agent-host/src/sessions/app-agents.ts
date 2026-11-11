@@ -42,27 +42,10 @@ export class AgentRunWait {
   readonly done: Promise<{ output?: unknown; answer?: string }>
   private settle!: { resolve: (v: { output?: unknown; answer?: string }) => void; reject: (e: Error) => void }
   private settled = false
-  private inputs = 0
-  private trackedInputs = false
   private ending?: { output?: unknown; answer?: string }
 
-  get waitingForInputs(): boolean { return this.inputs > 0 }
   get finished(): boolean { return this.settled }
-  get tracksInputs(): boolean { return this.trackedInputs }
   get completedAnswer(): string | undefined { return this.ending?.answer }
-
-  /** A parent's note may join this turn or run after it. Hold before send, since adapters can emit synchronously. */
-  holdInput(): () => void {
-    this.trackedInputs = true
-    this.inputs++
-    let released = false
-    return () => {
-      if (released) return
-      released = true
-      this.inputs--
-      if (!this.inputs && this.ending) this.finish(this.ending)
-    }
-  }
 
   constructor(
     private notify: (message: string) => void,
@@ -102,7 +85,6 @@ export class AgentRunWait {
       case 'turn_complete':
         if (this.stoppedByPerson) return this.fail(new Error('the person stopped the agent before it finished'))
         this.ending = { ...(e.output === undefined ? {} : { output: e.output }), ...(this.readAnswer ? { answer: this.readAnswer() } : {}) }
-        if (this.inputs) return
         return this.finish(this.ending)
       case 'error':
         return this.fail(new Error(this.stoppedByPerson ? 'the person stopped the agent before it finished' : `the agent's turn failed: ${e.error.message}`))

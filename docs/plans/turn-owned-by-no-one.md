@@ -1,6 +1,6 @@
 # A turn belongs to no one: requests carry their own answers (#1948)
 
-> **Status: decided 2026-11-05 (§11); P1 and P2 built, P11's close (C12) and the Next line (B8) built 2026-11-06, P3 to P10 and the rest of P11 not.** Read from main at `eafd28253`. The design landed with its
+> **Status: decided 2026-11-05 (§11); P1 and P2 built, P11's close (C12) and the Next line (B8) built 2026-11-06, P8 built as #1948 step 2 (mailbox.md §10.6.2), P3 to P7, P9, P10 and the rest of P11 not.** Read from main at `eafd28253`. The design landed with its
 > first implementation PR (P1, §8). It follows the owner's decisions on #1948 of 2026-11-04 (Targets 1 to 4, the
 > Inbox, Continue) and of 2026-11-05 (an agent's turn belongs to no one; the composer's "Working for X" choice goes).
 > It covers the audit items B1 to B9 and C1 to C12 of the comment "Audit: what the old (pre-mailbox) model still leaves

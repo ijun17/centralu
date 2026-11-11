@@ -7,6 +7,8 @@ import { CrossAdapter, crossWorld, type CrossHandle, type CrossWorld } from './c
 import { answersFrom, decisionFrom } from './delegated-cards.js'
 import { SessionManager } from './manager.js'
 import { runCentraluTool } from './centralu-tools.js'
+import type { HostMail } from '../mail/host-mail.js'
+import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * Cards in a delegated turn (#676): when a session works on a turn another session gave it (start_agent,
@@ -332,24 +334,40 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
     })
   })
 
-  describe('a task that joins a turn the person is running gives its caller none of that turn\'s cards', () => {
+  describe('a task sent while the person runs a turn gives its caller none of that turn\'s cards', () => {
+    /** The host's mail, its delivery started; `due` looks at the mail due for a session now (past the debounce): a task waits for the turn's end */
+    let m: HostMail
+    const clock = { t: 0 }
+    beforeEach(() => {
+      clock.t = Date.now()
+      m = wireHostMail(w.mgr, w.store, { now: () => clock.t })
+      m.delivery.start()
+    })
+    afterEach(() => m.delivery.stop())
+    const due = async (sessionId: string) => {
+      // The tool says it took a tracked input at once, as Claude does
+      handleOf(sessionId).acceptsAtOnce = true
+      clock.t += 3_000
+      await m.delivery.process(addressOf(sessionId))
+    }
+
     it('ask_project into the person\'s turn', async () => {
       const caller = await w.callerSession()
-      // Joining a turn that is not its own is a note, the caller's choice under auto (#677)
+      // Under auto, which may answer a card of a turn it gave
       await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const cards = answering(handleOf(target))
       await w.mgr.inputs.send(target, "the person's own work")
-      let settled = false
-      void w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this', ifBusy: 'note' }).then(() => { settled = true })
-      await w.until(() => handleOf(target).sent.length === 2)
+      // The task goes as mail, which waits for the person's turn to end (docs/plans/mailbox.md §10.6.2)
+      expect(await w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this' })).toMatchObject({ ok: true, state: 'mailed' })
+      await due(target)
+      expect(handleOf(target).sent).toHaveLength(1)
       cards.ask('q-person')
       cards.approval('a-person')
       await new Promise((r) => setTimeout(r, 30))
-      // Not told, its wait not answered with the person's cards, and nothing to answer
+      // Not told, and nothing to answer
       expect(toldOf(caller, target)).toEqual([])
-      expect(settled).toBe(false)
       expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'status' })).toMatchObject({ ok: false })
       for (const card of ['q-person', 'a-person']) {
         expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card, text: 'allow' })).toMatchObject({ ok: false })
@@ -368,7 +386,10 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       const before = toldOf(parent, child).length
       await w.mgr.inputs.send(child, "the person's own work")
-      expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'a note' })).toMatchObject({ ok: true })
+      // The note goes as mail, which waits for the person's turn to end
+      expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'a note' })).toMatchObject({ ok: true, state: 'mailed' })
+      await due(child)
+      expect(handleOf(child).sent.some((t) => t.includes('a note'))).toBe(false)
       const cards = answering(handleOf(child))
       cards.approval('a-person')
       await new Promise((r) => setTimeout(r, 30))

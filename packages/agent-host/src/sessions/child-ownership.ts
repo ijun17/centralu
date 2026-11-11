@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { errorMessage, TurnOrigin } from '@cc/protocol'
 import type { BackgroundTask, SessionInfo, StoredMessage } from '@cc/protocol'
-import type { QueuedRequest, Store } from '../dev-services/store.js'
+import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
@@ -21,9 +21,6 @@ import type { AgentStartRecord } from './agent-start-record.js'
  */
 export const PAUSED_REPORT_SETTLE_MS = 60_000
 
-/** The tools a request can be queued through that this build delivers (#677); a row of another is left alone (#384) */
-const QUEUED_VIA: ReadonlySet<string> = new Set<QueuedRequest['via']>(['ask_project', 'agent_session', 'send_to_session'])
-
 /** One ask_project call's work in the target project (#371 part B) — see `ChildOwnership.delegations` */
 export type Delegation = {
   callerId: string
@@ -36,12 +33,8 @@ export type Delegation = {
   readonly settled: boolean
   /** What the delegated session waits on, when it waits on the person */
   notice(): string | undefined
-  /** A task that joined the person's running turn: caller cancellation must leave that turn alone. */
-  joinedTurn?: boolean
-  /** Ends only the caller's wait, keeping the target's receipt watcher and observers alive. */
-  waitCancelled?: Promise<{ ok: false; error: string }>
-  /** Ends the wait; interrupts only an assigned turn or an explicit stop of the target itself. */
-  stop(why: string, targetStop?: boolean): void
+  /** Ends the wait and interrupts the turn */
+  stop(why: string): void
   /** A child start_agent started in the caller's own project (#561), rather than ask_project's delegated session */
   agent?: boolean
   /** How many of the caller's calls are waiting on it right now (`awaitAgent`, `awaitDelegation`) */
@@ -191,8 +184,6 @@ export type OwnerMove = {
   armReports: readonly string[]
   /** The original's start_agent requests still open that move with it */
   starts: readonly AgentStartRecord[]
-  /** Whether the requests the original queued move too (not for a removed original: the session archive drops them) */
-  queued: boolean
 }
 
 type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'messages'>
@@ -218,12 +209,6 @@ export class ChildOwnership {
    */
   private readonly reports = new Map<string, string>()
   readonly awaitingReport: ReadonlyMap<string, string> = this.reports
-  /**
-   * An auto observer's own mid-turn note (#646), `<observer>><session>` -> the reader its receipt is held on. The
-   * observer's `status` and `wait` read this, never the owner's delegation, until a read takes its settled outcome.
-   */
-  private readonly notes = new Map<string, { run: Delegation; waiters: number; told: boolean }>()
-  readonly observerNotes: ReadonlyMap<string, { run: Delegation; waiters: number; told: boolean }> = this.notes
   /**
    * Reports held over the session's own background work (#721): a turn ended while work it started still ran, so the work is paused, not over. The
    * report stays owed in `awaitingReport` (its caller was told once that it paused) and goes out at the end of a turn with none of that work left, or
@@ -252,7 +237,7 @@ export class ChildOwnership {
    * with that work by Centralu's doing (`turnStarted`: a compaction's next step) is that caller's again. Memory only, as `cliTurns`
    */
   private readonly workOf = new Map<string, string>()
-  /** Running turns that go on with that work (#2164), read as a pause's continuing turn is (`continuesWork`) */
+  /** Running turns that go on with that work (#2164) */
   private readonly goingOn = new Set<string>()
   private readonly lastBy = new Map<string, 'person' | 'work'>()
   /** The messages given each session's tool that no turn has taken yet (#1639), oldest first; read back from the rows once per host (`held`) */
@@ -276,21 +261,6 @@ export class ChildOwnership {
    */
   private readonly turns = new Map<string, TurnOwner>()
   readonly turnOwners: ReadonlyMap<string, TurnOwner> = this.turns
-  /**
-   * Requests held for a busy session (#677, `ifBusy: "queue"`): session -> its queue, oldest first. Each goes in as a new
-   * turn of its requester's when the session's running turn ends (`drainQueue`). Mirrored in the store's
-   * `queued_requests` (v52), so a host swap keeps them.
-   */
-  private readonly queues = new Map<string, QueuedRequest[]>()
-  readonly queued: ReadonlyMap<string, readonly QueuedRequest[]> = this.queues
-  /**
-   * The queued request being delivered now, per session (#684 review): it stays first in its queue, and its row stays
-   * in the store marked `delivering_at`, until the session's turn actually starts (`onEvent`); only then is it taken
-   * off. While it is here the session counts as busy and no other drain runs for it, so waking a sleeping session
-   * cannot let a second request in, and a swap or crash mid-delivery leaves the row for the next host.
-   */
-  private readonly deliveries = new Map<string, string>()
-  readonly delivering: ReadonlyMap<string, string> = this.deliveries
   /**
    * ask_project's delegations still owed to their caller (#371 part B) — `<caller session>><target project>><target session>` -> the
    * delegation. One per chosen session at a time: a second task while the first runs is refused, and a call with no task waits
@@ -366,14 +336,13 @@ export class ChildOwnership {
 
   /**
    * Whether the old report paths still owe `ownerId` a report of `childId` (docs/plans/mailbox.md §9.5, D18): they are the truth of an owed report
-   * until M8, and the mail task rows follow them. A delegation not settled, a report mark, a queued request, a report paused over the child's own
+   * until M8, and the mail task rows follow them. A delegation not settled, a report mark, a report paused over the child's own
    * work, a linked machine's report; for the person, their task with the child
    */
   oldOwes(ownerId: string, childId: string): boolean {
     if (ownerId === 'person') return this.personOwes(childId)
     if ([...this.runs.values()].some((d) => d.callerId === ownerId && d.sessionId === childId && !d.settled)) return true
     if (this.reports.get(childId) === ownerId) return true
-    if ((this.queues.get(childId) ?? []).some((q) => q.callerSessionId === ownerId)) return true
     return this.linked.get(childId)?.assistantId === ownerId
   }
 
@@ -565,37 +534,6 @@ export class ChildOwnership {
     }
   }
 
-  /** At startup (#677): every queued request whose session and requester still exist; `legacyOpenedByAuto` reads a row an older build wrote */
-  restoreQueued(sessions: ReadonlyMap<string, SessionInfo>, legacyOpenedByAuto: (r: QueuedRequest) => boolean): void {
-    /*
-     * Queued requests (#677) outlive the host: the next one delivers them when the session's turn ends, or soon after
-     * start for a session already at rest. A session whose cut turn is continued waits for that turn to end, so its first
-     * input does not start a second process. A request whose session or requester is gone is dropped.
-     */
-    for (const r of this.store.children.listQueuedRequests()) {
-      if (!sessions.has(r.sessionId) || !sessions.has(r.callerSessionId)) {
-        this.store.children.removeQueuedRequest(r.id)
-        continue
-      }
-      /*
-       * Queued by a newer build through a tool this one does not know (#384): no gate here stands for it, so it is not
-       * delivered, and not dropped either. The row stays for a build that knows the tool; the requests behind it go.
-       */
-      if (!QUEUED_VIA.has(r.via)) {
-        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} came through ${JSON.stringify(r.via)}, which this build cannot deliver; it is left for one that can`)
-        continue
-      }
-      // A delivery the old host began and never saw start is delivered again (#684 review)
-      if (r.deliveringAt) {
-        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
-        this.store.children.markQueuedDelivering(r.id, null)
-      }
-      // A row an older build wrote does not say whether only `auto` let it through: an ask with no consent for the pair is read as such
-      const openedByAuto = r.openedByAuto ?? legacyOpenedByAuto(r)
-      this.adoptQueued({ ...r, deliveringAt: null, openedByAuto })
-    }
-  }
-
   /** A mark the previous host left, kept for a session whose turn goes on here (the store already holds it) */
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)
@@ -656,7 +594,8 @@ export class ChildOwnership {
    * running turn's state as the host before left it. This build gives every user row an input id except two: the first prompt (the first
    * row, before any message) and the words read back from the tool's own record (`transcript`, which a late catch-up can store after a
    * message just given; skipped). Any other user row without one was written by a build before #1639 after a rollback, which ran the
-   * session: what was given before it is done with. With no `turn_inputs` at all, a build before #1639 left the session (`legacyHeld`)
+   * session: what was given before it is done with. A delegated task the mailbox gave (`mail`) shows as its sender's row and is skipped too: the
+   * tool took it as mail. With no `turn_inputs` at all, a build before #1639 left the session (`legacyHeld`)
    */
   private held(sessionId: string): Entry[] {
     let held = this.entries.get(sessionId)
@@ -669,7 +608,7 @@ export class ChildOwnership {
         const e = entryOf(row)
         const mark = e && kept.marks[e.id]
         if (e) held.push({ ...e, joined: mark === 'joined', ...(mark === 'after' || mark === 'carried' ? { [mark]: true as const } : {}) })
-        else if (asObj(row.payload).transcript !== true) [held, spent] = [[], row.seq]
+        else if (asObj(row.payload).transcript !== true && asObj(row.payload).mail !== true) [held, spent] = [[], row.seq]
       }
       if (spent !== null) this.spentAt.set(sessionId, spent)
       if (kept.named) this.named.add(sessionId)
@@ -827,7 +766,8 @@ export class ChildOwnership {
    * Who gave each thing that may have entered the session's latest turn (#1948): every user row stored since the turn before it began (every
    * row, with no turn before), as the session id that sent it, or null for one no session sent (the person, an app, a script, a relayed report,
    * words read back from the tool's own record), and a null for a question card answered since. The turn before's own rows count too. Mail
-   * given in leaves no user row: the mailbox has those. No turn seen to begin: one null
+   * given in leaves no user row (the mailbox has those) but a delegated task's, which names its sender (`SessionEvents.deliverMail`). No turn seen
+   * to begin: one null
    */
   latestTurnInputs(sessionId: string): (string | null)[] {
     const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
@@ -887,7 +827,7 @@ export class ChildOwnership {
    * The tool names the inputs the turn opening now runs for (#1639, `SessionHandle.turnStartInputs`): ids, of which the last one held
    * decides it, and it ran for every message given up to that one (the tool runs inputs in order); ids none of which a message was given
    * under (a mail wake, a compact, a quiet note), or none at all (`[]`): the CLI's own. `null`: not an opening, nothing changes. A turn
-   * the person took over stays theirs. The messages held after it are queued behind it, so it may take them in at a tool round (`personInTurn`).
+   * the person took over stays theirs. The messages held after it are queued behind it, so it may take them in at a tool round.
    * Returns the hub's message it ran for, the last one named (#1604), said with the event that opens it
    */
   turnNamed(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
@@ -979,27 +919,6 @@ export class ChildOwnership {
     this.store.settings.deleteAppSetting(reportTurnKey(sessionId))
     return starter
   }
-  /**
-   * Whether the turn running goes on with the caller's work: the paused work's continuing (#1576), when the caller's report is held over the
-   * session's own background work and the tool started this turn when that work ended, or the turn Centralu opened to go on with it after a
-   * compaction (#2164, `turnStarted`). No message began it (`turnStarted`) and no person's message is in it. Its end is the report the caller
-   * is owed, so it is the caller's too. The one place that says so, as `reportBackIfAwaited` reads the same turn for its report
-   */
-  continuesWork(sessionId: string, callerId: string): boolean {
-    if (this.reports.get(sessionId) !== callerId || !(this.paused.has(sessionId) || this.goingOn.has(sessionId))) return false
-    // A turn the mailbox started for another owner's thread, or one given to another caller, is theirs
-    const owner = this.turns.get(sessionId)?.callerId
-    if ((owner && owner !== callerId) || (this.mailTurns.get(sessionId) && this.mailTurns.get(sessionId)?.ownerId !== callerId)) return false
-    const starter = this.starters.get(sessionId)
-    // Only the tool's own continuation: a message with a `from`, an app's or a script's also starts a 'work' turn, and is not it
-    return this.cliTurns.has(sessionId) && starter?.by === 'work' && !this.personInTurn(sessionId)
-  }
-  /** Whether a person started the running turn or wrote into it, or their message is queued behind its named opening (#1576): a refusal says "the person may be using it" for no other */
-  personInTurn(sessionId: string): boolean {
-    const starter = this.starters.get(sessionId)
-    const queued = (p: Entry) => p.joined || (this.named.has(sessionId) && !p.after && !p.carried)
-    return starter?.by !== 'work' || !!starter.wrote || !!starter.added || this.held(sessionId).some((p) => p.by === 'person' && queued(p))
-  }
   /** Whose the session's last turn was (#1377): its last response is the person's answer when it was theirs */
   lastTurnBy(sessionId: string): 'person' | 'work' | undefined {
     return this.lastBy.get(sessionId)
@@ -1072,47 +991,6 @@ export class ChildOwnership {
     this.store.children.setDelegatedTurnTold(sessionId, [...owner.told])
   }
 
-  /** Holds a request for a busy session, last in its queue; returns its place */
-  enqueue(r: QueuedRequest): number {
-    const list = [...(this.queues.get(r.sessionId) ?? []), r]
-    this.queues.set(r.sessionId, list)
-    this.store.children.addQueuedRequest(r)
-    return list.length
-  }
-  /** Marks a queued ask as resting on its requester's `auto` alone, here and in the store (#838) */
-  markOpenedByAuto(r: QueuedRequest): void {
-    if (r.openedByAuto === true) return
-    r.openedByAuto = true
-    this.store.children.markQueuedOpenedByAuto(r.id)
-  }
-  /** A request the previous host left, read back at startup (the store already holds it) */
-  adoptQueued(r: QueuedRequest): void {
-    this.queues.set(r.sessionId, [...(this.queues.get(r.sessionId) ?? []), r])
-  }
-  dropQueued(which: (r: QueuedRequest) => boolean): QueuedRequest[] {
-    const dropped: QueuedRequest[] = []
-    for (const [id, list] of [...this.queues]) {
-      const now = this.deliveries.get(id)
-      if (now && list.some((r) => r.id === now && which(r))) this.deliveries.delete(id)
-      const keep = list.filter((r) => !which(r))
-      for (const r of list) if (which(r)) { dropped.push(r); this.store.children.removeQueuedRequest(r.id) }
-      if (keep.length) this.queues.set(id, keep)
-      else this.queues.delete(id)
-    }
-    return dropped
-  }
-  /** A queued request goes in now (#684 review): the session is busy with it until its turn starts */
-  startDelivering(sessionId: string, requestId: string): void {
-    this.deliveries.set(sessionId, requestId)
-    this.store.children.markQueuedDelivering(requestId, Date.now())
-  }
-  /** The session's turn started while a queued request was being delivered to it: that request is delivered (#684 review) */
-  queuedTurnStarted(sessionId: string): void {
-    const id = this.deliveries.get(sessionId)
-    if (!id) return
-    this.deliveries.delete(sessionId)
-    this.dropQueued((x) => x.id === id)
-  }
 
   setDelegation(key: string, d: Delegation): void {
     this.runs.set(key, d)
@@ -1121,18 +999,6 @@ export class ChildOwnership {
   dropDelegation(key: string, only?: Delegation): void {
     if (only && this.runs.get(key) !== only) return
     this.runs.delete(key)
-  }
-  setObserverNote(key: string, note: { run: Delegation; waiters: number; told: boolean }): void {
-    this.notes.set(key, note)
-  }
-  /** Drops the note under `key`; with `only`, only while that one is still there */
-  dropObserverNote(key: string, only?: { run: Delegation; waiters: number; told: boolean }): void {
-    if (only && this.notes.get(key) !== only) return
-    this.notes.delete(key)
-  }
-  /** The notes a session took as an observer, and the ones taken on it */
-  dropObserverNotesOf(sessionId: string): void {
-    for (const key of [...this.notes.keys()]) if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) this.notes.delete(key)
   }
 
   addAgentStart(rec: AgentStartRecord): void {
@@ -1166,7 +1032,7 @@ export class ChildOwnership {
   /**
    * Moves what `from` owns of the given children to `to`, in memory (#693, #738): their report marks, the marks a wait
    * had taken down (`armReports`), the turns `from` gave them, its delegations and observer notes on them (their keys
-   * name the caller), the requests it queued (`queued`), linked machines' reports, and the start requests that made
+   * name the caller), linked machines' reports, and the start requests that made
    * them. `moveCards` runs next, for the cards that stand for the moving `starts`; then what moved is recorded as
    * handed over, and the original's calls still waiting on it are ended.
    *
@@ -1187,12 +1053,6 @@ export class ChildOwnership {
       d.callerId = to
       this.runs.set(to + key.slice(from.length), d)
     }
-    for (const [key, n] of [...this.notes]) {
-      if (!key.startsWith(`${from}>`) || !moving.has(key.slice(from.length + 1))) continue
-      this.notes.delete(key)
-      this.notes.set(`${to}>${key.slice(from.length + 1)}`, n)
-    }
-    if (move.queued) for (const list of this.queues.values()) for (const r of list) if (r.callerSessionId === from && moving.has(r.sessionId)) r.callerSessionId = to
     for (const [id, wait] of this.linked) {
       if (wait.assistantId !== from || !moving.has(id)) continue
       wait.assistantId = to

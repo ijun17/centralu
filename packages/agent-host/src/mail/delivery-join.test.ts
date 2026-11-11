@@ -111,6 +111,35 @@ describe('mail joins a running turn (§10.6.2)', () => {
     expect(w.to('orc')[1]!.input.text).toContain(`id="${request.message.id}"`)
   })
 
+  it("a delegation tool's task held for the turn's end goes as soon as that turn ends, with no 30 s wake gap; other mail keeps the gap", async () => {
+    const w = started()
+    // A mail wake starts b's turn
+    w.send(A, { to: [B], text: 'start on #12', needsReply: true })
+    await w.advance(2_000)
+    expect(w.to('b')).toHaveLength(1)
+    w.states.set('b', inTurn)
+    const task = w.mail.task(C, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    const question = w.send(C, { to: [B], text: 'which branch?', needsReply: true })
+    await w.advance(3_000)
+    // The question joined the turn; the task waits for its end
+    expect(w.to('b')).toHaveLength(2)
+    expect(w.to('b')[1]!.input.text).toContain(`id="${question.message.id}"`)
+    // The turn ends 5 s after the wake: the task goes now, not 30 s after the wake
+    w.endTurn('b')
+    w.states.set('b', { kind: 'ready', live: true, quiet: false })
+    w.delivery.poke('b')
+    await w.advance(3_000)
+    expect(w.to('b')).toHaveLength(3)
+    expect(w.to('b')[2]!.input.text).toContain(`id="${task.id}"`)
+    // A message that wakes still waits out the gap after that wake
+    w.states.set('b', { kind: 'ready', live: true, quiet: false })
+    const later = w.send(A, { to: [B], text: 'and one more thing', needsReply: true })
+    await w.advance(3_000)
+    expect(w.to('b')).toHaveLength(3)
+    await w.advance(30_000)
+    expect(w.to('b').at(-1)!.input.text).toContain(`id="${later.message.id}"`)
+  })
+
   it('at rest, mail from two senders wakes the session once', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'one', needsReply: true })

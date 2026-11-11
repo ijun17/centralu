@@ -7,7 +7,6 @@ import { presetWithin } from './start-agent.js'
 import { matchProjects } from './ask-project.js'
 import { AskedGate } from './asked-gate.js'
 import { MailNotAtRest } from '../mail/delivery.js'
-import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
@@ -94,7 +93,7 @@ import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
-import { HostCards, type HostCardsHost } from './host-cards.js'
+import { HostCards, type HostAsk, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
 import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
@@ -106,7 +105,7 @@ import type { HubsReader } from './ask-project-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & AssistantSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost & HandoffNotesHost & SessionStartsHost & SessionEventsHost & ToolRegistryHost & ProjectRegistryHost & LaunchInputsHost & SessionLayoutHost & AssistantSlotHost & LinkedHostHost & SessionSettingsHost & MailSessionsHost & TurnInputsHost & SessionProcessesHost & HostTenureHost
 
 /** Whether `o` stands on `proto` (`Object.setPrototypeOf` answers `any`, so the type is said here, not asserted) */
 function stands<O extends object, P extends object>(o: O, proto: P): o is O & P {
@@ -143,14 +142,12 @@ export class SessionManager {
   readonly linkedHost: LinkedHost
   /** What is changed on a session: settings, name, read mark, background tasks, CLI move notices (session-settings.ts) */
   readonly sessionSettings: SessionSettings
-  /** Who owns a child session's work (#428): reports, turns, queued requests, delegations, start requests, handoffs */
+  /** Who owns a child session's work (#428): reports, turns, delegations, start requests, handoffs */
   private readonly children: ChildOwnership
   /** The work one session gives another: ask_project, start_agent, agent_session (delegation-flow.ts) */
   private readonly delegationFlow: DelegationFlow
   /** The Assistant's handoff_session (#694): who may hand off what, and the handoff itself */
   private readonly handoffFlow: HandoffFlow
-  /** Requests for a session busy with another's turn: the choices, the queue and its delivery (queued-requests.ts) */
-  private readonly queue: QueuedRequests
   /** The cards of a delegated turn, as the session that gave it reads and answers them (routed-cards.ts) */
   private readonly cards: RoutedCards
   /** A handoff's move of the original's children to the session that took over (handoff-children.ts) */
@@ -317,7 +314,6 @@ export class SessionManager {
     this.reports = new ChildReports(this.parts())
     this.handoffChildren = new HandoffChildren(this.parts())
     this.cards = new RoutedCards(this.parts())
-    this.queue = new QueuedRequests(this.parts())
     this.cardRests = new CardRests(appSettingRests(store.settings))
     this.modelWindows = new ModelWindows(store.settings)
     this.delegationFlow = new DelegationFlow(this.parts())
@@ -553,13 +549,11 @@ export class SessionManager {
    * So deletion goes **leaves first**.
    */
   async deleteProject(projectId: string): Promise<void> {
-    // Cards and queued asks that reach into it or out of it end first, before any wait: none outlives the project
-    this.queue.withdrawReaches(
+    // Cards that reach into it or out of it end first, before any wait: none outlives the project. Mail its sessions sent or were sent goes with them (§7.7)
+    this.withdrawReachCards(
       (ask) => ask.detail.kind === 'project_access'
         ? ask.detail.from.id === projectId || ask.detail.to.id === projectId
         : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
-      (_r, from, to) => from === projectId || to === projectId,
-      'The project was removed from Centralu.',
       false,
     )
     const mine = [...this.meta.values()].filter((s) => s.projectId === projectId)
@@ -607,15 +601,26 @@ export class SessionManager {
           agentStartPersonText(rec.req, 'untrusted'),
         )
       }
-      // So do its sessions' cards to reach another project, a fork's card for a session in it, and its queued asks
-      this.queue.withdrawReaches(
+      // So do its sessions' cards to reach another project, and a fork's card for a session in it. Mail its sessions sent out waits for its trust (§7.4)
+      this.withdrawReachCards(
         (ask) => ask.detail.kind === 'project_access' ? ask.detail.from.id === projectId : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
-        (_r, from) => from === projectId,
-        "The person stopped trusting the asking session's project.",
         true,
       )
     }
     return this.launches.refreshLaunchSettings(projectId, true)
+  }
+
+  /**
+   * Withdraws the cards that rest on a project's trust or on the project itself, when the person takes it away: the cards a session raised to reach another
+   * project (`project_access`) or to fork (start_agent cards with no request of their own, `forkFor`). A call waiting on a card reads the gate that now
+   * refuses it. `keepAuto`: trust does not close an `auto` session's reach (#603), so its cards stay; a removed project keeps nothing
+   */
+  private withdrawReachCards(cards: (ask: HostAsk) => boolean, keepAuto: boolean): void {
+    for (const ask of [...this.hostCards.hostAsks.values()]) {
+      const reach = ask.detail.kind === 'project_access' || (ask.detail.kind === 'agent_start' && !this.children.agentStarts.has(ask.requestId))
+      const kept = keepAuto && this.meta.get(ask.sessionId)?.permissionPreset === 'auto'
+      if (reach && !kept && cards(ask)) this.hostCards.withdrawHostAsk(ask.requestId)
+    }
   }
 
   /** The linked machines' sessions, for the Assistant's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
@@ -893,9 +898,9 @@ export class SessionManager {
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       backgroundTasksKey: (...a) => self.launches.backgroundTasksKey(...a),
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
-      busyAnswer: (...a) => self.queue.busyAnswer(...a),
-      busyChoices: (...a) => self.queue.busyChoices(...a),
-      busyForCaller: (...a) => self.queue.busyForCaller(...a),
+      takesSendNow: (...a) => self.mail.takesSendNow(...a),
+      mailTask: (...a) => self.mail.mailTask(...a),
+      withdrawTasks: (...a) => self.mail.withdrawTasks(...a),
       get cacheLedger() {
         return self.cacheLedger
       },
@@ -965,7 +970,6 @@ export class SessionManager {
       get endpoint() {
         return self.endpoint
       },
-      enqueue: (...a) => self.queue.enqueue(...a),
       ensureProjectAccess: (...a) => self.consents.ensureProjectAccess(...a),
       exportHandoffNote: (...a) => self.handoffNotes.exportHandoffNote(...a),
       exportHandoffRecord: (...a) => self.handoffNotes.exportHandoffRecord(...a),
@@ -1060,7 +1064,6 @@ export class SessionManager {
       get hostCards() {
         return self.hostCards
       },
-      inputsHeld: (...a) => self.inputs.inputsHeld(...a),
       get interruptions() {
         return self.interruptions
       },
@@ -1116,10 +1119,6 @@ export class SessionManager {
       projectRow: (...a) => self.projectRegistry.projectRow(...a),
       projectTrusted: (...a) => self.projectRegistry.projectTrusted(...a),
       trustGate: (...a) => self.projectRegistry.trustGate(...a),
-      queuedOf: (...a) => self.queue.queuedOf(...a),
-      get queue() {
-        return self.queue
-      },
       get readGrants() {
         return self.readGrants
       },
@@ -1150,7 +1149,6 @@ export class SessionManager {
       get running() {
         return self.processes.running
       },
-      scheduleDrain: (...a) => self.queue.scheduleDrain(...a),
       send: (...a) => self.inputs.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
       sessionOf: (...a) => self.sessionOf(...a),

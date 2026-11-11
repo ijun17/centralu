@@ -1,5 +1,4 @@
 import type { WorktreeRecovery } from '../dev-services/worktree-recovery.js'
-import type { QueuedRequest } from '../dev-services/store.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import type { ToolProfile } from '../apps/contract.js'
@@ -16,7 +15,7 @@ import type {
   ToolName,
   UiPreferences,
 } from '@cc/protocol'
-import type { AgentAdapter, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, LinkedSessions, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, BusyAnswer, ChildRunResult, RoutedCard, LinkedSessions, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
 import type { HostCards } from './host-cards.js'
@@ -24,6 +23,9 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
+
+/** The tool a send to another session came through, the task's origin when it goes as mail */
+export type SendOrigin = 'agent_session' | 'ask_project' | 'send_to_session'
 
 /** Where a delegation goes (docs/plans/mailbox.md §7.4): a session, a project (null: outside any), the Assistant, or a linked machine's session */
 export type DelegationTarget = { sessionId?: string; projectId?: string | null; assistant?: boolean; linked?: boolean }
@@ -46,9 +48,12 @@ export type DelegationHost = {
   /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`): for a read, not a crossing (`trustGate`) */
   projectTrusted: (projectId: string | null) => boolean
   builderRefOf: (m: Pick<SessionInfo, "id" | "appId" | "projectId">) => AppRef | null
-  busyAnswer: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => Extract<BusyAnswer, { state: "busy"; }>
-  busyChoices: (callerId: string, target: SessionInfo, from: QueuedRequest["via"]) => BusyChoice[]
-  busyForCaller: (callerId: string, sessionId: string) => boolean
+  /** Whether a send reaches the session as a turn it starts now; otherwise it goes as mail (`MailSessionsView.takesSendNow`) */
+  takesSendNow: (sessionId: string) => boolean
+  /** A send to a session that cannot take it now, as a mail task (`MailSessionsView.mailTask`) */
+  mailTask: (callerId: string, target: SessionInfo, origin: SendOrigin, text: string) => Extract<BusyAnswer, { state: 'mailed' }> | { error: string }
+  /** The caller's tasks to the session not delivered yet, withdrawn (`MailSessionsView.withdrawTasks`); how many */
+  withdrawTasks: (callerId: string, sessionId: string) => number
   readonly children: ChildOwnership
   readonly worktrees: Pick<WorktreeSessions, 'cleanUpWorktreeChild'>
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; onSetupProblems?: (problems: string[]) => void; onWorktreeBase?: (note: string) => void; }) => Promise<SessionInfo>
@@ -62,7 +67,6 @@ export type DelegationHost = {
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void, stillAllowed?: () => string | null, relayedText?: string) => Promise<void>
   readonly disposing: boolean
   readonly emit: (e: NormalizedEvent) => void
-  enqueue: (callerId: string, target: SessionInfo, via: QueuedRequest["via"], text: string) => Extract<BusyAnswer, { state: "queued"; }>
   ensureProjectAccess: (callerSessionId: string, toProjectId: string, access: ProjectConsentKind, what: { text: string; app?: { appId: string; name: string; }; session?: { id: string; name: string; }; }, signal?: AbortSignal) => Promise<{ ok: true; } | { ok: false; error: string; }>
   firstTool: (preferred?: ToolName | null) => ToolName | null
   gitTrust: (projectId: string | null) => { trusted: boolean; }
@@ -79,7 +83,6 @@ export type DelegationHost = {
   ownTasksRunning: (sessionId: string) => BackgroundTask[]
   pauseReport: (sessionId: string, running: readonly BackgroundTask[]) => void
   pausedTasksNow: (sessionId: string) => BackgroundTask[]
-  queuedOf: (callerId: string, sessionId: string) => ChildRunResult | undefined
   readonly readGrants: Map<string, Set<string>>
   rename: (sessionId: string, name: string) => void
   reportBackIfAwaited: (sessionId: string, ending: NormalizedEvent, answer?: string, settled?: readonly BackgroundTask[]) => Promise<string | undefined>

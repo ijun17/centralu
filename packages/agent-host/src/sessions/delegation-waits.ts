@@ -121,8 +121,7 @@ export class DelegationWaits {
     const leaving = observing ? undefined : this.untilHandedOver(d)
     if (!observing) d.waiters = (d.waiters ?? 0) + 1
     try {
-      // The owner's own cancellation (`waitCancelled`, a task that joined the person's turn) ends its wait, never an observer's
-      const r = await raceBound(d.outcome, opts.boundMs ?? ASK_WAIT_MS, opts.signal, ...(d.waitCancelled && !observing ? [d.waitCancelled] : []), ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : []))
+      const r = await raceBound(d.outcome, opts.boundMs ?? ASK_WAIT_MS, opts.signal, ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : []))
       if (r === 'handedOver') return { kind: 'handedOver', owner }
       if (r === 'asked') {
         const cards = this.host.routedCards(d.sessionId, d.callerId)
@@ -131,7 +130,7 @@ export class DelegationWaits {
       if (r === 'aborted') {
         if (observing) return { kind: 'cancelled' }
         d.stop(opts.stopWhy)
-        if (!d.joinedTurn) await d.outcome
+        await d.outcome
         this.host.children.dropDelegation(key, d)
         return { kind: 'cancelled' }
       }
@@ -177,8 +176,7 @@ export class DelegationWaits {
       case 'working':
         return this.agentWorking(d)
       case 'cancelled':
-        // A turn this call only joined is left running, as ask_project words it (no child's turn joins one today)
-        return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : d.joinedTurn ? `The call was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
+        return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
       case 'bound':
         return this.agentWorking(d, !observing, observing)
       case 'failed':

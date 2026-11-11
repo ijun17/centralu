@@ -21,7 +21,7 @@ export type SessionSettingsHost = Pick<DelegationHost, 'meta' | 'store' | 'emit'
   Pick<SessionTrashHost, 'restartPolicy'> &
   Pick<RestartHost, 'restartSession'> &
   Pick<SessionRecordHost, 'cacheLedger' | 'sessionOf'> &
-  Pick<SessionEventsHost, 'queue' | 'requireHandle'> &
+  Pick<SessionEventsHost, 'requireHandle'> &
   Pick<WorktreeHost, 'resuming'> & {
     /** Why a tool cannot run the session under a preset, or null (`SessionProcesses.toolRefusal`) */
     readonly processes: Pick<SessionProcesses, 'toolRefusal'>
@@ -52,10 +52,8 @@ export class SessionSettings {
     if (s.effort !== undefined) m.effort = s.effort
     if (s.verbosity !== undefined) m.verbosity = s.verbosity
     if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
-    const wasAuto = m.permissionPreset === 'auto'
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.host.store.sessions.upsertSession(m)
-    if (wasAuto && m.permissionPreset !== 'auto') this.host.queue.dropOpenedByAuto(sessionId)
     /*
      * The model and effort chosen most recently become this project's default (#69, item 5). The
      * same lesson default_tool learned: instead of building a settings screen, the fact is recorded

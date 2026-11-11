@@ -70,7 +70,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants` (held by `manager.ts`, handed to `sessions/delegation-host.ts`), `readableGrants`, `ask-project.ts` | |
 | Report mark | "You will be told when it ends": a session that owes a report of its work's end to the session that gave it work (`start_agent` past its wait, `send_to_session` with `reportBack`, `create_session`'s first message unless `reportBack` is false, #1233). One per session. A note into a turn already running never clears a mark, its sender's own included: without `reportBack` it leaves the marks as they are, with it it adds the sender's only where none stands (the answer says when another session is owed that turn's end). Only a new instruction to a session at rest without `reportBack` replaces the sender's earlier mark (#166). Cleared once reported; survives a host swap (#646). A turn that completes while background work the session started still runs **pauses** it (#721): the giver is told once that the work paused, and the report stays owed until a turn ends with none of that work left. A later turn with a new answer meanwhile is sent at once as an update, which wakes the giver once until it reads it (#1540); an update's stop keeps a paused report and reports the session's next turn, or that the work was stopped (#1912) | `awaitingReport`, `pausedReports`, `sessions/child-ownership.ts`; `report_marks` (store v49), app setting `report_paused:<session>` | |
 | Delegated turn | A turn another session's work started in a session (`ask_project`, `start_agent`, `agent_session` send, `send_to_session` to a session at rest, `create_session`'s first message, #1233). Its owner's further words are notes into it, with no busy answer. While it runs, its cards go to that session too: questions it may answer, approvals it is told of (#676). Ends with the turn; survives a host swap | `turnOwners`, `sessions/child-ownership.ts`; `delegated_turns` (store v51) | |
-| Queued request | Work one session asked a busy session for and chose to queue (`ifBusy: "queue"`): delivered as a new turn the requester owns when the running one ends. Survives a host swap (#677) | `queued`, `sessions/child-ownership.ts`; `queued_requests` (store v52) | |
+| Mailed send | Work one session sends a session that cannot take it now (`agent_session` send, `ask_project`, `send_to_session`): a mail task from the sender, which reaches the session as a turn of its own once it is free, reported to the sender (#1948 step 2). Replaced the queued request (#677), which an older build may still leave in `queued_requests`: the next start turns each into such a task | `MailSessionsView.takesSendNow` / `mailTask`; plans/mailbox.md §10.6.2 | Queued request |
 | Fork | A sub-session started from a copy of a busy session's conversation for another session's request (`ifBusy: "fork"`): linked to the requester, hung under the original in the sidebar (#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id` (store v52) | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
@@ -279,7 +279,7 @@ Where it is stored:
 - `report_marks`: the report a session owes the session that gave it work, until it is delivered.
 - `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673); or an allowed start waiting for memory (`allowed`), which the next host starts when memory recovers, without a card (#686).
 - `delegated_turns`: the session that gave a session its running turn, and the cards it was told of, until the turn ends.
-- `queued_requests`: a request held for a busy session, until it is delivered as a new turn.
+- `queued_requests`: a request an older build held for a busy session; this build writes none and turns each it finds into a mail task at the start.
 - `usage_readings`: the limit windows' percentages and reset times over time, per tool and account; kept 90 days, on this computer only (agent-host/usage.md "Usage over time").
 - `usage_buckets`: the requests of each hour per session, project, tool and model: tokens, cache reads and writes, rebuilds by cause. Kept 90 days, on this computer only; a purged session's buckets go with it.
 - `usage_local_totals`: the last good totals of a tool that reports no limits (OpenCode's `opencode stats`) and when they were read, one row per tool, so a restart shows them at once. Counts only, on this computer only (agent-host/usage.md).
@@ -475,8 +475,8 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
   written to the `card_rests` app setting, so a card that stands through a host swap (the keeper keeps the process,
   the next host adopts it) still closes into it; a start that adopts nothing drops it. Input the host delivers counts
   as a turn asked for until the tool next moves the state, at most `ASK_WINDOW_MS`, so a tool that raises a card
-  before announcing its turn keeps that card in the turn. Closing into a rest drains a request queued for the session
-  (#677), as a turn's end does.
+  before announcing its turn keeps that card in the turn. Closing into a rest lets mail waiting for the session go, as a turn's
+  end does.
 - A `tool_result` moves nothing: it closes a call and starts no turn. Results also arrive after a turn ended (a
   background agent released as its process closes), and read as work they left a session working with nothing to end
   it (#428).

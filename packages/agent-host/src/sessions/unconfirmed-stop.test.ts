@@ -55,23 +55,4 @@ describe('a Stop the tool refused (#1060)', () => {
     handleOf(a).answer('first job done')
     expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'first job done' })
   })
-
-  it('a queued request is held until the turn really ends', async () => {
-    const { a, b } = await child()
-    handleOf(a).answer('first job done')
-    await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
-    await w.mgr.inputs.send(a, "the person's own work")
-    expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
-    const sent = handleOf(a).sent.length
-
-    refusedStop(a)
-    await new Promise((r) => setTimeout(r, 30))
-    expect(info(a).state).toBe('working')
-    expect(handleOf(a).sent).toHaveLength(sent)
-    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
-
-    handleOf(a).answer("the person's answer")
-    await w.until(() => handleOf(a).sent.length === sent + 1)
-    expect(handleOf(a).sent.at(-1)).toContain('add the index')
-  })
 })

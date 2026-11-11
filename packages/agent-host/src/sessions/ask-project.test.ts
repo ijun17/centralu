@@ -226,12 +226,6 @@ describe('asking another project', () => {
 
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id) ?? w.adapters.get('codex')!.handles.get(id)
   const delegatedIn = (_callerId: string) => w.mgr.listSessions().filter((s) => s.id === targetSession)
-  /** A caller whose preset lets it add a note to a turn that is not its own (#606, #677) */
-  const autoCaller = async () => {
-    const c = await w.callerSession()
-    await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
-    return c
-  }
 
   it('refuses an empty project without consent, adapter discovery or session creation, including under auto', async () => {
     await w.mgr.trash.trashSession(targetSession)
@@ -312,66 +306,6 @@ describe('asking another project', () => {
     expect(w.mgr.listSessions().find((s) => s.id === blank.id)!.name).toBe('now the tiles')
   })
 
-  it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
-    await w.mgr.processes.switchTool(targetSession, tool)
-    const caller = await autoCaller()
-    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
-    const h = handleOf(targetSession)!
-    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
-    await w.until(() => h.sent.length === 2)
-    expect(h.interrupted).toBe(0)
-    expect(h.sent[1]).toContain("through Centralu's ask_project")
-    expect(w.events).toContainEqual(expect.objectContaining({ type: 'user_message', sessionId: targetSession, from: expect.objectContaining({ sessionId: caller }) }))
-    let answered = false
-    void call.then(() => { answered = true })
-    h.answer('old turn answer', false)
-    await Promise.resolve()
-    expect(answered).toBe(false)
-    h.answer('note answer')
-    expect(await call).toMatchObject({ ok: true, answer: 'note answer', sessionId: targetSession })
-  })
-
-  it('keeps an existing report-back marker until the mid-turn task completes, then reports once', async () => {
-    const caller = await autoCaller()
-    const directing = await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
-    const directingHandle = handleOf(directing.id)!
-    await directingHandle.opts.centraluTools!.sendToSession(targetSession, 'original task', true)
-    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
-    const h = handleOf(targetSession)!
-    await w.until(() => h.sent.length === 2)
-    h.answer('old turn', false)
-    await Promise.resolve()
-    expect(directingHandle.sent).toEqual([])
-    h.answer('note answer')
-    expect(await call).toMatchObject({ ok: true, answer: 'note answer' })
-    await w.until(() => directingHandle.sent.length === 1)
-    expect(directingHandle.sent[0]).toContain(`sourceSessionId: ${targetSession}`)
-    h.answer('later turn')
-    await Promise.resolve()
-    expect(directingHandle.sent).toHaveLength(1)
-  })
-
-  it.each(['working', 'waiting_approval'] as const)('returns the choices for a busy session (%s), with no note when its CLI cannot take one (#677)', async (state) => {
-    const caller = await autoCaller()
-    // Through working: the host keeps the window's table (#428), and idle → waiting_approval is not in it
-    handleOf(targetSession)!.event({ type: 'state_change', sessionId: targetSession, state: 'working' })
-    handleOf(targetSession)!.event({ type: 'state_change', sessionId: targetSession, state })
-    w.adapters.get('codex')!.capabilities.midTurnInput = false
-    expect(await w.mgr.askProject(caller, { project: w.target.id, task: 'export' })).toMatchObject({
-      ok: true, state: 'busy', sessionState: state,
-      choices: [
-        { choice: 'note', available: false, why: expect.stringContaining('cannot take a note') },
-        { choice: 'queue', available: true },
-        { choice: 'fork', available: false, why: expect.stringContaining('another project') },
-      ],
-    })
-    expect(await w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('cannot take a note') })
-    expect(handleOf(targetSession)!.sent).toEqual([])
-    expect(w.card(caller)).toBeUndefined()
-  })
-
   /*
    * #1186: the receiver read the project only, and a wait past its bound and a busy answer said nothing of where the
    * turn was, so a session at work and one stuck read the same, and a caller could not tell how long a queue was
@@ -405,20 +339,6 @@ describe('asking another project', () => {
     expect(await w.mgr.askProject(caller, { project: w.target.id })).toMatchObject({ ok: true, state: 'done', answer: 'passed' })
   })
 
-  it("says what a busy session is doing and how many requests are queued there, with its choices", async () => {
-    const first = await autoCaller()
-    const second = await autoCaller()
-    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
-    handleOf(targetSession)!.event({ type: 'tool_call', sessionId: targetSession, callId: 'c1', summary: { tool: 'Read', title: 'README.md', paths: [] } })
-    expect(await w.mgr.askProject(first, { project: w.target.id, task: 'export', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued', position: 1 })
-    expect(await w.mgr.askProject(second, { project: w.target.id, task: 'import' })).toMatchObject({
-      ok: true, state: 'busy', ahead: 1, progress: { lastStep: 'Read: README.md' },
-    })
-    const text = (await w.mgr.runCentraluTool(second, 'ask_project', { project: w.target.id, task: 'import' })).text
-    expect(text).toContain('its last step, as JSON: "Read: README.md". 1 request is queued there already. Choose:')
-  })
-
   it('rechecks a session deleted while its consent card was open and never replaces it', async () => {
     const caller = await w.callerSession()
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
@@ -431,15 +351,19 @@ describe('asking another project', () => {
   })
 
   it("does not replace another caller's active delegation watcher", async () => {
+    // Delivery is not started: the mailed task stays undelivered
+    wireHostMail(w.mgr, w.store)
     const caller = await w.callerSession()
     const other = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const first = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
     await w.until(() => handleOf(targetSession)!.sent.length === 1)
-    // Busy with another caller's task (#677): the choices, and no note into that task even for auto
-    expect(await w.mgr.askProject(other, { project: w.target.id, task: 'review' })).toMatchObject({ ok: true, state: 'busy', choices: [{ choice: 'note', available: false }, { choice: 'queue', available: true }, { choice: 'fork', available: false }] })
-    await w.mgr.updateSettings(other, { permissionPreset: 'auto' })
-    expect(await w.mgr.askProject(other, { project: w.target.id, task: 'review', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining("another session's task") })
+    // Busy with another caller's task: the second ask goes as mail, and takes no wait of its own on that turn
+    const mailed = await w.mgr.askProject(other, { project: w.target.id, task: 'review' })
+    expect(mailed).toMatchObject({ ok: true, state: 'mailed', messageId: expect.any(String) })
+    const task = w.store.mailbox.newestTask(addressOf(other), addressOf(targetSession))!
+    expect(task).toMatchObject({ id: mailed.ok && mailed.state === 'mailed' ? mailed.messageId : '', body: 'review', origin: 'ask_project' })
+    expect(w.store.mailbox.recipient(task.id, addressOf(targetSession))).toMatchObject({ deliveredAt: null })
     expect(handleOf(targetSession)!.sent).toHaveLength(1)
     handleOf(targetSession)!.answer('original answer')
     expect(await first).toMatchObject({ ok: true, answer: 'original answer' })
@@ -607,57 +531,13 @@ describe('asking another project', () => {
     expect(!r.ok && r.error).toContain('cancelled')
   })
 
-  it.each([
-    ['claude', 'stop'], ['claude', 'cancel'], ['codex', 'stop'], ['codex', 'cancel'],
-  ] as const)("%s: caller %s ends its wait without interrupting the person's running turn", async (tool, action) => {
-    await w.mgr.processes.switchTool(targetSession, tool)
-    const caller = await autoCaller()
+  it('Stop after an ask bound leaves the target running', async () => {
+    const caller = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
-    const h = handleOf(targetSession)!
-    const ac = new AbortController()
-    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' }, ac.signal)
-    await w.until(() => h.sent.length === 2)
-    const observer = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool, permissionPreset: 'auto' })
-    const observing = w.mgr.agentSession(observer.id, { sessionId: targetSession, action: 'wait' })
-    if (action === 'stop') w.mgr.inputs.interrupt(caller)
-    else ac.abort()
-    const result = await asking
-    expect(h.interrupted).toBe(0)
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
-    expect(h.receipts).toHaveLength(1)
-    expect(w.mgr.listSessions().find((s) => s.id === targetSession)?.state).toBe('working')
-    // Ending this caller's wait must not end another session's observation or the note receipt.
-    h.answer('person turn answer', false)
-    let observed = false
-    void observing.then(() => { observed = true })
-    await Promise.resolve()
-    expect(observed).toBe(false)
-    h.answer('note answer')
-    expect(await observing).toMatchObject({ ok: true, answer: 'note answer' })
-  })
-
-  it('an explicit stop of the target still interrupts a task that joined its running turn', async () => {
-    const caller = await autoCaller()
-    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    await w.mgr.inputs.send(targetSession, 'person work')
-    const h = handleOf(targetSession)!
-    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
-    await w.until(() => h.sent.length === 2)
-    const observer = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'auto' })
-    expect(await w.mgr.agentSession(observer.id, { sessionId: targetSession, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
-    expect(h.interrupted).toBe(1)
-    expect(await asking).toMatchObject({ ok: false, error: expect.stringContaining('stopped') })
-  })
-
-  it.each([false, true])('Stop after an ask bound leaves the target running (joined turn: %s)', async (joinedTurn) => {
-    const caller = joinedTurn ? await autoCaller() : await w.callerSession()
-    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
-    if (joinedTurn) await w.mgr.inputs.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ...(joinedTurn ? { ifBusy: 'note' as const } : {}) })
-    for (let n = 0; n < 50 && h.sent.length < (joinedTurn ? 2 : 1); n++) await vi.advanceTimersByTimeAsync(0)
+    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    for (let n = 0; n < 50 && h.sent.length < 1; n++) await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await asking).toMatchObject({ ok: true, state: 'working' })
     vi.useRealTimers()

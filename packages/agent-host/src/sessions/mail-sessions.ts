@@ -1,4 +1,5 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
+import type { BusyAnswer } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
@@ -12,7 +13,7 @@ import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import type { PersonReportDraft } from './child-ownership.js'
 import type { ChildReports } from './child-reports.js'
 import type { DelegationHost } from './delegation-flow.js'
-import type { DelegationCall, DelegationTarget } from './delegation-host.js'
+import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
 import type { SelfCompaction } from './self-compaction.js'
 import type { SessionEvents } from './session-events.js'
 import type { SessionTools } from './session-tools.js'
@@ -46,6 +47,10 @@ export type MailHooks = {
   linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
   /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
   delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); returns its id */
+  sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string): string
+  /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
+  withdrawTasks?(callerId: string, childId: string): number
   /** How many threads a session handed on in the work it does for another are still going (§6) */
   waitingOn?(ownerId: string, childId: string): number
   /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
@@ -75,7 +80,7 @@ export type MailHooks = {
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
  * with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
+export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
   /** What a session's tool says and what goes into its conversation: the mail's delivery and its notes */
   readonly events: SessionEvents
   /** What a session is told of work it gave: the report path the mailbox takes over, and the words a stop notice quotes */
@@ -260,6 +265,31 @@ export class MailSessionsView {
   /** The session can be given a turn of its own now: at rest with no card or limit standing, in a host that is not leaving (asleep, it is woken) */
   takesTurn(id: string): boolean {
     return this.takesAsPlanned(id, false)
+  }
+
+  /**
+   * Whether a send from another session reaches it now as a turn it starts (docs/plans/mailbox.md §10.6.2): it takes a turn (`takesTurn`), no run another
+   * session waits on is going there, and no mail that wakes it is waiting, which goes first. Otherwise the send goes as mail (`mailTask`)
+   */
+  takesSendNow(id: string): boolean {
+    const run = this.host.agentRuns.get(id)
+    return this.takesTurn(id) && !(run && !run.finished) && this.hooks?.waiting?.(id) !== true
+  }
+
+  /** A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2) */
+  mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
+    const hooks = this.hooks
+    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
+    try {
+      return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text) }
+    } catch (e) {
+      return { error: `Could not send it to "${target.name}": ${errorMessage(e)}` }
+    }
+  }
+
+  /** The caller's tasks to the session that are not delivered yet, withdrawn (`agent_session stop`); how many */
+  withdrawTasks(callerId: string, sessionId: string): number {
+    return this.hooks?.withdrawTasks?.(callerId, sessionId) ?? 0
   }
 
   /** The session still takes mail as the delivery planned it: woken at rest, or joining its turn. Otherwise the mail waits (`MailNotAtRest`) and is planned again */

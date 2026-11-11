@@ -43,13 +43,6 @@ export class TurnInputs {
   readonly agentRuns = new Map<string, AgentRunWait>()
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   readonly turnObservers = new Map<string, Set<AgentRunWait>>()
-  /** A queued note not yet taken, on the delegation's wait or an observer's own reader (#646): the session is not between turns */
-  inputsHeld(sessionId: string): boolean {
-    if (this.agentRuns.get(sessionId)?.waitingForInputs) return true
-    for (const observer of this.turnObservers.get(sessionId) ?? []) if (observer.waitingForInputs) return true
-    return false
-  }
-
   /**
    * Sends a message.
    *

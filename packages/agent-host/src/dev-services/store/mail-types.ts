@@ -17,6 +17,12 @@ export type ThreadOrigin = (typeof THREAD_ORIGINS)[number]
 /** The origins a session's delegation tools open threads with (§8.1): work one session gave another, written down by the host */
 export const DELEGATION_ORIGINS = ['start_agent', 'agent_session', 'send_to_session', 'create_session', 'ask_project'] as const satisfies readonly ThreadOrigin[]
 
+/**
+ * The delegation tools that send to a session already there, which may be busy: their send waits as a task from the sender (an earlier build's
+ * queued request too), shown in the receiver's conversation as the sender's message, as their direct send is (#1948 step 2, option B)
+ */
+export const SEND_ORIGINS: ReadonlySet<string> = new Set<ThreadOrigin>(['agent_session', 'ask_project', 'send_to_session'])
+
 /** §3.2 */
 export const MESSAGE_KINDS = ['assign', 'question', 'answer', 'report', 'notice', 'note', 'event'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]

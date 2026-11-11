@@ -1,4 +1,5 @@
 import { errorMessage } from '@cc/protocol'
+import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
 import { PERSON, parseAddress } from './address.js'
 import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourlyKey, needsReceiver, wakesMessage } from './rules.js'
@@ -63,6 +64,12 @@ export type MailInput = {
   wanted?: () => boolean
   /** Joins the turn running (`ReceiverState.joins`); a receiver no longer in the state the delivery was planned for is `MailNotAtRest` */
   joins?: boolean
+  /**
+   * The task the wake carries from a delegation tool (`agent_session` send, `ask_project`, the Assistant's `send_to_session`; docs/plans/mailbox.md
+   * §10.6.2): its sender and words, for the receiver's conversation to show as that sender's message (`SessionEvents.deliverMail`). `alone`: the
+   * wake carries nothing else. The agent reads the mail frame only
+   */
+  task?: { senderId: string; text: string; alone: boolean }
   /**
    * The turn this starts is the work of a task this session gave, or of its request to the Assistant (§7.6): the end of the turn is reported to it,
    * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
@@ -479,8 +486,10 @@ export class MailDelivery {
       if (!waiting && state.live && this.cutoff !== null && drained.wake) drained = drain(undefined)
       this.service.hold(recipient, drained.heldBack)
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
-      // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9); mail joining a turn wakes nothing
-      if (drained.wake && !drained.immediate && !state.joins) {
+      // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9); mail joining a turn wakes nothing. Nor
+      // does a delegation tool's task once the last wake's turn is over: held for the turn's end, it goes when that turn ends, as the tool's direct send would (§10.6.2)
+      const goesAtTurnEnd = this.delegatedTask(drained) !== undefined && this.turns?.current(sessionId) === undefined
+      if (drained.wake && !drained.immediate && !state.joins && !goesAtTurnEnd) {
         const gap = (this.lastWake.get(recipient) ?? -Infinity) + this.o.minWakeGapMs - now
         if (gap > 0) return { drained, go: false as const, waitMs: gap }
       }
@@ -504,8 +513,9 @@ export class MailDelivery {
     }
     const delivered: { at?: number } = {}
     const reportTo = quiet ? undefined : this.reportTarget(recipient, drained)
+    const task = quiet ? undefined : this.delegatedTask(drained)
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins } : {}), ...(reportTo ? { reportTo } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins } : {}), ...(reportTo ? { reportTo } : {}), ...(task ? { task } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -548,6 +558,14 @@ export class MailDelivery {
     const from = drained.asker ?? (work?.kind === 'task' && this.records.recipient(work.id, recipient) ? work.sender : undefined)
     const party = from === undefined ? undefined : parseAddress(from)
     return party?.kind === 'session' ? party.sessionId : undefined
+  }
+
+  /** The work a wake starts when a delegation tool sent it (`MailInput.task`) */
+  private delegatedTask(drained: Pick<DrainResult, 'workMessage' | 'messageIds'>): MailInput['task'] {
+    const m = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
+    const from = m && parseAddress(m.sender)
+    if (m?.kind !== 'task' || from?.kind !== 'session' || !SEND_ORIGINS.has(m.origin ?? '')) return undefined
+    return { senderId: from.sessionId, text: m.body, alone: drained.messageIds.length === 1 }
   }
 
   /**

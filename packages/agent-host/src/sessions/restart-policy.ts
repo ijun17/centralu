@@ -34,7 +34,6 @@ export type RestartHost = {
   backgroundTasksKey: (sessionId: string) => string
   readonly children: ChildOwnership
   readonly handles: Map<string, SessionHandle>
-  inputsHeld: (sessionId: string) => boolean
   /** The host is quitting or handing over (#839): no process is replaced then */
   readonly lettingGo: boolean
   readonly meta: Map<string, SessionInfo>
@@ -42,7 +41,6 @@ export type RestartHost = {
   rememberBackgroundTasks: (m: SessionInfo) => void
   restartSession: (sessionId: string, cause?: RebuildCause) => Promise<{ session: SessionInfo; resumed: boolean; reason?: string; }>
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
-  scheduleDrain: (sessionId: string) => void
   readonly store: Store
 }
 
@@ -203,12 +201,10 @@ export class RestartPolicy {
    * anyway after `BACKGROUND_HOLD_MAX_MS`.
    */
   applyDeferredRestart(sessionId: string): void {
-    // The same boundaries free a busy session for the request queued for it (#677)
-    if (this.host.children.queued.has(sessionId)) this.host.scheduleDrain(sessionId)
     // Not while the host leaves (#839): a restart now would stop a process the keeper keeps for the next host, or start one nobody stops
     if (this.host.lettingGo) return
     const session = this.host.meta.get(sessionId)
-    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.host.inputsHeld(sessionId) || !this.restartAfterTurn.has(sessionId)) return
+    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || !this.restartAfterTurn.has(sessionId)) return
     const hold = this.backgroundHolds.get(sessionId)
     const holdExpired = !!hold && Date.now() - hold.since >= BACKGROUND_HOLD_MAX_MS
     if (!holdExpired && !this.safetyRestartPending(sessionId) && this.backgroundRunning(sessionId)) {
@@ -226,8 +222,6 @@ export class RestartPolicy {
     // Publish the barrier before dispose can emit events or the completed wait can hand the parent its answer.
     const restarting = Promise.resolve().then(() => this.host.restartSession(sessionId, cause)).then(() => {}).finally(() => {
       if (this.deferredRestarts.get(sessionId) === restarting) this.deferredRestarts.delete(sessionId)
-      // A drain that met this restart returned: the request queued behind it goes in now (#684 review)
-      if (this.host.children.queued.has(sessionId)) this.host.scheduleDrain(sessionId)
     })
     this.deferredRestarts.set(sessionId, restarting)
     void restarting.catch(() => {})

@@ -10,7 +10,7 @@ import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
 import type { RemoteAgents } from './remote-agents.js'
 import { agentState, ownAgents } from './own-agents.js'
-import { aboveCallerError, agentFrame, agentNoteFrame, canMailParent } from './start-agent.js'
+import { aboveCallerError, agentFrame, canMailParent } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { raceBound } from '../timing.js'
@@ -22,7 +22,7 @@ import { staleSessionHint } from './stale-session-id.js'
  */
 export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'startDelegation'> &
   Pick<DelegationWaits, 'agentAsking' | 'agentAtRest' | 'handedOverReply' | 'untilHandedOver'> &
-  Pick<ObservedTurns, 'observeTurn' | 'readObserverNote' | 'tellNoteRefused'> &
+  Pick<ObservedTurns, 'observeTurn'> &
   Pick<BackgroundStops, 'restingWork' | 'stopOwnWork' | 'stopPausedWork'> &
   Pick<DelegationForks, 'forkFor'> & { readonly starts: AgentStartFlow; readonly remote: RemoteAgents }
 
@@ -125,9 +125,6 @@ export class AgentSessionActions {
     if (opts.sessionId === callerId) return this.flow.agentAtRest(child)
     if (opts.action === 'answer') return this.host.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
     const key = `${callerId}>${child.id}`
-    // An observer that sent a note reads its own note's reader, never the owner's delegation (#646)
-    const note = this.host.children.delegations.has(key) ? undefined : this.host.children.observerNotes.get(key)
-    if (note && (opts.action === 'status' || opts.action === 'wait')) return this.flow.readObserverNote(key, note, opts.action === 'wait', signal)
     let d = this.host.children.delegations.get(key)
     let releaseObservation: (() => void) | undefined
     if (!d && this.host.autoBoundaryOpen(callerId)) {
@@ -148,9 +145,6 @@ export class AgentSessionActions {
     try {
       switch (opts.action) {
         case 'status': {
-          // A request still queued for it (#677)
-          const held = (!d || d.settled) ? this.host.queuedOf(callerId, child.id) : undefined
-          if (held) return held
           // The cards of the turn it gave are what the owner reads first (#676)
           const cards = d && !d.settled && !observing ? this.host.routedCards(child.id, callerId) : []
           if (d && cards.length) return this.flow.agentAsking(d, cards)
@@ -160,8 +154,9 @@ export class AgentSessionActions {
         case 'wait':
           return d ? await this.flow.awaitAgent(key, d, signal, observing) : this.flow.agentAtRest(child, callerId)
         case 'stop': {
-          // A queued request is withdrawn before it is delivered (#677)
-          if ((!d || d.settled) && this.host.children.dropQueued((r) => r.sessionId === child.id && r.callerSessionId === callerId && this.host.children.delivering.get(child.id) !== r.id).length) {
+          // What it sent as mail and the session was not given yet is withdrawn first, whatever else runs (docs/plans/mailbox.md §10.6.2)
+          const withdrawn = this.host.withdrawTasks(callerId, child.id)
+          if ((!d || d.settled) && withdrawn > 0) {
             return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
           }
           // A report paused over its own background work (#721): stop ends that wait
@@ -173,7 +168,7 @@ export class AgentSessionActions {
           if (resting.length) return this.flow.stopOwnWork(child, resting, false)
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
           if (!observing && this.host.children.awaitingReport.get(child.id) === callerId) this.host.children.clearReport(child.id)
-          d.stop('the session that started it stopped it', observing)
+          d.stop('the session that started it stopped it')
           await d.outcome
           if (!observing) this.host.children.dropDelegation(key, d)
           return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
@@ -204,97 +199,21 @@ export class AgentSessionActions {
         case 'send': {
           const above = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset)
           if (above) return { ok: false, error: above }
-          // §7.4: before anything is sent, queued or forked
+          // §7.4: before anything is sent, mailed or forked
           const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'agent_session', target: child.name || child.id, text: opts.text ?? '' })
           if (refused) return { ok: false, error: refused }
           const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
-          /*
-           * Busy with a turn that is not the caller's (#677): the caller chooses what happens, a note into that turn,
-           * a queue, or a fork; without `ifBusy` nothing is sent and the choices come back. Its own delegation's
-           * turn is not busy for it: a note into its own work goes on as before.
-           */
-          /*
-           * The turn the child's own tool started when the work it paused on ended is the caller's work (#1576): its end is
-           * the report the caller is owed (`continuesWork`), so it is not busy for the caller. A note goes into it as an
-           * observer's does, on a wait of its own, so the report owed is not touched; it needs no `auto`
-           */
-          const continuing = (!d || d.settled) && inTurn(child.state) && this.host.children.continuesWork(child.id, callerId)
-          if ((d && !d.settled && observing) || ((!d || d.settled) && !continuing && this.host.busyForCaller(callerId, child.id))) {
-            if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.host.busyAnswer(callerId, child, 'agent_session') }
-            if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.host.enqueue(callerId, child, 'agent_session', opts.text ?? '') }
-            if (opts.ifBusy === 'fork' || opts.ifBusy === 'fork_read') {
+          // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
+          if (!this.host.takesSendNow(child.id)) {
+            if (opts.ifBusy) {
               const f = await this.flow.forkFor(callerId, child, opts.text ?? '', opts.ifBusy === 'fork_read', 'agent_session', signal)
               if (!f.ok) return f
-              if ('queued' in f) return { ok: true, tool: child.tool, ...f.queued }
+              if ('mailed' in f) return { ok: true, tool: child.tool, ...f.mailed }
               const r = await this.flow.awaitAgent(f.key, f.d, signal)
               return r.ok ? { ...r, via: 'fork', forkedFrom: child.id } : r
             }
-            const note = this.host.busyChoices(callerId, child, 'agent_session').find((c) => c.choice === 'note')!
-            if (!note.available || !d || d.settled) return { ok: false, error: `No note to "${child.name}": ${note.why ?? 'nothing is running there to add it to'}. Queue it or fork it instead.` }
-            this.host.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
-          }
-          if ((d && !d.settled) || continuing) {
-            const text = agentNoteFrame(from.name, opts.text ?? '', canMailParent(child, callerId))
-            if (!this.host.adapters.get(child.tool)?.capabilities.midTurnInput || !this.host.handles.get(child.id)?.sendTracked) {
-              return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
-            }
-            /*
-             * An observer's note rides on a wait of its own (#646). Holding, resolving or failing the owner's wait
-             * would hand the owner the reply to this note instead of its answer, or fail its whole delegation when
-             * the note is refused; the owner's wait is never touched from here.
-             */
-            const own = observing || continuing ? this.flow.observeTurn(child, true, true) : undefined
-            if (own) void own.run.wait.done.then(own.release, own.release)
-            // A continued turn's note has no reader of its own for status and wait: they read the paused child as they do at any time, and its one end is the report owed
-            const record = own && !continuing ? { run: own.run, waiters: 0, told: false } : undefined
-            if (record) this.host.children.setObserverNote(key, record)
-            const run = own?.run ?? d
-            if (!run) return { ok: false, error: `No note to "${child.name}": nothing is running there to add it to.` }
-            const wait = run.wait
-            const releaseHold = wait.holdInput()
-            const release = () => {
-              releaseHold()
-              this.host.restartPolicy.applyDeferredRestart(child.id)
-            }
-            try {
-              await this.host.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input, inputId) => {
-                const fail = (e: Error) => {
-                  if (!record) {
-                    wait.fail(e)
-                    release()
-                    if (continuing) void this.flow.tellNoteRefused(callerId, child.id, e.message)
-                    return
-                  }
-                  wait.fail(new Error(`your note was not delivered: ${e.message}`))
-                  release()
-                  // A wait on the note reads the refusal itself; otherwise the observer is told, once
-                  if (!record.told && !record.waiters && this.host.children.observerNotes.get(key) === record) {
-                    record.told = true
-                    void this.flow.tellNoteRefused(callerId, child.id, e.message)
-                  }
-                }
-                void h.sendTracked!(input, { complete: release, fail }, inputId ? { id: inputId } : undefined).then(release, fail)
-              })
-            } catch (e) {
-              if (record) {
-                wait.fail(e as Error)
-                this.host.children.dropObserverNote(key, record)
-              }
-              release()
-              return { ok: false, error: `Could not send it: ${(e as Error).message}` }
-            }
-            // An observer's note is not work its owner gave (#646): only the caller's own words are written down in the mailbox
-            if (!observing) this.host.children.delegated(callerId, child.id, 'agent_session', opts.text ?? '')
-            // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
-            const working = this.flow.agentWorking(run, false, observing || continuing)
-            // The report stays owed to the caller on a continued turn: the note is not an observer's
-            if (continuing && working.ok && working.state === 'working') return { ...working, reported: this.host.children.awaitingReport.get(child.id) === callerId, via: 'note' }
-            return working.ok && observing ? { ...working, via: 'note' } : working
-          }
-          if (inTurn(child.state) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)) {
-            // Said by what started the turn (#1576): "the person may be using it" only when a person's message did
-            const person = this.host.children.personInTurn(child.id)
-            return { ok: false, error: `"${child.name}" is busy with ${person ? 'something else (the person may be using it)' : 'a turn you did not give it (another session, or its own tool, started it)'}. Try again later.` }
+            const mailed = this.host.mailTask(callerId, child, 'agent_session', opts.text ?? '')
+            return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, tool: child.tool, ...mailed }
           }
           // An answer the caller never came back for gives way to the new message
           if (d) this.host.children.dropDelegation(key)

@@ -1,7 +1,6 @@
 import type { SessionInfo } from '@cc/protocol'
 import { busyWith, oneLineText } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
-import type { QueuedRequests, QueuedRequestsHost } from './queued-requests.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { HandedOverMessage } from '../mail/messages.js'
@@ -12,7 +11,7 @@ import type { SessionAppWiring } from './session-app-wiring.js'
  * lists it: a session (started with start_agent, forked, or asked in another project, finished or not), a start_agent request still
  * waiting for the person, whose handle is the request id, a mail message, or an app. `can` is what the new session can actually do with it, which
  * depends on what moved: a child it now started, a turn it now owns in a session it did not start, another project's
- * session, a queued request, a standing card.
+ * session, a standing card.
  */
 export type MovedChild = {
   handle: string; name: string; state: string; can: string; project?: string; request?: boolean
@@ -95,11 +94,11 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request' | 'messag
  */
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
   Pick<SessionTrashHost, 'delegationFlow' | 'hostCards' | 'mailPoke'> &
-  Pick<QueuedRequestsHost, 'turnRunning'> & {
+  {
+    /** Whether a turn runs in the session for anyone: its state, or a wait on it not settled yet (`TurnInputs.turnRunning`) */
+    turnRunning: (m: SessionInfo) => boolean
     /** The apps a session attached itself (#1638) */
     readonly apps: Pick<SessionAppWiring, 'appAccess'>
-    /** Requests of a session that only `auto` let through are dropped when they would go on without it (#606) */
-    readonly queue: Pick<QueuedRequests, 'dropOpenedByAuto'>
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
     mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverMessage[]
   }
@@ -120,7 +119,7 @@ export class HandoffChildren {
    * Every child moves, the settled ones too (finished, reported or read, nothing pending: "finished; waiting for more
    * work" in the note): a settled child is often still in use, and one left with the original could not be listed or
    * archived by the session that carries the work on, nor would its next report reach it. What else is owed moves with
-   * them: a request the original queued, a report not yet delivered, an ask_project answer not yet read, and a
+   * them: a report not yet delivered, an ask_project answer not yet read, and a
    * start_agent request whose card still stands. `scope` is whether the original goes, and so what of its mail moves:
    * - `kept`: a handoff that keeps the original. The mail those children sent it moves; the rest stays with it, to read
    *   and answer.
@@ -129,8 +128,8 @@ export class HandoffChildren {
    *   window did not say it would remove it. Its children themselves go to the session that inherited its handoff
    *   (`askedBy`/`parentSessionId`, with the reports, turns and delegations that are theirs), since an orphan is worse;
    *   that session is told in its conversation (its note was read long ago), and the original, about to go, is told
-   *   nothing. What the original asked for and the person never answered stays behind: its start_agent requests and the
-   *   requests it queued are withdrawn and dropped by the session archive as before, so no card appears in another session
+   *   nothing. What the original asked for and the person never answered stays behind: its start_agent requests are
+   *   withdrawn and dropped by the session archive as before, so no card appears in another session
    *   because this one was deleted, and nothing is delivered in a session that did not ask for it.
    *
    * Everything stored moves in one transaction (`Store.moveChildren`), and only then the host's memory, all without an
@@ -155,17 +154,12 @@ export class HandoffChildren {
     // Its children on linked machines go to the heir too, their reports with them (#1038 review)
     this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
-    // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told.
-    // A removed original's queue moves nowhere: the session archive drops it
-    if (!removed && heir.permissionPreset !== 'auto') this.host.queue.dropOpenedByAuto(from)
-    const queuedBy = removed ? new Set<string>() : new Set([...this.host.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string => {
       // A card first, named as the busy rule names it (`busyWith`): a question blocks the session as an approval does
       const card = busyWith(s)
       if (card === 'question' || card === 'approval') return card === 'question' ? 'waiting on a question' : 'waiting for an approval'
-      if (this.host.turnRunning(s)) return queuedBy.has(s.id) && this.host.children.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
-      if (queuedBy.has(s.id)) return 'your request is queued'
+      if (this.host.turnRunning(s)) return 'working'
       // Its turn ended while its own background work runs (#721): the report waits for that work's end
       if (this.host.children.awaitingReport.get(s.id) === from && this.host.children.pausedReports.has(s.id)) return 'paused on its own background work; its report comes when that work ends'
       if (this.host.children.awaitingReport.get(s.id) === from) return 'finished; its report has not been delivered yet'
@@ -177,7 +171,6 @@ export class HandoffChildren {
     const childIds = [...this.host.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
     const linked = removed ? new Set(childIds) : new Set<string>([
-      ...queuedBy,
       ...delegated.map((d) => d.sessionId),
       ...[...this.host.children.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
       ...[...this.host.children.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
@@ -221,7 +214,7 @@ export class HandoffChildren {
       sessions.push(id)
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
       // What the new session can actually do with it, by what moved (#693 review)
-      const told = this.host.children.awaitingReport.get(id) === from || armReports.includes(id) || queuedBy.has(id)
+      const told = this.host.children.awaitingReport.get(id) === from || armReports.includes(id)
       const owns = this.host.children.turnOwners.get(id)?.callerId === from
       const can = project !== undefined
         ? `Call ask_project with project "${project}" and no task to wait for its answer${owns ? '; you are told of the cards of its turn and answer them with agent_session (answer)' : ''}. It is that project's session: agent_session does nothing else with it.`
@@ -269,8 +262,6 @@ export class HandoffChildren {
           sessions,
           startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
           armReports,
-          // With no child moving, the memory side does not run, so the queue's rows do not move either
-          queued: !removed && moved.length > 0,
         },
         mailWhich === null ? undefined : () => void (threads = this.host.mailHandOver(from, to, mailWhich)),
       )
@@ -299,7 +290,7 @@ export class HandoffChildren {
       if (s.parentSessionId === from) s.parentSessionId = to
       this.host.emit({ type: 'session_owner', sessionId: id, askedBy: s.askedBy ?? null, parentSessionId: s.parentSessionId ?? null })
     }
-    if (childCount) this.host.children.moveOwner(from, to, { sessions, armReports, starts, queued: !removed }, () => {
+    if (childCount) this.host.children.moveOwner(from, to, { sessions, armReports, starts }, () => {
       /*
        * A start_agent card still standing (#673) moves with its request: the request object is the one the waiting setup
        * holds, so an approval starts the child for the new session. The card closes in the original and stands in the

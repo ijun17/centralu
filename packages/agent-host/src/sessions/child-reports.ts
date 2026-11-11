@@ -14,8 +14,7 @@ import { PAUSED_REPORT_SETTLE_MS, type PausedKind, type TurnStarter } from './ch
 import { type DelegationHost, taskList } from './delegation-flow.js'
 import type { ReportPart, ReportWork } from './linked-reports.js'
 import { isPauseUpdate, personWroteSinceMark } from './pause-update.js'
-import type { QueuedRequestsHost } from './queued-requests.js'
-import type { RestartHost } from './restart-policy.js'
+import type { ProjectRegistry } from './project-registry.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE } from './ask-project.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
@@ -190,8 +189,7 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
     /** Whether the session's seat has the mail tool: the mailbox can wake it (the receive rule) */
     canReadMail(sessionId: string): boolean
   } &
-  Pick<RestartHost, 'inputsHeld'> &
-  Pick<QueuedRequestsHost, 'projectRow'>
+  Pick<ProjectRegistry, 'projectRow'>
 
 /** The turn whose end a report tells of, as its end was seen (`ChildReports.reportBackIfAwaited`) */
 export type EndedTurn = TurnStarter & { compaction?: true; since?: number }
@@ -303,7 +301,7 @@ export class ChildReports {
     if (this.host.disposing) return
     const quiet = () => {
       const m = this.host.meta.get(sessionId)
-      return (this.host.children.pausedReports.has(sessionId) || this.host.children.personPausedReports.has(sessionId)) && !!m && !inTurn(m.state) && !this.host.inputsHeld(sessionId) && !this.host.children.delivering.has(sessionId) &&
+      return (this.host.children.pausedReports.has(sessionId) || this.host.children.personPausedReports.has(sessionId)) && !!m && !inTurn(m.state) &&
         this.ownTasksRunning(sessionId).length === 0
     }
     if (!quiet()) return
@@ -689,13 +687,12 @@ export class ChildReports {
   }
 
   /**
-   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request, a note or a queued
-   * request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
+   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
    * next host's to give (#646); one held only in memory (a linked machine's, #723) and a notice like these are dropped
    * in that window, as anything said then would be. Quitting, the next start tells what the quit cut (#698), where a
    * word now would read "failed" and could wake a sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
-   * or deleted, and a notice must not destabilize the host. The four ways of telling each kept their own guard, and
-   * the report and a queued request's had none.
+   * or deleted, and a notice must not destabilize the host. The ways of telling each kept their own guard, and
+   * the report had none.
    *
    * `relayed`: the text is about another session (`from`), stored and shown as from it. What the model reads is
    * `forModel`, the words Centralu wrote, with the source's id (#1186): every such text is Centralu's but a report's

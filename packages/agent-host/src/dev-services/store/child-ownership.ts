@@ -1,7 +1,10 @@
 import type Database from 'better-sqlite3'
 import { parseJson } from './json.js'
 
-/** A request held for a busy session until its turn ends (#677, `queued_requests`) */
+/**
+ * A request an older build held for a busy session until its turn ends (#677, `queued_requests`). This build writes none: a send to a busy session
+ * is mail (docs/plans/mailbox.md §10.6.2), and a row an older build left becomes a mail task at the start (`takeOverFromEarlierBuild`)
+ */
 export type QueuedRequest = {
   id: string
   sessionId: string
@@ -97,7 +100,7 @@ export class ChildOwnershipRecords {
     this.db.prepare(`UPDATE delegated_turns SET told_cards = ? WHERE session_id = ?`).run(told.join(' '), sessionId)
   }
 
-  // ── Requests held for a busy session (#677) — see migration v52 ──
+  // ── Requests an older build held for a busy session (#677) — see migration v52; read once, as mail, and removed ──
 
   listQueuedRequests(): QueuedRequest[] {
     const rows = this.db
@@ -108,21 +111,6 @@ export class ChildOwnershipRecords {
       )
       .all()
     return rows.map((r) => ({ ...r, openedByAuto: r.openedByAuto === null ? null : r.openedByAuto === 1 }))
-  }
-
-  addQueuedRequest(r: QueuedRequest): void {
-    this.db
-      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at, opened_by_auto) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt, r.openedByAuto ? 1 : 0)
-  }
-
-  /** A queued ask that now rests on its requester's `auto` alone (#838): the mark the delivery gate reads */
-  markQueuedOpenedByAuto(id: string): void {
-    this.db.prepare(`UPDATE queued_requests SET opened_by_auto = 1 WHERE id = ?`).run(id)
-  }
-
-  markQueuedDelivering(id: string, at: number | null): void {
-    this.db.prepare(`UPDATE queued_requests SET delivering_at = ? WHERE id = ?`).run(at, id)
   }
 
   removeQueuedRequest(id: string): void {
@@ -136,8 +124,7 @@ export class ChildOwnershipRecords {
   /**
    * A handoff's move of the original session's children to the session that took over (#693, #1475), in one
    * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
-   * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
-   * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
+   * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
    * row on the new session, so the next host (a swap or a restart) reads one owner either way. `armReports`: children
    * whose report the original was waiting for in a call (its wait had taken the mark down), now owed to the new session.
@@ -147,7 +134,7 @@ export class ChildOwnershipRecords {
   moveChildren(
     from: string,
     to: string,
-    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean },
+    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[] },
     then?: () => void,
   ): void {
     this.db.transaction(() => {
@@ -163,11 +150,6 @@ export class ChildOwnershipRecords {
         owner.run({ from, to, id })
         mark.run({ from, to, id })
         turn.run({ from, to, id })
-      }
-      // A removed original's queue stays with it, for the trash to drop (#738)
-      // Only those for a session that moves: a request for a child that stays with the original stays its own (#1932)
-      if (move.queued !== false) {
-        this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ? AND session_id IN (SELECT value FROM json_each(?))`).run(to, from, JSON.stringify(move.sessions))
       }
       const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
       for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)

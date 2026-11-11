@@ -24,7 +24,7 @@ import type { HandoffNotes } from './handoff-notes.js'
 import type { HostCardsHost } from './host-cards.js'
 import type { LaunchRecords, LaunchRecordsHost } from './launch-records.js'
 import { assistantRole } from './assistant-home.js'
-import type { QueuedRequestsHost } from './queued-requests.js'
+import type { ProjectRegistry } from './project-registry.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 import type { SessionRecordHost } from './session-record.js'
@@ -78,7 +78,7 @@ export type SessionStartsHost = Pick<DelegationHost, 'adapters' | 'children' | '
   Pick<RestartHost, 'lettingGo'> &
   Pick<HostCardsHost, 'settleState'> &
   Pick<LaunchRecordsHost, 'settingFilesFor'> &
-  Pick<QueuedRequestsHost, 'projectRow'> & {
+  Pick<ProjectRegistry, 'projectRow'> & {
     readonly appSessions: AppSessions
     readonly apps: SessionAppWiring
     readonly cardRests: CardRests

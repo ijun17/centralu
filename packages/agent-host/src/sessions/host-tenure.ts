@@ -32,7 +32,7 @@ import type { UsageRecorder } from './usage-recorder.js'
  * getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emit' | 'handles' | 'memoryGate' | 'meta' | 'store'> &
-  Pick<SessionEventsHost, 'interruptions' | 'overloadRetry' | 'queue' | 'reports'> &
+  Pick<SessionEventsHost, 'interruptions' | 'overloadRetry' | 'reports'> &
   Pick<MailSessionsHost, 'events'> & {
     /** What the stops before this start left (the manager's constructor options) */
     readonly keeperOpts: { updateResume?: UpdateResumeFolder; systemEnd?: SystemEnd | null }
@@ -452,16 +452,6 @@ export class HostTenure {
     this.host.delegationFlow.remote.restore()
     this.host.children.restoreTurns(this.host.meta, goingOn)
     this.keptAtStart = goingOn
-    // `restoreQueued` asks only of a request whose session is here
-    this.host.children.restoreQueued(this.host.meta, (r) => {
-      const m = this.host.meta.get(r.sessionId)
-      return r.via === 'ask_project' && m !== undefined && !this.host.queue.pairConsented(r.callerSessionId, m)
-    })
-    if (this.host.children.queued.size) {
-      setTimeout(() => {
-        for (const id of this.host.children.queued.keys()) if (!goingOn.has(id)) this.host.queue.scheduleDrain(id)
-      }, 0)
-    }
     if (this.quitPersonWork.length) setTimeout(() => this.reportQuitPersonWork(), 0)
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }

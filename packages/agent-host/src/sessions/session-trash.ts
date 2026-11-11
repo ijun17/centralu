@@ -81,8 +81,6 @@ export type SessionTrashHost = {
   readonly restartPolicy: RestartPolicy
   /** A wake or a resume under way (`SessionManager.resuming`): the session is about to take a turn */
   readonly resuming: ReadonlyMap<string, unknown>
-  /** A queued note not yet taken by the session (`TurnInputs.inputsHeld`) */
-  inputsHeld: (sessionId: string) => boolean
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   stopWatchingReconnect: (sessionId: string) => void
   readonly store: Store
@@ -217,8 +215,7 @@ export class SessionTrash {
     if (!atRest(m)) return false
     const run = this.host.agentRuns.get(sessionId)
     if (run && !run.finished) return false
-    if (this.host.resuming.has(sessionId) || this.host.restartPolicy.deferredRestarts.has(sessionId) || this.host.inputsHeld(sessionId)) return false
-    return (this.host.children.queued.get(sessionId)?.length ?? 0) === 0
+    return !(this.host.resuming.has(sessionId) || this.host.restartPolicy.deferredRestarts.has(sessionId))
   }
 
   /**
@@ -427,12 +424,9 @@ export class SessionTrash {
     this.host.children.forgetTurns(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.host.children.awaitingReport]) if (caller === sessionId) this.host.children.clearReport(child)
-    // Requests held for it, or that it made, go too (#677)
-    this.host.children.dropQueued((r) => r.sessionId === sessionId || r.callerSessionId === sessionId)
     // The same for a delegated turn's link (#676), either way
     this.host.children.releaseTurn(sessionId)
     for (const [child, owner] of [...this.host.children.turnOwners]) if (owner.callerId === sessionId) this.host.children.releaseTurn(child)
-    this.host.children.dropObserverNotesOf(sessionId)
     this.host.forgetCommits(sessionId)
     this.host.cardRests.forget(sessionId)
     this.host.forgetHeldNotices(sessionId)
