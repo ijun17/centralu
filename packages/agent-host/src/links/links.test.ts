@@ -116,7 +116,13 @@ async function remoteHost(
     const claude = adapters.get('claude')
     if (claude instanceof ScriptedAdapter) claude.release(sessionId)
   }
-  return { server, mgr, store, port: p, close, release }
+  /** Holds a session's next answer to a question there until the returned function is called (`ScriptedAdapter.holdAnswer`) */
+  const holdAnswer = (sessionId: string) => {
+    const claude = adapters.get('claude')
+    if (!(claude instanceof ScriptedAdapter)) throw new Error('not scripted')
+    return claude.holdAnswer(sessionId)
+  }
+  return { server, mgr, store, port: p, close, release, holdAnswer }
 }
 
 /** An RPC handler without these methods, as a build from before them answers */
@@ -3255,7 +3261,7 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
 
   // #1038: agent_session answer did not reach a child on another machine
   it('answers a question card of the turn it gave the child there, read through the wait or status, and only that card', async () => {
-    const { answer, start, agent, reports } = await rig()
+    const { remote, hub, answer, start, agent, reports } = await rig()
     const call = start({ task: 'a question for you' })
     await answer('allow')
     // The wait reads the card, as a local child's does
@@ -3266,7 +3272,19 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     expect(await agent(asked.sessionId, 'status')).toMatchObject({ state: 'asking', cards: [expect.objectContaining({ card })] })
     expect(await agent(asked.sessionId, 'answer', 'yes')).toMatchObject({ ok: false, error: expect.stringContaining(`Name the card you read: ${card}`) })
     expect(await agent(asked.sessionId, 'answer', 'yes', `${card.split('.')[0]}.deadbeef`)).toMatchObject({ ok: false, error: expect.stringContaining('no longer stands') })
+    /*
+     * The child's turn goes on after the answer until the caller's wait is open, by the order of the events, not a timer: a turn that ends before the
+     * wait is reported instead, and the wait then reads the child at rest (the design; a slow hub lost the 20 ms race in the merge queue)
+     */
+    const release = remote.holdAnswer(asked.sessionId.slice('m1.'.length))
     expect(await agent(asked.sessionId, 'answer', 'yes', card)).toMatchObject({ ok: true, state: 'answered', card })
+    const agents = (hub.mgr as unknown as { delegationFlow: { remote: { openWait(id: string): unknown } } }).delegationFlow.remote
+    const openWait = agents.openWait.bind(agents)
+    vi.spyOn(agents, 'openWait').mockImplementation((id) => {
+      const opened = openWait(id)
+      release()
+      return opened
+    })
     // Its answer is the wait's, and owed to nobody else
     expect(await agent(asked.sessionId, 'wait')).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('answered: Yes') })
     expect(reports()).toBe(0)

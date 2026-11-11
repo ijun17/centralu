@@ -37,6 +37,8 @@ class ScriptedHandle implements SessionHandle {
   private announced = false
   private hold: boolean
   private gate: (() => void) | null = null
+  /** The next answer to a question is said once this resolves, not a moment later (`ScriptedAdapter.holdAnswer`) */
+  private answerGate: Promise<void> | null = null
 
   constructor(
     readonly sessionId: string,
@@ -56,6 +58,13 @@ class ScriptedHandle implements SessionHandle {
 
   turnInputs?(): readonly string[] | null
   turnStartInputs?(): readonly string[] | null
+
+  /** The next answer to a question goes on only when the returned function is called: a test orders the turn's end after what it does first */
+  holdAnswer(): () => void {
+    let go!: () => void
+    this.answerGate = new Promise<void>((resolve) => (go = resolve))
+    return go
+  }
 
   /** Opens the held turn that `holdNext` kept waiting */
   release(): void {
@@ -151,7 +160,10 @@ class ScriptedHandle implements SessionHandle {
   answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
     if (!this.questions.delete(requestId)) return false
     this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
-    setTimeout(() => this.say(`answered: ${answers.flatMap((a) => a.answers).join(', ')}`), 20)
+    const say = () => this.say(`answered: ${answers.flatMap((a) => a.answers).join(', ')}`)
+    if (this.answerGate) void this.answerGate.then(say)
+    else setTimeout(say, 20)
+    this.answerGate = null
     return true
   }
 
@@ -202,6 +214,13 @@ export class ScriptedAdapter implements AgentAdapter {
     const handle = new ScriptedHandle(opts.sessionId, emit, this.immediate, this.queueBehind, this.holdNext)
     this.handles.set(opts.sessionId, handle)
     return handle
+  }
+
+  /** Holds the session's next answer to a question until the returned function is called (`ScriptedHandle.holdAnswer`) */
+  holdAnswer(sessionId: string): () => void {
+    const handle = this.handles.get(sessionId)
+    if (!handle) throw new Error(`no scripted session ${sessionId}`)
+    return handle.holdAnswer()
   }
 
   /** Opens the turn a session's `holdNext` kept waiting (`ScriptedHandle.release`) */
