@@ -11,7 +11,6 @@ import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
-import { takeOverFromEarlierBuild } from '../mail/adoption.js'
 import type { HostMail } from '../mail/host-mail.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
@@ -139,10 +138,9 @@ const until = async (ok: () => boolean) => {
   for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10))
   if (!ok()) throw new Error('the condition did not come')
 }
-const marksOf = (h: ReturnType<typeof host>) => (h.mgr as unknown as { children: { awaitingReport: ReadonlyMap<string, string> } }).children.awaitingReport
 
 describe('a parent that waits for what it handed on, across an update', () => {
-  it('keeps its mark across the update, and its end is reported once, at the real end', async () => {
+  it('its task stays open while the work it handed on is open, across the update, and is answered once, at the real end', async () => {
     const f = memoryUpdateFolder()
     const a = host(f)
     a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
@@ -153,34 +151,32 @@ describe('a parent that waits for what it handed on, across an update', () => {
     a.claude.handles.get(child)!.answer('handed the tests on')
     const work = read().tasks(addressOf(parent), child)[0]!
     const reports = () => read().reportsOn(work.id)
-    await until(() => reports().length === 1)
-    // A pause over the work it handed on: reported, and the task stays open
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'waiting', waitingOn: 1 })
+    await until(() => a.mgr.sessionInfo(child)?.state !== 'working')
+    // The work it handed on is open: no last response answers the task (docs/plans/mailbox.md §10.6.3), and it stays open
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reports()).toEqual([])
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
-    expect(marksOf(a).get(child)).toBe(parent)
     await stopForUpdate(a)
 
     // The next host: the child is at rest with no process, and what it handed on is still going (the helper's turn is continued)
     const b = host(f)
-    expect(marksOf(b).get(child)).toBe(parent)
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: null })
     // The helper is done; the session has a turn of its own, and ends it
     const handed = read().tasks(addressOf(child), helper)[0]!
     b.m.service.report(handed.id, { outcome: 'finished', body: '[Centralu] The helper finished.' })
     await b.mgr.inputs.send(child, 'carry on', undefined, { sessionId: parent, name: 'parent' })
     b.claude.handles.get(child)!.answer('all done')
-    await until(() => reports().length === 2)
-    expect(reports().map((m) => m.facts.outcome)).toEqual(['waiting', 'finished'])
+    await until(() => reports().length === 1)
+    expect(reports().map((m) => [m.facts.outcome, m.facts.answer])).toEqual([['finished', 'all done']])
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: 'reported' })
-    expect(marksOf(b).has(child)).toBe(false)
     // Once: nothing follows
     await new Promise((r) => setTimeout(r, 30))
-    expect(reports()).toHaveLength(2)
+    expect(reports()).toHaveLength(1)
     // Nor a notice of a turn that "ended in the swap"
     expect(read().to(addressOf(parent)).some((x) => x.message.body.includes('swap'))).toBe(false)
   })
 
-  it('a session at rest whose helper is gone has no pause to keep: its mark is dropped at the next start', async () => {
+  it('a session at rest whose helper is gone holds its task for nothing: the next start answers it with its last response', async () => {
     const a = host()
     a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
     const { parent, child } = await parentAndChild(a)
@@ -188,78 +184,25 @@ describe('a parent that waits for what it handed on, across an update', () => {
     if (!helperStarted.ok) throw new Error(helperStarted.error)
     const helper = helperStarted.sessionId
     a.claude.handles.get(child)!.answer('handed the tests on')
-    await until(() => marksOf(a).get(child) === parent && read().tasks(addressOf(child), helper).length === 1)
-    // The helper's task is going while its session is there
-    expect(a.m.hooks.waitingOn!(parent, child)).toBe(1)
+    await until(() => a.mgr.sessionInfo(child)?.state !== 'working' && read().tasks(addressOf(child), helper).length === 1)
+    const work = read().tasks(addressOf(parent), child)[0]!
+    expect(read().reportsOn(work.id)).toEqual([])
     // The helper's session was archived while the old host served: its task is gone
     a.m.service.stops.partyGone(addressOf(helper))
     expect(read().taskRow(read().tasks(addressOf(child), helper)[0]!.id, helper)).toMatchObject({ settled: 'gone' })
     await a.mgr.tenure.disposeAll()
-    const b = host()
-    expect(marksOf(b).has(child)).toBe(false)
-  })
-})
 
-describe('a rollback to an earlier build, then forward', () => {
-  /*
-   * `unread`: the parent also left the helper a note it was given and never read (#1458). Under threads such a note kept the helper's thread
-   * `running` after the forward step, and the parent waited on it for good. The waiting count reads the old report paths and the task rows not
-   * delivered yet (`MessageService.waitingOn`), never whether a delivered message was read, so the note changes nothing
-   */
-  it.each([false, true])('settles the helper’s task the earlier build reported: the parent’s next turn end is reported, not taken for the same pause (unread note: %s)', async (unread) => {
-    const a = host()
-    a.mgr.prefs.setUiPreferences({ agentDepth: 3 })
-    const { parent, child } = await parentAndChild(a)
-    const helperStarted = await a.mgr.startAgent(child, { task: 'write the tests', wait: false })
-    if (!helperStarted.ok) throw new Error(helperStarted.error)
-    const helper = helperStarted.sessionId
-    a.claude.handles.get(child)!.answer('handed the tests on')
-    const work = read().tasks(addressOf(parent), child)[0]!
-    await until(() => read().reportsOn(work.id).length === 1)
-    const part = read().tasks(addressOf(child), helper)[0]!
-    // The helper's task was handed on in the parent's work
-    expect(part.causeId).toBe(work.id)
-    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
-    // The helper finishes. An earlier build serving instead of this one would report it the old way (its mark cleared) and leave the task row
-    // unsettled: it does not know the message tables
-    a.claude.handles.get(helper)!.answer('the tests are written')
-    await until(() => read().taskRow(part.id, helper)?.settled === 'reported')
-    if (unread) {
-      const note = a.m.service.send(addressOf(child), { to: [addressOf(helper)], text: 'one more thing about the tests' })
-      store.mailbox.markDelivered(addressOf(helper), [note.message.id], Date.now(), null)
-      expect(store.mailbox.recipient(note.message.id, addressOf(helper))).toMatchObject({ deliveredAt: expect.any(Number), readAt: null, settled: null })
+    const b = host()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      b.m.afterReady()
+      await vi.advanceTimersByTimeAsync(61_000)
+    } finally {
+      b.m.delivery.stop()
+      vi.useRealTimers()
     }
-    await a.mgr.tenure.disposeAll()
-    store.children.clearReportMark(helper)
-    ;(store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
-      .prepare('UPDATE mail_recipients SET settled = NULL, settled_at = NULL WHERE message_id = ?')
-      .run(part.id)
-
-    // This build again: the step after ready settles the task no old path owes any more, so nothing counts the helper as going
-    const b = host()
-    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: null })
-    const result = takeOverFromEarlierBuild(b.m.service, store, { info: (id) => b.mgr.sessionInfo(id), oldOwes: (o, c) => b.mgr.mail.oldOwes(o, c) })
-    // The helper's task, and the parent's work with the child: no process of the child's outlived the stop, and its pause named a helper no old
-    // path owes any more, so the start dropped the child's mark (`restoreReports`) and no old path owes the parent either
-    expect(result.settled).toBe(2)
-    expect(read().taskRow(part.id, helper)).toMatchObject({ settled: 'reported' })
+    expect(read().reportsOn(work.id).map((m) => [m.facts.outcome, m.facts.answer])).toEqual([['finished', 'handed the tests on']])
     expect(read().taskRow(work.id, child)).toMatchObject({ settled: 'reported' })
-    expect(b.m.hooks.waitingOn!(parent, child)).toBe(0)
-    const before = read().between('centralu', addressOf(parent), 'report').length
-
-    // The owner sends more work, and the session ends its turn: the work's end is reported, once, and as an end, not as the same pause again.
-    // Mail that wakes the session (the helper's report) waits for it, so the work goes as mail too, and the delivery gives it both in one turn
-    expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and then?' })).toMatchObject({ ok: true, state: 'mailed' })
-    await deliverTo(wireHostMail(b.mgr, store, { now: () => Date.now() + 60_000 }), addressOf(child))
-    await until(() => (b.claude.handles.get(child)?.sent.length ?? 0) >= 1)
-    expect(b.claude.handles.get(child)!.sent.at(-1)).toContain('and then?')
-    b.claude.handles.get(child)!.answer('all done')
-    await until(() => read().between('centralu', addressOf(parent), 'report').length > before)
-    const after = read().between('centralu', addressOf(parent), 'report').slice(before)
-    expect(after.map((m) => m.facts.outcome)).toEqual(['finished'])
-    expect(read().between('centralu', addressOf(parent), 'report').filter((m) => m.facts.outcome === 'waiting')).toHaveLength(1)
-    // No work of the parent's with the child is left open
-    expect(store.mailbox.newestTask(addressOf(parent), addressOf(child))).toBeUndefined()
   })
 })
 

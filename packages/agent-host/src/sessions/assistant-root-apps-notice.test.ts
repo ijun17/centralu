@@ -6,6 +6,7 @@ import { managerWorld, projectDirs } from './manager.test-helpers.js'
 import type { SessionManager } from './manager.js'
 import { ROOT_APPS_NOTICE } from './session-app-wiring.js'
 import { APP_NAMES_PREFIX } from './session-apps.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * An Assistant that had root apps attached before #1205 (each was given to it as an `mcp__app-<id>` server) reads
@@ -42,10 +43,13 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
   })
 
   /*
-   * A report is often an Assistant's first turn of the day. What the model reads of it is Centralu's words about the
-   * other session (#1186), and the line goes before them, as before any other turn's text, and is not used up unsaid
+   * A report is often an Assistant's first turn of the day. What the model reads of it is the mail that wakes it with Centralu's words about the
+   * other session (#1186, docs/plans/mailbox.md §10.6.3), and the line goes before them, as before any other turn's text, and is not used up unsaid
    */
   it("goes before a report's words when the report is the first turn", async () => {
+    const clock = { t: Date.now() }
+    const m = wireHostMail(mgr, store, { now: () => clock.t })
+    m.delivery.start()
     const orc = await mgr.assistant()
     const tools = adapter.lastCentraluTools!
     store.settings.setAppSetting(`${APP_NAMES_PREFIX}${orc.id}`, JSON.stringify({ 'p1/board': 'app-board' }))
@@ -55,9 +59,15 @@ describe('the one-time line on root apps no longer attached (#1205)', () => {
     await tools.sendToSession(worker.id, 'tell me when done', true)
     adapter.handleOf(worker.id)!.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
-    const report = adapter.handleOf(orc.id)!.sent[0]!
-    expect(report.startsWith(`${LINE}\n\n[Centralu] The session ended its turn.`)).toBe(true)
-    expect(report).toContain(`sourceSessionId: ${worker.id}`)
+    const [report] = mailReader(store).between('centralu', addressOf(orc.id), 'report')
+    expect(report).toBeDefined()
+    // The report is due: the mail delivery wakes the Assistant with it
+    clock.t += 3_000
+    await m.delivery.process(addressOf(orc.id))
+    m.delivery.stop()
+    const sent = adapter.handleOf(orc.id)!.sent[0]!
+    expect(sent.startsWith(`${LINE}\n\n`)).toBe(true)
+    expect(sent).toContain(report!.id)
   })
 
   it('is not said to an Assistant that had only user-folder apps, nor later when it attaches a root app itself', async () => {

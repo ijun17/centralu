@@ -12,6 +12,7 @@ import { rpcError } from '../rpc-error.js'
 import { MailNotAtRest, MailWithdrawn, type MailInput } from '../mail/delivery.js'
 import { takeInput } from './mail-accept.js'
 import type { StopTold, StopWhy } from '../mail/stop-notices.js'
+import type { TurnInputs } from '../mail/delivery.js'
 import { stopOf } from './interruptions.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { ContextMeter } from './context-meter.js'
@@ -50,8 +51,6 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
   Pick<WorktreeHost, 'cwdOf' | 'resuming'> &
   Pick<SessionStartsHost, 'appSessions' | 'apps' | 'cardRests' | 'launches' | 'openSession' | 'tools'> & {
     readonly cards: RoutedCards
-    /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
-    joinsRunningTurn(sessionId: string): boolean
     /** Whether the session's tool reads the context size with every request, so a turn needs no estimate of it (`contextAtRequest`) */
     contextAtRequest(sessionId: string): boolean
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
@@ -70,11 +69,13 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
     mailEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /**
      * A turn ended without finishing, and why: the senders of what it left unanswered, and the session that started it, are told once
-     * (`StopNotices.sessionStopped`), except `told`, whom it already reached, and `held`, whose notice waits for the older report paths (`mailStopTold`). Never throws
+     * (`StopNotices.sessionStopped`), except `told`, whom it already reached. Never throws
      */
     mailStopped: (sessionId: string, why: StopWhy, opts: StopTold) => void
-    /** The older report paths of that stop, each resolving to the session it told: once ended, a `held` session they did not tell gets the stop notice */
-    mailStopTold: (sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]) => void
+    /** A turn ended as a turn does: the sessions whose requests it carried are answered (S12, `MailHooks.requestTurnEnded`). Never throws */
+    mailRequestTurnEnded: (sessionId: string) => void
+    /** What the tool said of the mail given it, at a turn's end or opening (`MailDelivery.turnInputs`). Never throws */
+    mailTurnInputs: (sessionId: string, turn: TurnInputs) => void
     /** An event of a session, and whether it ended its turn: what compaction at a break reads (#1451, self-compaction.ts). Never throws */
     compactEvent: (e: NormalizedEvent, endedTurn: boolean) => void
     /** Whether the session's running turn is one Centralu started to compact it (#1451) */
@@ -185,10 +186,10 @@ export class SessionEvents {
          * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
          * changed or whether a call is still in flight.
          */
-        // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
+        // A turn starts (#1377): a first guess at whose it is, from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           continues = this.host.selfCompaction.stepOpens(m.id)
-          this.host.children.turnStarted(m.id, continues)
+          this.host.children.turnStarted(m.id)
           // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
           this.host.children.noteTurnStart(m.id, m.lastSeq)
         }
@@ -200,8 +201,10 @@ export class SessionEvents {
          */
         if (e.type === 'state_change' && e.state === 'working') {
           const named = handle?.turnStartInputs?.()
-          // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639); and the hub's message it ran for
+          // Whose the turn is, decided by the inputs the tool names it opened from (#1639); and the hub's message it ran for
           started = this.host.children.turnNamed(m.id, named)
+          // Mail a turn before did not take and this one opens for is this turn's (docs/plans/mailbox.md §10.6.3)
+          if (named?.length) this.host.mailTurnInputs(m.id, { opened: named })
         }
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
@@ -264,12 +267,13 @@ export class SessionEvents {
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     /*
-     * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
-     * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
+     * Whose the turn was (#1377), read once as it ends, from the rows of what the tool says it took in: said on the event that ends
+     * it, so a hub that follows this host reads it rather than guessing (`LinkedReports`). The person's own turn is reported to nobody
      */
     // The process went with the turn (a crash, a lost conversation): it runs none of the messages given it after. Any other error or limit leaves it, and a message it holds queued can still run (#1604)
     const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
-    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, this.host.handles.get(e.sessionId)?.turnInputs?.(), processWent) : undefined
+    const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
+    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken) : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
@@ -284,39 +288,25 @@ export class SessionEvents {
     if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
       this.host.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
     }
-    // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
-    const owed = endedTurn && !!e.sessionId && (this.host.children.awaitingReport.has(e.sessionId) || waited)
-    /*
-     * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
-     * turn_complete, but two adapters do not emit turn_complete for a failed turn (emitting it there
-     * too would end the state as "awaiting input" and hide the failure). So a failed run was never
-     * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
-     */
-    /*
-     * A turn the mailbox started for another owner's thread than the one this session owes a report (#1474) is that owner's alone: the mark, its pause and
-     * the tasks it waits on are not this turn's. Taken at every end, so a later turn is not read as it
-     */
-    const mailTurn = endedTurn && e.sessionId ? this.host.children.takeMailTurn(e.sessionId) : undefined
     /*
      * A turn that ends without finishing leaves the questions delivered into it unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
-     * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
+     * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's.
+     * Told so no matter how the turn ends (#166): two adapters emit no turn_complete for a failed turn
      */
-    const stopWhy = endedTurn && e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId) && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
-    const stopTold = stopWhy && e.sessionId ? this.stopTold(e.sessionId, { mailOwner: mailTurn?.ownerId, waited, caller: delegation?.callerId }) : undefined
-    if (stopWhy && e.sessionId && stopTold) this.host.mailStopped(e.sessionId, stopWhy, stopTold)
-    /** The older report paths that may tell of this turn's end, each resolving to the session it told */
-    const sends: Promise<string | undefined>[] = []
-    if (mailTurn && e.sessionId) {
-      sends.push(this.host.reports.reportMailTurn(e.sessionId, mailTurn.ownerId, e, runOpen ? run?.completedAnswer : undefined, turnBy))
-      // The first owner's paused work may have ended during this turn, which then set no timer for it (a turn running reports at its own end)
-      this.host.reports.settlePausedReport(e.sessionId)
-    } else if (endedTurn && e.sessionId) {
-      // A wait settled in an earlier turn holds that turn's answer, not this one's
-      sends.push(this.host.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, undefined, turnBy && since !== undefined ? { ...turnBy, since } : turnBy))
+    // The mail given into the turn that it did not take waits in the tool for a turn after, and is not this turn's (§10.6.3); one whose process went took all with it
+    if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken })
+    const workEnded = endedTurn && !!e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId)
+    // The end of a turn an update cut, before its Continue is in, is not the work's stop: the continued turn's end answers
+    const stopWhy = workEnded && e.sessionId && !this.host.restartPolicy.continuingTurns.has(e.sessionId) ? stopOf(e, nowInterrupted) : null
+    if (stopWhy && e.sessionId) {
+      this.host.reports.turnStopped(e.sessionId)
+      this.host.mailStopped(e.sessionId, stopWhy, this.stopTold(e.sessionId, waited, delegation?.callerId))
+    } else if (workEnded && e.sessionId) {
+      // It ended as a turn does: the requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to
+      // (docs/plans/mailbox.md §10.6.3). A call still waiting reads its own answer as it returns, which marks the report read (`answerRecorder`)
+      this.host.mailRequestTurnEnded(e.sessionId)
+      this.host.reports.turnEndedAtRest(e.sessionId, !!owned?.cut)
     }
-    // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when nobody else is owed it (§8.1)
-    if (endedTurn && e.sessionId && !owed) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
-    if (e.sessionId && stopTold) this.host.mailStopTold(e.sessionId, stopTold.held, sends)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)
@@ -347,8 +337,8 @@ export class SessionEvents {
     if (e.sessionId && (endedTurn || e.type === 'state_change' || e.type === 'approval_resolved' || e.type === 'question_resolved')) this.host.mailPoke(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
-    // A paused report's work may just have ended (#721)
-    if (e.type === 'background_tasks' && e.sessionId) this.host.reports.settlePausedReport(e.sessionId)
+    // The session's own background work may just have ended (#721): at rest, its last response answers once settled
+    if (e.type === 'background_tasks' && e.sessionId) this.host.reports.settleAtRest(e.sessionId)
   }
 
   /**
@@ -357,19 +347,11 @@ export class SessionEvents {
    * itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
    * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
    */
-  /**
-   * Who already knows of this stop, and who may yet be told by an older report path, read before they run (they clear their marks). `told`: a call
-   * still waiting, which read the end itself. `held`: every session those paths could tell (the owner of the report or of the thread's turn, the
-   * session that gave the turn or started it), whose stop notice waits until they ended and is sent only if they did not tell it
-   */
-  private stopTold(id: string, d: { mailOwner: string | undefined; waited: boolean; caller: string | undefined }): { told: string[]; held: string[]; starter: string | null } {
-    const meta = this.host.meta
-    const asker = d.caller ?? meta.get(id)?.askedBy ?? undefined
-    // Not itself: the stop notice leaves the stopped session out (`StopNotices.sessionsStopped`)
-    const known = (who: string | undefined): who is string => !!who && meta.has(who)
-    const told = d.waited && known(asker) ? [asker] : []
-    const held = [...new Set([d.mailOwner, this.host.children.awaitingReport.get(id)])].filter(known).filter((who) => !told.includes(who))
-    return { told, held, starter: known(asker) ? asker : null }
+  /** Who already knows of this stop: a call still waiting, which read the end itself (`told`); and the session that gave the turn or started it */
+  private stopTold(id: string, waited: boolean, caller: string | undefined): StopTold {
+    const asker = caller ?? this.host.meta.get(id)?.askedBy ?? undefined
+    if (!asker || !this.host.meta.has(asker)) return { starter: null }
+    return { ...(waited ? { told: [asker] } : {}), starter: asker }
   }
 
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
@@ -581,8 +563,6 @@ export class SessionEvents {
      * either when Centralu puts a line of its own in front of it (`rootAppsNotice`, once).
      */
     fromPerson = false,
-    /** What the person chose for a delegation report the session owes (#1377); the default is "just asking" */
-    intent: 'ask' | 'task' | 'takeover' = 'ask',
     /**
      * A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
      * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the
@@ -626,9 +606,9 @@ export class SessionEvents {
         kind: 'text',
         // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
         // image bytes back in
-        // The input id it goes in under, what the person meant and whether it is a report (#1639): the record of whose a turn it starts is.
+        // The input id it goes in under and whether it is a report (#1639): the record of whose a turn it starts is.
         // `byPerson`: sent from the window (the composer, or the handoff prompt and Continue text the person's click sends), the one mark a request's citation accepts (docs/plans/cited-requests.md §3)
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(intent !== 'ask' ? { intent } : {}), ...(relayed ? { relayed: true } : {}) },
+        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(relayed ? { relayed: true } : {}) },
         ts: Date.now(),
       },
     ])
@@ -656,7 +636,6 @@ export class SessionEvents {
       ...(from ? { from } : {}),
       ...(fromApp ? { fromApp } : {}),
       ...(fromScript ? { fromScript } : {}),
-      ...(!from && !fromApp && !fromScript && intent !== 'ask' ? { intent } : {}),
       // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
       // — attachments have to ride along too, or the bubble is incomplete
       ...(attachments?.length ? { attachments } : {}),
@@ -681,15 +660,7 @@ export class SessionEvents {
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
-    // An Assistant that had root apps attached reads once why their names are gone (#1205); never stored or shown
-    const notice = this.host.apps.rootAppsNotice(sessionId)
-    const input = notice ? `[Centralu] ${notice}\n\n${adapterText}` : adapterText
-    // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
-    const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    const hubInput = isHubSender(from?.sessionId)
-    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
-    // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
-    if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
+    const { input, notice } = this.withRootAppsNotice(sessionId, adapterText)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)
@@ -709,7 +680,7 @@ export class SessionEvents {
   async deliverMail(
     sessionId: string,
     /** `label`: the conversation line's kind (`mail` when absent); an update's continued turn says `update` (#1618) */
-    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; task?: MailInput['task'] },
+    input: { text: string; quiet: boolean; line: string; label?: string; skipLine?: () => boolean; task?: MailInput['task']; id?: string },
     gate: { leaving(): boolean; atRest(): boolean; wanted?(): boolean } = { leaving: () => false, atRest: () => true },
     late?: (e: Error) => void,
   ): Promise<void> {
@@ -741,7 +712,7 @@ export class SessionEvents {
       this.host.record.closeStream(sessionId)
       // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
       this.host.cardRests.turnAsked(sessionId)
-      await takeInput(handle, input.text, late)
+      await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, late, input.id)
     }
     /*
      * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists
@@ -774,6 +745,12 @@ export class SessionEvents {
     this.host.store.sessions.upsertSession(m)
     this.host.emit({ type: 'user_message', sessionId, seq, text: task.text, from })
     return true
+  }
+
+  /** An Assistant that had root apps attached reads once why their names are gone (#1205), before its first input that starts a turn, a message or mail; never stored or shown */
+  private withRootAppsNotice(sessionId: string, text: string): { input: string; notice: string | null } {
+    const notice = this.host.apps.rootAppsNotice(sessionId)
+    return { input: notice ? `[Centralu] ${notice}\n\n${text}` : text, notice }
   }
 
   /**

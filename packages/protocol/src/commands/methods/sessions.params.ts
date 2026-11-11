@@ -11,7 +11,7 @@ import {
 } from '../../entities.js'
 import { machineParam } from '../machine-fields.js'
 import { CreateSessionParams, UpdateSettingsParams } from '../session-params.js'
-import { SendIntent, SUBAGENT_STEPS_PAGE } from '../sessions.js'
+import { SUBAGENT_STEPS_PAGE } from '../sessions.js'
 
 /** The parameters of the `sessions` methods, which the host validates (docs/protocol.md §3). Their results: ./sessions.results.ts */
 export const sessionsParams = {
@@ -20,18 +20,7 @@ export const sessionsParams = {
     sessionId: SessionId,
     text: z.string(),
     attachments: z.array(Attachment).optional(),
-    /*
-     * What the message means to a delegation report the session owes (#1377), when the person chose: `ask` (the default,
-     * "Just asking": the person's own turn, not reported), `task` ("Add to the task": its turn is the delegated work's,
-     * noted as the person's addition), `takeover` ("Take it over": the report closes and the caller is told once)
-     */
-    intent: SendIntent.optional(),
   }),
-  /**
-   * The delegation report a session owes (#1377), for the composer's "Working for <caller>" choice: who is waiting for
-   * its work, here or on a linked machine. `null` when it owes none.
-   */
-  'agents.reportOwed': z.object({ sessionId: SessionId }),
   'agents.respondApproval': z.object({
     sessionId: SessionId,
     requestId: z.string(),

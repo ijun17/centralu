@@ -88,9 +88,8 @@ async function updateMidTurn(hubGave = false) {
   const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
   const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
   a.adapter.last.emit({ type: 'state_change', sessionId: s.id, state: 'working' })
-  // A hub gave it a note for the turn to come, and the turn it was in began after row 1 (#1604)
+  // A hub follows it: the turn it was in began after row 1 (#1604)
   if (hubGave) {
-    store.settings.setAppSetting(`input_origins:${s.id}`, JSON.stringify([['note-1', { seq: 2, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }]]))
     store.settings.setAppSetting(`turn_span:${s.id}`, JSON.stringify({ latest: { since: 1 } }))
   }
   a.mgr.tenure.stopForUpdate()
@@ -110,10 +109,9 @@ describe("a turn an update cut whose Continue cannot be sent (#1562 review)", ()
     expect(events.some((e) => e.type === 'notice' && e.sessionId === id && /Centralu quit or restarted/.test(e.text))).toBe(true)
   })
 
-  it('closes the turn a hub follows and takes off what it was given: the process that held them is gone', async () => {
+  it('closes the turn a hub follows: the process that ran it is gone', async () => {
     const { b, id } = await updateMidTurn(true)
     expect(b.adapter.last.attempts).toBe(1)
-    expect(store.settings.appSetting(`input_origins:${id}`)).toBeNull()
     expect(JSON.parse(store.settings.appSetting(`turn_span:${id}`)!)).toEqual({ latest: { since: 1, ended: true } })
   })
 })

@@ -23,7 +23,7 @@ function queue(w: ReturnType<typeof deliveryWorld>, row: { id: string; sessionId
 function setup() {
   const w = deliveryWorld()
   const known: Record<string, AdoptedSession> = { a: { state: 'idle' }, b: { state: 'working' }, w: { askedBy: 'a', state: 'idle' } }
-  const take = () => takeOverFromEarlierBuild(w.mail, w.store, { info: (id) => known[id], oldOwes: () => false })
+  const take = () => takeOverFromEarlierBuild(w.mail, w.store, { info: (id) => known[id] })
   return { ...w, take }
 }
 

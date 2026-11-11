@@ -17,7 +17,8 @@ import {
 import { CENTRALU, PERSON, parseAddress, sessionAddress } from './address.js'
 import { buildMessageFrame, deliveryLine, mailCalls, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
-import { updateInPlace, type TurnReport } from './turn-report.js'
+import type { TurnReport } from './turn-report.js'
+import { answerAtRest, type LastResponse } from './last-response.js'
 import { droppedText, trustedText, type MailReach } from './reach.js'
 import { sendGuards } from './send-guards.js'
 import { StopNotices, type StopNoticeOptions } from './stop-notices.js'
@@ -61,6 +62,8 @@ export type SendInput = {
   text: string
   needsReply?: boolean
   replyTo?: string
+  /** A reply the sender marked as the answer to the task it replies to (the tool's `kind: "answer"`): only such a reply settles a task (`replyAnswers`) */
+  answer?: boolean
   urgent?: boolean
   /** Per recipient: `assistant` when the sender named the role (D15) */
   via?: readonly (string | null)[]
@@ -74,6 +77,16 @@ export type SendInput = {
   picked?: true
 }
 /**
+ * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
+ * a task only by a reply marked as its answer that asks nothing back. Any other reply to a task is a message in its thread, and the task stays open, so
+ * the last response at rest still answers it: an early "On it" closes nothing
+ */
+export function replyAnswers(target: Pick<MailRow, 'kind' | 'needsReply'>, reply: { needsReply: boolean; answer?: boolean }): boolean {
+  return target.kind === 'task' ? reply.answer === true && !reply.needsReply : target.kind === 'message' && target.needsReply
+}
+
+/**
+ * `answered`: the message the send replies to. `answers`: whether it answers it (`replyAnswers`).
  * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the Assistant cites, checked.
  * `notCited`: why a citation the request asked for did not pass the check, so the Assistant reads the request as the session's own words
  */
@@ -81,6 +94,7 @@ export type SendResult = {
   message: MailRow
   held: { recipient: string; why: HoldReason }[]
   answered: string | null
+  answers: boolean
   quiet: boolean
   asWork: boolean
   cited?: { seq: number; at: number }
@@ -116,8 +130,8 @@ export type DrainOptions = {
   /** Left out, and nothing is written about it */
   skip?: (message: MailRow, row: RecipientRow) => boolean
   /**
-   * The mail joins the recipient's running turn (docs/plans/mailbox.md §10.6.2): a task, a request to the Assistant, or a reminder for its asker, is
-   * left for a turn of its own, whose end is reported to its sender (one turn keeps one asker, turn-owned-by-no-one.md §4.2)
+   * The mail joins the recipient's running turn (docs/plans/mailbox.md §10.6.2), tasks included (§10.6.3): a request to the Assistant, or a reminder
+   * for its asker, is left for a turn of its own (one turn keeps one asker, turn-owned-by-no-one.md §4.2)
    */
   joining?: boolean
 }
@@ -182,7 +196,7 @@ export class MessageService {
   ) {
     this.now = opts.now ?? Date.now
     this.ulids = opts.ids ?? new UlidMaker()
-    this.stops = new StopNotices({ ...opts, records, reach, now: this.now, run: (fn) => this.run(fn), notice: (to, n) => void this.centralu(to, n) })
+    this.stops = new StopNotices({ ...opts, records, reach, now: this.now, run: (fn) => this.run(fn), notice: (to, n) => this.centralu(to, n) })
   }
 
   sessionAddress(sessionId: string): string {
@@ -291,12 +305,14 @@ export class MessageService {
       // What is held waits for the person: the Inbox lists it (§7.4), so it hears of it
       if (held.length > 0) this.changed(stored, [PERSON])
 
-      // The sender's own row on what it answers: settled, or while the answer is held, marked so the question stays open (D8)
-      if (target?.kind === 'message' && target.needsReply && this.records.recipient(target.id, sender)) {
+      // The sender's own row on what it answers (`replyAnswers`): settled, or while the answer is held, marked so it stays open until the person lets the
+      // answer through (D8, `trustChanged`). A task so answered gets no last response
+      const answers = target !== undefined && replyAnswers(target, { needsReply, answer: input.answer === true })
+      if (target && answers && this.records.recipient(target.id, sender)) {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
         else this.answerHeld(target, stored)
       }
-      return { message: stored, held, answered: target?.id ?? null, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
+      return { message: stored, held, answered: target?.id ?? null, answers, quiet, asWork, ...(cited ? { cited } : {}), ...(typeof word === 'string' ? { notCited: word } : {}) }
     })
   }
 
@@ -310,7 +326,7 @@ export class MessageService {
    * host answered with the message's id, under the same id, so a reply there and here names one message. Its one row is
    * the foreign recipient's, delivered at hand-over, so this host's delivery never tries it; the recipient's host pushes
    * what becomes of it (`MailboxRecords.mergeAcross`). No guard runs here: they ran where the message was written. An
-   * answer settles the sender's own row on what it answers, as `send` does
+   * answer settles the sender's own row on what it answers, as `send` does (`replyAnswers`; a reply across marks no task's answer)
    */
   sentAcross(sender: string, input: { id: string; to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string }): MailRow {
     return this.run(() => {
@@ -320,7 +336,7 @@ export class MessageService {
         { id: input.id, sender, kind: 'message', body: input.text, needsReply: input.needsReply, urgent: input.urgent === true, replyTo: target?.id ?? null, origin: 'mail', createdAt: now },
         [this.row(input.to, { dueAt: now, deliveredAt: now })],
       )
-      if (target?.kind === 'message' && target.needsReply && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
+      if (target && replyAnswers(target, input) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', now, stored.id)
       return stored
     })
   }
@@ -374,9 +390,8 @@ export class MessageService {
 
   /**
    * How a turn of delegated work ended (§9.3): Centralu's report, replying to the task, for its sender. A turn that ended for good settles the task
-   * `reported`, and every other open task from the same sender to the same child that was delivered before the turn began (F4, K3); a pause
-   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`.
-   * A pause's update (`update`, #1540) wakes when its owner has read the one before; until then it is written over that one, `duplicate` too
+   * `reported`, and only it: each task is a request of its own, answered in its own thread (docs/plans/mailbox.md §10.6.3); a pause
+   * (`paused`, `waiting`) settles nothing, wakes its owner the first time and is quiet after. The same pause again is the stored report, `duplicate`
    */
   report(taskId: string, input: TurnReport): ReportWritten {
     return this.run(() => {
@@ -388,18 +403,7 @@ export class MessageService {
       if (row.settled !== null && task.kind === 'task') return { settledAlready: true }
       const now = this.now()
       const pause = input.outcome === 'paused' || input.outcome === 'waiting'
-      const held = updateInPlace(this.records, taskId, task.sender, input)
-      if (held?.rewritten) this.changed(held.message, [task.sender])
-      if (held) return { message: held.message, duplicate: true, first: false }
-      // A pause's update carries a new answer (#1540): one that is a report of its own wakes, as the first pause does
-      const first = !pause || input.update !== undefined || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
-      const startedAt = input.startedAt ?? this.opts.turn?.(row.recipient)?.startedAt
-      const covers = pause || startedAt === undefined || task.kind !== 'task'
-        ? []
-        : this.records
-            .watchedFrom(task.sender)
-            .filter((x) => x.recipient === row.recipient && x.messageId !== taskId && x.deliveredAt !== null && x.deliveredAt < startedAt && this.records.message(x.messageId)?.kind === 'task')
-            .map((x) => x.messageId)
+      const first = !pause || !this.records.reportsOn(taskId).some((r) => r.facts.outcome === 'paused' || r.facts.outcome === 'waiting')
       const facts: MailFacts = {
         outcome: input.outcome,
         about: { session: row.recipient },
@@ -407,10 +411,9 @@ export class MessageService {
         ...(input.reason ? { reason: input.reason } : {}),
         ...(input.paused ? { paused: input.paused } : {}),
         ...(input.waitingOn ? { waitingOn: input.waitingOn } : {}),
-        ...(input.update !== undefined ? { update: input.update } : {}),
-        ...(input.personNote ? { personNote: true } : {}),
+        ...(input.personSince ? { personSince: true } : {}),
+        ...(input.after ? { after: true } : {}),
         ...(input.answer ? { answer: input.answer } : {}),
-        ...(covers.length > 0 ? { covers } : {}),
         ...(first ? {} : { quiet: true }),
       }
       const stored = this.centralu(task.sender, {
@@ -418,29 +421,20 @@ export class MessageService {
         body: input.body,
         facts,
         replyTo: taskId,
-        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}${input.update !== undefined ? `:update:${input.update}` : ''}`,
+        dedupeKey: `report:${task.sender}:${taskId}:${input.outcome}:${input.paused ?? input.waitingOn ?? 0}`,
       })
       if (!stored.duplicate && !pause) {
-        for (const id of [taskId, ...covers]) this.records.settle(id, row.recipient, 'reported', now)
+        this.records.settle(taskId, row.recipient, 'reported', now)
       }
       return { message: stored, duplicate: stored.duplicate, first }
     })
   }
 
-  /** A task the old report paths no longer owe is settled `reported` with no report: the old path told its sender (§9.5). Returns the rows settled */
-  settleReported(taskId: string, recipient: string): number {
-    return this.run(() => (this.records.message(taskId)?.kind === 'task' ? this.records.settle(taskId, recipient, 'reported', this.now()) : 0))
-  }
-
-  /**
-   * The work handed on in the child's current work for `owner` that is still owed (§9.4): task rows caused by the child's turn's task from `owner`
-   * (else its newest unsettled task from `owner`), not settled, not held, and still owed by the old report paths (`oldOwes`, §9.5)
-   */
-  waitingOn(owner: string, child: string, current: string | null, oldOwes: (sender: string, recipient: string) => boolean): number {
-    const work = current === null ? undefined : this.records.message(current)
-    const task = work?.kind === 'task' && work.sender === owner ? work : this.records.newestTask(owner, child)
-    // A task not delivered yet is owed too: the old path marks its report when the delivery gives it (§9.7), so until then only the row says so
-    return task ? this.records.handedOn(task.id).filter((r) => !r.delivered || oldOwes(r.sender, r.recipient)).length : 0
+  /** A session at rest answers its open tasks with its last response (§10.6.3, `answerAtRest`): returns the tasks answered */
+  lastResponse(recipient: string, last: LastResponse): string[] {
+    const party = parseAddress(recipient)
+    const personAt = party?.kind === 'session' ? this.opts.personSaid?.(party.sessionId)?.ts : undefined
+    return this.run(() => answerAtRest(this.records, recipient, last, (id, input) => this.report(id, input), personAt))
   }
 
   /**
@@ -567,8 +561,8 @@ export class MessageService {
     for (const { row, message } of this.records.pendingFor(recipient, now, opts.again === true)) {
       const request = this.isRequest(message, recipient)
       if (message.sender === recipient || this.reach.mayWrite(message.sender, recipient, request) !== null || opts.skip?.(message, row)) continue
-      // Step 3 of #1948 removes the task filter, when a task's end is its reply rather than the end of a turn
-      if (opts.joining && (message.kind === 'task' || (toAssistant && this.askerOf(message, recipient) !== undefined))) continue
+      // A request to the Assistant never joins its running turn: one asker a turn (docs/plans/turn-owned-by-no-one.md §4.2)
+      if (opts.joining && toAssistant && this.askerOf(message, recipient) !== undefined) continue
       if (this.reminderSettled(message, recipient)) {
         this.records.markRead(recipient, [message.id], now)
         continue
@@ -741,9 +735,12 @@ export class MessageService {
       for (const { row, senderProject } of this.records.heldPolicy()) {
         const m = senderProject === projectId ? this.records.message(row.messageId) : undefined
         if (!m) continue
-        // Let go, an unread row is delivered as the mail it is, also one an older build told of quietly while it held it (§6.3)
+        // Let go, an unread row is delivered as the mail it is, also one an older build told of quietly while it held it (§6.3). What it answers
+        // (`replyAnswers`) is answered now; a task's answer is the reply its send marked on the task's row while it was held (`answerHeld`)
         this.records.letGo(row.recipient, [m.id])
-        if (m.replyTo !== null) this.records.settle(m.replyTo, m.sender, 'answered', now, m.id)
+        const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
+        const marked = target !== undefined && this.records.recipient(target.id, m.sender)?.answerId === m.id
+        if (target && replyAnswers(target, { needsReply: m.needsReply, answer: marked })) this.records.settle(target.id, m.sender, 'answered', now, m.id)
         pokes.add(row.recipient)
       }
       const refused = this.records.refusedRecords(projectId)

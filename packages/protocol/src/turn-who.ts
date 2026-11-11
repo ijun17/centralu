@@ -3,7 +3,8 @@ import { z } from 'zod'
 /**
  * Whose a turn was, said on the event that ends it (#1377): `person` when the person's own message started it, `work`
  * otherwise (the caller's message, an app's, Centralu's, or the tool starting it when the work's background tasks end);
- * `wrote`: the person wrote into a turn of the work and the tool took it in; `added`: they chose to add it to the task.
+ * `wrote`: the person wrote into a turn of the work and the tool took it in. A host before #1948 may also say `added` (the
+ * composer's "Add to the task"), which no reader takes any more.
  * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
  * order of the messages. Absent from a host that does not say.
  * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
@@ -13,7 +14,6 @@ import { z } from 'zod'
 export const TurnWho = z.object({
   by: z.enum(['person', 'work']),
   wrote: z.literal(true).optional(),
-  added: z.literal(true).optional(),
   /** An update of Centralu cut this turn and Centralu continued it (#1966): the report of its end says so */
   cut: z.literal(true).optional(),
   compaction: z.literal(true).optional(),

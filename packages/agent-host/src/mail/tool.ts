@@ -63,7 +63,7 @@ export type MailToolHost = {
 
 /**
  * A session's mailbox through the version-1 tool (§11.3, `mapV1`): every old action runs on the message service. `reply {thread}` answers a message
- * (`needsReply` false unless `kind: "question"`), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
+ * (`needsReply` false unless `kind: "question"`; a task only with `kind: "answer"`, docs/plans/mailbox.md §10.6.3), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
  * (`needsReply` true unless `kind: "note"`), and `update` and `close` are gone with threads. `thread` names a message id, or a legacy thread id, which
  * means the newest message of that thread sent to the caller. The address a session acts as is the host's, never one the call names (§7.1).
  *
@@ -189,7 +189,7 @@ export class MailTool {
       }
       case 'reply': {
         const id = this.target(me.address, this.need(a.thread, 'thread'))
-        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}) })
+        const sent = this.service.send(me.address, { to: [], replyTo: id, text: this.need(a.text, 'text'), needsReply: a.kind === 'question', ...(a.kind === 'answer' ? { answer: true } : {}), ...(a.urgent ? { urgent: true } : {}), ...(a.cite ? { cite: true } : {}), ...(a.choices ? { choices: a.choices } : {}) })
         return this.sent(sent)
       }
       case 'find':
@@ -291,7 +291,9 @@ export class MailTool {
     const lines = [`Sent ${m.id} to ${name}${name === to ? '' : ` (${to})`}.`]
     if (r.notCited) lines.push(`Centralu could not check the citation: ${r.notCited}, so the Assistant reads this request as your own words. Cite only a message of the person's, from the last ${CITE_MS / 60_000} minutes, that asked for this.`)
     if (r.cited) lines.push(`Centralu checked the citation: the Assistant reads the person's message ${r.cited.seq} of this session with your request.`)
-    if (answered) {
+    // A reply to a task answers it only marked as its answer (`replyAnswers`); otherwise the task stays open and the last response answers it
+    if (answered?.kind === 'task' && !r.answers) lines.push(`Task ${answered.id} stays open: reply with kind="answer" to answer it, or your last response will.`)
+    else if (answered) {
       // A request its sender withdrew (the person closed the chain) is answered anyway, and the answer says so
       const withdrawn = this.records.recipient(answered.id, m.sender)?.settled === 'withdrawn'
       lines.push(`It answers ${answered.id} from ${this.reach.labelOf(answered.sender)}${withdrawn ? ` (${answered.sender === PERSON ? 'the person' : 'its sender'} withdrew it)` : ''}.`)

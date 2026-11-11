@@ -4,7 +4,7 @@ import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import { crossWorld, type CrossAdapter, type CrossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
 import { runCentraluTool } from './centralu-tools.js'
-import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * What a child session costs the machine (#686, owner decision 2026-10-15):
@@ -87,6 +87,7 @@ describe('child sessions and the machine (#686)', () => {
     it('queues a start_agent start below the floor, with a handle and a notice, and starts it when memory recovers', async () => {
       gate()
       allowProject()
+      wireHostMail(w.mgr, w.store)
       const s = await session()
       free = 1 * GB
       const r = await w.mgr.startAgent(s, { task: 'refactor the parser', wait: false, lsp: true })
@@ -113,10 +114,13 @@ describe('child sessions and the machine (#686)', () => {
       // The choice made at the call is the child's
       expect(handleOf(child).opts.noCodeIntelligence).toBeUndefined()
       expect(w.store.children.listAgentStartRequests()).toEqual([])
-      // The handle now leads to the child, and the caller is told when its turn ends
+      // The handle now leads to the child, and the caller's task is answered by its last response (docs/plans/mailbox.md §10.6.3)
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
       handleOf(child).answer('parser refactored')
-      await w.until(() => handleOf(s).sent.some((t) => t.includes(`sourceSessionId: ${child}`)))
+      const read = mailReader(w.store)
+      const answers = () => read.tasks(addressOf(s), child).flatMap((t) => read.reportsOn(t.id)).map((x) => x.facts.answer)
+      await w.until(() => answers().length > 0)
+      expect(answers()).toEqual(['parser refactored'])
     })
 
     it('starts at once while memory is above the floor', async () => {

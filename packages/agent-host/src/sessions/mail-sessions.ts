@@ -2,16 +2,16 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import type { BusyAnswer } from '../adapters/contract.js'
 import { cardOrTurn, errorMessage, isAssistantKind } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
-import type { AnswerGiven, ReportDraft, ReportedAs } from '../mail/delegation.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { HandedOverMessage } from '../mail/messages.js'
-import { OLD_PATH_WAIT_MS, type StopTold, type StopWhy } from '../mail/stop-notices.js'
+import type { StopTold, StopWhy } from '../mail/stop-notices.js'
 import type { MailToolArgs } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import type { TurnInputs } from '../mail/delivery.js'
 import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import type { PersonReportDraft } from './child-ownership.js'
-import type { ChildReports } from './child-reports.js'
+import type { ChildReports, SessionLastResponse } from './child-reports.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
 import type { SelfCompaction } from './self-compaction.js'
@@ -24,8 +24,8 @@ export type MailHooks = {
   sessionGone(sessionId: string): void
   /** A session stopped without answering (docs/plans/mailbox.md "The stop notice"): the senders of the questions it left unanswered are told once */
   stopped?(sessionId: string, why: StopWhy, opts?: StopTold): void
-  /** An older report path held by `stopped` (its `held`) ended: `told`, it really told `senderId` of the stop; else the stop notice tells it now */
-  oldPathEnded?(sessionId: string, senderId: string, told: boolean): void
+  /** This host leaves, with these sessions in a turn: what an earlier build that may take over reads of their open tasks is written (`leaveForEarlierBuild`) */
+  leaving?(inTurn: readonly string[]): void
   /**
    * A handoff moves the original's mail to the successor (mailbox §7.7, `MessageService.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids). Run inside the transaction of the children's move; it throws to undo both
@@ -45,25 +45,29 @@ export type MailHooks = {
   tool?(sessionId: string, args: MailToolArgs): Promise<{ text: string; isError?: boolean }>
   /** A child on a linked machine is gone with notes the hub held for it (#2114): they are released with its other mail, and their sender told */
   linkedGone?(childId: string, callerId: string, notes: readonly string[]): void
-  /** A session gave another one work by a tool the host delivered it by (§8.1): the mailbox writes it down */
-  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): void
+  /** A session gave another one work by a tool the host delivers it by (§8.1): the mailbox writes it down. Returns how to withdraw it, when it could not go in */
+  delegated?(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void
   /** A send to a session that cannot take it now: a task from the caller, not delivered yet (docs/plans/mailbox.md §10.6.2); returns its id */
   sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string): string
   /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
   withdrawTasks?(callerId: string, childId: string): number
-  /** How many threads a session handed on in the work it does for another are still going (§6) */
-  waitingOn?(ownerId: string, childId: string): number
-  /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
+  /** A script or the RPC started a session with a first message: the work is the person's (§8.1), a task answered as any task is */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
     withdrawn(sessionId: string): void
-    owes(sessionId: string): boolean
-    report(sessionId: string, draft: PersonReportDraft): boolean
   }
   /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
   finishedWith?(callerId: string, childId: string): void
-  /** A turn of delegated work ended, or the person took the session over (§6, §8.1): the report goes in the thread, and the mailbox tells the owner when it can */
-  report?(ownerId: string, childId: string, draft: ReportDraft): ReportedAs
+  /** A session at rest answers the tasks it did not reply to with its last response (docs/plans/mailbox.md §10.6.3); `body` is for a session id, or null for the person */
+  lastResponse?(sessionId: string, last: SessionLastResponse): void
+  /** The sessions with a task open between them and the session (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's), or its own tasks' receivers (`from`) */
+  openTasks?(sessionId: string, side: 'to' | 'from'): string[]
+  /** What the tool said of the inputs given it (`MailDelivery.turnInputs`): which the turn that ended took, or which the turn opening runs for */
+  turnInputs?(sessionId: string, turn: TurnInputs): void
+  /** A handoff moves a child: the original's open tasks to it become the successor's (`taskRepointer`), inside the move's transaction */
+  repointTasks?(fromSessionId: string, toSessionId: string, childId: string): void
+  /** The Assistant's turn ended as a turn does: each session whose request it carried is told what it gets back, and those requests are settled (S12, §7.6) */
+  requestTurnEnded?(assistantId: string): void
   /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
   answered?(callerId: string, childId: string, how?: AnswerGiven): void
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
@@ -89,7 +93,7 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | '
   readonly tools: SessionTools
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
-  /** Whether the session's tool takes input into the turn it is running (`SessionEventsHost.joinsRunningTurn`) */
+  /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
   joinsRunningTurn(sessionId: string): boolean
   /** A compact Centralu sent and that is not over, during which no mail joins a turn */
   readonly selfCompaction: Pick<SelfCompaction, 'compacts'>
@@ -109,11 +113,6 @@ export class MailSessionsView {
   /** A child this host started on a linked machine, by its name there (#2067): mail refuses it as elsewhere, not as gone */
   onLinkedMachine(sessionId: string): { name: string } | undefined {
     return this.host.linkedChild(sessionId)
-  }
-
-  /** Whether the old report paths still owe `ownerId` a report of `childId` (mailbox §9.5, D18) */
-  oldOwes(ownerId: string, childId: string): boolean {
-    return this.host.children.oldOwes(ownerId, childId)
   }
 
   /**
@@ -140,43 +139,53 @@ export class MailSessionsView {
     }
   }
 
-  /**
-   * The older report paths of a stop whose notices `mailStopped` held for them (`held`), each resolving to the session it really told: once all have
-   * ended, those they told are marked told and the rest get the stop notice (docs/plans/turn-owned-by-no-one.md §4.1)
-   */
-  mailStopTold(sessionId: string, held: readonly string[], sends: readonly Promise<string | undefined>[]): void {
-    if (held.length === 0) return
-    // A path that does not end within the wait counts as not having told: a double notice at worst, never none
-    const bounded = sends.map((send) =>
-      Promise.race([
-        send,
-        new Promise<undefined>((resolve) => {
-          const timer = setTimeout(() => resolve(undefined), OLD_PATH_WAIT_MS)
-          timer.unref?.()
-        }),
-      ]),
-    )
-    void Promise.allSettled(bounded).then((ended) => {
-      const told = new Set(ended.flatMap((r) => (r.status === 'fulfilled' && r.value !== undefined ? [r.value] : [])))
-      for (const who of held) this.mailOldPathEnded(sessionId, who, told.has(who))
-    })
+  /** This host leaves (`HostTenure.disposeAll`): the sessions still in a turn, for an earlier build that may take over (`MailHooks.leaving`). Never throws */
+  mailLeaving(inTurn: readonly string[]): void {
+    try {
+      this.hooks?.leaving?.(inTurn)
+    } catch (e) {
+      console.error(`[mail] the marks for an earlier build could not be written (${errorMessage(e)})`)
+    }
   }
 
-  mailOldPathEnded(sessionId: string, senderId: string, told: boolean): void {
+  /** A session at rest answers its open tasks with its last response (`MailHooks.lastResponse`). Never throws: a turn's end must not fail for it */
+  mailLastResponse(sessionId: string, last: SessionLastResponse): void {
     try {
-      this.hooks?.oldPathEnded?.(sessionId, senderId, told)
+      this.hooks?.lastResponse?.(sessionId, last)
     } catch (e) {
-      console.error(`[mail] ${sessionId.slice(0, 8)}: its stop could not be told to ${senderId.slice(0, 8)} (${errorMessage(e)})`)
+      console.error(`[mail] ${sessionId.slice(0, 8)}: its last response could not answer its tasks (${errorMessage(e)})`)
+    }
+  }
+
+  /** The Assistant's turn ended as a turn does (`MailHooks.requestTurnEnded`). Never throws */
+  mailRequestTurnEnded(assistantId: string): void {
+    try {
+      this.hooks?.requestTurnEnded?.(assistantId)
+    } catch (e) {
+      console.error(`[mail] the end of the Assistant's turn could not be told to its askers (${errorMessage(e)})`)
+    }
+  }
+
+  /** A session this start found at rest answers its open tasks once settled (`ChildReports.settleAtRest`) */
+  settleAtRest(sessionId: string): void {
+    this.host.reports.settleAtRest(sessionId)
+  }
+
+  /** What the tool said of the mail given it at a turn's end or opening (`MailHooks.turnInputs`). Never throws: a turn must not fail for it */
+  mailTurnInputs(sessionId: string, turn: TurnInputs): void {
+    try {
+      this.hooks?.turnInputs?.(sessionId, turn)
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: what its turn took of its mail could not be filed (${errorMessage(e)})`)
     }
   }
 
   useMail(hooks: MailHooks): void {
     this.hooks = hooks
     this.host.children.onDelegated(hooks.delegated ? (callerId, childId, origin, task) => hooks.delegated?.(callerId, childId, origin, task) : undefined)
-    this.host.children.onWaitingOn(hooks.waitingOn ? (ownerId, childId) => hooks.waitingOn?.(ownerId, childId) ?? 0 : undefined)
     this.host.children.onPersonWork(hooks.personWork)
+    this.host.children.onOpenTasks(hooks.openTasks ? (id, side) => hooks.openTasks?.(id, side) ?? [] : undefined)
     this.host.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
-    this.host.reports.useMail(hooks.report ? (ownerId, childId, draft) => hooks.report?.(ownerId, childId, draft) ?? 'none' : undefined)
     this.host.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
     this.host.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
@@ -186,41 +195,12 @@ export class MailSessionsView {
     return {
       receiver: (id) => this.mailReceiver(id),
       deliver: async (id, input, late) => {
-        /*
-         * A turn the mail starts is the work of the thread it carries (§6): its end is reported to the thread's owner like any turn of work that
-         * session gave, so a report is owed from here. A session already owing the same owner keeps its mark (the turn is that work's); one owing
-         * another owner keeps that mark and its pause, and this turn is reported to its own owner when it ends (#1474). A mark or a note made
-         * here goes if the input was not taken
-         */
-        const owner = input.quiet ? undefined : input.reportTo
-        const known = owner !== undefined && this.host.meta.has(owner)
-        const marked = known && !this.host.children.awaitingReport.has(id)
-        const other = known && this.host.children.awaitingReport.has(id) && this.host.children.awaitingReport.get(id) !== owner
-        if (marked) this.host.children.markReport(id, owner)
-        if (other) this.host.children.markMailTurn(id, owner)
-        const unmark = () => {
-          if (marked && this.host.children.awaitingReport.get(id) === owner) this.host.children.clearReport(id)
-          if (other) this.host.children.clearMailTurn(id, owner)
-        }
-        try {
-          await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, (e) => {
-            unmark()
-            late?.(e)
-          })
-        } catch (e) {
-          unmark()
-          throw e
-        }
+        await this.host.events.deliverMail(id, input, { leaving: () => this.host.closing, atRest: () => this.takesAsPlanned(id, input.joins === true), wanted: () => input.wanted?.() ?? true }, late)
       },
       note: (id, text) => {
         if (this.host.meta.has(id)) this.host.events.onEvent({ type: 'notice', sessionId: id, level: 'info', from: 'Centralu', label: 'mail', text })
       },
     }
-  }
-
-  /** The session's report to `ownerId` is held over its own background work (`pausedReports`) */
-  pausedFor(sessionId: string, ownerId: string): boolean {
-    return this.host.children.awaitingReport.get(sessionId) === ownerId && this.host.children.pausedReports.has(sessionId)
   }
 
   /**
@@ -298,10 +278,15 @@ export class MailSessionsView {
     return r.kind === 'ready' && (r.joins === true) === joins
   }
 
-  /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.stoppedTurnAnswer`, at most 600 characters), or null when it said none */
+  /** A session whose seat cannot read mail is told of a stop the old way (`ChildReports.relayStop`, mailbox.md §10.6.3) */
+  relayStop(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void {
+    this.host.reports.relayStop(receiverId, stoppedId, why, told)
+  }
+
+  /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.turnWords`, at most 600 characters), or null when it said none */
   stoppedWords(sessionId: string): string | null {
     if (!this.host.meta.has(sessionId)) return null
-    return this.host.reports.stoppedTurnAnswer(sessionId).preview || null
+    return this.host.reports.turnWords(sessionId).preview || null
   }
 
   /**

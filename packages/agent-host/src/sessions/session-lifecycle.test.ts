@@ -5,6 +5,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * Races in the session lifecycle — cases where something else lands **in the middle of** swapping
@@ -372,68 +373,65 @@ describe('a setting changed while waking or restarting still reaches the process
  * A report the Assistant asked for (#166). Neither adapter emits turn_complete for a failed
  * turn, only error — so the manager, which used to report only on turn_complete, never reported
  * the failure, and the leftover flag then reported an unrelated later turn as "finished."
+ * Now the task is the request (docs/plans/mailbox.md §10.6.3): its answer is a report on it, a stop is the stop notice's.
  */
 describe('a report goes exactly once, however the turn ends (#166)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const handleOf = (id: string) => claude.created.filter((h) => h.sessionId === id).at(-1)!
 
   async function setup() {
+    // The host's mail, as main.ts wires it
+    wireHostMail(mgr, store)
+    const read = mailReader(store)
     const worker = await newSession()
     const orc = await mgr.assistant()
     const tools = claude.asked.find((o) => o.sessionId === orc.id)!.centraluTools!
-    /** The reports stored in the Assistant's conversation — the text the UI and the record read */
+    /** Centralu's reports to the Assistant on the tasks it gave the worker: Centralu's words, which the UI and the record read */
     const reports = () =>
-      store
-        .messages.loadMessages(orc.id, 100)
-        .map((r) => r.payload as { text?: string; from?: { sessionId: string } })
-        .filter((p) => p.from?.sessionId === worker)
-        .map((p) => p.text ?? '')
-    return { worker, tools, w: handleOf(worker), reports }
+      read
+        .tasks(addressOf(orc.id), worker)
+        .flatMap((t) => read.reportsOn(t.id))
+        .map((r) => r.body)
+    /** The Assistant's tasks to the worker that a stop notice told it went unanswered */
+    const unanswered = () =>
+      read.between('centralu', addressOf(orc.id), 'notice').flatMap((n) => (n.facts.unanswered ?? []).filter((u) => u.recipient === addressOf(worker)).map((u) => [u.id, u.why]))
+    return { worker, tools, w: handleOf(worker), reports, unanswered, tasks: () => read.tasks(addressOf(orc.id), worker) }
   }
 
-  it('sends one failure report for a failed turn, and does not report the unrelated turn after it', async () => {
-    const { worker, tools, w, reports } = await setup()
+  it('a failed turn is told once, by the stop notice; the next turn that ends at rest answers that task, and none after it does again', async () => {
+    const { worker, tools, w, reports, unanswered, tasks } = await setup()
     await tools.sendToSession(worker, 'fix the build', true)
     w.emit({ type: 'error', sessionId: worker, error: { code: 'internal', message: 'API Error: 400 bad model', retryable: true } })
     await tick()
 
-    expect(reports()).toHaveLength(1)
-    expect(reports()[0]).toContain('failed')
-    expect(reports()[0]).toContain('API Error: 400 bad model')
-    expect(reports()[0]).not.toContain('finished')
+    const [task] = tasks()
+    expect(unanswered()).toEqual([[task!.id, 'error']])
+    expect(reports()).toEqual([])
 
-    // A turn the person spoke to directly, and a turn assigned without asking for a report, are not reported
+    // The task stays open after the stop: the turn the person continues it with answers it, once (stop-notices.ts `sessionsStopped`)
     await rpc('agents.send', { sessionId: worker, text: 'something asked directly' })
     w.emit({ type: 'turn_complete', sessionId: worker })
+    await tick()
+    expect(reports()).toHaveLength(1)
+    // A turn assigned without asking for a report is not reported, nor is the answered task answered again
     await tools.sendToSession(worker, 'keep it quiet', false)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toHaveLength(1)
+    expect(unanswered()).toHaveLength(1)
   })
 
   /*
    * #1233: words sent while that turn still runs are a note into the same work, and keep the report asked for. They
    * used to clear it (this test said so), and the Assistant never heard the end of work it had asked to hear of.
    */
-  it('keeps the report asked for when more words go into the running turn without one', async () => {
+  it('keeps the task asked for when more words go into the running turn without one: its answer comes once', async () => {
     const { worker, tools, w, reports } = await setup()
     await tools.sendToSession(worker, 'let me know when it is done', true)
     await tools.sendToSession(worker, 'no, do this instead', false)
     w.emit({ type: 'turn_complete', sessionId: worker })
     await tick()
     expect(reports()).toHaveLength(1)
-  })
-
-  it('clears a report request still standing when a new task goes to the session at rest without one — the new instruction replaces it', async () => {
-    const { worker, tools, reports } = await setup()
-    // A mark that outlived its turn, as one paused over background work does (#721)
-    const children = (mgr as unknown as { children: { markReport(id: string, caller: string): void; awaitingReport: ReadonlyMap<string, string> } }).children
-    children.markReport(worker, (await mgr.assistant()).id)
-    await tools.sendToSession(worker, 'a new task, quietly', false)
-    expect(children.awaitingReport.has(worker)).toBe(false)
-    handleOf(worker).emit({ type: 'turn_complete', sessionId: worker })
-    await tick()
-    expect(reports()).toEqual([])
   })
 
   it('reports a completed turn as ended, not as a finished piece of work (#1902)', async () => {

@@ -10,7 +10,6 @@ import type { AgentConsents } from './agent-consents.js'
 import type { Delegation } from './child-ownership.js'
 import type { AgentStartRecord, AgentStartRequest, LowMemory } from './agent-start-record.js'
 import type { DelegationHost } from './delegation-host.js'
-import type { DelegationWaits } from './delegation-waits.js'
 import { bytesText } from '../bytes-text.js'
 import type { MemoryShortfall } from './memory-gate.js'
 import { FILL, namedCall } from './tool-seats.js'
@@ -28,9 +27,6 @@ function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
   return r as AgentStartRequest
 }
 
-/** What a standing request reaches of the delegation flow (`DelegationFlow`): the answer for a child that started */
-export type StandingRequestDelegations = Pick<DelegationWaits, 'agentWorking'>
-
 /** What a standing request reaches of the rest of start_agent (`AgentStartFlow`): the child's start, the card read as consent */
 export type StandingRequestSteps = Pick<AgentConsents, 'agentConsentFrom'> & {
   createAgentChild(
@@ -47,12 +43,11 @@ export type StandingRequestSteps = Pick<AgentConsents, 'agentConsentFrom'> & {
  * A start_agent request that outlives its call (#673, #686): kept while its card stands or memory is short, in memory
  * and in the store, ended once with the reason told, withdrawn, resumed after a restart, and started once memory is
  * free. Moved out of `AgentStartFlow` as it was (#428); what it reaches of the rest of start_agent is
- * `StandingRequestSteps`, of the delegation flow `StandingRequestDelegations`, of the manager `DelegationHost`.
+ * `StandingRequestSteps`, of the manager `DelegationHost`.
  */
 export class AgentStartRequests {
   constructor(
     private readonly host: DelegationHost,
-    private readonly flow: StandingRequestDelegations,
     private readonly starts: StandingRequestSteps,
   ) {}
 
@@ -217,10 +212,8 @@ export class AgentStartRequests {
     const r = project
       ? await this.starts.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset, req.requestId)
       : { done: { ok: false as const, error: "This session's project is no longer registered." } }
-    if ('key' in r) {
-      this.endAgentStart(req.requestId, { childId: r.d.sessionId })
-      this.flow.agentWorking(r.d)
-    } else {
+    if ('key' in r) this.endAgentStart(req.requestId, { childId: r.d.sessionId })
+    else {
       const error = r.done.ok ? 'No session was created.' : r.done.error
       this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
     }

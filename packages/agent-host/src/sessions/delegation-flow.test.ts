@@ -6,8 +6,9 @@ import { sessionLiveDefaults, type BackgroundTask, type NormalizedEvent, type Se
 import type { RoutedCard, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { AgentRunWait } from './app-agents.js'
-import { ChildOwnership, pausedReportKey, type Delegation } from './child-ownership.js'
+import { ChildOwnership, type Delegation } from './child-ownership.js'
 import { DelegationFlow, type DelegationHost } from './delegation-flow.js'
 import { ASSISTANT_PLACE } from './start-agent-terms.js'
 
@@ -135,8 +136,9 @@ describe('the place a start holds', () => {
 
 /*
  * The waits on a delegation's turn, and agent_session's send and stop, over the real ownership: what a regression there
- * loses is the child's answer or its report, or it leaves a wait, a turn link or a delegation behind that misroutes the
- * next one. The child's turn is driven as the manager drives it, through the wait in `agentRuns`.
+ * loses is the child's answer, or the call answers the task when it should not (docs/plans/mailbox.md §10.6.3), or it leaves a wait,
+ * a turn link or a delegation behind that misroutes the next one. The child's turn is driven as the manager drives it, through the
+ * wait in `agentRuns`.
  */
 describe("a child's turn and the call waiting on it", () => {
   /** The host is quitting (`disposeAll`) */
@@ -145,7 +147,8 @@ describe("a child's turn and the call waiting on it", () => {
   let cards: RoutedCard[] = []
   let raiseCard: () => void = () => {}
   let interrupted: string[] = []
-  let reported: { sessionId: string; type: string }[] = []
+  /** What the calls said they answered of a caller's task (`ChildOwnership.answered`): `how` absent, the task is left open */
+  let answered: { callerId: string; childId: string; how?: AnswerGiven }[] = []
   let agentRuns: Map<string, AgentRunWait>
   let readGrants: Map<string, Set<string>>
   let root: string
@@ -155,7 +158,8 @@ describe("a child's turn and the call waiting on it", () => {
     running = []
     cards = []
     interrupted = []
-    reported = []
+    answered = []
+    children.onAnswered((callerId, childId, how) => void answered.push({ callerId, childId, ...(how ? { how } : {}) }))
     agentRuns = new Map()
     readGrants = new Map()
     root = tempRoot('cc-delegation-')
@@ -188,10 +192,10 @@ describe("a child's turn and the call waiting on it", () => {
       untilCard: () => ({ asked: new Promise<'asked'>((resolve) => (raiseCard = () => resolve('asked'))), done: () => {} }),
       ownTasksRunning: () => running,
       toolProfileOf: () => 'scoped',
-      pauseReport: (id, tasks) => children.pauseReport(id, tasks),
-      reportBackIfAwaited: async (sessionId, ending) => void reported.push({ sessionId, type: ending.type }),
       refusesDelegation: () => null,
       withdrawTasks: () => 0,
+      // No compaction with a next step: a turn's end is the work's (#2164)
+      selfCompaction: { goesOn: () => false },
     }
     Object.defineProperties(given, Object.getOwnPropertyDescriptors(extra))
     return new DelegationFlow(hostWith(given))
@@ -206,7 +210,7 @@ describe("a child's turn and the call waiting on it", () => {
   /** What an outcome's handlers start runs on resolved promises only */
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 
-  it('a child that finished before the call waits is read once: its answer, the paths it names, and no report owed', async () => {
+  it('a child that finished before the call waits is read once: its answer, the paths it names, and its task answered by the call', async () => {
     mkdirSync(join(root, 'src'))
     writeFileSync(join(root, 'src', 'a.ts'), 'export {}\n')
     const inside = join(root, 'src', 'a.ts')
@@ -214,22 +218,19 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     expect(children.turnOwners.get('child')?.callerId).toBe('caller')
-    // Armed as a call past its bound arms it: the call that reads the answer takes it, so it does not arrive twice
-    children.markReport('child', 'caller')
     finishes(`Done. See ${inside} and ${away}.`)
     const r = await flow.awaitAgent('caller>child', d)
     expect(r).toMatchObject({ ok: true, state: 'done', sessionId: 'child', answer: expect.stringContaining('Done.'), readable: [inside], outside: [away], cleanUp: true })
     expect(readGrants.get('caller')).toEqual(new Set([inside]))
     await flush()
-    expect(store.children.listReportMarks()).toEqual([])
+    // The call read the answer: it answers the task, so no last response answers it again
+    expect(answered).toEqual([{ callerId: 'caller', childId: 'child', how: { ok: true, text: `Done. See ${inside} and ${away}.` } }])
     expect(children.delegations.size).toBe(0)
     expect(children.turnOwners.has('child')).toBe(false)
     expect(agentRuns.size).toBe(0)
-    // A child's turn that completed was reported as it ended, by the manager: not again from here
-    expect(reported).toEqual([])
   })
 
-  it('a turn that fails mid-way answers that it did not finish, and its failure goes to whoever is owed the report', async () => {
+  it('a turn that fails mid-way answers that it did not finish, and the call records that it told its caller', async () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const waiting = flow.awaitAgent('caller>child', d)
@@ -240,7 +241,7 @@ describe("a child's turn and the call waiting on it", () => {
       error: '"Child" [child] did not finish: the agent\'s turn failed: the CLI crashed. Tell the person, or give it a clearer task.',
     })
     await flush()
-    expect(reported).toEqual([{ sessionId: 'child', type: 'error' }])
+    expect(answered).toEqual([{ callerId: 'caller', childId: 'child', how: { ok: false, error: expect.any(String) } }])
     expect(children.delegations.size).toBe(0)
     expect(children.turnOwners.has('child')).toBe(false)
   })
@@ -258,15 +259,16 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.delegations.size).toBe(0)
   })
 
-  it('past the bound the call answers "working", and the report it promises is stored', async () => {
+  it('past the bound the call answers "working", and leaves the task open for the child to answer', async () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     expect(await flow.awaitAgent('caller>child', d, undefined, false, 1)).toMatchObject({ ok: true, state: 'working', reported: true })
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(answered).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(children.delegations.get('caller>child')).toBe(d)
   })
 
-  it('a card raised during the wait answers "asking", with the report armed for the turn going on without the call', async () => {
+  it('a card raised during the wait answers "asking", and leaves the task open for the turn going on without the call', async () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const waiting = flow.awaitAgent('caller>child', d)
@@ -274,7 +276,7 @@ describe("a child's turn and the call waiting on it", () => {
     cards = [card]
     raiseCard()
     expect(await waiting).toMatchObject({ ok: true, state: 'asking', sessionId: 'child', cards: [card] })
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(answered).toEqual([])
     expect(d.settled).toBe(false)
   })
 
@@ -282,7 +284,7 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const original = flow.awaitAgent('caller>child', d)
-    children.moveOwner('caller', 'heir', { sessions: ['child'], armReports: [], starts: [] }, () => {})
+    children.moveOwner('caller', 'heir', { sessions: ['child'], starts: [] }, () => {})
     expect(await original).toEqual({
       ok: false,
       error:
@@ -300,7 +302,7 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.delegations.size).toBe(0)
   })
 
-  it("a turn that ends with the child's own work still running holds the report for that work's end (#721)", async () => {
+  it("a turn that ends with the child's own work still running leaves the task open for that work's end (#721)", async () => {
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
     const waiting = flow.awaitAgent('caller>child', d)
@@ -310,8 +312,8 @@ describe("a child's turn and the call waiting on it", () => {
     expect(r).toMatchObject({ ok: true, state: 'done', answer: 'verify is running in the background', notice: expect.stringContaining('pnpm verify') })
     // No clean-up line: the work is not over
     expect(r).not.toHaveProperty('cleanUp')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
-    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([{ id: 'bg-verify', description: 'pnpm verify' }])
+    // Read, but not answered: the child's last response answers the task once that work ends
+    expect(answered).toEqual([{ callerId: 'caller', childId: 'child' }])
   })
 
   // #850: the stop it names is one the caller can make; the Assistant reaches agent_session only through centralu_run
@@ -326,35 +328,17 @@ describe("a child's turn and the call waiting on it", () => {
     })
   })
 
-  it("new work from the same caller ends its pause; another caller's pause stands", () => {
-    const flow = flowWith()
-    children.markReport('child', 'caller')
-    children.pauseReport('child', [{ id: 'bg-verify', description: 'pnpm verify' }])
-    flow.startDelegation('caller>child', 'caller', 'child', target(), true)
-    expect(children.pausedReports.has('child')).toBe(false)
-    expect(store.children.listReportMarks()).toEqual([])
-
-    meta.set('other', session('other', { name: 'Other', askedBy: 'someone' }))
-    children.markReport('other', 'someone')
-    children.pauseReport('other', [{ id: 'bg-dev', description: 'dev server' }])
-    flow.startDelegation('caller>other', 'caller', 'other', target(), true)
-    expect(children.pausedReports.get('other')).toEqual([{ id: 'bg-dev', description: 'dev server' }])
-    expect(children.awaitingReport.get('other')).toBe('someone')
-  })
-
   it("a quitting host keeps the turn's link for the next host; one that is not quitting lets it go", async () => {
     const flow = flowWith()
     // A quit's failed wait ends no link (#1618): the next start tells the turn stopped, or continues it after an update, for its caller
     meta.set('cut', session('cut', { askedBy: 'caller' }))
     const quit = flow.startDelegation('caller>cut', 'caller', 'cut', target(), true)
-    children.markReport('cut', 'caller')
     quitting = true
     quit.wait.fail(new Error('Centralu is shutting down'))
     await quit.outcome
     await flush()
     expect(children.turnOwners.get('cut')?.callerId).toBe('caller')
-    expect(children.awaitingReport.get('cut')).toBe('caller')
-    expect(reported.filter((r) => r.sessionId === 'cut')).toEqual([])
+    expect(answered).toEqual([])
     quitting = false
 
     const ended = flow.startDelegation('caller>child', 'caller', 'child', target(), false)
@@ -382,13 +366,11 @@ describe("a child's turn and the call waiting on it", () => {
     expect(children.turnOwners.has('child')).toBe(false)
   })
 
-  it('stop on the turn it gave interrupts it, takes the report down and lets the delegation go', async () => {
+  it('stop on the turn it gave interrupts it and lets the delegation go', async () => {
     const flow = flowWith()
     flow.startDelegation('caller>child', 'caller', 'child', target(), true)
-    children.markReport('child', 'caller')
     expect(await flow.agentSession('caller', { sessionId: 'child', action: 'stop' })).toEqual({ ok: true, state: 'stopped', sessionId: 'child', sessionName: 'Child', tool: 'claude' })
     expect(interrupted).toEqual(['child'])
-    expect(store.children.listReportMarks()).toEqual([])
     expect(children.delegations.size).toBe(0)
   })
 

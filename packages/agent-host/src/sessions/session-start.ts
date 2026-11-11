@@ -145,7 +145,7 @@ export class SessionStarts {
       initialFrom?: { sessionId: string; name: string }
       /**
        * A script or the RPC started the session (the connection holds the limited credential, not the window's token): the work is the person's, written
-       * down in the mailbox before the first message goes in, and the turn it starts is reported to their Inbox (§8.1). The message is the script's, not
+       * down in the mailbox before the first message goes in, and answered in their Inbox as any task is (mailbox.md §10.6.3). The message is the script's, not
        * the person's: stored and shown as such, and the session reads it under a header of Centralu's (`scriptMessageFrame`). `credential` is the
        * connection's label (`scriptLabel`). Not in the RPC contract: the host sets it from the connection
        */
@@ -858,8 +858,6 @@ export class SessionStarts {
         this.host.emit({ type: 'settings_changed', sessionId, model: m.model, effort: m.effort, verbosity: m.verbosity, serviceTier: m.serviceTier, by: 'tool' })
       }
       this.host.handles.set(sessionId, handle)
-      // The process before it held the messages given it for turns to come, and a new one holds none (#1604)
-      this.host.children.dropInputOrigins(sessionId)
       this.host.launches.rememberToolPrefix(sessionId)
       this.host.launches.rememberLaunchSettings(m, cwd)
       // A new process holds no background work yet (#648)

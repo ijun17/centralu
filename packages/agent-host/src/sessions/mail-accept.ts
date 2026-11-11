@@ -12,10 +12,11 @@ export const MAIL_ACCEPT_MS = 90_000
  * wake still queued, a Codex whose `turn/start` is rejected late) it never ran it, so `late` is told and the mailbox puts the mail
  * back; a failure after the tool took the input is not told, since sending it again could run the work twice.
  */
-export async function takeInput(handle: SessionHandle, text: string, late?: (e: Error) => void): Promise<void> {
+/** `id`: the name the tool is given the input by, which a turn's end names back (`SessionHandle.turnInputs`) */
+export async function takeInput(handle: SessionHandle, text: string, late?: (e: Error) => void, id?: string): Promise<void> {
   const origin = { kind: 'channel', server: 'centralu' } as const
   if (!handle.sendTracked) {
-    handle.send(text, { origin })
+    handle.send(text, { origin, ...(id ? { id } : {}) })
     return
   }
   const tracked = handle.sendTracked.bind(handle)
@@ -41,6 +42,6 @@ export async function takeInput(handle: SessionHandle, text: string, late?: (e: 
       if (was === 'waiting') reject(e)
       else if (was === 'counted') late?.(e)
     }
-    tracked(text, { accepted: done, complete: done, fail }, { origin }).then(done, fail)
+    tracked(text, { accepted: done, complete: done, fail }, { origin, ...(id ? { id } : {}) }).then(done, fail)
   })
 }

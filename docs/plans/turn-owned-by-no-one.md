@@ -1,6 +1,6 @@
 # A turn belongs to no one: requests carry their own answers (#1948)
 
-> **Status: decided 2026-11-05 (§11); P1 and P2 built, P11's close (C12) and the Next line (B8) built 2026-11-06, P8 built as #1948 step 2 (mailbox.md §10.6.2), P3 to P7, P9, P10 and the rest of P11 not.** Read from main at `eafd28253`. The design landed with its
+> **Status: decided 2026-11-05 (§11); P1 and P2 built, P11's close (C12) and the Next line (B8) built 2026-11-06, P8 built as #1948 step 2 (mailbox.md §10.6.2), #1948 step 3 built (reports are replies and last responses, mailbox.md §10.6.3; the turn-starter engine reduced, turn-starter.md "After #1948 step 3"), P3 to P7, P9, P10 and the rest of P11 not.** Read from main at `eafd28253`. The design landed with its
 > first implementation PR (P1, §8). It follows the owner's decisions on #1948 of 2026-11-04 (Targets 1 to 4, the
 > Inbox, Continue) and of 2026-11-05 (an agent's turn belongs to no one; the composer's "Working for X" choice goes).
 > It covers the audit items B1 to B9 and C1 to C12 of the comment "Audit: what the old (pre-mailbox) model still leaves
@@ -29,7 +29,7 @@ loop and rate guards.
 | **Answered** | The row is settled (`settled` not null). §2.2 lists how. |
 | **Open** | Delivered, not held, not settled. |
 | **The person's message** | What the person types in the session's composer. It is **not a request row**. Its thread is the conversation itself: the person reads the answer where they typed. Nothing is owed for it to anyone, and no report of it goes anywhere. Its user row keeps the `byPerson` mark (`session-events.ts:624`), which the citation check (#1940) and the facts in §2.4 read. |
-| **At rest** | The session runs no turn, shows no card, has no live background work its tool lists (`liveBackgroundTasks`, timers left out), and has no mail due that would wake it. When background work just ended, at rest also needs `PAUSED_REPORT_SETTLE_MS` (60 s, `child-ownership.ts:20`) to pass with no turn starting, as the settle wait does today. |
+| **At rest** | The session runs no turn, shows no card, has no live background work its tool lists (`liveBackgroundTasks`, timers left out), and has no mail due that would wake it. When background work just ended, at rest also needs `OWN_WORK_SETTLE_MS` (60 s, `child-ownership.ts:20`) to pass with no turn starting, as the settle wait does today. |
 | **A stop** | The session's last turn ended without finishing and nothing continues it on its own: an error, a usage limit, the network, the person's Stop, a quit or shutdown of Centralu, a continue after an update or swap that failed, deletion. §4.1. |
 
 A turn is only the time the tool runs. It may run for 24 hours and take in many requests from several senders and the
@@ -341,7 +341,8 @@ That is stricter, which floor b allows.
 
 - **The pair's warning count** (`pairTurns`, `turns.ts`; it holds nothing since #2014; `pairTurnsSince` counts `started_by = 'mail'` with a session
   sender, `dev-services/store/mailbox.ts:757`) is about mail starting turns. It keeps reading `started_by = 'mail'`,
-  which the delivery writes when it starts a turn (`MailTurns.begin`), with no turn owner involved.
+  which the delivery writes when it starts a turn (`MailTurns.begin`), with no turn owner involved. Since tasks join a running turn (#1948 step 3), it
+  also counts each task of the pair that joined a turn it did not start (mailbox.md §10.6.3 "Re-keyed, not dropped").
 - **Its reset at the person's word** (`lastPersonWord` → `lastPersonTurn`, `started_by = 'person'`, `mailbox.ts:1007`)
   reads, instead, the newest `byPerson` user row of either session of the pair, and the person's mail. That is what
   "a word from the person" means, and it needs no turn decision.
@@ -393,7 +394,8 @@ depends on a turn owner:
 | `delegated_turns` (v51) | table | P5 | P5 + one release | same |
 | `queued_requests` | table | P8 | P8 + one release | same |
 | `report_turn:<s>` | `app_settings` | P6 | P7 | delete keys in the contract step |
-| `report_paused:<s>` | `app_settings` | P6 | P6 + one release (an older build reads it to keep a paused report) | same |
+| `report_paused:<s>` | `app_settings` | P6 | P6 (#1948 step 3, mailbox.md §10.6.3); every `ready` deletes it, so an older build after a rollback does not hold the mark this build leaves as paused | same |
+| `person_report_paused:<s>` | `app_settings` | P6 (#1948 step 3, mailbox.md §10.6.3) | P6; every `ready` deletes it, so an older build after a rollback finds no stale pause | same |
 | `turn_inputs:<s>` | `app_settings` | P7 | P7 | same |
 | `input_origins:<s>` (A5) | `app_settings` | not read since #1929 except `legacyHeld` | P7 | same |
 | `user_message.intent` | transcript payload | P3 (the host ignores it) | P3 | never: old rows keep it, harmless |
@@ -404,7 +406,8 @@ depends on a turn owner:
 paths no longer owe (step 2, `oldOwes`). If this design stopped writing `report_marks` at once, that build would settle
 this build's open tasks with no report: a lost answer (mailbox N1). So `report_marks` keeps being written both ways for
 one release, exactly as mailbox M8 plans. `report_paused` likewise, or the older build reports a paused child as
-finished. `report_turn` and `turn_inputs` can stop at once: an older build that misses them reads the next turn as the
+finished; as built in #1948 step 3 it went at once instead (nothing is sent while a session's own work runs) and every `ready` deletes it, so the
+one mark this build leaves for a session in a turn is not read as paused (mailbox.md §10.6.3). `report_turn` and `turn_inputs` can stop at once: an older build that misses them reads the next turn as the
 CLI's own and reports it to the caller, which is what this design does anyway; named in P7's Not exercised.
 
 **A5's window has passed.** `input_origins` was kept for a build before #1929 (commit `471c4f7b3`, 2026-11-03), whose

@@ -57,9 +57,9 @@ export class LinkedHost {
 
   /**
    * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, as
-   * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work
-   * (#723, `LinkedReports`).
+   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, with a
+   * pause over the session's own background work (#723, `LinkedReports`): this host's own sessions are answered by the
+   * mailbox instead (docs/plans/mailbox.md §10.6.3), until mail crosses links.
    */
   observeLinked(e: LinkedEvent): void {
     if (e.type === 'machine_status') this.host.askProjectFlow.observeLinkLoss(e.machine)
@@ -70,16 +70,6 @@ export class LinkedHost {
     // A call waiting on a child there reads its turn's end; no report is armed while it waits, so nothing comes twice (#1038)
     this.host.delegationFlow.remote.observe(e)
     this.host.linkedReports.observe(e)
-  }
-
-  /**
-   * A call the hub routes to a linked machine, seen before it goes (`Router`'s `forwarding`): the person's choice on an
-   * `agents.send` for a report this hub holds (#1377). Returns what to do when the call ends.
-   */
-  forwarding(method: string, params: unknown): ((delivered: boolean) => void) | undefined {
-    if (method !== 'agents.send' || typeof params !== 'object' || params === null) return undefined
-    const sessionId = 'sessionId' in params ? params.sessionId : undefined
-    return typeof sessionId === 'string' && 'intent' in params ? this.host.linkedReports.choosing(sessionId, params.intent) : undefined
   }
 
   /**

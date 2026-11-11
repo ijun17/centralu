@@ -308,8 +308,6 @@ packages/agent-host/src/sessions/opened-settings.test.ts
 packages/agent-host/src/sessions/preferences-commands.test.ts
 packages/agent-host/src/sessions/project-creation.ts
 packages/agent-host/src/sessions/project-registry.ts
-packages/agent-host/src/sessions/report-marks.test.ts
-packages/agent-host/src/sessions/report-owed.test.ts
 packages/agent-host/src/sessions/rules.test.ts
 packages/agent-host/src/sessions/running-cost.test.ts
 packages/agent-host/src/sessions/session-apps-manager.test.ts

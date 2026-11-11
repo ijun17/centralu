@@ -324,6 +324,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     text: 'Triage the failing build',
     fromScript: { credential: 'ci runner' },
   },
+  // The composer's report choice (#1377), which a host before #1948 still puts on the person's message: read as a plain message
+  { type: 'user_message', sessionId: 's1', seq: 17, text: 'I will do this myself', intent: 'takeover' },
   // An inline conversation app screen (M4 B-1) — open (input), result, cancelled, rejected, closed
   {
     type: 'app_view',
@@ -984,6 +986,10 @@ describe('envelope', () => {
     )
     expect(parseClientFrame({ kind: 'rpc', id: '1', method: 'agents.send', params: {} }).success).toBe(true)
     expect(parseClientFrame({ kind: 'nope' }).success).toBe(false)
+  })
+
+  it("takes a send from a window before #1948 with the report choice dropped: the person's message is just a message", () => {
+    expect(RpcMethods['agents.send'].params.parse({ sessionId: 's1', text: 'mine now', intent: 'takeover' })).toEqual({ sessionId: 's1', text: 'mine now' })
   })
 
   it('hello_ok / event / res server frames', () => {

@@ -184,6 +184,18 @@ describe('reply (§11.3: an answer, needsReply only with kind "question")', () =
     expect(w.store.mailbox.feedOf(A, { limit: 1 })[0]).toMatchObject({ needsReply: true })
   })
 
+  it('a reply to a task answers it only with kind "answer", and its result says whether it did (§10.6.3)', () => {
+    const w = world()
+    const task = w.mail.task(A, B, { text: 'fix #12', origin: 'agent_session', delivered: true })
+    const early = w.run('b', { action: 'reply', thread: task.id, text: 'On it' })
+    expect(early.text).toContain(`Task ${task.id} stays open: reply with kind="answer" to answer it, or your last response will.`)
+    expect(early.text).not.toContain('It answers')
+    expect(w.row(task.id, B)!.settled).toBeNull()
+    const done = w.run('b', { action: 'reply', thread: task.id, text: '#12 fixed', kind: 'answer' })
+    expect(done.text).toContain(`It answers ${task.id} from alpha.`)
+    expect(w.row(task.id, B)!.settled).toBe('answered')
+  })
+
   it('a quiet answer says it reaches the receiver without waking it', () => {
     const w = world()
     const note = w.mail.send(A, { to: [B], text: 'fyi', needsReply: false })

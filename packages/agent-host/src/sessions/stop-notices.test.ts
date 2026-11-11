@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 import type { MailRow } from '../dev-services/store/mailbox.js'
-import { OLD_PATH_WAIT_MS } from '../mail/stop-notices.js'
 import { wakesMessage } from '../mail/rules.js'
 import type { HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
@@ -220,7 +219,7 @@ describe('a turn ends without finishing', () => {
       },
     },
     { name: "an app's message", give: (child) => deliverIn()(child, 'the key is k3y', undefined, undefined, false, { appId: 'notes', projectId: null, name: 'Notes' }) },
-    { name: "a script's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, false, 'ask', { credential: 'script-1' }) },
+    { name: "a script's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, false, { credential: 'script-1' }) },
     { name: 'a report relayed into the turn', give: (child, asker) => deliverIn()(child, 'the key is k3y', undefined, { sessionId: asker, name: 'Asker' }, true) },
     { name: "another session's message", give: async (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, { sessionId: await w.callerSession(), name: 'Other' }) },
     { name: "the person's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true) },
@@ -407,19 +406,20 @@ describe('who is not told, or told another way', () => {
     await w.until(() => stopNotices(asker).length === 1)
   })
 
-  it('the session that started the child, which the older report tells of the stop, gets that and not a second notice', async () => {
+  it('the session that started the child and asked it is told once, by the stop notice listing its task and its question, with no report', async () => {
     const asker = await w.callerSession()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const started = await w.mgr.startAgent(asker, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     working(child)
     const q = ask(asker, child, 'which branch?')
+    const task = read.tasks(addr(asker), child)[0]!
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
-    await w.until(() => read.reportsOn(read.tasks(addr(asker), child)[0]!.id).length === 1)
-    // Marked told once the report path that sent it has ended
-    await w.until(() => read.row(q.id, addr(child))?.toldAt != null)
-    expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'limit', toldAt: expect.any(Number) })
-    expect(stopNotices(asker)).toEqual([])
+    await w.until(() => stopNotices(asker).length === 1)
+    expect(stopNotices(asker)[0]!.message.facts.unanswered).toEqual(rowsOf(child, 'limit', task, q))
+    expect(read.reportsOn(task.id)).toEqual([])
+    await new Promise((r) => setTimeout(r, 20))
+    expect(stopNotices(asker)).toHaveLength(1)
   })
 
   /**
@@ -482,21 +482,6 @@ describe('who is not told, or told another way', () => {
     handleOf(child).event({ type: 'limit_reached', sessionId: child })
     await w.until(() => stopNotices(asker).length === 1)
     expect(stopNotices(asker)[0]!.message.body).toContain('reached its usage limit')
-  })
-
-  it('a held notice whose older report path never ends is told after the wait: that path counts as not having told', async () => {
-    const { asker, child, question, task } = await asked(true)
-    vi.useFakeTimers({ toFake: ['setTimeout'] })
-    try {
-      m.service.stops.sessionStopped(addr(child), 'limit', { turnSeq: m.turns.latest(child)!.seq, held: [addr(asker)] })
-      w.mgr.mail.mailStopTold(child, [asker], [new Promise<string | undefined>(() => {})])
-      await vi.advanceTimersByTimeAsync(OLD_PATH_WAIT_MS - 1_000)
-      expect(stopNotices(asker)).toEqual([])
-      await vi.advanceTimersByTimeAsync(1_000)
-      expect(stopNotices(asker).map((n) => n.message.facts.unanswered)).toEqual([rowsOf(child, 'limit', task, question)])
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   it('a sender a quit cut is told quietly: a notice would start a turn with nobody there', async () => {

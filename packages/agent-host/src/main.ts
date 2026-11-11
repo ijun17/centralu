@@ -754,7 +754,6 @@ const usedCredentials = new UsedCredentials()
 const usedCredentialsFile = launch.serveState ? new UsedCredentialsFile(usedCredentialsPath(launch.serveState, realOs()), usedCredentials, realOs()) : null
 usedCredentialsFile?.load()
 const router: Router = new Router({
-  forwarding: (method, params) => mgr.linkedHost.forwarding(method, params),
   local: createRpcHandler(mgr, adapters, {
     // A deleted project gives back the user-folder app it had become, once the session archive cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),

@@ -20,6 +20,7 @@ function world(handle: Partial<SessionHandle>) {
     requireHandle: (id: string) => handles.get(id),
     record: { closeStream: () => {} },
     cardRests: { turnAsked: () => {} },
+    apps: { rootAppsNotice: () => null },
   }
   const sessionEvents = new SessionEvents(host as unknown as SessionEventsHost)
   Object.assign(sessionEvents, { onEvent: (e: unknown) => void events.push(e) })

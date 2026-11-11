@@ -28,9 +28,6 @@ export const sessionsResults = {
   /** `worktreeBase`: where a new worktree forked from and what could not be done to make it current (#1488); an older host leaves it out */
   'agents.createSession': SessionInfo.extend({ worktreeBase: z.string().optional() }),
   'agents.send': z.object({ ok: z.literal(true) }),
-  'agents.reportOwed': z.object({
-    owed: z.object({ callerId: z.string(), callerName: z.string() }).nullable(),
-  }),
   'agents.respondApproval': z.object({ ok: z.literal(true) }),
   'agents.answerQuestion': z.object({ ok: z.literal(true) }),
   'agents.interrupt': z.object({ ok: z.literal(true) }),

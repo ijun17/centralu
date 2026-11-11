@@ -1,5 +1,5 @@
 import type { SessionInfo } from '@cc/protocol'
-import { busyWith, oneLineText } from '@cc/protocol'
+import { busyWith, oneLineText, pausedOnBackground } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
@@ -101,6 +101,8 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
     readonly apps: Pick<SessionAppWiring, 'appAccess'>
     /** The original's mail, moved to the successor inside the store's transaction (`MailService.handOver`, #1574); nothing without a mailbox */
     mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope) => HandedOverMessage[]
+    /** The original's open tasks to a child that moves become the successor's, inside the same transaction (`MailHooks.repointTasks`) */
+    mailRepointTasks: (fromSessionId: string, toSessionId: string, childId: string) => void
   }
 
 /**
@@ -155,14 +157,16 @@ export class HandoffChildren {
     this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
     const delegated = [...this.host.children.delegations.values()].filter((d) => d.callerId === from)
+    /** The sessions with a task of the original's open: their report is the original's to hear, and the successor's once moved */
+    const owing = new Set(this.host.children.openTasks(from, 'from'))
     const stateOf = (s: SessionInfo): string => {
       // A card first, named as the busy rule names it (`busyWith`): a question blocks the session as an approval does
       const card = busyWith(s)
       if (card === 'question' || card === 'approval') return card === 'question' ? 'waiting on a question' : 'waiting for an approval'
       if (this.host.turnRunning(s)) return 'working'
-      // Its turn ended while its own background work runs (#721): the report waits for that work's end
-      if (this.host.children.awaitingReport.get(s.id) === from && this.host.children.pausedReports.has(s.id)) return 'paused on its own background work; its report comes when that work ends'
-      if (this.host.children.awaitingReport.get(s.id) === from) return 'finished; its report has not been delivered yet'
+      // Work the original gave it is open (docs/plans/mailbox.md §10.6.3): while its own background work runs (#721) its last response waits for that work's end
+      if (owing.has(s.id) && pausedOnBackground(s)) return 'paused on its own background work; its report comes when that work ends'
+      if (owing.has(s.id)) return 'finished; its report has not been delivered yet'
       // ask_project tells nobody when it ends: an answer the original never came back for is still owed
       if (delegated.some((d) => d.sessionId === s.id && d.settled && !d.agent)) return 'finished; its answer has not been read yet'
       // Settled: nothing is owed, and it is often still in use, so it moves with the rest (#738, #1475)
@@ -172,7 +176,7 @@ export class HandoffChildren {
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
     const linked = removed ? new Set(childIds) : new Set<string>([
       ...delegated.map((d) => d.sessionId),
-      ...[...this.host.children.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
+      ...owing,
       ...[...this.host.children.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
       ...childIds,
     ])
@@ -189,13 +193,6 @@ export class HandoffChildren {
         linked.delete(id)
       }
     }
-    /*
-     * A child the original is waiting on in a call right now: that wait took its report mark down (`awaitAgent`) and is
-     * about to be ended, so the report is owed to the new session instead
-     */
-    const armReports = delegated
-      .filter((d) => d.agent && !d.settled && (d.waiters ?? 0) > 0 && this.host.children.awaitingReport.get(d.sessionId) !== from && !staying.has(d.sessionId))
-      .map((d) => d.sessionId)
     const moved: MovedChild[] = []
     // They are the note's lines only: nothing about them moves, so they are no part of the notice or the counts
     const stays = [...staying].flatMap((id): MovedChild[] =>
@@ -214,7 +211,7 @@ export class HandoffChildren {
       sessions.push(id)
       const project = s.projectId !== original.projectId ? (projects.get(s.projectId ?? '') ?? s.projectId ?? '') : undefined
       // What the new session can actually do with it, by what moved (#693 review)
-      const told = this.host.children.awaitingReport.get(id) === from || armReports.includes(id)
+      const told = owing.has(id)
       const owns = this.host.children.turnOwners.get(id)?.callerId === from
       const can = project !== undefined
         ? `Call ask_project with project "${project}" and no task to wait for its answer${owns ? '; you are told of the cards of its turn and answer them with agent_session (answer)' : ''}. It is that project's session: agent_session does nothing else with it.`
@@ -261,9 +258,12 @@ export class HandoffChildren {
         {
           sessions,
           startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
-          armReports,
         },
-        mailWhich === null ? undefined : () => void (threads = this.host.mailHandOver(from, to, mailWhich)),
+        () => {
+          if (mailWhich !== null) threads = this.host.mailHandOver(from, to, mailWhich)
+          // The answer of work the original gave a child that moves is the successor's (docs/plans/mailbox.md §10.6.3; step 5 moves this onto handOver)
+          for (const id of sessions) if (owing.has(id)) this.host.mailRepointTasks(from, to, id)
+        },
       )
     } catch (e) {
       console.error(`[agent-host] handoff left the children and the mail with ${from.slice(0, 8)}: ${(e as Error).message}`)
@@ -290,7 +290,7 @@ export class HandoffChildren {
       if (s.parentSessionId === from) s.parentSessionId = to
       this.host.emit({ type: 'session_owner', sessionId: id, askedBy: s.askedBy ?? null, parentSessionId: s.parentSessionId ?? null })
     }
-    if (childCount) this.host.children.moveOwner(from, to, { sessions, armReports, starts }, () => {
+    if (childCount) this.host.children.moveOwner(from, to, { sessions, starts }, () => {
       /*
        * A start_agent card still standing (#673) moves with its request: the request object is the one the waiting setup
        * holds, so an approval starts the child for the new session. The card closes in the original and stands in the

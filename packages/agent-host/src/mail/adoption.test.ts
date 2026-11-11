@@ -1,27 +1,26 @@
 /**
- * What the host that becomes the active one does with what an earlier build left (docs/plans/mailbox.md §9.5): the old report paths are the truth of
- * a report owed until M8, and the task rows follow them at every `ready`. A report mark with no task gets one; a task no old path owes is settled.
+ * What the host that becomes the active one does with an earlier build's report marks (docs/plans/mailbox.md §10.6.3): the task rows are the record
+ * of an owed answer, so a mark with no task gets one, and every mark goes. A task no mark owes stays open for the session's reply or last response.
  */
 import { describe, expect, it } from 'vitest'
-import { takeOverFromEarlierBuild, type AdoptedSession } from './adoption.js'
+import { leaveForEarlierBuild, takeOverFromEarlierBuild, type AdoptedSession } from './adoption.js'
 import { A, B, W, world } from './messages.test-helpers.js'
 import { ADOPTED_TASK } from './rules.js'
 
-function setup(sessions: Record<string, AdoptedSession> = {}, owesToo: (owner: string, child: string) => boolean = () => false) {
+function setup(sessions: Record<string, AdoptedSession> = {}) {
   const w = world()
-  // As the manager answers it at ready: a mark the store still holds is owed (the start dropped the others), and whatever else the test says
-  const owes = (o: string, c: string) => owesToo(o, c) || w.store.children.listReportMarks().some((m) => m.sessionId === c && m.callerSessionId === o)
   const known: Record<string, AdoptedSession> = { a: { state: 'idle' }, b: { state: 'idle' }, w: { askedBy: 'a', state: 'idle' }, ...sessions }
-  const take = () => takeOverFromEarlierBuild(w.mail, w.store, { info: (id) => known[id], oldOwes: owes })
+  const take = () => takeOverFromEarlierBuild(w.mail, w.store, { info: (id) => known[id] })
   return { ...w, take, known }
 }
 
-describe('a report mark with no task (§9.5 step 1)', () => {
+describe('a report mark with no task (§10.6.3)', () => {
   it('gets a task from the marking caller, delivered and read, start_agent when the caller started the session; nothing wakes anyone', () => {
     const w = setup()
     w.store.children.setReportMark('w', 'a')
     w.store.children.setReportMark('b', 'a')
-    expect(w.take()).toEqual({ queued: 0, adopted: 2, settled: 0 })
+    expect(w.take()).toEqual({ queued: 0, adopted: 2 })
+    expect(w.store.children.listReportMarks()).toEqual([])
     const kid = w.store.mailbox.newestTask(A, W)!
     expect(kid).toMatchObject({ kind: 'task', body: ADOPTED_TASK, origin: 'start_agent' })
     expect(w.store.mailbox.newestTask(A, B)).toMatchObject({ origin: 'send_to_session' })
@@ -29,7 +28,7 @@ describe('a report mark with no task (§9.5 step 1)', () => {
     expect(w.store.mailbox.pendingFor(W, Number.MAX_SAFE_INTEGER)).toEqual([])
   })
 
-  it('is idempotent: a pair with an unsettled task is left; a mark whose sessions are not both here, or that names one session twice, is left', () => {
+  it('a pair with an unsettled task, a mark whose sessions are not both here, or one that names one session twice gets no task; each mark goes all the same', () => {
     const w = setup({ b: undefined as unknown as AdoptedSession })
     w.mail.task(A, W, { text: 'given by this build', origin: 'start_agent', delivered: true })
     w.store.children.setReportMark('w', 'a')
@@ -37,64 +36,52 @@ describe('a report mark with no task (§9.5 step 1)', () => {
     w.store.children.setReportMark('a', 'a')
     expect(w.take().adopted).toBe(0)
     expect(w.store.mailbox.watchedFrom(A)).toHaveLength(1)
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 })
 
-describe('a task the old paths no longer owe (§9.5 step 2)', () => {
-  it('a report an older build sent by its marks while this one was away settles the task, with no report message', () => {
+describe('a task no mark owes (§10.6.3)', () => {
+  it('stays open at the start: nothing settles it but its reply or the last response, and a second start adds nothing', () => {
     const w = setup()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    // The older build reported and cleared the mark: nothing owes it any more
-    expect(w.take()).toEqual({ queued: 0, adopted: 0, settled: 1 })
-    expect(w.rowOf(task.id, W).settled).toBe('reported')
+    w.store.children.setReportMark('b', 'a')
+    expect(w.take()).toEqual({ queued: 0, adopted: 1 })
+    expect(w.take()).toEqual({ queued: 0, adopted: 0 })
+    expect(w.rowOf(task.id, W).settled).toBeNull()
+    const adopted = w.store.mailbox.newestTask(A, B)!
+    expect(w.rowOf(adopted.id, B).settled).toBeNull()
     expect(w.store.mailbox.reportsOn(task.id)).toEqual([])
   })
+})
 
-  it('leaves a task that is owed, whose child is in a turn, has a queued request or undelivered mail from the owner, or is not here', () => {
-    const owed = setup({}, (o, c) => o === 'a' && c === 'w')
-    const t1 = owed.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    owed.take()
-    expect(owed.rowOf(t1.id, W).settled).toBeNull()
+describe('what an earlier build kept of whose a turn is (docs/plans/turn-starter.md "After #1948 step 3") and of the paused reports (mailbox.md §10.6.3)', () => {
+  it('is deleted for every session at the start, so that build after a rollback reads nothing stale; other keys of a session stay', () => {
+    const w = setup()
+    const old = ['turn_inputs:a', 'report_turn:a', 'input_origins:a', 'turn_inputs:w', 'report_turn:gone', 'report_paused:w', 'report_paused:gone', 'person_report_paused:w', 'person_report_paused:gone']
+    const others = ['turn_span:a', 'question_answered:a', 'turn_inputs', 'report_paused', 'person_report_paused']
+    for (const key of [...old, ...others]) w.store.settings.setAppSetting(key, '{}')
+    w.take()
+    expect(old.filter((key) => w.store.settings.appSetting(key) !== null)).toEqual([])
+    expect(others.filter((key) => w.store.settings.appSetting(key) !== null)).toEqual(others)
+  })
+})
 
-    const busy = setup({ w: { askedBy: 'a', state: 'working' } })
-    const t2 = busy.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    busy.take()
-    expect(busy.rowOf(t2.id, W).settled).toBeNull()
-
-    const waiting = setup()
-    const t3 = waiting.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    waiting.mail.task(A, W, { text: 'more', origin: 'agent_session', delivered: false })
-    waiting.take()
-    expect(waiting.rowOf(t3.id, W).settled).toBeNull()
-
-    const queued = setup()
-    const t6 = queued.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    // A row an older build queued (this build writes none): taken over as a task not delivered yet
-    queued.db
-      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at, opened_by_auto) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run('q1', 'w', 'a', 'agent_session', 'more', queued.clock.t, 0)
-    queued.take()
-    expect(queued.rowOf(t6.id, W).settled).toBeNull()
-
-    const gone = setup({ w: undefined as unknown as AdoptedSession })
-    const t4 = gone.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    gone.take()
-    expect(gone.rowOf(t4.id, W).settled).toBeNull()
-
-    // The same task with none of these is settled: the cases above stand only by the conditions they name
-    const free = setup()
-    const t5 = free.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    free.take()
-    expect(free.rowOf(t5.id, W).settled).toBe('reported')
+describe('what this build leaves for an earlier one as it leaves (§10.6.3)', () => {
+  it('a session in a turn gets one mark: the sender of the task its turn is the work of, not of a newer task that joined it', () => {
+    const w = setup()
+    const work = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    w.mail.task(B, W, { text: 'joined later', origin: 'send_to_session', delivered: true })
+    w.store.mailbox.startTurn({ sessionId: 'w', turnSeq: 1, messageId: work.id, starterId: work.id, startedBy: 'caller', startedAt: 1 })
+    leaveForEarlierBuild(w.mail, w.store, ['w'])
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: 'w', callerSessionId: 'a' }])
   })
 
-  it('a crash between the old mark and the task row is mended at the next ready: the mark gets its task, then the report settles it', () => {
+  it('a turn that is no session’s task leaves the mark of the newest open task’s sender', () => {
     const w = setup()
-    w.store.children.setReportMark('w', 'a')
-    // Crashed after the mark was written and before the task row: the next ready writes it
-    expect(w.take().adopted).toBe(1)
-    // The old path reported and cleared the mark; the host stopped before the row was settled: the next ready settles it
-    w.store.children.clearReportMark('w')
-    expect(w.take()).toEqual({ queued: 0, adopted: 0, settled: 1 })
+    w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
+    w.mail.task(B, W, { text: 'joined later', origin: 'send_to_session', delivered: true })
+    w.store.mailbox.startTurn({ sessionId: 'w', turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: 1 })
+    leaveForEarlierBuild(w.mail, w.store, ['w'])
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: 'w', callerSessionId: 'b' }])
   })
 })

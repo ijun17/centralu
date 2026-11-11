@@ -30,6 +30,8 @@ export class CrossHandle implements SessionHandle {
    * ends took in, by id (`SessionHandle.turnInputs`). Unset, the tool takes every message into the running turn
    */
   turnInputs?: () => readonly string[] | null
+  /** How many inputs the tool holds queued for a turn of their own (`SessionHandle.queuedInputs`); unset, it cannot tell */
+  queuedInputs?: () => number
   /** A test sets this to make the tool one that names the input a turn opens from (`SessionHandle.turnStartInputs`, #1604) */
   turnStartInputs?: () => readonly string[] | null
   /** The origin each input was stamped with (`SessionHandle.send`'s `opts.origin`), in the same order */
@@ -49,12 +51,12 @@ export class CrossHandle implements SessionHandle {
   }
   /** A test sets this to make the tool say it took a tracked input as it starts the turn, as Claude does (`InputObserver.accepted`) */
   acceptsAtOnce = false
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: unknown; id?: string }): Promise<void> {
     const done = new Promise<void>((resolve, reject) => this.receipts.push({
       resolve: () => { observer?.complete(); resolve() },
       reject: (e) => { observer?.fail(e); reject(e) },
     }))
-    this.send(text)
+    this.send(text, opts)
     if (this.acceptsAtOnce) observer?.accepted?.()
     return done
   }

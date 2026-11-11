@@ -2,14 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { ASK_WAIT_MS } from './ask-project.js'
-import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { askProjectText } from './tool-answers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * A local ask_project whose delegated turn ends while the session's own background work runs (#1460). It answered at that
  * turn end as if final and marked no report, so the work's later turn, which wrote the result, reached no one; a start_agent
- * child pauses over its own work (#721). The call answers as paused now, and the report is owed and paused for the work's
- * last turn end, kept in the store so a host swap does not lose it (report-marks.test.ts).
+ * child pauses over its own work (#721). The call answers as paused now, and the asker's task stays open: the session's last
+ * response answers it once that work ended and it is at rest (docs/plans/mailbox.md §10.6.3), the task row being the record.
  */
 
 const verify: BackgroundTask = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
@@ -32,6 +33,7 @@ describe('ask_project into a session that waits on its own background work (#146
     w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     caller = await w.callerSession()
+    wireHostMail(w.mgr, w.store)
   })
   afterEach(async () => {
     vi.useRealTimers()
@@ -39,10 +41,14 @@ describe('ask_project into a session that waits on its own background work (#146
   })
 
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
-  const reports = () =>
-    w.store.messages.loadMessages(caller, 200)
-      .filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId?: string } }).from?.sessionId === target)
-      .map((m) => String((m.payload as { text?: string }).text))
+  const read = () => mailReader(w.store)
+  /** The asker's tasks to the session, oldest first */
+  const tasks = () => read().tasks(addressOf(caller), target)
+  /** Centralu's reports on them, oldest first */
+  const reports = () => tasks().flatMap((t) => read().reportsOn(t.id))
+  const answers = () => reports().map((r) => r.facts.answer)
+  /** Whether the asker has read the report (its call returned it) */
+  const readByAsker = (id: string) => read().row(id, addressOf(caller))?.readAt != null
   const settle = () => new Promise((r) => setTimeout(r, 30))
   const ask = (task?: string) => w.mgr.askProject(caller, { project: w.target.id, session: target, ...(task ? { task } : {}) })
   /** The delegated turn backgrounds its verify and ends the turn waiting on it */
@@ -66,17 +72,16 @@ describe('ask_project into a session that waits on its own background work (#146
     expect(r.paused).toContain('background work is still running (pnpm verify)')
     expect(r.paused).toContain(`read_session(sessionId="${target}")`)
     expect(askProjectText(r).text).toContain('has not finished')
-    // The report is owed and paused, in the store; the call is the answer to this turn, so nothing is sent for it
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: target, callerSessionId: caller }])
-    expect(w.store.settings.appSetting(`report_paused:${target}`)).not.toBeNull()
+    // The task stays open: the session is not at rest while its own work runs, so no last response answers it yet
     await settle()
+    expect(tasks().map((t) => read().taskRow(t.id, target)?.settled)).toEqual([null])
     expect(reports()).toEqual([])
 
     verifyEndsAndSessionFinishes()
     await w.until(() => reports().length === 1)
-    expect(reports()[0]).toContain('[Centralu] The session ended its turn.')
-    expect(reports()[0]).toContain('8 pass / 2 fail')
-    expect(w.store.children.listReportMarks()).toEqual([])
+    expect(reports()[0]!.body).toContain('[Centralu] The session ended its turn.')
+    expect(answers()).toEqual(['8 pass / 2 fail'])
+    expect(read().taskRow(tasks()[0]!.id, target)?.settled).toBe('reported')
     // Once: a later turn of the session is not the assigned work
     handleOf(target).event({ type: 'state_change', sessionId: target, state: 'working' })
     handleOf(target).answer('an unrelated later turn')
@@ -96,8 +101,8 @@ describe('ask_project into a session that waits on its own background work (#146
     // Nobody waits now: the turn ends on its background work
     handleOf(target).event({ type: 'background_tasks', sessionId: target, live: [verify] })
     handleOf(target).answer('Started verify; I will summarize when it ends.')
-    await flush(() => w.store.children.listReportMarks().length > 0)
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: target, callerSessionId: caller }])
+    await flush(() => w.mgr.sessionInfo(target)?.state !== 'working')
+    expect(tasks().map((t) => read().taskRow(t.id, target)?.settled)).toEqual([null])
     expect(reports()).toEqual([])
     const collected = await ask()
     expect(collected).toMatchObject({ ok: true, state: 'done', answer: 'Started verify; I will summarize when it ends.', paused: expect.stringContaining('pnpm verify') })
@@ -105,50 +110,51 @@ describe('ask_project into a session that waits on its own background work (#146
     await flush(() => reports().length > 0)
     vi.useRealTimers()
     await w.until(() => reports().length === 1)
-    expect(reports()[0]).toContain('8 pass / 2 fail')
+    expect(answers()).toEqual(['8 pass / 2 fail'])
     await settle()
     expect(reports()).toHaveLength(1)
   })
 
-  it('a turn that ends with no such work is the answer, as before, and marks no report', async () => {
+  it('a turn that ends with no such work is the answer, as before: its report is read by the call, and a later turn adds none', async () => {
     const call = ask('run the suite')
     await w.until(() => (handleOf(target)?.sent.length ?? 0) > 0)
     handleOf(target).answer('all done')
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'done', answer: 'all done' })
     expect((r as { paused?: string }).paused).toBeUndefined()
-    expect(w.store.children.listReportMarks()).toEqual([])
+    expect(reports().map((x) => [x.facts.answer, readByAsker(x.id)])).toEqual([['all done', true]])
     handleOf(target).event({ type: 'state_change', sessionId: target, state: 'working' })
     handleOf(target).answer('later')
     await settle()
-    expect(reports()).toEqual([])
+    expect(reports()).toHaveLength(1)
   })
 
-  it('work that ends with no turn after it settles the report with how it ended', async () => {
+  it('work that ends with no turn after it: once settled, the last response answers the task', async () => {
     const r = await pauseOnVerify(ask('run the suite'))
     expect(r).toMatchObject({ ok: true, state: 'done', paused: expect.any(String) })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     handleOf(target).event({ type: 'background_tasks', sessionId: target, live: [], ended: [{ ...verify, status: 'stopped' }] })
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
     vi.useRealTimers()
     await w.until(() => reports().length === 1)
-    expect(reports()[0]).toContain('background work ended (pnpm verify: stopped) and no turn followed')
+    expect(answers()).toEqual(['Started verify; I will summarize when it ends.'])
   })
 
-  it("the person's own turn in the session is theirs: not reported, and the work's end still is", async () => {
+  it("the person's own turn while the work runs answers nothing; the work's end answers, saying the person wrote since", async () => {
     await pauseOnVerify(ask('run the suite'))
     const h = handleOf(target)
-    // The person writes in the session (the composer): their turn, not a new answer of the work to send on as an update (#1540)
-    await w.mgr.inputs.send(target, 'what is going on?')
+    // The person writes in the session (the composer), later than the task was given: their turn, and the session is still not at rest
+    await settle()
+    await w.mgr.inputs.send(target, 'what is going on?', undefined, undefined, true)
     h.answer('Verify is still running.')
     await settle()
     expect(reports()).toEqual([])
     verifyEndsAndSessionFinishes('8 pass / 2 fail')
     await w.until(() => reports().length === 1)
-    expect(reports()[0]).toContain('8 pass / 2 fail')
+    expect(reports()[0]!.facts).toMatchObject({ answer: '8 pass / 2 fail', personSince: true })
   })
 
-  it('a new task from the asker ends the pause: its own answer is the end, and the first report is not delivered besides', async () => {
+  it('a new task from the asker: the turn it runs answers both tasks, each with its own report, both read by the call', async () => {
     await pauseOnVerify(ask('run the suite'))
     handleOf(target).event({ type: 'background_tasks', sessionId: target, live: [], ended: [{ ...verify, status: 'completed' }] })
     const second = ask('and the lint')
@@ -156,7 +162,7 @@ describe('ask_project into a session that waits on its own background work (#146
     handleOf(target).answer('lint ok')
     expect(await second).toMatchObject({ ok: true, state: 'done', answer: 'lint ok' })
     await settle()
-    expect(reports()).toEqual([])
-    expect(w.store.children.listReportMarks()).toEqual([])
+    expect(tasks()).toHaveLength(2)
+    expect(reports().map((x) => [x.replyTo, x.facts.answer, readByAsker(x.id)])).toEqual(tasks().map((t) => [t.id, 'lint ok', true]))
   })
 })

@@ -16,7 +16,7 @@ import type { SessionEventsHost } from './session-events.js'
  * getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
 export type TurnInputsHost = Pick<DelegationHost, 'children' | 'closing' | 'emit' | 'handles' | 'meta' | 'trashing'> &
-  Pick<SessionEventsHost, 'overloadRetry' | 'reports' | 'requireHandle'> &
+  Pick<SessionEventsHost, 'overloadRetry' | 'requireHandle'> &
   Pick<MailSessionsHost, 'events'> & {
     /** The sessions an external app owns: a message of the person's makes an app's agent session theirs */
     readonly appSessions: AppSessions
@@ -62,35 +62,13 @@ export class TurnInputs {
     from?: { sessionId: string; name: string },
     /** The person's own typing, as the screen's composer sends it: the tool is told it is the person's (`InputOrigin`) */
     fromPerson = false,
-    /** What the person chose for a delegation report the session owes (#1377); "just asking" unless they said */
-    intent: 'ask' | 'task' | 'takeover' = 'ask',
-    /** A script wrote it (the limited credential, §8.1): its words are not the person's, nor are its choices — no `origin: human`, no `intent` */
+    /** A script wrote it (the limited credential, §8.1): its words are not the person's — no `origin: human` */
     fromScript?: { credential: string },
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from && !fromScript) this.host.appSessions.noteTookPart(sessionId, 'wrote')
-    // Only the person chooses what a message means for a report the session owes (#1377)
-    const chosen = from || fromScript ? 'ask' : intent
-    await this.host.events.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, chosen, fromScript)
-    /*
-     * A person's message never closes a delegation report (#1377): its turn is theirs, and not reported, or the work's,
-     * when they chose to add it. Only "take it over" closes it, and tells the caller once. After the delivery, so a
-     * message that did not reach the session takes nothing over.
-     */
-    if (!from && chosen === 'takeover') {
-      this.host.children.takeTurn(sessionId)
-      void this.host.reports.personTookOver(sessionId)
-    }
-  }
-
-  /**
-   * Who waits for the session's work (#1377), for the composer's "Working for <caller>" choice: the session that holds
-   * the delegation report it owes, here or (a linked session's, asked of this hub) on a machine. `null` when it owes none.
-   */
-  reportOwed(sessionId: string): { callerId: string; callerName: string } | null {
-    const callerId = this.host.children.awaitingReport.get(sessionId) ?? this.host.children.linkedReports.get(sessionId)?.assistantId
-    const caller = callerId ? this.host.meta.get(callerId) : undefined
-    return callerId && caller ? { callerId, callerName: caller.name } : null
+    // A person's message never closes a delegation report (#1377, #1948): its turn is theirs, and not reported
+    await this.host.events.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, fromScript)
   }
 
   /**
@@ -213,9 +191,6 @@ export class TurnInputs {
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
-    // A stop takes off what a hub gave the tool for turns to come (#1604): the tool drops what it still holds queued, and says it
-    // was not delivered (#1640), so no turn runs for it after the Stop
-    this.host.children.dropInputOrigins(sessionId)
     if (waiting) this.host.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     else handle?.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn

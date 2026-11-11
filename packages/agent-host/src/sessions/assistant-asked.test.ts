@@ -442,9 +442,8 @@ describe('what the session gets back of the Assistant’s turn (§9.7)', () => {
 })
 
 /**
- * The sender of a request always learns that it will not be answered (owner, #1186): a stop of the request's turn tells it once, by the turn's own
- * report when that report goes, else by a stop notice; a quit found at the next start, by the stop notice alone (mailbox.md §10.6.1). A crash is
- * `turnsLost`'s (`lost`, mail/stop-notices.test.ts)
+ * The sender of a request always learns that it will not be answered (owner, #1186): a stop of the request's turn, or a quit found at the next start,
+ * tells it once, by the stop notice alone (mailbox.md §10.6.1, §10.6.3). A crash is `turnsLost`'s (`lost`, mail/stop-notices.test.ts)
  */
 describe('a request whose turn is stopped or cut by a quit', () => {
   const meta = (id: string) => (w.mgr as unknown as { meta: Map<string, { interruption?: unknown }> }).meta.get(id)!
@@ -462,22 +461,20 @@ describe('a request whose turn is stopped or cut by a quit', () => {
   const quitFound = async (asker: SessionInfo, askerCut: boolean) => {
     meta(orc.id).interruption = { reason: 'quit', at: Date.now() }
     if (askerCut) meta(asker.id).interruption = { reason: 'quit', at: Date.now() }
-    // The start dropped the report mark of the turn the quit cut (`ChildOwnership.restoreReports`): nothing goes on to report it
-    w.store.children.clearReportMark(orc.id)
     m.afterReady()
     await settle()
   }
   const notAnswered = (request: MailRow) => `Centralu quit while ${nameOf(orc.id)} worked on ${request.id}, so it did not answer. The person decides whether it goes on; ask again later if you still need the answer.`
 
-  it("the person's Stop: the asker reads the turn's report, which says it did not finish, and no second notice of the same stop", async () => {
+  it("the person's Stop: the request is released, and the asker reads the stop notice once; no report besides", async () => {
     const { asker, request } = await requestRunning()
     handleOf(orc.id).emitEvent({ type: 'state_change', sessionId: orc.id, state: 'waiting_input', reason: 'interrupted' })
-    await eventually(() => read.reportsOn(request.id).length === 1)
+    await eventually(() => stopNotices(asker).length === 1)
     await settle()
-    expect(read.reportsOn(request.id)[0]!.body).toContain("The Assistant's turn on your request did not finish")
-    // Released with the stop's cause, and marked told by that report: the asker reads of this stop once
-    expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ settled: 'reported', releasedWhy: 'stopped', toldAt: expect.any(Number) })
-    expect(stopNotices(asker)).toEqual([])
+    // A stop goes through the stop notice (§10.6.3): released with the stop's cause and marked told by it, the request still open for a reply
+    expect(stopNotices(asker).map((n) => n.message.facts.unanswered)).toEqual([[{ id: request.id, recipient: addressOf(orc.id), why: 'stopped' }]])
+    expect(read.row(request.id, addressOf(orc.id))).toMatchObject({ settled: null, releasedWhy: 'stopped', toldAt: expect.any(Number) })
+    expect(read.reportsOn(request.id)).toEqual([])
   })
 
   it('a quit while the asker was at rest: the stop notice at the next start tells it its request was not answered, and wakes it; no report besides', async () => {

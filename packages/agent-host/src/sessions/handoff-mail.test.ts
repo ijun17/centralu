@@ -98,9 +98,9 @@ const answer = (h: Host, from: string, to: string, text: string) => h.m.service.
 const give = (h: Host, from: string, to: string, text: string) => h.m.service.task(from === PERSON ? PERSON : at(from), at(to), { text, origin: 'mail', delivered: true })
 /** Whether the message waits for `recipient`'s delivery (due by the time the debounce is over) */
 const pendingFor = (recipient: string, messageId: string) => store.mailbox.pendingFor(at(recipient), Date.now() + 10 * DEBOUNCE_MS).some((p) => p.message.id === messageId)
-/** The report texts stored in a session's conversation that name the child */
+/** Centralu's reports to a session on the tasks to the child: the answers of its work, by its last response (docs/plans/mailbox.md §10.6.3) */
 const reportsIn = (sessionId: string, child: string) =>
-  store.messages.loadMessages(sessionId, 50).map((x) => JSON.stringify(x.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
+  read.between('centralu', at(sessionId), 'report').filter((r) => r.replyTo !== null && read.row(r.replyTo, at(child)) !== undefined)
 /** The note's line for a moved message, as `movedMessage` words it */
 const unreadLine = (firstLine: string, id: string) =>
   `- mail message "${firstLine}" — unread, now waiting for you — handle: ${id}. It was addressed to the previous session and is yours to read and answer now. Read it with the mail tool.`
@@ -214,8 +214,9 @@ describe("a handoff moves the original's mail to the session that took over (#15
     const child = await startChild(h, original, 'write the tests')
     const task = read.tasks(at(upstream), original)[0]!
     h.claude.handles.get(original)!.answer('handed the tests on; waiting')
-    await eventually(() => read.reportsOn(task.id).length === 1)
-    expect(read.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'waiting' })
+    // The work it handed on is open: its last response does not answer upstream's task (docs/plans/mailbox.md §10.6.3)
+    await eventually(() => h.mgr.sessionInfo(original)?.state !== 'working')
+    expect(read.reportsOn(task.id)).toEqual([])
 
     const heir = await handOff(h, project, original, false)
     // The child answers to the original still; the note and the original's conversation say so
@@ -227,15 +228,17 @@ describe("a handoff moves the original's mail to the session that took over (#15
 
     h.claude.handles.get(child)!.answer('tests written')
     // The child's report is the original's to read: its delivery wakes the original, whose turn is the task's work
-    const report = read.reportsOn(read.tasks(at(original), child)[0]!.id)[0]!
+    const handed = read.tasks(at(original), child)[0]!
+    await eventually(() => read.reportsOn(handed.id).length === 1)
+    const report = read.reportsOn(handed.id)[0]!
     await eventually(async () => {
       await h.m.delivery.process(at(original))
       return h.claude.handles.get(original)!.sent.some((t) => t.includes(report.id) || t.includes('tests written'))
     }, 5 * DEBOUNCE_MS)
     expect(pendingFor(heir, report.id)).toBe(false)
     h.claude.handles.get(original)!.answer('landed')
-    await eventually(() => read.reportsOn(task.id).length === 2)
-    expect(read.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['waiting', 'finished'])
+    await eventually(() => read.reportsOn(task.id).length === 1)
+    expect(read.reportsOn(task.id).map((r) => [r.facts.outcome, r.facts.answer])).toEqual([['finished', 'landed']])
   })
 
   it("case 8 (#1932 review), a child started in a turn a report woke is no upstream work: it moves", async () => {
@@ -358,7 +361,9 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     expect(read.row(fromChild.id, at(parent))).toMatchObject({ settled: null })
     expect(read.row(fromChild.id, at(heir))).toBeUndefined()
     expect(store.sessions.listSessions().find((s) => s.id === child)?.askedBy).toBe(parent)
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    // The task it gave stays the original's, as the child does
+    expect(read.tasks(at(parent), child)).toHaveLength(1)
+    expect(read.tasks(at(heir), child)).toEqual([])
   })
 
   it('keeps the moved mail on the heir when the archive fails after the move, the original standing', async () => {

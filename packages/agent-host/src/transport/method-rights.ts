@@ -137,8 +137,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.exportHandoffRecord': 'everyday',
   'agents.exportHandoffNote': 'everyday',
   'agents.worktreeStatus': 'everyday',
-  /** Reads: who a session's work is owed to (#1377), and where its agent compacts by itself (#1376) */
-  'agents.reportOwed': 'everyday',
+  /** A read: where a session's agent compacts by itself (#1376) */
   'agents.autoCompact': 'everyday',
   'agents.restartSession': 'everyday',
   'agents.resumeSession': 'everyday',

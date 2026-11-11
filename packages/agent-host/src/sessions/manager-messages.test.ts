@@ -10,7 +10,6 @@ import type { NormalizedEvent, SessionInfo, StoredMessage } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
-import type { ChildOwnership } from './child-ownership.js'
 import type { RestartPolicy } from './restart-policy.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
@@ -139,7 +138,6 @@ describe('approvals, read state, and messages', () => {
   it('keeps nothing per session for a turn that ended or a session deleted mid-turn (#392)', async () => {
     const internals = mgr as unknown as {
       events: { pendingCommits: Map<string, string> }
-      children: ChildOwnership
       restartPolicy: RestartPolicy
     }
     const p = await addProject()
@@ -154,12 +152,10 @@ describe('approvals, read state, and messages', () => {
     const gone = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
-    // What its turn's end would have consumed: an Assistant's report, a restart for an app change
-    internals.children.adoptReport(gone.id, 'orchestrator', null)
+    // What its turn's end would have consumed: a restart for an app change
     internals.restartPolicy.appsRestartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
     expect(internals.events.pendingCommits.size).toBe(0)
-    expect(internals.children.awaitingReport.has(gone.id)).toBe(false)
     expect(internals.restartPolicy.appsRestartAfterTurn.has(gone.id)).toBe(false)
   })
 

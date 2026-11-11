@@ -7,7 +7,7 @@ import { eventually } from '../../../../tooling/test-timing.js'
 import { NOT_CONNECTED, type AskProjectResult, type LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { scriptedAdapters } from '../links/scripted-agent.test-helpers.js'
-import { PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { SessionManager } from './manager.js'
 import { askProjectText } from './tool-answers.js'
 
@@ -163,7 +163,7 @@ describe('ask_project to a linked machine whose session ends its turn on its own
     // No turn follows the work's end: after the settle wait it is reported as ended
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     h.tasks([], [done])
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 100)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 100)
     vi.useRealTimers()
     await h.settle(2)
     expect(h.reports()).toHaveLength(2)

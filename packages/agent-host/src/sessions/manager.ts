@@ -989,7 +989,9 @@ export class SessionManager {
         }
       },
       mailStopped: (id, why, o) => self.mail.mailStopped(id, why, o),
-      mailStopTold: (id, held, sends) => self.mail.mailStopTold(id, held, sends),
+      mailRequestTurnEnded: (id) => self.mail.mailRequestTurnEnded(id),
+      mailLastResponse: (id, last) => self.mail.mailLastResponse(id, last),
+      mailTurnInputs: (id, turn) => self.mail.mailTurnInputs(id, turn),
       mailEvent: (e, ended) => {
         try {
           self.mail.hooks?.sessionEvent?.(e, ended)
@@ -1006,6 +1008,7 @@ export class SessionManager {
         }
       },
       mailHandOver: (...a) => self.mail.hooks?.handOver?.(...a) ?? [],
+      mailRepointTasks: (...a) => self.mail.hooks?.repointTasks?.(...a),
       mailHandOverPreview: (from, to) => {
         try {
           return self.mail.hooks?.handOverPreview?.(from, to) ?? []
@@ -1101,8 +1104,6 @@ export class SessionManager {
       centraluToolsFor: (...a) => self.centraluToolsFor(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.events.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
-      pauseReport: (...a) => self.reports.pauseReport(...a),
-      pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
       get proposals() {
         return self.assistantSlot.proposals
       },
@@ -1136,7 +1137,6 @@ export class SessionManager {
       requireHandle: (...a) => self.requireHandle(...a),
       respondApproval: (...a) => self.inputs.respondApproval(...a),
       appNotice: (...a) => self.inputs.appNotice(...a),
-      reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy
       },
@@ -1171,7 +1171,6 @@ export class SessionManager {
       tellSession: (...a) => self.reports.tellSession(...a),
       linkedChildGone: (...a) => self.mail.linkedChildGone(...a),
       toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
-      canReadMail: (...a) => self.mail.canReadMail(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {
         return self.tools

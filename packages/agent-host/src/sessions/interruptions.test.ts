@@ -6,12 +6,13 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
+import { PERSON_TURN_ENDED } from '../mail/delegation.js'
 import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
-import { MAIL_HOST, addressOf, wireHostMail } from './host-mail.test-helpers.js'
+import { MAIL_HOST, addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
 import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { HOST_FAMILY } from '../os/real.js'
-import { pausedReportKey } from './child-ownership.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -155,10 +156,20 @@ async function parentAndChild(h: ReturnType<typeof host>) {
   return { parent, child: started.sessionId, project }
 }
 
-/** The report texts stored in the parent's conversation that name the child */
+/** The report texts stored in the parent's conversation that name the child: an older build's relayed reports, which this one never writes */
 const reportsTo = (parent: string, child: string) =>
   store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => /\[Centralu\] The (assigned work|session ended its turn)/.test(t) && t.includes(child))
-/** What the start does on its first timer tick (an update's Continue, the person's work reported to the Inbox) has run; this waits past it */
+/** Centralu's reports to the parent on the tasks it gave the child: with mail wired, the child's last response answers them (docs/plans/mailbox.md §10.6.3) */
+const answersTo = (parent: string, child: string) => {
+  const read = mailReader(store)
+  return read.between('centralu', addressOf(parent), 'report').filter((r) => r.replyTo !== null && read.row(r.replyTo, addressOf(child)) !== undefined)
+}
+/** Centralu's stop notices to `sender` (docs/plans/mailbox.md "The stop notice"): what a stopped session left unanswered */
+const stopNoticesTo = (sender: string) =>
+  store.mailbox.feedOf(addressOf(sender), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
+/** The parent's task to the child, as the delegation wrote it (mail wired) */
+const taskTo = (parent: string, child: string) => mailReader(store).tasks(addressOf(parent), child)[0]!
+/** What the start does on its first timer tick (an update's Continue) has run; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /**
  * Centralu's notices to `starter` that a session it started stopped, owed it nothing (docs/plans/mailbox.md "The stop notice"): only the mailbox
@@ -169,8 +180,8 @@ const starterNotices = (starter: string) =>
 /** Centralu's reports in `parent`'s mailbox: with mail wired, a child's report is mail */
 const mailReportsTo = (parent: string) => store.mailbox.feedOf(addressOf(parent), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'report')
 /** The starter notice's words, for the stopped session's name and the cause */
-const starterBody = (name: string, cause: string, reportOwed = false) =>
-  `${name}, which you started, stopped: ${cause}. ${reportOwed ? 'Its report to you will not come.' : 'It owed you no answer.'} read_session shows where it stopped; send it a message if it should go on.`
+const starterBody = (name: string, cause: string) =>
+  `${name}, which you started, stopped: ${cause}. It owed you no answer. read_session shows where it stopped; send it a message if it should go on.`
 const info = (h: ReturnType<typeof host>, id: string) => h.mgr.listSessions().find((s) => s.id === id)!
 const interruptions = (id: string) => events.filter((e) => e.type === 'interruption' && e.sessionId === id)
 
@@ -205,13 +216,16 @@ describe('a turn the network stopped (#698)', () => {
     expect(a.claude.handles.get(parent)!.sent).toEqual([])
   })
 
-  it('a report that was owed says the network stopped it, not that the work failed', async () => {
+  it('an open task is told unanswered by the stop notice, saying the network stopped it, not that the work failed, with no report', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: a network error ended its turn')
-    expect(reportsTo(parent, child)[0]).not.toContain('The assigned work failed')
+    await eventually(() => stopNoticesTo(parent).length === 1)
+    expect(stopNoticesTo(parent)[0]!.facts.unanswered).toEqual([{ id: taskTo(parent, child).id, recipient: addressOf(child), why: 'network' }])
+    expect(stopNoticesTo(parent)[0]!.body).toContain('lost the network before it answered')
+    expect(stopNoticesTo(parent)[0]!.body).not.toContain('with an error')
+    expect(answersTo(parent, child)).toEqual([])
   })
 
   it('is kept across a restart, and cleared when the session works again', async () => {
@@ -305,15 +319,18 @@ describe('errors that did not end a running turn (#698)', () => {
 })
 
 describe('a turn its tool interrupted (#698)', () => {
-  it('is reported to the Assistant as stopped before finishing, never as finished', async () => {
+  it('is told to the Assistant by the stop notice as unanswered, never answered as finished', async () => {
     const a = host()
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: its tool interrupted the turn')
+    await eventually(() => stopNoticesTo(parent).length === 1)
+    expect(stopNoticesTo(parent)[0]!.facts.unanswered).toEqual([{ id: taskTo(parent, child).id, recipient: addressOf(child), why: 'interrupted' }])
+    expect(stopNoticesTo(parent)[0]!.body).toContain("tool interrupted its turn before it answered")
     // Nothing to do with the network: no waiting for it
-    expect(reportsTo(parent, child)[0]).toContain('send it a message to go on, the same one')
-    expect(reportsTo(parent, child)[0]).not.toContain('network')
+    expect(stopNoticesTo(parent)[0]!.body).toContain('Send it a message to go on.')
+    expect(stopNoticesTo(parent)[0]!.body).not.toContain('network')
+    expect(answersTo(parent, child)).toEqual([])
     expect(info(a, child).interruption).toMatchObject({ reason: 'interrupted' })
   })
 
@@ -356,7 +373,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 
-  it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and settles the task', async () => {
+  it('work the person owns (a script started the session, §8.1): the next start gives the person the stop notice, once, and releases the task without a report', async () => {
     const a = host()
     const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
@@ -366,19 +383,44 @@ describe('a turn a quit stopped (#698)', () => {
     const task = store.mailbox.newestTask(PERSON, addressOf(s.id))!
     expect(task).toBeDefined()
 
-    const b = host()
-    // The mailbox is wired in the same tick as the host is made, before the start's first moment
-    wireHostMail(b.mgr, store)
-    const reports = () => store.mailbox.reportsOn(task.id).filter((m) => m.sender === 'centralu')
-    await eventually(() => reports().length === 1)
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'quit' })
-    expect(reports()[0]!.body).toContain('Centralu quit or restarted during its turn')
-    expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: 'reported' })
-    expect(store.mailbox.newestTask(PERSON, addressOf(s.id))).toBeUndefined()
+    // The next start: its mail's ready step releases what the quit cut and tells the senders
+    wireHostMail(host().mgr, store).afterReady()
+    const told = () => store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
+    await eventually(() => told().length === 1)
+    // The step-1 stop notice, in the person's form: the one path for a stop
+    expect(told()[0]!.facts.unanswered).toEqual([{ id: task.id, recipient: addressOf(s.id), why: 'quit' }])
+    expect(told()[0]!.body).toContain('Centralu quit while')
+    expect(told()[0]!.body).toContain('worked on your message, so it did not answer. Send it a message when you want it to go on.')
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: null, releasedWhy: 'quit' })
     // The start after that finds the session at rest and says nothing more
-    host()
+    wireHostMail(host().mgr, store).afterReady()
     await startNoticesRan()
-    expect(reports()).toHaveLength(1)
+    expect(told()).toHaveLength(1)
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+  })
+
+  // The per-request form of main's "a mark the start dropped, cut by a quit" (#1948 step 3): the open task is what the starter is owed
+  it("a task's turn the quit cut: the next start finds the child at rest and tells its sender once, by the stop notice, with no report", async () => {
+    const a = host()
+    wireHostMail(a.mgr, store)
+    const { parent, child } = await parentAndChild(a)
+    const task = taskTo(parent, child)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    // "Quit completely" in the child's turn: the next start finds it at rest, marked quit, and its settle runs past its wait
+    const b = host()
+    expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    wireHostMail(b.mgr, store).afterReady()
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+    expect(stopNoticesTo(parent).map((n) => n.facts.unanswered)).toEqual([[{ id: task.id, recipient: addressOf(child), why: 'quit' }]])
+    expect(starterNotices(parent)).toEqual([])
+    expect(answersTo(parent, child)).toEqual([])
+    expect(store.mailbox.recipient(task.id, addressOf(child))).toMatchObject({ settled: null, releasedWhy: 'quit' })
+    // The start after that tells nobody again, and answers nothing
+    wireHostMail(host().mgr, store).afterReady()
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+    expect(stopNoticesTo(parent)).toHaveLength(1)
+    expect(answersTo(parent, child)).toEqual([])
   })
 
   it('a session at rest is left alone by the next start', async () => {
@@ -393,7 +435,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(store.messages.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
-  it('the next start tells a starter that delegated without waiting (a report mark with no task row, as an older build left it), once per child, and only while the starter exists', async () => {
+  it('the next start tells a starter that delegated without waiting and was given no task (this host wrote none), quietly, once per child, and only while the starter exists', async () => {
     // This host's mail is not wired: the delegation wrote no task, so the starter is owed nothing by its child
     const a = host()
     const { parent, child, project } = await parentAndChild(a)
@@ -408,10 +450,9 @@ describe('a turn a quit stopped (#698)', () => {
     wireHostMail(b.mgr, store).afterReady()
     const [told, ...more] = starterNotices(parent)
     expect(more).toEqual([])
-    // Owed the report the start drops (its report mark): woken, though at rest, since it waits for that report (owner 2026-11-10)
-    expect(told).toMatchObject({ sender: 'centralu', kind: 'notice', facts: { about: { session: addressOf(child) }, reason: 'quit' } })
-    expect(told!.facts.quiet).toBeUndefined()
-    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn', true))
+    // Owed nothing, at rest: told quietly, not woken
+    expect(told).toMatchObject({ sender: 'centralu', kind: 'notice', facts: { about: { session: addressOf(child) }, reason: 'quit', quiet: true } })
+    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn'))
     // No report besides: the old report path that told the requester of a quit is gone
     expect(reportsTo(parent, child)).toEqual([])
     expect(info(b, orphan.sessionId).interruption).toMatchObject({ reason: 'quit' })
@@ -501,20 +542,21 @@ describe("the person's own turn a quit cut (#1946)", () => {
     expect(reportsTo(parent, child)).toEqual([])
   })
 
-  it("a report still owed is told of the stop though the turn was the person's: the start drops the mark, so it would never hear", async () => {
+  it("a task still open is told of the stop though the turn was the person's: the stop notice lists it, and wakes its sender", async () => {
     const a = host()
+    ;(a.claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
     wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
+    // Its own background work runs as its turn ends (#721): not at rest, so the task stays open; the person writes to it
+    a.claude.handles.get(child)!.emit({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'dev server', status: 'running' }] })
     a.claude.handles.get(child)!.answer('indent fixed, server running')
-    await eventually(() => mailReportsTo(parent).length === 1)
-    // The child's report is held over its own background work (#721); the person writes to it, which keeps the report owed
-    store.children.setReportMark(child, parent)
-    store.settings.setAppSetting(pausedReportKey(child), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+    await eventually(() => info(a, child).state !== 'working')
+    expect(mailReportsTo(parent)).toEqual([])
     await a.mgr.inputs.send(child, 'now tidy the imports')
     expect(info(a, child).state).toBe('working')
     const b = host()
     wireHostMail(b.mgr, store).afterReady()
-    // Owed a report, the parent hears of the quit, as a report or as a sender owed an answer, and is woken: it waits for that report
+    // Owed the task's answer, the parent hears of the quit as a sender owed an answer, and is woken: it waits for that answer
     const child_ = addressOf(child)
     const heard = () =>
       store.mailbox
@@ -523,8 +565,9 @@ describe("the person's own turn a quit cut (#1946)", () => {
     await eventually(() => heard().length > 0)
     expect(heard()).toHaveLength(1)
     expect(heard()[0]!.facts.quiet).toBeUndefined()
-    // Not the words for a starter owed nothing: it was owed this report
+    // Not the words for a starter owed nothing: it was owed this answer
     expect(heard()[0]!.body).not.toContain('It owed you no answer')
+    expect(heard()[0]!.facts.unanswered).toEqual([{ id: taskTo(parent, child).id, recipient: child_, why: 'quit' }])
   })
 })
 
@@ -568,6 +611,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it("is listed by the stop, continued once with Centralu's note; its parent hears nothing until the continued turn's end, which says so (#1966)", async () => {
     const f = folder()
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     expect(info(a, child).state).toBe('working')
     await stopForUpdate(a)
@@ -576,6 +620,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(f.turns()).toEqual([{ id: child, seq: listedAt }])
 
     const b = host({ updateResume: f })
+    wireHostMail(b.mgr, store)
     // A hub reading the machine before the note went in sees a turn running, not one that ended
     expect(info(b, child)).toMatchObject({ state: 'working' })
     expect(info(b, child).interruption ?? null).toBeNull()
@@ -599,15 +644,15 @@ describe("a turn a linked hub's update cut (#1618)", () => {
 
     // The parent is told nothing of the cut, neither that it stopped nor that it goes on (#1966)
     await startNoticesRan()
-    expect(reportsTo(parent, child)).toHaveLength(0)
+    expect(answersTo(parent, child)).toHaveLength(0)
 
-    // The continued turn's end is the report, once, and says in one line that an update cut the turn and Centralu continued it
+    // The continued turn's last response answers the task, once, and says in one line that an update cut the turn and Centralu continued it
     b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('The session ended its turn')
-    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    await eventually(() => answersTo(parent, child).length === 1)
+    expect(answersTo(parent, child)[0]!.facts).toMatchObject({ outcome: 'finished', answer: 'Sidebar indent fixed.' })
+    expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
     await startNoticesRan()
-    expect(reportsTo(parent, child)).toHaveLength(1)
+    expect(answersTo(parent, child)).toHaveLength(1)
     expect(sentTo(b, child)).toHaveLength(1)
   })
 
@@ -712,18 +757,20 @@ describe("a turn a linked hub's update cut (#1618)", () => {
       throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
     }
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     await stopForUpdate(a)
     expect(said.mock.calls.map((c) => String(c[0])).some((l) => l.includes('could not be listed') && l.includes('EPERM: operation not permitted'))).toBe(true)
     const b = host({ updateResume: f })
     expect(info(b, child)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
-    // Its starter, owed the report the start drops, reads the quit in its mailbox and is woken, as for any quit (docs/plans/mailbox.md "The stop notice")
+    // Its starter, owed its task's answer, reads the quit in its mailbox as that task unanswered and is woken, as for any quit (docs/plans/mailbox.md "The stop notice")
     wireHostMail(b.mgr, store).afterReady()
-    const [told, ...more] = starterNotices(parent)
+    const [told, ...more] = stopNoticesTo(parent)
     expect(more).toEqual([])
-    expect(told).toMatchObject({ facts: { about: { session: addressOf(child) }, reason: 'quit' } })
+    expect(told!.facts.unanswered).toEqual([{ id: taskTo(parent, child).id, recipient: addressOf(child), why: 'quit' }])
     expect(told!.facts.quiet).toBeUndefined()
-    expect(told!.body).toBe(starterBody(info(b, child).name, 'Centralu quit during its turn', true))
+    // Told once: not besides as a starter owed nothing
+    expect(starterNotices(parent)).toEqual([])
     // Nothing continued it: no Continue went in
     expect(b.claude.handles.has(child)).toBe(false)
   })
@@ -731,9 +778,11 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it('a Continue the tool takes while a second update stops the host is left to the next host, which continues and tells it once (#1626 review)', async () => {
     const f = folder()
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     await stopForUpdate(a)
     const b = host({ updateResume: f })
+    wireHostMail(b.mgr, store)
     // The tool takes the note late: after the second update's stop began
     let accept: (() => void) | undefined
     const create = b.claude.createSession.bind(b.claude)
@@ -757,18 +806,19 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     accept!()
     await stopping
     // A host leaving settles nothing: the first stop's list stays, and its own stop lists the turn again, the note included
-    expect(reportsTo(parent, child)).toHaveLength(0)
+    expect(answersTo(parent, child)).toHaveLength(0)
     expect(f.files.size).toBe(2)
     expect(f.ids()).toEqual([child])
     // The next host continues it, and its parent hears of it once, at the continued turn's end
     const c = host({ updateResume: f })
+    wireHostMail(c.mgr, store)
     await eventually(() => sentTo(c, child).length === 1)
     await eventually(() => f.ids() === null)
     await startNoticesRan()
-    expect(reportsTo(parent, child)).toHaveLength(0)
+    expect(answersTo(parent, child)).toHaveLength(0)
     c.claude.handles.get(child)!.answer('done')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    await eventually(() => answersTo(parent, child).length === 1)
+    expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
     // The conversation shows one Continue: the leaving host wrote no line of its own for the note it handed over late
     expect(lines(child).filter((l) => l.includes('Centralu continued it'))).toHaveLength(1)
   })
@@ -865,9 +915,11 @@ describe("a turn a linked hub's update cut (#1618)", () => {
   it('a continued turn that ends at once carries the cut line on that turn, not on a later one', async () => {
     const f = folder()
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     await stopForUpdate(a)
     const b = host({ updateResume: f })
+    wireHostMail(b.mgr, store)
     const create = b.claude.createSession.bind(b.claude)
     b.claude.createSession = async (opts, emit) => {
       const h = await create(opts, emit)
@@ -878,19 +930,74 @@ describe("a turn a linked hub's update cut (#1618)", () => {
       }
       return h
     }
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    await eventually(() => answersTo(parent, child).length === 1)
+    expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
     const held = (b.mgr as unknown as { children: { continuedCuts: Set<string> } }).children.continuedCuts
     expect(held.has(child)).toBe(false)
+  })
+
+  it("a continued turn that ends while the child's own background work runs keeps the cut line for the answer that follows that work's end", async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    ;(b.claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
+    wireHostMail(b.mgr, store)
+    await eventually(() => sentTo(b, child).length === 1)
+    const h = b.claude.handles.get(child)!
+    const verify = { id: 'b1', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    h.emit({ type: 'background_tasks', sessionId: child, live: [verify] })
+    h.answer('Started verify; waiting for it.')
+    await eventually(() => info(b, child).state !== 'working')
+    expect(answersTo(parent, child)).toEqual([])
+    // The work ends with no turn after it: the settle answers, and says the update cut the turn
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    h.emit({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' as const }] })
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+    expect(answersTo(parent, child).map((r) => r.facts.answer)).toEqual(['Started verify; waiting for it.'])
+    expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
+  })
+
+  it('a stop after a continued turn ended with its own work running drops the cut line: a later answer does not say an update cut it', async () => {
+    const f = folder()
+    const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
+    const { parent, child } = await parentAndChild(a)
+    await stopForUpdate(a)
+    const b = host({ updateResume: f })
+    ;(b.claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
+    wireHostMail(b.mgr, store)
+    await eventually(() => sentTo(b, child).length === 1)
+    const h = b.claude.handles.get(child)!
+    const verify = { id: 'b1', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    h.emit({ type: 'background_tasks', sessionId: child, live: [verify] })
+    h.answer('Started verify; waiting for it.')
+    await eventually(() => info(b, child).state !== 'working')
+    h.emit({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' as const }] })
+    // The person writes in, and that turn fails: a stop, whose notice releases what the child owed
+    await b.mgr.inputs.send(child, 'check the logs')
+    h.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom', retryable: true } })
+    await eventually(() => info(b, child).state === 'error')
+    // New work from the parent: the turn that runs it answers, and it was not cut
+    const sent = b.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
+    await eventually(() => info(b, child).state === 'working')
+    h.answer('Docs done.')
+    await sent
+    await eventually(() => answersTo(parent, child).some((r) => r.facts.answer === 'Docs done.'))
+    expect(answersTo(parent, child).filter((r) => r.body.includes('An update of Centralu cut this turn'))).toEqual([])
   })
 
   it('a wake before the Continue went in (a window that sees the machine back) keeps the turn, and the Continue goes in once (#1618 review D4)', async () => {
     const f = folder()
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     await stopForUpdate(a)
     const from = events.length
     const b = host({ updateResume: f })
+    wireHostMail(b.mgr, store)
     // The window's wake, in the same moment as the start's own Continue
     const woken = b.mgr.processes.resumeSession(child)
     await eventually(() => sentTo(b, child).length === 1)
@@ -902,11 +1009,11 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     const states = events.slice(from).flatMap((e) => (e.type === 'state_change' && e.sessionId === child ? [e.state] : []))
     expect(states.every((s) => s === 'working')).toBe(true)
     b.claude.handles.get(child)!.answer('done')
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('An update of Centralu cut this turn and Centralu continued it.')
+    await eventually(() => answersTo(parent, child).length === 1)
+    expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
   })
 
-  it("work the person owns is not reported to their Inbox as stopped: its one report is the continued turn's end (#1618 review D3)", async () => {
+  it("work the person owns gets no stop notice: the continued turn's end answers it, once, with the update's line (#1618 review D3, #1966)", async () => {
     const f = folder()
     const a = host({ updateResume: f })
     const project = await a.mgr.projectCreation.addProject(root)
@@ -924,19 +1031,22 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await startNoticesRan()
     expect(reports()).toHaveLength(0)
     expect(store.mailbox.newestTask(PERSON, addressOf(s.id))?.id).toBe(task.id)
+    expect(store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.facts.unanswered !== undefined)).toEqual([])
     b.claude.handles.get(s.id)!.answer('done')
     await eventually(() => reports().length === 1)
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'finished' })
-    expect(reports()[0]!.facts.reason).toBeUndefined()
+    expect(reports()[0]!.facts).toMatchObject({ outcome: 'finished', answer: 'done' })
+    expect(reports()[0]!.body).toBe(`${PERSON_TURN_ENDED}\nAn update of Centralu cut this turn and Centralu continued it.`)
   })
 
-  it("one that cannot be continued ends as a quit's does: marked stopped, its parent told, and it leaves the list", async () => {
+  it("one that cannot be continued ends as a quit's does: marked stopped, its parent told by the stop notice, and it leaves the list", async () => {
     const f = folder()
     const a = host({ updateResume: f })
+    wireHostMail(a.mgr, store)
     const { parent, child } = await parentAndChild(a)
     await stopForUpdate(a)
     const listedAt = store.messages.nextSeq(child) - 1
     const b = host({ updateResume: f })
+    wireHostMail(b.mgr, store)
     // Taken as going on at the start, until the wake fails
     expect(info(b, child)).toMatchObject({ state: 'working' })
     // Its tool cannot start it again on the new version; its parent's can
@@ -947,9 +1057,10 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     }
     await eventually(() => info(b, child).state === 'idle')
     expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
-    await eventually(() => reportsTo(parent, child).length === 1)
-    expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
-    expect(reportsTo(parent, child)[0]).not.toContain('cut this turn')
+    await eventually(() => stopNoticesTo(parent).length === 1)
+    expect(stopNoticesTo(parent)[0]!.facts.unanswered).toEqual([{ id: taskTo(parent, child).id, recipient: addressOf(child), why: 'uncontinued' }])
+    expect(stopNoticesTo(parent)[0]!.body).toContain('Centralu could not continue')
+    expect(answersTo(parent, child)).toEqual([])
     expect(f.ids()).toBeNull()
     // The stopped mark is a row too: past the listed one (#1626 review 1b)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)
@@ -1086,84 +1197,65 @@ describe("what an update's stop ends besides a turn (#1902)", () => {
 
   /*
    * #1912: a child whose report paused on its own background work was at rest when an update stopped the host. The next host dropped the report
-   * with the work, so its parent, told "a final report follows only if that work ends", waited for good. The report is kept now
+   * with the work, so its parent, told "a final report follows only if that work ends", waited for good. Now the task stays open while that work
+   * runs (docs/plans/mailbox.md §10.6.3), and is answered once the child is at rest under the next host
    */
-  describe('a child whose report to its parent paused on the work the update stopped (#1912)', () => {
-    /** The parent's reports about the child, the update's note among them */
-    const toldOf = (parent: string, child: string) =>
-      store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu]') && t.includes(child))
+  describe('a child whose task waited on the work the update stopped (#1912)', () => {
     async function pausedChild(h: ReturnType<typeof host>) {
+      wireHostMail(h.mgr, store)
       const { parent, child } = await parentAndChild(h)
       const handle = h.claude.handles.get(child)!
       handle.emit({ type: 'tool_call', sessionId: child, callId: 'call-1', summary: { tool: 'Bash', title: 'pnpm e2e', paths: [] }, input: { command: 'pnpm e2e', run_in_background: true } })
       handle.emit({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'e2e run', parentCallId: 'call-1', status: 'running' }] })
       handle.answer('Started the e2e run; waiting for it.')
-      await eventually(() => toldOf(parent, child).length === 1)
-      expect(toldOf(parent, child)[0]).toContain('The assigned work paused: its turn ended while its own background work is still running (e2e run)')
-      // The parent reads the pause and ends its turn
-      h.claude.handles.get(parent)!.answer('Noted.')
-      await eventually(() => info(h, parent).state !== 'working')
+      await eventually(() => info(h, child).state !== 'working')
+      // Not at rest while that work runs: the task stays open
+      expect(answersTo(parent, child)).toEqual([])
       return { parent, child }
     }
 
-    it("its parent hears the end of the turn the update's note wakes it for, saying the update stopped that work", async () => {
+    it("its parent's task is answered by the last response of the turn the update's note wakes it for", async () => {
       const f = memoryUpdateFolder()
       const a = host({ updateResume: f })
       const { parent, child } = await pausedChild(a)
       await stopForUpdate(a)
       const b = host({ updateResume: f })
+      wireHostMail(b.mgr, store)
       await eventually(() => sentTo(b, child).length === 1)
       expect(sentTo(b, child)[0]).toContain('- shell command: "pnpm e2e" (e2e run)')
       b.claude.handles.get(child)!.answer('The update stopped the e2e run; I ran it again and it passed.')
-      await eventually(() => toldOf(parent, child).length === 2)
-      const end = toldOf(parent, child)[1]!
-      expect(end).toContain('[Centralu] The session ended its turn.')
-      expect(end).toContain('An update of Centralu stopped the background work this work had paused on before that work ended; the session was told which, and this turn came after.')
-      expect(end).toContain('I ran it again and it passed.')
-      expect(store.children.listReportMarks()).toEqual([])
+      await eventually(() => answersTo(parent, child).length === 1)
+      expect(answersTo(parent, child)[0]!.facts).toMatchObject({ outcome: 'finished', answer: 'The update stopped the e2e run; I ran it again and it passed.' })
     })
 
-    // #1540: whether the person wrote to it was kept in memory, so the next host sent updates of a session the person had written to
-    it('one the person wrote to before the update sends its parent no update after it', async () => {
-      const f = memoryUpdateFolder()
-      const a = host({ updateResume: f })
-      const { parent, child } = await pausedChild(a)
-      await a.mgr.inputs.send(child, 'I will look at the e2e run myself', undefined, undefined, true)
-      a.claude.handles.get(child)!.answer('Sure.')
-      await eventually(() => info(a, child).state !== 'working')
-      await stopForUpdate(a)
-      const b = host({ updateResume: f })
-      await eventually(() => sentTo(b, child).length === 1)
-      // The woken turn starts the run again in the background and ends with words: the work is paused again
-      const handle = b.claude.handles.get(child)!
-      handle.emit({ type: 'tool_call', sessionId: child, callId: 'call-2', summary: { tool: 'Bash', title: 'pnpm e2e', paths: [] }, input: { command: 'pnpm e2e', run_in_background: true } })
-      handle.emit({ type: 'background_tasks', sessionId: child, live: [{ id: 't2', kind: 'shell', description: 'e2e run', parentCallId: 'call-2', status: 'running' }] })
-      handle.answer('Started the e2e run again; waiting for it.')
-      await eventually(() => info(b, child).state !== 'working')
-      await new Promise((r) => setTimeout(r, 50))
-      expect(toldOf(parent, child)).toHaveLength(1)
-      expect(store.children.listReportMarks()).toHaveLength(1)
-    })
-
-    it('one the note cannot wake: its parent is told at once that the update stopped the awaited work', async () => {
+    it("one the note cannot wake is at rest under the next host: the start's settle answers its parent's task with its last response", async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
       const f = memoryUpdateFolder()
       const a = host({ updateResume: f })
       const { parent, child } = await pausedChild(a)
       await stopForUpdate(a)
       const b = host({ updateResume: f })
+      const m = wireHostMail(b.mgr, store)
       const create = b.claude.createSession.bind(b.claude)
+      let tried = false
       b.claude.createSession = async (opts, emit) => {
-        if (opts.sessionId === child) throw new Error('its conversation is gone there')
+        if (opts.sessionId === child) {
+          tried = true
+          throw new Error('its conversation is gone there')
+        }
         return create(opts, emit)
       }
-      await eventually(() => toldOf(parent, child).length === 2)
-      const note = toldOf(parent, child)[1]!
-      expect(note).toContain(
-        '[Centralu] An update of Centralu stopped the background work the assigned work had paused on (e2e run) before that work ended, and no turn of the session followed, so the work may not have finished',
-      )
-      expect(note).toContain('Started the e2e run; waiting for it.')
-      expect(store.children.listReportMarks()).toEqual([])
+      await eventually(() => tried && f.ids() === null)
+      await startNoticesRan()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      try {
+        m.afterReady()
+        await vi.advanceTimersByTimeAsync(61_000)
+      } finally {
+        m.delivery.stop()
+        vi.useRealTimers()
+      }
+      expect(answersTo(parent, child).map((r) => r.facts.answer)).toEqual(['Started the e2e run; waiting for it.'])
     })
   })
 

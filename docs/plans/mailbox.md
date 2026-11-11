@@ -1412,7 +1412,7 @@ or delivered later) stays open, starts its own turn and gets its own report. The
 (§9.2) and lists the others in `facts.covers`. *Not taken:* coalescing tasks into one per pair at send time: `agent_session send` and
 `start_agent` hand back a task id per call, and the caller's later `stop` withdraws that one.
 
-`PAUSED_REPORT_SETTLE_MS` (60 s) and the settle path (`child-reports.ts:266`) stay and call the same recorder. A
+`OWN_WORK_SETTLE_MS` (60 s) and the settle path (`child-reports.ts:266`) stay and call the same recorder. A
 task's sender can withdraw it with `agent_session stop`: the row becomes `withdrawn`; the old path's stop report goes
 as today and the recorder answers `closed` for it.
 
@@ -1458,7 +1458,7 @@ Neither starts a turn nor wakes anyone. A crash between the old path's write and
 | `answerRecorder` (a call returned the answer: reports read, thread to `review`) | the reports replying to the task are marked read for the caller. No state | M3a |
 | `closingRecorder` (closing a thread stops its turn, #1511) | gone. `agent_session stop` is the way, and it withdraws the task | M3a |
 | `finishRecorder` (deleting the child closes the thread) | `partyGone` settles the child's rows | M3a |
-| `personWorkRecorder`, `personReportRecorder` (script-started work reports to the Inbox) | a task from `person`, and its report to `person` | M3a |
+| `personWorkRecorder`, `personReportRecorder` (script-started work reports to the Inbox) | a task from `person`, answered as any task (§10.6.3 "The person's own work"); `personReportRecorder` went in #1948 step 3 | M3a |
 | `adoptMark`, `reconcileFinished` | §9.5 | M3a |
 | `report_marks`, `pausedReports`, `delegated_turns`, `queued_requests`, `ChildReports.held`, `ReportedAs` | unchanged and the truth (§9.5) | M8 |
 | `LinkedReports`, `endOwed` (`remote-agents.ts:224`), the `owed` field of `remote_agents` | unchanged | when mail crosses links (§14) |
@@ -1692,7 +1692,8 @@ mail to the Assistant's role follows the role (D15).
 answered (the person's too), and every open task a session gave it and that reached it, whichever turn it came in (one still queued
 was never its work). The person's Stop releases only the tasks of the turn it stopped (delivered into it, or the work it was for): the
 session can still answer the others, so their givers are not told (owner, 2026-11-11). A stop that leaves it unable to answer (an error, a
-usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. Not the person's tasks: their work is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a
+usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. The person's own tasks are released and told the same way
+(§10.6.3 "The person's own work"). The rows stay open, so a
 reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
 released task as reported.
 
@@ -1719,12 +1720,12 @@ turn through the report path (`quitNotices`, `tellAskerOfInterruption`), which w
 **What it replaced.** `HostTenure.quitNotices`, `quitRequesters`, `quitTold`, `quitTellEnded` and the requester table at the start;
 `ChildReports.tellAskerOfInterruption` (the live stop's and the uncontinued turn's "tell whoever gave the turn" path) with its quote
 rule's second copy (`useQuotes`, `MailHooks.quotes`, `NOT_QUOTED`); and the wake rule's inputs `waitsOn` and the quit's blanket
-`quiet`. The older report path for a report mark (`reportBackIfAwaited`) stays until #1948 step 3, so its owner is still `held` until
-that path ends (`oldPathEnded`). `mail/policy.ts` went in #1996.
+`quiet`. The older report path for a report mark (`reportBackIfAwaited`) stayed until #1948 step 3, its owner `held` until that path
+ended (`oldPathEnded`); step 3 removed both (§10.6.3). `mail/policy.ts` went in #1996.
 
 **Decided as is (owner, 2026-11-11).** The starter owed nothing is told quietly of an error, a usage limit or a Stop alike. A notice
 to a session in a turn reaches it when that turn ends: mail joining a running turn is step 2 (P8), built in §10.6.2. After a quit, a child the person
-continues and that then finishes leaves its task open until it replies: step 3 makes a turn's last response its reply.
+continues and that then finishes leaves its task open until it replies: step 3 makes a turn's last response its reply (§10.6.3).
 
 ### 10.6.2 Mail joins a running turn; a send to a busy session is mail (#1948 step 2)
 
@@ -1743,7 +1744,7 @@ not over (`SelfCompaction.compacts`: the compact turn is not work, and mail sent
 is leaving still hold mail for the turn's end. A delivery planned for one state that finds the other (a wake, and a turn began meanwhile;
 or a join, and the turn ended) sends nothing and is planned again (`MailNotAtRest`, `takesAsPlanned`).
 
-- **Tasks and the Assistant's requests never join, until step 3.** `drain({ joining })` leaves out a task, a request to the Assistant
+- **Tasks and the Assistant's requests never join, until step 3** (lifted for tasks in §10.6.3). `drain({ joining })` leaves out a task, a request to the Assistant
   and a reminder that names an asker. Each waits for the turn's end and opens a turn of its own, one task to a wake (D17), whose end is
   reported to its sender as any turn of work it gave is (`MailInput.reportTo`; a join carries none). So a turn keeps one owner and one
   asker (turn-owned-by-no-one.md §4.2, Q8): two senders' tasks are two turns and two reports, as before step 2, and no report goes to
@@ -1816,6 +1817,150 @@ row is the user row a direct send writes (`from`, the sender's words) with `mail
 it (`ChildOwnership.held`) and the stop notice reads it as the sender's input (`latestTurnInputs`). An older build after a rollback reads
 such a row as one an even older build wrote: what its tool held before it counts as given (the case it already has for those rows).
 Options A (the line only) and C (wait for the at-rest send) were not taken.
+
+### 10.6.3 Reports become replies and last responses (#1948 step 3)
+
+Target 4 of #1948 and the owner's rule of 2026-11-05: an agent's turn belongs to no one; what has an owner is a request (a task, or a message
+that needs a reply), and the agent answers each in its own thread. Centralu keeps only the floor: the stop notice (§10.6.1) when a session
+cannot answer, and the last response below when it ends its turn without answering a task.
+
+**The last response (one owner, `MessageService.lastResponse`, `mail/last-response.ts`).** A report attaches to a request, never to a turn or
+a sender (the owner, 2026-11-05): when a session is at rest after a turn that ended as turns do, every task to it that is still open gets its
+own report, replying to it and settling it `reported`, with the response as `facts.answer` (600 characters) beside Centralu's words. Two tasks
+from one sender are two requests and get two reports; nothing covers another task (`covers` is gone, and with it F4/K3's sweep of a sender's
+older tasks). Which tasks: delivered, not settled, not held, from a session or the person (the person's own work, below), not held in
+the tool for a turn after (below), and with no task the session handed on in that work still open (`handedOn`: that work is not done; the turn
+that work's answer starts answers it). The response is the words of the session's latest turn (`ChildReports.turnWords`, the one definition a
+stop notice quotes too), never the run's: a turn that wrote nothing answers with none ("It wrote no response"), not the turn before's. The
+report adds `facts.personSince` when the person wrote in the session after the task was given ("The person also wrote in this session after
+your task was given, so this last response may be an answer to them.", turn-owned-by-no-one.md Q2) and `facts.after` when the task arrived
+after the response was written (Q4). A reply to a task settles it `answered` first only when it is marked as the answer (`mail reply` with
+`kind: "answer"`) and asks nothing back, so a session that answered every task gets no last-response report. Any other reply (an early "On it",
+a question back) is a message in the task's thread: the task stays open and the last response at rest answers it, so the final result reaches its
+sender (the reviewer's decision, #1948 step 3 review). One function decides it (`replyAnswers`), for a send, a reply from a linked machine and a reply held
+for an untrusted project that the person's trust lets go (`trustChanged`, which reads the mark the send left on the task's row, `answerHeld`). The
+reply's tool result says which it was ("Task … stays open: reply with kind="answer" to answer it, or your last response will."). The mail tool's
+definition is unchanged (1,231 characters before and after): `kind` was already a free word, and the result teaches it where it is needed.
+
+**A sender whose seat cannot read mail** (an older build's coordinator, a builder: no `mail` tool, `canReadMail`) is refused the report as mail
+(`no_mailbox`), so the last response is told to it as it was before step 3: the relayed report in its conversation, in the same words
+(`ChildReports.deliverReport`; for the model, Centralu's words with the read that shows the last response, never the response itself, #120), kept
+for its next message when it cannot be woken (`tellSession`). The report is still written and settles the task; it is marked delivered and read once
+the relayed report went in, so nothing waits to wake that seat. One place decides it: the mailbox's hook for the last response (`MailHooks.lastResponse`
+in `host-mail.ts`), which asks the session side to relay (`SessionLastResponse.relay`). A stop is told to such a seat the same way: every stop notice
+to a session (`StopNotices.tellUnanswered`, `tellStarter`) passes `StopNotices.relayToMailless`, which, once the notice's write committed, has the session side
+tell each stop in the relayed report's words for that ending (`ChildReports.relayStop` through `deliverReport`: "The assigned work failed." with its
+error's kind, the usage limit, the network, its tool's interrupt, a quit or shutdown, else "stopped before finishing"); the rows are released and
+marked told as for any sender, and the notice is marked delivered and read once the relayed report went in. On main the old report path told it, and
+the stop notice waited for that path (`held`, `oldPathEnded`); step 3 removed both, and this is what replaces them for such a seat.
+
+**Mail the tool holds for a turn after.** Mail that joins a running turn goes as tracked input with its own id (`MailInput.id`, `deliverMail`).
+At the turn's end the tool says which inputs that turn took (`SessionHandle.turnInputs`): mail it did not take is not the turn's
+(`MailDelivery.turnInputs`, `MailboxRecords.fileInTurn` with no turn), the last response leaves it out (`queuedFor`), and a stop of that turn
+neither releases it nor names it. When the tool opens a turn for it (`turnStartInputs`), it is filed under that turn, whose end answers or
+releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`): `started_by` `mail`, its task the work message and the starter
+(C8 below). This closes step 2's open low: a message that needs a reply, taken only after the turn ended, was filed under the turn before.
+
+**At rest** is the one rule `agentLook` (protocol session-state.ts) calls `finished`: no turn, no card, none of its own background work
+(`workTasks`), and the turn did not stop short (an error, a limit, an interruption). Not the turn Centralu starts to compact a conversation:
+that end is not the work's. A turn an update cut is no stop while Centralu continues it (#1975): the continued turn's end answers, also when it ends
+at once, and its report says the update cut the turn and Centralu continued it (`CUT_CONTINUED`, #1966); a continued turn that ends while its own
+background work runs leaves that line to the answer that follows (`ChildReports.cutsUntold`, memory only). Nor the turn that asked to compact with a next step, while that step is to go
+(`SelfCompaction.goesOn`, #2164): the step's turn goes on with the work and answers; a step the person's stop loses leaves the tasks to the turn they
+start. Mail waiting to wake the session does not hold the answer back: the turn that ran a task answers it at that turn's end with its own last
+response, though such mail waits (the owner's per-request rule: waiting would hand the sender a response about other work, and later); a follow-up
+from the same sender is a request of its own, answered by the turn that runs it. All of it is checked in one place, `ChildReports.answerAtRest`:
+- at the end of a turn that is not a stop (`SessionEvents`, `ChildReports.turnEndedAtRest`);
+- when the session's own background work ends with no turn running, after `OWN_WORK_SETTLE_MS` (60 s; Claude starts a turn for a task's end within a
+  second, and that turn answers): `ChildReports.settleAtRest`;
+- at every start, for each session at rest, the same way (no process outlives its host, so a settle the last host had armed is armed again).
+The settle and the start leave out a task a stop released: only a turn that ended after the release answers it, since the turn before them may be
+the one that stopped.
+
+**A call that waits** (`start_agent`, `agent_session wait`, `ask_project`) reads the answer itself: the turn's end has answered the task already,
+and the call marks that report read (`answerRecorder`), unless the child's own background work still runs or work it handed on is open: then the task stays open, the call says so, and
+the last response answers it later. A turn that asked to compact with a next step (`SelfCompaction.goesOn`) is not the answer either: the
+wait reads it as `working` (`DelegationWaits.awaitTurn`), and the step's turn answers. A call that did not wait (`bound`, `wait: false`) leaves the task open;
+nothing is marked. start_agent writes its task before its frame goes in (`ChildOwnership.delegated`), as the report mark was written at the bound:
+handing the frame over can outlast the bound, and a host that goes in that gap leaves the task to the next one, whose start answers it; a frame
+that could not go in withdraws the task.
+
+**Tasks join a running turn.** `drain({ joining })` no longer leaves tasks out (§10.6.2's interim rule is lifted): every task of every sender
+joins, and each is answered on its own, by a reply or by the last response at rest. Requests to the Assistant still wait for its turn's end
+(one asker a turn, turn-owned-by-no-one.md §4.2).
+
+**The Assistant's request turn** (S12, §7.6): at the end of its turn that is not a stop, each session whose request the turn carried
+(`requestsIn`, the store's rows of the turn) gets S12 replying to its request, and its requests there are settled (`requestTurnEnded`,
+`requestTurnRecorder`). A stop releases them instead, and the stop notice tells the askers.
+
+**The stop notice** (§10.6.1) is the only path for a stop. A call still waiting has read the stop itself (`told`). The hold for an older report
+path (`held`, `oldPathEnded`, `OLD_PATH_WAIT_MS`, `mailStopTold`) and the starter's `reportOwed` branch are gone with the report marks: the starter
+told of a quit is the session that gave the turn, else the one that started it (`HostTenure.quitStarter`).
+
+**What the person sees.** The composer's choice goes (C1): the person's message is a message, as "Just asking" was. The person's own work changes
+as below (mock-ups `1948-step3-*`, the last commit of step 3, which can be dropped on its own).
+
+**The person's own work** (a task from the person: a script's or the RPC's first message, §9.6) is a request like any other, answered by the same
+rule and stopped by the same notice; its own report path (`reportToPersonIfOwed`) goes. Three cases, by what the person's Inbox thread shows:
+
+| Case | Before | Now | Thread |
+|---|---|---|---|
+| Finished: the turn ended and the session is at rest | "[Centralu] The session you started finished its turn." | the last response answers the task, one report replying to it, settled `reported`, with the response as `facts.answer` and Centralu's one line "[Centralu] The session you started ended its turn. Its last response says whether the work is done." (`PERSON_TURN_ENDED`, the person form of `TURN_ENDED`; the update's line after it when an update cut the turn and Centralu continued it; no read_session line, no `personSince`). A turn that wrote nothing still says the line, with no answer | In review |
+| Paused: its turn ended while its own background work runs | "[Centralu] The session you started paused: its turn ended while its own background work is still running (1 task).", then a settled report | nothing while the work runs; the turn its end starts answers, or, when none follows, the 60 s settle (`settleAtRest`) does, with the Finished line | Running, then In review |
+| Stopped: an error, a usage limit, the network, its tool's interrupt, a quit or shutdown, a cut turn not continued | "[Centralu] The session you started stopped before finishing: …", one line per cause, settled `reported` | the stop notice (§10.6.1) in its person form, e.g. "Parser's tool interrupted its turn before it answered your message. Send it a message to go on."; no report; the task is released and stays open, so the next turn's last response answers it | Open |
+
+Why: one rule for every request (a report attaches to a request, the owner's rule of 2026-11-05), and one path for a stop (§10.6.1). Centralu does
+not say "finished" for a turn (#1902): only the session's last response says whether the work is done. A stopped task was not answered, so its thread is
+not In review: `MailPerson`'s row reads a task a stop released and nothing settled as not running, and the thread is `open` (the person can send the
+session a message to go on, as the notice says). Gone with it: `personReportLine`, `personOutcome`, `reportToPersonIfOwed`, the person's paused report
+(`ChildOwnership.personPausedReports`, `pausePersonReport`, `unpausePersonReport`, `restorePersonPaused`, `person_report_paused:<session>`,
+`ChildReports.pausedTasksNow`), the quit's report of it (`HostTenure.reportQuitPersonWork`), `personReportRecorder`, `PersonReportDraft`, `personOwes` and
+the hooks `personWork.owes` / `.report`. `personWork.started` / `.withdrawn` stay: the task is still written before the first message and withdrawn
+when it could not go in. A linked machine's copy (`LinkedReports`) reports to a session, never to the person, and is unchanged.
+
+| Removed | What replaces it |
+|---|---|
+| `report_marks` in memory (`ChildOwnership.awaitingReport`, `markReport`, `clearReport`, `restoreReports`, `adoptReport`) | the open task rows |
+| Paused reports of a caller (`pausedReports`, `report_paused`, `pauseReport`, `settlePausedReport`, `reportPauseUpdate`, `isPauseUpdate` here, `StoppedByUpdate`, `keptOverUpdateStop`, `reportStoppedByUpdate`) | nothing is sent while the session's own work runs; its last response answers once that work ended and it is at rest |
+| `reportBackIfAwaited`, `reportMailTurn`, the mail-turn bridge (`markMailTurn`, `takeMailTurn`, `MailInput.reportTo`) | the last response, per task; S12 by the turn's rows |
+| `reportRecorder`, `ReportDraft`, `ReportedAs`, `waitingOn`, `oldOwes`, `handedOnBySessions`, the `waiting` report | `answerAtRest`; work handed on keeps the task open (`handedOn`) |
+| A report covering a sender's other tasks (`facts.covers`, F4/K3), a pause's update in place (`update`, `personNote`, `updateInPlace`), `startedAt` on a report | one report per task; nothing is sent while the work runs |
+| Adoption step 2 (tasks no mark owes, `settleReported`) | nothing: no older path owes anything |
+| The composer's choice: `ReportChoice`, `agents.reportOwed`, `SendIntent`, `user_message.intent`, `takeTurn`, `personTookOver`, `took_over`, `LinkedReports.choosing` | nothing: a person's message is a message |
+| The person's own report path: `reportToPersonIfOwed`, `personReportLine`, the person's paused report and `person_report_paused:`, `personReportRecorder`, `personOwes` | the last response and the stop notice, as for any task |
+
+**Handoff** (step 5 moves it onto `handOver`): until then the smallest shim keeps a moved child's answer with the successor: its open tasks from
+the original are withdrawn and one task from the successor, with the same words, is written delivered (`MessageService.repointTasks`), where
+the report mark moved before.
+
+**Restart, swap and older builds.** No store step (v71 stays free). This build neither reads nor writes `report_paused`, `report_turn`,
+`turn_inputs`, `input_origins` or `person_report_paused` (the contract step drops them, turn-owned-by-no-one.md §6; every `ready` deletes all five for
+every session (`RETIRED_SESSION_KEYS`), so beta.57 after a rollback reads no stale value, turn-starter.md "After #1948 step 3": a `report_paused` left
+standing would hold the mark below as paused there; a person's task an older build left paused is answered by the settle at that start), and ignores
+`user_message.intent` on old rows. At
+every `ready`, an earlier build's report mark whose caller has no open task to its session becomes a delivered task (`ADOPTED_TASK`), and every
+mark is then deleted. An earlier build (beta.57) after a rollback reports a turn's end by a report mark only, keeps a mark only for a session whose
+turn goes on under it, and settles every task no mark owes at its start: so this build, as it leaves (`leaveForEarlierBuild`), writes one mark for
+each session still in a turn. One, because `report_marks` keeps one row per session (one per task would take a store step): the sender of the task
+the running turn is the work of (its `mail_turns` row), as that build's own mark named the caller whose work started the turn, so its report of that
+turn's end goes to the one it was for; when the turn is no session's task (the person's, the CLI's own), the sender of the newest open task, the last
+instruction the turn took in. The other senders' tasks are settled by that build with no report. A session at rest at a rollback has its open tasks
+settled by that build with no report, as that build's own restart drops a mark of a session at rest. Accepted (#1948, 2026-11-11): beta.57's shape
+cannot change, and a rollback is rare.
+
+**Open points, accepted.** A seat that cannot read mail hears of a session deleted (`gone`) or of a turn lost at a restart (`lost`) only by the
+mailbox's notice, which it never reads, as on main. The cut line kept for the answer after a session's own background work (`cutsUntold`) is memory
+only: a restart before the settle answers loses it, and that answer does not say the update cut the turn. A relay held for a
+mail-less seat's next message (`tellSession`) is memory only too: a host swap loses it and the stored report stays undelivered, as on main.
+
+**Linked machines** keep their copy (`LinkedReports`, `RemoteAgents.reportGate`, `deliverReport`'s relayed report and its paused reports) until mail
+crosses links (step 6): that is the second definition of "a turn's end is reported", reported, not changed here.
+
+**Re-keyed, not dropped.** C11, the asked gate, was keyed on the request rows in P2 (`requestsIn`) and is unchanged. C8, `mail_turns.started_by`,
+is still written (`mail` by the delivery and for a turn the tool opens for mail it held, `MailTurns.openedFor`; the rest from the turn's opening input)
+and still feeds the pair's warning count and its reset. Since tasks join a running turn where each started a turn of its own before, the pair's count
+(`pairTurnsSince`) is the turns a session's mail started plus each task of the pair that joined a turn it did not start, the person's too, and a join
+is checked against it as a wake is (`MailDelivery.warnIfRunning`): two busy sessions trading tasks are warned of as before.
 
 ### 10.7 The state table
 
@@ -3048,8 +3193,10 @@ step 2), nor finds a mark M8 already reported and reports it again (K1). M7 stop
 - `sessions/child-reports.ts`: what is owed comes from `MessageService.watchedFrom(owner)` filtered to tasks:
   - `awaitingReport` (child → caller) becomes a view over unsettled task rows (the newest task per child);
   - `pausedReports` becomes "the task's last report is `paused`" (`reportsOn`), with the paused count in its facts;
-  - `ChildReports.held` (notices kept for an owner that cannot read mail) goes: an owner that cannot read mail is a
-    seat without a mailbox, and its report is the old relayed notice as today, written from the task row;
+  - an owner that cannot read mail is a seat without a mailbox, and its report is the old relayed notice as today,
+    written from the task row. As built in #1948 step 3 (§10.6.3 "A sender whose seat cannot read mail"): the last response
+    that answers the task is relayed to it (`SessionLastResponse.relay`), and `ChildReports.held` stays, keeping that notice
+    for its next message when it cannot be woken;
   - `toMailbox` and `ReportedAs` go: the recorder writes the report and settles the row in one call, and returns
     nothing.
 - `sessions/child-ownership.ts`: report marks (`report_marks`) and `delegated_turns` are no longer **read**; their

@@ -319,11 +319,11 @@ export function createRpcHandler(
   /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
   const builderDeps = (call: ScriptTextCall, ctx?: RpcContext): BuilderRequestDeps => {
     const fromScript = scriptAuthor(call, ctx)
-    return { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a, undefined, false, 'ask', fromScript), byScript: fromScript !== undefined }
+    return { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a, undefined, false, fromScript), byScript: fromScript !== undefined }
   }
 
   const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
-    // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
+    // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, a task answered in their Inbox (docs/plans/mailbox.md §10.6.3)
     'agents.createSession': async (p, ctx) => {
       // Where a worktree forked from (#1488): in the answer, as a linked computer's hub has no other way to read it
       let worktreeBase: string | undefined
@@ -339,12 +339,11 @@ export function createRpcHandler(
       if (p.fromHub && ctx && !startedByHub) hubs?.awaitOffer?.(ctx.client, info.id)
       return worktreeBase ? { ...info, worktreeBase } : info
     },
-    'agents.send': async ({ sessionId, text, attachments, intent }, ctx) => {
+    'agents.send': async ({ sessionId, text, attachments }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
-      await mgr.inputs.send(sessionId, text, attachments, undefined, true, intent, scriptAuthor('agents.send', ctx))
+      await mgr.inputs.send(sessionId, text, attachments, undefined, true, scriptAuthor('agents.send', ctx))
       return { ok: true as const }
     },
-    'agents.reportOwed': async (p) => ({ owed: mgr.inputs.reportOwed(p.sessionId) }),
     'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.inputs.respondApproval(sessionId, requestId, decision, scope, matcher)),
     'agents.answerQuestion': async ({ sessionId, requestId, answers }) => ack(mgr.inputs.answerQuestion(sessionId, requestId, answers)),
     'agents.models': async (p) => mgr.toolQueries.listModels(p.tool),

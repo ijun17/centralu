@@ -1,10 +1,11 @@
 /**
- * A send to a session that cannot take it now is mail (docs/plans/mailbox.md §10.6.2, #1948 step 2), over the real manager: no note / queue / fork
- * choice comes back, the call answers `mailed` at once, the task waits for the turn's end and starts a turn of its own reported to its sender
- * (as before step 2: the reviewer's S2, S3, S3b, S4), and a stop releases it through the stop notice.
+ * A send to a session that cannot take it now is mail (docs/plans/mailbox.md §10.6.2, §10.6.3), over the real manager: no note / queue / fork
+ * choice comes back, the call answers `mailed` at once, the task joins the running turn and each sender's task is answered on its own by that
+ * turn's last response (the reviewer's S3b, S4b), and a stop releases it through the stop notice.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HostMail } from '../mail/host-mail.js'
+import { PERSON } from '../mail/address.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
@@ -51,29 +52,24 @@ async function childInTurn(): Promise<{ parent: string; child: string }> {
 }
 
 describe('a send to a busy session is mail (§10.6.2)', () => {
-  it("agent_session send to a child in a turn answers mailed at once, with no choice; the task waits for the turn's end and starts a turn of its own", async () => {
+  it('agent_session send to a child in a turn answers mailed at once, with no choice; the task joins the running turn (§10.6.3)', async () => {
     const { parent, child } = await childInTurn()
     const turns = turnsOf(w.store, child)
     const r = await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'use Chromium' })
     expect(r).toMatchObject({ ok: true, state: 'mailed', sessionId: child, messageId: expect.any(String) })
     const task = read.tasks(addr(parent), child).find((t) => t.body === 'use Chromium')!
     expect(task).toMatchObject({ id: r.ok && r.state === 'mailed' ? r.messageId : '', origin: 'agent_session' })
-    // Not into the running turn
+    // Into the running turn: no turn of its own
     await deliverDue(child)
-    expect(handleOf(child).sent.join(' ')).not.toContain(task.id)
-    expect(read.taskRow(task.id, child)).toMatchObject({ deliveredAt: null })
-    handleOf(child).answer('Started.')
-    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
-    await wakeDue(child)
     expect(handleOf(child).sent.at(-1)).toContain(task.id)
     expect(handleOf(child).sent.at(-1)).toContain('use Chromium')
-    expect(turnsOf(w.store, child)).toHaveLength(turns.length + 1)
-    expect(read.taskRow(task.id, child)).toMatchObject({ deliveredAt: expect.any(Number), turnSeq: turnsOf(w.store, child).at(-1)!.turnSeq })
+    expect(turnsOf(w.store, child)).toHaveLength(turns.length)
+    expect(read.taskRow(task.id, child)).toMatchObject({ deliveredAt: expect.any(Number), turnSeq: turns.at(-1)!.turnSeq })
   })
 
   /*
-   * The deep review's cases (S2, S3, S3b, S4, S4b), each sender's report as before step 2: one report per send, on the turn that did that work. With
-   * tasks joining the running turn, a sender was told of a turn that never saw its task, or nobody was told
+   * The deep review's cases (S3b, S4b) under step 3: tasks given into one turn at different times each get one answer, their own, from the last
+   * response of the turn that ran them. S2, S3 and S4 are sessions/last-response.test.ts's "two tasks of one sender", H1 and H2
    */
   describe('each sender is told of its own work, once', () => {
     /** The session's turn ends with `text`, and the mail due for it then goes as a wake */
@@ -82,42 +78,10 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
       await w.until(() => w.mgr.sessionInfo(id)?.state !== 'working')
       await wakeDue(id)
     }
-    const reported = (taskId: string) => read.reportsOn(taskId).length
+    /** The answers on a task, oldest first */
+    const answered = (taskId: string) => read.reportsOn(taskId).map((r) => r.facts.answer)
 
-    it('S2: a follow-up sent while the turn it gave runs is not reported on that turn; it runs as the next, which is reported on it', async () => {
-      const { parent, child } = await childInTurn()
-      const [first] = read.tasks(addr(parent), child)
-      const r = await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
-      const follow = r.ok && r.state === 'mailed' ? r.messageId : ''
-      await deliverDue(child)
-      await turnEnds(child, 'Code done.')
-      await w.until(() => reported(first!.id) > 0)
-      expect(reported(follow)).toBe(0)
-      expect(handleOf(child).sent.at(-1)).toContain(follow)
-      await turnEnds(child, 'Docs done.')
-      await w.until(() => reported(follow) > 0)
-      expect([reported(first!.id), reported(follow)]).toEqual([1, 1])
-    })
-
-    it("S3: the Assistant's send into a child's turn leaves the child's parent its report, and gets its own on the turn after", async () => {
-      const { parent, child } = await childInTurn()
-      const [first] = read.tasks(addr(parent), child)
-      const orc = await w.mgr.assistant()
-      const sent = await w.mgr.runCentraluTool(orc.id, 'send_to_session', { sessionId: child, text: 'check the build' })
-      expect(sent.text).toContain('went to it as mail')
-      const [asked] = read.tasks(addr(orc.id), child)
-      await deliverDue(child)
-      await turnEnds(child, 'Code done.')
-      await w.until(() => reported(first!.id) > 0)
-      expect(reported(asked!.id)).toBe(0)
-      // The parent's report mark went with the turn it was for: nothing keeps the parent waiting on the Assistant's work
-      expect(w.store.children.listReportMarks().filter((r) => r.sessionId === child && r.callerSessionId === parent)).toEqual([])
-      await turnEnds(child, 'Build green.')
-      await w.until(() => reported(asked!.id) > 0)
-      expect([reported(first!.id), reported(asked!.id)]).toEqual([1, 1])
-    })
-
-    it('S3b: two senders into one turn at different times are each told, on a turn of its own', async () => {
+    it('S3b: two senders into one turn at different times each get their own answer, once, from that turn', async () => {
       const { parent, child } = await childInTurn()
       const [first] = read.tasks(addr(parent), child)
       const orc = await w.mgr.assistant()
@@ -127,11 +91,14 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
       const follow = r.ok && r.state === 'mailed' ? r.messageId : ''
       await deliverDue(child)
       const [asked] = read.tasks(addr(orc.id), child)
-      await turnEnds(child, 'Code done.')
-      await turnEnds(child, 'Next done.')
-      await turnEnds(child, 'Last done.')
-      await w.until(() => reported(asked!.id) > 0 && reported(follow) > 0)
-      expect([reported(first!.id), reported(asked!.id), reported(follow)]).toEqual([1, 1, 1])
+      expect(handleOf(child).sent.join(' ')).toContain(asked!.id)
+      expect(handleOf(child).sent.join(' ')).toContain(follow)
+      await turnEnds(child, 'All three done.')
+      await w.until(() => answered(asked!.id).length > 0 && answered(follow).length > 0)
+      // A later turn answers none of them again
+      await w.mgr.inputs.send(child, 'one more thing')
+      await turnEnds(child, 'Later.')
+      expect([answered(first!.id), answered(asked!.id), answered(follow)]).toEqual([['All three done.'], ['All three done.'], ['All three done.']])
     })
 
     /** Two sessions of the caller's project, and a session of the target's that the person is working in */
@@ -146,35 +113,21 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
       return { b, c, there }
     }
 
-    it("S4: two ask_project into the person's turn are each a turn of their own after it, each reported to its asker", async () => {
-      const { b, c, there } = await twoAskers()
-      expect(await w.mgr.askProject(b, { project: w.target.id, session: there, task: 'what does parse() return?' })).toMatchObject({ state: 'mailed' })
-      expect(await w.mgr.askProject(c, { project: w.target.id, session: there, task: 'which branch is it on?' })).toMatchObject({ state: 'mailed' })
-      const [fromB] = read.tasks(addr(b), there)
-      const [fromC] = read.tasks(addr(c), there)
-      await deliverDue(there)
-      await turnEnds(there, 'Done for the person.')
-      expect([reported(fromB!.id), reported(fromC!.id)]).toEqual([0, 0])
-      await turnEnds(there, 'It returns a tree.')
-      await turnEnds(there, 'main.')
-      await w.until(() => reported(fromB!.id) > 0 && reported(fromC!.id) > 0)
-      expect([reported(fromB!.id), reported(fromC!.id)]).toEqual([1, 1])
-    })
-
-    it("S4b: an ask_project that comes while the first asker's turn runs waits for it, and each asker is told once", async () => {
+    it("S4b: an ask_project that comes after another joined the person's turn joins it too, and each asker is told once", async () => {
       const { b, c, there } = await twoAskers()
       await w.mgr.askProject(b, { project: w.target.id, session: there, task: 'what does parse() return?' })
       const [fromB] = read.tasks(addr(b), there)
-      await turnEnds(there, 'Done for the person.')
-      expect(handleOf(there).sent.at(-1)).toContain(fromB!.id)
+      await deliverDue(there)
+      expect(handleOf(there).sent.join(' ')).toContain(fromB!.id)
       await w.mgr.askProject(c, { project: w.target.id, session: there, task: 'which branch is it on?' })
       const [fromC] = read.tasks(addr(c), there)
       await deliverDue(there)
-      expect(handleOf(there).sent.join(' ')).not.toContain(fromC!.id)
-      await turnEnds(there, 'It returns a tree.')
-      await turnEnds(there, 'main.')
-      await w.until(() => reported(fromB!.id) > 0 && reported(fromC!.id) > 0)
-      expect([reported(fromB!.id), reported(fromC!.id)]).toEqual([1, 1])
+      expect(handleOf(there).sent.join(' ')).toContain(fromC!.id)
+      await turnEnds(there, 'A tree, on main.')
+      await w.until(() => answered(fromB!.id).length > 0 && answered(fromC!.id).length > 0)
+      expect([answered(fromB!.id), answered(fromC!.id)]).toEqual([['A tree, on main.'], ['A tree, on main.']])
+      // The person's own message is answered by no report
+      expect(read.to(PERSON).filter((x) => x.message.kind === 'report')).toEqual([])
     })
   })
 
@@ -241,19 +194,17 @@ describe('a send to a busy session is mail (§10.6.2)', () => {
     expect(read.taskRow(task.id, child)).toMatchObject({ settled: 'withdrawn', deliveredAt: null })
   })
 
-  it('a session that stops in the turn of the mailed task releases it through the stop notice, and the report on it says so, as for any task', async () => {
+  it('a session that stops in the turn the mailed task joined releases it through the stop notice, with no report, as for any task', async () => {
     const { parent, child } = await childInTurn()
     const r = await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })
     const id = r.ok && r.state === 'mailed' ? r.messageId : ''
-    handleOf(child).answer('Started.')
-    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
-    await wakeDue(child)
+    await deliverDue(child)
     expect(read.taskRow(id, child)?.deliveredAt).not.toBeNull()
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'boom', retryable: false } })
     await w.until(() => read.taskRow(id, child)?.releasedAt != null)
-    expect(read.taskRow(id, child)).toMatchObject({ releasedWhy: 'error' })
-    // Its own turn: the report on it says how that turn ended, as for any task
-    await w.until(() => read.reportsOn(id).length > 0)
-    expect(read.reportsOn(id).map((r) => r.facts.outcome)).toEqual(['failed'])
+    expect(read.taskRow(id, child)).toMatchObject({ releasedWhy: 'error', settled: null })
+    const notices = read.between('centralu', addr(parent), 'notice')
+    expect(notices.filter((n) => n.facts.unanswered?.some((u) => u.id === id))).toHaveLength(1)
+    expect(read.reportsOn(id)).toEqual([])
   })
 })

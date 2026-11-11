@@ -21,7 +21,6 @@ function stopWorld() {
   const stops = {
     sessionStopped: (who: string, why: StopWhy, o: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}) => service.stops.sessionStopped(who, why, { turnSeq: 1, ...o }),
     sessionsStopped: service.stops.sessionsStopped.bind(service.stops),
-    oldPathEnded: service.stops.oldPathEnded.bind(service.stops),
   }
   /** A question from `from` to `to`, delivered to it in its turn `turn` and not answered */
   const ask = (from: string, to: string, text = 'what does the build need?', over: { needsReply?: boolean; turn?: number | null } = {}) => {
@@ -116,33 +115,15 @@ describe('a session stops without answering a question', () => {
     expect(owed.noticesTo(A)).toHaveLength(1)
   })
 
-  it("a starter owed the turn's report the start dropped (a mark with no task row: an older build's, or a crash between the mark and the task row) is told whoever's turn it was, and woken unless the same quit cut it", () => {
-    const w = stopWorld()
-    w.startTurn(B, null, { by: 'person' })
-    w.db.prepare(`UPDATE mail_turns SET started_by = 'person' WHERE turn_seq = 1`).run()
-    w.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: 1, starter: A, reportOwed: true }])
-    const [told, ...rest] = w.startersNotices(A)
-    expect(rest).toEqual([])
-    expect(told?.message.body).toBe('beta, which you started, stopped: Centralu quit during its turn. Its report to you will not come. read_session shows where it stopped; send it a message if it should go on.')
-    expect(wakesMessage(told!.message)).toBe(true)
-
-    const cut = stopWorld()
-    cut.cut.add(A)
-    cut.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: null, starter: A, reportOwed: true }])
-    expect(wakesMessage(cut.startersNotices(A)[0]!.message)).toBe(false)
-  })
-
-  it("the starter is not told of the person's own turn, nor when an older report path tells or may tell it (#1946)", () => {
+  it("the starter is not told of the person's own turn, nor when a call waiting on the stopped session told it (#1946)", () => {
     const w = stopWorld()
     w.startTurn(B, null, { by: 'person' })
     w.db.prepare(`UPDATE mail_turns SET started_by = 'person' WHERE turn_seq = 1`).run()
     w.stops.sessionStopped(B, 'error', { starter: A })
     expect(w.startersNotices(A)).toEqual([])
-    for (const by of [{ told: [A] }, { held: [A] }]) {
-      const v = stopWorld()
-      v.stops.sessionStopped(B, 'error', { starter: A, ...by })
-      expect(v.startersNotices(A)).toEqual([])
-    }
+    const v = stopWorld()
+    v.stops.sessionStopped(B, 'error', { starter: A, told: [A] })
+    expect(v.startersNotices(A)).toEqual([])
   })
 
   it('a restart that finds sessions a quit cut wakes nobody owed nothing: their starters are told quietly, the person in the Inbox', () => {
@@ -201,7 +182,7 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(PERSON)).toHaveLength(1)
   })
 
-  it('a sender the older report paths tell of the same stop gets its rows released and marked told, and no second notice', () => {
+  it('a sender a call waiting on the session already told of the same stop gets its rows released and marked told, and no second notice', () => {
     const w = stopWorld()
     const q = w.ask(A, B)
     const other = w.ask(C, B)
@@ -339,33 +320,6 @@ describe('a session stops without answering a question', () => {
     expect(told?.message.body).toContain(request.id)
   })
 
-  it('the asker the request turn’s own report tells is held for that report: told by it, no second notice; missed by it, the stop notice', () => {
-    for (const reported of [true, false]) {
-      const w = stopWorld()
-      const request = w.ask(A, ORC, 'can you look at CI?')
-      // Another session's request rode in the same turn: no report is owed to it, so it is told now
-      const other = w.ask(C, ORC, 'and the release?')
-      expect(w.stops.sessionStopped(ORC, 'stopped', { held: [A] })).toBe(2)
-      expect(w.noticesTo(A), String(reported)).toEqual([])
-      expect(w.noticesTo(C).map((n) => n.message.facts.unanswered)).toEqual([[{ id: other.id, recipient: ORC, why: 'stopped' }]])
-      w.stops.oldPathEnded(ORC, A, reported)
-      expect(w.noticesTo(A), String(reported)).toHaveLength(reported ? 0 : 1)
-      expect(w.rowOf(request.id, ORC)).toMatchObject({ releasedWhy: 'stopped', toldAt: w.clock.t })
-    }
-  })
-
-  it('a stop with no turn on record still holds the sender an older path may tell: told by it, no notice; missed by it, one notice', () => {
-    for (const reported of [true, false]) {
-      const w = stopWorld()
-      const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-      expect(w.stops.sessionStopped(B, 'error', { turnSeq: null, held: [A] })).toBe(1)
-      expect(w.noticesTo(A), String(reported)).toEqual([])
-      w.stops.oldPathEnded(B, A, reported)
-      expect(w.noticesTo(A), String(reported)).toHaveLength(reported ? 0 : 1)
-      expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'error', toldAt: w.clock.t })
-    }
-  })
-
   it("the person's Stop releases only the tasks of the turn it stopped; a stop that leaves the session unable to answer releases them all", () => {
     for (const why of ['stopped', 'error'] as const) {
       const w = stopWorld()
@@ -398,17 +352,19 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A)).toHaveLength(1)
   })
 
-  it("releases every open task a session gave the stopped one, whichever turn it came in; not the person's, whose work is reported to their Inbox, nor one still queued", () => {
+  it("releases every open task a session or the person gave the stopped one, whichever turn it came in, each sender told; not one still queued", () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
+    // The person's own work is a request like any other (mailbox.md §10.6.3): the stop notice is its one path for a stop
     const mine = w.mail.task(PERSON, B, { text: 'my work', origin: 'create_session', delivered: true })
     const queued = w.mail.task(C, B, { text: 'later work', origin: 'send_to_session', delivered: false })
-    expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(1)
+    expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(2)
     expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
-    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
     expect(w.rowOf(queued.id, B)).toMatchObject({ releasedAt: null })
     expect(w.noticesTo(C)).toEqual([])
     expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
-    expect(w.noticesTo(PERSON)).toEqual([])
+    expect(w.noticesTo(PERSON).map((n) => n.message.facts.unanswered)).toEqual([[{ id: mine.id, recipient: B, why: 'quit' }]])
+    expect(w.noticesTo(PERSON)[0]!.message.body).toBe('Centralu quit while beta worked on your message, so it did not answer. Send it a message when you want it to go on.')
   })
 })

@@ -15,7 +15,6 @@ import type { HostCards } from './host-cards.js'
 import { withHubMark } from './hub-preset.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 import type { LinkedReports } from './linked-reports.js'
-import { keptOverUpdateStop } from './pause-update.js'
 import type { MailSessionsHost, MailSessionsView } from './mail-sessions.js'
 import type { MergeChecks } from './merge-checks.js'
 import type { RestartPolicy } from './restart-policy.js'
@@ -63,16 +62,14 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
 export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
 
-  /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
-  private quitPersonWork: string[] = []
   /**
-   * The session told of each turn a quit cut that this start found (#698, `HostMail.afterReady`): the one owed its report, else the one that gave the
-   * turn, else the one that started it; the first that still exists. Read before the start drops those rows; a later start finds none
+   * The session told of each turn a quit cut that this start found (#698, `HostMail.afterReady`): the one that gave the turn, else the one that
+   * started it; the first that still exists. Read before the start drops those rows; a later start finds none
    */
-  private quitStarters = new Map<string, { starter: string; reportOwed: boolean }>()
+  private quitStarters = new Map<string, string>()
 
   /** Who is told of the turn a quit cut in `sessionId`, as this start found it (`quitStarters`) */
-  quitStarter(sessionId: string): { starter: string; reportOwed: boolean } | null {
+  quitStarter(sessionId: string): string | null {
     return this.quitStarters.get(sessionId) ?? null
   }
   /**
@@ -105,8 +102,8 @@ export class HostTenure {
   }
 
   /**
-   * The turn an update cut could not be continued (#698): the session goes idle with the quit mark and its line, and the report it
-   * owed goes now, rather than naming a later turn
+   * The turn an update cut could not be continued (#698): the session goes idle with the quit mark and its line, and the senders of what it left
+   * open are told now (the stop notice)
    */
   private turnLostInSwap(m: SessionInfo): void {
     // The same statement the window gets, through the same rules (#428)
@@ -117,20 +114,11 @@ export class HostTenure {
     this.host.emit(change)
     // The turn is over: so is a hub task's depth for it, as at any end of a turn (#2020)
     this.host.events.endHubAsk(m.id)
-    // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
-    // Whose the turn was (#1377): the person's is reported to nobody
-    // The process is gone with it (#1604): what it was given is run by no one
-    const turnBy = this.host.children.turnEnded(m.id, null, true)
-    // Centralu cut this turn and could not continue it: the senders of what it left unanswered, and the session that started it, are told (mailbox.md
-    // "The stop notice"). The notice to the owner of the report, which the older path below tells of the same stop, waits for that path to end
-    const owner = this.host.children.awaitingReport.get(m.id)
-    const held = owner && owner !== m.id ? [owner] : []
-    this.host.mail.mailStopped(m.id, 'uncontinued', { held, starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
-    const sends: Promise<string | undefined>[] = []
-    if (owner) sends.push(this.host.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, undefined, turnBy))
-    // The work the person owns: the same end, in their Inbox (§8.1)
-    else this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
-    this.host.mail.mailStopTold(m.id, held, sends)
+    // This host did not see it begin, and the tool cannot say what it took: it reads as the work's
+    this.host.children.turnEnded(m.id, null)
+    // Centralu cut this turn and could not continue it: the senders of what it left open (the person for their own work), and the session that
+    // started it, are told (mailbox.md "The stop notice")
+    this.host.mail.mailStopped(m.id, 'uncontinued', { starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
   }
 
   /**
@@ -174,8 +162,6 @@ export class HostTenure {
             // Nothing was cut: the agent is not told which tasks the update stopped, and the log says so
             console.error(`[agent-host] ${sessionId.slice(0, 8)}: the agent could not be told what an update stopped (${errorMessage(e)})`)
             this.updateLists?.done(sessionId)
-            // No turn of it follows: a report kept over the work the update stopped goes now (#1912)
-            this.host.reports.reportStoppedByUpdate(sessionId)
             return
           }
           console.error(`[agent-host] ${sessionId.slice(0, 8)}: the turn an update ended could not be continued (${errorMessage(e)})`)
@@ -233,15 +219,6 @@ export class HostTenure {
     return [...this.continuedAfterUpdate]
   }
 
-  /** The work the person owns (a script started the session, §8.1) whose turn a quit cut: reported to their Inbox as it ended, once */
-  private reportQuitPersonWork(): void {
-    // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
-    if (this.disposing) return
-    const person = this.quitPersonWork
-    this.quitPersonWork = []
-    for (const id of person) if (this.host.meta.has(id)) this.host.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
-  }
-
   /**
    * The handles are being let go of (#839): a quit sweeping them (`disposeAll`). A process that comes up now is missed
    * by the sweep, so whoever started it stops it, and no process is swapped for another.
@@ -274,6 +251,8 @@ export class HostTenure {
     this.host.overloadRetry.stopAll()
     this.disposing = true
     this.leaveHost('Centralu is shutting down')
+    // An earlier build that takes over after this one (a rollback) reads what the sessions in a turn owe from report marks (mailbox.md §10.6.3)
+    this.host.mail.mailLeaving(this.host.listSessions().filter((s) => inTurn(s.state)).map((s) => s.id))
     /*
      * A linked hub's update stops this host (#1618): the turns it ends are the ones in a turn now, read in the same step as
      * the processes are let go of below, with no new turn taken since `leaveHost`. Listed once the processes are down and
@@ -320,8 +299,8 @@ export class HostTenure {
   private leaveHost(why: string): void {
     // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
     this.host.interruptions.stopAll()
-    // So do the waits of paused reports (#721): the work ends with its process and the next start drops the mark
-    this.host.reports.stopSettlingPausedReports()
+    // So do the waits for a session's own background work to settle (#721): the next start settles every session at rest again
+    this.host.reports.stopSettling()
     this.host.linkedReports.dispose()
     // So does a start waiting for memory (#686)
     this.host.memoryGate?.close()
@@ -399,8 +378,8 @@ export class HostTenure {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.host.interruptions.markTurnLost(fixed, false, bySystem ? 'shutdown' : 'quit')
         store.sessions.upsertSession(fixed)
-        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
-        this.host.children.processGone(s.id)
+        // The turn the last host was in never sent its end (#1604)
+        this.host.children.noteTurnEnd(s.id)
         stoppedByQuit.push(fixed)
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null
@@ -418,13 +397,10 @@ export class HostTenure {
     for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the turns an update cut (#1618) */
     const goingOn = new Set(cutByUpdate.map((s) => s.id))
-    this.quitPersonWork = stoppedByQuit.map((s) => s.id)
-    // A report owed is told of the stop whoever's turn it was: this start drops the mark (`restoreReports`), so it would never hear otherwise
-    const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
     const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
-      const starter = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && this.host.meta.has(id))
-      if (starter) this.quitStarters.set(s.id, { starter, reportOwed: starter === marks.get(s.id) })
+      const starter = [turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && this.host.meta.has(id))
+      if (starter) this.quitStarters.set(s.id, starter)
     }
     // And a session at rest whose background tasks the stop ended is woken for the note alone (#1902)
     const cutIds = new Set(cutByUpdate.map((s) => s.id))
@@ -434,25 +410,11 @@ export class HostTenure {
     ]
     // No process outlives its host, so no card the previous host left standing is still asked (#428): every rest it wrote goes
     this.host.cardRests.restore(() => false)
-    // A report paused over work an update's stop ended is kept as one whose turn goes on (#1912, `keptOverUpdateStop`)
-    const stopped = lists === null ? new Set<string>() : keptOverUpdateStop(this.host.store, this.host.meta, goingOn)
-    const ended = this.host.children.restoreReports(this.host.meta, new Set([...goingOn, ...stopped]))
-    // The person's reports paused on work that went with the last host's process (#1463): told now as that work's end, each task stopped
-    if (ended.length) setTimeout(() => ended.forEach((id) => this.host.reports.reportToPersonIfOwed(id, { type: 'turn_complete', sessionId: id }, undefined, undefined, this.host.reports.pausedTasksNow(id, 'person', true))), 0)
-    for (const id of stopped) this.host.children.stoppedByUpdate.keep(id)
-    /*
-     * The turn the update's note wakes such a session for reports, saying so. A session the note does not wake (the stop listed nothing of it, or its
-     * conversation moved on) has no such turn coming: its caller is told now
-     */
-    const woken = new Set(this.updateCuts.filter((c) => !c.turn).map((c) => c.sessionId))
-    const unwoken = [...stopped].filter((id) => !woken.has(id))
-    if (unwoken.length) setTimeout(() => unwoken.forEach((id) => this.host.reports.reportStoppedByUpdate(id)), 0)
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()
     this.host.children.restoreTurns(this.host.meta, goingOn)
     this.keptAtStart = goingOn
-    if (this.quitPersonWork.length) setTimeout(() => this.reportQuitPersonWork(), 0)
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }
 }

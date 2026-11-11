@@ -26,7 +26,6 @@ With the limited credential: runs.
 - `agents.mcpProposals`
 - `agents.models`
 - `agents.orchestratorSkills`
-- `agents.reportOwed`
 - `agents.restartSession`
 - `agents.resumeSession`
 - `agents.send`

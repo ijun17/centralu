@@ -4,6 +4,8 @@ import type { SessionInfo } from '@cc/protocol'
 import { agentListText, agentRunText } from './tool-answers.js'
 import { runCentraluTool } from './centralu-tools.js'
 import { agentState, cleanUpDue, ownAgents, type OwnAgentsHost } from './own-agents.js'
+import type { HostMail } from '../mail/host-mail.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * Finished children left behind (#690): on 2026-10-14 a parent used fourteen children's answers and deleted none until
@@ -12,11 +14,15 @@ import { agentState, cleanUpDue, ownAgents, type OwnAgentsHost } from './own-age
  */
 describe('a parent is told to clean up the children whose answers it used (#690)', () => {
   let w: CrossWorld
+  let m: HostMail
   beforeEach(async () => {
     w = await crossWorld()
+    m = wireHostMail(w.mgr, w.store)
+    m.delivery.start()
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   })
   afterEach(async () => {
+    m.delivery.stop()
     await w.dispose()
   })
 
@@ -29,12 +35,12 @@ describe('a parent is told to clean up the children whose answers it used (#690)
     await w.until(() => !!handleOf(id)?.sent.length)
     return id
   }
-  /** The report the parent was told about a child, as its conversation keeps it */
+  /** Centralu's reports to the parent on a child's work, as the mailbox keeps them (docs/plans/mailbox.md §10.6.3) */
   const reportOf = (parent: string, child: string) =>
-    w.store
-      .messages.loadMessages(parent, 50)
-      .filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
-      .map((m) => (m.payload as { text: string }).text)
+    mailReader(w.store)
+      .between('centralu', addressOf(parent), 'report')
+      .filter((r) => r.facts.about?.session === addressOf(child))
+      .map((r) => r.body)
   const list = async (s: string) => (await w.mgr.runCentraluTool(s, 'agent_session', { action: 'list' })).text
 
   it("a finished child's report names its delete, and how many of the parent's other children are at rest", async () => {

@@ -402,7 +402,7 @@ export class MailPerson {
   /**
    * A chain as the window's list row. Done when the person closed it (`facts.closed` on its root, or an older close: a row to them settled `done`) and
    * nothing in it waits for them or for an answer to them, with how they closed it. Otherwise running while a session's turn is on it or a task the person gave in it is
-   * not reported, in review once such a task is reported, and open for the rest; the person may always write in a chain that is not done. The session
+   * neither reported nor released by a stop, in review once such a task is reported, and open for the rest; the person may always write in a chain that is not done. The session
    * named on it is the one whose turn is on it, else the first one the person's first message went to
    */
   private row(root: string, held: number): MailThreadRow | null {
@@ -419,7 +419,8 @@ export class MailPerson {
     const closedAs = this.records.message(root)?.facts.closed?.outcome
     const done = (closedAs !== undefined || toPerson.some((r) => r.settled === 'done') || tasks.some((r) => r.settled === 'done')) && !waits
     const working = done ? [] : this.workers(this.chainOf(root))
-    const state = done ? 'done' : working.length > 0 || tasks.some((r) => r.settled === null) ? 'running' : tasks.some((r) => r.settled === 'reported') ? 'review' : 'open'
+    // A task a stop released is not being worked on: the session can no longer answer it until the person sends it a message (§10.6.1)
+    const state = done ? 'done' : working.length > 0 || tasks.some((r) => r.settled === null && r.releasedAt === null) ? 'running' : tasks.some((r) => r.settled === 'reported') ? 'review' : 'open'
     const assignee = working[0]?.address ?? (first.sender === PERSON ? this.records.recipients(first.id)[0]?.recipient : undefined)
     return {
       id: root,

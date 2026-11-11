@@ -10,11 +10,12 @@ import { Adapter } from './fake-claude.test-helpers.js'
 import { START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { MemoryGate } from './memory-gate.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * A start_agent card the person has not answered outlives the call and the host (#673): the leaving host keeps the
  * request in the store's `agent_start_requests`, the next one raises the card again, and an approval there starts the
- * child with its report armed. A card hidden by the caller's own turn comes back when that turn ends.
+ * child with the caller's task, which its reply or last response answers. A card hidden by the caller's own turn comes back when that turn ends.
  */
 
 let store: Store
@@ -69,7 +70,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(store.children.listAgentStartRequests()).toEqual([])
   })
 
-  it('outlives the host: the call answers "pending", the next host raises the card, and its approval starts the child with the report', async () => {
+  it("outlives the host: the call answers 'pending', the next host raises the card, and its approval starts the child with the caller's task", async () => {
     const a = host()
     const { parent, call, requestId } = await asking(a)
     await a.mgr.tenure.disposeAll()
@@ -79,6 +80,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('No agent was started'))).toEqual([])
 
     const b = host()
+    wireHostMail(b.mgr, store)
     expect(card(b.mgr, parent)?.requestId).toBe(requestId)
     // The conversation already has the card: raised again for the windows, it is not recorded a second time
     const raised = events.filter((e) => e.type === 'approval_request' && e.sessionId === parent)
@@ -88,8 +90,9 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     b.mgr.inputs.respondApproval(parent, requestId, 'allow')
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await eventually(() => store.children.listReportMarks().length === 1)
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    // The task row is the record of the answer owed (docs/plans/mailbox.md §10.6.3)
+    await eventually(() => !!store.mailbox.newestTask(addressOf(parent), addressOf(child)))
+    expect(store.mailbox.newestTask(addressOf(parent), addressOf(child))).toMatchObject({ kind: 'task', origin: 'start_agent', body: expect.stringContaining('long work') })
     expect(store.children.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
   })
@@ -172,6 +175,7 @@ describe('a start allowed but waiting for memory (#686)', () => {
     expect(store.children.listAgentStartRequests()).toHaveLength(1)
 
     const b = host()
+    wireHostMail(b.mgr, store)
     b.mgr.useMemoryGate(gate())
     await new Promise((r) => setTimeout(r, 100))
     // The person already answered: no card again, and nothing starts while memory is short
@@ -181,8 +185,9 @@ describe('a start allowed but waiting for memory (#686)', () => {
     free = 4 * 1024 ** 3
     await eventually(() => children(b.mgr, parent).length === 1)
     const child = children(b.mgr, parent)[0]!.id
-    await eventually(() => store.children.listReportMarks().length === 1)
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    // The task row is the record of the answer owed (docs/plans/mailbox.md §10.6.3)
+    await eventually(() => !!store.mailbox.newestTask(addressOf(parent), addressOf(child)))
+    expect(store.mailbox.newestTask(addressOf(parent), addressOf(child))).toMatchObject({ kind: 'task', origin: 'start_agent', body: expect.stringContaining('long work') })
     expect(store.children.listAgentStartRequests()).toEqual([])
     expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
   })

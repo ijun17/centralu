@@ -312,6 +312,22 @@ describe('guards and counts', () => {
     expect(box.pairTurnsSince(B, A, NOW - 60 * 60 * 1000)).toBe(3)
   })
 
+  it('pairTurnsSince counts each task that joined a turn it did not start, the person’s turn too; a task that started its turn counts as that turn', () => {
+    const { box, send } = world()
+    const B_ID = B.slice(B.indexOf('/') + 1)
+    // b's turn 1 the person started; a's two tasks join it
+    box.startTurn({ sessionId: B_ID, turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: NOW })
+    for (const at of [NOW + 1, NOW + 2]) {
+      const task = send({ sender: A, kind: 'task', createdAt: at }, B)
+      box.markDelivered(B, [task], at, 1)
+    }
+    // b's turn 2 a's task started: one turn, counted once
+    const work = send({ sender: A, kind: 'task', createdAt: NOW + 3 }, B)
+    box.markDelivered(B, [work], NOW + 3, 2)
+    box.startTurn({ sessionId: B_ID, turnSeq: 2, messageId: work, starterId: work, startedBy: 'mail', startedAt: NOW + 3 })
+    expect(box.pairTurnsSince(A, B, NOW - 60 * 60 * 1000)).toBe(3)
+  })
+
   it('held rows are found by their index, not by a scan of the table (v66)', () => {
     const { db } = world()
     for (const where of [`r.held = 'policy'`, `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`]) {

@@ -90,39 +90,17 @@ export class DelegationFlow {
       },
       ...(agent ? { agent: true } : {}),
     }
-    // The caller's new work supersedes its work the session paused on (#721): this run's own wait or report tells it
-    if (this.host.children.pausedReports.has(sessionId) && this.host.children.awaitingReport.get(sessionId) === callerId) this.host.children.clearReport(sessionId)
     // The turn is the caller's (#676): its cards go to the caller too
     this.host.children.ownTurn(sessionId, callerId, false)
-    void d.outcome.then((r) => {
+    void d.outcome.then(() => {
       if (this.host.agentRuns.get(sessionId) === wait) this.host.agentRuns.delete(sessionId)
       /*
        * A swap's or a quit's failed waits are not the turn's end: the next host keeps the link while a kept turn runs, and
-       * decides at its start what became of one the quit cut (told as stopped, or continued after an update, #1618). The
-       * report it owes and whose the turn is stay recorded for it
+       * decides at its start what became of one the quit cut (told as stopped, or continued after an update, #1618)
        */
       if (this.host.closing) return
       // The delegation's owner now: a handoff may have moved it (#693)
       this.host.children.releaseTurn(sessionId, d.callerId)
-      /*
-       * A turn that completed was reported by `onEvent` as it ended: judged again here, a microtask later, a pause over its own
-       * background work (#721) could read as the end once that work has ended. A wait failed with no ending event (a stop, a cancel)
-       * is reported only here.
-       */
-      /*
-       * An ask_project turn that completed with the session's own background work still running (#721, #1460) is a pause,
-       * decided here so it holds whether or not a call was waiting (one past its bound is not): the report is marked owed
-       * and paused for the work's last turn end, in the store, and the call that reads the answer says so
-       * (`AskProjectFlow.awaitDelegation`). A start_agent child's is `awaitAgent`'s and the report's own
-       */
-      if (!agent && r.ok && this.host.meta.has(d.callerId) && !this.host.children.pausedReports.has(sessionId)) {
-        const left = this.host.ownTasksRunning(sessionId)
-        if (left.length) {
-          this.host.children.markReport(sessionId, d.callerId)
-          this.host.pauseReport(sessionId, left)
-        }
-      }
-      if (agent && !r.ok) void this.host.reportBackIfAwaited(sessionId, { type: 'error', sessionId, error: { code: 'internal', message: r.error, retryable: false } })
     })
     this.host.agentRuns.set(sessionId, wait)
     this.host.children.setDelegation(key, d)
@@ -164,10 +142,6 @@ export class DelegationFlow {
     return this.waits.agentAtRest(...a)
   }
 
-  /** `BackgroundStops.stopPausedWork` (background-stops.ts), kept on the flow for its callers */
-  stopPausedWork(...a: Parameters<BackgroundStops['stopPausedWork']>): ReturnType<BackgroundStops['stopPausedWork']> {
-    return this.stops.stopPausedWork(...a)
-  }
 
   /** `BackgroundStops.stopOwnWork` (background-stops.ts), kept on the flow for its callers */
   stopOwnWork(...a: Parameters<BackgroundStops['stopOwnWork']>): ReturnType<BackgroundStops['stopOwnWork']> {

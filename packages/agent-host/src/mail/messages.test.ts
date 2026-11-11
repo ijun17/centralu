@@ -453,11 +453,28 @@ describe('cause and clarifications (D9, §9.7)', () => {
     expect(w.rowOf(q.id, PERSON).settled).toBe('answered')
   })
 
-  it('an answer to a task settles nothing: its report does', () => {
+  it('a reply settles a task only marked as its answer: an early "On it" and a question back leave it open for the last response (§10.6.3)', () => {
     const w = world()
     const t = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    w.send(B, { replyTo: t.id, text: 'on it' })
-    expect(w.rowOf(t.id, B).settled).toBeNull()
+    expect(w.send(B, { replyTo: t.id, text: 'On it' })).toMatchObject({ answered: t.id, answers: false })
+    w.send(B, { replyTo: t.id, text: 'which branch?', needsReply: true, answer: true })
+    expect(w.rowOf(t.id, B)).toMatchObject({ settled: null, answerId: null })
+    const answer = w.send(B, { replyTo: t.id, text: 'done: 3 files changed', answer: true })
+    expect(answer.answers).toBe(true)
+    expect(w.rowOf(t.id, B)).toMatchObject({ settled: 'answered', answerId: answer.message.id })
+  })
+
+  it('a held reply to a task answers it when the person trusts its project only if it was marked as the answer: the same rule as a send (§10.6.3)', () => {
+    const w = world()
+    const early = w.mail.task(A, X, { text: 'first job', origin: 'agent_session', delivered: true })
+    const done = w.mail.task(A, X, { text: 'second job', origin: 'agent_session', delivered: true })
+    expect(w.send(X, { replyTo: early.id, text: 'On it' }).held).toEqual([{ recipient: A, why: 'policy' }])
+    const answer = w.send(X, { replyTo: done.id, text: 'second job done', answer: true }).message
+    expect([w.rowOf(early.id, X), w.rowOf(done.id, X)]).toEqual([expect.objectContaining({ settled: null, answerId: null }), expect.objectContaining({ settled: null, answerId: answer.id })])
+    w.projects.set('px', { trusted: true })
+    w.mail.trustChanged('px')
+    expect(w.rowOf(early.id, X).settled).toBeNull()
+    expect(w.rowOf(done.id, X)).toMatchObject({ settled: 'answered', answerId: answer.id })
   })
 
   it('covering: a row is covered by a watched row sent after it was delivered, caused by the starter of its delivery turn or by nothing; not by one sent before, nor by one a later turn’s other starter caused', () => {
@@ -491,7 +508,7 @@ describe('cause and clarifications (D9, §9.7)', () => {
 })
 
 describe('reports (§9.3)', () => {
-  it('settles the task and every other open task of the pair delivered before the turn began; a task queued during the turn stays open', () => {
+  it('settles its own task only: each task is a request of its own, answered in its own thread (§10.6.3)', () => {
     const w = world()
     const t1 = w.mail.task(A, W, { text: 'one', origin: 'start_agent', delivered: true })
     w.clock.t += 5
@@ -506,10 +523,10 @@ describe('reports (§9.3)', () => {
     expect(out).toMatchObject({ duplicate: false, first: true })
     if (!('message' in out)) throw new Error('settled already')
     expect(out.message).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: t1.id, rootId: t1.id, body: '[Centralu] done' })
-    expect(out.message.facts).toEqual({ outcome: 'finished', about: { session: W }, answer: 'all fine', covers: [t2.id] })
+    expect(out.message.facts).toEqual({ outcome: 'finished', about: { session: W }, answer: 'all fine' })
     expect(w.records.recipients(out.message.id).map((r) => r.recipient)).toEqual([A])
     expect(w.rowOf(t1.id, W).settled).toBe('reported')
-    expect(w.rowOf(t2.id, W).settled).toBe('reported')
+    expect(w.rowOf(t2.id, W).settled).toBeNull()
     expect(w.rowOf(other.id, W).settled).toBeNull()
     expect(w.rowOf(queued.id, W).settled).toBeNull()
     // Reported once: a second report of the same task is told so

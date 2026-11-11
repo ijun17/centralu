@@ -60,7 +60,7 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
     readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation'>
     /** The Assistant's and the askers' reports from linked machines' sessions (linked-reports.ts) */
@@ -575,11 +575,11 @@ export class AskProjectFlow {
     }
     const { granted, outside } = this.host.delegationFlow.grantReads(d.callerId, r.answer, d.target.path)
     /*
-     * A turn that completed with the session's own background work still running was paused where the delegation ended
-     * (`startDelegation`, #721, #1460), whether or not this call was waiting: the caller reads the answer now as a pause,
-     * with no separate notice, and the report is owed for the work's last turn end
+     * A turn that completed with the session's own background work still running (#721, #1460): the caller reads the answer now, and the session's
+     * last response answers the task once that work ends (docs/plans/mailbox.md §10.6.3)
      */
-    const paused = this.host.children.awaitingReport.get(d.sessionId) === d.callerId ? this.host.children.pausedReports.get(d.sessionId) : undefined
+    const running = this.host.ownTasksRunning(d.sessionId)
+    const paused = running.length ? running : undefined
     this.host.children.answered(d.callerId, d.sessionId, paused ? undefined : { ok: true, text: r.answer })
     return {
       ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName(), answerAt(this.host.store.messages, d.sessionId, r.answer)), readable: granted, outside,

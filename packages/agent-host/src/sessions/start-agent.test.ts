@@ -7,12 +7,14 @@ import { AGENT_TOOLS, runCentraluTool } from './centralu-tools.js'
 import { ANSWER_GROUNDS, ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import type { ModelOption } from '@cc/protocol'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { assistantAgentsRoot, assistantHome, isAssistantAgentFolder } from './assistant-home.js'
+import { addressOf as addr, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -181,6 +183,18 @@ describe('starting another agent in the same project', () => {
     return p?.detail.kind === 'agent_start' ? p : undefined
   }
   const allowProject = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  /**
+   * The host's mail, wired as main.ts wires it: the caller's task to a child is what its answer comes back on (docs/plans/mailbox.md §10.6.3).
+   * `openTask`: the caller's tasks to the child, open (delivered, not settled): the answer it is owed; `reportsTo`: Centralu's reports on them
+   */
+  const mailOn = () => {
+    wireHostMail(w.mgr, w.store)
+    const read = mailReader(w.store)
+    return {
+      openTasks: (caller: string, child: string) => read.tasks(addr(caller), child).filter((t) => read.taskRow(t.id, child)?.settled === null),
+      reportsTo: (caller: string, child: string) => read.tasks(addr(caller), child).flatMap((t) => read.reportsOn(t.id)),
+    }
+  }
   /** Starts a child that keeps running, and returns its id */
   const startRunning = async (s: string, task = 'write it') => {
     const before = childrenOf(s).length
@@ -303,6 +317,7 @@ describe('starting another agent in the same project', () => {
   })
 
   it('a quit tells no caller anything: the children it stops are the next start\'s to report (#428)', async () => {
+    const { openTasks } = mailOn()
     const s = await session('normal')
     const child = await startRunning(s)
     await w.until(() => !!handleOf(child)?.sent.length)
@@ -320,9 +335,11 @@ describe('starting another agent in the same project', () => {
     await new Promise((r) => setTimeout(r, 50))
     await Promise.all(reports)
     expect(said()).toEqual([])
-    // Nor settles what the child owes: the next start reads the mark, to tell the turn stopped or continue it (#1618)
     expect(reports).toEqual([])
-    expect(w.store.children.listReportMarks().map((m) => m.sessionId)).toEqual([child])
+    // Nor settles what the child owes: its task stays open for the next start, to tell the turn stopped or continue it (#1618), and the mark an
+    // earlier build reads is written for it, in case the next host is one (docs/plans/mailbox.md §10.6.3 "Restart, swap and older builds")
+    expect(openTasks(s, child)).toHaveLength(1)
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
   })
 
   it('a safe session in a trusted project still asks (#673)', async () => {
@@ -407,7 +424,8 @@ describe('starting another agent in the same project', () => {
     })
   })
 
-  it('past its setup bound the card stays: the call answers "pending" with a handle, and a later approval starts the child with its report (#673)', async () => {
+  it('past its setup bound the card stays: the call answers "pending" with a handle, and a later approval starts the child with its task (#673)', async () => {
+    const { openTasks } = mailOn()
     const s = await session('safe')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
@@ -427,8 +445,7 @@ describe('starting another agent in the same project', () => {
     w.mgr.inputs.respondApproval(s, requestId, 'allow')
     await w.until(() => childrenOf(s).length === 1)
     const child = childrenOf(s)[0]!.id
-    await w.until(() => w.store.children.listReportMarks().length === 1)
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
+    await w.until(() => openTasks(s, child).length === 1)
     // The handle now leads to the child
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: child })
     expect(w.store.children.listAgentStartRequests()).toEqual([])
@@ -705,7 +722,8 @@ describe('starting another agent in the same project', () => {
       expect(childrenOf(s)).toHaveLength(1)
     })
 
-    it('a session that is slow to start past the bound says one may exist, and its report is armed when it comes up', async () => {
+    it('a session that is slow to start past the bound says one may exist, and its task is given when it comes up', async () => {
+      const { openTasks } = mailOn()
       allowProject()
       const s = await session()
       const adapter = w.adapters.get('codex')!
@@ -727,26 +745,80 @@ describe('starting another agent in the same project', () => {
       await w.until(() => childrenOf(s).length === 1)
       // The report promised for any child that outlives the call is there
       expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
-      // and stored, so a host restart keeps it (#646)
-      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      // as its task, stored, so a host restart keeps it (#646)
+      await w.until(() => openTasks(s, childrenOf(s)[0]!.id).length === 1)
     })
 
     it('a task still being handed over at the bound is answered as "working", with the report and the unchecked note', async () => {
+      const { openTasks } = mailOn()
       allowProject()
       const s = await session()
       w.adapters.get('codex')!.listModels = () => new Promise<ModelOption[]>(() => {})
-      vi.spyOn(w.mgr.events, 'deliver').mockImplementation(() => new Promise<void>(() => {}))
+      let handedOver: (() => void) | undefined
+      vi.spyOn(w.mgr.events, 'deliver').mockImplementation(() => new Promise<void>((resolve) => (handedOver = resolve)))
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       const p = w.mgr.startAgent(s, { task: 'slow hand-over', tool: 'codex', model: 'gpt-x', wait: false })
       await vi.advanceTimersByTimeAsync(START_AGENT_MODEL_CHECK_MS)
       await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
       const r = await p
       expect(r).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
-      // The armed report is stored, so a host restart keeps it (#646)
-      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
+      // The answer it promises comes back on the task, written down before the hand-over ends, so a host restart keeps it (#646)
+      expect(openTasks(s, r.ok ? r.sessionId : '')).toHaveLength(1)
+      expect(handedOver).toBeDefined()
+      handedOver!()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(openTasks(s, r.ok ? r.sessionId : '')).toHaveLength(1)
     })
 
-    it('an approval and the bound in the same instant: the answer is "pending", and the child starts with its report (#673)', async () => {
+    it('a task that could not go in is withdrawn: the child owes no answer', async () => {
+      const { openTasks, reportsTo } = mailOn()
+      allowProject()
+      const s = await session()
+      vi.spyOn(w.mgr.events, 'deliver').mockRejectedValue(new Error('the tool did not start'))
+      const r = await w.mgr.startAgent(s, { task: 'never given', wait: false })
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Could not give the task to the new session') })
+      const [child] = childrenOf(s)
+      expect(child).toBeDefined()
+      expect(openTasks(s, child!.id)).toEqual([])
+      expect(reportsTo(s, child!.id)).toEqual([])
+    })
+
+    it('a task still being handed over when the host goes is kept: the next host answers it once (#1948 step 3)', async () => {
+      const { openTasks, reportsTo } = mailOn()
+      allowProject()
+      const s = await session()
+      vi.spyOn(w.mgr.events, 'deliver').mockImplementation(() => new Promise<void>(() => {}))
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const p = w.mgr.startAgent(s, { task: 'slow hand-over', wait: false })
+      await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+      const r = await p
+      expect(r).toMatchObject({ ok: true, state: 'working', reported: true })
+      const child = r.ok ? r.sessionId : ''
+      expect(openTasks(s, child)).toHaveLength(1)
+      // The host goes with the hand-over in the air; the next one starts on the same store
+      vi.useRealTimers()
+      await w.mgr.tenure.disposeAll()
+      const next = new SessionManager(w.store, w.adapters, () => {}, undefined, join(dirname(w.caller.path), 'worktrees'))
+      try {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        const mail = wireHostMail(next, w.store)
+        // Its start finds the child at rest with the task open: the child's last response (none) answers it, once
+        mail.afterReady()
+        await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+        expect(reportsTo(s, child).map((x) => x.body)).toEqual([expect.stringContaining('It wrote no response')])
+        expect(openTasks(s, child)).toEqual([])
+        mail.afterReady()
+        await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+        expect(reportsTo(s, child)).toHaveLength(1)
+        mail.delivery.stop()
+      } finally {
+        vi.useRealTimers()
+        await next.tenure.disposeAll()
+      }
+    })
+
+    it('an approval and the bound in the same instant: the answer is "pending", and the child starts with its task (#673)', async () => {
+      const { openTasks } = mailOn()
       const s = await session('safe')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       // Registered before the call's own timer, so on one synchronous advance the person's "allow" is given first
@@ -760,7 +832,7 @@ describe('starting another agent in the same project', () => {
       for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
       expect(childrenOf(s)).toHaveLength(1)
       expect(agentCard(s)).toBeUndefined()
-      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      expect(openTasks(s, childrenOf(s)[0]!.id)).toHaveLength(1)
     })
   })
 
@@ -937,6 +1009,7 @@ describe('starting another agent in the same project', () => {
   })
 
   it('past the bound it answers "working", tells the parent when the turn ends, and a later wait reads the answer', async () => {
+    const { reportsTo } = mailOn()
     allowProject()
     const s = await session()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -947,9 +1020,9 @@ describe('starting another agent in the same project', () => {
     expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: c, reported: true })
     vi.useRealTimers()
     handleOf(c)!.answer('long job done')
-    // The parent hears about it through the report path, as another session's message
-    await w.until(() => (handleOf(s)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${c}`)))
-    expect(handleOf(s)!.sent.filter((t) => t.includes(`sourceSessionId: ${c}`))).toHaveLength(1)
+    // The parent hears about it by Centralu's report on its task, carrying the child's last response, once
+    await w.until(() => reportsTo(s, c).length > 0)
+    expect(reportsTo(s, c).map((r) => r.facts.answer)).toEqual(['long job done'])
     expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'long job done' })
   })
 
@@ -1301,6 +1374,7 @@ describe('starting another agent in the same project', () => {
     })
 
     it('starts without a card under auto, tells the Assistant when the turn ends, and works with the child after', async () => {
+      const { reportsTo } = mailOn()
       const { orch, tools } = await centraluTools()
       await w.mgr.updateSettings(orch.id, { permissionPreset: 'auto' }, 'person')
       expect(await tools.startAgent({ task: 'Find the changelog', wait: false })).toMatchObject({ ok: true, state: 'working' })
@@ -1310,7 +1384,7 @@ describe('starting another agent in the same project', () => {
       expect(await tools.listAgents()).toMatchObject({ ok: true, agents: [{ sessionId: c }] })
       expect(await tools.agentSession({ sessionId: c, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: c })
       handleOf(c)!.answer('the changelog is at docs/CHANGES.md')
-      await w.until(() => (handleOf(orch.id)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${c}`)))
+      await w.until(() => reportsTo(orch.id, c).length === 1)
       expect(await tools.agentSession({ sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'the changelog is at docs/CHANGES.md' })
       expect(await tools.agentSession({ sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
       expect(w.mgr.listSessions().some((x) => x.id === c)).toBe(false)

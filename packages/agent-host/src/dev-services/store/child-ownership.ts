@@ -44,9 +44,6 @@ export class ChildOwnershipRecords {
   }
 
   /** When the session's report mark was set: new work from its caller sets it again, a change of owner does not */
-  reportMarkedAt(sessionId: string): number | null {
-    return this.db.prepare<unknown[], { at: number }>(`SELECT marked_at as at FROM report_marks WHERE session_id = ?`).get(sessionId)?.at ?? null
-  }
 
   clearReportMark(sessionId: string): void {
     this.db.prepare(`DELETE FROM report_marks WHERE session_id = ?`).run(sessionId)
@@ -124,17 +121,16 @@ export class ChildOwnershipRecords {
   /**
    * A handoff's move of the original session's children to the session that took over (#693, #1475), in one
    * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
-   * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
+   * delegated turn it gave each (`delegated_turns`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
-   * row on the new session, so the next host (a swap or a restart) reads one owner either way. `armReports`: children
-   * whose report the original was waiting for in a call (its wait had taken the mark down), now owed to the new session.
+   * row on the new session, so the next host (a swap or a restart) reads one owner either way.
    * `then`: the rest of the handoff's move that is stored elsewhere (the mail, `MailService.handOver`), run last in the same
    * transaction, so a refusal there leaves every row of both on the original.
    */
   moveChildren(
     from: string,
     to: string,
-    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[] },
+    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[] },
     then?: () => void,
   ): void {
     this.db.transaction(() => {
@@ -144,20 +140,13 @@ export class ChildOwnershipRecords {
            parent_session_id = CASE WHEN parent_session_id = @from THEN @to ELSE parent_session_id END
          WHERE id = @id`,
       )
-      const mark = this.db.prepare(`UPDATE report_marks SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
       const turn = this.db.prepare(`UPDATE delegated_turns SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
       for (const id of move.sessions) {
         owner.run({ from, to, id })
-        mark.run({ from, to, id })
         turn.run({ from, to, id })
       }
       const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
       for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
-      const arm = this.db.prepare(
-        `INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
-      )
-      for (const id of move.armReports ?? []) arm.run(id, to, Date.now())
       then?.()
     })()
   }

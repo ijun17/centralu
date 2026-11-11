@@ -20,6 +20,9 @@ export const MailFacts = z.looseObject({
   waitingOn: z.number().optional(),
   update: z.number().optional(),
   personNote: z.boolean().optional(),
+  /** On a last response (#1948 step 3): the person wrote in the session after the task was given; the task arrived after the response was written */
+  personSince: z.boolean().optional(),
+  after: z.boolean().optional(),
   answer: z.string().optional(),
   quiet: z.boolean().optional(),
   needsOwner: z.boolean().optional(),

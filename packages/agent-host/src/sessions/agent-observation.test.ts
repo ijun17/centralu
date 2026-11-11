@@ -5,11 +5,13 @@ import type { PermissionPreset } from '@cc/protocol'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { agentRunText } from './tool-answers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 describe("auto observes another caller's delegation without consuming it", () => {
   let w: CrossWorld
   beforeEach(async () => {
     w = await crossWorld()
+    wireHostMail(w.mgr, w.store)
   })
   afterEach(async () => {
     vi.useRealTimers()
@@ -25,8 +27,11 @@ describe("auto observes another caller's delegation without consuming it", () =>
       })
     ).id
   const handle = (id: string) => w.adapters.get('claude')!.handles.get(id)!
-  const reports = (id: string, child: string) =>
-    handle(id).sent.filter((text) => text.includes(`sourceSessionId: ${child}`))
+  /** Centralu's reports on the tasks `id` gave `child` (docs/plans/mailbox.md §10.6.3) */
+  const reports = (id: string, child: string) => {
+    const read = mailReader(w.store)
+    return read.tasks(addressOf(id), child).flatMap((t) => read.reportsOn(t.id))
+  }
   const start = async () => {
     const owner = await session('normal')
     const observer = await session('auto')
@@ -115,17 +120,21 @@ describe("auto observes another caller's delegation without consuming it", () =>
     },
   )
 
-  it("auto stop preserves the owner's error report and error answer", async () => {
+  it("auto stop goes to the owner as the stop notice, and leaves the owner its error answer once", async () => {
     const { owner, observer, child } = await start()
     expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'stop' })).toMatchObject({
       ok: true,
       state: 'stopped',
     })
-    await ownerReport(owner, child)
-    const report = w.store
-      .messages.loadMessages(owner, 20)
-      .find((m) => JSON.stringify(m.payload).includes('assigned work failed'))
-    expect(report).toBeDefined()
+    // The tool ends the turn it was told to stop. A stop goes through the stop notice (docs/plans/mailbox.md §10.6.3): the owner's task is released
+    // and the owner told, with no report
+    handle(child).event({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: 'interrupted' })
+    const read = mailReader(w.store)
+    const [task] = read.tasks(addressOf(owner), child)
+    await w.until(() => read.taskRow(task!.id, child)?.releasedAt != null)
+    expect(read.taskRow(task!.id, child)).toMatchObject({ releasedWhy: 'stopped', settled: null })
+    const notices = read.between('centralu', addressOf(owner), 'notice')
+    expect(notices.filter((n) => n.facts.unanswered?.some((u) => u.id === task!.id))).toHaveLength(1)
     expect(await w.mgr.agentSession(owner, { sessionId: child, action: 'wait' })).toMatchObject({
       ok: false,
       error: expect.stringContaining('stopped'),
@@ -134,11 +143,13 @@ describe("auto observes another caller's delegation without consuming it", () =>
       ok: true,
       state: 'at_rest',
     })
-    expect(reports(owner, child)).toHaveLength(1)
+    // The only report is the one the owner's call returned (`answerRecorder`): written as read, so nothing wakes the owner for it
+    expect(reports(owner, child).map((r) => [r.facts.outcome, read.row(r.id, addressOf(owner))?.readAt != null])).toEqual([['failed', true]])
     expect(handle(observer).sent).toEqual([])
+    expect(read.to(addressOf(observer))).toEqual([])
   })
 
-  it('an observer cannot re-arm a report while the owner is already waiting', async () => {
+  it("an observer's wait while the owner waits leaves the answer to the owner's call: its report is read, nothing wakes the owner for it", async () => {
     const { owner, observer, child } = await start()
     const ownWait = w.mgr.agentSession(owner, { sessionId: child, action: 'wait' })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -148,9 +159,11 @@ describe("auto observes another caller's delegation without consuming it", () =>
     vi.useRealTimers()
     handle(child).answer('only an answer')
     expect(await ownWait).toMatchObject({ ok: true, state: 'done', answer: 'only an answer' })
-    // The owner consumed the answer through its active wait, so there is no background receipt.
+    // The owner read the answer through its own wait: the last response's report on its task is read (docs/plans/mailbox.md §10.6.3)
     await w.mgr.agentSession(owner, { sessionId: child, action: 'status' })
-    expect(reports(owner, child)).toEqual([])
+    const read = mailReader(w.store)
+    expect(reports(owner, child).map((r) => read.row(r.id, addressOf(owner))?.readAt != null)).toEqual([true])
+    expect(read.to(addressOf(observer))).toEqual([])
   })
 
   it("an observation does not turn the normal owner's background child into an owned wait", async () => {

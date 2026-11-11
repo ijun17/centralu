@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HistoryMessage, CentraluTools } from '../adapters/contract.js'
 import type { PermissionPreset } from '@cc/protocol'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * Requests to a busy session (#677): when B asks A for work while A runs a turn that is not B's, the request goes to A as
@@ -92,7 +93,8 @@ describe('requests to a busy session (#677)', () => {
       expect(await forking).toMatchObject({ ok: true, state: 'done', sessionId: fork.id, via: 'fork', forkedFrom: a, answer: 'schema reviewed' })
     })
 
-    it('fork_read shares the busy session\'s folder under at most safe, and its turn reports to the requester', async () => {
+    it('fork_read shares the busy session\'s folder under at most safe, and its last response answers the requester', async () => {
+      wireHostMail(w.mgr, w.store)
       const { a, b } = await busyChild()
       const orch = await w.mgr.assistant()
       w.mgr.setProjectTrusted(w.caller.id, true)
@@ -107,9 +109,12 @@ describe('requests to a busy session (#677)', () => {
       await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('asking a question')))
       expect(await tools.readSession(forkId)).toMatchObject({ cards: [{ requestId: 'q-f', kind: 'question' }] })
       handleOf(forkId).event({ type: 'question_resolved', sessionId: forkId, requestId: 'q-f' })
-      // The Assistant is told when the fork's turn ends, as for any work it does not wait on
+      // The Assistant's task is answered by the fork's last response, as any work it does not wait on (docs/plans/mailbox.md §10.6.3)
       handleOf(forkId).answer('logs read')
-      await w.until(() => w.store.messages.loadMessages(orch.id, 20).some((m) => JSON.stringify(m.payload).includes('The session ended its turn')))
+      const read = mailReader(w.store)
+      const answers = () => read.tasks(addressOf(orch.id), forkId).flatMap((t) => read.reportsOn(t.id)).map((x) => x.facts.answer)
+      await w.until(() => answers().length > 0)
+      expect(answers()).toEqual(['logs read'])
       void b
     })
 
