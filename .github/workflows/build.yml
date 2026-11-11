@@ -742,12 +742,15 @@ jobs:
 
   # The shards' one result under the name the job had before it was split (#2167): `macos tests` is a check the board's
   # `ci.quickChecks` requires, and a board started before the split reads its list once, at start. Fails when a shard did
-  # not pass (failed, cancelled, or skipped while the quick tier ran); skipped with them when the quick tier does not run.
+  # not pass (failed, timed out or cancelled alone, or skipped while the quick tier ran); skipped with them when the quick
+  # tier does not run, and skipped when the whole run was cancelled (`!cancelled()`, not `always()`, #2187): the merge queue
+  # cancels a pull request's own run for its batch, and lands it only when every check of that run that did not pass is
+  # cancelled or skipped (batch.mjs `onlyCancelledByBatch`). Under `always()` this job turned that cancel into a failure.
   # Its failing step is named for the board (run-failure.mjs `SHARDS_STEP`): the shard that failed says why, not this.
   macos-tests-result:
     name: macos tests
     needs: [changes, macos-tests]
-    if: always() && needs.changes.outputs.quick == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.quick == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
