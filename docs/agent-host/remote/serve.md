@@ -113,12 +113,12 @@ The hub runs `centralu serve --detach` over ssh when it finds no host running ([
 It starts the same `serve` as a launcher outside the session that asked, then returns once that launcher's host
 answers a hello, so the caller can connect at once:
 
-| Where | How it is started | Why (measured, plan §10.4) |
+| Where | How it is started | Why (measured, remote-hub.md §10.4) |
 |---|---|---|
 | Linux, macOS | A new session (`setsid`) with no terminal and no stdio; reparented to init once `--detach` exits | Nothing of the ssh session's process group or terminal reaches it (`tooling/launcher-serve.test.ts` kills the whole group and the host still answers) |
 | Windows, someone signed in | The data folder's scheduled task (`Centralu host (<user>)`, the one `--autostart` writes), registered without its trigger when it is not there, and registered again when its action or its principal is not what this serve would write (a launcher that moved, a task another account wrote under the name), keeping a trigger only when the task was this user's; then started with `Start-ScheduledTask` (#1224). `detach.how` is `task` | Its principal is `Interactive`, so it runs in the person's own session with their sign-in's token, also when asked from an ssh session. Measured on a linked Windows 11 PC (2026-10-19): started from the hub's ssh logon it ran in session 1, interactive logon, medium integrity, and saw the user's Credential Manager entries; the ssh logon's own processes ran in session 0, network logon, and saw none (`cmdkey /list`: `* NONE *`) |
 | Windows, nobody signed in (no Explorer outside session 0 whose owner has this account's SID; matched by SID, since an ssh logon on a PC in a workgroup says `USERDOMAIN=WORKGROUP` where WMI names the PC, #1223), the task's host not answering in 20 s, or `CENTRALU_SIGNIN_TASK=off` | `Win32_Process.Create` through WMI (`Invoke-CimMethod`), from Windows PowerShell 5.1 by full path | Windows' OpenSSH ends every process of a session with it, `Start-Process` included; a process WMI creates is not in the session. It keeps the caller's network logon: Git there cannot use the credentials saved in Windows, and the host says so (`hello_ok.logon`) |
-| WSL (`WSL_DISTRO_NAME` set and interop on) | The same WMI call, from `powershell.exe` reached through the drive WSL mounts, creating `wsl.exe -d <distro> -u <user> --cd <folder> --exec <node> <centralu.mjs> serve …` | WSL stops a distro about 15 s after its last `wsl.exe` client exits; this `wsl.exe` is one for as long as the host runs. On the test laptop a WMI-created `wsl.exe` later hung without running anything (plan §10.4); that is reported as `wmi_blocked`, and the hub runs the host link-bound |
+| WSL (`WSL_DISTRO_NAME` set and interop on) | The same WMI call, from `powershell.exe` reached through the drive WSL mounts, creating `wsl.exe -d <distro> -u <user> --cd <folder> --exec <node> <centralu.mjs> serve …` | WSL stops a distro about 15 s after its last `wsl.exe` client exits; this `wsl.exe` is one for as long as the host runs. On the test laptop a WMI-created `wsl.exe` later hung without running anything (remote-hub.md §10.4); that is reported as `wmi_blocked`, and the hub runs the host link-bound |
 
 A process WMI creates gets the account's default environment, not the session's, so what the launcher needs from the
 `--detach` that started it travels in one internal argument (`--detached-child=<base64 JSON>`): the log file, and
@@ -155,14 +155,14 @@ working, so the hub can still read `install.node` from a machine whose Node is t
 `--stop` asks the running host to stop over its own socket with the token (`host.stop`, [protocol.md](../../protocol.md)
 §3), then waits up to 30 s for the port to close and the host's pid (from `host.lock`) to end. Only the host does its
 shutdown that way on Windows: killing the WMI-started launcher ended the host 143 ms later with no "shutting down"
-line (plan §10.4), because the host sits in libuv's kill-on-close job object. Only for a host that does not go (one
+line (remote-hub.md §10.4), because the host sits in libuv's kill-on-close job object. Only for a host that does not go (one
 from before `host.stop`, a shutdown that hangs): SIGTERM to the launcher on posix, which passes it on, and on Windows
 ending the host, said in the answer (`how: "ended"`). It signals only the pids `serve.pid` and `host.lock` name, and
 only while the two agree and the host answered with this folder's token. It prints
 `{ "v": 1, "stop": { "ok", "wasRunning", "how"?, "message"? } }`. A host refuses `host.stop` unless `serve` started
 it (`CC_SERVE=1`): the app's host is stopped by the app.
 
-**The managed launcher** (plan §10.1, S8). An install the hub makes over ssh (phase 3's next step) has its own
+**The managed launcher** (remote-hub.md §10.1, S8). An install the hub makes over ssh (phase 3's next step) has its own
 launcher at `<data>/remote/bin/centralu` (`centralu.cmd`), whose text never changes (`managedLauncherScript` in
 `serve.mjs`): it reads `<data>/remote/current` ("<centralu version> <node version>", two plain words or it refuses)
 at every start and runs that version's `centralu.mjs` on that version's pinned Node with `CENTRALU_MANAGED=1`. A
@@ -185,7 +185,7 @@ suffix from its path).
 
 It prints `{ "v": 1, "autostart": { "ok", "on", "how", "linger", "message"? } }`. The task's PowerShell travels to
 `powershell.exe` as `-EncodedCommand` on a command line of its own (CreateProcess, 32,767 characters), never through
-ssh. None of the entries has been created on a real machine yet (plan §10.10, step 6).
+ssh. None of the entries has been created on a real machine yet (remote-hub.md §10.10, step 6).
 
 **App views of this host, shown on a hub.** The hub's window never loads an address of this host: the hub asks
 `apps.viewDocument` for an open instance (its app, its origin method and the app's raw `resources/read` answer) and

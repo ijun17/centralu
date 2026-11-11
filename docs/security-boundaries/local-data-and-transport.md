@@ -58,7 +58,7 @@ Centralu installs Google's Antigravity agent itself and keeps all of its state u
   ([plans/antigravity-acp.md](../plans/antigravity-acp.md) §4.3). In a session, the helper handed the agent's own login
   request means the stored sign-in stopped working: the session fails as `not_logged_in` and its process ends. Commands
   the agent runs inherit `BROWSER`, so any other address they hand it is dropped and logged without the address, never
-  opened and never taken for a sign-in: nothing is opened that the person did not ask for (§4.4). Where the data
+  opened and never taken for a sign-in: nothing is opened that the person did not ask for (antigravity-acp.md §4.4). Where the data
   folder's path cannot be put in `BROWSER` (it holds `;` on Windows, `:` elsewhere, or `%s`), the helper's private
   folder is made in a folder of the person's own instead, built from the home folder alone
   (`~\AppData\Local\centralu-antigravity`, `~/Library/Caches/centralu-antigravity`, `~/.cache/centralu-antigravity`;

@@ -61,7 +61,7 @@ and `normal` it has these controls ([agent-host/delegation/ask-project.md](../ag
 ## A linked machine's session asking this computer (#550)
 
 The reverse direction of linked machines ([plans/remote-hub.md](../plans/remote-hub.md) §12.7). The plan treats a linked
-machine as the less trusted side: a compromised server must not reach the person's computer by default (§3.2). So:
+machine as the less trusted side: a compromised server must not reach the person's computer by default (remote-hub.md §3.2). So:
 
 - **Off by default, per machine, on this computer.** Only the hub's Settings → Machines turns it on, and the switch is
   read at every call; off refuses at once and forgets the pairs. It is stored on the machine's row and goes with it.

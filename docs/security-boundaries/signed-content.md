@@ -6,7 +6,7 @@ is **what may be started from that folder**: only files signed by a key compiled
 including release content and owner-approved local content (#610). The verifier is
 `apps/desktop/content-verify` (shared by the shell and the window's diagnosis of a refusal); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
-the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
+the plan), which a macOS release window opens since step 4 (thin-shell.md §10.2) when the shell it carries is the one
 `shell.lock` pins.
 
 - **Signature first.** `content-manifest.json` lists every file (path, size, sha256, executable bit) with
@@ -100,7 +100,7 @@ The shell's refusal is **shown by the window itself, in a native dialog** (#634,
   shell's checks, then every listed file's size and hash; it reads and hashes and starts, copies and changes nothing),
   because the shell's status carries one sentence and no hashes and its crate cannot change without a new shell version.
 - **Show, do not run.** The dialog only tells. It starts, trusts and unlocks nothing; what keeps running is what already ran
-  (what the window starts itself when the shell refused, §6 of the plan, unchanged), and the dialog says so: Centralu was
+  (what the window starts itself when the shell refused, thin-shell.md §6, unchanged), and the dialog says so: Centralu was
   started directly from the app and this start was not verified, not that nothing ran. Its two buttons are "Show log" (reveals `keeper.log`) and "Close"; it names the commands that
   fetch the build again (`npm i -g centralu@<version>`, then `centralu install --force`: `centralu update` does nothing when
   the registry's latest is the version already installed). A "run anyway" (the owner's decision of 2026-10-14 on #634) is not
@@ -112,12 +112,12 @@ The shell's refusal is **shown by the window itself, in a native dialog** (#634,
 Limits:
 
 - Another process of the same user can change the copy after it is verified, or start whatever it likes
-  with the same `node` and agent CLIs the keeper uses; the plan says so (§4). This protects against
+  with the same `node` and agent CLIs the keeper uses; the plan says so (thin-shell.md §4). This protects against
   running content the project did not sign, a partial or corrupted update, and a file dropped into
   Centralu's folders inheriting the grants, not against the user's own processes.
 - Whoever holds a signing key can sign anything; rotating means moving `next` to `current` in a new shell
   version, which is why the shell carries both.
-- Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8), so no refusal arises there
+- Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (thin-shell.md §8), so no refusal arises there
   and the dialog is never shown.
 - The dialog is drawn by the window process, which runs as the same user as everything else here: another process of the
   user could draw over it or close it, or write `shell-status.json`; it cannot make the dialog say more than the check, the

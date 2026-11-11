@@ -1,22 +1,22 @@
 # The mailbox, and a session asking the Assistant
 
 **The mailbox (#1347, [plans/mailbox.md](../plans/mailbox.md) §9).** The sender of a post is always what the host knows: the session
-whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Since M3a (#1684, §7)
+whose tool called, the person for the window's `mail.*` calls, Centralu for its own; no argument of a call names one. Since M3a (#1684, mailbox.md §7)
 mail is messages without threads, and who may write to whom, which project is trusted and what is held is one module, `mail/reach.ts`:
 every session may write to every session here, the person and the Assistant; a send is refused only for a receiver whose seat has no `mail`
 tool (`no_mailbox`: a coordinator, a builder, an app's agent), one that is gone, `centralu`, one on another computer (`elsewhere`), a request to an
-assistant whose tool cannot put each step to the person (`assistant_asks`), and by a guard. **The one hold** (§7.4, D12): a `message`
+assistant whose tool cannot put each step to the person (`assistant_asks`), and by a guard. **The one hold** (mailbox.md §7.4, D12): a `message`
 from a session whose project is untrusted now (read live: no project is trusted, an unknown project is not) to a party outside that project
 (another project's session, the Assistant) is held `policy` until the person trusts the project; mail into an untrusted project, within one
 project and to the person is not held, and an `auto` receiver no longer holds anything. Held mail is let go in the order sent; a held answer
 leaves its question open and tells the asker (S14). **A delegation out of an untrusted project is refused, not held** (`refusesDelegation`,
 S15): `start_agent`, `create_session` with a first message, `agent_session send`, `send_to_session` with `reportBack`, `ask_project` and the
-linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (§7.5):
+linked machine paths start nothing; trusting the project tells the caller once which calls it may give again (S16). **Guards** (mailbox.md §7.5):
 identical repeats within 10 minutes (`repeat`); 30 posts a minute per session; 5 requests an hour to the Assistant per asker group
 (`ask_rate`, no one-open rule any more). **Nothing holds, defers or refuses mail for how much of it there is** (#2014): past 20 mail-started
 turns an hour between two sessions with no word from the person, or 120 on the host, Centralu writes the person one warning an hour in the
 Inbox and the mail goes on. The accepted risk: a runaway exchange while the person is away keeps spending usage until they act on the warning.
-**Accepted gaps of the one hold** (§1.6, D11): what a trusted session read of an untrusted project (a session's words through `read_session`
+**Accepted gaps of the one hold** (mailbox.md §1.6, D11): what a trusted session read of an untrusted project (a session's words through `read_session`
 or `agent_session`, an `ask_project` answer, `recall`, a file, a handoff's note, a fork's copied conversation) it can send on by mail or a task
 unheld, and the receiver sees the sender, not the origin; a report's `answer` from a session of an untrusted project that a trusted session
 delegated to reaches the owner unheld (reports are never held); the CLI's own file tools reading another project's folder, and folders two
@@ -30,7 +30,7 @@ the `mail` tool is the ordinary session's and the Assistant's alone (matrix abov
 as the CLI's own input, never as a message of the person's.
 
 **A session asking the Assistant (#1447, #1739, [plans/cited-requests.md](../plans/cited-requests.md), [plans/mailbox.md](../plans/mailbox.md) §7.6).** Any session of this host may send the Assistant a request
-(`mail send` with `to: "assistant"`: a message from a session that answers no question or task of the Assistant's, §7.6). The request is a session's text, so it
+(`mail send` with `to: "assistant"`: a message from a session that answers no question or task of the Assistant's, mailbox.md §7.6). The request is a session's text, so it
 is not the person's word. The request path's safety is the Assistant's judgement, one floor in code, and a record the person reads afterwards (owner, 2026-11-03:
 what matters is what the person intends, which only the Assistant can judge). These follow. (1) **A citation is evidence, checked by the host.** A request may cite the
 person's message (`cite: true`). In the send's own transaction the host takes the newest message the person sent in the asking session's own conversation (a transcript
@@ -87,12 +87,12 @@ text through the composer's call and so as the person; a request held for an unt
 window is checked at send;
 a turn that a relayed report starts (the old path of a kept process) belongs to no thread, so a request's words do not reach it; an app tool its app marks read-only
 (`readOnlyHint`) is not asked about, on the app's word, as for every session; `read_session` and `recall` of the asking session show what it wrote, so the words are reachable by them in any turn
-(reading needs no card, §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
+(reading needs no card, mailbox.md §9.7); a step whose card would pass 6,000 characters (a `Write` of more than about 6 KB) is refused, with no way through but smaller parts; a turn that an old build's kept process was already in when this build took it over has no hook until it restarts; the output of a command the person allowed can start a turn of the CLI's own
 later, as the output of any command can (a command started in the background is refused in a request's turn, since it would start that turn on purpose). (4) Limits:
 a request from an untrusted project is held by the one hold (`policy`, above) until the person trusts the project, and a held row is a phantom to the Assistant: `mail read` shows none of
 its words meanwhile, and marking it handled or answering it is refused as for any message it cannot read; there is no one-open rule (#1683), and at most 5 requests an hour (a clarification of a task the Assistant gave is no request), counted over the sessions of the asker's project and under its root session, so starting sessions does not multiply them. The sessions the Assistant itself started are not one group: the walk up to the root stops before the Assistant, so its sessions in
 other projects each have their own request and their own five an hour. Nothing moves across with the answer: the asking session gets back only what the Assistant posts in the thread, and the end of the
-Assistant's turn is reported in Centralu's words alone, never with the Assistant's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's Assistant are slice 4's (§9.7, "Linked machines").
+Assistant's turn is reported in Centralu's words alone, never with the Assistant's last response (which may be addressed to the person) or a pointer to its conversation. A linked machine's sessions asking the hub's Assistant are slice 4's (mailbox.md §9.7, "Linked machines").
 
 `handoff_session` (#694) is the Assistant's alone, and among its commands the one that acts on another session's
 place in the person's work: it starts a successor from a note and moves the original's children to it and copies its attached apps. Its

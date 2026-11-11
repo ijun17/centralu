@@ -34,7 +34,7 @@ its "preparing modules for first use" progress to stderr as CLIXML, which is not
 | The host reads the config, `ssh -G` resolves it | The window has no file access; `ssh -G` applies everything a hand-written reader would get wrong (`Match`, `CanonicalizeHostname`, defaults), and connects to nothing |
 | The probe runs when a host is picked, not for every listed host | One ssh per host the person chose, never a sweep of every machine in the config |
 
-**Installing on a machine** (phase 3, plan §10.2; `install.ts`, `registry.ts`, `remote-install.mjs`).
+**Installing on a machine** (phase 3, remote-hub.md §10.2; `install.ts`, `registry.ts`, `remote-install.mjs`).
 `machines.install` installs the hub's own version there over the same ssh, in three remote commands, each a script for
 that machine's shell sent the way the lookup is (base64 to `sh`, to `bash -l` inside WSL, `-EncodedCommand` to
 PowerShell):
@@ -70,7 +70,7 @@ keeps its folder, and the next start runs the new one. When the link is not conn
 and the lookup finds the managed launcher. A development hub refuses (its version is not on npm), and so does a
 machine with a command of its own.
 
-**Updating, rolling back and uninstalling** (phase 3 step 4, plan §10.5; `update.ts`). Each is one call
+**Updating, rolling back and uninstalling** (phase 3 step 4, remote-hub.md §10.5; `update.ts`). Each is one call
 (`machines.update`, `machines.rollback`, `machines.uninstall`, additive) that answers when it is done or failed; its
 steps arrive meanwhile as the machine's `operation` (`{ kind, step, target, at }`, additive) in `machine_status`, and
 the row's status is `updating` (additive; an older window reads it as unreachable) while the host there is down. One
@@ -139,7 +139,7 @@ an install from the app (one running leaves it for the next start, one asked for
 check (`scripts/release-npm.mts`, `scripts/icon-check.mts`) fails a Windows package whose `centralu.exe` lacks an image of
 `icons/icon.ico`.
 
-**Starting a machine's host at boot** (plan §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
+**Starting a machine's host at boot** (remote-hub.md §10.4, owner decision 4; `autostart.ts`). `machines.autostart { machineId,
 on? }` (additive) runs `centralu serve --autostart on|off|status` there through the lookup, and the Centralu found
 writes, removes or reads its own entry ([serve.md](serve.md)); without `on` it only reads. The row's `autostart` (`MachineInfo`,
 additive) comes from the connection line at every link start and from the call's answer; a remote that predates it
@@ -151,5 +151,5 @@ What would stop is asked of the remote first: `machines.activity` calls the remo
 counts what `hostBusy` counts (`activityCounts`, idle.ts): working sessions, approvals and questions waiting,
 background work, terminals and running commands. While the link is held at `versions_differ` on one protocol (before #689) it asked
 over a short connection of its own. A remote that predates the call answers nothing, and the prompt says "anything
-running". No remote runs a keeper today (plan §10.4), so on Linux and Windows an update ends the agents there; their
+running". No remote runs a keeper today (remote-hub.md §10.4), so on Linux and Windows an update ends the agents there; their
 sessions resume on the new host through their stored ids, as after any restart, and the turns it ended are continued.

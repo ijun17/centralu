@@ -42,7 +42,7 @@ tool-neutral (`sessions/interruptions.ts`):
 (`lifecycle/shutdown.ts`), so a host handing over wakes no session the next one takes. A delivery already waiting for a session to
 wake checks again before it sends (`deliverMail`'s `leaving`). It writes a heartbeat (`mail.heartbeat`) with each 60 s sweep, except
 while the person has not answered for a crowd of sleeping sessions, so that a restart asks again. A host that was off, or away without
-stopping, more than 30 minutes wakes a sleeping session only for mail that needs it (§7.9); plain news it held back starts no turn of its own
+stopping, more than 30 minutes wakes a sleeping session only for mail that needs it (mailbox.md §8.1); plain news it held back starts no turn of its own
 when the person only opens the session, and goes with the next mail that wakes it (#1951). The sweep also runs the mailbox's retention
 and moves on the work of a session that left without telling the mailbox. Sleeping sessions are resumed two at a time.
 
@@ -60,29 +60,29 @@ once in `mail/host-mail.ts` (`hostMail`, used by `main.ts` and by the tests): th
 whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, `handled` is `done`,
 `read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). After the ready line, before
 delivery starts, `afterReady` moves the thread mail an older build left pending (once, in one transaction, `Store.movePendingThreadMail`), then
-brings the task rows in step with the old report paths (`takeOverFromEarlierBuild`, §9.5). The person's window still reads the thread tables
+brings the task rows in step with the old report paths (`takeOverFromEarlierBuild`, mailbox.md §9.5). The person's window still reads the thread tables
 until the person's host methods move to the service (M3a-person, in the same release).
 
-**Delegations write tasks; the old report paths stay the truth until M8** (§9, D18). Each place a session gives another work calls
+**Delegations write tasks; the old report paths stay the truth until M8** (mailbox.md §9, D18). Each place a session gives another work calls
 `ChildOwnership.delegated` once the old path delivered it, and `delegationRecorder` writes a `task` from the caller to the child, delivered and
 read, caused by the turn the caller is in; the child's turn the task started is that task's (`MailTurns.attach`). A script's or the RPC's first
 message is a task from the person. Before a delegation out of a session's untrusted project starts anything, the tool asks
-`MailHooks.refusesDelegation` (§7.4): it answers S15, starts nothing, and records the call so trusting the project tells the caller once (S16).
+`MailHooks.refusesDelegation` (mailbox.md §7.4): it answers S15, starts nothing, and records the call so trusting the project tells the caller once (S16).
 `ChildReports` still decides when a report is due (report marks, paused reports, queued requests, linked reports); `reportRecorder` writes
-Centralu's report on the turn's task (§9.2) and answers `ReportedAs` per §9.3: a turn that ended for good settles the task and every other open
+Centralu's report on the turn's task (mailbox.md §9.2) and answers `ReportedAs` per §9.3: a turn that ended for good settles the task and every other open
 task of the pair delivered before the turn began; a pause (`paused`, or `waiting` on work handed on that the old paths still owe, or not yet
 delivered) leaves it open, wakes the owner the first time and is quiet after; an update's cut that goes on is the old path's to say. The end of
 the Assistant's turn on a session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer
 is the report, written as told. At each ready a report mark with no task gets one, and a task no old path owes any more is settled
 (`oldOwes`, `ChildOwnership.oldOwes`).
 
-**Turns** (§8.2). The delivery begins a turn with its work message (a task, or for the Assistant one asker's request) and the message that
+**Turns** (mailbox.md §8.2). The delivery begins a turn with its work message (a task, or for the Assistant one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and
 A turn the person or the CLI started has no cause. A turn continued after a restart or an update (kept by the keeper,
 or cut by an update's stop and continued, `HostTenure.keptInTurn`) writes no new row: its open row is read back with its starter, work and
 asker, so neither count below counts it again. Nothing holds or defers mail for how much of it there is (#2014): past 20 mail-started turns an
 hour between two sessions, counted from the store since the person's last word to either, or past 120 on the host, the delivery writes the
-person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An Assistant made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, §7.7); a
+person one notice in the Inbox, once per clock hour each (`warnIfRunning`), and the mail goes on. An Assistant made takes the role's unsettled mail another session held, the one before it in the trash included (`roleMoved`, mailbox.md §7.7); a
 trashed session's watched rows are settled `gone` and their senders told (`partyGone`), except what was sent to the role, which waits for the next.
 
 **The first message is the script's, not the person's** (3.8b). Only words the person typed may pass as theirs, and a script's first message can carry outside words (a CI log, an issue title). So `createSession` over the limited credential stores it, and announces it as `user_message`, with `fromScript: { credential }`, where `credential` is what the connection called itself in its hello (`RpcContext.label`, cut by the transport, never checked), made plain by `scriptLabel` (no quote, bracket, angle bracket or line break; `unnamed` when it said nothing). It is written by the host from the connection, never from a field of the call: a window's call has none, and a field in the params is ignored. The session reads it under a header of Centralu's (`scriptMessageFrame`: "sent by the script <label> the person set up; the person did not type it"), every line behind `> `, not stamped `origin: human`. The screen draws it as the script's (its label, drawn as the agent's bubble, like an app's message), not as the person's bubble; `read_session` gives the line `fromScript`, `recall` marks it `[script "<label>"]`, a handoff record and an Assistant's memory do not take it for the person's; the session is not named from it. The person's task carries the label as a fact (`facts.fromScript`), so `mail read` says a script wrote it, not the person, the Inbox draws it under the script's label and its subject names the script; the sender stays the person, so reports still land in the Inbox. A call the person allowed on a card keeps the label (`HostRequests` passes it on). The label is the script's own claim: every process of the user holds the one limited credential, so any script may call itself anything, another script's name or `Centralu` included. It stands in quotes in every sentence of Centralu's (`the script "<label>"`), says who the script says it is and nothing more, and grants nothing. A later `agents.send` by a script is marked the same way, from the calling connection (`TurnInputs.send`'s `fromScript`): stored and announced as the script's, under the same header, not stamped `origin: human`, not naming the session, and with no `intent` (a script cannot take over a report another session is owed); it is the work's turn, not the person's own, so a thread the person owes is reported when it ends. `apps.askBuilder` and `apps.sendError` from a script are marked the same way (#1468), and the builder's header says a script sent it, not that the person wrote it; `read_session`'s card in the window names the script or the app on such a line. A linked machine never sees the script's connection, only the hub's own link, so it would store the text as the person's: the hub refuses a script's text call to a machine (`SCRIPT_TEXT`, links/routes.ts) and says to run the script on that machine. A `dev:live` page holds the limited credential, so what it sends is labelled a script's; it is not a Centralu window, and only development builds run it.

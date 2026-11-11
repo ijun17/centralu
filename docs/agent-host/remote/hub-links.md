@@ -23,7 +23,7 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 | Autostart | `autostart.ts` | `machines.autostart`: `centralu serve --autostart` there, through the lookup (below) |
 | Ssh config, probe | `ssh-config.ts`, `probe.ts` | `machines.sshHosts`: the hosts of this computer's `~/.ssh/config`; `machines.probe`: what runs at one of them, before it is linked (below) |
 
-The three choke points of §5 of the plan are where it sits: the router is the `onRpc` the server calls, a link puts
+The three choke points of remote-hub.md §5 are where it sits: the router is the `onRpc` the server calls, a link puts
 the remote's events into `server.broadcast` (so they get the hub's own `seq` and replay) and its terminal frames into
 the same lane as local ones. A host with no linked machine routes every call to its own handler, as before.
 
@@ -45,10 +45,10 @@ machine probe and `ssh -G` run through the same runner with their own deadlines 
 ssh this host stops, at a deadline, at a forward that did not come up or at `close()`, gets SIGTERM and, 2 s later,
 SIGKILL if it is still there (`endChild`).
 
-**A machine with no host running is started** (plan §10.9, decision 7). When the connection line says
+**A machine with no host running is started** (remote-hub.md §10.9, decision 7). When the connection line says
 `hostRunning: false`, the link goes to `starting`, runs `centralu serve --detach` through the same lookup as the
 connection command ([serve.md](serve.md)), writes `[links] <machine>: no Centralu host is running there; starting one` and how it
-went to `host.log`, and opens again. Nobody is asked: adding the machine was the consent (§3.2 of the plan). The row
+went to `host.log`, and opens again. Nobody is asked: adding the machine was the consent (remote-hub.md §3.2). The row
 keeps `hostStarted: { how, at, note }`. Where the remote answers `wmi_blocked`, the link falls back to a
 **link-bound** host: from then on the forward's ssh runs `centralu serve` (found the same way) as its remote command
 instead of `-N`, and the link reads the connection line until that host answers. It lives as long as the link
@@ -148,7 +148,7 @@ other than `~/.centralu`. It runs as given, with no fallback.
 | A WSL lookup takes `/mnt/*` off PATH | WSL appends Windows' PATH, and Windows' npm folder has a `centralu` shim: measured, `command -v centralu` in the distro named `/mnt/c/Users/<me>/AppData/Roaming/npm/centralu`, the Windows install |
 | The WSL forward runs `wsl.exe -d <distro> --exec sleep infinity` instead of `-N` | WSL stops a distro about 15 s after its last `wsl.exe` client exits, and its services with it. Measured: `centralu serve` under a systemd unit was stopped 19 s after it started, with no client attached; a forward to Windows' sshd alone never holds the distro |
 | Both ends of the forward bind 127.0.0.1, `GatewayPorts=no` | Nothing on either machine's network can use the link |
-| The same port number on both ends when it is free here, another one otherwise | The number reads the same in both machines' logs. Nothing depends on it since phase 2: the hub serves a linked machine's app views on its own port (plan §11). Two machines on the default 17175 cannot both have it |
+| The same port number on both ends when it is free here, another one otherwise | The number reads the same in both machines' logs. Nothing depends on it since phase 2: the hub serves a linked machine's app views on its own port (remote-hub.md §11). Two machines on the default 17175 cannot both have it |
 | `BatchMode=yes` everywhere | A password or host-key prompt nobody can answer would hang the link. The person sets the keys up once, as for any ssh use |
 | The token is not stored; it is asked over ssh at every link start | It is the key to every RPC on that machine. One ssh round trip per start (measured 2.1 to 4.3 s to connected on a LAN) is cheap |
-| The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of the plan (§10.6, 2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |
+| The ssh processes are children of the hub host, behind the `Tunnel` interface | Probe 4 of remote-hub.md §10.6 (2026-10-08) measured the alternatives across real hub swaps: the link is away about 1.1 s per swap as it is, 0.8 s with OpenSSH `ControlPersist` (which leaves a forward behind per swap and outlives "Quit completely"), and would be about 0.14 s as a keeper child. The remote's agents never notice a hub swap, so it stays here |

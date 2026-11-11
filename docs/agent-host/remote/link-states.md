@@ -73,7 +73,7 @@ with it what they said. The row's Disconnect closes any link without unlinking t
 the hub's next start, with the switch on or off. An install, update or autostart change on a disconnected machine connects
 it first, since it runs over the link's ssh, and leaves it up.
 
-**Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
+**Versions are checked before connecting** (remote-hub.md §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with
 `hello_ok.build` once it does. Another protocol never connects and holds the link at `versions_differ`. One protocol
 connects whatever the app versions (#689): a different version of the same channel only names the older side, and the
@@ -82,12 +82,12 @@ holding anything. A dev build has no older side. A local build (`<base>.local.N`
 (`npm i -g centralu` there) and over ssh in phase 3.
 
 **After connecting**, the link reads the remote's `sessions.list` and `projects.list` into the mirror, notes which
-sessions it hides (the remote's Assistant and coordinators, §3.4 of the plan), and broadcasts `machine_resync`; the
+sessions it hides (the remote's Assistant and coordinators, remote-hub.md §3.4), and broadcasts `machine_resync`; the
 window re-reads that machine and wakes what died. The link keeps one cursor and epoch per remote, so a dropped socket
 gets the gap replayed, and a remote that restarted is a new lifetime and a resync. Events of sessions the hub does not
 show are dropped, and session events keep the mirror's names and states current between reads.
 
-**The reverse direction is off** (plan §3.2). The link is a client connection the hub opened. The protocol has no
+**The reverse direction is off** (remote-hub.md §3.2). The link is a client connection the hub opened. The protocol has no
 frame for a host to call its client, and `RemoteClient` drops anything shaped like a request without dispatching it
 (`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link.
 
@@ -101,7 +101,7 @@ which machines it could not search. What a machine answers is fenced as a worker
 ids that are not ids dropped, a conversation line that is not one line quoted. A manager, a lead and an ordinary
 session keep their own machine's view.
 
-**And directs them** (phase 4 step 2, plan §12.4). `send_to_session` goes to the machine as `host.send` (additive),
+**And directs them** (phase 4 step 2, remote-hub.md §12.4). `send_to_session` goes to the machine as `host.send` (additive),
 delivered there as an instruction from `<assistant> on <this computer>`; with `reportBack`, `observeLinked` watches
 the machine's relayed events for the end of that turn and reports it as for a session here, a turn that ends with the
 session's own background work running included ([../delegation/start-agent-steps.md](../delegation/start-agent-steps.md) step 7, #723). The watch starts at the instruction's own
@@ -139,5 +139,5 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 | Inbox, notice cards, OS notifications | Name the machine of a remote session |
 | Usage gauges (phase 2) | This computer's donuts first, then each linked machine's behind its name: `agents.detect` and `agents.usage` with its `machine`. Only connected machines are asked (on the 5-minute refresh, on the host connection coming back, and when that machine's link comes back); one that is not connected shows its state |
 | Open in VS Code (phase 2) | For another machine's project, the project's sidebar menu, the diff, the viewer and the file tree's row menu offer "Open in VS Code": a `vscode://vscode-remote/ssh-remote+<sshTarget><path>` link through `system.openUrl` (`remoteIdeUrl` in `@cc/core`). Not offered for a WSL machine, nor for an ssh target a link cannot carry |
-| App views (phase 2) | Another machine's apps open like this computer's: a pinned view, a view in its conversations, Pin. The hub serves each from its own door with the machine's document (`apps.viewDocument`), and per-app origins from its own port book, keyed by machine ([plans/remote-hub.md](../../plans/remote-hub.md) §11). A user-folder app is opened with its `machine` (`apps.openView`), and its panels, Restart and Remove pass the same `machine` (plan §11.9, §11.10); Settings → Apps lists such apps per machine. They stand on the grid too: the hub keeps such a panel while it knows the machine and the project (store v47, plan §11.8) |
+| App views (phase 2) | Another machine's apps open like this computer's: a pinned view, a view in its conversations, Pin. The hub serves each from its own door with the machine's document (`apps.viewDocument`), and per-app origins from its own port book, keyed by machine ([plans/remote-hub.md](../../plans/remote-hub.md) §11). A user-folder app is opened with its `machine` (`apps.openView`), and its panels, Restart and Remove pass the same `machine` (remote-hub.md §11.9, §11.10); Settings → Apps lists such apps per machine. They stand on the grid too: the hub keeps such a panel while it knows the machine and the project (store v47, remote-hub.md §11.8) |
 | Off for another machine's project | Reveal in the file manager and the file tree's other verbs, this computer's Open in IDE (`fs.resolve` is refused), moving its folder to this computer's trash on delete, New app |
