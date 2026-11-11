@@ -8,7 +8,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('guard/doc-refs', () => {
   it('finds no reference to a section that is not there', () => {
-    expect(scanRepository(ROOT).findings).toEqual([])
+    expect(scanRepository(ROOT)).toEqual([])
   })
 
   it('tells a section that exists from one that does not, in the forms the repository writes', () => {

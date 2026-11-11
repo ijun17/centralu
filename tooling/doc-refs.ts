@@ -36,6 +36,8 @@ export interface DocIndex {
   byPath: Map<string, Doc>
   /** The documents of a file name, as the union of the files that have it */
   byName: Map<string, Doc>
+  /** The paths of the documents by every ending of a path, without `.md` (`remote/serve`, `agent-host/remote/serve`, …) */
+  bySuffix: Map<string, string[]>
   /** The names of documents that are folders now (`agent-host` for docs/agent-host/README.md with no docs/agent-host.md) */
   folders: Set<string>
 }
@@ -135,9 +137,15 @@ export function indexTexts(texts: Map<string, string>): DocIndex {
   }
   const byPath: DocIndex['byPath'] = new Map()
   const byName: DocIndex['byName'] = new Map()
+  const bySuffix: DocIndex['bySuffix'] = new Map()
   for (const [f, text] of texts) {
     const doc = targets(text)
     byPath.set(f, doc)
+    const parts = f.replace(/\.md$/, '').split('/')
+    for (let i = 0; i < parts.length; i++) {
+      const suffix = parts.slice(i).join('/')
+      bySuffix.set(suffix, [...(bySuffix.get(suffix) ?? []), f])
+    }
     // A sub-document of a split one is named with its folder: its bare name (`keeper`, `usage`) is an ordinary word
     if ((f.includes('/') && !f.startsWith('docs/')) || folders.has(f.split('/')[1] ?? '')) continue
     const name = basename(f, '.md').toLowerCase()
@@ -146,7 +154,7 @@ export function indexTexts(texts: Map<string, string>): DocIndex {
     entry.titles.push(...doc.titles)
     byName.set(name, entry)
   }
-  return { byPath, byName, folders: new Set([...folders].map((f) => f.toLowerCase())) }
+  return { byPath, byName, bySuffix, folders: new Set([...folders].map((f) => f.toLowerCase())) }
 }
 
 /** What is wrong with a path under docs/ (without `.md`) that is no file: it is a split document's old name, or names no file of its folder */
@@ -172,7 +180,7 @@ function lookup(name: string, index: DocIndex, from?: string): Doc | string | un
   if (beside) return beside
   if (name.includes('/')) {
     const path = name.replace(/^(?:\.{1,2}\/)+/, '').replace(/^docs\//, '')
-    const found = [...index.byPath.keys()].filter((p) => p === `docs/${path}.md` || p === `${path}.md` || p.endsWith(`/${path}.md`))
+    const found = index.bySuffix.get(path) ?? []
     if (found.length === 1) return index.byPath.get(found[0] ?? '')
     const note = path.includes('/') ? splitNote(name, path, index) : undefined
     if (note) return note
@@ -205,13 +213,14 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
     else if (!doc && md && /^(?:docs|\.\.?)\//.test(name)) found.push(`${lineOf(at)}: ${name}.md does not exist`)
     return typeof doc === 'object' ? doc : undefined
   }
-  for (const m of text.matchAll(NUMBERED)) {
+  // Each form is read only in a text that has its mark: most files have none, and a miss costs a try at every word
+  for (const m of text.includes('§') ? text.matchAll(NUMBERED) : []) {
     const [, name = '', md = '', sections = ''] = m
     const doc = docOf(m.index, name, md)
     if (!doc) continue
     for (const [, n = ''] of sections.matchAll(/§\s?(\d+(?:\.\d+)*)/g)) if (!doc.numbers.has(n)) found.push(`${lineOf(m.index)}: ${name}${md} has no section ${n}`)
   }
-  for (const m of text.matchAll(QUOTED)) {
+  for (const m of text.includes('.md') ? text.matchAll(QUOTED) : []) {
     const [whole, name = '', , quoted = ''] = m
     // The quotation as written: a heading may hold code (`"The manifest, `x.json`"`), and the prose keeps every offset
     const end = m.index + whole.length - 1
@@ -221,13 +230,13 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
     const wanted = clean(title)
     if (!doc.titles.some((t) => t.startsWith(wanted))) found.push(`${lineOf(m.index)}: ${name}.md has no heading "${title}"`)
   }
-  for (const m of text.matchAll(RULE)) {
+  for (const m of /[A-Z]{2}\d/.test(text) ? text.matchAll(RULE) : []) {
     const [, name = '', md = '', ids = ''] = m
     const doc = docOf(m.index, name, md)
     if (!doc) continue
     for (const [id] of ids.matchAll(new RegExp(ID, 'g'))) if (!doc.titles.some((t) => t.startsWith(`${id.toLowerCase()}.`))) found.push(`${lineOf(m.index)}: ${name}${md} has no rule ${id}`)
   }
-  for (const m of text.matchAll(PLAIN)) {
+  for (const m of text.includes('.md') ? text.matchAll(PLAIN) : []) {
     const doc = lookup(m[1] ?? '', index, file)
     if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
   }
@@ -244,20 +253,16 @@ export function danglingRefs(written: string, index: DocIndex, file?: string): s
   return [...new Set(found)].sort((a, b) => parseInt(a) - parseInt(b))
 }
 
-/** Every dangling reference of the repository, as `file:line: what`, and how many references were read */
-export function scanRepository(root: string): { findings: string[]; read: number } {
-  const files = trackedFiles(root)
+/** Every dangling reference of the repository, as `file:line: what` */
+export function scanRepository(root: string): string[] {
+  const texts = new Map(trackedFiles(root).map((f) => [f, readFileSync(join(root, f), 'utf8')]))
+  const index = indexTexts(new Map([...texts].filter(([f]) => f.endsWith('.md'))))
   // This checker and its test hold made-up references on purpose
   const own = new Set(['tooling/doc-refs.ts', 'tooling/doc-refs.test.ts'])
-  const index = indexDocs(root, files)
   const findings: string[] = []
-  let read = 0
-  for (const f of files) {
-    if (own.has(f)) continue
-    const text = readFileSync(join(root, f), 'utf8')
-    if (text.length > MAX_BYTES || !(text.includes('§') || text.includes('.md'))) continue
-    read += (text.match(NUMBERED) ?? []).length + (text.match(QUOTED) ?? []).length + (text.match(RULE) ?? []).length
+  for (const [f, text] of texts) {
+    if (own.has(f) || text.length > MAX_BYTES || !(text.includes('§') || text.includes('.md'))) continue
     for (const what of danglingRefs(text, index, f)) findings.push(`${f}:${what}`)
   }
-  return { findings, read }
+  return findings
 }
