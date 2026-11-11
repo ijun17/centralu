@@ -198,7 +198,7 @@ script rehearses by default and why nothing publishes automatically.
   limited to 3 minutes by `.github/scripts/apt-install.sh` and tried once more, and the calling
   step has a `timeout-minutes` of 9. A stuck mirror then fails a step named `Install … system
   dependencies`, which the queue reads as setup and reruns, in under 9 minutes, where it had held
-  a job until its 20-minute limit twice. The second try asks a mirror outside Canonical
+  a job until its 20-minute limit twice. The second try asks mirrors outside Canonical (OCF Berkeley, MIT, Leaseweb)
   (`.github/scripts/apt-fallback-mirror.sh`, #2198: on 2026-11-11 Canonical's mirrors were down for
   2.5 hours), in the `playwright install-deps` steps too; the packages stay checked against Ubuntu's
   archive keys. `release.yml` uses the same action and the same list as the

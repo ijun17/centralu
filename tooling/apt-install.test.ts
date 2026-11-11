@@ -8,6 +8,7 @@ import { SLOW } from './test-timing.js'
 
 const posix = (p: string) => p.replace(/\\/g, '/')
 const script = posix(new URL('../.github/scripts/apt-install.sh', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+const fallbackScript = script.replace('apt-install.sh', 'apt-fallback-mirror.sh')
 // The script is the Linux runner's (its apt): `timeout` and `env` are coreutils'. Windows runs it only when a person asks, in Git's bash.
 const hasCoreutils = (process.platform !== 'win32' || process.env.APT_INSTALL_TEST_BASH === '1') && spawnSync('bash', ['-c', 'timeout --version']).status === 0
 
@@ -95,26 +96,48 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   it.each([
     ['amd64', 'ubuntu'],
     ['arm64', 'ubuntu-ports'],
-  ])('asks a mirror outside Canonical on the second try and not on the first (%s)', async (arch, archive) => {
+  ])('asks mirrors outside Canonical on the second try and not on the first (%s)', async (arch, archive) => {
     const { dir, log, etc } = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
-    const r = await run(dir, log, etc, undefined, { ARCH: arch, MIRROR: 'https://mirror.example' })
+    const r = await run(dir, log, etc, undefined, { ARCH: arch, MIRRORS: 'https://one.example https://two.example' })
     expect(r.status, r.out).toBe(0)
     const lines = calls(log)
     const [first, second] = [lines.findIndex((l) => /install -y/.test(l)), lines.findLastIndex((l) => /install -y/.test(l))]
     // Nothing of the fallback before the first try has ended, and every apt-get after it sees it: the update and the install
     expect(lines.slice(0, first + 1).some((l) => l.includes('sees:'))).toBe(false)
     expect(lines.slice(first + 1, second).filter((l) => l.startsWith('  sees:'))).toHaveLength(1)
-    expect(lines[second + 1]).toBe(`  sees: deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirror.example/${archive} noble main restricted universe multiverse`)
-    // The four pockets, and the machine's own sources are left out
+    expect(lines[second + 1]).toBe(`  sees: deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] mirror+file:${etc}/fallback-mirrors.txt noble main restricted universe multiverse`)
+    // The mirrors in the order given, one after the other when one does not answer; the four pockets; the machine's own sources are left out
+    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe(`https://one.example/${archive}/\nhttps://two.example/${archive}/\n`)
     const list = readFileSync(join(etc, 'fallback-mirror.list'), 'utf8').trim().split('\n')
     expect(list.map((l) => l.split(' ')[3])).toEqual(['noble', 'noble-updates', 'noble-backports', 'noble-security'])
     expect(readFileSync(join(etc, 'apt.conf.d', '99fallback-mirror'), 'utf8')).toContain('Dir::Etc::sourceparts "-";')
+  })
+
+  it('names Berkeley, MIT and Leaseweb when no mirrors are given', async () => {
+    const { dir, log, etc } = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
+    expect((await run(dir, log, etc)).status).toBe(0)
+    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe('https://mirrors.ocf.berkeley.edu/ubuntu/\nhttps://mirrors.mit.edu/ubuntu/\nhttps://mirror.leaseweb.com/ubuntu/\n')
   })
 
   it('does not touch the mirrors when the first try works', async () => {
     const { dir, log, etc } = standIn(() => 'exit 0')
     expect((await run(dir, log, etc)).status).toBe(0)
     expect(existsSync(join(etc, 'fallback-mirror.list'))).toBe(false)
+  })
+
+  // The three build.yml second-try steps run the script under `bash -e`, before the install that is their work
+  it('never fails its step: a setting it cannot write is a warning, and the same mirrors are tried again', async () => {
+    const { dir, log, etc } = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
+    // A file where the folder should be: nothing can be made under it
+    writeFileSync(join(dir, 'blocked'), '')
+    const blocked = `${dir}/blocked/etc`
+    const direct = spawnSync('bash', [fallbackScript], { env: { ...process.env, SUDO: '', APT_ETC: blocked, ARCH: 'amd64', CODENAME: 'noble' }, encoding: 'utf8' })
+    expect(direct.status).toBe(0)
+    expect(direct.stdout).toContain('::warning::the mirror setting could not be written')
+    const r = await run(dir, log, etc, undefined, { APT_ETC: blocked })
+    expect(r.status, r.out).toBe(0)
+    expect(r.out).toContain('::warning::the mirror setting could not be written')
+    expect(installs(log)).toHaveLength(2)
   })
 
   it('fails the step with the same error line when the fallback mirror fails too, and tries the same mirrors again on an architecture it has no fallback for', async () => {

@@ -10,7 +10,7 @@
 # limit is followed by one more (TRIES, 2): first what the timed-out one left running is stopped, since `timeout` ends `sudo`
 # and the root `apt-get` under it can go on holding dpkg's locks (stop-leftover-apt.sh, #1503), then dpkg is put right.
 # The .deb files an earlier try downloaded stay in apt's archive folder, so the second try fetches only what is left. The second
-# try also asks a mirror outside Canonical (apt-fallback-mirror.sh, #2198: on 2026-11-11 Canonical's mirrors were down for 2.5
+# try also asks mirrors outside Canonical (apt-fallback-mirror.sh, #2198: on 2026-11-11 Canonical's mirrors were down for 2.5
 # hours and each try only went from one of them to another), with the packages still verified against Ubuntu's keys. Both
 # tries failing exits 1, in a step the caller limits again (`timeout-minutes`): the step's name is what the merge queue reads
 # (an install step that fails or times out is the runner's or the mirror's, not the commit's: run-failure.mjs `isSetupStep`).
