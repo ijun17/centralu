@@ -1,5 +1,5 @@
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
-import type { CreateSessionOpts } from '../contract.js'
+import { toolProfileOf, type CreateSessionOpts } from '../contract.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
 import { CENTRALU_MCP_NAME, centraluMcp } from './centralu-mcp.js'
 import { appToolOf } from './permissions.js'
@@ -45,7 +45,7 @@ export class ClaudeServers {
     this.appProxies.set(a.server, { proxy: appProxy(this.host.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
   }
   if (this.host.opts.centraluTools) {
-    this.centraluToolsServer = centraluMcp(this.host.opts.centraluTools, this.host.opts.toolProfile, this.host.opts.sessionId, this.appProxies.size > 0)
+    this.centraluToolsServer = centraluMcp(this.host.opts.centraluTools, toolProfileOf(this.host.opts), this.host.opts.sessionId, this.appProxies.size > 0)
   }
   }
 

@@ -110,16 +110,18 @@ export const mailActions = (set: StoreSet, get: StoreGet): MailActions => {
       set({ mailThread: null })
     },
 
-    async replyMail(text, kind) {
+    async replyMail(text, kind, answers) {
       const platform = get().platform
       const open = get().mailThread
       if (!platform || !open) return false
-      return act('send that', async () => {
-        const view = await platform.mail.reply(open.thread.id, text, kind)
+      const sent = await act('send that', async () => {
+        const view = await platform.mail.reply(open.thread.id, text, kind, answers)
         const now = get().mailThread
         if (get().platform === platform && now?.thread.id === open.thread.id) set({ mailThread: merged(now, view) })
         void get().loadMail()
       })
+      if (!sent && answers !== undefined) await refreshThread(get, set, open.thread.id)
+      return sent
     },
 
     async closeMail(outcome) {

@@ -4,9 +4,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { Store } from './store.js'
 import { MailConflict, MailTargetMissing, type MailFacts, type MailboxRecords, type NewMail, type NewRecipient } from './store/mailbox.js'
 import { turnsOf } from './store/mailbox-turns.test-helpers.js'
@@ -682,29 +679,5 @@ describe('a question’s choices have a column of their own (v70, #1630)', () =>
     }
     db.prepare(`UPDATE mail SET choices = NULL, facts = ? WHERE id = ?`).run('{"choices":["x","y"]}', id)
     expect(box.message(id)?.choices).toBeNull()
-  })
-
-  it('an older build’s store (v69: no column) migrates with its mail intact, and an older build’s insert leaves the column empty', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-choices-'))
-    try {
-      const file = join(dir, 'store.db')
-      const first = new Store(file)
-      const raw = (first as unknown as { db: Database.Database }).db
-      const id = first.mailbox.insert(mail({ sender: A, needsReply: true }), [to('person')]).id
-      raw.exec(`ALTER TABLE mail DROP COLUMN choices`)
-      raw.pragma('user_version = 69')
-      raw.close()
-
-      const second = new Store(file)
-      expect(second.schemaVersion).toBeGreaterThanOrEqual(70)
-      expect(second.mailbox.message(id)).toMatchObject({ body: expect.any(String), choices: null })
-      const db = (second as unknown as { db: Database.Database }).db
-      // What a build of v69 writes: its own column list, none of ours
-      db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES ('h1.m_old', ?, 'message', 1, 'h1.m_old', 'old', '{}', 1)`).run(A)
-      expect(second.mailbox.message('h1.m_old')).toMatchObject({ body: 'old', choices: null })
-      db.close()
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
   })
 })

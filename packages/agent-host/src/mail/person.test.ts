@@ -759,6 +759,67 @@ describe('a session asks the person by mail (#1630)', () => {
     expect(honest.facts).toEqual({})
   })
 
+  describe('a pick names the question it answers', () => {
+    /** The person wrote to both sessions; each asks, in the one chain, with choices. Returns the chain's thread id and the two questions */
+    function twoAsk() {
+      const w = ready(hostWorld())
+      const root = w.service.send(PERSON, { to: [A, B], text: 'Go ahead, and ask me if you need to.' }).message
+      w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'Which branch?', choices: ['main', 'dev'] })
+      w.clock.t += 10
+      w.tool.run('b', { action: 'reply', thread: root.id, kind: 'question', text: 'Ship it?', choices: ['yes', 'no'] })
+      const view = w.person.thread(root.id)
+      const ask = (body: string) => view.messages.find((m) => m.body === body)!
+      return { w, thread: root.id, qa: ask('Which branch?'), qb: ask('Ship it?') }
+    }
+
+    it('answers that question, not the newest open one: a pick on the older of two questions in a chain reaches its asker alone', async () => {
+      const { w, thread, qa, qb } = twoAsk()
+      w.clock.t += 10
+      const view = w.person.reply(thread, 'main', 'answer', qa.id)
+      expect(view.messages.find((m) => m.body === 'main')).toMatchObject({ replyTo: qa.id, facts: { picked: true } })
+      await w.advance(31_000)
+      expect(bodies(w, 'a')).toContain('main')
+      expect(bodies(w, 'b')).not.toContain('main')
+      // The other question still waits for its answer
+      const after = w.person.thread(thread).messages
+      expect(after.some((m) => m.replyTo === qb.id)).toBe(false)
+    })
+
+    it('the asking session reads its own choices back, and that the person’s answer is one of them', () => {
+      const { w, thread, qa } = twoAsk()
+      expect(w.tool.run('a', { action: 'read', thread: qa.id }).text).toContain('You offered: "main", "dev".')
+      const answer = w.person.reply(thread, 'dev', 'answer', qa.id).messages.find((m) => m.body === 'dev')!
+      expect(w.tool.run('a', { action: 'read', thread: answer.id }).text).toContain('The person wrote it, picking one of your choices.')
+    })
+
+    it('one session asking twice: the first question can be picked after the second was asked, and each is answered once', () => {
+      const w = ready(hostWorld())
+      const root = w.service.send(PERSON, { to: [A], text: 'Go ahead.' }).message
+      w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'First?', choices: ['x', 'y'] })
+      w.clock.t += 10
+      w.tool.run('a', { action: 'reply', thread: root.id, kind: 'question', text: 'Second?', choices: ['p', 'q'] })
+      const asked = (body: string) => w.person.thread(root.id).messages.find((m) => m.body === body)!
+      w.person.reply(root.id, 'x', 'answer', asked('First?').id)
+      expect(w.person.thread(root.id).messages.filter((m) => m.replyTo !== undefined && m.sender.kind === 'person').map((m) => [m.body, m.replyTo])).toEqual([['x', asked('First?').id]])
+      w.person.reply(root.id, 'q', 'answer', asked('Second?').id)
+      expect(w.person.thread(root.id).messages.filter((m) => m.kind === 'answer').map((m) => m.body)).toEqual(['x', 'q'])
+    })
+
+    it('a question is answered once: a second pick, from any window, is refused and writes nothing; so is a pick of words it did not offer', () => {
+      const { w, thread, qa } = twoAsk()
+      w.person.reply(thread, 'main', 'answer', qa.id)
+      expect(refusedFor(() => w.person.reply(thread, 'dev', 'answer', qa.id))).toBe('answered')
+      expect(refusedFor(() => w.person.reply(thread, 'main', 'answer', qa.id))).toBe('answered')
+      expect(w.person.thread(thread).messages.filter((m) => m.sender.kind === 'person' && m.replyTo === qa.id)).toHaveLength(1)
+      const { w: w2, thread: t2, qa: other } = twoAsk()
+      expect(refusedFor(() => w2.person.reply(t2, 'neither', 'answer', other.id))).toBe('bad_value')
+      expect(refusedFor(() => w2.person.reply(t2, 'main', 'answer', 'hub-aaaaaaaa.m_missing'))).toBe('unknown_message')
+      // The free reply box stays free: it answers the newest open question, as before
+      w2.person.reply(t2, 'my own words')
+      expect(w2.person.thread(t2).messages.filter((m) => m.sender.kind === 'person' && m.body === 'my own words')).toHaveLength(1)
+    })
+  })
+
   it('choices go only with a question to the person alone, 2 to 6 of them, none empty', () => {
     const w = ready(hostWorld())
     const send = (a: Record<string, unknown>) => w.tool.run('a', { action: 'send', to: 'person', kind: 'question', text: 'Which?', ...a })

@@ -70,6 +70,8 @@ export type SendInput = {
   id?: string
   /** A session's question to the person only: the answers it offers to pick from (#1630) */
   choices?: MailChoices
+  /** The person's answer is one of the choices of the question it answers, pressed in the window (`mail.reply` with `answers`); recorded in `facts.picked` (#1630) */
+  picked?: true
 }
 /**
  * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the Assistant cites, checked.
@@ -278,7 +280,7 @@ export class MessageService {
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
-      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}) }
+      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}), ...(input.picked && cls === 'person' ? { picked: true } : {}) }
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)

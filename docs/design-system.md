@@ -168,13 +168,13 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A grid span picker | `SpanButton` (`SpanPicker.tsx`) |
 | A command's log, a terminal | `CommandLogView`, `xterm.ts` with `terminalTheme.ts` |
 | Icons | `icons.tsx` |
-| A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame); `xs` / `sm` / `md`; `busy` with `busyText` |
+| A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame), `choice` (a row of a list a question offers: outlined, `surface-selected` under the pointer and for the one picked); `xs` / `sm` / `md` / `lg` (`lg` is a list's row); `busy` with `busyText` |
 | One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick) |
 | A setting that is on or off | `Switch` (a checkbox underneath, drawn as a track and knob); in Settings through `SettingToggle`, laid out with `SettingsLayout.tsx` (page, group card, row) |
 | A capsule | `Pill`: `size="bar"` (the top bar's 28px) or `"label"` (a waiting card's kind); edges `quiet`, `live`, `solid`, `dashed` |
 | A small uppercase label | `Badge` (`readout` among figures) |
 | A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
-| The answers a mailed question offers | `ChoiceList` (*owner, 2026-11-11*, #1630, mock-up A): a small muted label ("Choose one"), then a numbered vertical list of rows as wide as the message, outlined in `line-strong` with no fill, so they do not read as more of the message above. A row takes `surface-selected` under the pointer; once the question is answered no row takes a press, the picked one stays on `surface-selected` and the others fade as a disabled control does, and the label says what was done ("You chose", "Answered"). Hover and the picked state change in 150ms (`transition`); the label changes in place with `.cc-setup-swap` (reduced motion: a 100ms fade) |
+| The answers a mailed question offers | `ChoiceList` (*owner, 2026-11-11*, #1630, mock-up A): a small muted label ("Choose one"), then a numbered vertical list of rows as wide as the message, outlined in `line-strong` with no fill, so they do not read as more of the message above. A row takes `surface-selected` under the pointer; once the question is answered no row takes a press, the picked one stays on `surface-selected` and the others fade as a disabled control does, and the label says what was done ("You chose", "Answered"). The rows are `Button variant="choice" size="lg"`; hover and the picked state change in 150ms (`Button`'s `transition`, colours and the disabled fade); the label changes in place with `.cc-setup-swap` (reduced motion: a 100ms fade) |
 
 **The guard.** The lint rule `guard/hand-made-looks` fails when a screen outside `components/` draws a
 framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use

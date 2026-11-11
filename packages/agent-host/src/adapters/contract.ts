@@ -238,6 +238,11 @@ export type CreateSessionOpts = {
   hostAccess?: { url: string; credential: string }
 }
 
+/** The seat a session's Centralu tools are for: the Assistant's when the caller named none. One answer for the adapters (the tools' server, Claude's disallowed tools, Codex's instructions) */
+export function toolProfileOf(opts: Pick<CreateSessionOpts, 'toolProfile'>): ToolProfile {
+  return opts.toolProfile ?? 'assistant'
+}
+
 /**
  * The variables a session's agent finds the host by (#1405): its address and the session's credential. Nothing when the
  * session has none (a host whose port is not known yet, a test)

@@ -136,10 +136,15 @@ export class MailMock {
       t.row.unread = 0
       return this.view(t, messages)
     },
-    reply: async (threadId, text, kind) => {
+    reply: async (threadId, text, kind, answers) => {
       const t = this.must(threadId)
       if (t.row.state === 'done') throw mockError('this thread is done; open a follow-up', 'refused')
-      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: {}, createdAt: this.clock.now() }
+      // As the host does (`pickTarget`): a pick names its question, whose choices include the words, and a question is answered once
+      const open = t.messages.findLast((m) => m.sender.kind !== 'person' && m.kind === 'question' && !t.messages.some((a) => a.replyTo === m.id))
+      const question = answers === undefined ? open : t.messages.find((m) => m.id === answers)
+      if (answers !== undefined && !question?.choices?.includes(text)) throw mockError(`${answers} does not offer that choice.`, 'refused')
+      if (answers !== undefined && question && t.messages.some((m) => m.replyTo === question.id && m.sender.kind === 'person')) throw mockError(`${question.id} is answered already: a question is answered once. Write to say more.`, 'refused')
+      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: answers !== undefined ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
       t.row.last = { sender: PERSON, kind: message.kind, preview: text.slice(0, 140), at: message.createdAt }

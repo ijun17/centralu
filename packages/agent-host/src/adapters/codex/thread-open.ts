@@ -1,7 +1,7 @@
 import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
 import { codexToolInstructionsFor } from '../../sessions/centralu-tools.js'
 import { rpcError } from '../../rpc-error.js'
-import type { CreateSessionOpts, EventSink } from '../contract.js'
+import { toolProfileOf, type CreateSessionOpts, type EventSink } from '../contract.js'
 import type { CodexClient } from './client.js'
 import { permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 import { runningTurnOf } from './turn-reads.js'
@@ -207,7 +207,7 @@ export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
 export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
   // An app attached as the thread starts adds the line on repository work (#957, #992 review)
   const apps = (opts.apps?.current().length ?? 0) > 0
-  const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'assistant', undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
+  const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(toolProfileOf(opts), undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
   const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
   return text ? { developerInstructions: text } : {}
 }

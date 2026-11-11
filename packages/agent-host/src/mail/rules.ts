@@ -48,6 +48,7 @@ const REFUSALS = [
   'assistant_asks',
   'removed',
   'untrusted_project',
+  'answered',
 ] as const
 export type MailRefusal = (typeof REFUSALS)[number]
 
@@ -162,6 +163,7 @@ export const REFUSAL_TEXT = {
   no_mailbox: () => 'that session cannot read mail: only an ordinary session in a project, or the Assistant, has the mail tool',
   // The mailbox here never writes to another computer's session: a session's mail tool sends it there (#2067 item 2), and this is what any other way of sending reads
   elsewhere: (address: string) => `${address} is on another computer, and only a session's mail tool sends mail there: nothing was written.`,
+  answered: (id: string) => `${id} is answered already: a question is answered once. Write to say more.`,
   unknown_message: (id: string) => `there is no message ${id} you can read; check the id with mail(action="inbox").`,
   own_message: (id: string) => `${id} is your own message; say who it is for with to="…".`,
   recipients: () => `at most ${MAX_RECIPIENTS} recipients.`,

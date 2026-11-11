@@ -53,5 +53,7 @@ export const MailFacts = z.looseObject({
   cites: z.object({ seq: z.number(), at: z.number() }).optional(),
   /** On the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection (`scriptLabel`), so no reader takes it for the person's words */
   fromScript: z.object({ credential: z.string() }).optional(),
+  /** On the person's answer to a session's question (#1630): it is one of the choices the question offered, pressed in the window; the host decides it, so a session reads it as Centralu's word */
+  picked: z.boolean().optional(),
 })
 export type MailFacts = z.infer<typeof MailFacts>

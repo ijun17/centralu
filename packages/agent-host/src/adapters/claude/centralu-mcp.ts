@@ -37,7 +37,7 @@ export const CLAUDE_SUBAGENT_TOOL = 'Agent'
 
 export function centraluMcp(
   tools: CentraluTools,
-  profile: ToolProfile = 'assistant',
+  profile: ToolProfile,
   sessionId?: string,
   /** An app is attached as the session starts (#957, #992 review): the instructions then name an app's help */
   appsAttached = false,

@@ -432,12 +432,12 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     `bad_value`. Each is cut to one line of 80 characters, so a choice cannot carry a line that reads as Centralu's.
   - **The Inbox draws them as a numbered list** (owner, 2026-11-11, mock-up A): a small muted "Choose one" label, then outlined rows as wide
     as the message, lit by `surface-selected` under the pointer (`ChoiceList`, design-system.md §11). A press posts the choice's words as the person's
-    `answer` in the thread, which wakes the asker as any answer does, and the list then locks: the picked row stays lit ("You chose"), the others fade, and a
+    `answer` in the thread (`mail.reply` with `answers`: the answer goes to the question pressed, which must offer those words and not be answered already, `facts.picked`), which wakes the asker as any answer does, and the list then locks: the picked row stays lit ("You chose"), the others fade, and a
     question is answered once. The reply box stays, so the person may always answer in their own words (the list then says "Answered"). The window finds
-    the answer as the person's first `answer` after the question; a window that cannot draw choices still shows the question and takes the answer.
+    the answer as the person's message that names the question (`replyTo`); a window that cannot draw choices still shows the question and takes the answer.
   - **The CLI's own choice tool is off** in every Claude session that has the mail tool (`disallowedTools: ['AskUserQuestion']`,
-    `claudeQueryOptions`, by `seatHas(profile, 'mail')`), and the mail tool's description says to ask the person with a mail question (the line sits in the
-    mail tool, whose ceiling did not rise: words went out of `to`). A session
+    `claudeQueryOptions`, by `seatHas(profile, 'mail')`). No line tells a session to ask by mail yet: it does not fit the mail tool's ceiling, which did not rise
+    (docs/tool-cost.md #1630 lists the options; the owner decides). A session
     without mail (a builder, an app's agent) keeps the question card. Codex's `request_user_input` exists only in its
     plan mode and behind a feature flag, neither of which Centralu turns on, so it has nothing to switch off.
     Approvals stay cards: they hold a tool call.
@@ -800,6 +800,7 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
+| `picked` | message | `true`: the person's answer to a session's question is one of the question's `choices`, pressed in the window (`mail.reply` with `answers`, D33, #1630); the host decides it, so `mail read` can say it to the asker |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `store/mail-facts.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key

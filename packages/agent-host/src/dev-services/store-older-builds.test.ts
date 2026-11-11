@@ -98,3 +98,30 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
     expect(tables(file)).not.toContain('usage_facts')
   })
 })
+
+describe('a store written before a question’s choices had a column (v69, #1630)', () => {
+  it('migrates with its mail intact, shows a question without choices, and an older build’s insert leaves the column empty', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-mail-choices-'))
+    dirs.push(dir)
+    const file = join(dir, 'store.db')
+    const first = new Store(file)
+    const written = (first as unknown as { db: Database.Database }).db
+    const at = 1_800_000_000_000
+    const row = { id: 'h1.m_1', sender: 'session:h1/a', kind: 'message', needs_reply: 1, root_id: 'h1.m_1', body: 'Which?', facts: '{}', created_at: at }
+    written
+      .prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES (@id, @sender, @kind, @needs_reply, @root_id, @body, @facts, @created_at)`)
+      .run(row)
+    written.exec(`ALTER TABLE mail DROP COLUMN choices`)
+    written.pragma('user_version = 69')
+    written.close()
+
+    const second = new Store(file)
+    expect(second.migrationsRun).toBe(1)
+    expect(second.mailbox.message('h1.m_1')).toMatchObject({ body: 'Which?', choices: null })
+    const db = (second as unknown as { db: Database.Database }).db
+    // What a build of v69 writes: its own column list, none of ours
+    db.prepare(`INSERT INTO mail (id, sender, kind, needs_reply, root_id, body, facts, created_at) VALUES ('h1.m_2', 'session:h1/a', 'message', 1, 'h1.m_2', 'old', '{}', ?)`).run(at)
+    expect(second.mailbox.message('h1.m_2')).toMatchObject({ body: 'old', choices: null })
+    db.close()
+  })
+})

@@ -1,5 +1,5 @@
 import type { McpServerConfig, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
-import { hostAccessEnv } from '../contract.js'
+import { hostAccessEnv, toolProfileOf } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
@@ -225,10 +225,10 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     resume: opts.resumeExternalId,
     /*
      * A session with Centralu's mail asks the person through it (#1630): a question by mail does not hold the turn, lives past a host swap and a
-     * dropped link, and is answered in the Inbox. The CLI's own choice tool is off for it; the mail tool's description says how to ask instead.
-     * A session without mail (a builder, an app's agent) keeps the card. The profile defaults as the tools' server does (`centraluMcp`)
+     * dropped link, and is answered in the Inbox. The CLI's own choice tool is off for it.
+     * A session without mail (a builder, an app's agent) keeps the card
      */
-    ...(opts.centraluTools && seatHas(opts.toolProfile ?? 'assistant', 'mail') ? { disallowedTools: ['AskUserQuestion'] } : {}),
+    ...(opts.centraluTools && seatHas(toolProfileOf(opts), 'mail') ? { disallowedTools: ['AskUserQuestion'] } : {}),
     // allowedTools is never set (M0: it would shadow canUseTool).
     /*
      * **The callback is passed even in auto** (#171). It used to be omitted for auto, and

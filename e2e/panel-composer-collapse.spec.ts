@@ -453,9 +453,9 @@ test('a panel of 450px folds its composer and one of 700px does not', async ({ p
 })
 
 /**
- * A row above the input is not resting height (#2190). The report choice ("Working for …") shows over the input while the person
- * writes to a session that owes a report, and its 100px counted as the composer's height, so a panel of ordinary height folded the
- * composer whenever the field lost focus. The line is still the one card at one line: 700px keeps it open with the row showing, and
+ * A row above the input is not resting height (#2190). The strip of attachments shows over the input while a file waits to be sent, and
+ * its height counted as the composer's, so a panel of ordinary height folded the composer whenever the field lost focus (the report
+ * choice did the same, until it went). The line is still the one card at one line: 700px keeps it open with the strip showing, and
  * 450px still folds it.
  */
 test('a row above the input does not fold the composer of a panel of 700px, and a panel of 450px still folds', async ({ page }) => {
@@ -463,7 +463,6 @@ test('a row above the input does not fold the composer of a panel of 700px, and 
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
-  await page.evaluate((id) => (window as any).__mock.reportsOwed.set(id, { callerId: 'o1', callerName: 'Assistant' }), a)
 
   const panel = page.getByTestId(`grid-panel-${a}`)
   const shell = panel.getByTestId('composer-shell')
@@ -474,9 +473,8 @@ test('a row above the input does not fold the composer of a panel of 700px, and 
   }
   const height = async () => Math.round((await panel.boundingBox())!.height)
   await expect.poll(height).toBeGreaterThan(620)
-  await panel.getByTestId('prompt-input').click()
-  await page.keyboard.type('quick question')
-  await expect(panel.getByTestId('report-choice')).toBeVisible()
+  await panel.getByTestId('attach-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('notes') })
+  await expect(panel.getByTestId('attachment-list')).toBeVisible()
   // The field loses focus with the row still showing
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.mouse.move(0, 0)
@@ -485,7 +483,7 @@ test('a row above the input does not fold the composer of a panel of 700px, and 
 
   await page.setViewportSize({ width: SHORT_WINDOW.width, height: 500 })
   await expect.poll(height).toBeLessThan(480)
-  await expect(panel.getByTestId('report-choice')).toBeVisible()
+  await expect(panel.getByTestId('attachment-list')).toBeVisible()
   await expect.poll(hangsBelow).toBe(true)
 })
 

@@ -18,6 +18,8 @@ export const mailParams = {
     threadId: z.string(),
     text: z.string().min(1).max(16_000),
     kind: z.enum(['note', 'answer', 'question']).optional(),
+    /** A pick (#1630): the id of the question in this thread whose choice `text` is. The answer goes to that question, not to the newest open one, and a question already answered refuses it (`answered`). An older host ignores it */
+    answers: z.string().optional(),
   }),
   /** The person closes a thread */
   'mail.close': z.object({

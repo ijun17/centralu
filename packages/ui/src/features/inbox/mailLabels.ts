@@ -68,9 +68,9 @@ export function closeStopsWork(view: Pick<MailThreadView, 'canReply'> & { thread
   return view.canReply === undefined && view.thread.working === true
 }
 
-/** The person's answer to the question at `at`: their first answer after it, if they gave one (a choice pressed, or words of their own) */
-export function answerTo(messages: readonly MailMessage[], at: number): MailMessage | null {
-  return messages.slice(at + 1).find((m) => m.sender.kind === 'person' && m.kind === 'answer') ?? null
+/** The person's answer to a question: their message that names it (`replyTo`), a choice pressed or words of their own */
+export function answerTo(messages: readonly MailMessage[], question: MailMessage): MailMessage | null {
+  return messages.find((m) => m.sender.kind === 'person' && m.replyTo === question.id) ?? null
 }
 
 /** What the list of a question's choices says it is: to pick from, then what became of it */

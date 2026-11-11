@@ -43,7 +43,7 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
   await expect(page.getByTestId('inbox')).toBeVisible()
 })
 
-test('Mail: a question with choices lists them, a press answers once with its words and locks the list, and the reply box still takes words of its own (#1630)', async ({ page }) => {
+test('Mail: a question with choices lists them, a press answers once with its words, however often it is pressed, and locks the list (#1630)', async ({ page }) => {
   await setup(page)
   const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now', 'Ask me again'] })
   await page.getByTestId('counter').click()
@@ -54,8 +54,26 @@ test('Mail: a question with choices lists them, a press answers once with its wo
   await expect(page.getByTestId('mail-choices-1-2')).toContainText('2.Switch now')
   await expect(page.getByTestId('mail-reply')).toBeVisible()
 
-  // Two presses in a row are one answer
-  await page.getByTestId('mail-choices-1-2').dblclick()
+  // The host answers slowly: what the window does with a second press, and with the reply box, while the first is on its way
+  await page.evaluate(() => {
+    const w = window as unknown as { __held: (() => void)[]; __calls: number; __store: { getState(): { platform: { mail: { reply: (...a: unknown[]) => Promise<unknown> } } } } }
+    const mail = w.__store.getState().platform.mail
+    const real = mail.reply.bind(mail)
+    w.__held = []
+    w.__calls = 0
+    mail.reply = (...a) => {
+      w.__calls++
+      return new Promise((resolve) => w.__held.push(() => resolve(real(...a))))
+    }
+  })
+  await page.getByTestId('mail-choices-1-2').click()
+  await expect(page.getByTestId('mail-choices-1-1')).toBeDisabled()
+  await page.getByTestId('mail-choices-1-1').click({ force: true })
+  await page.getByTestId('mail-reply').fill('words of my own')
+  await expect(page.getByTestId('mail-send')).toBeDisabled()
+  await page.getByTestId('mail-reply').press('Enter')
+  expect(await page.evaluate(() => (window as unknown as { __calls: number }).__calls)).toBe(1)
+  await page.evaluate(() => (window as unknown as { __held: (() => void)[] }).__held.forEach((release) => release()))
   await expect(page.getByTestId('mail-message-2')).toContainText('Switch now')
   await expect(page.getByTestId('mail-message-2')).toContainText('You · answer')
   await expect(page.getByTestId('mail-message-3')).toHaveCount(0)
