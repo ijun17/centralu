@@ -289,7 +289,7 @@ describe('which attached apps this thread can call (#308, appAttachment)', () =>
   it('an app loaded at thread start is attached; one attached after it needs a restart; a bridge Codex reports failed is failed until it is ready', async () => {
     const c = await start(WORKER)
     expect(handle!.appAttachment!('app-notes')).toBe('attached')
-    // An app that appears while the thread runs: Codex does not take it in (apps.md §9.2)
+    // An app that appears while the thread runs: Codex does not take it in (apps/attaching.md "Claude and Codex")
     w.plant('p1', 'fresh')
     w.rt.refresh()
     await kit.until(() => hub.refsFor(WORKER).map((r) => r.server), (s) => s.includes('app-fresh'))

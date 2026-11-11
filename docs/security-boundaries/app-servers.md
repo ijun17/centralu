@@ -40,8 +40,8 @@ then who may call it:
   `e2e/public-apps.spec.ts`). The
   session side re-checks decision 4 at every call, so a detached app cannot be reached by a stale
   tool name.
-- A project's session reaches another project's app only by attaching it (#371 part A, apps.md
-  §9.4), and only when three things hold, each read again at every count of the session's apps and
+- A project's session reaches another project's app only by attaching it (#371 part A, apps/other-projects-apps.md),
+  and only when three things hold, each read again at every count of the session's apps and
   so at every call: the person shares that app (off by default, per app), the person allowed this
   pair of projects (a consent card in the calling session; "always" kept per pair and revocable in
   Settings, "once" for that attachment, a denial not kept), and both projects are trusted. A session
@@ -134,5 +134,5 @@ Limits:
 - `sessions.list` gives session names, and an automatically named session is named after the first
   words of its first message. It never lists a session in the session archive (FR-22), and no app capability or
   agent tool restores or deletes one for good — only the person, in Settings.
-- fd 3 on Windows is an overlapped pipe (apps.md §10). The broker suites pass in the Windows CI
+- fd 3 on Windows is an overlapped pipe (apps/broker-and-rpcs.md "The broker: agents, other apps, host data"). The broker suites pass in the Windows CI
   job with Node apps; nobody has run a Python app or the packaged app on Windows.

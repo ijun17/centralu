@@ -7,7 +7,7 @@ type Unreachable = Extract<AppReach, { reachable: false }>
  *
  * The link is in the message either way, and the agent can still open it. What the line adds is the
  * one thing the person cannot see from the link: that the agent will not have the app's tools, and
- * what would give them (apps.md §9.1 for who gets which apps). `app` is the app's name, `project` the
+ * what would give them (apps/attaching.md "Which session gets which apps" for who gets which apps). `app` is the app's name, `project` the
  * name of the project it belongs to (null for one of the person's own apps).
  */
 export function appReachNotice(r: Unreachable, app: string, project: string | null): string {

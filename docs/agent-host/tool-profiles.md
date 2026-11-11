@@ -15,7 +15,7 @@ bundle leaves out is refused even through the Codex bridge.
 | `assistant` | the one Assistant | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, [delegation/ask-project.md](delegation/ask-project.md)); `start_agent`, `agent_session` (#561, [delegation/start-agent.md](delegation/start-agent.md)); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
+| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, [delegation/ask-project.md](delegation/ask-project.md)); `start_agent`, `agent_session` (#561, [delegation/start-agent.md](delegation/start-agent.md)); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps/other-projects-apps.md) | Centralu's tools first unless the person says otherwise (#564) |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -75,7 +75,7 @@ lose its argument. The same arguments cost the Assistant and the scoped seat 178
 and deferred figures for both CLIs are in [tool-cost.md](../tool-cost.md) §11 and §14. #1487 restored `.int().min(0)` on `offset` (the schema had lost it): +12
 characters in the reader set and in the Assistant's, whose ceilings rise by 10 (1,960 and 9,710), the reader's resident sum by 25 (2,850).
 
-The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps.md §9.4) are the
+The app-access tools (#371 part A: `find_apps`, `attach_app`, `detach_app`, apps/other-projects-apps.md) are the
 Assistant's too since #1205, as rare commands behind `centralu_run`, for the root apps it attaches
 when it needs one ([tool-cost.md](../tool-cost.md) §12). In an ordinary session they ride on
 the same server with their own ceiling, `APP_ACCESS_BUDGET_CHARS` (900; the set is 874), so neither
@@ -83,7 +83,7 @@ set grows into the other's headroom. Claude defers all three, which adds +31 tok
 same probe, 2026-10-05, measured on the #320 set before `ask_project` joined it: +192 to +223), and
 loaded they would add +263, which is what a
 Codex session pays. The model found them: 5 of 5 fresh haiku sessions found `find_apps` through
-tool search from a plain request (apps.md §9.4), with no other way open to it.
+tool search from a plain request (apps/other-projects-apps.md), with no other way open to it.
 
 Since #522 Claude loads `find_apps` and defers the other two. With `ask_project` loaded beside it, a
 question about another project's app went to `ask_project` (or to reading sessions) and never to tool

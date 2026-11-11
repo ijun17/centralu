@@ -862,7 +862,7 @@ export const COMPACT_BUDGET_CHARS = 610
  * Three tools rather than one with a mode: each one's schema is a single string, and the model picks a
  * verb by name. On Claude (Codex loads them all) find_apps is loaded and the other two wait behind
  * tool search: the result of each one names the next (`find_apps` says "attach_app", `attach_app`
- * says "detach_app"), so a model that found the first finds the rest (docs/apps.md §9.4).
+ * says "detach_app"), so a model that found the first finds the rest (docs/apps/other-projects-apps.md).
  *
  * find_apps was deferred too until #522: asked about another project's app without being told to use
  * it, haiku never searched for it (0 of 10 runs called attach_app) and called the loaded ask_project.

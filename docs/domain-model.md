@@ -27,7 +27,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Term | Meaning | Defined in | Avoid |
 |---|---|---|---|
 | Project | A folder registered with Centralu. Sessions, rules, consents, apps, saved commands and commit attribution hang off it. It need not be a git repository | `ProjectInfo`, `packages/protocol/src/commands/projects.ts` | workspace, repo |
-| Trusted project | A project the person said yes to. Trust lets its apps run and its repository settings (`.claude/`) apply; a new project starts untrusted, except an empty folder Centralu made itself | `projects.trusted`; [apps.md](apps.md) §3 | |
+| Trusted project | A project the person said yes to. Trust lets its apps run and its repository settings (`.claude/`) apply; a new project starts untrusted, except an empty folder Centralu made itself | `projects.trusted`; [apps/trust-lifecycle-calls.md](apps/trust-lifecycle-calls.md#trust) | |
 | Session | One conversation with one agent tool: its own process (when live), state, model and permission preset | `SessionInfo`, `packages/protocol/src/commands/sessions.ts` | chat, thread, agent |
 | Agent tool | The CLI a session runs: Claude Code or Codex. A string so a third can be added | `ToolName`, `packages/protocol/src/entities/ids.ts`; adapters in `packages/agent-host/src/adapters/` | model, provider |
 | Adapter | The module that wraps one agent tool in the common contract and turns its output into normalized events | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | driver |
@@ -78,13 +78,13 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 
 | Term | Meaning | Defined in | Avoid |
 |---|---|---|---|
-| App | A small MCP server with optional views, identified by (project, id). A person uses its views, agents call its tools: one call path | [apps.md](apps.md); `packages/agent-host/src/apps/external/runtime.ts` | plugin, extension, mod |
+| App | A small MCP server with optional views, identified by (project, id). A person uses its views, agents call its tools: one call path | [apps/](apps/README.md); `packages/agent-host/src/apps/external/runtime.ts` | plugin, extension, mod |
 | Manifest | `centralu.app.json`, the file that makes a folder an app | `packages/agent-host/src/apps/external/manifest.ts` | |
 | Root app | A project whose own folder has the manifest at its root: the project is the app. Key `<project id>/<manifest id>`; trust, sessions and state follow the project. Added and removed with the file (#1141) | `root` on `ExternalAppInfo`; `packages/agent-host/src/apps/external/discovery.ts`; [plans/root-apps.md](plans/root-apps.md) | app project |
 | Project app | An app in `<project>/.centralu/apps/<id>/`, committed with the repository. Runs only in a trusted project. A root app is also its project's app | `packages/agent-host/src/apps/external/discovery.ts` | |
 | User-folder app | An app in `<data>/apps/<id>/` (project null). Since #1141 each is registered as a project in place and becomes a root app; one stays a user-folder app only until that happens, or on a linked machine running an older build | `packages/agent-host/src/apps/external/discovery.ts` | global app |
 | Shared app | A project app its project lets other projects' sessions attach | `app_shared:<project>/<app>` setting, `packages/agent-host/src/sessions/app-access.ts` | public |
-| Attach | Giving a session an app's tools on demand (`find_apps`, `attach_app`, `detach_app`), beyond the ones it gets by default | `packages/agent-host/src/sessions/app-access.ts`, `session-apps.ts`; [apps.md](apps.md) §9.4 | install |
+| Attach | Giving a session an app's tools on demand (`find_apps`, `attach_app`, `detach_app`), beyond the ones it gets by default | `packages/agent-host/src/sessions/app-access.ts`, `session-apps.ts`; [apps/other-projects-apps.md](apps/other-projects-apps.md) | install |
 | App status | Derived each time, first match wins: `invalid`, `untrusted`, `unconfirmed`, `failed`, `running`, `starting`, `crashed`, `stopped` | `ExternalAppStatus`, `entities/apps.ts`; `ExternalApps.status`, `runtime.ts` | |
 | Unconfirmed | An imported user-folder app the person has not enabled, or whose `server` or `uses` changed since. An import now lands as a root app, whose project's trust is its enabling | `packages/agent-host/src/apps/external/import-book.ts` | |
 | View | An app's screen (an MCP Apps `ui://` resource). An open one is a **view instance** with its own id | `packages/agent-host/src/views/view-host.ts` | iframe |

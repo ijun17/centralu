@@ -23,7 +23,7 @@ agent-host/src/
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
 ├─ sessions/            # SessionManager and the parts moved out of it: delegation, handoff, the session archive (`session-trash.ts`),
 │                       #   Centralu tools, session apps (folder-structure.md §1)
-├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
+├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps/README.md)
 ├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
 ├─ links/               # linked machines (#82): links, the remote client, install and update over ssh
 ├─ dev-services/        # git/fs/store, terminals, commands (not dev-only — it is where messages live, store-migrations.md)

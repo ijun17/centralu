@@ -103,7 +103,7 @@ three are Centralu tools (`mcp__centralu__*`), allowed under every preset like t
 command and never which commands it reaches. The measurement is in
 [tool-cost.md](../tool-cost.md) §9.
 
-Apps are separate from this profile. Decision 4 ([apps.md](../apps.md) §9.1) gives the Assistant the
+Apps are separate from this profile. Decision 4 ([apps/attaching.md](../apps/attaching.md#which-session-gets-which-apps-decision-4)) gives the Assistant the
 user-folder apps, a project's sessions that project's apps, and a builder its own app (`givesApp` in
 `sessions/session-apps.ts`); a reader adds others with `attach_app` (§9.4), and the Assistant adds the
 root apps of trusted projects the same way (#1141: a project whose folder holds the manifest is an app, and

@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager};
  * and the link itself is pulled out with `take_app_links` — one link never travels twice, once
  * as the event and once as the thing pulled out.
  */
-// App links arrive on macOS only (docs/apps.md §12.3); elsewhere these wait for a receiver.
+// App links arrive on macOS only (docs/apps/handing-over.md "App links"); elsewhere these wait for a receiver.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const APP_LINK_MAX_CHARS: usize = 4096;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

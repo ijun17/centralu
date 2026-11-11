@@ -243,7 +243,7 @@ export const appsParams = {
    * Whether a session can use one app's tools right now, and if not, why (#308). Asked when an item
    * dragged out of that app's view is dropped on the session's composer: the link goes in either
    * way, and a session that cannot reach the app gets a notice saying what would fix it. Decided by
-   * the host from the same rule that attaches apps (apps.md §9.1) and from what the session's live
+   * the host from the same rule that attaches apps (apps/attaching.md "Which session gets which apps") and from what the session's live
    * agent actually has (a Codex thread keeps the servers it started with). A session that is not
    * running counts as reachable when the rule gives it the app: it attaches the app when it wakes.
    */

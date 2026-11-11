@@ -4,7 +4,7 @@
 //
 // Who drives: the board app's server while it runs, and the watch command (bin/merge-queue.mjs) a
 // session runs in the background. Centralu stops an app with no open screen and no call for 5 minutes
-// unless it says it is busy (docs/apps.md §4): the server holds busy while the queue has work
+// unless it says it is busy (docs/apps/trust-lifecycle-calls.md "Lifecycle"): the server holds busy while the queue has work
 // (`queueBusy`, #1236), so the queue carries on overnight with nothing open. Both take the same lease (`merge-queue.lease.json`), so one of them polls at a
 // time, and both read and write the same file, so the queue carries on in whichever is alive, and
 // after either restarts.

@@ -1073,7 +1073,7 @@ issue, the smallest, puts a dev build on the machine from one git commit, with n
 
 ### 11.1 What stood in the way
 
-A view is two nested frames ([apps.md](../apps.md)). The outer one is the host's proxy page at
+A view is two nested frames ([apps/views.md](../apps/views.md#how-a-view-is-hosted)). The outer one is the host's proxy page at
 `http://127.0.0.1:<host port>/<secret>/views/<instance>/`; for an app that asks for its own origin, the inner one is
 `http://127.0.0.1:<that app's port>/<derived secret>/views/<instance>/view`, a port from the host's port book
 (`views/origin-ports.ts`, 20000–32767, fixed per app and never reused). A linked machine's addresses name that

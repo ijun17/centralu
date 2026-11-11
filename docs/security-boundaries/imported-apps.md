@@ -1,6 +1,6 @@
 # Imported apps and app links
 
-An app imported from a folder, a zip or an https link (plan E-3, [apps.md](../apps.md) §12) is someone
+An app imported from a folder, a zip or an https link (plan E-3, [apps/handing-over.md](../apps/handing-over.md)) is someone
 else's code that will run as the user. It gets its own confirmation, separate from project trust.
 
 - **Nothing runs before the person has seen what runs.** The source is copied into a staging folder

@@ -16,7 +16,7 @@ import { tools as releaseTools } from '../.centralu/apps/project-board/release-t
 import { tools as wordsTools } from '../.centralu/apps/project-board/words-tools.mjs'
 
 /**
- * Which of the board's writes ask a person, as the host reads what the tools declare (tool-risk.ts, docs/apps.md,
+ * Which of the board's writes ask a person, as the host reads what the tools declare (tool-risk.ts, docs/apps/attaching.md,
  * "A write can declare how risky it is"). The board's bookkeeping is `local`; the ordinary writes of the repository's
  * own pull requests and issues are `routine`; `release` (tag, approve), the three that merge and `edit_comment`
  * declare nothing; `rebase_stack` asks when it pushes, and `open_pr` unless it runs no code of the head. A tool

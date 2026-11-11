@@ -16,7 +16,7 @@ the person's own `defaultMode`, carried under `normal` since #382; in Codex, the
 like any worker. The builder of a user-folder app counts as trusted, because that folder is the user's own
 (decision 3).
 
-The same switch decides whether the project's apps may run (M4 decision 3; [apps.md](../apps.md) §3).
+The same switch decides whether the project's apps may run (M4 decision 3; [apps/trust-lifecycle-calls.md](../apps/trust-lifecycle-calls.md#trust)).
 An untrusted project's apps are discovered and listed with the reason, but never started, never
 attached to a session, and every call to them is refused; no app or builder is created there.
 Trust is re-read at every app call, not only when an app is attached (`runtime.ts` `call`,

@@ -335,7 +335,7 @@ open the same store. Coordinator sessions already in a store keep working (liste
 `control` stays a reserved app id (`RESERVED_APP_IDS` in `app-id.ts`) so no external app inherits those rows or the
 coordinator sessions stamped with it.
 
-External apps keep their state in their own process ([apps.md](apps.md)).
+External apps keep their state in their own process ([apps/](apps/README.md)).
 
 ## 3.3 What a peer of another build loses ([#844](https://github.com/ijun17/centralu/issues/844))
 

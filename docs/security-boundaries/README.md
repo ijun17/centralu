@@ -3,7 +3,7 @@
 These controls reduce risks from untrusted repository and agent content. They do not
 sandbox an already-executing process with the user's OS privileges. An app's server is such a
 process ("App servers"); an app's screen is sandboxed ("App views"). The app model itself is in
-[apps.md](../apps.md).
+[apps/](../apps/README.md).
 
 Each file holds one boundary: what it stops, the code that holds it, and what it leaves open. A change to any of
 them is reviewed at the deep tier (`.centralu/tiers.json`, `pnpm tier`).

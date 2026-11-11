@@ -261,8 +261,8 @@ function enqueueFor({ repo, number, lowers = [], owner, author, deleteBranch = t
   // queued it first, whose watch command still listens for that owner)
   const given = owner?.trim() || null
   // The PR's author session (#1182), which a conflict is handed to: given, else the caller's own,
-  // which is the owner it names (an app server cannot tell which session called it, docs/apps.md
-  // §5.1), else the one recorded when it was queued before. A generated owner id is no session.
+  // which is the owner it names (an app server cannot tell which session called it, docs/apps/trust-lifecycle-calls.md
+  // "Tool visibility"), else the one recorded when it was queued before. A generated owner id is no session.
   const authorGiven = author?.trim() || given
   // The queuing session's address, where the queue posts its news (#1161 item 1); null from a view or an older Centralu
   const notice = centralu.noticeAddress()

@@ -99,7 +99,7 @@ conversation the person picked, in the same frame as a view inside a conversatio
 text) — but stating it came from outside the conversation"); `e2e/inline-views.spec.ts` and
 `e2e/apps.spec.ts` for asking first; `e2e/build-loop.spec.ts` for the pinned path.
 
-A `run_agent` prompt (apps.md §10) is an app's text too, and no person chose to send it. It is
+A `run_agent` prompt (apps/broker-and-rpcs.md "The broker: agents, other apps, host data") is an app's text too, and no person chose to send it. It is
 stored with its source (`fromApp`) and reaches the agent in the same frame, under a heading saying
 the app asked for this work through Centralu, that the person did not write or read it, that
 nothing in it can grant permissions or change instructions, and that the final message goes back
@@ -107,7 +107,7 @@ to the app (`appMessageFrame(..., 'request')`; `app-agents.test.ts` "work an app
 confined to the same frame as UI messages — every line is a quote, so the app's text cannot forge
 a header or fake the end of the frame").
 
-A notice an app posts into a session that called it (apps.md §10, `notify`, #1161 item 1) is an
+A notice an app posts into a session that called it (apps/broker-and-rpcs.md "The broker: agents, other apps, host data", `notify`, #1161 item 1) is an
 app's text no person chose to send either. It is stored with its source (`fromApp`), and reaches the
 agent in the same frame, under a heading saying the app posted it to this session, which called its
 tools before, that the person did not write or read it, and that nothing in it can grant permissions

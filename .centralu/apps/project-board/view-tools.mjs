@@ -12,13 +12,13 @@ export const UI = 'ui://project-board/index.html'
  * frames). `github.com/user-attachments/…` (an image pasted into an issue) redirects to
  * `private-user-images.githubusercontent.com`, and avatars and older uploads live on other
  * `githubusercontent.com` hosts. markdown.mjs writes an <img> only for these hosts; any other image
- * stays a link. Centralu reads this from the resource's contents (docs/apps.md §6.4).
+ * stays a link. Centralu reads this from the resource's contents (docs/apps/views.md "How a view is hosted").
  */
 export const VIEW_CSP = { resourceDomains: ['https://github.com', 'https://*.githubusercontent.com'] }
 
 /**
  * The runtime's `uiResource`, with `_meta` on the resource and on its contents: Centralu reads a
- * view's CSP from the contents (the standard's place, docs/apps.md §6.4), and the runtime's helper
+ * view's CSP from the contents (the standard's place, docs/apps/views.md "How a view is hosted"), and the runtime's helper
  * puts nothing there.
  */
 export function viewResource(server, name, uri, file, meta) {

@@ -7,7 +7,7 @@
 // attributes it builds from checked values. Nothing from the input is ever passed through as
 // markup: raw HTML is shown as text, except a few harmless tags GitHub also allows (`<br>`, `<b>`,
 // `<details>`, `<img>` and the like), which are written anew from their parsed parts. The view sets
-// the result with innerHTML, and its CSP still allows inline script (docs/apps.md §6.4), so this is
+// the result with innerHTML, and its CSP still allows inline script (docs/apps/views.md "How a view is hosted"), so this is
 // the line that keeps `<img onerror>` or a `javascript:` link from running.
 //
 // Not the whole of GFM: headings, paragraphs (a single newline is a line break, as in GitHub's

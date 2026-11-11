@@ -298,7 +298,7 @@ A team server (permissions, distribution, central records) sits behind the paid 
 
 ## F. Documents and compatibility
 
-- **F-1** `docs/apps.md`: the app's shape, the call path, brokering, security boundaries. States the scope of compatibility honestly (an in-conversation screen is spec, updates on a pinned screen and brokering are our own extension). Two copies, English and Korean.
+- **F-1** `docs/apps/README.md`: the app's shape, the call path, brokering, security boundaries. States the scope of compatibility honestly (an in-conversation screen is spec, updates on a pinned screen and brokering are our own extension). Two copies, English and Korean.
 - **F-2** Write an app server's permissions, screen isolation, and trust model into `docs/security-boundaries/README.md`.
 - **F-3** Add an e2e test that opens two apps published for another host, unmodified, as in-conversation screens. If it breaks, compatibility is broken.
 

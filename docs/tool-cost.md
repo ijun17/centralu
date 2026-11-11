@@ -7,7 +7,7 @@ Decisions about how Centralu exposes its tools (#419, #512) are made on numbers.
 repeatable measurement of those numbers (#513): how to run it, how to read it, and the first baseline.
 It is a record of measurement, like [runtime-lessons/](runtime-lessons/README.md), so it is not mirrored in
 Korean. The design it measures is in [agent-host/tool-profiles.md](agent-host/tool-profiles.md) (who gets which tools) and
-[apps.md §9.4](apps.md) (attaching apps to a session).
+[apps/other-projects-apps.md](apps/other-projects-apps.md) (attaching apps to a session).
 
 ## 1. Running it
 
@@ -207,7 +207,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
   CLI reads it (`tools/list` on every server, the tools marked `anthropic/alwaysLoad`), is byte-identical
   before and after an app is attached and detached, even an app that declares `anthropic/alwaysLoad`
-  itself; the app proxy drops that flag (apps.md §9.4). Loading a deferred tool is the CLI's own doing;
+  itself; the app proxy drops that flag (apps/other-projects-apps.md). Loading a deferred tool is the CLI's own doing;
   dry mode runs it against the real CLI.
 
 ## 6. What the baseline found
@@ -221,7 +221,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
    to list the tools it could call, it named none of Centralu's, and still called `read_session` when
    asked to). The cost moved into the conversation: the first `exec` step of the scripted session added
    7,411 tokens. "Codex has no
-   deferral" in agent-host/tool-profiles.md and apps.md §9.4 describes an earlier Codex.
+   deferral" in agent-host/tool-profiles.md and apps/other-projects-apps.md describes an earlier Codex.
 3. **The Assistant is the expensive seat**: 3,223 tokens of its own in every request on Claude, ten
    times an ordinary session's 326.
 4. **A deferred tool can lose to a loaded one.** Asked about another project's app, haiku never searched
@@ -881,7 +881,7 @@ assistant now attaches a root app when it needs one: `find_apps`, `attach_app` a
 commands, so their 874 characters ride in none of its requests; one line of its instructions (+75 characters) names
 "the find_apps command", as the others name theirs, so the first call is not a refused bare name. Its resident cost
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
-9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
+9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps/attaching.md "Which session gets which apps").
 
 The preferences and archive commands (#1219: `get_preferences`, `set_preferences` and five commands for the session archive, all rare; the archive was called the trash until #1404, and `list_trash` became `list_archive`) came with
 almost no more resident cost. The machine line, which named six commands, now names one and says to look for the rest with

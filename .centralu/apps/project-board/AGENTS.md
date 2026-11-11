@@ -23,7 +23,7 @@ length). Those are plain, non-secret values; change them there, not in code.
   with the fix (`classify` in `github.mjs`). Agent tools answer them with `isError`; `show`
   answers them as data (`ok: false`) so the screen can say why there is no board.
 - **Agents read short answers.** Claude Code hands the model a result's `structuredContent`, not
-  its text (docs/apps.md §9.2), so the agent tools answer `{ summary, items }` (or `results` and
+  its text (docs/apps/attaching.md "Claude and Codex"), so the agent tools answer `{ summary, items }` (or `results` and
   `failed` for writes) as one line per item, `#113 Title — Status · Priority · Area`, and the text
   is the same lines. URLs, ids and whole item objects only with `detail: "full"`. `get_items` (or
   `list_items` with `numbers`) reads a few items in the order asked and names the ones not in the
@@ -70,7 +70,7 @@ tools agents use to record the owner's answers.
   list in `ALLOWED`, with attributes built from checked values; raw HTML is text, except a few tags
   GitHub allows, written anew. Links go only to http, https and mailto. The view puts the HTML in
   through an inert `<template>` and removes anything outside the same list before it reaches the
-  page, because the view's CSP allows inline script (docs/apps.md §6.4).
+  page, because the view's CSP allows inline script (docs/apps/views.md "How a view is hosted").
 - **Images** load only from GitHub (`github.com`, `*.githubusercontent.com`): the view's resource
   declares those two as `resourceDomains` in `_meta.ui.csp` on its contents (`viewResource` in
   view-tools.mjs; the runtime's `uiResource` puts nothing there), and markdown.mjs turns an image on any
@@ -176,7 +176,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
   names the PR's author session, the one that opened or owns it and that a conflict is handed to
   (#1182): default the caller's own, which is the `owner` it gives (an app server cannot tell which
-  session called it, docs/apps.md §5.1), else the one recorded before, else none (a generated owner
+  session called it, docs/apps/trust-lifecycle-calls.md "Tool visibility"), else the one recorded before, else none (a generated owner
   id is no session); `merge_queue` lists it on each item. Queued
   again (what an attention message may ask for), an item is looked at afresh: its clocks and failure
   count start over, a merge GitHub refused is tried again, reruns spent on its head stay spent, and
@@ -250,7 +250,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **Where it lives**: `merge-queue.json` in the app's data folder, read and written whole and
   synchronously for each change, so it survives the server restarting. A file that does not read
   stops the driver, said once in the app's log, then tried again with a growing wait. Centralu stops an app with no
-  open screen and no call after 5 minutes unless it says it is busy (docs/apps.md §4): the manifest declares
+  open screen and no call after 5 minutes unless it says it is busy (docs/apps/trust-lifecycle-calls.md "Lifecycle"): the manifest declares
   `uses.background`, and this server holds busy exactly while the queue has an item waiting or in CI, or a batch
   with its end to do (not one needing attention: it waits on a session, and one forgotten would keep the app polling
   for good; except one in attention `subject`, for 6 hours: it waits on a title edit only a poll sees, #1593) (`queueBusy`, after every tick and every change a tool makes; the row's Stop icon says "Running: merge queue, N
@@ -261,8 +261,8 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 - **Telling the session**: every change worth a message is an event with a sequence number and the
   item's owner. Attention is one event per change (`noticeKey`: the reason, the head and the job), not
   one per poll; a merge or a close is one too. The manifest declares `uses.notices`, so `queue_merge`
-  keeps the calling session's notice address on the item (`centralu.noticeAddress()`, docs/apps.md
-  §10), each message event carries it (`to`), and this server posts it into that session after every
+  keeps the calling session's notice address on the item (`centralu.noticeAddress()`, docs/apps/broker-and-rpcs.md),
+  each message event carries it (`to`), and this server posts it into that session after every
   tick (`tellSessions`, #1161 item 1): it arrives as a report does, with the relay text in an
   attention message, and the event is marked `told` (or `failed` after 6 tries 30 s apart: the
   session is gone, or the Centralu cannot post). `merge_queue` never shows the address. An item
@@ -1225,7 +1225,7 @@ push run of CI is fully green, the full tier included (or `commit`).
    a tool that is not `readOnlyHint: true` tells this app's open screens to read again (rule 8). A
    read tool left unannotated costs a refresh cycle each time it is called, and screens that re-read
    with it keep refreshing each other.
-   A write may also declare its risk in `_meta`, so the person is not asked for every call (docs/apps.md,
+   A write may also declare its risk in `_meta`, so the person is not asked for every call (docs/apps/attaching.md,
    "A write can declare how risky it is"): `'centralu/risk': 'local'` for bookkeeping in this app's own
    data (with `destructiveHint: false`), `'routine'` for an ordinary write of this project's own pull
    requests, issues and queue (no card in a trusted project's own app under `normal`), and
@@ -1289,11 +1289,11 @@ refusal comes back as that error: show it plainly instead of retrying.
 
 ## The screen's look
 
-- **Everything comes from Centralu's theme** (docs/apps.md §6.5): colours, sizes, line heights,
+- **Everything comes from Centralu's theme** (docs/apps/view-theme-layout-drag.md "The theme in a view"): colours, sizes, line heights,
   fonts, weights, radii and the border width are MCP Apps variables, applied on `<html>` by
   `applyTheme`. Their fallbacks (Centralu's dark values) are in the `:root` block at the top of the
   stylesheet and nowhere else; every rule reads those names. Spacing stays literal.
-- **Narrow first** (docs/apps.md §6.6): under 520px the columns stack, the decision column first,
+- **Narrow first** (docs/apps/view-theme-layout-drag.md "Narrow first"): under 520px the columns stack, the decision column first,
   and the board scrolls as one page, with a row of status tabs above it that jump to a section and
   mark the one in view (`renderTabs`, `markTab`). Keep that working when you change the layout.
 

@@ -129,7 +129,7 @@ Limits:
   declared in `connectDomains`. Not measured yet (#150).
 - A declared `connectDomains` entry is a real way out for anything the view holds. The CSP limits
   where data can go, not what.
-- The host adds a drag relay to every view's document (#308, apps.md §6.7): a few lines that post a
+- The host adds a drag relay to every view's document (#308, apps/view-theme-layout-drag.md "Dragging an item out of a view"): a few lines that post a
   dragged item's `text/uri-list` and `text/plain`, and where the drag ended, to the view's parent.
   It runs with the view's own privileges and posts nothing the view could not post itself. The UI
   reads both messages as the app's words: it checks their shape, counts an end only after a start
