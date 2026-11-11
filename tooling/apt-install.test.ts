@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -23,24 +23,25 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   })
 
   /** A folder with an `apt-get` that does `behaviour(n)` (shell) on its n-th `install` and logs every call */
-  function standIn(behaviour: (n: number) => string): { dir: string; log: string } {
+  function standIn(behaviour: (n: number) => string): { dir: string; log: string; etc: string } {
     const dir = mkdtempSync(join(tmpdir(), 'apt-install-'))
     folders.push(dir)
     const log = posix(join(dir, 'calls.log'))
     const installs = posix(join(dir, 'installs'))
+    const etc = posix(join(dir, 'etc'))
     const cases = [1, 2, 3].map((n) => `${n}) ${behaviour(n)} ;;`).join('\n')
     writeFileSync(
       join(dir, 'apt-get'),
-      ['#!/bin/sh', `echo "apt-get $*" >> "${log}"`, 'for a in "$@"; do [ "$a" = install ] && install=1; done', '[ -n "$install" ] || exit 0', `echo x >> "${installs}"`, `n=$(wc -l < "${installs}" | tr -d ' ')`, 'case "$n" in', cases, '*) exit 0 ;;', 'esac', ''].join('\n'),
+      ['#!/bin/sh', `echo "apt-get $*" >> "${log}"`, `[ -e "${etc}/apt.conf.d/99fallback-mirror" ] && echo "  sees: $(head -1 "${etc}/fallback-mirror.list")" >> "${log}"`, 'for a in "$@"; do [ "$a" = install ] && install=1; done', '[ -n "$install" ] || exit 0', `echo x >> "${installs}"`, `n=$(wc -l < "${installs}" | tr -d ' ')`, 'case "$n" in', cases, '*) exit 0 ;;', 'esac', ''].join('\n'),
     )
     chmodSync(join(dir, 'apt-get'), 0o755)
-    return { dir: posix(dir), log }
+    return { dir: posix(dir), log, etc }
   }
 
-  const run = (dir: string, log: string, packages: string[] = ['libfoo-dev', 'libbar-dev']) =>
+  const run = (dir: string, log: string, etc: string, packages: string[] = ['libfoo-dev', 'libbar-dev'], machine: Record<string, string> = {}) =>
     new Promise<{ status: number | null; out: string }>((resolve) => {
       const child = spawn('bash', [script, ...packages], {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SUDO: '', TRY_SECONDS: '10', RECOVER: `echo recovered >> "${log}"` },
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, SUDO: '', TRY_SECONDS: '10', RECOVER: `echo recovered >> "${log}"`, APT_ETC: etc, ARCH: 'amd64', CODENAME: 'noble', ...machine },
       })
       let out = ''
       child.stdout.on('data', (d) => (out += d))
@@ -51,8 +52,8 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   const installs = (log: string) => calls(log).filter((l) => /^apt-get .*install -y/.test(l))
 
   it('updates, then installs the packages, once when the mirror answers', async () => {
-    const { dir, log } = standIn(() => 'exit 0')
-    const r = await run(dir, log)
+    const { dir, log, etc } = standIn(() => 'exit 0')
+    const r = await run(dir, log, etc)
     expect(r.status).toBe(0)
     const lines = calls(log)
     expect(lines).toHaveLength(2)
@@ -64,9 +65,9 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   })
 
   it('stops a try that hits its limit, puts the machine right, and tries once more', async () => {
-    const { dir, log } = standIn((n) => (n === 1 ? 'sleep 300' : 'exit 0'))
+    const { dir, log, etc } = standIn((n) => (n === 1 ? 'sleep 300' : 'exit 0'))
     const t = Date.now()
-    const r = await run(dir, log)
+    const r = await run(dir, log, etc)
     expect(r.status, r.out).toBe(0)
     // The first try was ended by its limit (10 s), not waited for (300 s)
     expect(Date.now() - t).toBeLessThan(120_000)
@@ -82,17 +83,56 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
 
   it('retries a try that fails, and fails the step when both do, saying why and keeping to its tries', async () => {
     const retried = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
-    expect((await run(retried.dir, retried.log)).status).toBe(0)
+    expect((await run(retried.dir, retried.log, retried.etc)).status).toBe(0)
     const failing = standIn(() => 'exit 100')
-    const r = await run(failing.dir, failing.log)
+    const r = await run(failing.dir, failing.log, failing.etc)
     expect(r.status).toBe(1)
     expect(installs(failing.log)).toHaveLength(2)
     expect(r.out).toContain('::error::the packages could not be installed in 2 tries of 10s')
   })
 
+  // #2198: 2026-11-11, from about 14:39 to 17:00 UTC, Canonical's mirrors timed out and both tries of every install failed on them
+  it.each([
+    ['amd64', 'ubuntu'],
+    ['arm64', 'ubuntu-ports'],
+  ])('asks a mirror outside Canonical on the second try and not on the first (%s)', async (arch, archive) => {
+    const { dir, log, etc } = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
+    const r = await run(dir, log, etc, undefined, { ARCH: arch, MIRROR: 'https://mirror.example' })
+    expect(r.status, r.out).toBe(0)
+    const lines = calls(log)
+    const [first, second] = [lines.findIndex((l) => /install -y/.test(l)), lines.findLastIndex((l) => /install -y/.test(l))]
+    // Nothing of the fallback before the first try has ended, and every apt-get after it sees it: the update and the install
+    expect(lines.slice(0, first + 1).some((l) => l.includes('sees:'))).toBe(false)
+    expect(lines.slice(first + 1, second).filter((l) => l.startsWith('  sees:'))).toHaveLength(1)
+    expect(lines[second + 1]).toBe(`  sees: deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirror.example/${archive} noble main restricted universe multiverse`)
+    // The four pockets, and the machine's own sources are left out
+    const list = readFileSync(join(etc, 'fallback-mirror.list'), 'utf8').trim().split('\n')
+    expect(list.map((l) => l.split(' ')[3])).toEqual(['noble', 'noble-updates', 'noble-backports', 'noble-security'])
+    expect(readFileSync(join(etc, 'apt.conf.d', '99fallback-mirror'), 'utf8')).toContain('Dir::Etc::sourceparts "-";')
+  })
+
+  it('does not touch the mirrors when the first try works', async () => {
+    const { dir, log, etc } = standIn(() => 'exit 0')
+    expect((await run(dir, log, etc)).status).toBe(0)
+    expect(existsSync(join(etc, 'fallback-mirror.list'))).toBe(false)
+  })
+
+  it('fails the step with the same error line when the fallback mirror fails too, and tries the same mirrors again on an architecture it has no fallback for', async () => {
+    const failing = standIn(() => 'exit 100')
+    const r = await run(failing.dir, failing.log, failing.etc)
+    expect(r.status).toBe(1)
+    expect(calls(failing.log).some((l) => l.startsWith('  sees:'))).toBe(true)
+    expect(r.out).toContain('::error::the packages could not be installed in 2 tries of 10s: the package mirror is slow or down')
+    const other = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
+    const o = await run(other.dir, other.log, other.etc, undefined, { ARCH: 's390x' })
+    expect(o.status, o.out).toBe(0)
+    expect(o.out).toContain('::warning::no fallback mirror')
+    expect(calls(other.log).some((l) => l.startsWith('  sees:'))).toBe(false)
+  })
+
   it('refuses to install nothing', async () => {
-    const { dir, log } = standIn(() => 'exit 0')
-    const r = await run(dir, log, [])
+    const { dir, log, etc } = standIn(() => 'exit 0')
+    const r = await run(dir, log, etc, [])
     expect(r.status).toBe(2)
     expect(r.out).toContain('usage:')
   })

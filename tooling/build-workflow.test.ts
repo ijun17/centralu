@@ -429,6 +429,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
           '        run: |',
           '          bash .github/scripts/stop-leftover-apt.sh',
           '          sudo dpkg --configure -a || true',
+          '          bash .github/scripts/apt-fallback-mirror.sh',
           `          pnpm exec playwright install-deps ${browser}`,
           '',
           '      - name: Keep the apt packages this run downloaded',

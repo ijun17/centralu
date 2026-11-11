@@ -825,8 +825,8 @@ jobs:
       # 45 s, 244 to 893 s on some shards, which cancelled three shards at the job's limit, #1503), so each try has a
       # limit of its own and one retry: the install may take its 9 minutes at worst, and the tests keep theirs. The
       # runner kills the step of a try that hit its limit, not the root apt-get it started, which goes on holding
-      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh). Limits and a retry were not
-      # enough on 2026-10-26 (#1592, #1597): both tries timed out on the mirror. So the downloaded .deb files are cached,
+      # dpkg's locks; the second try stops it first (.github/scripts/stop-leftover-apt.sh) and asks a mirror outside Canonical
+      # (.github/scripts/apt-fallback-mirror.sh, #2198). Limits and a retry were not enough on 2026-10-26 (#1592, #1597): both tries timed out on the mirror. So the downloaded .deb files are cached,
       # by runner image and Playwright's version, and put back in apt's archive folder before the install; apt then asks
       # the network for the package lists only (.github/scripts/apt-deb-cache.sh). The cache is saved right after a
       # successful install, not at the end of the job, so a failed test run does not keep it from filling.
@@ -865,6 +865,7 @@ jobs:
         run: |
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
+          bash .github/scripts/apt-fallback-mirror.sh
           pnpm exec playwright install-deps webkit
 
       - name: Keep the apt packages this run downloaded
@@ -965,6 +966,7 @@ jobs:
         run: |
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
+          bash .github/scripts/apt-fallback-mirror.sh
           pnpm exec playwright install-deps chromium
 
       - name: Keep the apt packages this run downloaded
@@ -1124,6 +1126,7 @@ jobs:
         run: |
           bash .github/scripts/stop-leftover-apt.sh
           sudo dpkg --configure -a || true
+          bash .github/scripts/apt-fallback-mirror.sh
           pnpm exec playwright install-deps webkit
 
       - name: Keep the apt packages this run downloaded
