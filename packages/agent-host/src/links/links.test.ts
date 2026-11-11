@@ -3420,6 +3420,9 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     const q = remote.mgr.listSessions().find((s) => s.id === id)!.pendingQuestions[0]!
     remote.mgr.inputs.answerQuestion(id, q.requestId, [{ question: 'Proceed?', answers: ['Yes'] }])
     await eventually(() => reports() === 1)
+    // The note goes in only once the machine's session is at rest (#2157): its end reaches the hub as a report before the machine's own
+    // state has left `working`, and a note that comes in then is a send to a busy session, `queued`
+    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === id) && remote.mgr.listSessions().find((s) => s.id === id)?.state !== 'working')
     take()
     // The note's turn runs there: the caller stops it before the send has answered
     await eventually(() => remote.store.messages.loadMessages(id, 50).some((m) => (m.payload as { text?: string }).text?.includes('use the staging data')))
@@ -3685,8 +3688,10 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await eventually(() => continuedThere().length === 1 && running.mgr.listSessions().find((s) => s.id === id)?.live === true)
     expect(running.mgr.listSessions().find((s) => s.id === id)?.state).toBe('working')
 
-    // The parent hears nothing of the cut meanwhile (#1966): not that the turn was cut, nor that the link dropped, nor that the work ended
-    await new Promise((r) => setTimeout(r, 300))
+    // The parent hears nothing of the cut meanwhile (#1966): not that the turn was cut, nor that the link dropped, nor that the work ended.
+    // The clock for "nothing comes" is the link's own order (#2157): the hub's question to the child travels it after the events already
+    // there, so when it is answered the report of a cut would have been told
+    expect(await hub.mgr.agentSession('h1', { sessionId: r.sessionId, action: 'status' })).toMatchObject({ ok: true, state: 'working' })
     expect(told().filter((t) => t.includes('dropped') || t.includes('cut the turn') || t.includes('continued it there'))).toEqual([])
     expect(told().filter((t) => /^\[Centralu\] The (assigned work|session ended its turn)/.test(t))).toEqual([])
 
