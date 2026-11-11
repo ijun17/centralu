@@ -25,7 +25,7 @@ const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules
 /** `rule`: the rule the case stands on; null when it is light because no rule matches */
 const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
   { name: 'documents only', paths: ['docs/apps/README.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
-  { name: 'a document of the docs/security-boundaries/ folder', paths: ['docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc' },
+  { name: 'a document in a docs/security-boundaries/ folder', paths: ['docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc' },
   { name: 'docs with a security-boundaries document among them', paths: ['docs/apps/README.md', 'docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc', because: ['docs/security-boundaries/keeper.md'] },
   {
     name: 'fixture data only',
