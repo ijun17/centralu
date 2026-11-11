@@ -150,7 +150,6 @@ describe('the rules for public text', () => {
     ['- Closes #1 #2', '- Closes #1\n- Closes #2'],
     ['* Fixes #1, #2\n  - Resolves #3 #4\n3. Closes #5 #6', '* Fixes #1\n* Fixes #2\n  - Resolves #3\n  - Resolves #4\n3. Closes #5\n3. Closes #6'],
     ['Closes #1 #2\n```\nCloses #3 #4\n```\nCloses #5 #6', 'Closes #1\nCloses #2\n```\nCloses #3 #4\n```\nCloses #5\nCloses #6'],
-    ['~~~md\nCloses #3 #4', '~~~md\nCloses #3 #4'],
   ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
     const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })
     expect(r.problems).toEqual([])
@@ -167,7 +166,7 @@ describe('the rules for public text', () => {
     }
     // A list is rewritten, so what stays is not left alone by a rewrite that matches everything
     expect(fill('Closes #1 #2')).toEqual({ closes: 'Closes #1\nCloses #2', warnings: [] })
-    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```'])
+    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```', '~~~md\nCloses #3 #4'])
       expect(fill(same)).toEqual({ closes: same, warnings: [] })
     // A keyword before two or more references that is not a clause of its own: GitHub closes the first only, so it is said
     for (const [same, quoted] of [
