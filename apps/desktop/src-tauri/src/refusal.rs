@@ -1,4 +1,4 @@
-//! Why signed content was refused, shown in a native window (#634, docs/security-boundaries.md
+//! Why signed content was refused, shown in a native window (#634, docs/security-boundaries/signed-content.md
 //! "Signed content").
 //!
 //! When the shell refuses this window's content, the person used to see one line in the build bar,

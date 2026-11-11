@@ -440,7 +440,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     type: z.literal('usage_update'),
     tokens: TokenUsage,
     /**
-     * One model request's input, when this reading closes one (prompt cache accounting, docs/agent-host.md §6.1).
+     * One model request's input, when this reading closes one (prompt cache accounting, docs/agent-host/prompt-cache.md).
      * `tokens` is a running reading; this is the request alone, sent once per request. Absent on readings that do
      * not close a request (Claude's turn result, a Codex repeat).
      */

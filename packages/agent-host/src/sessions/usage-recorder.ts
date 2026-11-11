@@ -3,7 +3,7 @@ import { HOUR_MS, type StoredWindow, type UsageBucket, type UsageRecords } from 
 import { paidTokens, type Counted } from './cache-ledger.js'
 
 /**
- * Keeps usage over time (docs/agent-host.md §6.2): the requests `CacheLedger` counts, summed into hourly buckets and
+ * Keeps usage over time (docs/agent-host/usage.md "Usage over time"): the requests `CacheLedger` counts, summed into hourly buckets and
  * written once a minute, and the limit windows' readings. Both come from what the host is told or asks the tool
  * itself, never from the tool's files (§8.1).
  */

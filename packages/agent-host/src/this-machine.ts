@@ -9,7 +9,7 @@ import { isIP } from 'node:net'
  *
  * `host` is a WHATWG URL's `hostname` (`new URL(…).hostname`): numeric IPv4 spellings (`127.1`, an integer, octal,
  * hexadecimal) are already dotted by then, and an IPv6 address is bracketed. Brackets and case are dealt with here.
- * What a name resolves to is not checked (a documented limit, docs/security-boundaries.md).
+ * What a name resolves to is not checked (a documented limit, docs/security-boundaries/imported-apps.md).
  */
 export function isThisMachineHost(host: string): boolean {
   // A trailing dot names the same host (`localhost.`), and a URL keeps it

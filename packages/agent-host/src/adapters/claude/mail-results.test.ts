@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
- * What the Claude adapter makes of the CLI's answers to the mailbox's inputs (#1347, docs/plans/mailbox.md §7.1; docs/agent-host.md §4.6.3):
+ * What the Claude adapter makes of the CLI's answers to the mailbox's inputs (#1347, docs/plans/mailbox.md §7.1; docs/agent-host/lifecycle/turn-endings-and-mail.md "The mailbox's delivery in the host"):
  * the answer to a quiet input (measured on CLI 2.1.296: a `result` 40 to 160 ms later with no turn run) is no finished turn, and a
  * wake that is tracked is taken when a turn runs for it, and failed when the process closes with it still queued.
  */

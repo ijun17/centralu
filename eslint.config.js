@@ -247,7 +247,7 @@ export default tseslint.config(
       'scripts/**/*.{mts,mjs}',
       // Scripts that GitHub Actions workflows run.
       '.github/scripts/**/*.mjs',
-      // Project apps' servers (docs/apps.md) and their Node CLI helpers.
+      // Project apps' servers (docs/apps/README.md) and their Node CLI helpers.
       '.centralu/apps/*/*.mjs',
       '.centralu/apps/*/bin/*.mjs',
     ],

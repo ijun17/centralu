@@ -5,9 +5,9 @@ Every word of a tool definition or a server's instructions rides in every reques
 
 Decisions about how Centralu exposes its tools (#419, #512) are made on numbers. This is the one
 repeatable measurement of those numbers (#513): how to run it, how to read it, and the first baseline.
-It is a record of measurement, like [runtime-lessons.md](runtime-lessons.md), so it is not mirrored in
-Korean. The design it measures is in [agent-host.md §1.1](agent-host.md) (who gets which tools) and
-[apps.md §9.4](apps.md) (attaching apps to a session).
+It is a record of measurement, like [runtime-lessons/](runtime-lessons/README.md), so it is not mirrored in
+Korean. The design it measures is in [agent-host/tool-profiles.md](agent-host/tool-profiles.md) (who gets which tools) and
+[apps/other-projects-apps.md](apps/other-projects-apps.md) (attaching apps to a session).
 
 ## 1. Running it
 
@@ -207,7 +207,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
   CLI reads it (`tools/list` on every server, the tools marked `anthropic/alwaysLoad`), is byte-identical
   before and after an app is attached and detached, even an app that declares `anthropic/alwaysLoad`
-  itself; the app proxy drops that flag (apps.md §9.4). Loading a deferred tool is the CLI's own doing;
+  itself; the app proxy drops that flag (apps/other-projects-apps.md). Loading a deferred tool is the CLI's own doing;
   dry mode runs it against the real CLI.
 
 ## 6. What the baseline found
@@ -221,7 +221,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
    to list the tools it could call, it named none of Centralu's, and still called `read_session` when
    asked to). The cost moved into the conversation: the first `exec` step of the scripted session added
    7,411 tokens. "Codex has no
-   deferral" in agent-host.md §1.1 and apps.md §9.4 describes an earlier Codex.
+   deferral" in agent-host/tool-profiles.md and apps/other-projects-apps.md describes an earlier Codex.
 3. **The Assistant is the expensive seat**: 3,223 tokens of its own in every request on Claude, ten
    times an ordinary session's 326.
 4. **A deferred tool can lose to a loaded one.** Asked about another project's app, haiku never searched
@@ -253,7 +253,7 @@ developer instructions, after the seat's role, under the header `# How to use th
 
 The same probe resumed the thread with other developer instructions, then the same again, then none, a turn after
 each: the model kept naming the first phrase and the rollout gained no developer message. Codex reads developer
-instructions at `thread/start` only, so a thread keeps the instructions it started with (agent-host.md §1.1), and
+instructions at `thread/start` only, so a thread keeps the instructions it started with (agent-host/tool-profiles.md), and
 the adapter sends them on a start alone. (Cache read of the four turns: 12,288 of 18,712, 12,288 of 19,419,
 19,200 of 19,485, 19,328 of 19,551; one run, so the first resume's shortfall is not attributed here.)
 
@@ -368,7 +368,7 @@ changes.
 The Assistant carries about 3,200 tokens of its own in every request, and three tools it rarely calls
 (`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
 should discover such commands like a CLI rather than carry them. A prototype behind a switch (since removed)
-(agent-host.md §1.1, security-boundaries.md; C became the default, see the decision at the end of this section)
+(agent-host/tool-profiles.md, security-boundaries/tool-matrix.md; C became the default, see the decision at the end of this section)
 gives three arms on the same prompts:
 
 - **A** `resident`: today.
@@ -597,7 +597,7 @@ the events the screen reacts to); Windows and the packaged app.
 
 ## 10. Starting other agents in the same project (#561, 2026-10-12)
 
-`start_agent` and `agent_session` joined the reader set ([agent-host.md](agent-host.md) §1.2.1). Measured with
+`start_agent` and `agent_session` joined the reader set ([agent-host/delegation/start-agent.md](agent-host/delegation/start-agent.md)). Measured with
 `pnpm measure:tools --live --kinds none,reader --phases resident,selection --prompts
 packages/agent-host/scripts/measure-tools/prompts-561.json --reps 3` (Claude Code on haiku, codex-cli 0.160.0 on the
 account's default model, gpt-6.1-sol). Selection turns decline the consent card, so no child was started; the
@@ -836,7 +836,7 @@ and about 140 Codex turns on the account's plan.
 
 **Not measured.** Opus as an ordinary session's model; a session that was already running when the change ships
 (a Claude session picks the instructions up when its process next starts, at a one-time cost to its cache; a Codex
-thread keeps what it was started with, agent-host.md §1.1); prompts deep in a long conversation, where the instructions
+thread keeps what it was started with, agent-host/tool-profiles.md); prompts deep in a long conversation, where the instructions
 are far from the question; the consent cards allowed, so what `ask_project` or `attach_app` would then have answered;
 the Assistant's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
 card allowed (whether the child then does the long job); Windows and the packaged app.
@@ -881,7 +881,7 @@ assistant now attaches a root app when it needs one: `find_apps`, `attach_app` a
 commands, so their 874 characters ride in none of its requests; one line of its instructions (+75 characters) names
 "the find_apps command", as the others name theirs, so the first call is not a refused bare name. Its resident cost
 (`residentCost`), after #1219's machine commands: 9,368 → 9,443 on Claude, 9,420 → 9,495 on Codex, against a ceiling of
-9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps.md §9.1).
+9,500; the line was cut to fit. An app it attached costs what it did before, until `detach_app`. The user-folder apps stay given (apps/attaching.md "Which session gets which apps").
 
 The preferences and archive commands (#1219: `get_preferences`, `set_preferences` and five commands for the session archive, all rare; the archive was called the trash until #1404, and `list_trash` became `list_archive`) came with
 almost no more resident cost. The machine line, which named six commands, now names one and says to look for the rest with
@@ -945,7 +945,7 @@ definitions (`centralu-tools.test.ts` holds them to the ceilings).
 
 A `read_session` call had no total: 40 lines of up to 2,000 characters came back as about 80,000 characters (about 20k tokens), read
 again on every later request of the reader. It now returns at most `maxChars` (12,000 by default, 2,000 to 40,000, notes included;
-[agent-host.md](agent-host.md) §1.2), `tools` is `none`, `titles` or `full` (or the boolean it was), and the notes of a read that
+[agent-host/delegation/ask-project.md](agent-host/delegation/ask-project.md)), `tools` is `none`, `titles` or `full` (or the boolean it was), and the notes of a read that
 stopped early name `before` or `from`, which read on without showing anything twice. All five arguments, with `offset` (#1186), are in
 the Assistant's and the reader's definitions. The reader's carry **no description**; the Assistant's and the scoped seat's keep a
 short one for `tools` and `maxChars`. They have to be listed: Claude's in-process server strips an argument its schema does not list
@@ -975,7 +975,7 @@ no description picks `maxChars` by itself when a note says a read stopped early.
 
 ## 15. compact_self (#1451, `then` #2024)
 
-`compact_self({ focus?, then? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host.md "Compacting at a break"). An
+`compact_self({ focus?, then? })` asks Centralu to compact the calling session when its turn ends (docs/agent-host/context-compaction.md "Compacting at a break"). An
 ordinary session's and the Assistant's; a coordinator and a builder do not have it. It is **loaded** on Claude, not deferred: its description is the
 instruction on when to use it (work finished and reported; before waiting over a few minutes on a child, CI or the person; switching to an
 unrelated task), and a deferred tool is not read until something searches for it. Counted from the definition: 453 characters
@@ -984,7 +984,7 @@ Assistant's 9,710 → 10,170 (its tool list is resident in the commands tier too
 contexts over 300k tokens were 64% of the cost); the tool's own cost is a few dozen tokens per request.
 
 **`then` (#2024, owner decision 2026-11-06).** A new optional argument, the agent's own next step, sent as its next turn once the compaction is
-done (docs/agent-host.md "Going on after the compaction"). Counted from the definition the way the rest of this section is (`sentChars`, the name,
+done (docs/agent-host/context-compaction.md "Going on after the compaction"). Counted from the definition the way the rest of this section is (`sentChars`, the name,
 description and the schema as the tool sends them): **453 → 606 characters, +153** (`COMPACT_BUDGET_CHARS` 460 → 610). The argument is 153
 characters because its words are the instruction: the call carries the next step, the turn must end after it, and a refusal still brings the step with
 the reason ("or with the reason if not", 27 of them, added by the review of the first version, where a refused request left the session stalled). The
@@ -997,7 +997,7 @@ not per request. Not measured live: tokens through `pnpm measure:tools --live`, 
 one live run of the whole path is in the pull request.
 
 **Whether an agent calls it on its own (#1492, one run, 2026-10-24).** An agent cannot see its context size, so Centralu tells it quietly when it
-passes shares (docs/agent-host.md "Telling a growing session"). Claude on its cheapest model (`haiku`, window 1,000,000 as the CLI reported it), an
+passes shares (docs/agent-host/context-compaction.md "Telling a growing session"). Claude on its cheapest model (`haiku`, window 1,000,000 as the CLI reported it), an
 in-process host on a temporary store, the shares set to 10% and 25% (the defaults are 30% and 10 points under the tool's 60%, which a 1M window only
 reaches at 300k and 500k), one turn of three steps that read thirty 30 KB files (about 8,800 tokens each), write a summary and report. The meter moved
 with every request (18 estimates, one per 3 s, from 35k to 301k; the tool's reading at the turn's end replaced the last, 301,480). The notices arrived

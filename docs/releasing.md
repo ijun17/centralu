@@ -20,7 +20,7 @@ the keeper copy in the content folder and the shell included. `build.yml` also f
 newer" warning, which a compiled object can raise without changing the file's number. 11.0 is what macos-14 produced
 (measured on a main build and in 0.1.0-beta.45), so moving to macos-15 changed no supported macOS. The Rust cache keys
 carry the runner image, so a runner move rebuilds every dependency. What CI no longer runs is macOS 14 itself (see
-runtime-lessons.md TE4 and FI8).
+runtime-lessons/testing.md TE4, runtime-lessons/files.md FI8).
 
 Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
 and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
@@ -51,7 +51,7 @@ Eight packages go to npm:
 **The platform packages are scoped (`@centralu/…`) from 0.1.0-beta.10.** The first publish of an unscoped `centralu-win32-x64` (0.1.0-beta.8) was refused with `403 … Package name triggered spam detection`; the `@centralu` scope belongs to the owner's npm organization, so nobody can take or squat a name under it. Up to 0.1.0-beta.9, macOS and Linux shipped as `centralu-darwin-arm64`, `centralu-linux-x64` and `centralu-linux-arm64`; those stay on the registry, marked deprecated, so older shims that pin them keep installing. The shim itself stays the unscoped `centralu`, because it is the name people type; it is managed by the organization through its `developers` team. Users never type a platform package's name.
 
 The Linux packages carry the bundled host a second time, unpacked, as `host/` beside the AppImage. `centralu serve`
-(the remote mode's headless host, [agent-host.md](agent-host.md) §4.7) runs it with the system Node; the copy inside
+(the remote mode's headless host, [agent-host/remote/serve.md](agent-host/remote/serve.md)) runs it with the system Node; the copy inside
 the AppImage is only reachable by mounting the AppImage (FUSE, which servers often lack) or extracting it on every
 start. It costs about 11 MB. macOS and Windows need no second copy: `Centralu.app/Contents/Resources/resources/host`
 and `Centralu\resources\host` are plain folders already. `scripts/release-npm.mts` copies it from
@@ -547,8 +547,7 @@ the re-run rule above then finishes the job once the token is fixed.
 
 The darwin job also stages the bundle's host and its `centralu-keeper` into
 `apps/desktop/src-tauri/target/release/content/` and writes a signed `content-manifest.json` there
-(`scripts/content-manifest.mts`, formats in [security-boundaries.md](security-boundaries.md) "Signed
-content"). That folder is then copied into the bundle as `Contents/Resources/content/`, which the shell
+(`scripts/content-manifest.mts`, formats in [security-boundaries/signed-content.md](security-boundaries/signed-content.md)). That folder is then copied into the bundle as `Contents/Resources/content/`, which the shell
 verifies and starts the keeper from ([plans/thin-shell.md](plans/thin-shell.md) §10.2, next section).
 
 - A rehearsal signs with a key generated in memory. A publish runs with `--require-content-key`, signs
@@ -625,7 +624,7 @@ not a reviewed source checkout. Approval is exercised with the owner's `gh` toke
 reviewed environment has one required reviewer, allows self-review, and lets administrators
 bypass protection: dispatch and approval can use the same token. A local signature is not
 machine-bound and verifies with the matching files on any `darwin-arm64` machine trusting
-the same key whose highest-seen version is lower. See [Signed content](security-boundaries.md#local-content-signing-610)
+the same key whose highest-seen version is lower. See [Signed content](security-boundaries/signed-content.md#local-content-signing-610)
 for this trust boundary.
 
 The command prints the run URL and waits; it never approves itself. The maintainer or their
@@ -821,7 +820,7 @@ every OS by `tooling/launcher-platform.test.ts`):
 | `centralu` | Checks the registry for the WebView2 Runtime. If it is missing, prints the download link and exits instead of starting an exe that would end without a window. Otherwise starts `centralu.exe` **detached**, from the installed copy if there is one and from the npm package if not, and watches it for 3 s: an exe that exits nonzero in that time gets a message with the WebView2 link and the `host.log` path |
 | `centralu install` | Copies the folder to `%LOCALAPPDATA%\Programs\Centralu` and writes a Start-menu shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`). The new copy is assembled beside the old one and swapped in by two folder renames, so a failed copy leaves the working install untouched. The swap works while the app runs (the old copy, still in use, stays as `Centralu.old-<time>` until a later install sweeps it); it is refused only while a process's working directory is inside the folder |
 | `centralu update` | `npm i -g centralu@<latest>` (through the shell, because `npm` is `npm.cmd`), then refreshes the installed copy if there is one |
-| Update in the app | The same two steps run by the host without a shell ([agent-host.md](agent-host.md) §4.5), then "Restart Centralu to finish updating". Builds up to 0.1.0-beta.12 fail here with `spawn npm ENOENT`; on those, `centralu update` in a terminal once |
+| Update in the app | The same two steps run by the host without a shell ([agent-host/lifecycle/updates.md](agent-host/lifecycle/updates.md)), then "Restart Centralu to finish updating". Builds up to 0.1.0-beta.12 fail here with `spawn npm ENOENT`; on those, `centralu update` in a terminal once |
 | `centralu uninstall` | Removes the copy and the shortcut. Leaves `%USERPROFILE%\.centralu` alone |
 
 Why a copy, like macOS, rather than a shortcut into the package, like Linux: Windows will not

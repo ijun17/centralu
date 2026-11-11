@@ -55,7 +55,7 @@ centralu/
 │  │     ├─ tolerant.ts         # parseTolerant: how a client reads another build's answer (protocol.md §4)
 │  │     ├─ session-state.ts    # the session state machine's rules, run by both core and the host
 │  │     ├─ theme.ts  machines.ts  handoff.ts  paths.ts  semver.ts  always-allow.ts  app-*.ts …
-│  │     └─ schema/schema.sql   # the store's DDL, in one place (agent-host.md §5)
+│  │     └─ schema/schema.sql   # the store's DDL, in one place (agent-host/store-migrations.md)
 │  │
 │  ├─ common/                   # pure helpers both the host and the screen run: no IO, no React, no domain, no dependency
 │  │  └─ src/                   #   (@cc/common; docs/architecture.md §2)
@@ -73,7 +73,7 @@ centralu/
 │  │     ├─ unread/             # read rules (FR-16)
 │  │     ├─ approval/           # always-allow rule matching, in-place approval policy
 │  │     ├─ machines/           # linked machines: away rows, link errors in words, the version prompt
-│  │     └─ usage/              # prompt cache arithmetic: hit rate, a window's name (agent-host.md §6.1)
+│  │     └─ usage/              # prompt cache arithmetic: hit rate, a window's name (agent-host/prompt-cache.md)
 │  │
 │  ├─ platform/                 # the firewall for C1/C2
 │  │  └─ src/
@@ -145,10 +145,10 @@ centralu/
 │        ├─ mail/               # the mailbox's model (#1347, plans/mailbox.md): messages.ts is MessageService (send, read, settle, hold,
 │        │                      #   drain, sweep) over the message tables; host-mail.ts wires it with reach, turns, delivery and the tool;
 │        │                      #   person.ts is the person's window; frame.ts is the wake frame; rules, address and ids are what they stand on
-│        ├─ apps/external/      # external apps (apps.md): runtime.ts is the one door (ExternalApps); the parts moved out of it (#850): runtime-types, app-entry, app-lifecycle, app-calls, change-reflector, app-check, app-folders, error-log, app-start-env (an app's start environment and secrets), app-resources (its resources and home view); and placement, folder-walk, discovery, manifest, desk/broker, capabilities, runs, handover/imports/versions
+│        ├─ apps/external/      # external apps (apps/README.md): runtime.ts is the one door (ExternalApps); the parts moved out of it (#850): runtime-types, app-entry, app-lifecycle, app-calls, change-reflector, app-check, app-folders, error-log, app-start-env (an app's start environment and secrets), app-resources (its resources and home view); and placement, folder-walk, discovery, manifest, desk/broker, capabilities, runs, handover/imports/versions
 │        ├─ views/              # app views: the view host, its CSP, the proxy page
 │        ├─ links/              # linked machines (#82): links.ts is the door (re-exports); one machine's connection and its operations, the registry of links, the remote client, install and update over ssh
-│        ├─ dev-services/       # despite the name, the prod path (agent-host.md §5): git, fs, store (sqlite),
+│        ├─ dev-services/       # despite the name, the prod path (agent-host/store-migrations.md): git, fs, store (sqlite),
 │        │                      #   the watcher, terminals and commands; project-files: a project's git panel, file
 │        │                      #   tree and file operations as the manager passes them on (#1143)
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
@@ -164,7 +164,7 @@ centralu/
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts
 │                               #   measure against a seeded heavy store (fixtures/heavy-store.ts)
 │  └─ ux/                       # task cost in keyboard and mouse operations: `pnpm ux` (ux-metrics.md)
-├─ .centralu/apps/              # project apps committed with this repository (apps.md §2): project-board
+├─ .centralu/apps/              # project apps committed with this repository (apps/what-an-app-is.md "Where apps live"): project-board
 └─ tooling/                     # eslint config, dependency-cruiser rules, shared tsconfig
 ```
 
@@ -190,7 +190,7 @@ features/inbox/
 |---|---|---|
 | Add an agent tool (Gemini etc.) | `agent-host/adapters/gemini/` + a capability declaration | ui, core (because events are normalised) |
 | Add a new kind of event | `protocol/events.ts` → core reducer → the consuming feature | other features |
-| Move git from Node to Rust (C2, on hold: [agent-host.md](agent-host.md) §5) | a git implementation in `platform/tauri/` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
+| Move git from Node to Rust (C2, on hold: [agent-host/store-migrations.md](agent-host/store-migrations.md)) | a git implementation in `platform/tauri/` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
 | Add a new screen | `ui/features/<new>/` | platform, agent-host |
 | Change how OS notifications work | the `SystemPort` implementation in `platform/{web,tauri}/index.ts` (when to notify is `core/notify/`; that one window of a machine raises each event is `ui/src/app/notice-claim.ts`, #2168) | ui (it is behind SystemPort) |
 | Change session state rules | `core/session/` (+ transition table tests) | if statements in ui — there should not have been any |

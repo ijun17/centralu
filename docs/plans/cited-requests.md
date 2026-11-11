@@ -1,7 +1,7 @@
 # A session's request, the person's message it cites, and the orchestrator's judgement (#1739, replacing #1926's reply cards)
 
 Proposed 2026-11-03, on the owner's decisions of that day (#1739's decision comment, and the owner's direction after the deep review of #1940;
-#1933 closed unmerged). [security-boundaries.md](../security-boundaries.md) ("A session asking the orchestrator") and [mailbox.md](mailbox.md)
+#1933 closed unmerged). [security-boundaries/mailbox-and-requests.md](../security-boundaries/mailbox-and-requests.md) ("A session asking the orchestrator") and [mailbox.md](mailbox.md)
 §7.6 describe the result.
 
 ## 1. Why

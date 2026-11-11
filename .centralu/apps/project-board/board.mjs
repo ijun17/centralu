@@ -17,7 +17,7 @@ export const forget = () => boards.forget('board')
 
 // --- Presenting ------------------------------------------------------------------------------------
 // What the model reads is short: one line per item, and the same words in the text and in
-// structuredContent (docs/apps.md §9.2: Claude Code hands the model the structured part, not the
+// structuredContent (docs/apps/attaching.md "Claude and Codex": Claude Code hands the model the structured part, not the
 // text). URLs and ids only when `detail: "full"` asks for them.
 export const FIELDS = ['status', 'priority', 'area']
 const TYPE = { issue: 'issue', pull: 'pull request', draft: 'draft issue', hidden: 'hidden item' }

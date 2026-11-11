@@ -1,5 +1,5 @@
 /**
- * An app that is gone, or never reads, while the host writes to it (docs/runtime-lessons.md HO14):
+ * An app that is gone, or never reads, while the host writes to it (docs/runtime-lessons/host-contract.md HO14):
  * the write lands on a closed pipe, and a stream 'error' nobody listens to is an uncaught exception
  * that ends the host and every session. The start fails; nothing escapes.
  */

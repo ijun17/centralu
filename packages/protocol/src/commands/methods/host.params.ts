@@ -92,7 +92,7 @@ export const hostParams = {
    * Linked machines (#82, docs/plans/remote-hub.md). The hub's own: these are never forwarded.
    * Adding one is the consent for this computer to reach that machine (plan §3.2): the person can
    * already open an SSH connection to it. The link uses the person's own `ssh` and keys
-   * (`BatchMode`), and expects `centralu serve` running there (docs/agent-host.md §4.7).
+   * (`BatchMode`), and expects `centralu serve` running there (docs/agent-host/remote/serve.md).
    */
   'machines.list': z.object({}),
   'machines.add': z.object({
@@ -309,8 +309,8 @@ export const hostParams = {
   }),
   /**
    * Stops this host the way a signal would: agents, terminals, command runs and app processes
-   * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host.md
-   * §4.7): on Windows a launcher can only be killed, and killing it ends the host without its
+   * stopped in order, the store closed, then exit. For `centralu serve --stop` (docs/agent-host/remote/serve.md):
+   * on Windows a launcher can only be killed, and killing it ends the host without its
    * shutdown. Answers before the host starts to leave. Refused by a host under the app's keeper,
    * which the app stops (and which would only start the host again).
    *
@@ -322,7 +322,7 @@ export const hostParams = {
    *
    * `forUpdate` (#1618, additive): a linked hub stops this host to update it, roll it back or put a version back, and starts
    * one again in this folder. As it lets its sessions go, this host writes those in a turn to a list of its own in the
-   * folder, each with the last row of its conversation (docs/agent-host.md §4.8), so the host that starts next continues
+   * folder, each with the last row of its conversation (docs/agent-host/lifecycle/continue-after-update.md), so the host that starts next continues
    * each of those turns once, while its conversation still ends there. A host
    * older than it ignores it and stops, and its turns end as a stop's always did
    */

@@ -1,5 +1,5 @@
 /**
- * Every way the host process can be asked to end (docs/runtime-lessons.md HO4, HO6, HO7, HO10,
+ * Every way the host process can be asked to end (docs/runtime-lessons/host-contract.md HO4, HO6, HO7, HO10,
  * HO15), against a stand-in process the test sends signals and errors to.
  */
 import { EventEmitter } from 'node:events'

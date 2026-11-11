@@ -35,7 +35,7 @@
 
 ## 1. What happens today, and why it waits
 
-An update of a linked machine (`links/update.ts`, [agent-host.md](../agent-host.md) §4.8 "Updating, rolling back and
+An update of a linked machine (`links/update.ts`, [agent-host/remote/install-and-update.md](../agent-host/remote/install-and-update.md) "Updating, rolling back and
 uninstalling") installs the new version beside the running one, then `HostControl.beforeStop` waits, then `serve
 --stop` stops the host, the pointers switch, `serve --detach` starts the new version and a hello from it ends the update.
 `serve --stop` ends everything the host started: no remote runs a keeper ([remote-hub.md](remote-hub.md) §10.4), so
@@ -49,13 +49,13 @@ because agents started from the hub kept working there; the other stayed in `wai
 gave up after 30 minutes. A longer wait, more retries or pausing the work sent there all still end the work or depend
 on luck. The fix is to keep what runs.
 
-**What the Mac keeps, and how** (agent-host.md §4.1 to §4.4, architecture.md §4.2 to §4.4). The keeper is the host's
+**What the Mac keeps, and how** (agent-host/lifecycle/README.md, architecture.md §4.2 to §4.4). The keeper is the host's
 parent and holds every long-lived child on `children.sock`: an agent's pipes with a lossless 64 MiB stdout buffer, a
 pty drained into a 256 KiB ring, a command's pipes. A swap starts the new host in standby, drains the old one (new
 calls refused, running calls cut with a retryable error, then `stopServices('detach')`, which releases the held
 children without signalling them), activates the new one behind the same front-door port and token, and the new host
 lists the keeper's children and reattaches: a live agent through `resumeSession` with its turn still running (measured
-for claude and codex, agent-host.md §4.3), terminals and commands under their ids with the ring replayed. What does not
+for claude and codex, agent-host/lifecycle/children.md), terminals and commands under their ids with the ring replayed. What does not
 survive even there: app processes and in-process servers (restarted by the new host), a Centralu tool call in flight
 (cut with a retryable error), and open app views older than ten minutes (§4.2's handover record).
 
@@ -124,7 +124,7 @@ the Mac; an update is the keeper's host swap to the version `current` names.
 
 | | Linux and WSL | Windows |
 |---|---|---|
-| Turns in flight | kept (the swap of agent-host.md §4.2 and the reattach of §4.3, as measured on macOS and in `keeper e2e (linux)`) | kept, once the Windows keeper exists (§6); P4 and P6 show the OS allows it |
+| Turns in flight | kept (the swap of agent-host/lifecycle/front-door.md and the reattach of agent-host/lifecycle/children.md, as measured on macOS and in `keeper e2e (linux)`) | kept, once the Windows keeper exists (§6); P4 and P6 show the OS allows it |
 | Background tasks | kept with their CLI: a detach sends nothing, so nothing sweeps the group | kept with their CLI, in its job |
 | Terminals | kept (pty in the keeper, ring replayed) | kept (pseudoconsole in the keeper, P4, P6) |
 | Project commands | kept | kept |
@@ -134,7 +134,7 @@ the Mac; an update is the keeper's host swap to the version `current` names.
 
 Every rule the keeper already has comes along: one keeper per data folder, restarts by the five-failures rule, the
 drain, the standby check that refuses a store only a newer build reads before anything is stopped, mixed versions of
-keeper and host (agent-host.md §4.2), and the same keeper on the Windows desktop later (#14), which is the plan's end
+keeper and host (agent-host/lifecycle/front-door.md), and the same keeper on the Windows desktop later (#14), which is the plan's end
 state anyway (runtime-unification §7, items 1 and 8).
 
 ### 4.2 B. A rolling handover at turn boundaries (not recommended)
@@ -189,10 +189,10 @@ A host swap needs a keeper that speaks the host's API, not the newest keeper. So
   test pins both with their history, as `PROTOCOL_VERSION` is pinned, so a raise is a decision in a pull request and not
   a side effect.
 - **The keeper serves older hosts**, so a rollback swaps to the previous host without touching the keeper. This is a new
-  rule, not one that exists: agent-host.md §4.2's mixed-version table covers only how the token is delivered. Step 5
+  rule, not one that exists: agent-host/lifecycle/front-door.md's mixed-version table covers only how the token is delivered. Step 5
   adds it with a test that runs the previous release's host under the new keeper.
 - **Linux and WSL**: when the new version's keeper is another build, the swap is a `switch` with `keeper`, which hands
-  the keeper over first and then swaps the host (agent-host.md §4.4; measured on Linux in the spike's §5: host,
+  the keeper over first and then swaps the host (agent-host/lifecycle/keeper.md "A keeper runs one build"; measured on Linux in the spike's §5: host,
   terminal and dev server kept their pids, the front door and an open WebSocket survived). Everything is kept.
 - **Windows, until it has a handoff** (step 8): the host swap keeps everything and the keeper stays on its build
   ("lags"). The machine's row in Settings → Machines says so (owner, decision 2; not the sidebar). Nothing waits for
@@ -214,7 +214,7 @@ The cases: a remote whose `serve` has no keeper (every remote today, and WSL wit
 a keeper, and on Windows until step 8 a host that needs a newer keeper and the keeper's own replacement. In each, the
 update stops and starts at once, as `when: 'now'` does, and the host it starts continues the turns the stop ended.
 Terminals and project commands cannot be continued: they close, as they do when the person presses Update now. Built
-in step 2 (#1618, #1626); agent-host.md §4.8, "Continuing the turns an update cut", is the full rule.
+in step 2 (#1618, #1626); agent-host/lifecycle/continue-after-update.md, "Continuing the turns an update cut", is the full rule.
 
 1. **The stopping host lists the turns it ends.** Every stop of the hub's after which a host starts again in that
    folder (the update's, the put-back's after a failed check, a rollback's; not an uninstall's) runs `serve --stop` with
@@ -279,7 +279,7 @@ window or hub of another build.
 
 ## 6. Windows specifics
 
-**No keeper today.** The window runs the host directly (`StartMode::Direct`, agent-host.md §4.0), and a remote's `serve`
+**No keeper today.** The window runs the host directly (`StartMode::Direct`, agent-host/lifecycle/start.md), and a remote's `serve`
 runs it under the launcher. The keeper crate is `cfg(unix)` throughout: its reactor is `poll(2)`, its sockets unix
 sockets, its lock `flock`, its handoff `SCM_RIGHTS`. The OS layer (`keeper/src/os/`, runtime-unification §3.3) names the
 Windows operation for each; `os/windows.rs` today has only the window's direct path (stop by closing stdin, `taskkill /T`).
@@ -402,7 +402,7 @@ exception is any same-user process there, not `serve --switch` alone; what bound
   keeper to code it wrote, holding the window's full token. That refusal and its test are part of step 4;
 - to a folder under `<data>/remote/versions/` with an `install.json` only.
 
-All three are written into security-boundaries.md in step 4.
+All three are written into security-boundaries/README.md in step 4.
 
 **On the hub** (`links/update.ts`, `linked-machine-ops.ts`): the update takes the swap path when the machine's line has
 `switch` in `takes` and a running keeper, and either `keeper.hostApi` is at or above the new host's `needsKeeper` or
@@ -452,14 +452,14 @@ setting.
 | 1 | Linux: the keeper as a plain file beside `host/` in `@centralu/host-linux-x64` and `-linux-arm64` (§7). The release takes it from the AppImage it ships; `hostPackageProblems` requires it and checks it by reading the file, with no `file` or `ldd`, through one check (`keeperProblems`, which the release also runs on the AppImage's copy): an ELF executable for the platform's machine, with its exec bit, linking nothing beyond the C runtime, and asking for no glibc newer than the remote preflight's floor (`MIN_GLIBC`). Nothing starts it yet | `tooling/host-package.test.ts`: a Linux host package without the keeper, with one for the other machine, with one that is not an executable, without its exec bit, linking webkit2gtk or another library beyond the C runtime, or asking for GLIBC_2.35 is refused; `files` must name it, and git ignores what the release stages there; the Windows package still ships `host/` only | none: nothing runs it yet. At the first release after it, the host package's tarball lists the keeper with its exec bit |
 | 2 (#1626) | Hub and host: §5.1 on every remote. Every update nobody approved goes at once (`wait_open`, `OPEN_WORK_WAIT_MS` go; the person's `when: 'idle'` keeps its wait); every hub stop a host starts again after says `forUpdate`, and the stopping host lists the turns it ends in a list of its own, each with its conversation's last row; the next host continues each listed turn once while its conversation still ends there, and removes a list once all its turns are dealt with; `hello_ok.updateContinued`; a quitting host's failed waits settle no report | host: a turn an update's stop ended is listed by that stop and continued once (one Continue, as Centralu's note, no quit notice and no Inbox "stopped", the list gone once sent, a later start sends nothing); a list left behind (a removal that failed, a rollback to a host that never reads it) continues no later turn; a list held at the start (EBUSY) is read again and its turn continued, and one still held is kept, said in the log; Centralu's own note is never stored as the person's message where the transcript lacks its id, in either reader; a Continue the tool takes as the host leaves leaves one line, not two; a list that cannot be written is logged and those turns end as a quit's; a host stopped again before the Continue went in, or while the tool takes it, leaves it listed and the one after continues it and tells the requester once; a Stop the host took is not listed; a stop not for an update lists nothing; a wake from a window before the Continue keeps the turn and the Continue goes in once; one that cannot be continued ends as a quit's. Launcher: `CENTRALU_STOP_FOR=update` becomes `host.stop { forUpdate }`. Hub (`links.test.ts`, `remote-agents.test.ts`, `update.test.ts`): an update with turns running and a terminal open stops at once and says it is for an update; a turn the hub never read is continued; a hub parent hears "continued" once, never "dropped", then one report; a machine not back, or a host from before, tells the drop as before | Done on a Windows 11 PC with real hosts (a data folder and `--db` of their own) and a real Claude Code 2.1.296 child (haiku), by the recheck of #1626 and by its follow-up: `host.stop { forUpdate }` during a foreground Bash call lists the turn; the next host continues it once; with the list held under `FileShare.None` the start read it again and continued (2 failed reads logged); held past the tries it kept the list and marked the turn stopped, said in the log; with Centralu's id stripped from the transcript no note or call was stored as the person's, and the log said the CLI did not keep it. **Still to do before step 2 merges, or moved to the first release that carries it:** a linked Windows PC and WSL over ssh from a real hub: an update with a claude turn and a codex turn running and a terminal open; both turns continue once on the new version, the terminal closes, the window wakes neither turn itself, and a hub parent of each hears "continued" once, then one report; a real Codex turn |
 | 3 | Linux: the headless keeper taking `serve`'s port, token, Node and `CC_SERVE`; `serve` starts it and stays its parent; `--connection` reports it; `--stop` and the sign-in hand-over ask its `stop { ifIdle }`; a dev build (remote-hub.md §10.11), which bundles the host only, takes the keeper of the release it is built on | the keeper crate's `idle_decision` keeps a headless keeper with no window; a headless keeper serves on the given port with the given token; its `stop { ifIdle }` refuses while a turn runs and refuses a call after its yes; `serve` tests choose the keeper when the file is there and `CENTRALU_KEEPER` is not off; `keeper-integration.mjs` gains a headless scenario run by `keeper e2e (linux)` | a Linux arm64 server and WSL: `serve --detach`, ssh closed, the keeper and host still serving; WSL's distro held by the WMI-created `wsl.exe` as before |
-| 4 | Hub: the swap path of §8; `serve --switch` and the keeper's `swap_current` op; #1405's exception written into security-boundaries.md | the keeper refuses `swap_current` to a folder outside `<data>/remote/versions/` or without `install.json`, refuses it over the front door's limited token, and still refuses `switch` to a non-window; `update.test.ts`: with `switch` in `takes` and the floor met, nothing is stopped and the hold is lifted at the end; without either, §5.1; a refused or failed switch puts the pointers back and stops nothing; a new host that does not answer as the target is swapped back | a Linux arm64 server and WSL: an update with a claude turn in a tool call, a codex turn, an open terminal running a counter and a Run command; each kept, the counter continuous, the turn finishing on the new host |
+| 4 | Hub: the swap path of §8; `serve --switch` and the keeper's `swap_current` op; #1405's exception written into security-boundaries/README.md | the keeper refuses `swap_current` to a folder outside `<data>/remote/versions/` or without `install.json`, refuses it over the front door's limited token, and still refuses `switch` to a non-window; `update.test.ts`: with `switch` in `takes` and the floor met, nothing is stopped and the hold is lifted at the end; without either, §5.1; a refused or failed switch puts the pointers back and stops nothing; a new host that does not answer as the target is swapped back | a Linux arm64 server and WSL: an update with a claude turn in a tool call, a codex turn, an open terminal running a counter and a Run command; each kept, the counter continuous, the turn finishing on the new host |
 | 5 | The keeper's own update (§5): `keeper.hostApi`, `needsKeeper`, the pin test, older hosts under a newer keeper, the handoff on Linux at a switch, the lag where there is none and its line on the machine's row, the replacement when it costs nothing or the person chooses Update, `in-use.json` and prune keeping what runs | the pin test fails on an unrecorded raise; the previous release's host runs under the new keeper; a host with a higher floor takes §5.1; prune keeps the versions and Nodes `in-use.json` names; the row's line appears and leaves with a short transition, and with none under reduced motion | a Linux arm64 server: an update across a keeper build change keeps a turn and a terminal |
 | 6 | Windows: the keeper's OS layer without the handoff (§6), runtime-unification step 9 minus W1, W2, W5; W3 and W4 measured first; a `keeper e2e (windows)` CI job | the keeper crate's tests on `windows-latest`: one keeper per folder, a child in its own job ended with its helpers, a pseudoconsole's shell surviving a host's kill and reattached with its ring, the device-attributes query answered with no host attached; `keeper-integration.mjs` and `keeper-children-integration.mjs --no-claude --no-codex` (removed in #1895 step 4 PR 1) on that runner | a signed-in Windows 11 PC and one with nobody signed in: started by the sign-in task and by WMI from ssh; W3 there |
 | 7 | Windows: the keeper in `@centralu/host-win32-x64` with the PE checks; `serve` on Windows starts it (WMI and sign-in task); `serve --window` attaches through its front door | `hostPackageProblems` on a PE stand-in (missing, wrong machine, a window DLL imported); `serve-windows` tests choose the keeper; the window's start plan attaches to a remote keeper's door (`serve_window::choose`) | a linked Windows PC: an update with turns, a terminal and a Run command running, from the hub, by the person's Update and by following the hub; an administrator's ssh account; the window on that PC while its keeper swaps |
 | 8 | Windows: the keeper's handoff (W1, W2, W5; runtime-unification step 5 on the OS layer), ending the lag | the handoff script on `windows-latest` | a linked Windows PC: an update across a keeper build change keeps a turn and a terminal |
 
 Step 2 needs no keeper and ends #1614's wait on every remote; steps 3 to 5 and step 6 can run in parallel. Each step
-updates agent-host.md (§4.0's table, §4.7, §4.8's update table), remote-hub.md §10.4 and §10.5, and runtime-lessons.md
+updates agent-host/lifecycle/start.md (its table), agent-host/remote/serve.md, agent-host/remote/install-and-update.md (its update table), remote-hub.md §10.4 and §10.5, and runtime-lessons/README.md
 for the rules it guards, in its own pull request. The Windows desktop (#14) takes the keeper from step 6 on through
 `start_plan`, as runtime-unification step 9 says; that is not part of this plan.
 

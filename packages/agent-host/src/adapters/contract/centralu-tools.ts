@@ -580,7 +580,7 @@ export type CentraluTools = {
   ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
   /**
    * Whether `readSession` reads this session of this host for the seat: the one read rule (#984, #1941), which a stop notice's quote of a session's
-   * words asks too (security-boundaries.md). Absent: it reads none
+   * words asks too (security-boundaries/inter-agent-content.md). Absent: it reads none
    */
   mayRead?(sessionId: string): boolean
   /** Sessions this app currently manages (excludes the Assistant itself and archived sessions); `project` narrows by name or id */
@@ -825,7 +825,7 @@ export type CentraluTools = {
   ): Promise<HandoffResult>
   /**
    * What this computer stored of the limit windows and of the tokens per hour over the last `days` days (usage
-   * over time, docs/agent-host.md §6.2), by session, project, model or tool. The Assistant's; counts only.
+   * over time, docs/agent-host/usage.md "Usage over time"), by session, project, model or tool. The Assistant's; counts only.
    */
   usageHistory?(spec: { days: number; by: 'session' | 'project' | 'model' | 'tool' }): Promise<UsageHistory>
   /**

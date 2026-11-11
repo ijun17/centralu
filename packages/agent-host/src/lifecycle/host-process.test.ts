@@ -1,9 +1,9 @@
 /**
  * The host's start and ending, run for real: `main.ts` started as the keeper and the window start
- * it, with a login shell of the test's own as the first child it spawns (docs/runtime-lessons.md
- * ST16, HO3, HO7); on Windows, which asks no login shell, an agent CLI of the test's own that the
- * host runs when asked which agents are installed. These are the rules a unit test of one module
- * cannot see, because they are about the order `main.ts` takes its steps in.
+ * it, with a login shell of the test's own as the first child it spawns
+ * (docs/runtime-lessons/who-starts-what.md ST16, docs/runtime-lessons/host-contract.md HO3, HO7); on Windows, which
+ * asks no login shell, an agent CLI of the test's own that the host runs when asked which agents are installed.
+ * These are the rules a unit test of one module cannot see, because they are about the order `main.ts` takes its steps in.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'

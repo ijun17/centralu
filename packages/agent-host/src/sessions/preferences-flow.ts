@@ -55,7 +55,7 @@ function autoCompactText(c: AutoCompact): string {
  * names them, and their stored switches stay readable for older builds. And "Automatic updates" turned **on** asks first,
  * in every preset. With it on, this computer installs a newer Centralu by itself and the window relaunches into it when nothing is busy, so
  * from then on code arrives without a later question; `update_centralu` never touches that switch for the same reason
- * (docs/agent-host.md §4.5). Turning it off, and every other switch, acts at once.
+ * (docs/agent-host/lifecycle/updates.md). Turning it off, and every other switch, acts at once.
  */
 export class PreferencesFlow {
   private rpc: WindowRpc | null = null
@@ -292,7 +292,7 @@ export class PreferencesFlow {
      * asks unless both are on already (unread counts as off, so it asks). Turning it off asks nothing, and turns installing
      * off first, so a check landing between the two calls installs nothing. Both setters are called either way (each does
      * nothing when already so): a card may stand for minutes, and what was read before it may have changed. Checking goes on
-     * first, so its check finds the release before installing is on to take it. (docs/agent-host.md §4.5)
+     * first, so its check finds the release before installing is on to take it. (docs/agent-host/lifecycle/updates.md)
      */
     if (changes.autoUpdate !== undefined) {
       const on = changes.autoUpdate

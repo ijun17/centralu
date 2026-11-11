@@ -21,7 +21,7 @@ import { sleep } from '../timing.js'
  * survive any host restart). Whatever wins only has to answer `open` and report `down`.
  */
 
-/** What `centralu serve --connection` prints on the remote (docs/agent-host.md §4.7) */
+/** What `centralu serve --connection` prints on the remote (docs/agent-host/remote/serve.md) */
 export type ConnectionLine = {
   v: number
   port: number
@@ -580,7 +580,7 @@ function notInstalled(where: string, spec: RemoteSpec): Error {
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
 export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
 
-/** What follows a launcher's exit 127 with no marker: its Node is gone, as after a Node upgrade (docs/agent-host.md, the connection line) */
+/** What follows a launcher's exit 127 with no marker: its Node is gone, as after a Node upgrade (docs/agent-host/remote/hub-links.md, the connection line) */
 const STALE_LAUNCHER = '; if Node was upgraded there, run `centralu serve` once from an interactive shell on that machine'
 
 /**
@@ -595,7 +595,7 @@ function noAnswer(err: Error, r: RemoteRun, remote: RemoteSpec): string {
 }
 
 /**
- * The remote command that prints the connection line (docs/agent-host.md §4.7), in the remote
+ * The remote command that prints the connection line (docs/agent-host/remote/serve.md), in the remote
  * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
  * `centralu.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu` on the PATH an ssh
  * command gets, else the launcher `serve` keeps (`<data>/bin/centralu`), else `NOT_FOUND` on
@@ -808,7 +808,7 @@ export type SshTunnelOptions = {
  *   forever. The person's keys, agent and `~/.ssh/config` are used as they are.
  * - The first command falls back to `<data>/bin/centralu`, decided on the remote: an SSH shell is not
  *   interactive, and nvm, fnm, volta and `~/.npm-global` put npm's global folder on PATH only in
- *   interactive shells (§4.7 of agent-host.md, which is why `serve` keeps that launcher).
+ *   interactive shells (agent-host/remote/serve.md, which is why `serve` keeps that launcher).
  * - The forward binds 127.0.0.1 on both ends, explicitly: never 0.0.0.0 and never `GatewayPorts`,
  *   so nothing on the hub's network can use the link.
  * - **The same port number on both ends** when it is free here, another one when it is taken
@@ -960,7 +960,7 @@ export class SshTunnel implements Tunnel {
        * said it runs, less than the wait for its confirmation, and it checks the time again before it confirms, so by the time the
        * step is sent again the first reader is gone or never ran the script: the script runs only after the confirmation.
        * (The input is written with the command, not after PowerShell says it runs: written later, Windows OpenSSH did not deliver
-       * it in 11 to 30 percent of the runs, and not at all 100 ms later; docs/runtime-lessons.md RE18.)
+       * it in 11 to 30 percent of the runs, and not at all 100 ms later; docs/runtime-lessons/remotes.md RE18.)
        */
       if (!(err instanceof SshRunFailure) || err.kind !== 'expected' || err.stage !== 1) throw err
       this.ifClosed()

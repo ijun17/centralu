@@ -8,7 +8,7 @@ import { assertCanonicalGitPath, gitBranches, gitRevParse, gitStatusFiles, isRep
  * A write the person asked for (stage, commit, switch, push): it runs as plain git does, hooks and
  * filters included, trusted or not. Turning a clean filter off here would change what gets
  * committed (an LFS pointer, a git-crypt file), which is worse than not committing at all.
- * docs/security-boundaries.md lists this as a limit.
+ * docs/security-boundaries/project-trust.md lists this as a limit.
  *
  * It gets a bound of its own (`WRITE_TIMEOUT_MS`), not a read's 10 s (#980): a write runs the repository's hooks (a
  * pre-commit type check, a pre-push test run) and the person's credential helper, which can wait on a sign-in.

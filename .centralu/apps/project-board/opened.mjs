@@ -6,7 +6,7 @@
 // from a tool call, the queue reads it from the server or from a watch command, and `open_pr` must not import the
 // queue (the queue's integrator imports `open_pr`). Written whole and synchronously, so a reader never sees half.
 //
-// `notice` is the opening session's notice address (`centralu.noticeAddress()`, docs/apps.md §10): a MAC over (app,
+// `notice` is the opening session's notice address (`centralu.noticeAddress()`, docs/apps/broker-and-rpcs.md "The broker: agents, other apps, host data"): a MAC over (app,
 // session), stable across calls and restarts, which opens only for a session that called this app. It is never shown
 // in an answer. A pull request opened by an older Centralu has none, and then nothing here applies to it. `draft` is
 // whether it was opened as a draft: the queue marks a draft ready only for a pull request opened as one (a later

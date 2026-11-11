@@ -58,7 +58,7 @@ export const RequestInput = z.object({
   cacheTtl: z.enum(['5m', '1h']).optional(),
   /**
    * Of `cacheCreationTokens`, what the API said stays cached an hour and five minutes (Claude's `cache_creation` split, #1492):
-   * the two are priced apart (docs/agent-host.md §6.1), so the weighting of writes needs them, not only which one the request had
+   * the two are priced apart (docs/agent-host/prompt-cache.md), so the weighting of writes needs them, not only which one the request had
    * most of. Absent when the tool did not split its writes; the part that is in neither is priced as a five-minute write.
    */
   cacheWrite1hTokens: z.number().optional(),
@@ -70,7 +70,7 @@ export type RequestInput = z.infer<typeof RequestInput>
 
 /**
  * Why a rebuild most likely happened, from what the host saw in that session between the request before it and this
- * one (docs/agent-host.md §6.1). A string on the wire, so a newer host's cause reaches an older screen as its name.
+ * one (docs/agent-host/prompt-cache.md). A string on the wire, so a newer host's cause reaches an older screen as its name.
  *
  *   cold_start         the session's first request
  *   subagent           a subagent's first request (its own prompt)
@@ -105,7 +105,7 @@ const CacheCounts = z.object({
   inputTokens: z.number(),
   cacheReadTokens: z.number(),
   cacheCreationTokens: z.number(),
-  /** Requests that wrote most of their prompt to the cache again (the threshold: docs/agent-host.md §6.1) */
+  /** Requests that wrote most of their prompt to the cache again (the threshold: docs/agent-host/prompt-cache.md) */
   rebuilds: z.number(),
   /** The rebuilds by their likely cause (`RebuildCause`); absent from a host that predates it */
   rebuildCauses: z.record(z.string(), z.number()).optional(),
@@ -127,7 +127,7 @@ export const CacheSessionStats = z.object({
 export type CacheSessionStats = z.infer<typeof CacheSessionStats>
 
 /**
- * The prompt cache over one window of time, summed from the requests in it (docs/agent-host.md §6.1).
+ * The prompt cache over one window of time, summed from the requests in it (docs/agent-host/prompt-cache.md).
  *
  * The sums, not the rate: the hit rate is `cacheReadTokens / (inputTokens + cacheReadTokens + cacheCreationTokens)`
  * and is computed where it is shown (`@cc/core` `cacheHitRate`), so a host and a UI of different builds cannot
@@ -143,7 +143,7 @@ export const CacheWindowStats = CacheCounts.extend({
   /**
    * What the cache cost in units of an uncached input token (#1492), for the share the writes were of it: the tokens read from the cache
    * times the price of a read, and the tokens written times the price of a write, each as a ratio to uncached input (Anthropic: read 0.1,
-   * five-minute write 1.25, one-hour write 2; Codex by model, docs/agent-host.md §6.1). No money: the ratios, not the prices. For a tool
+   * five-minute write 1.25, one-hour write 2; Codex by model, docs/agent-host/prompt-cache.md). No money: the ratios, not the prices. For a tool
    * that does not report writes (Codex) the write units are those of the input it did not read from the cache. Absent from a host that
    * predates them.
    */
@@ -173,7 +173,7 @@ export const CacheStats = z.object({
 export type CacheStats = z.infer<typeof CacheStats>
 
 /**
- * What `usage.history` groups the token rows by (docs/agent-host.md §6.2); `day` and `hour` are the time axis
+ * What `usage.history` groups the token rows by (docs/agent-host/usage.md "Usage over time"); `day` and `hour` are the time axis
  * (`groupBy`).
  */
 export const UsageHistoryBy = z.enum(['session', 'project', 'model', 'tool'])

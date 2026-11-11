@@ -22,7 +22,7 @@
  *
  * The page carries that credential, and a loopback port is not per user, so this is still for
  * single-user machines: another user could read every conversation and act as an everyday client
- * (docs/security-boundaries.md, "Local transport").
+ * (docs/security-boundaries/local-data-and-transport.md "Local transport").
  *
  * The keeper is built on unix sockets, so there is nothing to read on Windows (the app runs the
  * host directly there); the script says so instead of looking for a pipe that does not exist.

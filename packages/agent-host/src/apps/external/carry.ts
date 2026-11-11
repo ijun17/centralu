@@ -14,7 +14,7 @@ import { VERSIONS_REL } from './versions.js'
  *   log        <data folder>/app-logs/<key>.log, and the older generation `.log.1`
  *   versions   <data folder>/app-versions/<key>/
  *
- * **Copied, never moved**: a previous build serving during a host swap (docs/agent-host.md §5.1) still reads and writes
+ * **Copied, never moved**: a previous build serving during a host swap (docs/agent-host/store-migrations.md "Migration steps: expand, then contract") still reads and writes
  * the old key, and must not find its app's data gone. A later release removes the old copies.
  *
  * Only where the new key has nothing yet, so running it again after an interruption changes nothing, and never writes

@@ -7,7 +7,7 @@ schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
 What the tables mean, and which concept each one stores, is in [the domain model](../domain-model.md).
-How a migration may change them is in [agent-host.md](../agent-host.md) and above `migrationSteps` in
+How a migration may change them is in [agent-host/store-migrations.md](../agent-host/store-migrations.md) and above `migrationSteps` in
 `packages/agent-host/src/dev-services/store/migrations/index.ts`.
 
 "Added in" is the first step that gives a new store the table or column: `schema.sql`, the migration runner

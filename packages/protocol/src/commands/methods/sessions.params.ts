@@ -264,7 +264,7 @@ export const sessionsParams = {
    * A local image an agent wrote into a reply as Markdown (`![alt](/path/to/shot.png)`). The window cannot load
    * a file path itself (its origin is the app, and its CSP takes images from `data:` and `blob:` only), so the host
    * reads it: wherever it is on that machine, but only a path that appears in one of this session's own replies, only
-   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries.md,
+   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries/desktop.md,
    * "Images a reply names"). `path` is the string as the reply wrote it: `~`, a path relative to the session's folder
    * and a `file://` URL are resolved by the host.
    */
@@ -337,7 +337,7 @@ export const sessionsParams = {
    */
   'agents.models': z.object({ tool: ToolName, ...machineParam }),
   /**
-   * Limit readings and tokens over time, as this host stored them (docs/agent-host.md §6.2): each window's percent per
+   * Limit readings and tokens over time, as this host stored them (docs/agent-host/usage.md "Usage over time"): each window's percent per
    * tool and account, and the hourly token buckets summed by day or hour and by session, project, model or tool.
    * Read-only. The hub asks a linked machine with `machine`; each host keeps its own record.
    */

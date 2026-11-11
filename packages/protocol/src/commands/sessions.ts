@@ -171,7 +171,7 @@ export const SessionInfo = z.object({
    * All the core knows is **a single id line naming the owner**; only the app knows what it
    * means. A session of a project stands in that project's sidebar list whatever this says; a
    * session with no project stands under the row of the user-folder app this names, whether that
-   * app is running or not (docs/apps.md §6.2). One that names no listed app has no sidebar row and
+   * app is running or not (docs/apps/views.md "Pinned, in the main area"). One that names no listed app has no sidebar row and
    * is reached through search, the palette and the inbox.
    *
    * An app cannot write this itself: the value comes from the registered id of the app that
@@ -201,7 +201,7 @@ export const SessionInfo = z.object({
    * worktree manager's `parent_session_id` into it. Store step v55 clears the cross-project rows
    * (the host start did until #844). A window of beta.20 or before reads a start_agent child as
    * "asked by" its parent, which is now what it means; a host of beta.20 or before still writes the
-   * old meaning, and a row it writes after v55 keeps it (agent-host.md §5.1).
+   * old meaning, and a row it writes after v55 keeps it (agent-host/store-migrations.md "Migration steps: expand, then contract").
    */
   askedBy: z.string().nullable().optional(),
   /**

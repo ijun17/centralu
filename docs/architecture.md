@@ -10,7 +10,7 @@ Large changes were **expected** in this project from the start. The architecture
 |---|---|---|---|
 | C1 | Runtime environment: **browser (web development) → Tauri** | after M1 | Platform ports (→ [platform-abstraction.md](platform-abstraction.md)) |
 | C2 | Service implementations move: git/store etc. **Node (dev) → Rust (prod)** | at the Tauri migration, gradually per service | Port interfaces fixed, only implementations swapped |
-| C3 | New agent tools: Gemini CLI etc. | v2 | AgentAdapter + capability (→ [agent-host.md](agent-host.md)) |
+| C3 | New agent tools: Gemini CLI etc. | v2 | AgentAdapter + capability (→ [agent-host/adapters/contract.md](agent-host/adapters/contract.md)) |
 | C4 | Codex protocol version changes | any time | Isolation inside the adapter + anti-corruption layer |
 | C5 | Screen structure changes (inbox evolving, the v2 grid etc.) | any time | Pure domain core + derived-state selectors |
 | C6 | Protocol evolution (new events) | any time | Schema version rules (→ [protocol.md](protocol.md)) |
@@ -89,7 +89,7 @@ shell), `adapters/claude/exe-link.ts` (Claude Code's Windows start; `windowsStar
 project's default location, `~/Centralu`, and folder-name rules, #515) and the launcher's `platform.mjs`.
 Code elsewhere asks one of those a question named for what differs, so each OS's answer is written once and a new
 OS is a change to those files. Tests and build scripts are not checked. The Rust side's equivalent for how the host
-starts is `start_plan` ([agent-host.md](agent-host.md) §4.0).
+starts is `start_plan` ([agent-host/lifecycle/start.md](agent-host/lifecycle/start.md)).
 
 **The OS is touched only in the OS layer** (`local/os-imports`, the same file; #1599,
 [plans/os-layer.md](plans/os-layer.md)). In the same code and its tests, importing `fs`, `fs/promises`,
@@ -184,7 +184,7 @@ agent-host (node, run standalone)         ▼
 
 - **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart) — in the packaged app through the keeper (§4.1). We do not build a stdio relay (double serialisation via Rust).
 - Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only. Browser/WebView clients must also come from the explicit dev/Tauri origin allowlist; native clients without an `Origin` header still need the token, and literal `Origin: null` is rejected.
-- In dev and prod alike, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node); despite the name it is the prod path. Moving them to Rust (invoke) is on hold until a measurement shows a bottleneck ([agent-host.md](agent-host.md) §5), and if it happens **the ports stay the same** (C2). How that move would go is in [platform-abstraction.md](platform-abstraction.md) §5.
+- In dev and prod alike, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node); despite the name it is the prod path. Moving them to Rust (invoke) is on hold until a measurement shows a bottleneck ([agent-host/store-migrations.md](agent-host/store-migrations.md)), and if it happens **the ports stay the same** (C2). How that move would go is in [platform-abstraction.md](platform-abstraction.md) §5.
 - This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
 
 ### 4.1 The keeper: the host outlives the window (#280, option C step 1)
@@ -218,11 +218,11 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
 | Background mode is a setting, off by default | Off: the last window detaching stops the keeper and host, as quitting always did. On: they keep running, and a relaunched app re-attaches. The quit question follows it: off, its main button is "Quit completely" (quitting stops everything anyway), and with a turn running "Quit and keep running" beside it turns the setting on and then quits (#1512; the keeper has no one-time keep, so the setting stays on); on, "Quit" closes the window and "Quit completely" stops the keeper, the host and every agent, terminal and running command. A Windows window on the `centralu serve` host reads as on, its "Quit completely" being `serve --stop` (#1466). The label read "Quit and stop agents" until #387, which undersold what stops. |
 | An unwatched keeper in background mode exits after 30 minutes with no window and no activity | Something has to end a host nobody is watching. Activity (a working or waiting session, a terminal, a command run) is the host's own report on its stdout; the keeper parses nothing else. A running turn or a waiting approval keeps it alive however long that takes. |
 | A keeper runs one build for its life; a window of another build attaches and offers to restart into its own (§4.4, §4.5) | Since #1895 step 4 PR 4. Until then switching moved the keeper to the window's build (§4.4) and ran the blue-green swap of §4.2. Since the host's children became its own (§4.3), an update stops them either way, so the swap and the handoff kept only the front door's address across builds. |
-| Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a macOS debug build in. Windows and Linux have no keeper (Linux since #1895 step 4 PR 7). Every case, per platform, is in [agent-host.md](agent-host.md) §4.0, decided in one place (`start_plan`). |
+| Debug builds (`pnpm app:dev`) keep the direct path | The app is the host's parent there, exactly as before. `CC_USE_KEEPER=1` opts a macOS debug build in. Windows and Linux have no keeper (Linux since #1895 step 4 PR 7). Every case, per platform, is in [agent-host/lifecycle/start.md](agent-host/lifecycle/start.md), decided in one place (`start_plan`). |
 
 The host's long-lived children are its own (§4.3): a host restart ends them, and an update stops them for
-an update, which the next host continues. The control socket, its protocol and its trust rule are in [agent-host.md](agent-host.md) §4.1 and
-[security-boundaries.md](security-boundaries.md).
+an update, which the next host continues. The control socket, its protocol and its trust rule are in [agent-host/lifecycle/keeper.md](agent-host/lifecycle/keeper.md) and
+[security-boundaries/keeper.md](security-boundaries/keeper.md).
 
 ### 4.2 The front door (#280, option C step 3)
 
@@ -237,7 +237,7 @@ Codex Centralu tools bridge connect there.
 | While no host is ready, a new connection is held (up to 45 s), not refused | A client that reconnects at once lands on the next host as soon as it is up, instead of failing and backing off. Measured: a client cut by a swap was greeted by the new host 84–86 ms later. |
 | A relay whose peer refuses its bytes for 30 s ends (#392) | Writes are blocking. A peer that stopped reading (a stopped bridge, a hung client) held its relay thread and descriptors until the next swap, and blocked every keeper handoff, since a freeze waited for each relay to finish its copy (both gone since #1895 step 4 PR 4; the bound stays). A live client reads within that; the bridge reconnects on its next call. |
 | The Codex bridge is given the front door | Its environment is read once; only an address that outlives the host survives its restart (`keeper-integration.mjs`, `front-door` scenario). The bridge fails the calls waiting on a socket that closed and reconnects on the next call. |
-| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host by a stop for an update (a swap's drain did it until #1895 step 4 PR 5; [agent-host.md](agent-host.md) §4.2), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
+| App views are addressed through the front door too, with an HTTP secret derived from the keeper's token | The iframe keeps its address; the next host behind the door must accept it. Open view instances are handed to the next host by a stop for an update (a swap's drain did it until #1895 step 4 PR 5; [agent-host/lifecycle/front-door.md](agent-host/lifecycle/front-door.md)), and the window asks for a view's address again after a resync, reloading it only if the address changed. |
 
 The drain's 10 s bound (`host.stop {ifIdle}`) came from a real store: assistant tools took at most 0.2 s and app tools at most 5.6 s, while draining every
 tool was never an option (p99 78 s, max 4.5 h).
@@ -270,7 +270,7 @@ them for an update: the host lists the turns, terminals and Run commands it ends
 turns with Centralu's note and opens the terminals and Run commands again ("Apply now" asks the keeper to stop the
 host for an update and exit, and the relaunched window starts the new build's keeper through the shell). A crash
 ends them with the host, and a turn in flight shows stopped with Continue. Supervision, background mode, credential
-issuance and the front door stay with the keeper. The details are in [agent-host.md](agent-host.md) §4.3 and §4.5.
+issuance and the front door stay with the keeper. The details are in [agent-host/lifecycle/children.md](agent-host/lifecycle/children.md) and [agent-host/lifecycle/updates.md](agent-host/lifecycle/updates.md).
 
 **Leaving has one mode.** Every ending is a stop: sessions, terminals and commands stop with the host. The keeper
 asks for it by a line on the host's stdin, plain when it is stopping for good ("Quit completely", "Restart
@@ -349,7 +349,7 @@ agent-host / tauri ─┴─→ NormalizedEvent stream
 | ui | Playwright on the core flows only (web dev mode + mock platform) | The bonus of developing in a browser |
 | dependency rules | eslint-plugin-boundaries + dependency-cruiser in CI | Enforce §2 by machine, not by document |
 | types | `tsc` strict, and typescript-eslint's type-aware rules in `pnpm lint`; what predates them is listed per file in `tooling/lint-allowlist/` and only shrinks (`tooling/type-aware-lint.test.ts`, #1339) | A cast on a CLI's message hid a crash the compiler would have refused (`/compact`, #1339) |
-| keeper (§4.1–4.4) | The real binary and host, driven by `scripts/keeper-*integration.mjs`; in CI on macOS without models ([agent-host.md](agent-host.md) §4.1) | Startup order, adoption and handoff only fail with real processes: #329's crash on every restart that held a terminal passed every unit and e2e test (#348) |
+| keeper (§4.1–4.4) | The real binary and host, driven by `scripts/keeper-*integration.mjs`; in CI on macOS without models ([agent-host/lifecycle/keeper.md](agent-host/lifecycle/keeper.md)) | Startup order, adoption and handoff only fail with real processes: #329's crash on every restart that held a terminal passed every unit and e2e test (#348) |
 
 ## 7. The connection to M0
 

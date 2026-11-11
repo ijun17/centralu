@@ -59,7 +59,7 @@ export function cacheTooltipLine(cache: CacheStats | undefined): string | null {
   return rate === null ? `Cache: no requests · ${name}` : `Cache hit ${percentOf(rate)}% · ${name}`
 }
 
-/** What each rebuild cause is called on screen (`RebuildCause`, docs/agent-host.md §6.1) */
+/** What each rebuild cause is called on screen (`RebuildCause`, docs/agent-host/prompt-cache.md) */
 export const REBUILD_CAUSE_LABEL: Readonly<Record<string, string>> = {
   cold_start: 'first request',
   subagent: 'subagent start',

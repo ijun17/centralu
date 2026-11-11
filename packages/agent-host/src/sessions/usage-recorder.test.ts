@@ -14,7 +14,7 @@ function setup(now = { at: T0 + 5 * 60_000 }) {
   return { store, rec, now }
 }
 
-describe('UsageRecorder requests (docs/agent-host.md §6.2)', () => {
+describe('UsageRecorder requests (docs/agent-host/usage.md "Usage over time")', () => {
   it('sums the requests of an hour into one bucket per session, project, tool and model, and writes it once', () => {
     const { store, rec } = setup()
     rec.request(src, { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000, outputTokens: 70, cacheTtl: '1h' }, rebuild)

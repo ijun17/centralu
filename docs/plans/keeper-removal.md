@@ -151,7 +151,7 @@ measured releases).
 
 Linux has no permission model to keep, so the shell's reason for the keeper does not apply. A Linux window runs from
 its AppImage's mount, whose path changes at every launch, so the window check can accept only the window that started
-the keeper ([security-boundaries.md](../security-boundaries.md), "The keeper's control socket"), and the keeper would
+the keeper ([security-boundaries/keeper.md](../security-boundaries/keeper.md)), and the keeper would
 need its carried copy and AppImage code to outlive the mount. The Linux keeper never ran by default on a desktop. Moving
 it there would add a path for a feature no Linux user has today. If background mode is ever wanted on Linux, the small
 keeper is the place, from a known point.
@@ -182,7 +182,7 @@ keeper is the place, from a known point.
 The "a step may not break the previous build" rule was written for the swap's rollback, but three readers of a newer
 store remain without it:
 
-1. **A person going back a release**, the reason [agent-host.md](../agent-host.md) §5.1 gives first.
+1. **A person going back a release**, the reason [agent-host/store-migrations.md](../agent-host/store-migrations.md#migration-steps-expand-then-contract-292) gives first.
 2. **A hub's automatic rollback of a linked machine.** When a new version does not say hello within 30 s, or a dev
    build cannot read the store, `links/update.ts` puts the previous version back on the store the new one may have
    migrated. That is the swap's reason, still alive on remotes.
@@ -197,8 +197,8 @@ for good: deleting it would leave a step owed and never run.
 ## 4. The pull requests
 
 Every PR after the doc lands only after the `keeper-holding-last` tag. Each one updates in the same PR the documents
-for what it removes: agent-host.md §4.0 to §4.5, architecture.md §4.1 to §4.5, domain-model.md's keeper rows,
-security-boundaries.md, runtime-lessons.md and the Korean mirrors. Line counts are estimates and include tests.
+for what it removes: agent-host/lifecycle/README.md, architecture.md §4.1 to §4.5, domain-model.md's keeper rows,
+security-boundaries/README.md, runtime-lessons/README.md and the Korean mirrors. Line counts are estimates and include tests.
 
 | PR | Deletes | Moves or changes | Must pass | Real-environment check | ≈ lines out |
 |---|---|---|---|---|---|
@@ -237,7 +237,7 @@ So that the removal deletes the switch instead of leaving two paths:
 
 - **The switch is one fact in the keeper, read at one site:** whether `server/start.rs` starts the children service
   and `server/host.rs` tells the host about it. Nothing in the host and nothing in `start_plan`: a host whose keeper
-  offers no children service already spawns its own and stops them at every ending (agent-host.md §4.3), and the
+  offers no children service already spawns its own and stops them at every ending (agent-host/lifecycle/children.md), and the
   topology (shell, keeper, host) does not change. PR 2 deletes the fact with the service.
 - **The handover from a holding keeper, as step 3 built it (#2055).** A host of 0.1.0-beta.48 or earlier cannot be told to
   stop for an update by its keeper (it takes the stdin stop line only from a window, and its drain hands the children over),

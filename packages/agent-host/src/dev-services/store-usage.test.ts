@@ -1,5 +1,5 @@
 /**
- * The tables behind usage over time (v62, docs/agent-host.md §6.2): an expand step, and the upserts the recorder uses.
+ * The tables behind usage over time (v62, docs/agent-host/usage.md "Usage over time"): an expand step, and the upserts the recorder uses.
  */
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'

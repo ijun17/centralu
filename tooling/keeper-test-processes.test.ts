@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const s of servers.splice(0)) await new Promise((r) => s.close(r))
 })
 
-/** What a socket path may be on macOS (`sun_path`); Linux allows 107. Why: `docs/runtime-lessons.md` LK7. */
+/** What a socket path may be on macOS (`sun_path`); Linux allows 107. Why: `docs/runtime-lessons/single-instance-and-supervision.md` LK7. */
 const SOCKET_PATH_MAX = 103
 
 /** A keeper socket that answers each line with `answer(request, socket)`; a socket file in `dir`, a named pipe on Windows */

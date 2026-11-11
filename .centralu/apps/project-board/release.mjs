@@ -614,7 +614,7 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions, registry
 // --- approve ------------------------------------------------------------------------------------------
 
 // approve with wait (#1035): how long it may wait for the gate by default and at most, and how often it
-// reads it again. Centralu keeps the call alive while it reports progress (docs/apps.md §5).
+// reads it again. Centralu keeps the call alive while it reports progress (docs/apps/trust-lifecycle-calls.md "One call path").
 const APPROVE_WAIT_MINUTES = 45
 const APPROVE_WAIT_MAX_MINUTES = 60
 // PROJECT_BOARD_CI_POLL_MS: for the tests only

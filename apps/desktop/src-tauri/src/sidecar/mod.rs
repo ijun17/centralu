@@ -6,7 +6,7 @@
 //! and prod share the same path.
 //!
 //! Two ways to get there (#280, option C step 1); which one is `start_plan::plan`'s answer, and
-//! docs/agent-host.md §4.0 lists it per platform:
+//! docs/agent-host/lifecycle/start.md lists it per platform:
 //!   - **Keeper**: the app finds or launches the keeper — the `centralu-keeper` executable next to
 //!     its own (#440), detached into its own session — and attaches to it over its control socket.
 //!     A macOS release first asks the shell to start it (`crate::shell`, thin-shell plan §6): the

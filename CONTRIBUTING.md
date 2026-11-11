@@ -134,7 +134,7 @@ things, but deleting for good, trusting, installing and answering the app's own 
 app window's. Such a click raises a card in the app's window, or is refused. A loopback port is
 not per user: on a machine with other users, any of them can read the credential from the page
 and every conversation with it, so use this on a single-user machine only. See
-[security boundaries](docs/security-boundaries.md#local-transport).
+[security boundaries](docs/security-boundaries/local-data-and-transport.md#local-transport).
 
 For the real app rather than the browser:
 
@@ -235,7 +235,7 @@ a lower becomes the top, mark it ready (`gh pr ready <n>`): that starts its CI. 
 
 CI's full tier also runs the keeper's end-to-end scripts on macOS, the parts that need no model and
 no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
-[docs/agent-host.md](docs/agent-host.md) §4.1).
+[docs/agent-host/lifecycle/keeper.md](docs/agent-host/lifecycle/keeper.md)).
 
 CI's full tier runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
@@ -439,7 +439,7 @@ Then ask these against your change. Put anything you could not check in **Not ex
 - **Does an adapter change rest on what the tool really sends?** A fix tested on a fake's value passed
   every test and did nothing on the real Codex, which answers another status
   ([#2031](https://github.com/ijun17/centralu/pull/2031)). Add or cite a recording of a real run
-  ([agent-host.md §3](docs/agent-host.md#3-procedure-for-adding-a-new-tool-c3--the-reason-this-document-exists) step 3).
+  ([agent-host/adapters/adding-a-tool.md](docs/agent-host/adapters/adding-a-tool.md) step 3).
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
@@ -454,7 +454,7 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 
 - **Two builds on one store.** An older build opens the store a newer one wrote: the person goes
   back a release, or a linked machine's update is rolled back (`Store.migrate()`,
-  [docs/agent-host.md](docs/agent-host.md)). What does each of them do with what the other wrote?
+  [docs/agent-host/store-migrations.md](docs/agent-host/store-migrations.md)). What does each of them do with what the other wrote?
 - **Link loss and reconnect.** The window, a remote or a child loses its connection in the middle
   of this and comes back. What is resent, what is lost, what is done twice?
 - **An older build reading what this one writes.** A field, a message or a file this change adds,
@@ -474,9 +474,9 @@ read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
 |---|---|---|
-| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries.md`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
+| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries/`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
 | light | everything no rule names, and anything in an auto folder of a kind its rule does not list: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
-| deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
+| deep | the store and migrations, `docs/security-boundaries/`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
 | person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
 
 The author runs that review before saying done and fixes what it finds; nobody relays review

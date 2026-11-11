@@ -8,7 +8,7 @@ export class StepsV62 extends MigrationRange {
         to: 62,
         breaksOlderReaders: false,
         /**
-         * Usage over time (docs/agent-host.md §6.2): the limit windows' readings and the tokens per hour.
+         * Usage over time (docs/agent-host/usage.md "Usage over time"): the limit windows' readings and the tokens per hour.
          *
          * `usage_readings`: one row per change of a window's percent or reset time, per tool, account and window
          * (`window_id`, with the `scope` of a per-model window and its `label` as the tool names them)

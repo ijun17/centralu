@@ -19,7 +19,7 @@ import type { SessionApps } from './contract/session-apps.js'
 import type { AdapterSurface } from './contract/surface.js'
 
 /**
- * The adapter contract (docs/agent-host.md §2).
+ * The adapter contract (docs/agent-host/adapters/contract.md).
  *
  * Rule: an external SDK type must not step even one foot outside adapters/<tool>/ (anti-corruption).
  *
@@ -315,7 +315,7 @@ export type InputObserver = {
   fail(error: Error): void
   /**
    * The tool took the input: Codex answered `turn/start`, Claude started a turn for it. Before `complete`, which waits for the turn to be
-   * recorded. The mailbox's delivery counts a wake as delivered from here, not from the write (docs/agent-host.md §4.6.3)
+   * recorded. The mailbox's delivery counts a wake as delivered from here, not from the write (docs/agent-host/lifecycle/turn-endings-and-mail.md "The mailbox's delivery in the host")
    */
   accepted?(): void
 }

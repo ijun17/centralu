@@ -18,7 +18,7 @@ import { ADOPTION_MARK, UserAppAdoption, adoptedProjectOf, adoptedUserApp } from
 /**
  * Existing user-folder apps become projects in place (#1141, docs/plans/root-apps.md §4). Each item kept under the
  * old key `_user/notes` has a test of its own: after the move it is found under `<project id>/notes`, and what a
- * previous build reads by the old key is still there (a swap may hand back to it, docs/agent-host.md §5.1).
+ * previous build reads by the old key is still there (a swap may hand back to it, docs/agent-host/store-migrations.md "Migration steps: expand, then contract").
  */
 
 let root = ''

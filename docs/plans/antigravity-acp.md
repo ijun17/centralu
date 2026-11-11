@@ -2,7 +2,7 @@
 
 Proposed 2026-10-27, with the host side built in the same pull request; the screens come in the next one and are the
 owner's call. Replaces the `agy -p` design ([antigravity-adapter.md](antigravity-adapter.md), whose hook path is being
-retired in its own pull request). A record like the rest of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md)
+retired in its own pull request). A record like the rest of `plans/`, so not mirrored in Korean; [agent-host/adapters/README.md](../agent-host/adapters/README.md)
 and [protocol.md](../protocol.md) gain the lasting parts.
 
 Evidence: a spike on macOS against the agent (ACP registry `antigravity-acp` 1.4.3, `darwin-aarch64`, 2026-10-27), with
@@ -163,7 +163,7 @@ So:
   is told by the settings alone (§4.4).
 - **Windows, Linux, and a Mac without a usable Keychain**: the token is the file in `GEMINI_HOME`, and the agent can read
   it without asking (its viewer and search do not ask, spike §6), as Codex can read its `auth.json` and Claude Code its
-  credentials file on Linux. Said in [security-boundaries.md](../security-boundaries.md).
+  credentials file on Linux. Said in [security-boundaries/local-data-and-transport.md](../security-boundaries/local-data-and-transport.md#antigravitys-agent-and-its-token-59).
 - The agent's own viewer and search read files without asking, as under Claude's Safe; its subagents and workflows run
   once their request (`Run invoke_subagent?`, kind `other`) is allowed: at once under Auto, and under Safe, Normal and
   Edits a card every time, since a call of kind `other` has no rule key and no saved "always" rule can allow it (as for

@@ -40,7 +40,7 @@ Every preset puts the conversation on the floor, with what rests on it (the comp
 approval and question cards) on the raised step and drawn with a hairline border, the way the
 project-board app draws its columns and cards ([#362](https://github.com/ijun17/centralu/issues/362)).
 So a session panel and an app panel beside it on the grid stand on the same ground, and an app's
-view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-theme-in-a-view-312)).
+view is told the steps the conversation uses ([apps/view-theme-layout-drag.md](apps/view-theme-layout-drag.md#the-theme-in-a-view-312)).
 `surface-reading` and `surface-reading-raised` still exist, so a custom theme can give the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
@@ -209,7 +209,7 @@ textarea's computed line height in pixels and copies it to its mirror, so it nee
 
 ## Apps
 
-App views get the theme too ([apps.md](apps.md) §6.5): the side as the MCP Apps `theme`, all 76
+App views get the theme too ([apps/view-theme-layout-drag.md](apps/view-theme-layout-drag.md#the-theme-in-a-view-312)): the side as the MCP Apps `theme`, all 76
 standard style variables mapped from these tokens, and in the `centralu` extension the signal colour
 and the scrollbar tokens. Every switch and custom-theme edit reaches open views
 without reloading them, and so does a change of font or line height: `--font-sans`, `--font-mono` and

@@ -239,7 +239,7 @@ class Driver {
     this.recorder?.mark(key, step, event)
     if (this.recorder && !LIVE) this.recorder.queue(...(opts.fake ?? []))
     const events = await this.host.turn(sessionId, text)
-    // A Codex thread restarts through resume when a turn that attached or detached an app ends (apps.md §9.4)
+    // A Codex thread restarts through resume when a turn that attached or detached an app ends (apps/other-projects-apps.md)
     if (this.cli === 'codex') await new Promise((r) => setTimeout(r, 3000))
     let rows: RequestRow[]
     let calls: Call[]

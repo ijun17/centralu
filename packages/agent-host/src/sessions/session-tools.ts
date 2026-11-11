@@ -109,7 +109,7 @@ export class SessionTools {
 
   /**
    * Whether `readerId` can read `targetId` with read_session: its profile has the tool and its seat's read rule lets it (`CentraluTools.mayRead`).
-   * What a stop notice may quote of a stopped session to it (security-boundaries.md): nothing it could not read anyway
+   * What a stop notice may quote of a stopped session to it (security-boundaries/inter-agent-content.md): nothing it could not read anyway
    */
   readsSession(readerId: string, targetId: string): boolean {
     const m = this.host.meta.get(readerId)

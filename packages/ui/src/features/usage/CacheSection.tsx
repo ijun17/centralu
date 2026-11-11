@@ -6,7 +6,7 @@ import { Badge } from '../../components/Badge.jsx'
 import { formatCount } from '../../app/format.js'
 
 /**
- * The prompt cache, in the usage dropdown (docs/agent-host.md §6.1).
+ * The prompt cache, in the usage dropdown (docs/agent-host/prompt-cache.md).
  *
  * A rebuild (a request that wrote its prompt to the cache again) is what costs: it is paid at the write price and
  * counts toward the limit the donut above shows. So the section answers three questions in reading order: how much

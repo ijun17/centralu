@@ -192,7 +192,7 @@ const FILES = [
   'commands.ts',
   'rpc-client.ts',
   'relay.rs',
-  'agent-host.md',
+  'agent-host-notes.md',
   'panel.spec.ts',
   'history.ts',
   'scroll.ts',

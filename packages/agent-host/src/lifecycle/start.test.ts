@@ -1,7 +1,7 @@
 /**
- * The host's start as data (docs/runtime-lessons.md ST16, HO2, HO3, HO6, HO11): the order
- * `main.ts` must keep, the guard that holds it to it, the refusal, the gate for early frames and the
- * launcher's variables.
+ * The host's start as data (docs/runtime-lessons/who-starts-what.md ST16,
+ * docs/runtime-lessons/host-contract.md HO2, HO3, HO6, HO11): the order `main.ts` must keep, the guard that
+ * holds it to it, the refusal, the gate for early frames and the launcher's variables.
  */
 import { describe, expect, it } from 'vitest'
 import { Gate } from './gate.js'

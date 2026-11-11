@@ -112,7 +112,7 @@ export function classifySource(raw: string, isAbs: (path: string) => boolean = i
  * Where an https address must not point — this machine (loopback), link-local (cloud metadata
  * addresses live here), and unspecified addresses. A download happens only after the person clicks,
  * but what they clicked is the address the link gave. Where a named host actually resolves to is
- * never checked (a documented limit in docs/security-boundaries.md).
+ * never checked (a documented limit in docs/security-boundaries/imported-apps.md).
  */
 function httpsProblem(url: URL): string | null {
   if (url.protocol !== 'https:') return `Only https links can be downloaded: ${url.href}`
@@ -235,7 +235,7 @@ class Tally {
  * checks again that it is not a link (`O_NOFOLLOW`) and that it is still inside the root (the path
  * guard — in case a parent turned into a link in the meantime), then reads through the open
  * descriptor. A race where the same user swaps it out in that window still remains (the same limit
- * documented under "Project files" in docs/security-boundaries.md).
+ * documented under "Project files" in docs/security-boundaries/desktop.md).
  */
 function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFiles {
   const t = new Tally(limits)

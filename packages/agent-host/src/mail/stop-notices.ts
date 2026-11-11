@@ -141,7 +141,7 @@ export class StopNotices {
 
   /**
    * Whether a stop notice to `sender` may quote the words of `stopped`'s turn `turnSeq` (its latest when absent): the one rule every stop notice
-   * to a session quotes by (security-boundaries.md), the mailbox's and the older report path's (`MailHooks.quotes`). All of it must hold:
+   * to a session quotes by (security-boundaries/inter-agent-content.md), the mailbox's and the older report path's (`MailHooks.quotes`). All of it must hold:
    * - `sender` is a session that can read `stopped` with read_session (`mayRead`, that tool's own rule);
    * - the turn is the session's latest (no turn since), and `sender`'s own message started it: a mail the mailbox delivered, or work `sender`
    *   gave it (a start_agent task, an agent_session send: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the

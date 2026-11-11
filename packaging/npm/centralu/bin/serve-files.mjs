@@ -485,7 +485,7 @@ export const PAIRED_VIA = ['pair', 'window', 'handover']
  * same pairer as before and are not marked: marked at every routine pairing, the flag meant nothing. A `--pair window`
  * taking the window's place, or the window's next start taking that one's, is marked. What this cannot tell is two
  * askers of the same way: a program's `--pair hub:<name>-<key>` against that hub's own. The hub's row tells that one
- * by itself (`hubsName`, and its own credential gone), docs/security-boundaries.md.
+ * by itself (`hubsName`, and its own credential gone), docs/security-boundaries/remote-host.md.
  */
 export function pairServe(dataDir, label, platform = process.platform, now = Date.now(), via = 'pair') {
   ensureServeState(dataDir, platform, now)

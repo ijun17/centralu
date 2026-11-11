@@ -31,7 +31,7 @@ fn env(f: Facts, e: Env) -> Facts {
 const USE_KEEPER: Env = Env { use_keeper: true, host_cmd: Var::Unset, keeper_host_source: Var::Unset, shell_unpinned: false };
 
 /**
- * Every row of docs/agent-host.md §4.0, in the order the table lists them. Each row is what the code
+ * Every row of docs/agent-host/lifecycle/start.md, in the order the table lists them. Each row is what the code
  * did before this module existed (`use_keeper`, `shell_resources`, `bundled_host_dir`,
  * `direct_launcher`, `launch_keeper` and `exe::exec_target`), less the compatibility rows #461
  * removed; `the_plan_is_the_code_it_replaced` below checks every combination against a transcription

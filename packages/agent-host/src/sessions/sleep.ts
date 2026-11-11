@@ -2,7 +2,7 @@ import type { NormalizedEvent, SessionInfo, SleepPolicy, ToolName } from '@cc/pr
 import type { SessionIdle } from '../idle.js'
 
 /**
- * Putting idle sessions to sleep (#568, docs/agent-host.md §4.6.1).
+ * Putting idle sessions to sleep (#568, docs/agent-host/lifecycle/agent-cli-updates.md "Putting idle sessions to sleep").
  *
  * Every session runs its own agent process, and an idle one keeps its memory: a Claude process was 240-300 MB after a
  * few turns and grew while idle (a three-day Opus session was 814 MB, #561). Ending it frees all of it, and resuming

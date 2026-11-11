@@ -86,7 +86,7 @@ full tier on Linux showed.
 drain check) resolves to the project's root app (`ExternalApps.resolve`), with its trust and rules, while
 the user folder has no app of that id and the project still exists; it answered "no such app" before.
 
-**A previous build during a swap** (agent-host.md §5.1) still finds the folder in `<data>/apps/` and
+**A previous build during a swap** (agent-host/store-migrations.md "Migration steps: expand, then contract") still finds the folder in `<data>/apps/` and
 keeps working on the `_user` copies, which this build leaves in place; it shows the app's sessions under
 the new project and misses the runs moved to it. No table or column changes. Removing the `_user`
 copies is a later release's step.
@@ -142,7 +142,7 @@ sessions, as for any project app and as the permission card says; `git.status` r
 | Restoring a root app's version outside git | Copies the version back, deletes nothing, refused if the copy taken first failed | As a user-folder app (deletes what the version lacks): the folder is the person's whole project |
 | When user-folder apps move | After the host is ready, sessions moved live | At start: a host failing before ready leaves the previous build serving on old copies, marked done |
 | A folder named apart from its manifest id | Not adopted, stays listed with its reason | Adopted: two folders with one id (a backup copy) would both become runnable |
-| Where the note lives | `docs/plans/` (a record, English only) and the parts that last in `apps.md` / `domain-model.md` | A new design document: most of it is a one-time migration |
+| Where the note lives | `docs/plans/` (a record, English only) and the parts that last in `apps/README.md` / `domain-model.md` | A new design document: most of it is a one-time migration |
 
 ## Not handled yet
 

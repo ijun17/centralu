@@ -18,7 +18,7 @@ const GROUPS: { by: Extract<UsageHistoryBy, 'session' | 'project'>; label: strin
 ]
 
 /**
- * The last seven days, in the usage dropdown (docs/agent-host.md §6.2): the weekly window's percent over time, from the
+ * The last seven days, in the usage dropdown (docs/agent-host/usage.md "Usage over time"): the weekly window's percent over time, from the
  * readings the host stored, and the sessions or projects that used the most tokens with their cache hit rate.
  *
  * Asked once when the dropdown opens, and again when the list is regrouped. A host that predates the question (or a

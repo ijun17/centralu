@@ -9,7 +9,7 @@ export type WindowRpc = (method: string, params: unknown, ctx?: { client: number
 
 /**
  * The methods the Assistant's settings and trash commands may call, and no others. A list, not "any method": the
- * assistant reaches what #1219's inventory (docs/agent-host.md §1.4) marks as its own, and a method added to the
+ * assistant reaches what #1219's inventory (docs/agent-host/assistant/window-parity.md "The inventory behind #1219") marks as its own, and a method added to the
  * protocol is not reachable from here until it is named in a change that says why.
  */
 export const WINDOW_METHODS = [

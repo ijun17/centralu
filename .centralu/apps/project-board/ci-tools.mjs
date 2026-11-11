@@ -132,7 +132,7 @@ async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
 
 /**
  * Tells the caller the call is alive. Centralu ends a call after 10 minutes without progress
- * (docs/apps.md §5); the message shows under the session's tool card.
+ * (docs/apps/trust-lifecycle-calls.md "One call path"); the message shows under the session's tool card.
  */
 export function progress(ctx, n, message) {
   console.error(`[project-board] ${message}`)

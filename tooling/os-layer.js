@@ -116,7 +116,7 @@ const CHECKED = /^(packages\/[^/]+\/src\/.+|apps\/[^/]+\/src\/.+|packaging\/.+)\
 export const isChecked = (file) => CHECKED.test(file)
 
 /**
- * The repository's own apps (`.centralu/apps/`, docs/apps.md): not held to the rule (an app is plain Node with no
+ * The repository's own apps (`.centralu/apps/`, docs/apps/README.md): not held to the rule (an app is plain Node with no
  * installs), but they run on the person's machine, on any OS, so a test that reaches their OS use runs everywhere.
  */
 export const isRepoApp = (file) => file.startsWith('.centralu/apps/')

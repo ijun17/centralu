@@ -1,6 +1,6 @@
 # Stored shapes another build reads (#384)
 
-The store's tables are one shape that two builds share. [agent-host.md](agent-host.md) §5.1 covers them: steps that
+The store's tables are one shape that two builds share. [agent-host/store-migrations.md](agent-host/store-migrations.md#migration-steps-expand-then-contract-292) covers them: steps that
 add first and remove later, and `min_reader_version`. Many other shapes are stored or exchanged the same way: JSON
 rows in `app_settings`, JSON columns, files in the data folder, files a person or another build writes, and the lines
 and frames between processes. An older and a newer build read each of them during a host swap (the previous host
@@ -9,7 +9,7 @@ two machines on different releases.
 
 This document is the inventory: every such shape, who owns it, where it is parsed, and what an added field, a
 removed field and a broken value do **today**. It is a record of the code, kept with `file:line` so a reader can check
-it. When a line moves, the symbol named next to it still finds it. Like [runtime-lessons.md](runtime-lessons.md), it is
+it. When a line moves, the symbol named next to it still finds it. Like [runtime-lessons/](runtime-lessons/README.md), it is
 English only.
 
 ## The rules
@@ -66,7 +66,7 @@ this build cannot read, and sets a row that is not a list aside, naming it, befo
 
 | Shape | Where | Owner | Parser | Added | Removed | Broken | Tests |
 |---|---|---|---|---|---|---|---|
-| App manifest | `centralu.app.json` in an app folder | agent-host apps | `parseManifest` `agent-host/src/apps/external/manifest.ts:234` | an unknown field is a warning ("unknown field, ignored: …"); an unknown `uses.host` capability is a warning and refused when asked; a `view.span` out of bounds is clamped or ignored with a warning; another `manifestVersion` is an error naming both versions; an unknown `view.origin` or a malformed `uses` stops the app with an error (deliberate: `docs/apps.md`) | optional fields default (`view.origin` opaque, `uses` empty, `server.args` empty) | "centralu.app.json is not JSON: …" / "… must be a JSON object", shown in the app list with the app | `manifest.test.ts`, `discovery.test.ts` (all three) |
+| App manifest | `centralu.app.json` in an app folder | agent-host apps | `parseManifest` `agent-host/src/apps/external/manifest.ts:234` | an unknown field is a warning ("unknown field, ignored: …"); an unknown `uses.host` capability is a warning and refused when asked; a `view.span` out of bounds is clamped or ignored with a warning; another `manifestVersion` is an error naming both versions; an unknown `view.origin` or a malformed `uses` stops the app with an error (deliberate: `docs/apps/what-an-app-is.md`) | optional fields default (`view.origin` opaque, `uses` empty, `server.args` empty) | "centralu.app.json is not JSON: …" / "… must be a JSON object", shown in the app list with the app | `manifest.test.ts`, `discovery.test.ts` (all three) |
 | An app's consents in a session | `app_settings.session_apps:<sessionId>` | agent-host sessions | `AppAccess.stored` / `isRecord` `agent-host/src/sessions/app-access.ts:357`, `:368` on `listSetting` | an element with a consent this build does not know grants nothing, and is kept when the list is written back | — | empty list, named on stderr; the next write sets it aside as `session_apps.unreadable:<sessionId>`, which goes with the session | `app-access.test.ts`, `store-purge-settings.test.ts` |
 | An app shared with other projects | `app_settings.app_shared:<appKey>` | agent-host sessions | `sessions/app-access.ts:107` | anything but `1` is not shared: a refusal | not shared | not shared | `app-access.test.ts` (all three) |
 | App permissions | `app_permissions` | agent-host apps | `PermissionRecords` `agent-host/src/dev-services/store/permissions.ts:71`; `desk.ts:587` | any decision but `allow` refuses, without asking, and the record stays | a decision recorded for an older `uses` asks again | (rows) | `app-capabilities.test.ts` (all three) |

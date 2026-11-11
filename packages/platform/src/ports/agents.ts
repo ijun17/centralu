@@ -193,7 +193,7 @@ export interface AgentPort {
   /**
    * A local image one of this session's replies names, read by the host the session runs on (`messages.image`). The
    * window cannot load a file path itself; the host reads only a path a reply wrote, only a real PNG, JPEG, GIF or WebP,
-   * and at most 10 MB, and says why when it does not (docs/security-boundaries.md, "Images a reply names").
+   * and at most 10 MB, and says why when it does not (docs/security-boundaries/desktop.md "Images a reply names").
    */
   messageImage(sessionId: string, path: string): Promise<MessageImage>
   capabilities(tool: ToolName, machine?: MachineRef): Promise<AdapterCapabilities>
@@ -209,7 +209,7 @@ export interface AgentPort {
    */
   usage(tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }): Promise<UsageAnswer>
   /**
-   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host.md §6.2):
+   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host/usage.md "Usage over time"):
    * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.
    */
   usageHistory(

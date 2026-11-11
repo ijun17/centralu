@@ -8,7 +8,7 @@ import { listSetting } from '../dev-services/store/settings.js'
 /**
  * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
  *
- * Decision 4 (apps.md §9.1) gives a project's session its own project's apps and nothing else. The
+ * Decision 4 (apps/attaching.md "Which session gets which apps") gives a project's session its own project's apps and nothing else. The
  * owner's decision for #371 keeps that, and lets a session reach further **only while it needs to**:
  * it searches the apps it could attach, attaches one (its tools join this session), and detaches it
  * (they leave). An app that is not attached costs no context.

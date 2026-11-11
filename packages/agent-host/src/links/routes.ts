@@ -94,7 +94,7 @@ const historyResult: ResultFix = (r, q) => {
     ),
   }
 }
-// The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
+// The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host/prompt-cache.md)
 const usageResult = fields({ cache: fields({ windows: each(fields({ sessions: each(fields({ sessionId: id })) })) }) })
 
 /**

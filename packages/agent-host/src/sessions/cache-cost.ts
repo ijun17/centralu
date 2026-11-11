@@ -1,7 +1,7 @@
 import type { CacheBilling } from '../adapters/contract.js'
 
 /**
- * What the prompt cache costs, as ratios to the price of an uncached input token (#1492, docs/agent-host.md §6.1). The hit rate is by
+ * What the prompt cache costs, as ratios to the price of an uncached input token (#1492, docs/agent-host/prompt-cache.md). The hit rate is by
  * tokens, which hides that a write costs far more than a read: weighted by these ratios the same traffic reads 96% by tokens and has
  * writes at about 43% of what the cache cost. Ratios only, never money: the prices move, the ratios between a provider's own kinds of
  * input have not.

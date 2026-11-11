@@ -402,7 +402,7 @@ export const CENTRALU_TOOLS = [
    */
   /*
    * #1219, fourth slice: housekeeping and reads. Rare commands; none asks. Stopping a session's background task, marking
-   * it read and reordering the sidebar are the person's (docs/agent-host.md section 1.4).
+   * it read and reordering the sidebar are the person's (docs/agent-host/assistant/window-parity.md "The inventory behind #1219").
    */
   {
     name: 'rename_session',
@@ -529,7 +529,7 @@ export const CENTRALU_TOOLS = [
   },
   {
     /*
-     * Usage over time (docs/agent-host.md §6.2). A rare command (RARE_COMMANDS): asked when work is paced against a
+     * Usage over time (docs/agent-host/usage.md "Usage over time"). A rare command (RARE_COMMANDS): asked when work is paced against a
      * limit or a change is weighed, so it costs its line in centralu_commands, not a definition in every request.
      */
     name: 'usage_history',
@@ -618,7 +618,7 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Centralu
  * send_to_session — a role this seat does not have, and words an ordinary session would read as
  * a hint to start directing. They are also the cost: these schemas ride in every session's
  * context on every turn, so each word was weighed against a measurement (haiku, CLI 2.1.289,
- * scripts/probe-reader-tools.mts; the table is in docs/agent-host.md):
+ * scripts/probe-reader-tools.mts; the table is in docs/agent-host/tool-profiles.md):
  *
  *   - Each tool costs about 55 tokens before its first word (its name and schema envelope:
  *     list_sessions, with no arguments and a one-line description, cost 75), so the tool that
@@ -710,7 +710,7 @@ export const DELEGATE_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /**
- * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host.md.
+ * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host/delegation/start-agent.md.
  * 400 until #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values).
  */
 export const DELEGATE_BUDGET_CHARS = 450
@@ -862,7 +862,7 @@ export const COMPACT_BUDGET_CHARS = 610
  * Three tools rather than one with a mode: each one's schema is a single string, and the model picks a
  * verb by name. On Claude (Codex loads them all) find_apps is loaded and the other two wait behind
  * tool search: the result of each one names the next (`find_apps` says "attach_app", `attach_app`
- * says "detach_app"), so a model that found the first finds the rest (docs/apps.md §9.4).
+ * says "detach_app"), so a model that found the first finds the rest (docs/apps/other-projects-apps.md).
  *
  * find_apps was deferred too until #522: asked about another project's app without being told to use
  * it, haiku never searched for it (0 of 10 runs called attach_app) and called the loaded ask_project.

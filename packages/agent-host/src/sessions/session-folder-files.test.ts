@@ -4,7 +4,7 @@
  * `fs.readFile` and `fs.resolve` were keyed by the project only, so a link in a worktree session's reply opened the
  * main checkout's file: the old version of a file the agent changed, or "not found" for one only on its branch. With
  * the session named, the host reads from that session's folder and refuses anything outside it, the main checkout
- * included (docs/security-boundaries.md, "Project files and native handoff").
+ * included (docs/security-boundaries/desktop.md "Project files and native handoff").
  */
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'

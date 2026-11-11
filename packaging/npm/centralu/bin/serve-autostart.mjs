@@ -109,7 +109,7 @@ function systemdQuote(value, { dollars = false } = {}) {
 }
 
 /**
- * The `systemd --user` unit (docs/agent-host.md §4.7 has the hand-written one this follows).
+ * The `systemd --user` unit (docs/agent-host/remote/serve.md has the hand-written one this follows).
  *
  * - `serve` in the foreground: systemd is what keeps it outside any session.
  * - `KillMode=mixed`: a stop sends SIGTERM to the launcher only, which passes one to the host, which

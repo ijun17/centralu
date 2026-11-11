@@ -114,16 +114,16 @@ function stands<O extends object, P extends object>(o: O, proto: P): o is O & P 
 }
 
 /**
- * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host.md §2), so all state
+ * Session lifecycle plus persistence. Adapters hold no state (docs/agent-host/adapters/contract.md), so all state
  * tracking and storage happens here.
  */
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
   /** Every session this host knows, in sidebar order; never replaced, so a module may read it through `parts()` */
   private readonly meta = new Map<string, SessionInfo>()
-  /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
+  /** Every model request's cache figures over the last day, per tool (docs/agent-host/prompt-cache.md); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger(Date.now(), (tool) => this.adapters.get(tool)?.cacheBilling ?? 'anthropic')
-  /** The same requests summed per hour and kept, with the limit windows' readings (docs/agent-host.md §6.2) */
+  /** The same requests summed per hour and kept, with the limit windows' readings (docs/agent-host/usage.md "Usage over time") */
   private readonly usageRecorder: UsageRecorder
   /** Each model's context window as the tools reported it, for where agents compact (#1376, auto-compact.ts) */
   private readonly modelWindows: ModelWindows
@@ -741,7 +741,7 @@ export class SessionManager {
   }
 
   /**
-   * Usage over time (docs/agent-host.md §6.2): the figures an earlier run of this host stored come back into the
+   * Usage over time (docs/agent-host/usage.md "Usage over time"): the figures an earlier run of this host stored come back into the
    * cache ledger, and the recorder starts writing this run's. A store that cannot be read costs the history only.
    */
   private startUsageHistory(): void {
@@ -758,7 +758,7 @@ export class SessionManager {
     )
   }
 
-  /** `usage.history` (docs/agent-host.md §6.2): what this host stored of the limit windows and of the tokens per hour */
+  /** `usage.history` (docs/agent-host/usage.md "Usage over time"): what this host stored of the limit windows and of the tokens per hour */
   usageHistory(p: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName }): UsageHistory {
     this.usageRecorder.flush() // what is still in memory counts too
     const projects = new Map(this.store.projects.listProjects().map((x) => [x.id, x.name]))

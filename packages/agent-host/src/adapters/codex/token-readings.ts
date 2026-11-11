@@ -2,7 +2,7 @@ import { asObj, finite } from '../../json-value.js'
 import { type NormalizedEvent, type RequestInput } from '@cc/protocol'
 
 /**
- * The model request a `thread/tokenUsage/updated` closes, for prompt cache accounting (docs/agent-host.md §6.1).
+ * The model request a `thread/tokenUsage/updated` closes, for prompt cache accounting (docs/agent-host/prompt-cache.md).
  *
  * `last` is the most recent request (`ThreadTokenUsage`, generated/v2), and `total` grows with every request. A
  * notification whose `total` has not moved since the previous one repeats a request already counted (Codex sends the

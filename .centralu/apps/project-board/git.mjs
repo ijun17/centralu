@@ -1,6 +1,5 @@
 // Local git, for rebase_stack and release: run with runProgram (never a shell), with no prompts and
-// plain English messages. The app server runs as the person (docs/security-boundaries.md, "App
-// servers"), so this is their git, their credentials and their checkout; stack.mjs works in a
+// plain English messages. The app server runs as the person (docs/security-boundaries/app-servers.md), so this is their git, their credentials and their checkout; stack.mjs works in a
 // temporary worktree and release.mjs only reads and pushes by id, so the checkout itself is never touched.
 import { runProgram } from './system.mjs'
 import { resolve as resolvePath } from 'node:path'

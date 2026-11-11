@@ -4,7 +4,7 @@
 > (the keys, the transcript and the protocol fields) and slice 3 (the machine side: `--pair-key`, the host's signed
 > proof and key hello, the hand-over with limited rights) are built (§9); no hub pairs by key until slice 4. The
 > first pull request carries this document with slice 2; each later one updates it with what it built and measured. It closes
-> the residual in [security-boundaries.md](../security-boundaries.md), "The remote host", **Residual: the proof under a
+> the residual in [security-boundaries/remote-host-residuals.md](../security-boundaries/remote-host-residuals.md), **Residual: the proof under a
 > stored verifier** (#1405 review, held for the owner; owner decision 2026-10-29: do it after the #1405 stack).
 >
 > **Short version.**
@@ -630,7 +630,7 @@ Each is reviewed at the deep tier (security); each says in **Not exercised** wha
 4. **The hub side, with D2's sentence.** The key file; `--pair-key` at every link and `--key-paired` from the
    record; the record (§5.1) and the refusal, with the made credential withdrawn; the key handshake in `RemoteClient`;
    its own entry recognised by public key, and a verifier entry under its label shown as another's; the additive store
-   fields. `security-boundaries.md`: the residual rewritten as closed **from the machine's first key link**, with what
+   fields. `security-boundaries/remote-host-residuals.md`: the residual rewritten as closed **from the machine's first key link**, with what
    stays (§2), the first-link window among it.
 5. **Dropped.** It was a key-confirmed channel in case two listeners could share the host's port on Windows. The
    measurement in §4.3 shows they cannot, on Windows or WSL.

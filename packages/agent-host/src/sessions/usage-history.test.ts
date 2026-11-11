@@ -13,7 +13,7 @@ const bucket = (over: Partial<UsageBucket>): UsageBucket => ({
   requests: 1, input: 10, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, output: 0, rebuilds: 0, rebuildTokens: 0, causes: {}, ...over,
 })
 
-describe('historyRows (docs/agent-host.md §6.2)', () => {
+describe('historyRows (docs/agent-host/usage.md "Usage over time")', () => {
   const buckets = [
     bucket({ requests: 2, input: 10, cacheRead: 900, output: 5 }),
     bucket({ hour: DAY + 10 * HOUR, requests: 1, input: 1, cacheRead: 99, rebuilds: 1, causes: { expired: 1 } }),

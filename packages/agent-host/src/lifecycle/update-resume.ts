@@ -5,7 +5,7 @@ import { ENDED_MAX_AGE_MS, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
- * The turns an update of this machine cut (#1618, docs/agent-host.md §4.8 "Continuing the turns an update cut"). A linked
+ * The turns an update of this machine cut (#1618, docs/agent-host/lifecycle/continue-after-update.md "Continuing the turns an update cut"). A linked
  * hub that stops this machine's host to update it, roll it back or put the previous version back says so in its stop
  * (`centralu serve --stop` with `CENTRALU_STOP_FOR=update`, `host.stop { forUpdate }`). The stopping host then writes, as it
  * lets its sessions go, the turns it ends (`cutTurns`, idle.ts) into a list of its own in the data folder: on its own

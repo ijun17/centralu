@@ -157,7 +157,7 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
   - **The accepted gap, said plainly:** a trusted session can relay an untrusted project's text, by mail or by a task,
     after reading a session, a file, `recall`, a handoff or a fork, and nothing holds it. The receiver sees the
     sender, not the origin. The text is still framed and quoted as the sender's, and mail grants nothing (§7.5). §1.6
-    lists this for `docs/security-boundaries.md`.
+    lists this for `docs/security-boundaries/mailbox-and-requests.md`.
   - What it saves against round 3: the `session_ingress` table and `IngressRecords` (~60 store lines), `noteIngress`
     and its nine call sites (~70), `labelFor` and the label in the frame, the `read` header, the cards and the Inbox
     (~50 product, ~30 UI and protocol), the report's label (~10), and ~250 test lines; Q6 goes, and so does the
@@ -428,11 +428,11 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
 ### 1.6 Out of scope here
 
 - **#1684 item 4, `read_session` of any session except the orchestrator's.** It is a reach rule for reading
-  conversations, not mail. It goes to its own issue (filed by the orchestrator) and `docs/security-boundaries.md`'s
+  conversations, not mail. It goes to its own issue (filed by the orchestrator) and `docs/security-boundaries/mailbox-and-requests.md`'s
   read-scope section, after M3a.
 - **Finding sessions on linked machines** (`mail sessions` lists this computer only). It goes with linked mail (§14,
   "Later"), which owns how a hub lists a machine's sessions.
-- **Channels the one hold does not see** (D11, D12). M3a-host writes them into `docs/security-boundaries.md`'s mailbox
+- **Channels the one hold does not see** (D11, D12). M3a-host writes them into `docs/security-boundaries/mailbox-and-requests.md`'s mailbox
   paragraph as accepted gaps:
   - **relay through a trusted session:** a trusted session that read an untrusted project's text (a session's words
     by `read_session` or `agent_session`, an `ask_project` answer, `recall`, a file, a handoff's note, a fork's copied
@@ -649,7 +649,7 @@ These still hold, and this design does not reopen them:
 - Claude's own cross-session channel is refused for every Centralu session.
 - A mid-turn stdin message is worded "The user sent".
 
-These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, §9.6; `docs/security-boundaries.md`).
+These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, §9.6; `docs/security-boundaries/mailbox-and-requests.md`).
 
 ### 3.3 Where the code differs from the old plan (the code wins)
 
@@ -1238,7 +1238,7 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
      3. the rest.
    - At most one task per wake, and for the orchestrator one asker. The other work waits for the next turn.
    - **Not a wake of the mailbox:** the note an update's stop makes the next host send, to continue a cut turn or to tell a session
-     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host.md §4.8), goes in through
+     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host/lifecycle/continue-after-update.md), goes in through
      `deliverMail` and not through `drain`, so it is not mail-started: no `MailTurns.begin`, no `turn_seq` on any row, and the
      tool starts the turn it runs on its own, so it is recorded as the CLI's own turn (`turnStarted`, `cli: true`), not as a mail's (#1902).
      Everything else rides along.
@@ -2082,8 +2082,8 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 
 - A test that a slice adds for a behaviour change fails on main. The slice says which.
 - `pnpm verify` passes.
-- Documents change in the same PR: `docs/domain-model.md` §2.5, `docs/stored-shapes.md`, `docs/agent-host.md`,
-  `docs/security-boundaries.md`, `docs/tool-cost.md` §13 and `docs/protocol.md`, wherever the slice changes what they
+- Documents change in the same PR: `docs/domain-model.md` §2.5, `docs/stored-shapes.md`, `docs/agent-host/lifecycle/turn-endings-and-mail.md`,
+  `docs/security-boundaries/README.md`, `docs/tool-cost.md` §13 and `docs/protocol.md`, wherever the slice changes what they
   say.
 - Code comments that cite this file's old section numbers are updated to these.
 - Tests that start a host use `CC_DATA_DIR` pointed at a temporary folder.
@@ -2545,9 +2545,9 @@ and passes on its own; the stack lands together.
   refusal reasons `removed`, `trust_project`, `untrusted_project`.
 - **`packages/platform`**: the five methods in the mail port, the web client (`platform/src/web/index.ts`) and the
   mock (`platform/src/mock/mail.ts`, served from a message list).
-- **Documents:** `security-boundaries.md`, the mailbox paragraph (reach, the one hold, the refused delegations, the
+- **Documents:** `security-boundaries/mailbox-and-requests.md`, the mailbox paragraph (reach, the one hold, the refused delegations, the
   guards, and §1.6's accepted gaps);
-  `agent-host.md` (delegations write tasks; the old paths are the truth until M8); `domain-model.md` §2.5.
+  `agent-host/lifecycle/turn-endings-and-mail.md` (delegations write tasks; the old paths are the truth until M8); `domain-model.md` §2.5.
 
 **`MailToolHost`** (in `tool.ts`, implemented by the manager in `main.ts`):
 

@@ -789,7 +789,7 @@
           ),
         )
         // A card carries its link too, so it drops into a session's composer as one (Centralu's
-        // drag contract, docs/apps.md): `text/uri-list` and `text/plain`. Only a movable card
+        // drag contract, docs/apps/view-theme-layout-drag.md): `text/uri-list` and `text/plain`. Only a movable card
         // carries the item, which a column takes as a move.
         node.addEventListener('dragstart', (e) => {
           if (movable) e.dataTransfer.setData('text/x-item', item.itemId)
@@ -820,7 +820,7 @@
       // The server writes Markdown as HTML from a short list of tags (markdown.mjs). It goes in through
       // an inert <template>, and anything outside that list is removed before it reaches the page,
       // so even a renderer bug cannot run a script or load from elsewhere: the view's CSP allows
-      // inline script (docs/apps.md §6.4), so this is the second line, not the CSP.
+      // inline script (docs/apps/views.md "How a view is hosted"), so this is the second line, not the CSP.
       const TAGS = {
         P: [], BR: [], HR: [], H1: [], H2: [], H3: [], H4: [], H5: [], H6: [], STRONG: [], EM: [], DEL: [], CODE: ['class'], PRE: [],
         BLOCKQUOTE: [], UL: ['class'], OL: ['start'], LI: ['class'], INPUT: ['type', 'disabled', 'checked'], TABLE: [], THEAD: [], TBODY: [],

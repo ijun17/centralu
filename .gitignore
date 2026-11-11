@@ -19,7 +19,7 @@ spike/**/out/
 
 # What Centralu writes inside a project while dogfooding with this repository: handoff notes
 # (.centralu/handoff/<session id>.md, #104) and the like. Not for the repository.
-# The exception is project apps (.centralu/apps/<id>/, docs/apps.md §2): they are code the
+# The exception is project apps (.centralu/apps/<id>/, docs/apps/what-an-app-is.md "Where apps live"): they are code the
 # team shares by committing them. Their data and secrets live in the data folder, never here.
 # So are the risk tier rules (.centralu/tiers.json, scripts/tier.mjs, #1259).
 .centralu/*

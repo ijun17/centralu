@@ -24,10 +24,9 @@ const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules
 
 /** `rule`: the rule the case stands on; null when it is light because no rule matches */
 const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
-  { name: 'documents only', paths: ['docs/apps.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
-  { name: 'a change to docs/security-boundaries.md', paths: ['docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc' },
+  { name: 'documents only', paths: ['docs/apps/README.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
   { name: 'a document in a docs/security-boundaries/ folder', paths: ['docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc' },
-  { name: 'docs with docs/security-boundaries.md among them', paths: ['docs/apps.md', 'docs/security-boundaries.md'], tier: 'deep', rule: 'security-doc', because: ['docs/security-boundaries.md'] },
+  { name: 'docs with a security-boundaries document among them', paths: ['docs/apps/README.md', 'docs/security-boundaries/keeper.md'], tier: 'deep', rule: 'security-doc', because: ['docs/security-boundaries/keeper.md'] },
   {
     name: 'fixture data only',
     paths: ['packages/agent-host/src/adapters/surface-fixtures/claude-2.1.302-help.txt', 'packages/agent-host/src/dev-services/store-fixtures/v1.sql', 'packages/agent-host/src/dev-services/store-migrations.golden.json'],
@@ -99,14 +98,14 @@ const CASES: { name: string; paths: string[]; tier: string; rule: string | null;
   { name: 'the tier rules', paths: ['.centralu/tiers.json'], tier: 'deep', rule: 'tier-rules' },
   {
     name: 'a mixed change: docs, a test, ordinary logic',
-    paths: ['docs/apps.md', 'packages/ui/src/app/labelClock.test.ts', 'packages/ui/src/app/labelClock.ts', 'packages/ui/src/styles/index.css'],
+    paths: ['docs/apps/README.md', 'packages/ui/src/app/labelClock.test.ts', 'packages/ui/src/app/labelClock.ts', 'packages/ui/src/styles/index.css'],
     tier: 'light',
     rule: 'docs',
     because: ['packages/ui/src/app/labelClock.test.ts', 'packages/ui/src/app/labelClock.ts', 'packages/ui/src/styles/index.css'],
   },
   {
     name: 'a mixed change reaching the protocol',
-    paths: ['docs/apps.md', 'packages/agent-host/src/rpc.ts', 'packages/protocol/src/brand.ts', 'packages/agent-host/src/rpc.test.ts'],
+    paths: ['docs/apps/README.md', 'packages/agent-host/src/rpc.ts', 'packages/protocol/src/brand.ts', 'packages/agent-host/src/rpc.test.ts'],
     tier: 'deep',
     rule: 'protocol',
     because: ['packages/protocol/src/brand.ts'],
@@ -122,7 +121,7 @@ describe('the repository\'s tier rules', () => {
 
   it.each(CASES.filter((c) => c.rule))('$name stands on the $rule rule', ({ paths, tier, rule }) => {
     expect(RULES.rules.map((r) => r.id)).toContain(rule)
-    // A mixed light change stands on its auto rules too: without docs, docs/apps.md is light like the logic
+    // A mixed light change stands on its auto rules too: without docs, docs/apps/README.md is light like the logic
     const r = tierOf(paths, without(rule!))
     if (tier === 'light') expect(r.files.find((f) => f.path === paths[0])!.tier).not.toBe(tierOf(paths).files[0]!.tier)
     else expect(r.tier).not.toBe(tier)
@@ -182,7 +181,7 @@ describe('the repository\'s tier rules', () => {
   })
 
   it('names in one line what put the change at its tier, and how many files fell elsewhere', () => {
-    const r = tierOf(['docs/apps.md', 'packages/agent-host/src/rpc.ts', 'packages/protocol/src/brand.ts', 'packages/protocol/src/entities.ts'])
+    const r = tierOf(['docs/apps/README.md', 'packages/agent-host/src/rpc.ts', 'packages/protocol/src/brand.ts', 'packages/protocol/src/entities.ts'])
     expect(tierLine(r, RULES)).toBe('Tier: deep, from `packages/protocol/src/brand.ts` (protocol), `packages/protocol/src/entities.ts` (protocol); the other files: 1 auto, 1 light.')
     expect(tierLine(tierOf(['a.ts', 'b.ts', 'c.ts']), RULES, 2)).toBe('Tier: light, from `a.ts` (no rule matches: light), `b.ts` (no rule matches: light) and 1 more.')
     expect(tierLine(tierOf(['AGENTS.md']), RULES)).toBe('Tier: light, from `AGENTS.md` (no rule matches: light).')
@@ -191,9 +190,7 @@ describe('the repository\'s tier rules', () => {
   it('matches every glob against at least one file in the repository, so a rename cannot drop a path silently', () => {
     const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean)
     const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
-    // The document may become a folder (#2179): its glob is written before the folder exists, so no file matches it yet
-    const folderToCome = ['docs/security-boundaries/**']
-    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !folderToCome.includes(g) && !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
+    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
     expect(dead).toEqual([])
   })
 })
