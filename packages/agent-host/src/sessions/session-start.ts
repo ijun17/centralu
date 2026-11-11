@@ -858,8 +858,6 @@ export class SessionStarts {
         this.host.emit({ type: 'settings_changed', sessionId, model: m.model, effort: m.effort, verbosity: m.verbosity, serviceTier: m.serviceTier, by: 'tool' })
       }
       this.host.handles.set(sessionId, handle)
-      // The process before it held the messages given it for turns to come, and a new one holds none (#1604)
-      this.host.children.dropInputOrigins(sessionId)
       this.host.launches.rememberToolPrefix(sessionId)
       this.host.launches.rememberLaunchSettings(m, cwd)
       // A new process holds no background work yet (#648)

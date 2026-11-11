@@ -69,8 +69,8 @@ boundaries (#603), with a log line instead of a card or refusal (Claude's own cr
   the person uses. They do not interrupt the child or replace the turn an existing wait follows; only a turn
   delegated by this parent accepts them, and the preset check still applies on every send (#592). If a note runs
   as a new turn after the earlier result, its completion receipt keeps that turn in the parent's delegation:
-  send, stop and wait still apply. Intermediate results cannot consume the report marker; the last note's
-  answer is delivered once through a wait or a report. Follow-ups use a note frame, not the initial task frame.
+  send, stop and wait still apply. Intermediate results cannot answer the task; the last note's
+  answer is delivered once through a wait or the last response. Follow-ups use a note frame, not the initial task frame.
 - **Not from an untrusted project** (#382's rule).
 
 **Worktree deletion** (#608, owner 2026-10-13) no longer requires a clean worktree or merge proof in any preset.

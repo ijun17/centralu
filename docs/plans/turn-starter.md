@@ -1,7 +1,9 @@
 # Whose a turn is: decided at its start, corrected by the inputs the tool names
 
-Issue #1639. Status: **built** in the same pull request as this document. The owner's decisions (2026-11-03) are in
-§6. Read from main at `c9f3807a7`.
+Issue #1639. Status: **built** in the same pull request as this document, and **reduced by #1948 step 3**: whose a turn is
+is read from the store's rows of the inputs the tool names, and nothing of it is kept (no entries, no `turn_inputs`, `report_turn`
+or `input_origins`); what remains and why is in "After #1948 step 3". §1 to §6 are the design as built for #1639. The owner's
+decisions (2026-11-03) are in §6. Read from main at `c9f3807a7`.
 
 ## 1. Before
 
@@ -127,3 +129,31 @@ From the review on #1639, and which way each errs:
 | D3 | Goes away with this design (there is no "not yet known") |
 | D4 | A second `working` event, no protocol event |
 | D5 | A follow-up issue |
+
+## After #1948 step 3
+
+A turn belongs to no one (owner, 2026-11-05; docs/plans/mailbox.md §10.6.3): a request is answered by its reply or the session's last
+response, so the report no longer goes to whoever started a turn, and the engine above lost its main reader. Whose a turn is survives
+only as what a hub is told on the turn's end (`turn: { by, wrote?, cut? }`, read by `LinkedReports` until mail crosses links), the hub's
+message a turn ran for (`origin`, #1604), the mailbox's `mail_turns.started_by` (the pair's warning count, C8), and the person's own
+work's Inbox report, which skips the person's turn. None of these needs the record of every message given the tool, so it went:
+
+- **Read from the rows.** Every message given the tool is already a user row with its `inputId`, `from`, `fromApp`, `fromScript` and
+  `relayed` (§2 item 1). When the tool names the inputs a turn opened from (`turnNamed`, once per turn), the rows with those ids, looked
+  up from the oldest turn start `turn_span` keeps (every row while fewer than eight are kept), decide it: the work's if any is the work's
+  (its source the first such row's), with `wrote` when one is the person's; else the person's if any; none, the CLI's own. The hub's
+  origin is the last named row's. A turn whose opening was not named is decided the same way by the inputs its end names.
+- **The first guess** (`turnStarted`, before any naming): the newest row, when it is a message (given at rest, after every row the turns
+  before wrote), else the CLI's own. A first guess of the CLI's own alone would read every turn of a tool that never names an opening
+  (Claude before 2.1.289 without a `user_message_uuid`, and the test doubles that stand for one) as the work's, so the person's own turn at
+  rest would be told to a hub as the work's.
+- **`wrote` at the end:** the work's turn took a person's message in: one the tool names as taken (`turnInputs`), wherever it was given
+  (a message held over the turn before's end and taken at a tool round included), or, for a tool that takes every message into the
+  running turn (Codex, no `turnInputs`), one given after the turn began. A tool that cannot tell (`null`) notes none.
+- **Kept nowhere.** Whose the running turn is lives in memory (`ChildOwnership.starters`) until its end. A host that takes a session over
+  mid-turn reads that turn as the work's unless its end names its inputs, as a host did with no record before #1377 was persisted. The
+  app settings `turn_inputs:<session>`, `report_turn:<session>` and `input_origins:<session>` are neither read nor written; every start
+  deletes them for every session (`takeOverFromEarlierBuild`), so an earlier build (beta.57) after a rollback reads no stale value.
+- **What it costs.** A turn the tool names by only the last of several messages it ran as one is read by that one (§2 item 4 took every
+  held message up to it). A message held for more turns than `turn_span` keeps is no longer found by its id. A Stop or a new process no
+  longer spends what was given before: a message the tool dropped is never named again, so nothing reads it.

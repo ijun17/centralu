@@ -211,4 +211,9 @@ export class SettingsRecords {
       if (renamed !== undefined) remove.run(renamed)
     })()
   }
+
+  /** Deletes the settings of these names kept for any session (`<name>:<sessionId>`), in one statement: keys a build no longer keeps */
+  deleteSessionSettings(names: readonly string[]): void {
+    this.db.prepare(`DELETE FROM app_settings WHERE substr(key, 1, instr(key, ':') - 1) IN (SELECT value FROM json_each(?))`).run(JSON.stringify(names))
+  }
 }

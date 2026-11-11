@@ -69,18 +69,15 @@ tells the caller (`MailSessionsView.linkedChildGone`, docs/plans/mailbox.md §10
 end with the host: once it is leaving, `drain` reads and writes nothing, checked again after each wait. A stop served by the build before this one during a swap leaves the field, so the
 note goes once the link resyncs. A note the tool did not read in the turn it went into
 runs as a turn of its own once that turn ends, with no message to start it (#1604). The machine's host says which: the tool
-names the input a turn began from, the host keeps who sent each message of a hub's it gave the tool under an id
-(`ChildOwnership` `noteInputOrigin`: into a running turn or at rest, in the order given, at most 64 a session, in the app
-setting `input_origins:<session>`, read and written there each time so a host that takes the session over after a swap still
-has them and the one that leaves cannot overwrite what the other wrote). They go as the tool's inputs do: when a turn runs
-one, when a turn's end says it took it in, or, for a tool that does not say (Codex), when that turn began after it was given;
-a stop, a process that is gone (a crash or a lost conversation, a host that starts with no process for a session its last left mid-turn, a new process) and the session's deletion take off all, and the `state_change` that opens the turn carries
-`origin: { seq, from }`, the row of that message and its sender (additive, `TurnOrigin`). Any other error or a usage limit ends the turn and leaves the process, which can still run a message it holds queued as the next turn, so those stay: a stale one is harmless (ids are unique, and the next turn that names a later input takes it off) and a missing one refuses the caller. The tool names the input only
+names the input a turn began from, and the host reads who sent it from that message's user row, which keeps the id it went
+in under (`inputId`) and its sender (`ChildOwnership.turnNamed`, looked up from the oldest turn start kept), so a host that
+takes the session over after a swap reads the same. The `state_change` that opens the turn carries `origin: { seq, from }`,
+the row of the last named message a hub sent and its sender (additive, `TurnOrigin`). Nothing is kept beside the rows: the
+app setting `input_origins:<session>` that held the hub's messages went with #1948 step 3 (docs/plans/turn-starter.md
+"After #1948 step 3"). The tool names the input only
 on the event that opens the turn, and the host reads it there whether or not it already had the session working: an
 instruction sent at rest in the gap between a turn and the one run for a note before it has the session working before
-that turn opens. The tool runs inputs in the order they were given, so a turn that names an input has taken every one given
-before it, and all of them leave the host's store (a CLI that runs several notes as one turn names only the last); so do
-those a turn's end says it took in. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
+that turn opens. A CLI that runs several notes as one turn names only the last. Claude Code names it as `user_message_uuid` on the turn's first message (the adapter's
 `turnStartInputs`; a note sent into a one-reply turn about 2.3 s after its task still reached the turn's end and ran as the next turn, measured); Codex, which merges a message sent while a turn runs into it but starts a turn of its own for one sent
 just after a turn ended or queued behind a compact or review (`MidTurnLedger`), gives its `turn/start` the input's id as the
 client id and reads it back from the turn's first item (`item/started`, `userMessage`, `clientId`) with a second
@@ -110,7 +107,7 @@ may also have ended (#1812): the event that ends a turn says the row it began af
 that turn's words with it (`host.lastAnswer`'s `since`; an `agent_session` wait's read too), up to where the next turn began.
 The span keeps the last 8 starts (`starts`, beside `latest` and `previous`); a `since` that is not one of them (older than
 those, or a span an older build rewrote) reads as the last turn that ended, as does a machine that does not say or read it. A turn
-that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`processGone`): its words are those it said, or none, never the turn before's. A turn the host did not
+that ended with nothing to say has no answer, and the report says so; it is never the turn before's. A turn that never sent its end because its process went (a host that starts with the session left mid-turn, a crash) is closed when that is known (`ChildOwnership.noteTurnEnd`): its words are those it said, or none, never the turn before's. A turn the host did not
 see begin (before this build) reads as the last response, and so does an older machine.
 
 The person may use the same session on that machine, and nothing of a turn that is not the caller's reaches the

@@ -181,7 +181,7 @@ export class LinkedReports {
     if (!wait) return
     this.remember(sessionId)
     /*
-     * A turn belongs to whoever started it (#1377), as a local one does (`ChildOwnership.noteMessage`): the person's
+     * Whose a turn there is (#1377), where the machine's host does not say it on the turn's end (`saidTurn`): the person's
      * message at rest makes the next turn theirs, and it is not reported; into the work's turn it is noted. It never closes the report.
      */
     if (e.type === 'user_message' && wait.instruction === undefined) this.messageSeen(wait, e)

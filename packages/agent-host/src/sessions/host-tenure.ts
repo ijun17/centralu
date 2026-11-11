@@ -117,8 +117,8 @@ export class HostTenure {
     // The turn is over: so is a hub task's depth for it, as at any end of a turn (#2020)
     this.host.events.endHubAsk(m.id)
     // Whose the turn was (#1377): the person's is reported to nobody
-    // The process is gone with it (#1604): what it was given is run by no one
-    const turnBy = this.host.children.turnEnded(m.id, null, true)
+    // This host did not see it begin, and the tool cannot say what it took: it reads as the work's
+    const turnBy = this.host.children.turnEnded(m.id, null)
     // Centralu cut this turn and could not continue it: the senders of what it left open, and the session that started it, are told (mailbox.md
     // "The stop notice")
     this.host.mail.mailStopped(m.id, 'uncontinued', { starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
@@ -392,8 +392,8 @@ export class HostTenure {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.host.interruptions.markTurnLost(fixed, false, bySystem ? 'shutdown' : 'quit')
         store.sessions.upsertSession(fixed)
-        // The turn the last host was in never sent its end and no process holds what it was given (#1604)
-        this.host.children.processGone(s.id)
+        // The turn the last host was in never sent its end (#1604)
+        this.host.children.noteTurnEnd(s.id)
         stoppedByQuit.push(fixed)
       }
       const stopped = lost ? null : lists?.stoppedOf(s.id, s.lastSeq) ?? null

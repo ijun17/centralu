@@ -1915,7 +1915,8 @@ the original are withdrawn and one task from the successor, with the same words,
 the report mark moved before.
 
 **Restart, swap and older builds.** No store step (v71 stays free). This build neither reads nor writes `report_paused`, `report_turn`,
-`turn_inputs` or `input_origins` (the contract step drops them, turn-owned-by-no-one.md §6), and ignores `user_message.intent` on old rows. At
+`turn_inputs` or `input_origins` (the contract step drops them, turn-owned-by-no-one.md §6; every `ready` deletes the last three for every
+session, so beta.57 after a rollback reads no stale value, turn-starter.md "After #1948 step 3"), and ignores `user_message.intent` on old rows. At
 every `ready`, an earlier build's report mark whose caller has no open task to its session becomes a delivered task (`ADOPTED_TASK`), and every
 mark is then deleted. An earlier build (beta.57) after a rollback reports a turn's end by a report mark only, keeps a mark only for a session whose
 turn goes on under it, and settles every task no mark owes at its start: so this build, as it leaves (`leaveForEarlierBuild`), writes one mark for

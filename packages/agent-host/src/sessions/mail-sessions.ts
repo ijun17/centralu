@@ -96,7 +96,7 @@ export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | '
   readonly tools: SessionTools
   /** A child this host started on a linked machine (`RemoteAgents.of`), with its name and machine as one name */
   linkedChild(sessionId: string): { name: string } | undefined
-  /** Whether the session's tool takes input into the turn it is running (`SessionEventsHost.joinsRunningTurn`) */
+  /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
   joinsRunningTurn(sessionId: string): boolean
   /** A compact Centralu sent and that is not over, during which no mail joins a turn */
   readonly selfCompaction: Pick<SelfCompaction, 'compacts'>

@@ -51,8 +51,6 @@ export type SessionEventsHost = Pick<DelegationHost, 'agentRuns' | 'children' | 
   Pick<WorktreeHost, 'cwdOf' | 'resuming'> &
   Pick<SessionStartsHost, 'appSessions' | 'apps' | 'cardRests' | 'launches' | 'openSession' | 'tools'> & {
     readonly cards: RoutedCards
-    /** Whether the session's tool takes a message into the turn it is running, rather than holding it for the next (`midTurnInput`) */
-    joinsRunningTurn(sessionId: string): boolean
     /** Whether the session's tool reads the context size with every request, so a turn needs no estimate of it (`contextAtRequest`) */
     contextAtRequest(sessionId: string): boolean
     /** Sessions whose hub task's input is tracked (`sendFromHub`): its own turn takes the depth mark down, no other */
@@ -188,7 +186,7 @@ export class SessionEvents {
          * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
          * changed or whether a call is still in flight.
          */
-        // A turn starts (#1377): whose it is comes from the message it started with, else the CLI's own
+        // A turn starts (#1377): a first guess at whose it is, from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           continues = this.host.selfCompaction.stepOpens(m.id)
           this.host.children.turnStarted(m.id)
@@ -203,7 +201,7 @@ export class SessionEvents {
          */
         if (e.type === 'state_change' && e.state === 'working') {
           const named = handle?.turnStartInputs?.()
-          // Whose the turn is, decided at its start, decided again by the input the tool names it opened from (#1639); and the hub's message it ran for
+          // Whose the turn is, decided by the inputs the tool names it opened from (#1639); and the hub's message it ran for
           started = this.host.children.turnNamed(m.id, named)
           // Mail a turn before did not take and this one opens for is this turn's (docs/plans/mailbox.md §10.6.3)
           if (named?.length) this.host.mailTurnInputs(m.id, { opened: named })
@@ -269,13 +267,13 @@ export class SessionEvents {
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     /*
-     * Whose the turn was (#1377), read once as it ends, from what the tool says it took in: said on the event that ends
-     * it, so a hub that follows this host reads it rather than guessing. The person's own turn is reported to nobody
+     * Whose the turn was (#1377), read once as it ends, from the rows of what the tool says it took in: said on the event that ends
+     * it, so a hub that follows this host reads it rather than guessing (`LinkedReports`). The person's own turn is reported to nobody
      */
     // The process went with the turn (a crash, a lost conversation): it runs none of the messages given it after. Any other error or limit leaves it, and a message it holds queued can still run (#1604)
     const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
     const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
-    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken, processWent) : undefined
+    const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken) : undefined
     // A turn Centralu started to compact the conversation says so (#1451): the window raises no "done" for it
     const turnBy = e.sessionId && endedTurn && this.host.selfCompaction.compactTurn(e.sessionId) ? { ...(owned ?? { by: 'work' as const }), compaction: true as const } : owned
     // Where it began (#1812), when kept: a hub reads this turn's words by it, though the next one has begun or ended by then
@@ -665,12 +663,6 @@ export class SessionEvents {
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
     const { input, notice } = this.withRootAppsNotice(sessionId, adapterText)
-    // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
-    const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
-    const hubInput = isHubSender(from?.sessionId)
-    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
-    // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
-    if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)

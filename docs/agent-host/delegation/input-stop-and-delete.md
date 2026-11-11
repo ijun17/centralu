@@ -43,7 +43,7 @@ method the CLI queue is left intact; the failed delegation still receives the tu
 is also skipped while person input is pending: cancelling an already-dequeued representative UUID can drop its
 whole coalesced batch. Only batches without person input are eligible for per-UUID cancellation.
 
-The existing `wait` and report marker follow the whole delegation, so an intermediate turn cannot deliver an
+The existing `wait` follows the whole delegation, so an intermediate turn cannot deliver an
 answer or detach the queued note from its parent. Each completed turn's answer is captured separately: queued
 input was already stored before the earlier answer, so those turns need not have a user row between them.
 The adapters notify the host synchronously **after recording the matched completion**, so later frames in the

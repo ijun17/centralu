@@ -26,7 +26,7 @@ original's things is in this table; the bullets below say how.
   with an original that goes it belonged to nobody (#738); left with one that stays, the session that carries the work
   on could not list or archive it (#1475). So it moves whether the original goes or stays.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
-  own row), the report mark (`report_marks`), the delegated turn's link (`delegated_turns`) and the delegation the
+  own row), its open tasks from the original (`MailHooks.repointTasks`, plans/mailbox.md §10.6.3), the delegated turn's link (`delegated_turns`) and the delegation the
   host holds for it (its key names the caller), and its standing
   start requests (`agent_start_requests`, whose stored request names its caller too). A standing card closes in the
   original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
@@ -87,8 +87,8 @@ original's things is in this table; the bullets below say how.
   mail went to whom (a `notice`; its apps stay with it and are not in it). A child with something going has its line
   there; the finished ones are one count ("30 finished sessions also moved to …"). A call of its own still waiting on one of them (`agent_session` wait or send, `ask_project` with no task,
   a wait on a start request's handle, a `start_agent` call whose card is approved later) ends with where it went, so
-  the answer is read once, by the new session; a wait had taken the child's report mark down, so that report is owed to
-  the new session, set in the same transaction (`armReports`). Its later `agent_session` or `ask_project` about one of
+  the answer is read once, by the new session; the child's open task is the new session's, so its last response answers
+  the new session. Its later `agent_session` or `ask_project` about one of
   them says where it went (`handedOver`) rather than "not a session this session started". The answer for a session is
   also found from the store, so it survives a host restart: a child that is older than the successor, owned by it, when
   the successor's handoff marker names the original (the direct predecessor: an earlier session in the lineage never owned it).
@@ -108,17 +108,17 @@ original's things is in this table; the bullets below say how.
   authority the same way first.
 - **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
   commit, with no await in between. A crash before the commit leaves every link on the original, after it every
-  link on the new session, so a host taking over after a swap or a restart reads one owner (`report_marks`,
+  link on the new session, so a host taking over after a swap or a restart reads one owner (the mail rows,
   `delegated_turns` and `agent_start_requests` are read at startup as before). If the store refuses,
   nothing moves and the note lists nothing. A delegation's end releases its turn by the delegation's owner at that
   time, not the one that started it.
 - **Where the state lives**: `ChildOwnership` (`sessions/child-ownership.ts`, #428) holds who owns a child's work:
-  report marks and paused reports, delegated turns, delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
+  the person's paused reports, delegated turns, delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
-  its own rows back (`restoreReports`, `restoreTurns`, `restoreQueued`), as the manager's constructor did; the
-  standing start_agent requests are `AgentStartFlow.restoreAgentStarts`, called between the reports and the turns.
+  its own rows back (`restorePersonPaused`, `restoreTurns`), as the manager's constructor did; the
+  standing start_agent requests are `AgentStartFlow.restoreAgentStarts`.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 - **The mail moves too** (#1574, docs/plans/mailbox.md §7.7): `MessageService.handOver`, run last inside the same

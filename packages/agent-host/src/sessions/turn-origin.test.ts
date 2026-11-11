@@ -49,16 +49,13 @@ describe('a turn the tool opens for an earlier message', () => {
     expect(opened()).toMatchObject({ origin: { seq: rowOf(id, 'first'), from: FROM } })
   })
 
-  it("keeps nothing of another session's messages on this computer: only a hub reads what a turn ran for", async () => {
+  it("says nothing for another session's message on this computer: only a hub reads what a turn ran for", async () => {
     const id = await w.callerSession()
-    // A control: a hub's message is kept
-    await w.mgr.inputs.send(id, 'a note from the hub', undefined, FROM)
-    expect(w.store.settings.appSetting(`input_origins:${id}`)).not.toBeNull()
-    const other = await w.callerSession()
-    await w.mgr.inputs.send(other, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
-    // The message goes in named as any other (#1639), and nothing is kept for a hub
-    expect(handleOf(other).ids.at(-1)).toEqual(expect.any(String))
-    expect(w.store.settings.appSetting(`input_origins:${other}`)).toBeNull()
+    await w.mgr.inputs.send(id, 'a note from a local session', undefined, { sessionId: 'a-local-session', name: 'Local' })
+    // The message goes in named as any other (#1639), and the turn the tool opens for it names no sender
+    expect(handleOf(id).ids.at(-1)).toEqual(expect.any(String))
+    opens(id, [handleOf(id).ids.at(-1)!])
+    expect(opened()).not.toHaveProperty('origin')
   })
 
   it('says nothing for a person’s message, or an input no sender gave', async () => {
@@ -154,8 +151,8 @@ describe('the answer of the turn a hub asks about', () => {
   })
 })
 
-/** What the host keeps of the messages a hub gave a session, for the turns it will run: it keeps none of it once nothing can run them */
-describe('what is kept for the turns a hub may be owed', () => {
+/** What the host keeps of the turns of a session a hub gives messages: where they began, and nothing of whose they are (#1948 step 3) */
+describe('what is kept of the turns a hub follows', () => {
   let w: CrossWorld
   const FROM = { sessionId: '_hub-orchestrator', name: 'Parent' }
   beforeEach(async () => {
@@ -163,7 +160,6 @@ describe('what is kept for the turns a hub may be owed', () => {
   })
   afterEach(() => w.dispose())
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
-  const origins = (id: string) => w.store.settings.appSetting(`input_origins:${id}`)
   const spans = (id: string) => w.store.settings.appSetting(`turn_span:${id}`)
   /** A hub's task, then a note into the running turn: the note is given after the turn began */
   async function withNote() {
@@ -173,49 +169,15 @@ describe('what is kept for the turns a hub may be owed', () => {
     return id
   }
 
-  it('keeps a note given during a turn that ended without saying it took it in (a control for the cases below)', async () => {
-    const id = await withNote()
-    handleOf(id).answer('done')
-    expect(JSON.parse(origins(id)!)).toHaveLength(1)
-  })
-
-  it('keeps nothing of the notes given before a turn began once it ended, for a tool that does not name its inputs', async () => {
-    const id = await withNote()
-    handleOf(id).answer('done')
-    // The tool ran the note as the next turn, not naming it (an older Claude Code): the turn after it ends, and it is done with
-    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
-    handleOf(id).answer('and the note')
-    expect(JSON.parse(origins(id)!)).toEqual([])
-  })
-
-  it('keeps a note when an error ends the turn but the process lives: the CLI can still run the note it holds as the next turn', async () => {
+  it('says whose a note is when an error ends the turn but the process lives: the CLI can still run the note it holds as the next turn', async () => {
     const id = await withNote()
     handleOf(id).turnInputs = () => []
     handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'internal', message: 'not logged in', retryable: true } })
-    // The task and the note are both held: the turn that ended took in neither
-    expect(JSON.parse(origins(id)!)).toHaveLength(2)
     // The note runs as the next turn, and that turn says whose it is
     const noteId = handleOf(id).ids.at(-1)
     handleOf(id).turnStartInputs = () => [noteId!]
     handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
     expect(w.events.filter((e) => e.type === 'state_change' && e.state === 'working').at(-1)).toHaveProperty('origin')
-  })
-
-  it('keeps a note when a usage limit ends the turn, the same', async () => {
-    const id = await withNote()
-    handleOf(id).turnInputs = () => []
-    handleOf(id).event({ type: 'limit_reached', sessionId: id, usedPercent: 100 })
-    expect(JSON.parse(origins(id)!)).toHaveLength(2)
-  })
-
-  it('keeps nothing when the process went with the turn: a crash, a lost conversation', async () => {
-    for (const code of ['adapter_crashed', 'conversation_locked'] as const) {
-      const id = await withNote()
-      // A control: something is kept until then
-      expect(origins(id)).not.toBeNull()
-      handleOf(id).event({ type: 'error', sessionId: id, error: { code, message: 'gone', retryable: false } })
-      expect(origins(id)).toBeNull()
-    }
   })
 
   it('ends the turn it was in when a host starts with no process for a session its last left mid-turn: its words are its own, not the turn before it', async () => {
@@ -229,7 +191,6 @@ describe('what is kept for the turns a hub may be owed', () => {
     expect(await before.lastAnswer(id, undefined, true)).toMatchObject({ text: 'first answer' })
     const restarted = new SessionManager(w.store, w.adapters, () => {}, undefined, `${w.caller.path}-worktrees`)
     try {
-      expect(origins(id)).toBeNull()
       expect(JSON.parse(spans(id)!).latest.ended).toBe(true)
       expect(await restarted.linkedHost.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'half of the second' })
     } finally {
@@ -237,35 +198,33 @@ describe('what is kept for the turns a hub may be owed', () => {
     }
   })
 
-  it('keeps nothing when the session is stopped', async () => {
-    const id = await withNote()
-    // A control: something is kept until then
-    expect(origins(id)).not.toBeNull()
-    w.mgr.inputs.interrupt(id)
-    expect(origins(id)).toBeNull()
-  })
-
-  it('keeps nothing for a new process: the one before it held the inputs', async () => {
-    const id = await withNote()
-    handleOf(id).turnInputs = () => []
-    // The conversation the tool keeps, which a new process resumes
-    handleOf(id).externalId = 'conversation-1'
-    handleOf(id).answer('done')
-    expect(origins(id)).not.toBeNull()
-    // A tool whose sessions can sleep
-    Object.assign(w.adapters.get('claude')!.capabilities, { backgroundTasks: true, sleep: true })
-    expect(await w.mgr.processes.sleepSession(id)).toBe(true)
-    await w.mgr.inputs.send(id, 'typed by the person')
-    expect(origins(id)).toBeNull()
-  })
-
   it('keeps nothing of the session once it is deleted, but its words', async () => {
     const id = await withNote()
     handleOf(id).answer('done')
     expect(spans(id)).not.toBeNull()
     await w.mgr.trash.trashSession(id)
-    expect(origins(id)).toBeNull()
     expect(spans(id)).toBeNull()
+  })
+
+  // docs/plans/turn-starter.md "After #1948 step 3": an earlier build reads these after a rollback, so this build never leaves a value there
+  it('writes nothing of what an earlier build kept of whose a turn is, through turns, a stop, a crash and a new process', async () => {
+    const id = await withNote()
+    const kept = () => ['turn_inputs', 'report_turn', 'input_origins'].map((name) => w.store.settings.appSetting(`${name}:${id}`)).filter((v) => v !== null)
+    handleOf(id).turnInputs = () => []
+    handleOf(id).answer('done')
+    handleOf(id).turnStartInputs = () => [handleOf(id).ids.at(-1)!]
+    handleOf(id).event({ type: 'state_change', sessionId: id, state: 'working' })
+    await w.mgr.inputs.send(id, 'typed by the person')
+    w.mgr.inputs.interrupt(id)
+    await w.mgr.inputs.send(id, 'again', undefined, FROM)
+    // The conversation the tool keeps, which a new process resumes
+    handleOf(id).externalId = 'conversation-1'
+    handleOf(id).event({ type: 'error', sessionId: id, error: { code: 'adapter_crashed', message: 'gone', retryable: false } })
+    await w.mgr.inputs.send(id, 'after the crash', undefined, FROM)
+    // Nothing while a turn runs, nor after it
+    expect(kept()).toEqual([])
+    handleOf(id).answer('done')
+    expect(kept()).toEqual([])
   })
 })
 

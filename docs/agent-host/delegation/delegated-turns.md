@@ -5,7 +5,7 @@ well as to the person (owner decision 2026-10-14, the child-question rule of #56
 is **delegated** when another session's work starts it: `ask_project` into a session at rest, `start_agent`, an
 `agent_session` send that starts a turn, `send_to_session` to a session at rest, and `create_session`'s first
 message (#1233). Mail that joins a turn already running (the person's, or someone else's; never a task, plans/mailbox.md
-§10.6.2) gives no one that turn, and never clears a report mark someone is owed of it (#1233, `domain-model.md` Report mark).
+§10.6.2) gives no one that turn, and answers no one's task by itself: a task is answered by its reply or the last response (#1233, plans/mailbox.md §10.6.3).
 
 - **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
   the delegation's outcome (`startDelegation`), or with the turn for `send_to_session` and `create_session`. A card from a later turn the

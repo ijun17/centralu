@@ -191,9 +191,6 @@ export class TurnInputs {
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
-    // A stop takes off what a hub gave the tool for turns to come (#1604): the tool drops what it still holds queued, and says it
-    // was not delivered (#1640), so no turn runs for it after the Stop
-    this.host.children.dropInputOrigins(sessionId)
     if (waiting) this.host.events.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
     else handle?.interrupt()
     // Stop reaches delegated work only while the caller waits. A note that joined the person's turn

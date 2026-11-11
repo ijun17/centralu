@@ -88,12 +88,10 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    ends and a turn ends it; if it is a server or watcher it leaves running this answer may be the final one;
    `read_session`"), with no `agent_session stop`, which an asked session does not have. It is decided where the delegation's
    turn ends (`DelegationFlow.startDelegation`), whether or not a call is still waiting, so a turn that ends after the
-   call's bound is paused too and the next call reads the pause. The report is marked owed and paused (`markReport` +
-   `pauseReport`: the store's `report_marks` and `report_paused:<session>`, so a host swap keeps both and the next host
-   delivers the final report once), and the rest is [start-agent-steps.md](start-agent-steps.md) step 7's: the report comes when a turn ends with that work gone,
-   or `PAUSED_REPORT_SETTLE_MS` after the work ended with no turn, a turn the person starts there is theirs and not
-   reported (#1377), and a new task from the same caller ends the pause. Like a child's, work the person left running there (a dev server) holds the
-   report until it ends.
+   call's bound is paused too and the next call reads the pause. The task stays open (a mailbox row, so a host swap keeps
+   it), and the rest is [start-agent-steps.md](start-agent-steps.md) step 7's: the session's last response answers it when a turn ends with that work gone, or
+   `OWN_WORK_SETTLE_MS` after the work ended with no turn ([plans/mailbox.md](../../plans/mailbox.md) §10.6.3). Like a
+   child's, work the person left running there (a dev server) holds the answer until it ends.
 
 **Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
 bridge wait of 280 s. It then answers still working, naming the session and how to call again with
