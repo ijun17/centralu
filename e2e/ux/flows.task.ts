@@ -370,6 +370,29 @@ uxTask({
 })
 
 uxTask({
+  id: 'answer-mailed-question.mouse',
+  task: 'Answer a question an agent mailed, by picking one of its choices',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The Inbox count in the top bar opens the list, a thread opens its question, and a numbered row answers it (#1630); the seeded mail stands for a session asking by mail'],
+  start: async (page) => {
+    await demo(page)
+    await page.evaluate(() => {
+      const from = { address: 'session:mock/s1', kind: 'session', sessionId: 's1', name: 'Parser', state: 'idle' }
+      ;(window as any).__mock.seedMail({ subject: 'Settings file format', from, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now', 'Ask me again'] })
+    })
+  },
+  run: async (u, page) => {
+    await u.click(page.getByTestId('counter'))
+    await u.click(page.locator('[data-testid^="mail-thread-"]').first(), { among: page.locator('[data-testid^="mail-thread-"]') })
+    await u.until('the choices', () => expect(page.getByTestId('mail-choices-1')).toBeVisible())
+    await u.click(page.getByTestId('mail-choices-1-2'), { among: page.locator('[data-testid^="mail-choices-1-"]') })
+  },
+  goal: async (page) => expect(page.getByTestId('mail-choices-1-label')).toHaveText('You chose'),
+  budget: { operators: 13, M: 3, seconds: 8.5 },
+})
+
+uxTask({
   id: 'handoff.mouse',
   task: 'Continue a session in the other tool (hand off from Codex to Claude Code)',
   path: 'mouse',

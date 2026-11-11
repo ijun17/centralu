@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
+import { MailChoices } from '@cc/protocol'
 import { isObj } from '../../json-value.js'
 import { parseAddress } from '../../mail/address.js'
 import { parseJson } from './json.js'
@@ -36,6 +37,8 @@ export type MailRow = {
   urgent: boolean
   body: string
   facts: MailFacts
+  /** A session's question to the person: the answers it offers to pick from (#1630), the sender's words, so not in `facts`. Null on any other message */
+  choices: MailChoices | null
   dedupeKey: string | null
   origin: string | null
   legacyThread: string | null
@@ -131,6 +134,7 @@ type MailSql = {
   urgent: number
   body: string
   facts: string
+  choices: string | null
   dedupe_key: string | null
   origin: string | null
   legacy_thread: string | null
@@ -231,8 +235,8 @@ export class MailboxRecords {
       }
       this.db
         .prepare(
-          `INSERT INTO mail (id, sender, sender_project, kind, needs_reply, reply_to, root_id, cause_id, depth, urgent, body, facts, dedupe_key, origin, legacy_thread, created_at)
-           VALUES (@id, @sender, @senderProject, @kind, @needsReply, @replyTo, @rootId, @causeId, @depth, @urgent, @body, @facts, @dedupeKey, @origin, @legacyThread, @createdAt)`,
+          `INSERT INTO mail (id, sender, sender_project, kind, needs_reply, reply_to, root_id, cause_id, depth, urgent, body, facts, choices, dedupe_key, origin, legacy_thread, created_at)
+           VALUES (@id, @sender, @senderProject, @kind, @needsReply, @replyTo, @rootId, @causeId, @depth, @urgent, @body, @facts, @choices, @dedupeKey, @origin, @legacyThread, @createdAt)`,
         )
         .run({
           id: mail.id,
@@ -247,6 +251,7 @@ export class MailboxRecords {
           urgent: mail.urgent ? 1 : 0,
           body: mail.body,
           facts: JSON.stringify(mail.facts),
+          choices: mail.choices ? JSON.stringify(mail.choices) : null,
           dedupeKey: mail.dedupeKey,
           origin: mail.origin,
           legacyThread: mail.legacyThread,
@@ -1092,6 +1097,7 @@ export class MailboxRecords {
       urgent: r.urgent === 1,
       body: r.body,
       facts: this.readFacts(r.id, r.facts),
+      choices: choicesFrom(r.choices),
       dedupeKey: r.dedupe_key,
       origin: r.origin,
       legacyThread: r.legacy_thread,
@@ -1214,4 +1220,11 @@ export function factsFrom(raw: unknown): MailFacts {
     if (!shape || shape.safeParse(v).success) out[key] = v
   }
   return MailFacts.parse(out)
+}
+
+/** A question's choices as stored (`mail.choices`, #1630): a JSON array of 2 to 6 strings; null, or anything that does not read as that, is none (stored-shapes.md rule 3) */
+export function choicesFrom(raw: string | null): MailChoices | null {
+  if (raw === null) return null
+  const parsed = MailChoices.safeParse(parseJson(raw))
+  return parsed.success ? parsed.data : null
 }

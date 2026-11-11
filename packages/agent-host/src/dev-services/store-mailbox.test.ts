@@ -33,6 +33,7 @@ function mail(over: Partial<NewMail> & { sender: string }): NewMail {
     urgent: false,
     body: `body ${n}`,
     facts: {},
+    choices: null,
     dedupeKey: null,
     origin: 'mail',
     legacyThread: null,
@@ -657,5 +658,26 @@ describe('what the message service reads (M2)', () => {
     expect(box.refusedRecords('p1').map((p) => p.message.id)).toEqual([one, three])
     expect(box.refusedRecords().map((p) => p.message.id).sort()).toEqual([one, two, three].sort())
     expect(box.refusedRecords('p9')).toEqual([])
+  })
+})
+
+describe('a question’s choices have a column of their own (v70, #1630)', () => {
+  it('round-trip as stored and never ride in facts', () => {
+    const { box, send, db } = world()
+    const id = send({ sender: A, needsReply: true, choices: ['main', 'release/1.4'] }, 'person')
+    expect(box.message(id)).toMatchObject({ choices: ['main', 'release/1.4'], facts: {} })
+    expect(db.prepare<[string], { choices: string; facts: string }>(`SELECT choices, facts FROM mail WHERE id = ?`).get(id)).toEqual({ choices: '["main","release/1.4"]', facts: '{}' })
+    expect(box.message(send({ sender: A }, B))?.choices).toBeNull()
+  })
+
+  it('read as none when what is stored is not 2 to 6 strings, and a key of that name in facts is not a choice', () => {
+    const { box, send, db } = world()
+    const id = send({ sender: A, needsReply: true }, 'person')
+    for (const raw of ['["only one"]', '{"a":1}', 'not json', '[1,2]']) {
+      db.prepare(`UPDATE mail SET choices = ? WHERE id = ?`).run(raw, id)
+      expect(box.message(id)?.choices).toBeNull()
+    }
+    db.prepare(`UPDATE mail SET choices = NULL, facts = ? WHERE id = ?`).run('{"choices":["x","y"]}', id)
+    expect(box.message(id)?.choices).toBeNull()
   })
 })

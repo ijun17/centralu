@@ -139,6 +139,41 @@ describe('a thread in the Inbox', () => {
     expect(useStore.getState().mailThread!.older).toBe(true)
   })
 
+  describe('a pick (#1630)', () => {
+    /** The store holds the thread as it was read; nothing tells it of what another window does until it asks */
+    function stale() {
+      const platform = new MockPlatform()
+      useStore.setState({ platform })
+      const id = platform.seedMail({ subject: 'q', from: worker, body: 'Which?', choices: ['main', 'dev'] })
+      return { platform, id }
+    }
+
+    it('names its question, and a question another window answered first is refused with the host’s reason and shown answered', async () => {
+      const { platform, id } = stale()
+      await useStore.getState().openMailThread(id)
+      const question = useStore.getState().mailThread!.messages[0]!
+      await platform.mail.reply(id, 'dev', 'answer', question.id)
+
+      expect(await useStore.getState().replyMail('main', 'answer', question.id)).toBe(false)
+      expect(useStore.getState().toast).toContain('answered already')
+      const shown = useStore.getState().mailThread!.messages
+      expect(shown.filter((m) => m.sender.kind === 'person').map((m) => [m.body, m.replyTo])).toEqual([['dev', question.id]])
+    })
+
+    it('a send that failed on the link is read again before the choices unlock: the host may have taken it', async () => {
+      const { platform, id } = stale()
+      await useStore.getState().openMailThread(id)
+      const question = useStore.getState().mailThread!.messages[0]!
+      const real = platform.mail.reply
+      platform.mail.reply = async (...a) => {
+        await real(...a)
+        throw new Error('connection lost')
+      }
+      expect(await useStore.getState().replyMail('main', 'answer', question.id)).toBe(false)
+      expect(useStore.getState().mailThread!.messages.map((m) => m.body)).toEqual(['Which?', 'main'])
+    })
+  })
+
   it('says why when the host refuses, and shows nothing it did not accept', async () => {
     const platform = attached()
     const id = platform.seedMail({ subject: 'q', from: worker, body: 'which?' })

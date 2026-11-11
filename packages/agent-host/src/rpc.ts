@@ -484,8 +484,8 @@ export function createRpcHandler(
     'mail.thread': async ({ threadId, after, all, tail, before }) => {
       return requireMail().thread(threadId, { after, all, tail, before })
     },
-    'mail.reply': async ({ threadId, text, kind }) => {
-      return requireMail().reply(threadId, text, kind)
+    'mail.reply': async ({ threadId, text, kind, answers }) => {
+      return requireMail().reply(threadId, text, kind, answers)
     },
     'mail.close': async ({ threadId, outcome }) => requireMail().close(threadId, outcome),
     'mail.held': async ({ action, recipient, messageIds }) => {

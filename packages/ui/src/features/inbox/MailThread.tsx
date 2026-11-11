@@ -3,12 +3,13 @@ import type { MailMessage } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
+import { ChoiceList } from '../../components/ChoiceList.js'
 import { Fold } from '../../components/Fold.js'
 import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
-import { closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
+import { answerTo, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
@@ -21,6 +22,9 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const older = useStore((s) => s.loadOlderMail)
   // A host of an older build stops the turn when the chain is closed: asked once first, with no way to close and leave it running. A host of this build stops nothing (it says so by sending `canReply`)
   const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
+  // The questions whose pick is on its way to the host: the reply box waits for every one of them, since its words would answer the newest open question
+  const [picking, setPicking] = useState<readonly string[]>([])
+  const inFlight = (question: string, on: boolean) => setPicking((now) => (on ? [...now, question] : now.filter((q) => q !== question)))
   const list = useRef<HTMLOListElement>(null)
   // A conversation opens at its end, where the newest message is, and follows a message that comes after it; earlier pages added above do not move it
   const newest = view?.messages.at(-1)?.seq
@@ -71,7 +75,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
           </li>
         )}
         {view.messages.map((m) => (
-          <Message key={m.id} m={m} />
+          <Message key={m.id} m={m} open={!done && view.canReply !== false} answer={answerTo(view.messages, m)} onPicking={inFlight} />
         ))}
         {view.more && <li className="text-center text-xs text-ink-faint">There are more messages. Open this again to read on.</li>}
       </ol>
@@ -85,7 +89,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
       <Fold open={!done}>
         {/* Only where there is something of the person's to answer: a chain of mail between sessions held for them has no one for a reply to go to (a host of an older build does not say, and has the box) */}
         <Fold open={view.canReply !== false}>
-          <Reply />
+          <Reply blocked={picking.length > 0} />
         </Fold>
         {/* The row folds in and out like the reply box; its text does not depend on the outcome asked, so it stays whole while it folds closed */}
         <Fold open={confirming !== null}>
@@ -124,7 +128,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   )
 }
 
-function Message({ m }: { m: MailMessage }) {
+/** `open`: the person can still answer in this thread. `answer`: how a question was answered, when it was (`answerTo`) */
+function Message({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (question: string, picking: boolean) => void }) {
   if (m.kind === 'event') {
     return (
       <li className="text-center text-xs text-ink-faint" data-testid={`mail-event-${m.seq}`}>
@@ -142,7 +147,39 @@ function Message({ m }: { m: MailMessage }) {
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
       <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>{m.body}</div>
+      {m.choices && <Choices m={m} open={open} answer={answer} onPicking={onPicking} />}
     </li>
+  )
+}
+
+/** A question's choices (#1630): a press posts the choice's words as the answer, once, and the rows then say which one it was */
+function Choices({ m, open, answer, onPicking }: { m: MailMessage; open: boolean; answer: MailMessage | null; onPicking: (question: string, picking: boolean) => void }) {
+  const view = useStore((s) => s.mailThread)
+  const reply = useStore((s) => s.replyMail)
+  const [sending, setSending] = useState(false)
+  if (!view || !m.choices) return null
+  // Pressed, not written: the host says so in the answer's facts
+  const picked = answer?.facts.picked === true ? m.choices.indexOf(answer.body) : -1
+  const pick = async (choice: string) => {
+    if (sending) return
+    setSending(true)
+    onPicking(m.id, true)
+    // The answer names this question: the newest open one is not always the one pressed
+    await reply(choice, 'answer', m.id)
+    onPicking(m.id, false)
+    setSending(false)
+  }
+  return (
+    <div className="w-[85%]">
+      <ChoiceList
+        choices={m.choices}
+        label={choicesLabel(answer !== null, picked >= 0, open)}
+        picked={picked >= 0 ? picked : null}
+        locked={sending || answer !== null || !open}
+        onPick={(c) => void pick(c)}
+        testId={`mail-choices-${m.seq}`}
+      />
+    </div>
   )
 }
 
@@ -153,7 +190,7 @@ function scriptOf(m: MailMessage): string | undefined {
 }
 
 /** The person's words: an answer when the last thing said to them was a question, a note otherwise (§7.1) */
-function Reply() {
+function Reply({ blocked }: { blocked: boolean }) {
   const view = useStore((s) => s.mailThread)
   const reply = useStore((s) => s.replyMail)
   const sendWithModifierEnter = useStore((s) => s.prefs.sendWithModifierEnter)
@@ -162,7 +199,7 @@ function Reply() {
   if (!view) return null
   const send = async () => {
     const words = text.trim()
-    if (!words || sending) return
+    if (!words || sending || blocked) return
     setSending(true)
     const ok = await reply(words, replyKind(view.messages))
     setSending(false)
@@ -187,7 +224,7 @@ function Reply() {
         className="max-h-40 min-w-0 flex-1 resize-none rounded-lg border border-line bg-surface-raised px-3 py-2 text-md text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
         data-testid="mail-reply"
       />
-      <Button size="md" variant="primary" disabled={!text.trim()} busy={sending} onClick={() => void send()} data-testid="mail-send">
+      <Button size="md" variant="primary" disabled={!text.trim() || blocked} busy={sending} onClick={() => void send()} data-testid="mail-send">
         Send
       </Button>
     </div>

@@ -424,6 +424,32 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     when the trash is emptied. The v61 sweep (`mail-retention.ts`) does not exempt the trash either, and an exemption
     would make the store match addresses against `sessions.deleted_at`, while a restored session's mail is what any
     session's mail is after the same time.
+- **D33. Agents ask the person by mail** (owner, 2026-11-10, #1630). A session with the mail tool asks the person with a
+  `question` to `person`, which may carry 2 to 6 short `choices` (`MailChoices` in the protocol). They are the sender's words, so they are not in `facts` (Centralu's record, which a session cannot write): they are the nullable column `mail.choices` (store step v70, expand only: an older build never names it and shows a question without its choices) and the field `MailMessage.choices` on the wire. The
+  session keeps working or ends its turn, and the person's answer arrives as mail and wakes it, as any answer does.
+  - **Only a session's question to the person alone** carries choices (`checkedChoices` in `messages.ts`): to anyone else,
+    on a note or from another party they are refused `field_not_allowed`, and fewer than 2, more than 6 or an empty one
+    `bad_value`. Each is cut to one line of 80 characters, so a choice cannot carry a line that reads as Centralu's.
+  - **The Inbox draws them as a numbered list** (owner, 2026-11-11, mock-up A): a small muted "Choose one" label, then outlined rows as wide
+    as the message, lit by `surface-selected` under the pointer (`ChoiceList`, design-system.md §11). A press posts the choice's words as the person's
+    `answer` in the thread (`mail.reply` with `answers`: the answer goes to the question pressed, which must offer those words and not be answered already, `facts.picked`), which wakes the asker as any answer does, and the list then locks: the picked row stays lit ("You chose"), the others fade, and a
+    question is answered once. The reply box stays, so the person may always answer in their own words (the list then says "Answered"). The window finds
+    the answer as the person's message that names the question (`replyTo`); a window that cannot draw choices still shows the question and takes the answer.
+  - **The CLI's own choice tool is off** in every Claude session that has the mail tool (`disallowedTools: ['AskUserQuestion']`,
+    `claudeQueryOptions`, by `seatHas(profile, 'mail')`). The mail tool's description says to ask the person with kind "question" (a test pins it for every seat that is served the tool; the Assistant's seat has mail as a command and no definition), within the ceiling, which did not rise
+    (docs/tool-cost.md #1630). A session
+    without mail (a builder, an app's agent) keeps the question card. Codex's `request_user_input` exists only in its
+    plan mode and behind a feature flag, neither of which Centralu turns on, so it has nothing to switch off.
+    Approvals stay cards: they hold a tool call.
+  - **Every mail to the person raises an OS notification**, of any kind (`mail_changed.arrived`, through the same port and
+    alert as an approval); a question calls the person back as an approval does.
+  - **What others do** (2026-11-10). Claude Code's `AskUserQuestion` asks 1 to 4 questions of 2 to 4 options, each a label
+    and a description, optionally several picked, and holds the turn until answered; an "Other" answer is always
+    possible. OpenAI Codex's `request_user_input` (plan mode) asks 1 to 3 short questions with options, and also holds
+    the turn. Cline's `ask_followup_question` takes a question and an optional list of 2 to 5 options and waits for the
+    reply. Taken: short options, and a free answer always possible. Not taken: holding the turn (the reason for this
+    decision), and a description per option or several picked: each word of the tool rides in every Codex request
+    (docs/tool-cost.md, #1630), and the window does not draw them yet.
 
 ### 1.6 Out of scope here
 
@@ -720,6 +746,7 @@ sends.
 | `urgent` | sessions and the person only, as today |
 | `body` | the sender's words: up to 16,000 characters from a session or the person, 4,000 from an app |
 | `facts` | JSON only Centralu writes (§5.4) |
+| `choices` | JSON `string[]` of 2 to 6, or null: the answers a session's question to the person offers (D33, #1630, store v70). The sender's words, so a column of their own, never in `facts` |
 | `dedupe_key` | unique per sender: Centralu's "once per change" (§6.5) |
 | `origin` | what produced it: `mail`, `start_agent`, `agent_session`, `send_to_session`, `create_session`, `ask_project`, `script`, `person`, `app`, `watch`, `centralu` |
 | `legacy_thread` | the thread it was adopted from (§6.3), else null |
@@ -773,6 +800,7 @@ task is never reminded: its report settles it.
 | `handedOver` | notice | a handoff or the role's move put this row here (§7.7) |
 | `legacyKind` | any | the kind it had in its thread (adopted rows) |
 | `fromScript` | task | `{ credential }`: the person's task a script started (§8.1, #1468): the label the host wrote from the script's connection; `mail read` and the Inbox name the script, not the person |
+| `picked` | message | `true`: the person's answer to a session's question is one of the question's `choices`, pressed in the window (`mail.reply` with `answers`, D33, #1630); the host decides it, so `mail read` can say it to the asker |
 | `cites` | message | `{ seq, at }`: the person's message in the sender's conversation a request to the orchestrator cites, checked by Centralu at send ([cited-requests.md](cited-requests.md) §3) |
 
 `MailFacts` in `store/mail-facts.ts` is a zod object of these keys, all optional, `.passthrough()` so a newer build's key

@@ -18,8 +18,12 @@ export type MailSlice = {
   loadOlderMail: () => Promise<void>
   /** Back to the list */
   closeMailThread: () => void
-  /** The person's words in the open thread; true when it was sent, false (with the host's words in a toast) when it was refused */
-  replyMail: (text: string, kind?: 'note' | 'answer' | 'question') => Promise<boolean>
+  /**
+   * The person's words in the open thread; true when it was sent, false (with the host's words in a toast) when it was refused. `answers`: the
+   * question whose choice `text` is (a pick, #1630). A pick that fails reads the thread again, whatever the failure was (another window answered
+   * first, or the link dropped after the host had taken it), so the choices show what became of the question
+   */
+  replyMail: (text: string, kind?: 'note' | 'answer' | 'question', answers?: string) => Promise<boolean>
   /** Closes the open thread: Mark done (`finished`) or Drop (`dropped`). A session working on it is stopped and told (the host's close, 3.10) */
   closeMail: (outcome?: 'finished' | 'failed' | 'stopped' | 'dropped') => Promise<boolean>
   /** Sends held mail now, or lets it go */

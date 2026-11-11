@@ -1,0 +1,4 @@
+{
+  "bytes": 2700,
+  "reason": "Inbox choices (#1630): the shared ChoiceList and Button's choice variant (numbered rows, a locked state that lights the picked one), the thread's Choices wiring with the pick naming its question and the reply box waiting for it, the label helpers, and the composer's resting-height measure (#2190). Measured 1,929,484 B in the app's total JS against a ceiling of 1,927,400 B before this declaration; main sat within about 1.3 KB of the ceiling. The pick wait per question (#1630 review round 2) added about 460 B more: 1,929,946 B measured in the merge queue's run against 1,929,600 B. No new dependency."
+}

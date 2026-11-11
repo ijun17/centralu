@@ -4,7 +4,7 @@ import type { MailboxRecords, MailRow, RecipientRow } from '../dev-services/stor
 import { PERSON, parseAddress } from './address.js'
 import type { MailDelivery } from './delivery.js'
 import type { MailChange, MessageService } from './messages.js'
-import { refuse } from './rules.js'
+import { REFUSAL_TEXT, refuse } from './rules.js'
 
 /** What the person's side needs to know of a session to name it: nothing the mailbox keeps */
 export type PersonHost = {
@@ -130,11 +130,12 @@ export class MailPerson {
    * the newest message sent to them, to its sender; else a word more to the ones the person's own newest message went to. A sender that is gone, and a
    * message hidden from the person, are passed over. A question waits for an answer (D3); an answer or a note does not
    */
-  reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note'): MailThreadView {
-    const found = this.replyTarget(this.rootsOf(threadId))
+  reply(threadId: string, text: string, kind: 'note' | 'answer' | 'question' = 'note', answers?: string): MailThreadView {
+    const roots = this.rootsOf(threadId)
+    const found = answers === undefined ? this.replyTarget(roots) : this.pickTarget(roots, answers, text)
     if (!found) throw refuse('unknown_message', `There is no message in ${threadId} to answer.`)
     const { target, to } = found
-    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question' })
+    const sent = this.service.send(PERSON, { to, text, replyTo: target.id, needsReply: kind === 'question', ...(answers === undefined ? {} : { picked: true }) })
     const at = this.shown(target.rootId).find((s) => s.m.id === sent.message.id)?.seq ?? 1
     return this.thread(target.rootId, { after: at - 1 })
   }
@@ -162,6 +163,19 @@ export class MailPerson {
     if (!target) return undefined
     const to = target === theirs ? [target.sender] : this.records.recipients(target.id).flatMap((r) => (this.here(r.recipient) ? [r.recipient] : []))
     return { target, to }
+  }
+
+  /**
+   * The question a pick answers (#1630): the one the window names, which must be a question in these chains sent to the person by a session that is still
+   * here, whose choices include `text`, and not answered already (a question is answered once, whichever window gives the answer first)
+   */
+  private pickTarget(roots: readonly string[], id: string, text: string): { target: MailRow; to: string[] } | undefined {
+    const target = roots.flatMap((root) => this.shown(root).map((s) => s.m)).find((m) => m.id === id)
+    const row = target && this.records.recipient(target.id, PERSON)
+    if (!target || !row || hiddenFromPerson(row) || !this.here(target.sender)) return undefined
+    if (!target.choices?.includes(text)) throw refuse('bad_value', `${id} does not offer that choice.`)
+    if (row.answerId !== null || (row.settled !== null && row.settled !== 'legacy')) throw refuse('answered', REFUSAL_TEXT.answered(id))
+    return { target, to: [target.sender] }
   }
 
   /** Whether mail to `address` can still reach it: a session this host keeps (trashed or deleted ones are gone), or any other party */
@@ -478,6 +492,8 @@ export class MailPerson {
       urgent: m.urgent,
       body: m.body,
       facts: { ...m.facts },
+      ...(m.choices ? { choices: m.choices } : {}),
+      ...(m.replyTo !== null ? { replyTo: m.replyTo } : {}),
       createdAt: m.createdAt,
       ...(m.sender === PERSON
         ? { receipts: this.records.recipients(m.id).map((r) => ({ recipient: this.party(r.recipient), delivered: r.deliveredAt !== null, read: r.readAt !== null, handled: r.settled !== null })) }

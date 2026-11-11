@@ -618,6 +618,8 @@ export const Composer = memo(function Composer({
           void acceptDrop(e.dataTransfer)
         }}
         data-testid="input-dropzone"
+        // The input card, which `SessionView` measures as the composer at rest (`restingHeight`): what is drawn above it comes and goes
+        data-composer-card
       >
         {ac.open && (
           <AutocompleteMenu

@@ -15,8 +15,10 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
  *   earlier messages): as dim as the text around it, so it never outshines what the agent wrote.
  * - `danger`: what cannot be taken back (Delete for good). The danger colour, the only chromatic one a button wears.
  * - `ghost`: a word with no frame (Cancel beside a confirmation), grey until hovered.
+ * - `choice`: one answer of a list a question offers (`ChoiceList`, owner 2026-11-11, #1630): outlined in the strong line, no fill, `surface-selected` under the
+ *   pointer and, with `aria-pressed`, for the one picked (it stays at full strength when the list is locked, where the others fade).
  *
- * And three sizes, from the screens: `md` for a dialog's actions, `sm` for an action inside a card or a row, `xs` for
+ * And four sizes, from the screens: `lg` for a row of a list (a choice), `md` for a dialog's actions, `sm` for an action inside a card or a row, `xs` for
  * the small chip in a line of text (a conversation row's "show", a picker's span).
  *
  * `onRaised`: the fill of `primary` is the raised surface, so on a card that is itself raised it would vanish into
@@ -32,8 +34,8 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
  * Hover reacts only while enabled: a disabled button that still brightened on hover looked pressable. Disabled fades
  * to 50%, the one fade every shared control uses (owner, 2026-10-18).
  */
-export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'subtle' | 'danger' | 'ghost'
-export type ButtonSize = 'xs' | 'sm' | 'md'
+export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'subtle' | 'danger' | 'ghost' | 'choice'
+export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg'
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary: 'border border-line text-ink enabled:hover:border-line-strong',
@@ -42,12 +44,14 @@ const VARIANT: Record<ButtonVariant, string> = {
   subtle: 'border border-line text-ink-faint enabled:hover:border-line-strong enabled:hover:text-ink',
   danger: 'border border-danger/40 bg-danger-bg text-danger enabled:hover:border-danger/70',
   ghost: 'text-ink-faint enabled:hover:text-ink',
+  choice: 'border border-line-strong text-ink enabled:hover:bg-surface-selected aria-pressed:bg-surface-selected aria-pressed:disabled:opacity-100',
 }
 
 const SIZE: Record<ButtonSize, string> = {
   xs: 'px-1.5 text-2xs',
   sm: 'px-2 py-0.5 text-xs',
   md: 'px-3 py-1 text-sm',
+  lg: 'px-3 py-1.5 text-sm',
 }
 
 /** The classes of a button's look, for the rare element that must look like one without being a `<button>` */
@@ -57,7 +61,7 @@ export function buttonClass({
   onRaised = false,
 }: { variant?: ButtonVariant; size?: ButtonSize; onRaised?: boolean } = {}): string {
   const fill = variant === 'primary' ? (onRaised ? 'bg-surface-floor' : 'bg-surface-raised') : ''
-  return `rounded-md transition-colors disabled:opacity-50 ${VARIANT[variant]} ${fill} ${SIZE[size]}`.replace(/\s+/g, ' ').trim()
+  return `rounded-md transition disabled:opacity-50 ${VARIANT[variant]} ${fill} ${SIZE[size]}`.replace(/\s+/g, ' ').trim()
 }
 
 export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {

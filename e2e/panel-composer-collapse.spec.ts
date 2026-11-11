@@ -453,6 +453,41 @@ test('a panel of 450px folds its composer and one of 700px does not', async ({ p
 })
 
 /**
+ * A row above the input is not resting height (#2190). The strip of attachments shows over the input while a file waits to be sent, and
+ * its height counted as the composer's, so a panel of ordinary height folded the composer whenever the field lost focus (the report
+ * choice did the same, until it went). The line is still the one card at one line: 700px keeps it open with the strip showing, and
+ * 450px still folds it.
+ */
+test('a row above the input does not fold the composer of a panel of 700px, and a panel of 450px still folds', async ({ page }) => {
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 750 })
+  await setup(page)
+  const a = await newSession(page, 'alpha', 'claude', 'one')
+  await openGrid(page, [a])
+
+  const panel = page.getByTestId(`grid-panel-${a}`)
+  const shell = panel.getByTestId('composer-shell')
+  const hangsBelow = async () => {
+    const p = (await panel.boundingBox())!
+    const s = (await shell.boundingBox())!
+    return s.y + s.height > p.y + p.height + 1
+  }
+  const height = async () => Math.round((await panel.boundingBox())!.height)
+  await expect.poll(height).toBeGreaterThan(620)
+  await panel.getByTestId('attach-input').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('notes') })
+  await expect(panel.getByTestId('attachment-list')).toBeVisible()
+  // The field loses focus with the row still showing
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.mouse.move(0, 0)
+  await transitionsDone(panel)
+  expect(await hangsBelow()).toBe(false)
+
+  await page.setViewportSize({ width: SHORT_WINDOW.width, height: 500 })
+  await expect.poll(height).toBeLessThan(480)
+  await expect(panel.getByTestId('attachment-list')).toBeVisible()
+  await expect.poll(hangsBelow).toBe(true)
+})
+
+/**
  * The pinned copy of the last message leaves while the pane is folded, and its original shows (owner, 2026-11-06).
  *
  * A short panel gives the composer's fold the room it takes from the conversation, and the copy at the top took more

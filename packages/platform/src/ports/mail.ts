@@ -17,7 +17,8 @@ export interface MailPort {
    */
   thread(threadId: string, opts?: { after?: number; all?: boolean; tail?: number; before?: number }): Promise<MailThreadView>
   /** The person's words in a thread; answers the new message */
-  reply(threadId: string, text: string, kind?: 'note' | 'answer' | 'question'): Promise<MailThreadView>
+  /** `answers`: the question whose choice `text` is (a pick); the answer goes to that question, and a question answered already refuses it */
+  reply(threadId: string, text: string, kind?: 'note' | 'answer' | 'question', answers?: string): Promise<MailThreadView>
   close(threadId: string, outcome?: 'finished' | 'failed' | 'stopped' | 'dropped'): Promise<MailThreadRow>
   /** Sends held mail now (`release`: Release, Resend, Retry) or lets it go undelivered (`dismiss`) */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): Promise<{ changed: number }>

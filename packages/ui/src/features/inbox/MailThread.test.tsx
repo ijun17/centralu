@@ -131,4 +131,47 @@ describe('the thread in the inbox', () => {
     expect(open.html).toContain('aria-label="Your reply"')
     expect(open.text).not.toMatch(/thread/i)
   })
+
+  describe('the choices of a question (#1630)', () => {
+    const asked = { id: 'm1', seq: 1, sender: parser, kind: 'question', urgent: false, body: 'How should I handle that?', facts: {}, choices: ['Keep the old format', 'Switch now', 'Ask me again'], createdAt: 1_800_000_000_000 }
+    const answer = (body: string, picked = false, to = 'm1') => ({ id: 'm2', seq: 2, sender: you, kind: 'answer', urgent: false, body, facts: picked ? { picked: true } : {}, replyTo: to, createdAt: 1_800_000_000_000 })
+    const rows = (html: string) => [...html.matchAll(/<button[^>]*data-testid="mail-choices-1-(\d)"[^>]*>/g)].map((m) => m[0])
+
+    it('lists them numbered under the question, to pick one, with the reply box still there for an answer of one’s own', () => {
+      const { html, text } = render(view({ messages: [asked] }))
+      expect(text).toContain('Choose one 1. Keep the old format 2. Switch now 3. Ask me again')
+      expect(rows(html)).toHaveLength(3)
+      expect(rows(html).some((r) => r.includes('disabled=""'))).toBe(false)
+      expect(html).toContain('data-testid="mail-reply"')
+    })
+
+    it('once answered takes no press, lights the one picked and says so', () => {
+      const { html, text } = render(view({ messages: [asked, answer('Switch now', true)] }))
+      expect(text).toContain('You chose')
+      expect(rows(html)).toHaveLength(3)
+      expect(rows(html).every((r) => r.includes('disabled=""'))).toBe(true)
+      expect(rows(html)[1]).toContain('aria-pressed="true"')
+      expect(rows(html)[0]).toContain('aria-pressed="false"')
+    })
+
+    it('reads the answer by the question it names: with two questions asking, the answer to one leaves the other open', () => {
+      const other = { ...asked, id: 'm3', seq: 3, sender: { ...parser, address: 'session:h/s2', sessionId: 's2', name: 'Builder' }, choices: ['Yes', 'No'] }
+      const { html } = render(view({ messages: [asked, other, answer('Switch now', true, 'm1')] }))
+      const first = [...html.matchAll(/<button[^>]*data-testid="mail-choices-1-(\d)"[^>]*>/g)].map((m) => m[0])
+      const second = [...html.matchAll(/<button[^>]*data-testid="mail-choices-3-(\d)"[^>]*>/g)].map((m) => m[0])
+      expect(first.every((r) => r.includes('disabled=""'))).toBe(true)
+      expect(second).toHaveLength(2)
+      expect(second.some((r) => r.includes('disabled=""'))).toBe(false)
+    })
+
+    it('takes no press either when the answer was written, nor in a thread that is done, and says what became of it', () => {
+      const written = render(view({ messages: [asked, answer('Neither: both')] }))
+      expect(written.text).toContain('Answered')
+      expect(rows(written.html).every((r) => r.includes('disabled=""'))).toBe(true)
+      expect(rows(written.html).some((r) => r.includes('aria-pressed="true"'))).toBe(false)
+      const done = render(view({ thread: { ...view().thread, state: 'done', outcome: 'finished' }, messages: [asked] }))
+      expect(done.text).toContain('Not answered')
+      expect(rows(done.html).every((r) => r.includes('disabled=""'))).toBe(true)
+    })
+  })
 })

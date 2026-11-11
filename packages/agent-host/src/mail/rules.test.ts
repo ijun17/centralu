@@ -37,7 +37,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
   const B = 'session:h1/b'
   const row = (over: Partial<MailRow> = {}): MailRow => ({
     id: 'h1.m_1', sender: A, senderProject: null, kind: 'message', needsReply: false, replyTo: null, rootId: 'h1.m_1', causeId: null, depth: 0, urgent: false,
-    body: 'x', facts: {}, dedupeKey: null, origin: 'mail', legacyThread: null, createdAt: NOW, ...over,
+    body: 'x', facts: {}, choices: null, dedupeKey: null, origin: 'mail', legacyThread: null, createdAt: NOW, ...over,
   })
 
   it('keeps every constant of the design in one place', () => {

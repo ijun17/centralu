@@ -527,7 +527,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     mail: {
       list: () => rpc.call('mail.list', {}),
       thread: (threadId, opts) => rpc.call('mail.thread', { threadId, ...opts }),
-      reply: (threadId, text, kind) => rpc.call('mail.reply', { threadId, text, ...(kind ? { kind } : {}) }),
+      reply: (threadId, text, kind, answers) => rpc.call('mail.reply', { threadId, text, ...(kind ? { kind } : {}), ...(answers ? { answers } : {}) }),
       close: (threadId, outcome) => rpc.call('mail.close', { threadId, ...(outcome ? { outcome } : {}) }),
       held: (action, recipient, messageIds) => rpc.call('mail.held', { action, recipient, messageIds }),
       resume: (target) => done(rpc.call('mail.resume', target)),

@@ -1,5 +1,5 @@
 import { createListeners } from '@cc/common'
-import { errorMessage, oneLineText } from '@cc/protocol'
+import { errorMessage, oneLineText, type MailChoices } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import {
   HIDDEN_HOLDS,
@@ -68,6 +68,10 @@ export type SendInput = {
   cite?: boolean
   /** The id another host picked for a message it sends here (#2067 review, `MailAcross`); a new one of this host's when absent */
   id?: string
+  /** A session's question to the person only: the answers it offers to pick from (#1630) */
+  choices?: MailChoices
+  /** The person's answer is one of the choices of the question it answers, pressed in the window (`mail.reply` with `answers`); recorded in `facts.picked` (#1630) */
+  picked?: true
 }
 /**
  * `asWork`: an answer to a clarification, stored as a task (§9.7). `cited`: the person's message a request to the Assistant cites, checked.
@@ -139,6 +143,18 @@ export type DrainResult = {
 
 /** `arrived`: the message itself is new, not a change to one already stored (what the person's OS notification is raised for, #1630) */
 export type MailChange = { messageId: string; rootId: string; recipients: string[]; arrived?: true }
+
+/**
+ * The choices of a question to the person (#1630), as stored: only a session's, only on a question, only to the person alone, 2 to 6 of them,
+ * each one short line and no two the same. Anything else is refused, so a choice never reaches another session as a field it might take for Centralu's
+ */
+function checkedChoices(c: MailChoices, cls: SenderClass, to: readonly string[], question: boolean): MailChoices {
+  if (cls !== 'session' || !question || to.length !== 1 || to[0] !== PERSON) throw refuse('field_not_allowed', 'choices go only with a question to the person (kind "question", to "person")')
+  const choices = c.map((label) => oneLineText(label, CHOICE_CHARS))
+  if (choices.length < 2 || choices.length > 6 || choices.includes('') || new Set(choices).size < choices.length) throw refuse('bad_value', 'a question offers 2 to 6 choices, none empty and no two the same')
+  return choices
+}
+const CHOICE_CHARS = 80
 
 export class MessageService {
   private readonly now: () => number
@@ -239,6 +255,7 @@ export class MessageService {
     const kind: MailKind = asWork ? 'task' : 'message'
 
     const requests = to.map((r) => this.isRequest({ sender, kind: 'message', replyTo: target?.id ?? null, facts: { clarifies } }, r))
+    const choices = input.choices && checkedChoices(input.choices, cls, to, kind === 'message' && (input.needsReply ?? target === undefined))
     for (const [i, r] of to.entries()) {
       const party = parseAddress(r)
       if (!party) throw refuse('bad_address', `Not a mail address: ${JSON.stringify(r)}`)
@@ -263,11 +280,11 @@ export class MessageService {
       const quiet =
         kind === 'message' && target !== undefined && to.length === 1 && to[0] === target.sender &&
         quietAnswer({ kind, sender, needsReply, urgent }, target, { parent: this.reach.parentOf(target.sender), owesTask: this.records.newestTask(sender, target.sender) !== undefined, request: requests[0] === true })
-      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}) }
+      const facts: MailFacts = { ...(clarifies !== undefined ? { clarifies } : {}), ...(quiet ? { quiet: true } : {}), ...(cited ? { cites: cited } : {}), ...(input.picked && cls === 'person' ? { picked: true } : {}) }
 
       const stored = this.put(
         // The citation's one use: `UNIQUE(sender, dedupe_key)` (`personWord` looked first, in this transaction)
-        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
+        { ...(input.id ? { id: input.id } : {}), sender, kind, body: text, needsReply, replyTo: target?.id ?? null, causeId, depth: 0, urgent, facts, choices: choices ?? null, origin: cls === 'person' ? 'person' : cls === 'app' ? 'app' : 'mail', ...(cited ? { dedupeKey: citeKey(cited.seq) } : {}) },
         to.map((r, i) => this.row(r, { dueAt: dueAt(now, urgent, cls === 'person'), via: input.to.length > 0 ? (input.via?.[input.to.indexOf(r)] ?? null) : null, held: holds[i] ?? null })),
       )
       const held = to.flatMap((recipient, i) => (holds[i] ? [{ recipient, why: holds[i] }] : []))
@@ -846,7 +863,7 @@ export class MessageService {
     let stored: StoredMail
     try {
       stored = this.records.insert(
-        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
+        { id: messageIdOf(this.opts.hostId, this.ulids.next(now)), senderProject: this.reach.projectOf(mail.sender), needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, dedupeKey: null, legacyThread: null, createdAt: now, ...mail },
         rows,
       )
     } catch (e) {
@@ -1023,7 +1040,7 @@ export class MessageService {
 
   /** The line for an earlier message that is no longer kept (S5) */
   private gone(id: string): ReadItem {
-    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
+    const stub: MailRow = { id, sender: '', senderProject: null, kind: 'notice', needsReply: false, replyTo: null, rootId: id, causeId: null, depth: 0, urgent: false, body: '', facts: {}, choices: null, dedupeKey: null, origin: null, legacyThread: null, createdAt: 0 }
     return { message: stub, row: null, relation: '', phantom: 'gone' }
   }
 

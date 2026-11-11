@@ -44,6 +44,8 @@ export class MailMock {
     from: MailParty
     body: string
     kind?: string
+    /** The answers a question offers to pick from (#1630) */
+    choices?: string[]
     state?: string
     assignee?: MailParty | null
     /** A turn of the thread is going in its assignee: closing tells that session and stops nothing (C12) */
@@ -54,7 +56,7 @@ export class MailMock {
   }): string {
     const id = `mock.t_${this.clock.next()}`
     const now = this.clock.now()
-    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, createdAt: now }
+    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, ...(spec.choices ? { choices: spec.choices } : {}), createdAt: now }
     const row: MailThreadRow = {
       id,
       subject: spec.subject,
@@ -79,6 +81,16 @@ export class MailMock {
     }
     this.emit({ type: 'mail_changed', threadId: id, toPerson: true })
     return id
+  }
+
+  /** Another message from a session in a thread, as the host adds one: unread for the person */
+  say(threadId: string, spec: { from: MailParty; body: string; kind?: string; choices?: string[] }): void {
+    const t = this.must(threadId)
+    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, ...(spec.choices ? { choices: spec.choices } : {}), createdAt: this.clock.now() }
+    t.messages.push(message)
+    t.row.unread += 1
+    t.row.last = { sender: spec.from, kind: message.kind, preview: spec.body.slice(0, 140), at: message.createdAt }
+    this.touch(t)
   }
 
   private must(threadId: string): Thread {
@@ -134,10 +146,15 @@ export class MailMock {
       t.row.unread = 0
       return this.view(t, messages)
     },
-    reply: async (threadId, text, kind) => {
+    reply: async (threadId, text, kind, answers) => {
       const t = this.must(threadId)
       if (t.row.state === 'done') throw mockError('this thread is done; open a follow-up', 'refused')
-      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: {}, createdAt: this.clock.now() }
+      // As the host does (`pickTarget`): a pick names its question, whose choices include the words, and a question is answered once
+      const open = t.messages.findLast((m) => m.sender.kind !== 'person' && m.kind === 'question' && !t.messages.some((a) => a.replyTo === m.id))
+      const question = answers === undefined ? open : t.messages.find((m) => m.id === answers)
+      if (answers !== undefined && !question?.choices?.includes(text)) throw mockError(`${answers} does not offer that choice.`, 'refused')
+      if (answers !== undefined && question && t.messages.some((m) => m.replyTo === question.id && m.sender.kind === 'person')) throw mockError(`${question.id} is answered already: a question is answered once. Write to say more.`, 'refused')
+      const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: t.messages.length + 1, sender: PERSON, kind: kind ?? 'note', urgent: false, body: text, facts: answers !== undefined ? { picked: true } : {}, ...(question ? { replyTo: question.id } : {}), createdAt: this.clock.now() }
       t.messages.push(message)
       t.read = message.seq
       t.row.last = { sender: PERSON, kind: message.kind, preview: text.slice(0, 140), at: message.createdAt }
