@@ -24,10 +24,7 @@ import type {
   QuestionAnswer,
   AgentVersions,
   SleepPolicy,
-  SendIntent,
 } from '@cc/protocol/client'
-
-export type { SendIntent }
 
 /** What `agents.usage` answers (docs/protocol.md): the limits, or why there are none, with the cache figures beside them */
 export type UsageAnswer = {
@@ -45,9 +42,7 @@ import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
-  send(sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent): Promise<void>
-  /** Who waits for this session's work, when it owes a report (#1377); the composer then offers the choice */
-  reportOwed(sessionId: string): Promise<{ callerId: string; callerName: string } | null>
+  send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
   /** Saves a pasted image and returns its path (so base64 does not end up in the conversation record) */
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string): Promise<Attachment>
   respondApproval(

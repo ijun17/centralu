@@ -58,29 +58,25 @@ describe('a delegation written down (§9.1)', () => {
 })
 
 describe('a turn the mailbox did not start', () => {
-  it('a caller’s message starts a turn of that caller’s task; the person’s own turn is nobody’s work; the person adding to the task is theirs, of the task', () => {
+  it('a caller’s message starts a turn of that caller’s task; the person’s own turn is nobody’s work', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
-    record('w', { by: 'work', added: false, cli: false, source: 'caller', ownerId: 'a' })
+    record('w', { by: 'work', cli: false, source: 'caller', ownerId: 'a' })
     expect(w.turns.current('w')).toMatchObject({ by: 'caller', messageId: task.id, starter: task.id })
     w.end('w')
-    record('w', { by: 'person', added: false, cli: false, source: 'caller' })
+    record('w', { by: 'person', cli: false, source: 'caller' })
     expect(w.turns.current('w')).toMatchObject({ by: 'person', messageId: null, starter: null })
-    w.end('w')
-    record('w', { by: 'work', added: true, cli: false, source: 'caller', ownerId: 'a' })
-    // The person's word: the turn is the task's, but what it sends has no cause (D9)
-    expect(w.turns.current('w')).toMatchObject({ by: 'person', messageId: task.id, starter: null })
   })
 
   it('the CLI running on after the work’s background tasks is a turn of that task; a report or an app’s message is a turn of its own kind', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
-    record('w', { by: 'work', added: false, cli: true, source: 'caller', ownerId: 'a' })
+    record('w', { by: 'work', cli: true, source: 'caller', ownerId: 'a' })
     expect(w.turns.current('w')).toMatchObject({ by: 'cli', messageId: task.id, starter: null })
     w.end('w')
-    record('w', { by: 'work', added: false, cli: false, source: 'report' })
+    record('w', { by: 'work', cli: false, source: 'report' })
     expect(w.turns.current('w')).toMatchObject({ by: 'report', messageId: null })
   })
 
@@ -92,18 +88,18 @@ describe('a turn the mailbox did not start', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
     const record = turnRecorder(w.mail, w.store.mailbox, w.turns)
-    record('w', { by: 'person', added: false, cli: false, source: 'caller', ownerId: 'a' })
+    record('w', { by: 'person', cli: false, source: 'caller', ownerId: 'a' })
     const seq = w.turns.current('w')!.turnSeq
-    record('w', { by: 'work', added: false, cli: false, source: 'caller', ownerId: 'a', again: true })
+    record('w', { by: 'work', cli: false, source: 'caller', ownerId: 'a', again: true })
     expect(w.turns.current('w')).toMatchObject({ turnSeq: seq, by: 'caller', messageId: task.id, starter: task.id })
     expect(turnsOf(w.store, 'w')).toEqual([expect.objectContaining({ turnSeq: seq, startedBy: 'caller', messageId: task.id, starterId: task.id, outcome: null })])
     // And back to the CLI's own: what it sends has no cause
-    record('w', { by: 'work', added: false, cli: true, source: 'caller', again: true })
+    record('w', { by: 'work', cli: true, source: 'caller', again: true })
     expect(turnsOf(w.store, 'w')).toEqual([expect.objectContaining({ turnSeq: seq, startedBy: 'cli', starterId: null, outcome: null })])
     // A turn the mailbox's delivery started is the mailbox's: not decided again
     w.end('w')
     const mailSeq = w.turns.begin('w', { workMessage: null, starter: null })
-    record('w', { by: 'person', added: false, cli: false, source: 'caller', again: true })
+    record('w', { by: 'person', cli: false, source: 'caller', again: true })
     expect(w.turns.current('w')).toMatchObject({ turnSeq: mailSeq, by: 'mail' })
   })
 
@@ -111,7 +107,7 @@ describe('a turn the mailbox did not start', () => {
     const w = turnWorld()
     personWorkRecorder(w.mail)('w', 'Sort the photos')
     const task = w.store.mailbox.newestTask(PERSON, W)!
-    turnRecorder(w.mail, w.store.mailbox, w.turns)('w', { by: 'work', added: false, cli: false, source: 'caller' })
+    turnRecorder(w.mail, w.store.mailbox, w.turns)('w', { by: 'work', cli: false, source: 'caller' })
     expect(w.turns.current('w')).toMatchObject({ messageId: task.id })
   })
 })
@@ -152,14 +148,10 @@ describe('a turn’s end (§9.3): each case answers the ReportedAs the table giv
     expect(w.rowOf(task.id, W).settled).toBe('reported')
   })
 
-  it('a failure, a usage limit or a stop keeps the old word as the reason; the person taking it over is stopped, taken_over', () => {
+  it('a failure, a usage limit or a stop keeps the old word as the reason', () => {
     const one = setup()
     one.report('a', 'w', draft({ outcome: 'limit_reached' }))
     expect(one.w.store.mailbox.reportsOn(one.task.id)[0]!.facts).toMatchObject({ outcome: 'failed', reason: 'limit_reached' })
-    const two = setup()
-    two.report('a', 'w', draft({ outcome: 'took_over', then: 'dropped' }))
-    expect(two.w.store.mailbox.reportsOn(two.task.id)[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'taken_over' })
-    expect(two.w.rowOf(two.task.id, W).settled).toBe('reported')
   })
 
   it('to an owner that cannot read mail: an object, and its settle marks the report delivered and read so nothing wakes the owner', () => {

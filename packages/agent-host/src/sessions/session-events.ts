@@ -581,8 +581,6 @@ export class SessionEvents {
      * either when Centralu puts a line of its own in front of it (`rootAppsNotice`, once).
      */
     fromPerson = false,
-    /** What the person chose for a delegation report the session owes (#1377); the default is "just asking" */
-    intent: 'ask' | 'task' | 'takeover' = 'ask',
     /**
      * A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
      * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the
@@ -626,9 +624,9 @@ export class SessionEvents {
         kind: 'text',
         // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
         // image bytes back in
-        // The input id it goes in under, what the person meant and whether it is a report (#1639): the record of whose a turn it starts is.
+        // The input id it goes in under and whether it is a report (#1639): the record of whose a turn it starts is.
         // `byPerson`: sent from the window (the composer, or the handoff prompt and Continue text the person's click sends), the one mark a request's citation accepts (docs/plans/cited-requests.md §3)
-        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(intent !== 'ask' ? { intent } : {}), ...(relayed ? { relayed: true } : {}) },
+        payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(relayed ? { relayed: true } : {}) },
         ts: Date.now(),
       },
     ])
@@ -656,7 +654,6 @@ export class SessionEvents {
       ...(from ? { from } : {}),
       ...(fromApp ? { fromApp } : {}),
       ...(fromScript ? { fromScript } : {}),
-      ...(!from && !fromApp && !fromScript && intent !== 'ask' ? { intent } : {}),
       // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
       // — attachments have to ride along too, or the bubble is incomplete
       ...(attachments?.length ? { attachments } : {}),
@@ -687,7 +684,7 @@ export class SessionEvents {
     // Whose turn this message makes, or joins (#1377): only the person's own message (no source) is theirs
     const joins = inTurn(m.state) && this.host.joinsRunningTurn(sessionId)
     const hubInput = isHubSender(from?.sessionId)
-    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, intent === 'task', inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
+    this.host.children.noteMessage(sessionId, !from && !fromApp && !fromScript ? 'person' : 'work', inTurn(m.state), joins, inputId, relayed ? 'report' : fromApp ? 'app' : 'caller', seq)
     // A hub's message may run as a turn of its own, after another's (#1604): who it is from, for the turn that does
     if (from && hubInput) this.host.children.noteInputOrigin(sessionId, inputId, { seq, from })
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)

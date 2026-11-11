@@ -301,7 +301,7 @@ describe('Mark done, Dismiss and Release, as Q-M3a-21, D8 and Q-M3a-22 say', () 
     const w = ready(hostWorld())
     w.clock.t += 10
     const mine = w.mail.send(PERSON, { to: [A], text: 'Ready?' }).message
-    w.hooks.turnStarted?.('a', { by: 'work', added: false, cli: true, source: 'caller' })
+    w.hooks.turnStarted?.('a', { by: 'work', cli: true, source: 'caller' })
     const waiting = w.mail.send(PERSON, { to: [A], text: 'Ready later?' }).message
     w.person.close(waiting.id)
     expect(w.row(waiting.id, A)?.settled).toBe('withdrawn')
@@ -364,7 +364,7 @@ describe('closing a chain a session works on, and its state, as on main (owner d
   function working(w: ReturnType<typeof ready>) {
     w.clock.t += 10
     const task = w.mail.task(PERSON, B, { text: 'Write the parser', origin: 'create_session', delivered: true })
-    w.hooks.turnStarted?.('b', { by: 'work', added: false, cli: true, source: 'caller' })
+    w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller' })
     return task
   }
   const rowOf = (w: ReturnType<typeof ready>, id: string) => w.person.list().threads.find((t) => t.id === id)
@@ -578,7 +578,7 @@ describe('closing a chain a session works on, and its state, as on main (owner d
     const root = w.mail.send(B, { to: [PERSON], text: 'Shall I start?', needsReply: true }).message
     w.clock.t += 10
     const go = w.mail.task(PERSON, B, { text: 'Yes, start', origin: 'person', delivered: true, replyTo: root.id })
-    w.hooks.turnStarted?.('b', { by: 'work', added: false, cli: true, source: 'caller' })
+    w.hooks.turnStarted?.('b', { by: 'work', cli: true, source: 'caller' })
     expect(rowOf(w, root.id)).toMatchObject({ working: true, state: 'running' })
     w.person.close(go.id)
     expect(w.told).toMatchObject([{ sessionId: 'b' }])

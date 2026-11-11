@@ -116,7 +116,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.assistantSkills': {},
   'agents.sleepPolicy': {},
   'agents.versions': {},
-  'agents.reportOwed': { sessionId: S },
   'agents.archiveLosses': { sessionId: S },
   'agents.worktreeStatus': { sessionId: S },
   'usage.history': { from: '2020-01-01T00:00:00Z', to: '2100-01-01T00:00:00Z', groupBy: 'day', by: 'tool' },

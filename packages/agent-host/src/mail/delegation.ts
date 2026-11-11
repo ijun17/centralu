@@ -156,19 +156,18 @@ function reportOnTaskTo(records: MailboxRecords, report: MailRow, owner: string,
 
 /**
  * What the mailbox does when a turn starts that it did not start: whose the turn is and which task it is the work of, so its end can be reported as
- * that task's. The person's own turn belongs to none, except when they chose to add their message to the task. A caller's message starts a turn of
+ * that task's. The person's own turn belongs to none. A caller's message starts a turn of
  * the task that caller gave; so does the CLI running on after the background work of the turn that paused (a report is still owed to the caller)
  */
 export function turnRecorder(mail: MessageService, records: MailboxRecords, turns: MailTurns): (sessionId: string, turn: TurnStart) => void {
   return (sessionId, turn) => {
     const child = mail.sessionAddress(sessionId)
-    const taskId = turn.ownerId && (turn.by === 'work' || turn.added) ? (records.newestTask(mail.sessionAddress(turn.ownerId), child)?.id ?? null) : null
+    const taskId = turn.ownerId && turn.by === 'work' ? (records.newestTask(mail.sessionAddress(turn.ownerId), child)?.id ?? null) : null
     const personWork = (): string | null => (turn.ownerId ? null : (records.newestTask(PERSON, child)?.id ?? null))
     // Decided again by the input the tool named (#1639): the same turn's row is corrected, not a new one begun
     const record = (by: Parameters<MailTurns['beginOther']>[1], messageId: string | null, owner?: string) =>
       turn.again ? turns.restate(sessionId, by, messageId, owner) : turns.beginOther(sessionId, by, messageId, owner)
     if (turn.by === 'person') record('person', null)
-    else if (turn.added) record('person', taskId, turn.ownerId)
     // A report or notice about another session starts a turn of its own kind, not of a caller's send
     else if (turn.source === 'report') record('report', null)
     else if (turn.source === 'app') record('app', null)
@@ -186,7 +185,7 @@ export function turnRecorder(mail: MessageService, records: MailboxRecords, turn
  * A turn's end as the mailbox is told it (docs/plans/mailbox.md §9.3): Centralu's own words for the task's sender, with the facts a wake carries
  */
 export type ReportDraft = {
-  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped, took_over */
+  /** One word of Centralu's: finished, failed, limit_reached, network, interrupted, quit, stopped, paused, settled, swapped */
   outcome: string
   /** The report in Centralu's words alone: how it ended, the id, the kind of error, how to go on, and where the session's words are read (#1186) */
   body: string
@@ -198,10 +197,10 @@ export type ReportDraft = {
   paused?: number
   /** A pause's update (#1540): a later turn of the paused work ended with a new answer; where that turn began (`TurnReport.update`) */
   update?: number
-  /** The person wrote into the turn, or added to the task */
+  /** The person wrote into the turn */
   personNote?: boolean
-  /** What the work is now: reported (`review`), still going (`running`: paused over its own work or work it handed on), or taken over (`dropped`) */
-  then: 'review' | 'running' | 'dropped'
+  /** What the work is now: reported (`review`), or still going (`running`: paused over its own work or work it handed on) */
+  then: 'review' | 'running'
   /** The session is being archived, and archiving stopped the turn this reports: that end is not the work's, and the task is left to `partyGone` */
   archiving?: boolean
   /** The owner is in a turn now: a relayed notice joins it and starts none */
@@ -225,8 +224,7 @@ export type ReportDelivery = 'wake' | 'old'
 export type ReportedAs = 'mailed' | 'closed' | 'none' | { settle: () => void; keep: boolean }
 
 /** The old path's outcome word as a report's (§5.4), and the word itself as the reason when the two differ */
-function outcomeOf(draft: Pick<ReportDraft, 'outcome' | 'then'>): { outcome: TurnReport['outcome']; reason?: string } {
-  if (draft.then === 'dropped') return { outcome: 'stopped', reason: 'taken_over' }
+function outcomeOf(draft: Pick<ReportDraft, 'outcome'>): { outcome: TurnReport['outcome']; reason?: string } {
   const word = draft.outcome
   const outcome: TurnReport['outcome'] =
     word === 'finished' || word === 'settled' ? 'finished' : word === 'failed' || word === 'limit_reached' ? 'failed' : 'stopped'

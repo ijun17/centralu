@@ -26,7 +26,7 @@ const turnStartedBy = (stored: string): TurnStartedBy => STARTED_BY.find((s) => 
  * the caller it is the work of, when there is one
  */
 /** `again`: the turn was decided at its start, and the tool's naming of its inputs decided it otherwise (#1639) */
-export type TurnStart = { by: 'person' | 'work'; added: boolean; cli: boolean; source: TurnSource; ownerId?: string; again?: true }
+export type TurnStart = { by: 'person' | 'work'; cli: boolean; source: TurnSource; ownerId?: string; again?: true }
 
 /** What a message of the work that starts a turn is: a caller's own, a report or notice about another session (Centralu's), or an app's */
 export type TurnSource = 'caller' | 'report' | 'app'

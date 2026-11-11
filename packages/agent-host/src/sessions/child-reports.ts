@@ -45,7 +45,6 @@ const NOT_READ = "(not read: the session's last turn was the person's; read_sess
 
 /** The one word of Centralu's that says how a turn ended, for the mailbox's wake (the same cases `deliverReport` words in full) */
 function outcomeWord(work: ReportWork | undefined, stop: { reason?: string } | null | undefined, ending: { type: string }): string {
-  if (work && 'tookOver' in work) return 'took_over'
   if (work && 'swapped' in work) return 'swapped'
   if (work && ('machineRemoved' in work || 'linkLost' in work)) return 'stopped'
   if (work && ('paused' in work || 'waitingOn' in work)) return 'paused'
@@ -139,18 +138,6 @@ function swappedReportLine(): string {
     'It is most likely the end of the work you gave it; check its last response before relying on it.\n'
   )
 }
-/**
- * What a caller is told when the person chose to take a session over (#1377, "Take it over"; #1340): the person's turns in
- * it are theirs, so none is reported, and the work it was given is not followed any more
- */
-function tookOverReportLine(paused: readonly BackgroundTask[], name: Naming = STORED): string {
-  return (
-    '[Centralu] The person took this session over; its later turns are theirs, and none of them will be reported to you. ' +
-    (paused.length
-      ? `The work you assigned had paused on its own background work (${name.tasks(paused)}), and no final report follows.\n`
-      : 'The work you assigned was still running, and no report of it follows.\n')
-  )
-}
 /** What a report says of the person's part in the turn it reports (#1377): Centralu's own words, never the person's */
 export function personPartLine(turn: ReportPart | undefined): string {
   // An update cut the turn and Centralu continued it (#1966): its parent heard nothing of the cut, so the end says so
@@ -158,7 +145,6 @@ export function personPartLine(turn: ReportPart | undefined): string {
     (turn?.cut ? 'An update of Centralu cut this turn and Centralu continued it.\n' : '') +
     // An update stopped the background work the report had paused on (#1912): the turn reported is the session's after Centralu told it so
     (turn?.stoppedByUpdate ? 'An update of Centralu stopped the background work this work had paused on before that work ended; the session was told which, and this turn came after.\n' : '')
-  if (turn?.added) return `${centralu}The person added an instruction to this task during this turn.\n`
   if (turn?.wrote) return `${centralu}The person wrote in this session during this turn.\n`
   return centralu
 }
@@ -486,46 +472,6 @@ export class ChildReports {
     return { preview: clipPreview(lastResponse(rows, span), 600), seq: lastResponseSeq(rows, span) ?? undefined }
   }
 
-  /**
-   * The person wrote to a session whose report is held over its own background work (#1340): the work the caller gave
-   * ended with the turn that paused, and what the session does from here is the person's. Nothing clears that pause
-   * but the end of the background work, which a watcher or a dev server never reaches, so every later turn end of
-   * the session, whoever started it, was reported as the assigned work ("The assigned work failed" for a person's
-   * failed `/compact`). The mark and the pause end here, stored as well, so a host swap keeps them ended; the caller is
-   * told once. A report not paused is a turn of the caller's still running, which the person's message joins: it
-   * stays owed. A message from the caller itself, another session or an app never comes here (`TurnInputs.send`).
-   */
-  async personTookOver(sessionId: string): Promise<void> {
-    const callerId = this.host.children.awaitingReport.get(sessionId)
-    if (!callerId) return
-    // Read before the pause is dropped: how each task stands now (none: the work was still running)
-    const tasks = this.host.children.pausedReports.has(sessionId) ? this.pausedTasksNow(sessionId) : []
-    this.host.children.clearReport(sessionId)
-    const target = this.host.meta.get(sessionId)
-    if (!target || !this.host.meta.has(callerId)) return
-    const { name, project } = this.reportedAs(target)
-    const read = `read_session(sessionId="${sessionId}")`
-    const stored =
-      tookOverReportLine(tasks) +
-      `Session: ${frameField(name)}\n` +
-      `id: ${sessionId}\n` +
-      `Project: ${frameField(project)}\n\n` +
-      `If you need more, you can read that session's recent conversation with read_session.`
-    // The thread is closed `dropped` and its owner told once; with no thread, or an owner that cannot read mail, the old way tells as well
-    // Centralu's words alone: the thread and the wake carry no name, project or task text (#1186)
-    const forModel = tookOverReportLine(tasks, FOR_MODEL) + `id: ${sessionId}\n\n${read} shows what the person and the session did since.`
-    const taken = this.toMailbox(callerId, sessionId, { outcome: 'took_over', body: forModel, ...(tasks.length ? { paused: tasks.length } : {}), then: 'dropped' })
-    if (taken === 'mailed' || taken === 'closed') return
-    await this.tellSession(
-      callerId,
-      stored,
-      { sessionId, name },
-      true,
-      forModel,
-      typeof taken === 'object' ? { keep: taken.keep, onDelivered: taken.settle } : undefined,
-    )
-  }
-
   /** Reports the end of a turn the Assistant asked to hear about, as one message in its session (#166) */
   async deliverReport(
     assistantId: string,
@@ -543,7 +489,7 @@ export class ChildReports {
     work?: ReportWork,
     /** Where its last response starts in its conversation, when it is read here: the read the model is pointed to (#1186) */
     answerSeq?: number,
-    /** The person's part in the turn reported (#1377): they wrote into it, or added to the task; and an update's part in it (#1966, #1912) */
+    /** The person's part in the turn reported (#1377): they wrote into it; and an update's part in it (#1966, #1912) */
     part?: ReportPart,
   ): Promise<boolean> {
     /*
@@ -558,8 +504,7 @@ export class ChildReports {
     const stop = this.host.meta.get(sessionId)?.interruption
     const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || wentWithItsProcess(stop)
     const outcomeOf = (name: Naming) =>
-      work && 'tookOver' in work ? tookOverReportLine(work.paused, name)
-      : work && 'swapped' in work ? swappedReportLine()
+      work && 'swapped' in work ? swappedReportLine()
       : work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused, name)
       : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused, name)
       : work && 'paused' in work
@@ -630,7 +575,7 @@ export class ChildReports {
      * or when the owner cannot read mail; either way the thread has the report
      */
     // Held over the session's own background work: the thread stays running, and the report says how many tasks are left
-    const holding = !!work && 'paused' in work && !('tookOver' in work) && !('machineRemoved' in work) && !('linkLost' in work)
+    const holding = !!work && 'paused' in work && !('machineRemoved' in work) && !('linkLost' in work)
     // Or held over the work it handed on and waits for (§6)
     const handedOn = !!work && 'waitingOn' in work
     const reported = this.toMailbox(assistantId, sessionId, {
@@ -641,7 +586,7 @@ export class ChildReports {
       ...(holding ? { paused: work.paused.length } : {}),
       // A new answer of a pause (#1540), named by where the turn that ended began
       ...(holding && 'update' in work && work.update?.since !== undefined ? { update: work.update.since } : {}),
-      ...(part?.wrote || part?.added ? { personNote: true } : {}),
+      ...(part?.wrote ? { personNote: true } : {}),
       then: holding || handedOn ? 'running' : 'review',
     })
     // Whether the owner was told now: by the mail, by the relayed notice, or by the report the mailbox delivers if the notice cannot be (a stop notice reads it, #1948)

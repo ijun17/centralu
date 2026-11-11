@@ -58,28 +58,28 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
 /**
  * Whose a turn is (#1377): the person's (the person wrote while the session was at rest, or their message waited for
  * the turn), or the delegated work's (the caller's message, an app's or Centralu's, or the CLI starting it itself when
- * the work's background tasks end). `wrote`: the person wrote into a turn of the work; `added`: the person chose to add
- * their message to the task. `cut`: an update of Centralu cut the turn and Centralu continued it (#1966): its end says so.
+ * the work's background tasks end). `wrote`: the person wrote into a turn of the work. `cut`: an update of Centralu cut the
+ * turn and Centralu continued it (#1966): its end says so.
  */
-export type TurnStarter = { by: 'person' | 'work'; wrote?: true; added?: true; cut?: true }
+export type TurnStarter = { by: 'person' | 'work'; wrote?: true; cut?: true }
 /**
  * A message given the tool (#1639, docs/plans/turn-starter.md): the input id and row it went in under (none in a test that gives no
  * row), whose it is, and `joined`: it is queued while a turn runs (given into it, or behind the input it opened from), which may take it in
  * at a tool round; `after`: it went in while a turn ran, to a tool that holds it for a turn after that one; `carried`: it went into a turn that
  * ended naming nothing (Codex), which took it in unless the next turn opens for it. `origin`: a hub's message (#1604)
  */
-type Entry = { id?: string; seq?: number; by: 'person' | 'work'; added?: true; source: TurnSource; joined: boolean; after?: true; carried?: true; origin?: TurnOrigin }
+type Entry = { id?: string; seq?: number; by: 'person' | 'work'; source: TurnSource; joined: boolean; after?: true; carried?: true; origin?: TurnOrigin }
 /**
  * Where each session's messages given its tool stand (#1639), in `turn_inputs:<session>`: `spent`, the rows at or before it are done
- * with, and the held ones are the user rows after it that carry an `inputId`; and of the running turn, whether its opening was named, whether
- * the person took it over, and each held id that is `joined`, `after` or `carried` (`marks`). Read back once per host, so a host that takes a kept session over
- * mid-turn decides as the one before would have
+ * with, and the held ones are the user rows after it that carry an `inputId`; and of the running turn, whether its opening was named, and
+ * each held id that is `joined`, `after` or `carried` (`marks`). Read back once per host, so a host that takes a kept session over mid-turn
+ * decides as the one before would have. A build before #1948 also kept `takenOver` (the person took the turn over); it is not read
  */
 export const turnInputsKey = (sessionId: string) => `turn_inputs:${sessionId}`
 function readInputs(raw: string | null) {
   const p = raw === null ? {} : asObj(tryParseJson(raw))
   const marks: Record<string, unknown> = asObj(p.marks)
-  return { spent: typeof p.spent === 'number' ? p.spent : null, named: p.named === true, takenOver: p.takenOver === true, marks }
+  return { spent: typeof p.spent === 'number' ? p.spent : null, named: p.named === true, marks }
 }
 /** The entry a user row is, when it went in under an input id (#1639): the person's when no one else is named on it */
 function entryOf(row: StoredMessage): (Entry & { id: string }) | undefined {
@@ -88,18 +88,17 @@ function entryOf(row: StoredMessage): (Entry & { id: string }) | undefined {
   const work = p.from !== undefined || p.fromApp !== undefined || p.fromScript !== undefined
   const hub = TurnOrigin.safeParse({ seq: row.seq, from: p.from })
   return {
-    id: p.inputId, seq: row.seq, by: work ? 'work' : 'person', ...(p.intent === 'task' ? { added: true as const } : {}),
+    id: p.inputId, seq: row.seq, by: work ? 'work' : 'person',
     source: p.relayed === true ? 'report' : p.fromApp !== undefined ? 'app' : 'caller', joined: false,
     ...(hub.success && isHubSender(hub.data.from.sessionId) ? { origin: hub.data } : {}),
   }
 }
 /**
  * Whose a turn that ran for these messages is (#1377): the work's if any is (the work's instruction is in it), with the person's noted
- * (`wrote`, or `added` for "Add to the task"); else the person's. The source is the first of the work's
+ * (`wrote`); else the person's. The source is the first of the work's
  */
 function starterFor(ran: readonly Entry[]): { starter: TurnStarter; source: TurnSource } {
   const source = ran.find((e) => e.by === 'work')?.source ?? 'caller'
-  if (ran.some((e) => e.added)) return { starter: { by: 'work', added: true }, source }
   if (!ran.some((e) => e.by === 'work')) return { starter: { by: 'person' }, source }
   return { starter: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, source }
 }
@@ -148,7 +147,7 @@ function startsOf(span: TurnSpan): readonly number[] {
 function readTurn(raw: string | null): TurnStarter | null {
   const t = raw === null ? {} : asObj(tryParseJson(raw))
   if (t.by !== 'person' && t.by !== 'work') return null
-  return { by: t.by, ...(t.wrote === true ? { wrote: true as const } : {}), ...(t.added === true ? { added: true as const } : {}) }
+  return { by: t.by, ...(t.wrote === true ? { wrote: true as const } : {}) }
 }
 
 /** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */
@@ -170,8 +169,6 @@ export type LinkedReport = {
   next?: TurnStarter
   /** Whose the last turn there was: its last response is the person's answer when it was theirs */
   lastBy?: 'person' | 'work'
-  /** When the person chose "Add to the task" for the message on its way to the machine (#1377): an older machine does not echo the choice */
-  addNext?: number
   /** The last response the report of this pause read (#1186): a report a lost link sends in its place carries it, marked as read then. Memory only */
   read?: { preview: string; seq: number | undefined }
 }
@@ -244,8 +241,6 @@ export class ChildOwnership {
   private readonly entries = new Map<string, Entry[]>()
   /** The last row of each session's messages that are done with (`turn_inputs`'s `spent`) */
   private readonly spentAt = new Map<string, number>()
-  /** Running turns the person took over (`takeTurn`): the tool's naming of the inputs does not give them back */
-  private readonly takenOver = new Set<string>()
   /** Running turns whose opening input the tool named (`turnNamed`); one not named is decided again by the inputs its end names */
   private readonly named = new Set<string>()
   /** The settle timer of a paused report whose background work has ended (#721) */
@@ -572,7 +567,7 @@ export class ChildOwnership {
    * (or where the tool holds it for a turn of its own) it is what the next turn starts from; into a running turn it joins
    * that turn: a person's into the work's is noted ("the person wrote during this turn"), into their own it is theirs.
    */
-  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, added = false, inputId?: string, source: TurnSource = 'caller', seq?: number): void {
+  noteMessage(sessionId: string, by: 'person' | 'work', inTurnNow: boolean, joinsRunningTurn: boolean, inputId?: string, source: TurnSource = 'caller', seq?: number): void {
     /*
      * Into a running turn: the tool may take it in at its next round, or run it as a turn of its own once this one ends (Claude folds a
      * queued input in only at a tool round, so a message sent while the final answer is written is a turn of its own). Which, is said at
@@ -585,7 +580,7 @@ export class ChildOwnership {
     // A host that just took the session over read this message back from the row already stored: the same entry, marked as given now
     const kept = inputId !== undefined ? held.find((e) => e.id === inputId) : undefined
     if (kept) Object.assign(kept, mark)
-    else held.push({ ...(inputId !== undefined ? { id: inputId } : {}), ...(seq !== undefined ? { seq } : {}), by, ...(added ? { added: true as const } : {}), source, ...mark })
+    else held.push({ ...(inputId !== undefined ? { id: inputId } : {}), ...(seq !== undefined ? { seq } : {}), by, source, ...mark })
     this.save(sessionId)
     if (joined) this.persistTurn(sessionId)
   }
@@ -612,7 +607,6 @@ export class ChildOwnership {
       }
       if (spent !== null) this.spentAt.set(sessionId, spent)
       if (kept.named) this.named.add(sessionId)
-      if (kept.takenOver) this.takenOver.add(sessionId)
       this.entries.set(sessionId, held)
     }
     return held
@@ -634,7 +628,7 @@ export class ChildOwnership {
     // The turn running was decided by the build before, at its start
     if (turn.by === 'person' || turn.by === 'work') this.named.add(sessionId)
     const given: Entry[] = (Array.isArray(turn.pending) ? turn.pending.map(asObj) : []).flatMap((p) => p.by !== 'person' && p.by !== 'work' ? [] : [{
-      ...(typeof p.id === 'string' ? { id: p.id, ...hub.find((h) => h.id === p.id) } : {}), by: p.by, ...(p.added === true ? { added: true as const } : {}),
+      ...(typeof p.id === 'string' ? { id: p.id, ...hub.find((h) => h.id === p.id) } : {}), by: p.by,
       source: p.source === 'app' || p.source === 'report' ? p.source : 'caller', joined: true,
     }])
     const atRest: Entry[] = hub.filter((h) => !given.some((g) => g.id === h.id)).map((h) => ({ ...h, by: 'work', source: 'caller', joined: false }))
@@ -659,7 +653,7 @@ export class ChildOwnership {
       return mark && e.id !== undefined ? [[e.id, mark]] : []
     }))
     this.store.settings.setAppSetting(turnInputsKey(sessionId), JSON.stringify({
-      ...(Number.isFinite(spent) ? { spent } : {}), ...(this.named.has(sessionId) ? { named: true } : {}), ...(this.takenOver.has(sessionId) ? { takenOver: true } : {}),
+      ...(Number.isFinite(spent) ? { spent } : {}), ...(this.named.has(sessionId) ? { named: true } : {}),
       ...(Object.keys(marks).length ? { marks } : {}),
     }))
     const hub = held.flatMap((e) => (e.origin && e.id !== undefined ? [[e.id, e.origin] as const] : []))
@@ -708,7 +702,6 @@ export class ChildOwnership {
     this.entries.delete(sessionId)
     this.spentAt.delete(sessionId)
     this.named.delete(sessionId)
-    this.takenOver.delete(sessionId)
     this.workOf.delete(sessionId)
     for (const [id, caller] of this.workOf) if (caller === sessionId) this.workOf.delete(id)
     this.unpauseReport(sessionId, 'person')
@@ -807,7 +800,6 @@ export class ChildOwnership {
    */
   turnStarted(sessionId: string, continues = false): void {
     const held = this.held(sessionId)
-    this.takenOver.delete(sessionId)
     this.named.delete(sessionId)
     // Every message held now may be what the turn opened from: none is in it yet
     for (const e of held) {
@@ -826,8 +818,8 @@ export class ChildOwnership {
   /**
    * The tool names the inputs the turn opening now runs for (#1639, `SessionHandle.turnStartInputs`): ids, of which the last one held
    * decides it, and it ran for every message given up to that one (the tool runs inputs in order); ids none of which a message was given
-   * under (a mail wake, a compact, a quiet note), or none at all (`[]`): the CLI's own. `null`: not an opening, nothing changes. A turn
-   * the person took over stays theirs. The messages held after it are queued behind it, so it may take them in at a tool round.
+   * under (a mail wake, a compact, a quiet note), or none at all (`[]`): the CLI's own. `null`: not an opening, nothing changes.
+   * The messages held after it are queued behind it, so it may take them in at a tool round.
    * Returns the hub's message it ran for, the last one named (#1604), said with the event that opens it
    */
   turnNamed(sessionId: string, inputs: readonly string[] | null | undefined): TurnOrigin | undefined {
@@ -843,7 +835,7 @@ export class ChildOwnership {
     // A turn this host did not see begin: what it ran for is done with, and nothing is decided
     if (this.starters.has(sessionId)) {
       this.named.add(sessionId)
-      if (!this.takenOver.has(sessionId)) this.decide(sessionId, ran.length ? starterFor(ran) : undefined, true)
+      this.decide(sessionId, ran.length ? starterFor(ran) : undefined, true)
     }
     this.save(sessionId)
     return origin
@@ -858,7 +850,7 @@ export class ChildOwnership {
   private decide(sessionId: string, decided: { starter: TurnStarter; source: TurnSource } | undefined, again: boolean): void {
     const starter: TurnStarter = decided?.starter ?? { by: 'work' }
     const was = this.starters.get(sessionId)
-    const same = was !== undefined && was.by === starter.by && !!was.wrote === !!starter.wrote && !!was.added === !!starter.added && this.cliTurns.has(sessionId) === !decided
+    const same = was !== undefined && was.by === starter.by && !!was.wrote === !!starter.wrote && this.cliTurns.has(sessionId) === !decided
     if (again && same) return
     this.starters.set(sessionId, starter)
     if (decided) this.cliTurns.delete(sessionId)
@@ -867,7 +859,7 @@ export class ChildOwnership {
     if (!this.turnStartedHook) return
     const ownerId = this.workOwner(sessionId)
     try {
-      this.turnStartedHook(sessionId, { by: starter.by, added: !!starter.added, cli: !decided, source: decided?.source ?? 'caller', ...(ownerId ? { ownerId } : {}), ...(again ? { again: true as const } : {}) })
+      this.turnStartedHook(sessionId, { by: starter.by, cli: !decided, source: decided?.source ?? 'caller', ...(ownerId ? { ownerId } : {}), ...(again ? { again: true as const } : {}) })
     } catch (e) {
       console.error(`[mail] could not record a turn of ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
     }
@@ -890,7 +882,6 @@ export class ChildOwnership {
     this.starters.delete(sessionId)
     this.cliTurns.delete(sessionId)
     this.goingOn.delete(sessionId)
-    this.takenOver.delete(sessionId)
     if (this.continuedCuts.delete(sessionId)) starter.cut = true
     // The process went with the turn (`cut`): it holds none of the messages given it (#1604). Any other error or limit leaves the process, which can still run one it holds queued as the next turn
     if (cut) this.dropInputOrigins(sessionId)
@@ -908,11 +899,7 @@ export class ChildOwnership {
     const joinedIt = this.spend(sessionId, upto)
     // A tool that names nothing (Codex) took in what was given while the turn ran, unless it runs it as the next turn: carried to that turn's opening
     if (taken === undefined && !cut) for (const e of held) if (e.joined) joinedIt.push(Object.assign(e, { carried: true as const }))
-    for (const p of joinedIt) {
-      if (p.by !== 'person' || starter.by !== 'work') continue
-      if (p.added) starter.added = true
-      else starter.wrote = true
-    }
+    if (starter.by === 'work' && joinedIt.some((p) => p.by === 'person')) starter.wrote = true
     if (cut || taken === null) this.spend(sessionId, held.length)
     this.save(sessionId)
     this.lastBy.set(sessionId, starter.by)
@@ -934,16 +921,6 @@ export class ChildOwnership {
   /** Whose the running turn is, when one is recorded */
   starterOf(sessionId: string): TurnStarter | undefined {
     return this.starters.get(sessionId)
-  }
-  /** The person took the session over (#1377): the running turn is theirs from here */
-  takeTurn(sessionId: string): void {
-    this.held(sessionId)
-    if (this.starters.has(sessionId)) {
-      this.takenOver.add(sessionId)
-      this.starters.set(sessionId, { by: 'person' })
-      this.persistTurn(sessionId)
-      this.save(sessionId)
-    }
   }
   /** Kept for a host that takes the session over mid-turn, and for the next start when a quit cuts the turn (#1946) */
   private persistTurn(sessionId: string): void {

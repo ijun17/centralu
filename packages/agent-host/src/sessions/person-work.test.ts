@@ -297,12 +297,11 @@ describe('a script that sends later is the script too (3.8b)', () => {
     expect(w.mgr.sessionInfo(s.id)?.name).toBe('Now do the second part')
   })
 
-  it('does not name the session, and a field of the call cannot make it the person’s or a takeover', async () => {
+  it('does not name the session, and a field of the call cannot make it the person’s', async () => {
     const s = await start({}, 'limited')
-    await send(s.id, { fromScript: { credential: 'the person' }, intent: 'takeover' }, 'limited', 'ci runner')
+    await send(s.id, { fromScript: { credential: 'the person' } }, 'limited', 'ci runner')
     expect(w.mgr.sessionInfo(s.id)?.name).toBe('New session')
     expect(storedFirst(s.id).payload).toMatchObject({ fromScript: { credential: 'ci runner' } })
-    expect(w.events.find((e) => e.type === 'user_message' && e.sessionId === s.id)).not.toHaveProperty('intent')
   })
 
   it('a script’s send is work, not the person’s own turn: the turn it starts is reported on the task the person gave', async () => {
@@ -312,16 +311,6 @@ describe('a script that sends later is the script too (3.8b)', () => {
     handleOf(s.id)!.answer('Both parts done')
     await w.until(() => reportsOf(s.id).length > 0)
     expect(settledOf(s.id)).toBe('reported')
-  })
-
-  it('cannot take over a report another session is owed: the choice is the person’s (#1377)', async () => {
-    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
-    const parent = await w.callerSession()
-    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
-    const child = started.ok ? started.sessionId : ''
-    expect(w.mgr.inputs.reportOwed(child)).not.toBeNull()
-    await send(child, { intent: 'takeover' }, 'limited')
-    expect(w.mgr.inputs.reportOwed(child)).not.toBeNull()
   })
 })
 

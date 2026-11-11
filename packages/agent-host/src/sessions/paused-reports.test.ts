@@ -256,16 +256,10 @@ describe('a child that waits on its own background work (#721)', () => {
 
   /*
    * #1377: a turn belongs to whoever started it, and a person's message never closes a delegation report. The rows are the
-   * issue's table; "Add to the task" and "Take it over" are the person's choices (`intent`). #1340 had closed the report at
-   * the person's first message, so a person who only asked something mid-way cost the caller the work's result.
+   * issue's table. #1340 had closed the report at the person's first message, so a person who only asked something mid-way
+   * cost the caller the work's result.
    */
   describe('a turn belongs to whoever started it (#1377)', () => {
-    const takeovers = (caller: string, child: string) => reportsTo(caller, child).filter((t) => t.includes('The person took this session over'))
-    const failedTurn = (child: string) => {
-      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'compact crashed', retryable: false } })
-    }
-
     it('row 1: the person writes while it is at rest: their turn is theirs and not reported, and the report stays open until the work ends', async () => {
       const { caller, child } = await started()
       pauseOnVerify(child)
@@ -277,7 +271,6 @@ describe('a child that waits on its own background work (#721)', () => {
       // Open, in memory and in the store
       expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
       expect(w.store.settings.appSetting(`report_paused:${child}`)).not.toBeNull()
-      expect(w.mgr.inputs.reportOwed(child)).toMatchObject({ callerId: caller })
       // Their turn ends well too, and again nothing is reported
       await w.mgr.inputs.send(child, 'how is it going?')
       handleOf(child)!.answer('Still waiting for verify.')
@@ -467,49 +460,12 @@ describe('a child that waits on its own background work (#721)', () => {
       })
     })
 
-    it('"Just asking" is the default, also when the person writes into the work\'s turn: it stays the work\'s, with the note', async () => {
+    it('the person writing into the work\'s turn: it stays the work\'s, with the note', async () => {
       const { caller, child } = await started()
-      await w.mgr.inputs.send(child, 'quick question', undefined, undefined, true, 'ask')
+      await w.mgr.inputs.send(child, 'quick question', undefined, undefined, true)
       handleOf(child)!.answer('Done.')
       await w.until(() => reportsTo(caller, child).length === 1)
       expect(reportsTo(caller, child)[0]).toContain('The person wrote in this session during this turn.')
-    })
-
-    it('"Add to the task": the message makes the turn the work\'s, noted as the person\'s addition', async () => {
-      const { caller, child } = await started()
-      pauseOnVerify(child)
-      await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.inputs.send(child, 'Also add a changelog line.', undefined, undefined, true, 'task')
-      verifyEndsAndChildFinishes(child, 'PR #9 opened with a changelog line.')
-      await w.until(() => reportsTo(caller, child).length === 2)
-      expect(reportsTo(caller, child)[1]).toContain('[Centralu] The session ended its turn.')
-      expect(reportsTo(caller, child)[1]).toContain('The person added an instruction to this task during this turn.')
-    })
-
-    it('"Take it over": the report closes and the caller is told once; none of their later turns is reported', async () => {
-      const { caller, child } = await started()
-      pauseOnVerify(child)
-      await w.until(() => reportsTo(caller, child).length === 1)
-      await w.mgr.inputs.send(child, '/compact', undefined, undefined, true, 'takeover')
-      await w.until(() => takeovers(caller, child).length === 1)
-      expect(takeovers(caller, child)[0]).toContain('its later turns are theirs, and none of them will be reported to you')
-      expect(w.store.children.listReportMarks()).toEqual([])
-      expect(w.store.settings.appSetting(`report_paused:${child}`)).toBeNull()
-      expect(w.mgr.inputs.reportOwed(child)).toBeNull()
-      failedTurn(child)
-      verifyEndsAndChildFinishes(child)
-      await settle()
-      expect(reportsTo(caller, child)).toHaveLength(2)
-    })
-
-    it('"Take it over" while the work\'s turn is running: the running turn is theirs from here', async () => {
-      const { caller, child } = await started()
-      await w.mgr.inputs.send(child, 'I will do this myself', undefined, undefined, true, 'takeover')
-      await w.until(() => takeovers(caller, child).length === 1)
-      expect(takeovers(caller, child)[0]).toContain('The work you assigned was still running')
-      handleOf(child)!.answer('Done by me.')
-      await settle()
-      expect(reportsTo(caller, child)).toHaveLength(1)
     })
 
     it("a message from the caller, an app or Centralu is never the person's: the caller sending again is the work's", async () => {
@@ -521,7 +477,7 @@ describe('a child that waits on its own background work (#721)', () => {
       handleOf(child)!.answer('Opened the PR without it.')
       expect(await sent).toMatchObject({ ok: true, state: 'done', answer: 'Opened the PR without it.' })
       await settle()
-      expect(takeovers(caller, child)).toEqual([])
+      expect(reportsTo(caller, child)).toHaveLength(1)
       expect(reportsTo(caller, child)[0]).toContain('paused')
     })
   })

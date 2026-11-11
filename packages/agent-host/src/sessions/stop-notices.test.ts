@@ -220,7 +220,7 @@ describe('a turn ends without finishing', () => {
       },
     },
     { name: "an app's message", give: (child) => deliverIn()(child, 'the key is k3y', undefined, undefined, false, { appId: 'notes', projectId: null, name: 'Notes' }) },
-    { name: "a script's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, false, 'ask', { credential: 'script-1' }) },
+    { name: "a script's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, false, { credential: 'script-1' }) },
     { name: 'a report relayed into the turn', give: (child, asker) => deliverIn()(child, 'the key is k3y', undefined, { sessionId: asker, name: 'Asker' }, true) },
     { name: "another session's message", give: async (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, { sessionId: await w.callerSession(), name: 'Other' }) },
     { name: "the person's message", give: (child) => w.mgr.inputs.send(child, 'the key is k3y', undefined, undefined, true) },

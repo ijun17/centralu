@@ -73,16 +73,6 @@ export class LinkedHost {
   }
 
   /**
-   * A call the hub routes to a linked machine, seen before it goes (`Router`'s `forwarding`): the person's choice on an
-   * `agents.send` for a report this hub holds (#1377). Returns what to do when the call ends.
-   */
-  forwarding(method: string, params: unknown): ((delivered: boolean) => void) | undefined {
-    if (method !== 'agents.send' || typeof params !== 'object' || params === null) return undefined
-    const sessionId = 'sessionId' in params ? params.sessionId : undefined
-    return typeof sessionId === 'string' && 'intent' in params ? this.host.linkedReports.choosing(sessionId, params.intent) : undefined
-  }
-
-  /**
    * Refuses a session a hub's Assistant may not direct (`sendFromHub`, a settings change `by: 'orchestrator'`): this
    * host's assistant or a coordinator, which a hub is not shown (remote-hub.md §3.4), or none at all
    */

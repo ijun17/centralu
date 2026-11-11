@@ -581,35 +581,6 @@ describe('work handed on', () => {
   })
 })
 
-describe('the person takes the session over', () => {
-  it('reports the task stopped, taken over, with one report to its owner, and the work is not followed any more', async () => {
-    const { parent, child } = await parentAndChild()
-    const reports = (w.mgr as unknown as { reports: { personTookOver(id: string): Promise<void> } }).reports
-    await reports.personTookOver(child)
-    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-    expect(reportsIn(parent, child).map((x) => x.facts)).toEqual([expect.objectContaining({ outcome: 'stopped', reason: 'taken_over' })])
-    // Centralu's words alone: the id and how to read more, never the session's name or its project's
-    const body = reportsIn(parent, child)[0]?.body ?? ''
-    expect(body).toContain(`id: ${child}`)
-    expect(body).not.toContain('Project:')
-    expect(body).not.toContain('Session:')
-    expect(body).not.toContain(w.caller.name)
-    expect(oldReports(parent, child)).toEqual([])
-    expect(w.store.children.listReportMarks()).toEqual([])
-  })
-
-  it('told the owner in a turn, it is mail like any report: nothing is relayed into its turn', async () => {
-    const { parent, child } = await parentAndChild()
-    await w.mgr.inputs.send(parent, 'a long job of the owner’s own')
-    const reports = (w.mgr as unknown as { reports: { personTookOver(id: string): Promise<void> } }).reports
-    await reports.personTookOver(child)
-    expect(oldReports(parent, child)).toEqual([])
-    const [report] = reportsIn(parent, child)
-    expect(report).toMatchObject({ facts: expect.objectContaining({ outcome: 'stopped', reason: 'taken_over' }) })
-    expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: null })
-  })
-})
-
 describe('the work ends with the session that did it', () => {
   it('the owner deleting a child whose work it has the report of leaves the task reported, with no second report', async () => {
     const { parent, child } = await parentAndChild()

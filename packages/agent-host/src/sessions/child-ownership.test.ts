@@ -108,7 +108,7 @@ describe('delegated turns', () => {
 
 describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', () => {
   const heard = () => {
-    const turns: { sessionId: string; by: string; added: boolean; cli: boolean; source: string; ownerId?: string }[] = []
+    const turns: { sessionId: string; by: string; cli: boolean; source: string; ownerId?: string }[] = []
     own.onTurnStarted((sessionId, turn) => void turns.push({ sessionId, ...turn }))
     return turns
   }
@@ -125,9 +125,9 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
     own.noteMessage('c', 'work', false, false)
     own.turnStarted('c')
     expect(turns).toEqual([
-      { sessionId: 'a', by: 'work', added: false, cli: false, source: 'caller', ownerId: 'caller' },
-      { sessionId: 'b', by: 'work', added: false, cli: false, source: 'caller', ownerId: 'owner' },
-      { sessionId: 'c', by: 'work', added: false, cli: false, source: 'caller' },
+      { sessionId: 'a', by: 'work', cli: false, source: 'caller', ownerId: 'caller' },
+      { sessionId: 'b', by: 'work', cli: false, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'c', by: 'work', cli: false, source: 'caller' },
     ])
   })
 
@@ -145,44 +145,40 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
     expect(turns.map((t) => t.ownerId)).toEqual([undefined, undefined])
   })
 
-  it('says a turn no message started is the CLI’s own, the person’s message is theirs, and adding to the task is the work’s with the addition', () => {
+  it('says a turn no message started is the CLI’s own, and the person’s message is theirs', () => {
     const turns = heard()
     own.markReport('a', 'owner')
     own.turnStarted('a')
     own.noteMessage('b', 'person', false, false)
     own.turnStarted('b')
-    own.markReport('c', 'owner')
-    own.noteMessage('c', 'person', false, false, true)
-    own.turnStarted('c')
     expect(turns).toEqual([
-      { sessionId: 'a', by: 'work', added: false, cli: true, source: 'caller', ownerId: 'owner' },
-      { sessionId: 'b', by: 'person', added: false, cli: false, source: 'caller' },
-      { sessionId: 'c', by: 'work', added: true, cli: false, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'a', by: 'work', cli: true, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'b', by: 'person', cli: false, source: 'caller' },
     ])
   })
 
   it('says what the work’s message was: a caller’s send, a report about another session, an app’s; the oldest message says, and the input the tool names says again', () => {
     const turns = heard()
-    own.noteMessage('a', 'work', false, false, false, undefined, 'report')
+    own.noteMessage('a', 'work', false, false, undefined, 'report')
     own.turnStarted('a')
-    own.noteMessage('b', 'work', false, false, false, undefined, 'app')
-    own.noteMessage('b', 'work', false, false, false, undefined, 'report')
+    own.noteMessage('b', 'work', false, false, undefined, 'app')
+    own.noteMessage('b', 'work', false, false, undefined, 'report')
     own.turnStarted('b')
     // The person’s message first, then a report: the turn opens as the person’s, and the tool names the report, so it ran for both (#1639)
-    own.noteMessage('c', 'person', false, false, false, 'c-1')
-    own.noteMessage('c', 'work', false, false, false, 'c-2', 'report')
+    own.noteMessage('c', 'person', false, false, 'c-1')
+    own.noteMessage('c', 'work', false, false, 'c-2', 'report')
     own.turnStarted('c')
     own.turnNamed('c', ['c-2'])
     // Into a running turn, a message the tool did not take in is the next turn’s, and keeps what it was
-    own.noteMessage('d', 'work', true, true, false, 'in-1', 'report')
+    own.noteMessage('d', 'work', true, true, 'in-1', 'report')
     own.turnEnded('d', [])
     own.turnStarted('d')
     // No message at all: the CLI’s own
     own.turnStarted('e')
     // A message a Stop dropped says nothing of the next turn
-    own.noteMessage('f', 'work', false, false, false, undefined, 'report')
+    own.noteMessage('f', 'work', false, false, undefined, 'report')
     own.dropInputOrigins('f')
-    own.noteMessage('f', 'work', false, false, false, undefined, 'app')
+    own.noteMessage('f', 'work', false, false, undefined, 'app')
     own.turnStarted('f')
     expect(turns.map((t) => [t.sessionId, t.source, t.cli])).toEqual([
       ['a', 'report', false],
@@ -497,20 +493,19 @@ describe('whose a turn is', () => {
   })
 
   it("a caller's, an app's or Centralu's message makes it the work's, also with the person's behind it when the tool names the last of them", () => {
-    own.noteMessage('s', 'work', false, true, false, 'w')
-    own.noteMessage('s', 'person', false, true, false, 'p')
+    own.noteMessage('s', 'work', false, true, 'w')
+    own.noteMessage('s', 'person', false, true, 'p')
     own.turnStarted('s')
     own.turnNamed('s', ['p'])
     expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true })
   })
 
-  it('the person into a running turn of the work: noted; into their own: nothing; "add to the task": noted as such', () => {
+  it('the person into a running turn of the work: noted; into their own: nothing', () => {
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
-    own.noteMessage('s', 'person', true, true)
     // Decided at the turn's end: a tool that takes every message into the running turn (no list of what it took)
-    own.noteMessage('s', 'person', true, true, true)
-    expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true, added: true })
+    own.noteMessage('s', 'person', true, true)
+    expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true })
     own.noteMessage('s', 'person', false, true)
     own.turnStarted('s')
     own.noteMessage('s', 'person', true, true)
@@ -521,8 +516,8 @@ describe('whose a turn is', () => {
   it("a message the turn did not take in is the next turn's, theirs; one it took in is noted on this", () => {
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
-    own.noteMessage('s', 'person', true, true, false, 'in')
-    own.noteMessage('s', 'person', true, true, false, 'held')
+    own.noteMessage('s', 'person', true, true, 'in')
+    own.noteMessage('s', 'person', true, true, 'held')
     expect(own.turnEnded('s', ['in'])).toEqual({ by: 'work', wrote: true })
     own.turnStarted('s')
     expect(own.turnEnded('s', ['held'])).toEqual({ by: 'person' })
@@ -530,10 +525,10 @@ describe('whose a turn is', () => {
 
   it('naming none (an empty list) takes none in, and the message is the next turn’s; a tool that cannot name them (null) is done with them all (#1639)', () => {
     for (const [taken, next] of [[[], 'person'], [null, 'work']] as const) {
-      own.noteMessage('s', 'work', false, true, false, `w-${next}`)
+      own.noteMessage('s', 'work', false, true, `w-${next}`)
       own.turnStarted('s')
       own.turnNamed('s', [`w-${next}`])
-      own.noteMessage('s', 'person', true, true, false, 'm')
+      own.noteMessage('s', 'person', true, true, 'm')
       expect(own.turnEnded('s', taken)).toEqual({ by: 'work' })
       own.turnStarted('s')
       expect(own.turnEnded('s')).toEqual({ by: next })
@@ -541,17 +536,17 @@ describe('whose a turn is', () => {
   })
 
   it("a person's message into their own turn that was not taken in is theirs after it too, and the caller's is the work's", () => {
-    own.noteMessage('s', 'person', false, true, false, 'p1')
+    own.noteMessage('s', 'person', false, true, 'p1')
     own.turnStarted('s')
     own.turnNamed('s', ['p1'])
-    own.noteMessage('s', 'person', true, true, false, 'again')
+    own.noteMessage('s', 'person', true, true, 'again')
     expect(own.turnEnded('s', [])).toEqual({ by: 'person' })
     own.turnStarted('s')
     expect(own.turnEnded('s', ['again'])).toEqual({ by: 'person' })
-    own.noteMessage('s', 'person', false, true, false, 'p2')
+    own.noteMessage('s', 'person', false, true, 'p2')
     own.turnStarted('s')
     own.turnNamed('s', ['p2'])
-    own.noteMessage('s', 'work', true, true, false, 'caller')
+    own.noteMessage('s', 'work', true, true, 'caller')
     expect(own.turnEnded('s', [])).toEqual({ by: 'person' })
     own.turnStarted('s')
     expect(own.turnEnded('s')).toEqual({ by: 'work' })
@@ -562,18 +557,12 @@ describe('whose a turn is', () => {
     own.markReport('s', 'caller')
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
-    own.noteMessage('s', 'person', true, true, false, 'held')
+    own.noteMessage('s', 'person', true, true, 'held')
     expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'work' })
     store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'work', pending: [{ id: 'held', by: 'person' }] }))
     const next = new ChildOwnership(store)
     next.adoptReport('s', 'caller', null)
     expect(next.starterOf('s')).toEqual({ by: 'work' })
-  })
-
-  it("add to the task, at rest, makes the turn the work's, noted as their addition", () => {
-    own.noteMessage('s', 'person', false, true, true)
-    own.turnStarted('s')
-    expect(own.turnEnded('s')).toEqual({ by: 'work', added: true })
   })
 
   it("a tool that holds a message for the turn after: the running turn stays as it was, and the next is the person's", () => {
@@ -582,13 +571,6 @@ describe('whose a turn is', () => {
     own.noteMessage('s', 'person', true, false)
     expect(own.turnEnded('s')).toEqual({ by: 'work' })
     own.turnStarted('s')
-    expect(own.turnEnded('s')).toEqual({ by: 'person' })
-  })
-
-  it('taking the session over makes the running turn theirs', () => {
-    own.noteMessage('s', 'work', false, true)
-    own.turnStarted('s')
-    own.takeTurn('s')
     expect(own.turnEnded('s')).toEqual({ by: 'person' })
   })
 
@@ -617,18 +599,13 @@ describe('whose a turn is', () => {
   })
 
   it("two messages before the turn that the tool runs as one (it names the last): the work's if either is", () => {
-    own.noteMessage('s', 'person', false, true, false, 'a1')
-    own.noteMessage('s', 'work', false, true, false, 'a2')
+    own.noteMessage('s', 'person', false, true, 'a1')
+    own.noteMessage('s', 'work', false, true, 'a2')
     own.turnStarted('s')
     own.turnNamed('s', ['a2'])
     expect(own.turnEnded('s')).toEqual({ by: 'work', wrote: true })
-    own.noteMessage('s', 'work', false, true, false, 'b1')
-    own.noteMessage('s', 'person', false, true, true, 'b2')
-    own.turnStarted('s')
-    own.turnNamed('s', ['b2'])
-    expect(own.turnEnded('s')).toEqual({ by: 'work', added: true })
-    own.noteMessage('s', 'person', false, true, false, 'c1')
-    own.noteMessage('s', 'person', false, true, false, 'c2')
+    own.noteMessage('s', 'person', false, true, 'c1')
+    own.noteMessage('s', 'person', false, true, 'c2')
     own.turnStarted('s')
     own.turnNamed('s', ['c2'])
     expect(own.turnEnded('s')).toEqual({ by: 'person' })
@@ -652,7 +629,7 @@ describe('what a turn that opens ran for', () => {
   const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
   /** A hub's message given the tool as `id`, at rest or into the running turn (#1639: an entry, with its origin) */
   const hub = (id: string, seq = note.seq, inTurn = false) => {
-    own.noteMessage('s', 'work', inTurn, true, false, id, 'caller', seq)
+    own.noteMessage('s', 'work', inTurn, true, id, 'caller', seq)
     own.noteInputOrigin('s', id, { ...note, seq })
   }
 
@@ -768,7 +745,7 @@ describe('where the last turn that ended began', () => {
   const note = { seq: 7, from: { sessionId: '_hub-orchestrator', name: 'Parent' } }
   /** A hub gives the session messages: only those have their turns kept */
   const followed = () => {
-    own.noteMessage('s', 'work', false, true, false, 'task', 'caller', note.seq)
+    own.noteMessage('s', 'work', false, true, 'task', 'caller', note.seq)
     own.noteInputOrigin('s', 'task', note)
   }
 
@@ -869,7 +846,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
 
   it('a message the tool holds queued for 20 s still starts its sender’s turn: no window decides it', () => {
     vi.useFakeTimers()
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    own.noteMessage('s', 'work', false, false, 'caller-1')
     vi.advanceTimersByTime(20_000)
     own.turnStarted('s')
     expect(told).toEqual([{ sessionId: 's', by: 'work', cli: false }])
@@ -877,8 +854,8 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
 
   it('is decided again when the tool names the input the turn opened from: the start went by an older message', () => {
     // The person’s message the tool answered without a turn (a refused /goal) is still held when the caller’s comes
-    own.noteMessage('s', 'person', false, false, false, 'person-1')
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    own.noteMessage('s', 'person', false, false, 'person-1')
+    own.noteMessage('s', 'work', false, false, 'caller-1')
     own.turnStarted('s')
     expect(own.starterOf('s')).toEqual({ by: 'person' })
     own.turnNamed('s', ['caller-1'])
@@ -894,7 +871,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
   })
 
   it('an input named that no message went in under (a mail wake, a compact), or none named, is the CLI’s own; the held message waits', () => {
-    own.noteMessage('s', 'person', false, false, false, 'person-1')
+    own.noteMessage('s', 'person', false, false, 'person-1')
     own.turnStarted('s')
     own.turnNamed('s', ['wake-1'])
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: true, again: true })
@@ -904,7 +881,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     expect(own.starterOf('s')).toEqual({ by: 'person' })
     own.turnNamed('s', ['person-1'])
     own.turnEnded('s', ['person-1'])
-    own.noteMessage('s', 'person', false, false, false, 'person-2')
+    own.noteMessage('s', 'person', false, false, 'person-2')
     own.turnStarted('s')
     own.turnNamed('s', [])
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: true, again: true })
@@ -914,21 +891,21 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
   })
 
   it('an end that cannot name what it took spends every message: the CLI’s next turn is its own, not the note sender’s', () => {
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    own.noteMessage('s', 'work', false, false, 'caller-1')
     own.turnStarted('s')
     // The person writes into the work’s turn; an older CLI cannot say whether it took the note in
-    own.noteMessage('s', 'person', true, true, false, 'person-1')
+    own.noteMessage('s', 'person', true, true, 'person-1')
     expect(own.turnEnded('s', null)).toEqual({ by: 'work' })
     own.turnStarted('s')
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: true })
   })
 
   it('a note the turn says it took joined it; one it did not take is the next turn’s', () => {
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    own.noteMessage('s', 'work', false, false, 'caller-1')
     own.turnStarted('s')
     own.turnNamed('s', ['caller-1'])
-    own.noteMessage('s', 'person', true, true, false, 'person-1')
-    own.noteMessage('s', 'person', true, true, false, 'person-2')
+    own.noteMessage('s', 'person', true, true, 'person-1')
+    own.noteMessage('s', 'person', true, true, 'person-2')
     expect(own.turnEnded('s', ['person-1'])).toEqual({ by: 'work', wrote: true })
     own.turnStarted('s')
     expect(own.starterOf('s')).toEqual({ by: 'person' })
@@ -936,23 +913,15 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
 
   it('a turn whose opening was not named (a card was up) is decided by the inputs its end names, however long they waited', () => {
     vi.useFakeTimers()
-    own.noteMessage('s', 'person', false, false, false, 'person-1')
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
+    own.noteMessage('s', 'person', false, false, 'person-1')
+    own.noteMessage('s', 'work', false, false, 'caller-1')
     vi.advanceTimersByTime(20_000)
     own.turnStarted('s')
     expect(own.turnEnded('s', ['person-1', 'caller-1'])).toEqual({ by: 'work', wrote: true })
   })
 
-  it('a turn the person took over stays theirs when the tool names a caller’s input', () => {
-    own.noteMessage('s', 'work', false, false, false, 'caller-1')
-    own.turnStarted('s')
-    own.takeTurn('s')
-    own.turnNamed('s', ['caller-1'])
-    expect(own.starterOf('s')).toEqual({ by: 'person' })
-  })
-
   it('a Stop, a new process or a cut turn spends what was held', () => {
-    own.noteMessage('s', 'person', false, false, false, 'person-1')
+    own.noteMessage('s', 'person', false, false, 'person-1')
     own.dropInputOrigins('s')
     own.turnStarted('s')
     expect(told.at(-1)).toEqual({ sessionId: 's', by: 'work', cli: true })
@@ -966,9 +935,10 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       row(1, {}),
       row(2, { inputId: 'person-1' }),
       row(3, { inputId: 'caller-1', from: { sessionId: 'c', name: 'C' } }),
+      // The composer's report choice a build before #1948 stored on the person's row is not read
       row(4, { inputId: 'person-2', intent: 'task' }),
     ])
-    own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 2)
+    own.noteMessage('s', 'person', false, false, 'person-1', 'caller', 2)
     own.turnStarted('s')
     own.turnNamed('s', ['person-1'])
     expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toEqual({ spent: 2, named: true })
@@ -976,7 +946,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     next.turnStarted('s')
     expect(next.starterOf('s')).toEqual({ by: 'work' })
     next.turnNamed('s', ['person-2'])
-    expect(next.starterOf('s')).toEqual({ by: 'work', added: true })
+    expect(next.starterOf('s')).toEqual({ by: 'work', wrote: true })
   })
 
   // Review of #1929: what a host that takes a kept session over mid-turn reads back
@@ -988,31 +958,33 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     it('a work turn the person wrote into stays the work’s, with the person noted: the caller’s report is not held back', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
       own.markReport('s', 'caller')
-      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       own.turnStarted('s')
       own.turnNamed('s', ['caller-1'])
-      own.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
+      own.noteMessage('s', 'person', true, true, 'person-1', 'caller', 2)
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
       // The CLI names both at the end: the caller's it opened from, and the person's it took in at a tool round
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
     })
 
-    it('a turn the person took over before the swap stays theirs when the new host hears the opening named', () => {
+    it('a turn a build before #1948 kept as taken over by the person is decided by the opening the new host hears named', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c')])
       own.markReport('s', 'caller')
-      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       own.turnStarted('s')
-      own.takeTurn('s')
+      // What that build's "Take it over" left in the store
+      store.settings.setAppSetting('turn_inputs:s', JSON.stringify({ ...JSON.parse(store.settings.appSetting('turn_inputs:s')!), takenOver: true }))
+      store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'person' }))
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
       next.turnNamed('s', ['caller-1'])
-      expect(next.starterOf('s')).toEqual({ by: 'person' })
+      expect(next.starterOf('s')).toEqual({ by: 'work' })
     })
 
     it('reads back a message held before anything was ever spent: a new session’s first one', () => {
       store.messages.appendMessages([user(1, 'person-1')])
-      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      own.noteMessage('s', 'person', false, false, 'person-1', 'caller', 1)
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
@@ -1022,12 +994,12 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     it('a message given first thing on the new host is marked as given into the turn, and kept so across another swap', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
       own.markReport('s', 'caller')
-      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       // A card is up at the opening: it is not named
       own.turnStarted('s')
       const next = new ChildOwnership(store)
       next.adoptReport('s', 'caller', null)
-      next.noteMessage('s', 'person', true, true, false, 'person-1', 'caller', 2)
+      next.noteMessage('s', 'person', true, true, 'person-1', 'caller', 2)
       expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ marks: { 'person-1': 'joined' } })
       const third = new ChildOwnership(store)
       third.adoptReport('s', 'caller', null)
@@ -1069,7 +1041,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
 
     it('keeps what was held before words a late catch-up read back from the tool’s own record', () => {
       store.messages.appendMessages([user(1, 'person-1'), { ...user(2, 'x'), payload: { text: 'said in a terminal', transcript: true } }])
-      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      own.noteMessage('s', 'person', false, false, 'person-1', 'caller', 1)
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
@@ -1086,11 +1058,11 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     it('reads back however many rows a long turn wrote after the last message spent', () => {
       const steps = Array.from({ length: 600 }, (_, i) => ({ sessionId: 's', seq: 2 + i, role: 'assistant' as const, kind: 'text' as const, payload: { text: 'step' }, ts: 1 }))
       store.messages.appendMessages([user(1, 'caller-1', 'c'), ...steps, user(602, 'person-1')])
-      own.noteMessage('s', 'work', false, false, false, 'caller-1', 'caller', 1)
+      own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       own.turnStarted('s')
       own.turnNamed('s', ['caller-1'])
       own.turnEnded('s', ['caller-1'])
-      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 602)
+      own.noteMessage('s', 'person', false, false, 'person-1', 'caller', 602)
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })
@@ -1098,11 +1070,11 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
   })
 
   it('a person’s message held over a turn’s end and taken into the next work turn at a tool round is noted on it, and is in it while it runs', () => {
-    own.noteMessage('s', 'work', false, false, false, 'caller-0')
+    own.noteMessage('s', 'work', false, false, 'caller-0')
     own.turnStarted('s')
     own.turnNamed('s', ['caller-0'])
-    own.noteMessage('s', 'work', true, true, false, 'caller-1')
-    own.noteMessage('s', 'person', true, true, false, 'person-1')
+    own.noteMessage('s', 'work', true, true, 'caller-1')
+    own.noteMessage('s', 'person', true, true, 'person-1')
     // Neither was taken: both wait for the next turn, which opens on the caller's
     expect(own.turnEnded('s', ['caller-0'])).toEqual({ by: 'work' })
     own.turnStarted('s')

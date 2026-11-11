@@ -1,5 +1,4 @@
 import { defaultCapabilities } from '../capabilities.js'
-import type { SendIntent } from '../ports/agents.js'
 import type {
   Attachment,
   ApprovalDecision,
@@ -75,11 +74,8 @@ class WebAgentPort implements AgentPort {
   createSession(params: CreateSessionParams) {
     return this.rpc.call('agents.createSession', params)
   }
-  send(sessionId: string, text: string, attachments?: Attachment[], intent?: SendIntent) {
-    return done(this.rpc.call('agents.send', { sessionId, text, attachments, ...(intent ? { intent } : {}) }))
-  }
-  async reportOwed(sessionId: string) {
-    return (await this.rpc.call('agents.reportOwed', { sessionId })).owed
+  send(sessionId: string, text: string, attachments?: Attachment[]) {
+    return done(this.rpc.call('agents.send', { sessionId, text, attachments }))
   }
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string) {
     return this.rpc.call('attachments.save', { sessionId, name, mime, dataBase64 })

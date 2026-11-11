@@ -35,6 +35,8 @@ const handleOf = (id: string): CrossHandle => w.adapters.get('claude')!.handles.
 /** The first task `owner` gave `child` */
 const taskOf = (owner: string, child: string): MailRow => read.tasks(addr(owner), child)[0]!
 const outcomes = (taskId: string) => read.reportsOn(taskId).map((r) => r.facts.outcome)
+/** The session a report of `id`'s work is owed to, if any (the host's report mark) */
+const owedTo = (id: string) => (w.mgr as unknown as { children: { awaitingReport: ReadonlyMap<string, string> } }).children.awaitingReport.get(id) ?? null
 /** New work sent by mail: a task from `owner` to `helper` the mailbox delivers (§9.7 stores an owner's answer to a clarification so) */
 const mailTask = (owner: string, helper: string, text: string): MailRow => m.service.task(addr(owner), addr(helper), { text, origin: 'mail', delivered: false })
 const settle = async () => {
@@ -75,7 +77,7 @@ describe('new work sent by mail after the first was reported', () => {
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: more.id })
-    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(owner)
+    expect(owedTo(helper)).toBe(owner)
 
     await turnEnds(helper, 'two files written')
     await w.until(() => outcomes(more.id).length === 1)
@@ -98,7 +100,7 @@ describe('new work sent by mail after the first was reported', () => {
     m.service.send(addr(bystander), { to: [addr(helper)], text: 'just an aside' })
     await due(helper)
     expect(handleOf(helper).sent).toHaveLength(2)
-    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
+    expect(owedTo(helper)).toBeNull()
     expect(m.turns.current(helper)).toMatchObject({ by: 'mail', messageId: null })
     expect(outcomes(taskOf(owner, helper).id)).toEqual(['finished'])
   })
@@ -128,7 +130,7 @@ describe('new work sent by mail after the first was reported', () => {
     await turnEnds(c, 'Z done')
     await w.until(() => outcomes(z.id).length === 1)
     expect(read.taskRow(z.id, c)).toMatchObject({ settled: 'reported' })
-    expect(w.mgr.inputs.reportOwed(c)).toBeNull()
+    expect(owedTo(c)).toBeNull()
     expect(read.taskRow(x.id, b)).toMatchObject({ settled: null })
     handleOf(b).acceptsAtOnce = true
     await due(b)
@@ -146,7 +148,7 @@ describe('new work sent by mail after the first was reported', () => {
     handleOf(helper).sendTracked = (): Promise<void> => Promise.reject(new Error('the tool failed'))
     const more = mailTask(owner, helper, 'Now write TWO files')
     await due(helper)
-    expect(w.mgr.inputs.reportOwed(helper)).toBeNull()
+    expect(owedTo(helper)).toBeNull()
     expect(outcomes(more.id)).toEqual([])
     expect(read.taskRow(more.id, helper)).toMatchObject({ settled: null })
   })
@@ -185,7 +187,7 @@ describe('new work sent by mail after the first was reported', () => {
     expect(outcomes(forA.id)).toEqual(['paused'])
     expect(read.taskRow(forA.id, helper)).toMatchObject({ settled: null })
     expect(w.mgr.mail.pausedFor(helper, a)).toBe(true)
-    expect(w.mgr.inputs.reportOwed(helper)?.callerId).toBe(a)
+    expect(owedTo(helper)).toBe(a)
   })
 
   it('A’s paused work ending during B’s turn is settled when that turn ends: nothing else would start its timer (#1474)', async () => {

@@ -1089,8 +1089,9 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(3)
     })
 
-    // #1377: the person's message goes straight to the machine; the hub sees the machine's record of it and the turn's events
-    it("the person writing to the session there never closes the paused report: their turn is not reported, the work's end is", async () => {
+    // #1377: the person's message goes straight to the machine; the hub sees the machine's record of it and the turn's events. A machine before
+    // #1948 may still relay the composer's "Take it over" on it, which is not read (#1948)
+    it.each([{}, { intent: 'takeover' }])("the person writing to the session there never closes the paused report: their turn is not reported, the work's end is (%o)", async (choice) => {
       const h = await hub()
       await h.send(true)
       h.mgr.linkedHost.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
@@ -1100,7 +1101,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await h.settle(1)
       expect(h.reports()[0]).toContain('The assigned work paused')
 
-      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact' })
+      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact', ...choice })
       h.mgr.linkedHost.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
       h.mgr.linkedHost.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
       await h.settle(2)
@@ -1112,54 +1113,6 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await h.settle(2)
       expect(h.reports()).toHaveLength(2)
       expect(h.reports()[1]).toMatch(/^\[Centralu\] The session ended its turn\./)
-    })
-
-    it("\"Take it over\" on the machine closes the report: told once, in Centralu's words, and none of their later turns is reported", async () => {
-      const h = await hub()
-      await h.send(true)
-      h.mgr.linkedHost.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
-      h.mgr.linkedHost.observeLinked(tasks([verify]))
-      h.mgr.linkedHost.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
-      h.mgr.linkedHost.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
-      await h.settle(1)
-
-      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: '/compact', intent: 'takeover' })
-      await h.settle(2)
-      expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toContain('[Centralu] The person took this session over; its later turns are theirs, and none of them will be reported to you.')
-      expect(h.reports()[1]).toContain('no final report follows')
-      // What the Assistant's model reads is Centralu's words with the id, never the task's own description
-      await eventually(() => h.messages().length === 2)
-      expect(h.messages()[1]).toContain('The person took this session over')
-      expect(h.messages()[1]).not.toContain('pnpm verify')
-
-      h.mgr.linkedHost.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
-      h.mgr.linkedHost.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'compact crashed' } })
-      h.mgr.linkedHost.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
-      turn(h)
-      await h.settle(2)
-      expect(h.reports()).toHaveLength(2)
-    })
-
-    // #1377: an older machine strips `intent` from the call, so the hub applies the choice it saw go out
-    it("\"Take it over\" for a machine that strips the choice: the hub closes the wait itself once the machine took the message", async () => {
-      const h = await hub()
-      await h.send(true)
-      h.mgr.linkedHost.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
-      h.mgr.linkedHost.observeLinked(tasks([verify]))
-      h.mgr.linkedHost.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
-      h.mgr.linkedHost.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
-      await h.settle(1)
-
-      const done = h.mgr.linkedHost.forwarding('agents.send', { sessionId: 'm1.w1', text: 'mine now', intent: 'takeover' })
-      expect(done).toBeDefined()
-      // The machine records the message without the choice, as an older one does
-      h.mgr.linkedHost.observeLinked({ type: 'user_message', sessionId: 'm1.w1', seq: 9, text: 'mine now' })
-      done!(true)
-      await h.settle(2)
-      expect(h.reports()).toHaveLength(2)
-      expect(h.reports()[1]).toContain('[Centralu] The person took this session over')
-      expect(h.mgr.linkedHost.forwarding('agents.send', { sessionId: 'm1.w1', text: 'x' })).toBeUndefined()
     })
 
     it("the person writing into the work's turn there is reported with their part", async () => {

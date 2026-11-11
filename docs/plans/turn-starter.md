@@ -34,7 +34,8 @@ What reads `by`:
    after them was written by an older build after a rollback, which ran the session: the entries before it are
    done with. This build gives every user row an `inputId` except the first prompt (the first row) and the words the
    resume catch-up reads from the tool's own record, which are marked `transcript` and skipped. The key also keeps the running turn's state: `named` (its opening
-   was named), `takenOver`, and `marks`, each held id that is `joined`, `after` or `carried`. All of it is kept in
+   was named), and `marks`, each held id that is `joined`, `after` or `carried` (a `takenOver` a build before #1948 kept
+   there is not read). All of it is kept in
    memory and read back once per host, so a host that takes a kept session over mid-turn decides as the one before
    would have; a message the new host is given first, whose row it read back, is marked as given then.
    With no `turn_inputs` at all (an upgrade swap from a build before this one), the host reads once what that build
@@ -45,20 +46,20 @@ What reads `by`:
    candidate for the opening now; `joined` marks one given while the turn runs.
 4. **When the tool names the turn's inputs** (`turnStartInputs` on a `working`, which now has three answers):
    - ids, of which some are held: the turn ran for every held entry up to the last one named (the tool runs inputs in
-     order). It is the work's if any of them is, with `wrote` (or `added`) when one of them is the person's, else the
+     order). It is the work's if any of them is, with `wrote` when one of them is the person's, else the
      person's. Those entries are spent.
    - ids, none held (a mail wake, a compact, a quiet note, the CLI's own): the turn is the CLI's own (`cli`).
    - `[]` (an opening that names nothing, from a tool that names inputs): the CLI's own.
    - `null` (not an opening, or a tool that never names): nothing changes.
 
    When the answer differs from the start's, the turn is decided again: `starters`, `report_turn` and the mailbox's
-   row (`MailTurns.restate`: `started_by`, `message_id`, `starter_id` of the same turn). A turn the person took over
-   (`takeTurn`) stays theirs. The entries still held after the named one are queued behind it: a person's among them
+   row (`MailTurns.restate`: `started_by`, `message_id`, `starter_id` of the same turn). The entries still held after the
+   named one are queued behind it: a person's among them
    makes `personInTurn` true, since the tool may take it in at a tool round. The hub's message the turn ran for, the
    last named, is its `origin` (#1604).
 5. **At the turn's end** (`turnInputs`):
-   - ids: the held entries up to the last one named joined the turn (a person's into the work's is `wrote`, or
-     `added`), whether given while it ran or held from before it; they are spent. The rest stay for the next turn.
+   - ids: the held entries up to the last one named joined the turn (a person's into the work's is `wrote`),
+     whether given while it ran or held from before it; they are spent. The rest stay for the next turn.
      When the opening was not named, the named ids held when the turn began are named first, as at the start.
    - undefined (the tool takes every message into the running turn, Codex): the entries held from before the turn
      are spent; those given while it ran joined it (`wrote` counted), and are `carried` to the next turn's opening,
@@ -110,13 +111,11 @@ From the review on #1639, and which way each errs:
 - A person's message held over a turn's end and taken into the next work turn at a tool round is `wrote`, and
   `personInTurn` while it runs.
 - A hub's message Codex runs as a turn of its own after the one it was sent into keeps its origin for that one turn.
-- The person takes over before the naming: the turn stays theirs.
 - The mailbox's row is decided again in place (`MailTurns.restate`).
 
 ## 5. Not built here
 
-- The hub's own 15 s window for "Add to the task" on a linked machine (`ADD_NEXT_MS`, `sessions/linked-reports.ts`)
-  pairs the person's message with a machine's echo and does not decide who starts a turn. A follow-up issue.
+- The hub's own 15 s window for "Add to the task" on a linked machine went with the composer's choice (#1948).
 
 ## 6. Owner's decisions (2026-11-03)
 

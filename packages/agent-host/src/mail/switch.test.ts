@@ -182,7 +182,7 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
     const { next } = await continued()
     // The person's Stop ended the turn; their Continue starts one of theirs
     next.endTurn('orc')
-    next.hooks.turnStarted!('orc', { by: 'person', added: false, cli: false, source: 'caller' })
+    next.hooks.turnStarted!('orc', { by: 'person', cli: false, source: 'caller' })
     expect(next.turns.current('orc')).toMatchObject({ by: 'person', starter: null })
     next.clock.t += 10
     expect(next.mail.send(ORC, { to: [C], text: 'from the person’s turn', needsReply: false }).message).toMatchObject({ causeId: null, depth: 0 })
