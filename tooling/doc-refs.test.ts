@@ -66,6 +66,22 @@ describe('guard/doc-refs', () => {
     ])
   })
 
+  it('reads no reference in code: a fenced block or a code span of a Markdown file, for every form', () => {
+    const index = indexTexts(new Map([['docs/a.md', '# A\n\n## 1. One `code`\n\n```\n## 2. In a fence\n```\n']]))
+    const text = [
+      '```sh',
+      'a §2 and [x](a.md#gone) and docs/a.md "Nothing" and docs/a.md §2',
+      '```',
+      '`a §2` and `[x](a.md#gone)` and `docs/a.md "Nothing"` are code',
+      '`a.md` §2 and [x](a.md#gone) and docs/a.md "One `code`" and docs/a.md "Nothing" are not',
+    ].join('\n')
+    expect(danglingRefs(text, index, 'docs/b.md')).toEqual([
+      '5: a.md has no section 2',
+      '5: docs/a.md has no heading "Nothing"',
+      '5: docs/a.md has no heading #gone',
+    ])
+  })
+
   it("reads a section on a comment's next line, past its comment mark", () => {
     const index = indexDocs(ROOT, ['docs/architecture.md', 'docs/releasing.md', 'AGENTS.md', '.centralu/apps/project-board/AGENTS.md'])
     const text = [

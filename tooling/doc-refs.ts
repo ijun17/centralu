@@ -16,7 +16,8 @@
  * left pointing at the document that was split.
  *
  * A name and what it cites may be on two lines, also of a comment (` * §4.5` under ` * x.md`). Not read: the end of a range (`§4.1–4.9`), a number after a comma
- * without its own `§`, `section 4` in words, a bare rule id (`HD12`), and a link in a file that is not Markdown.
+ * without its own `§`, `section 4` in words, a bare rule id (`HD12`), and a link in a file that is not Markdown. In a Markdown file,
+ * a fenced block and a code span are code, not references, for every form (a span that holds only a document's name is that name: `` `x.md` §3 ``).
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -63,6 +64,30 @@ export const anchorOf = (t: string) =>
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
     .replace(/\s/g, '-')
 
+/** Code blanked in place: its offsets and lines stay */
+const blank = (code: string) => code.replace(/[^\n]/g, '·')
+
+/** A Markdown text with its fenced blocks blanked: what is inside a fence is code, neither a heading nor a reference */
+const unfenced = (text: string) => {
+  let fence = false
+  return text
+    .split('\n')
+    .map((line) => {
+      const mark = /^\s*(```|~~~)/.test(line)
+      if (mark) fence = !fence
+      return mark || fence ? blank(line) : line
+    })
+    .join('\n')
+}
+
+// A code span (not across a blank line), and one that holds only a document's name
+const CODE = /(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])*?)(?<!`)\1(?!`)/g
+const NAME_ONLY = /^(?:[\w.-]+\/)*[A-Za-z][\w-]*\.md$/
+
+/** The prose of a Markdown text, where references are read: fences and code spans blanked in place (a span of a name alone stays) */
+const prose = (text: string) =>
+  unfenced(text).replace(CODE, (span: string, _: string, inner: string) => (NAME_ONLY.test(inner.trim()) ? span : blank(span)))
+
 /**
  * What a reference can name in a Markdown text, outside code fences: a numbered heading (`4.5`), an item of a numbered list under
  * one (`3.3`: the third item of §3), the text of a heading or of a bold lead-in (`**Unsigned: SmartScreen.**`), and a heading's anchor
@@ -72,11 +97,8 @@ export function targets(text: string): Doc {
   const titles: string[] = []
   const anchors = new Set<string>()
   const seen = new Map<string, number>()
-  let fence = false
   let under = ''
-  for (const line of text.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) fence = !fence
-    if (fence) continue
+  for (const line of unfenced(text).split('\n')) {
     const heading = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line)
     if (heading) {
       const text = heading[1] ?? ''
@@ -160,7 +182,8 @@ const PLAIN = /(?<![\w./-])((?:[\w.-]+\/)*[A-Za-z][\w-]*)\.md(?![\w-])/g
 const LINK = /\]\(([^)\s#]*?\.md)?(?:#([^)\s]+))?\)/g
 
 /** What is wrong with the references in a text: one string per finding, with its line; `file` (from the root) checks its links */
-export function danglingRefs(text: string, index: DocIndex, file?: string): string[] {
+export function danglingRefs(written: string, index: DocIndex, file?: string): string[] {
+  const text = file?.endsWith('.md') ? prose(written) : written
   const found: string[] = []
   const lineOf = (at: number) => text.slice(0, at).split('\n').length
   for (const m of text.matchAll(NUMBERED)) {
@@ -177,7 +200,10 @@ export function danglingRefs(text: string, index: DocIndex, file?: string): stri
     for (const [, n = ''] of sections.matchAll(/§\s?(\d+(?:\.\d+)*)/g)) if (!doc.numbers.has(n)) found.push(`${lineOf(m.index)}: ${name}${md} has no section ${n}`)
   }
   for (const m of text.matchAll(QUOTED)) {
-    const [, name = '', , title = ''] = m
+    const [whole, name = '', , quoted = ''] = m
+    // The quotation as written: a heading may hold code (`"The manifest, `x.json`"`), and the prose keeps every offset
+    const end = m.index + whole.length - 1
+    const title = written.slice(end - quoted.length, end)
     const doc = lookup(name, index, file)
     if (typeof doc !== 'object') continue
     const wanted = clean(title)
@@ -194,25 +220,16 @@ export function danglingRefs(text: string, index: DocIndex, file?: string): stri
     const doc = lookup(m[1] ?? '', index, file)
     if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
   }
-  if (file?.endsWith('.md')) {
-    let fence = false
-    let at = 0
-    for (const line of text.split('\n')) {
-      if (/^\s*(```|~~~)/.test(line)) fence = !fence
-      if (!fence) {
-        for (const m of line.matchAll(LINK)) {
-          const [whole, target, anchor] = m
-          if (!target && !anchor) continue
-          const path = target ? posix.normalize(posix.join(posix.dirname(file), target)) : file
-          if (path.startsWith('../') || /^[a-z]+:/i.test(target ?? '') || target?.startsWith('/')) continue
-          const doc = index.byPath.get(path)
-          if (!doc) found.push(`${lineOf(at)}: ${whole.slice(2, -1)} is no document`)
-          else if (anchor && !doc.anchors.has(anchor)) found.push(`${lineOf(at)}: ${path} has no heading #${anchor}`)
-        }
-      }
-      at += line.length + 1
+  if (file?.endsWith('.md'))
+    for (const m of text.matchAll(LINK)) {
+      const [whole, target, anchor] = m
+      if (!target && !anchor) continue
+      const path = target ? posix.normalize(posix.join(posix.dirname(file), target)) : file
+      if (path.startsWith('../') || /^[a-z]+:/i.test(target ?? '') || target?.startsWith('/')) continue
+      const doc = index.byPath.get(path)
+      if (!doc) found.push(`${lineOf(m.index)}: ${whole.slice(2, -1)} is no document`)
+      else if (anchor && !doc.anchors.has(anchor)) found.push(`${lineOf(m.index)}: ${path} has no heading #${anchor}`)
     }
-  }
   return [...new Set(found)].sort((a, b) => parseInt(a) - parseInt(b))
 }
 
