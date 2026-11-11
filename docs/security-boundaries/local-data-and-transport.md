@@ -96,8 +96,7 @@ a frame may be up to 100 MiB (the library's default, set explicitly); a bigger o
 (1009). The token is compared in constant time. An authenticated socket's hello is
 answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
 (#382, "The front door" in [keeper.md](keeper.md#the-front-door)); that socket receives no events and may call only its own session's
-bridge RPCs. It may also carry the limited credential, which calls only the everyday methods ("Who holds full power",
-below).
+bridge RPCs. It may also carry the limited credential, which calls only the everyday methods (credentials.md "Who holds full power").
 
 `pnpm dev:live` (#739) is the one script that puts a host credential into a browser page. It reads the running
 app's front door port and credential from the keeper's `status` and gives them to the Vite it starts, as
