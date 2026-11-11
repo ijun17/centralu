@@ -4,7 +4,6 @@
  * hour, an untrusted project's request waits for the person's trust, and the role's unsettled mail follows the role.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { reportRecorder } from './delegation.js'
 import { at, hostWorld } from './host-mail.test-helpers.js'
 import { oldThread } from './v61.test-helpers.js'
 import { ASKS_PER_HOUR } from './rules.js'
@@ -105,11 +104,11 @@ describe('the end of a request turn (§7.6, S12)', () => {
     const q = w.mail.send(A, { to: [ORC], text: 'can you?', needsReply: true })
     await w.advance(2_000)
     w.endTurn('orc')
-    reportRecorder(w.service, w.store.mailbox, w.turns)('a', 'orc', { outcome: 'interrupted', body: 'x', then: 'review', delivery: 'wake' })
+    w.hooks.requestTurnEnded!('orc')
     expect(w.row(q.message.id, ORC)!.settled).toBe('reported')
-    expect(w.store.mailbox.reportsOn(q.message.id)[0]!.body).toBe(
-      "[Centralu] The Assistant's turn on your request did not finish (interrupted). What it sent you in reply, if anything, has reached you. Ask again, or ask the person.",
-    )
+    expect(w.store.mailbox.reportsOn(q.message.id).map((r) => r.body)).toEqual([
+      '[Centralu] The Assistant ended its turn on your request. What it sent you in reply is its answer; if it sent nothing, it had none to give. Its other words in that turn are not passed on.',
+    ])
   })
 
   it('a turn that carried two requests of one asker settles both at its end: the second is not left owed', async () => {
@@ -119,7 +118,7 @@ describe('the end of a request turn (§7.6, S12)', () => {
     await w.advance(2_000)
     expect(w.to('orc')).toHaveLength(1)
     w.endTurn('orc')
-    reportRecorder(w.service, w.store.mailbox, w.turns)('a', 'orc', { outcome: 'finished', body: 'done', then: 'review', delivery: 'wake' })
+    w.hooks.requestTurnEnded!('orc')
     expect(w.row(first.message.id, ORC)!.settled).not.toBeNull()
     expect(w.row(second.message.id, ORC)!.settled).not.toBeNull()
   })
@@ -134,7 +133,7 @@ describe('the end of a request turn (§7.6, S12)', () => {
     expect(w.turns.current('orc')).toMatchObject({ messageId: message.id, asker: A })
     expect(w.row(message.id, ORC)!.settled).toBe('legacy')
     w.endTurn('orc')
-    expect(reportRecorder(w.service, w.store.mailbox, w.turns)('a', 'orc', { outcome: 'finished', body: 'x', then: 'review', delivery: 'wake' })).toBe('mailed')
+    w.hooks.requestTurnEnded!('orc')
     expect(w.store.mailbox.reportsOn(message.id)[0]!.body).toContain('ended its turn on your request')
     expect(w.row(message.id, ORC)!.settled).toBe('legacy')
   })

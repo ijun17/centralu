@@ -6,9 +6,9 @@ import type { Store } from '../dev-services/store.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
-import { takeOverFromEarlierBuild } from './adoption.js'
+import { leaveForEarlierBuild, takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, reportRecorder, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskRepointer, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -19,6 +19,7 @@ import { MailAcross } from './across.js'
 import { entryOf } from './find.js'
 import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { MailTurns } from './turns.js'
+import type { StopWhy } from './stop-notices.js'
 
 /**
  * What the mail of this host reads of its sessions (docs/plans/mailbox.md §16 M3a): the manager answers it in `main.ts`, and tests answer it from
@@ -36,8 +37,6 @@ export type HostMailSessions = {
   mailCommand(id: string): boolean
   /** Whether the session's turn goes on from the host before (kept, or continued after an update): its mail turn row is read back */
   keptInTurn(id: string): boolean
-  /** §9.5: the old report paths still owe the owner a report of the child */
-  oldOwes(ownerId: string, childId: string): boolean
   mailSessions(): MailSessions
   /** Whether the project is trusted, read now (`ProjectRegistry.projectTrusted`, #2159): what the reach's hold reads */
   projectTrusted(projectId: string): boolean
@@ -48,7 +47,11 @@ export type HostMailSessions = {
   /** Who gave what may have entered the session's latest turn (`MailSessionsView.turnInputs`): only a turn its asker alone gave anything is quoted to it */
   turnInputs?(id: string): readonly (string | null)[]
   /** Who is told of the turn a quit cut in `id`, found by this start (`HostTenure.quitStarter`); none for a turn an earlier start found */
-  quitStarter?(id: string): { starter: string; reportOwed: boolean } | null
+  quitStarter?(id: string): string | null
+  /** A session this start found at rest answers the tasks it did not answer once it is settled (`ChildReports.settleAtRest`, mailbox.md §10.6.3) */
+  settleAtRest?(id: string): void
+  /** Tells `receiverId`, whose seat cannot read mail, of `stoppedId`'s stop in the relayed report's words for that ending (`ChildReports.relayStop`); `told` once it went in */
+  relayStop?(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
 }
@@ -67,7 +70,6 @@ export function mailSessionsOf(
     assistantAsks: () => mgr.mail.assistantAsks(),
     mailCommand: (id) => seats.mailCommand(id),
     keptInTurn: (id) => mgr.tenure.keptInTurn(id),
-    oldOwes: (ownerId, childId) => mgr.mail.oldOwes(ownerId, childId),
     mailSessions: () => mgr.mail.mailSessions(),
     projectTrusted: (projectId) => mgr.projectRegistry.projectTrusted(projectId),
     stoppedWords: (id) => mgr.mail.stoppedWords(id),
@@ -75,6 +77,8 @@ export function mailSessionsOf(
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
     quitStarter: (id) => mgr.tenure.quitStarter(id),
+    settleAtRest: (id) => mgr.mail.settleAtRest(id),
+    relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
   }
 }
 
@@ -91,8 +95,9 @@ export type HostMail = {
   /** What the manager hears through `mgr.mail.useMail` */
   hooks: MailHooks
   /**
-   * The step after the host's ready line (§6.3, §9.5), before delivery starts: the thread mail an older build left pending moves, the turns the last host's end cut are told (the stop notice), then the report
-   * marks and tasks are brought in step, then delivery starts. By then the host this one replaced is gone, so only one host delivers
+   * The step after the host's ready line (§6.3, §10.6.3), before delivery starts: the thread mail an older build left pending moves, the turns the last host's end cut are told (the
+   * stop notice), an earlier build's report marks become tasks, then delivery starts and each session at rest answers its open tasks once settled. By then the host this
+   * one replaced is gone, so only one host delivers
    */
   afterReady(): void
 }
@@ -169,6 +174,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return from?.kind === 'session' && to?.kind === 'session' && sessions.readsSession?.(from.sessionId, to.sessionId) === true
     },
     ...(sessions.turnInputs ? { turnInputs: (id: string) => sessions.turnInputs?.(id) ?? [null] } : {}),
+    // A session whose seat cannot read mail is refused the stop notice (`no_mailbox`): it is told the old way (mailbox.md §10.6.3)
+    relayToMailless: (session, stopped, why, told) => {
+      const [to, about] = [parseAddress(session), parseAddress(stopped)]
+      if (to?.kind !== 'session' || about?.kind !== 'session' || sessions.canReadMail(to.sessionId) || !sessions.relayStop) return false
+      sessions.relayStop(to.sessionId, about.sessionId, why, told)
+      return true
+    },
   })
   box.turns = new MailTurns(store.mailbox, {
     ...(opts.now ? { now: opts.now } : {}),
@@ -238,21 +250,14 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     legacyChain: (threadId, messageId, reader) => store.legacyChainFor(threadId, messageId, reader, 9),
     across,
   })
-  const owedOld = (sender: string, recipient: string): boolean => {
-    const owner = parseAddress(sender)
-    const child = parseAddress(recipient)
-    return owner?.kind === 'session' && child?.kind === 'session' && sessions.oldOwes(owner.sessionId, child.sessionId)
-  }
-  const waitingOn = (ownerId: string, childId: string): number => service.waitingOn(addressOf(ownerId), addressOf(childId), mailTurns.latest(childId)?.messageId ?? null, owedOld)
-
   const hooks: MailHooks = {
     askedBy: (id) => askedBy(askedByHost, id),
     sessionGone: (id) => service.stops.partyGone(addressOf(id)),
     linkedGone: linkedGoneRecorder(service, store.mailbox),
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) =>
-      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.held ? { held: o.held.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
-    oldPathEnded: (id, sender, told) => service.stops.oldPathEnded(addressOf(id), addressOf(sender), told),
+      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}) }),
+    leaving: (inTurn) => leaveForEarlierBuild(service, store, inTurn),
     handOver: (from, to, which) => aboutSessions(service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) })),
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
@@ -266,12 +271,38 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     delegated: delegationRecorder(service, mailTurns),
     sendTask: taskSender(service),
     withdrawTasks: taskWithdrawer(service, store.mailbox),
-    waitingOn,
-    answered: answerRecorder(service, store.mailbox, mailTurns, waitingOn),
+    answered: answerRecorder(service, store.mailbox),
     // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
-    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox, (id) => service.waitingOn(PERSON, addressOf(id), mailTurns.latest(id)?.messageId ?? null, owedOld)) },
-    // A turn's end is a report on the task, and the owner is told as mail when it can read it (§9.3)
-    report: reportRecorder(service, store.mailbox, mailTurns, waitingOn),
+    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox) },
+    // A session at rest answers the tasks it did not answer by a reply with its last response (§10.6.3); the person's own work keeps its report (§8.1)
+    lastResponse: (id, { relay, ...last }) => {
+      const answered = service.lastResponse(addressOf(id), {
+        ...last,
+        body: (sender) => {
+          const party = parseAddress(sender)
+          return last.body(party?.kind === 'session' ? party.sessionId : sender)
+        },
+        answers: (sender) => parseAddress(sender)?.kind === 'session',
+        queued: delivery.queuedFor(addressOf(id)),
+      })
+      // A sender whose seat cannot read mail (an older build's coordinator, a builder) is refused it (`no_mailbox`): it is told in its conversation, as
+      // it was before step 3, and the report is marked delivered and read once that went in, so the Inbox reads it as told
+      for (const taskId of answered) {
+        const owner = records.message(taskId)?.sender ?? ''
+        const party = parseAddress(owner)
+        const report = records.reportsOn(taskId).at(-1)
+        if (party?.kind !== 'session' || sessions.canReadMail(party.sessionId) || !report) continue
+        relay(party.sessionId, () => {
+          const at = now()
+          records.markDelivered(owner, [report.id], at, null)
+          records.markRead(owner, [report.id], at)
+        })
+      }
+    },
+    requestTurnEnded: requestTurnRecorder(service, mailTurns, addressOf),
+    openTasks: (id, side) => openTaskParties(store.mailbox, addressOf(id), side),
+    turnInputs: (id, turn) => delivery.turnInputs(addressOf(id), turn),
+    repointTasks: taskRepointer(service, store.mailbox),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
     roleMoved: (to) => {
@@ -304,20 +335,22 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
         const stops = sessions.listSessions().flatMap((s) => {
           const why = s.interruption?.reason
           if (why !== 'quit' && why !== 'shutdown') return []
-          const told = sessions.quitStarter?.(s.id)
-          return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter: told ? addressOf(told.starter) : null, reportOwed: told?.reportOwed }]
+          const starter = sessions.quitStarter?.(s.id)
+          return [{ address: addressOf(s.id), why, turnSeq: open.get(s.id) ?? null, starter: starter ? addressOf(starter) : null }]
         })
         service.stops.sessionsStopped(stops)
       } catch (e) {
         console.error(`[mail] telling the senders of the turns the last host's end cut failed: ${errorMessage(e)}`)
       }
-      // After the stop notice: a task the quit cut is released and told by it, not settled as reported for the mark the start dropped
       try {
-        takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id), oldOwes: (o, c) => sessions.oldOwes(o, c) })
+        takeOverFromEarlierBuild(service, store, { info: (id) => sessions.sessionInfo(id) })
       } catch (e) {
         console.error(`[mail] taking over from an older build failed: ${errorMessage(e)}`)
       }
       delivery.start()
+      // No process outlives its host: a session the last host left at rest after a turn that ended as turns do, with tasks it did not answer,
+      // answers them with its last response once settled, as when its own background work ends (§10.6.3)
+      for (const s of sessions.listSessions()) sessions.settleAtRest?.(s.id)
     },
   }
 }
@@ -354,6 +387,16 @@ function openWork(service: MessageService, store: Store, address: string): { una
     else if (m.needsReply && row.answerId === null) unanswered.push(firstLineOf(m.body, 160))
   }
   return { unanswered, owed }
+}
+
+/** The sessions with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`), or its own tasks' receivers (`from`) */
+function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from'): string[] {
+  const rows = side === 'to' ? records.watchedTo(address) : records.watchedFrom(address)
+  return [...new Set(rows.flatMap((r) => {
+    const m = r.deliveredAt === null || r.releasedAt !== null ? undefined : records.message(r.messageId)
+    const other = m?.kind === 'task' ? parseAddress(side === 'to' ? m.sender : r.recipient) : null
+    return other?.kind === 'session' ? [other.sessionId] : []
+  }))]
 }
 
 /** §7.4: a delegation out of the caller's untrusted project is refused (S15), and the record S16 is built from is written */

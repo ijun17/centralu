@@ -263,6 +263,15 @@ export class SelfCompaction {
     return !!c && !c.ended
   }
 
+  /**
+   * Whether the session's work goes on in a turn Centralu starts for it (#2164): a request with a next step, a compaction whose step has not gone, or a
+   * step sent whose turn has not opened. The turn that asked is then not where the work ends, and its last response answers nothing
+   * (docs/plans/mailbox.md §10.6.3). A step lost to the person's stop leaves the tasks to the turn the person starts
+   */
+  goesOn(sessionId: string): boolean {
+    return !!this.pending.get(sessionId)?.then || !!this.compacting.get(sessionId)?.then || this.stepping.has(sessionId)
+  }
+
   /** Whether the turn opening now is the one a next step this host sent opens (#2164): it goes on with the work of the turn that asked. Once per step */
   stepOpens(sessionId: string): boolean {
     return this.stepping.delete(sessionId)

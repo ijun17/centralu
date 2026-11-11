@@ -357,7 +357,6 @@ packages/agent-host/src/sessions/remote-agents.test.ts @typescript-eslint/no-unn
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-non-null-assertion 2
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unnecessary-type-assertion 3
 packages/agent-host/src/sessions/remote-agents.ts @typescript-eslint/no-unsafe-type-assertion 6
-packages/agent-host/src/sessions/report-marks.test.ts @typescript-eslint/no-floating-promises 1
 packages/agent-host/src/sessions/routed-cards.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/agent-host/src/sessions/session-app-wiring.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/sessions/session-apps.ts @typescript-eslint/no-non-null-assertion 9

@@ -3,11 +3,11 @@
  * `MessageService.stops` holds it; it writes through the service's transaction and its Centralu notices
  */
 import { SHUTDOWN_WORDS } from '@cc/protocol'
-import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy, type RowKey } from '../dev-services/store/mailbox.js'
+import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy } from '../dev-services/store/mailbox.js'
 import { parseAddress } from './address.js'
 import { quoted } from './frame.js'
 import type { MailReach } from './reach.js'
-import { MINUTE_MS, hash16 } from './rules.js'
+import { hash16 } from './rules.js'
 
 /** What the stop notice reads of the host (`MessageService`'s options) */
 export type StopNoticeOptions = {
@@ -25,6 +25,12 @@ export type StopNoticeOptions = {
    * null for anything no session provably sent (the person's text or answer to a question card, an app, a script, a relayed report). None quoted when absent
    */
   turnInputs?: (sessionId: string) => readonly (string | null)[]
+  /**
+   * Tells `session` of `stopped`'s stop the way it was told before #1948 step 3, when its seat cannot read mail (an older build's coordinator, a builder),
+   * so the mailbox would never deliver it the notice (`no_mailbox`): the relayed report in the words of that ending (`ChildReports.relayStop`). False
+   * when it reads mail. `told` once it went in. None told so when absent
+   */
+  relayToMailless?: (session: string, stopped: string, why: StopWhy, told: () => void) => boolean
 }
 
 /** What the stop notice writes with: the service's records, reach, clock, transaction and Centralu notices */
@@ -33,16 +39,10 @@ type StopNoticeDeps = StopNoticeOptions & {
   reach: Pick<MailReach, 'labelOf'>
   now: () => number
   run: <T>(fn: () => T) => T
-  notice: (recipient: string, m: { kind: MailKind; body: string; facts: MailFacts; dedupeKey: string }) => void
+  notice: (recipient: string, m: { kind: MailKind; body: string; facts: MailFacts; dedupeKey: string }) => { id: string; duplicate: boolean }
 }
 
 export class StopNotices {
-  /**
-   * Stops whose notice to a sender waits for an older report path to end (`sessionStopped`'s `held`), by stopped session and sender, with whether it
-   * would wake. In memory: a restart in between leaves the rows released and untold, and the sender's next notice lists them
-   */
-  private readonly oldPathsOpen = new Map<string, { at: number; rows: RowKey[]; said: string | null }>()
-
   constructor(private readonly d: StopNoticeDeps) {}
 
   /**
@@ -64,12 +64,11 @@ export class StopNotices {
    * into the cut turn `turnSeq` and not answered (a `needsReply` message, the person's too; none without a turn), and every open task a session gave
    * it. Each sender is told once, in one notice, and woken: it is owed a reply (`standing`: in a turn it reads it when that turn ends; one a quit
    * cut reads it at its next turn). `starter`, the session that started the stopped one, is told too when it is owed nothing and the turn was not
-   * the person's, woken only from a turn; one owed the turn's report (`reportOwed`, a report mark a start dropped) is told whoever's turn it was, and woken. The rows stay open, so a reply after the person continues the session still answers them. A question
-   * delivered in an earlier turn is not this stop's: it was read, and the session may have answered it in conversation.
+   * the person's, woken only from a turn. The rows stay open, so a reply or a last response after the person continues the session still answers
+   * them. A question delivered in an earlier turn is not this stop's: it was read, and the session may have answered it in conversation.
    *
-   * The person's notice goes to the Inbox and wakes nothing. An older report path may tell some senders of this same stop (the owner of a report,
-   * a delegation's wait): `told`, those it already told, whose rows are released and marked told; `held`, those it may still tell, whose rows are
-   * released and whose notice waits for that path to end (`oldPathEnded`). Returns how many rows were released
+   * The person's notice goes to the Inbox and wakes nothing. `told`: the senders a call still waiting on the session already told (it read the stop
+   * itself), whose rows are released and marked told. Returns how many rows were released
    */
   sessionStopped(address: string, why: StopWhy, opts: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}): number {
     return this.sessionsStopped([{ ...opts, address, why, turnSeq: opts.turnSeq ?? null }])
@@ -81,51 +80,22 @@ export class StopNotices {
       const now = this.d.now()
       const senders = new Set<string>()
       let released = 0
-      for (const { address, why, turnSeq, told, held, starter, reportOwed } of stops) {
+      for (const { address, why, turnSeq, told, starter } of stops) {
         const owed = new Set<string>()
         for (const { row, message: m } of this.owedBy(address, why, turnSeq)) {
           if (!this.d.records.markReleased(row.messageId, address, now, why)) continue
           released++
           owed.add(m.sender)
           if (told?.includes(m.sender)) this.d.records.markTold([{ messageId: row.messageId, recipient: address }], now)
-          else if (!held?.includes(m.sender) || !this.holdFor(address, m.sender, row.messageId, turnSeq, now)) senders.add(m.sender)
+          else senders.add(m.sender)
         }
         const party = parseAddress(address)
         const persons = party?.kind === 'session' && turnSeq !== null && this.d.records.turn(party.sessionId, turnSeq)?.startedBy === 'person'
-        if (starter && starter !== address && (reportOwed || !persons) && !owed.has(starter) && !told?.includes(starter) && !held?.includes(starter)) this.tellStarter(starter, address, why, turnSeq, !!reportOwed)
+        if (starter && starter !== address && !persons && !owed.has(starter) && !told?.includes(starter)) this.tellStarter(starter, address, why, turnSeq)
       }
       for (const sender of senders) this.tellUnanswered(sender, now)
       return released
     })
-  }
-
-  /**
-   * An older report path ended for `stopped`'s stop (`sessionStopped`'s `held`): `told`, it really sent `sender` the stop, whose rows are then marked
-   * told; else `sender` gets the stop notice now. Nothing when no row of `sender` waited for it
-   */
-  oldPathEnded(stopped: string, sender: string, told: boolean): void {
-    const key = oldPathKey(stopped, sender)
-    const open = this.oldPathsOpen.get(key)
-    if (!open) return
-    this.oldPathsOpen.delete(key)
-    this.d.run(() => {
-      const now = this.d.now()
-      if (told) this.d.records.markTold(open.rows, now)
-      else this.tellUnanswered(sender, now, new Map([[stopped, open.said]]))
-    })
-  }
-
-  /**
-   * Holds a released row's notice for an older report path (`oldPathEnded`), with the stopped session's words as they are now, so a late notice
-   * quotes the cut turn. One stop of a pair is held at a time: a later stop's rows are told now (a double notice at worst, never a lost one)
-   */
-  private holdFor(stopped: string, sender: string, messageId: string, turnSeq: number | null, now: number): boolean {
-    const key = oldPathKey(stopped, sender)
-    const open = this.oldPathsOpen.get(key)
-    if (open && open.at !== now) return false
-    if (open) open.rows.push({ messageId, recipient: stopped })
-    else this.oldPathsOpen.set(key, { at: now, rows: [{ messageId, recipient: stopped }], said: this.quoteFor(stopped, sender, turnSeq) })
-    return true
   }
 
   /** The latest turn the mailbox recorded of a session address, 0 when none */
@@ -141,7 +111,7 @@ export class StopNotices {
 
   /**
    * Whether a stop notice to `sender` may quote the words of `stopped`'s turn `turnSeq` (its latest when absent): the one rule every stop notice
-   * to a session quotes by (security-boundaries/inter-agent-content.md), the mailbox's and the older report path's (`MailHooks.quotes`). All of it must hold:
+   * to a session quotes by (security-boundaries/inter-agent-content.md). All of it must hold:
    * - `sender` is a session that can read `stopped` with read_session (`mayRead`, that tool's own rule);
    * - the turn is the session's latest (no turn since), and `sender`'s own message started it: a mail the mailbox delivered, or work `sender`
    *   gave it (a start_agent task, an agent_session send: a `caller` turn whose starter is that work's task row, sent by `sender`). A turn the
@@ -166,8 +136,8 @@ export class StopNotices {
   /**
    * Turns the last host left that nothing continues, closed `lost` at this start (#1916): a crash or a plain restart cut them, or a kept process's
    * turn ended while no host was there to record it. The questions delivered in them that were not answered were read, so no delivery gives them
-   * again: each is released `lost`, and each sender is told once for all of them (D25), so it can ask again. A task is not: the old report path
-   * tells its owner of the stop (#698). `close` closes them and returns them, in the same write as the release: if the release fails, the turns
+   * again: each is released `lost`, and each sender is told once for all of them (D25), so it can ask again. A task is not: it stays open, and the
+   * session's next last response or reply answers it. `close` closes them and returns them, in the same write as the release: if the release fails, the turns
    * stay open and the next start finds them again
    */
   turnsLost(close: () => readonly { address: string; turnSeq: number }[]): void {
@@ -229,15 +199,12 @@ export class StopNotices {
    * without telling the person are not listed all at once.
    * It wakes a session, unless a quit cut it (`wakes`)
    */
-  private tellUnanswered(sender: string, since: number, said: ReadonlyMap<string, string | null> = new Map()): void {
+  private tellUnanswered(sender: string, since: number): void {
     const kind = parseAddress(sender)?.kind
-    // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them.
-    // Nor what an older report path may still tell (`oldPathEnded`), for a while: a path that never ends does not keep a row untold for good
-    const now = this.d.now()
-    const waiting = new Set([...this.oldPathsOpen.values()].filter((o) => now - o.at < OLD_PATH_WAIT_MS).flatMap((o) => o.rows.map((r) => `${r.messageId}/${r.recipient}`)))
+    // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
     const rows = this.d.records
       .releasedUntold(sender)
-      .filter((r) => !waiting.has(`${r.messageId}/${r.recipient}`) && (kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone')))
+      .filter((r) => kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone'))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
     // A session reads what the stopped session last said in the cut turn when `quotes` allows it, as that session's words; the person reads it in the conversation itself
@@ -246,14 +213,35 @@ export class StopNotices {
       const seqs = new Set(rows.filter((x) => x.recipient === r && isStop(x.releasedWhy)).map((x) => x.turnSeq))
       return seqs.size === 1 ? ([...seqs][0] ?? null) : null
     }
-    const words = new Map(stopped.flatMap((r) => { const w = said.has(r) ? said.get(r) : this.quoteFor(r, sender, cutTurn(r)); return w ? [[r, w] as const] : [] }))
-    this.d.notice(sender, {
+    const words = new Map(stopped.flatMap((r) => { const w = this.quoteFor(r, sender, cutTurn(r)); return w ? [[r, w] as const] : [] }))
+    const written = this.d.notice(sender, {
       kind: 'notice',
       body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient) })), kind === 'person', words),
       facts: { unanswered, ...(kind === 'session' && !this.wakes(sender, true) ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
     this.d.records.markTold(rows, this.d.now())
+    const stops = new Map(unanswered.flatMap((u) => (isStop(u.why) ? [[`${u.recipient}/${u.why}`, { stopped: u.recipient, why: u.why }] as const] : [])))
+    if (kind === 'session') this.relayToMailless(sender, written, [...stops.values()])
+  }
+
+  /**
+   * A stop notice to a session whose seat cannot read mail, which the mailbox would never deliver it (`relayToMailless`): it is told each stop the old way, and
+   * the notice is marked delivered and read once that went in, so nothing waits to wake that seat. The one place every stop notice to a session passes
+   */
+  private relayToMailless(session: string, notice: { id: string; duplicate: boolean }, stops: readonly { stopped: string; why: StopWhy }[]): void {
+    const relay = this.d.relayToMailless
+    if (notice.duplicate || !relay) return
+    const told = () => {
+      const at = this.d.now()
+      this.d.records.markDelivered(session, [notice.id], at, null)
+      this.d.records.markRead(session, [notice.id], at)
+    }
+    // Once the write that holds the notice has committed (its transaction is synchronous): a write that failed told nobody
+    queueMicrotask(() => {
+      if (!this.d.records.message(notice.id)) return
+      for (const { stopped, why } of stops) if (!relay(session, stopped, why, told)) return
+    })
   }
 
   /**
@@ -265,20 +253,20 @@ export class StopNotices {
     return owed ? standing !== 'cut' : standing === 'turn'
   }
 
-  /** `stopped`'s stop, to the session that started it: once per stop; owed nothing, woken only from a turn; owed the turn's report, woken (`sessionsStopped`) */
-  // `reportOwed` is reached by a report mark with no task row (an older build's, or a crash between the mark and the task row); #1948 step 3 deletes it together with the report marks
-  private tellStarter(starter: string, stopped: string, why: StopWhy, turnSeq: number | null, reportOwed: boolean): void {
+  /** `stopped`'s stop, to the session that started it, owed nothing: once per stop, woken only from a turn (`sessionsStopped`) */
+  private tellStarter(starter: string, stopped: string, why: StopWhy, turnSeq: number | null): void {
     if (parseAddress(starter)?.kind !== 'session') return
     const said = this.quoteFor(stopped, starter, turnSeq)
     const name = this.d.reach.labelOf(stopped)
-    this.d.notice(starter, {
+    const written = this.d.notice(starter, {
       kind: 'notice',
-      body: `${name}, which you started, stopped: ${STARTER_WORDS[why]}. ${reportOwed ? 'Its report to you will not come.' : 'It owed you no answer.'} read_session shows where it stopped; send it a message if it should go on.${said ? `
+      body: `${name}, which you started, stopped: ${STARTER_WORDS[why]}. It owed you no answer. read_session shows where it stopped; send it a message if it should go on.${said ? `
 ${lastWordsText(name, said)}` : ''}`,
-      facts: { about: { session: stopped }, reason: why, ...(this.wakes(starter, reportOwed) ? {} : { quiet: true }) },
+      facts: { about: { session: stopped }, reason: why, ...(this.wakes(starter, false) ? {} : { quiet: true }) },
       // One per stop: its cause and the turn it cut, else the session's latest turn (a stop with no turn on record names none of its own)
       dedupeKey: `stopped:${starter}:${stopped}:${why}:${turnSeq ?? this.latestTurnSeq(stopped)}`,
     })
+    this.relayToMailless(starter, written, [{ stopped, why }])
   }
 }
 
@@ -300,17 +288,11 @@ const WHY_WORDS: Record<ReleaseWhy, string> = {
   uncontinued: 'Centralu could not continue that session',
 }
 
-/** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders an older report path told of this stop or may still tell */
-export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; held?: readonly string[]; starter?: string | null; reportOwed?: boolean }
+/** One session that stopped: the turn it was in (the questions delivered in it are the ones released), and the senders a waiting call told of this stop */
+export type SessionStop = { address: string; why: StopWhy; turnSeq: number | null; told?: readonly string[]; starter?: string | null }
 
-/** How long a stop notice waits for an older report path before it is told anyway (`oldPathEnded`, `MailSessionsView.mailStopTold`) */
-export const OLD_PATH_WAIT_MS = 10 * MINUTE_MS
-
-/** A stopped session and a sender of questions to it, as one key */
-const oldPathKey = (stopped: string, sender: string): string => `${stopped}|${sender}`
-
-/** Who else hears of a stop (`MailHooks.stopped`, session ids): `told` and `held` by an older report path, and the session that started the stopped one */
-export type StopTold = { told?: readonly string[]; held?: readonly string[]; starter?: string | null }
+/** Who else hears of a stop (`MailHooks.stopped`, session ids): `told` by a call still waiting on it, and the session that started the stopped one */
+export type StopTold = { told?: readonly string[]; starter?: string | null }
 
 /** Why a session stopped, the words of `sessionStopped` */
 export type StopWhy = 'stopped' | 'error' | 'limit' | 'network' | 'interrupted' | 'quit' | 'shutdown' | 'uncontinued'

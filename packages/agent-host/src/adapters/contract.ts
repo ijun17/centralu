@@ -363,7 +363,8 @@ export interface SessionHandle {
    * handled. Absent: the tool takes every message into the turn it is running (Codex merges one into an active turn; one it
    * runs as a turn after is named by `turnStartInputs` instead). Present:
    * a message sent mid-turn may instead run as a turn of its own after (Claude folds one in only at a tool round);
-   * `null`: the tool cannot tell (an older CLI), and none is taken to have joined
+   * `null`: the tool cannot tell which it took (an older CLI). What that means for each reader is said where it reads it
+   * (`ChildOwnership.turnEnded`, `MailDelivery.turnInputs`)
    */
   turnInputs?(): readonly string[] | null
   /**

@@ -448,10 +448,7 @@ export function centraluToolsFor(
             host.children.releaseTurn(info.id, assistantId)
             throw e
           }
-          if (reportBack) {
-            host.children.markReport(info.id, assistantId)
-            host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage)
-          }
+          if (reportBack) host.children.delegated(assistantId, info.id, 'create_session', opts.firstMessage)
         }
         return { ok: true, sessionId: info.id, name: host.meta.get(info.id)?.name ?? info.name }
       } catch (e) {
@@ -702,7 +699,6 @@ export function centraluToolsFor(
           const f = await host.forkFor(assistantId, target, text, ifBusy === 'fork_read', 'send_to_session')
           if (!f.ok) return f
           if ('mailed' in f) return { ok: true, busy: f.mailed }
-          host.children.markReport(f.fork.id, assistantId)
           return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: host.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
         }
         const mailed = host.mailTask(assistantId, target, 'send_to_session', text)
@@ -723,14 +719,8 @@ export function centraluToolsFor(
         host.children.releaseTurn(sessionId, assistantId)
         return { ok: false, error: (e as Error).message }
       }
-      // Only comes back when asked for — silent by default
-      if (reportBack) {
-        host.children.markReport(sessionId, assistantId)
-        host.children.delegated(assistantId, sessionId, 'send_to_session', text)
-      }
-      // Instructing again without asking for a report clears this Assistant's earlier request — the
-      // new instruction replaces it (#166)
-      else if (host.children.awaitingReport.get(sessionId) === assistantId) host.children.clearReport(sessionId)
+      // Only comes back when asked for — silent by default: a task is the request, and its reply or last response comes back (mailbox.md §10.6.3)
+      if (reportBack) host.children.delegated(assistantId, sessionId, 'send_to_session', text)
       return { ok: true }
     },
 

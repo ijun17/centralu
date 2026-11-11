@@ -57,9 +57,9 @@ export class LinkedHost {
 
   /**
    * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
-   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, as
-   * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work
-   * (#723, `LinkedReports`).
+   * there ends as `observeLinkedAsk` judges it; the end of a turn the Assistant is waiting on becomes its report, with a
+   * pause over the session's own background work (#723, `LinkedReports`): this host's own sessions are answered by the
+   * mailbox instead (docs/plans/mailbox.md §10.6.3), until mail crosses links.
    */
   observeLinked(e: LinkedEvent): void {
     if (e.type === 'machine_status') this.host.askProjectFlow.observeLinkLoss(e.machine)

@@ -65,7 +65,7 @@ below retained for `safe` and `normal`:
    model to ask the person rather than do the work with its own CLI's subagents (#660).
    **A card is not withdrawn at the bound** (#673). The call answers `pending` with the request id (`ag-…`) as a
    handle, and the setup goes on in the background: the card stays until the person answers. An approval then starts
-   the child with its report armed (the caller is told when its turn ends, as with `wait: false`); a refusal, or a
+   the child with its task written (its answer comes back as with `wait: false`); a refusal, or a
    start that fails after the approval, is told to the caller as a message from Centralu (`HOST_SENDER`). The card
    lives in the caller's single approval slot, which the caller's own next events clear while its turn goes on; it is
    raised again (`raiseHostAsks` in `sessions/host-cards.ts`, not recorded twice) when that turn ends, unless it ended in an error.
@@ -86,12 +86,14 @@ below retained for `safe` and `normal`:
    In the window, a card raised in a session off screen leaves a card in the top right (`Notices`, kind
    `agent_start`) even while the app is in front, and clicking it opens that session.
    The wait of `wait: true` is cut to what is left of `START_AGENT_CALL_MS` (270 s), so setup and wait together stay
-   inside the bridge's bound; past it the answer is `working`, with the report armed.
+   inside the bridge's bound; past it the answer is `working`, the task written.
 5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
    marked `askedBy` the caller (drawn indented under it in the sidebar, owner decision 2026-10-12; its header links
    back: "Started by …"), under **the caller's permission preset**:
    never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
-   and that the final message is the answer) recorded as sent by the caller (`from`). After the task come the
+   and that the final message is the answer) recorded as sent by the caller (`from`). The caller's task is written to the
+   mailbox before the frame goes in (`ChildOwnership.delegated`): handing it over can outlast the call's bound, and a host that
+   goes in that gap leaves the task to the next one, whose start answers it; a hand-over that fails withdraws it. After the task come the
    project's **instructions for agents started here** (#1161 item 2, `ProjectInfo.agentInstructions`), when the
    person set any: the rules a parent otherwise repeats in every brief (its own worktree, stacked pull requests, never
    `git stash`), written once in the dialog of the project's menu, "Instructions for agents…", and said in the frame
@@ -124,7 +126,7 @@ below retained for `safe` and `normal`:
    PR 1 a host swap kept the marks of the sessions the keeper kept, and told a caller whose child ended its turn
    during the swap (`tellTurnEndedInSwap`, #1186); no process outlives its host now. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
-   Each answer that promises the notice (`working` with the report armed, `pending`) says not to check with `status`
+   Each answer that promises the notice (`working` with the task written, `pending`) says not to check with `status`
    meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that
    names `send` (`done`, `at_rest`) says to start a new agent for another kind of work, with the task written in full,
    since it starts without the old one's context and the old one's name and role came from its first task (#747: a parent
@@ -164,7 +166,7 @@ below retained for `safe` and `normal`:
    `background_tasks` (the same `applyBackgroundTasks`). A change relayed while that read is out is newer and kept. A
    completed turn there with its own work running (timers left out) sends the paused notice once and keeps the linked
    report (`LinkedReport.paused`); a later turn end with none of that work left sends the final report; the work ending
-   with no turn after it settles the report after `PAUSED_REPORT_SETTLE_MS`, saying how each task ended; a failed turn
+   with no turn after it settles the report after `OWN_WORK_SETTLE_MS`, saying how each task ended; a failed turn
    is reported as it ended. The Assistant has no `agent_session`, so the notice offers no stop, as for its own
    sessions here; a new `send_to_session` to that session replaces the report, as before. While that send is out, the
    session's events go to the new wait; a send that fails puts the paused report back and starts its settle wait again.

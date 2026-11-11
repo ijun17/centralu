@@ -57,14 +57,15 @@ wrote is its only trace in the conversation, and `read_session` and `recall` nev
 **Mail without threads (M3a, #1684, docs/plans/mailbox.md §7 to §9).** The host's mail is messages in `mail` and `mail_recipients`, wired
 once in `mail/host-mail.ts` (`hostMail`, used by `main.ts` and by the tests): the message service (`mail/messages.ts`), the one reach module
 (`mail/reach.ts`: who may write to whom, project trust, the one hold), the turns and guards (`mail/turns.ts`), the delivery, and the `mail` tool,
-whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, `handled` is `done`,
+whose advertised schema is still the version-1 one: each old action is mapped onto the service (`reply` answers a message, and a task only with `kind: "answer"`, plans/mailbox.md §10.6.3; `handled` is `done`,
 `read` reads a message and its chain, `send` sends a new message, `update` and `close` are refused `removed`). After the ready line, before
 delivery starts, `afterReady` moves the thread mail an older build left pending (once, in one transaction, `Store.movePendingThreadMail`), then
 brings the task rows in step with the old report paths (`takeOverFromEarlierBuild`, mailbox.md §9.5). The person's window still reads the thread tables
 until the person's host methods move to the service (M3a-person, in the same release).
 
 **Delegations write tasks; the old report paths stay the truth until M8** (mailbox.md §9, D18). Each place a session gives another work calls
-`ChildOwnership.delegated` once the old path delivered it, and `delegationRecorder` writes a `task` from the caller to the child, delivered and
+`ChildOwnership.delegated` once the old path delivered it (start_agent before its frame goes in, which can outlast the call's bound, and
+withdraws it when the frame could not go in), and `delegationRecorder` writes a `task` from the caller to the child, delivered and
 read, caused by the turn the caller is in; the child's turn the task started is that task's (`MailTurns.attach`). A script's or the RPC's first
 message is a task from the person. Before a delegation out of a session's untrusted project starts anything, the tool asks
 `MailHooks.refusesDelegation` (mailbox.md §7.4): it answers S15, starts nothing, and records the call so trusting the project tells the caller once (S16).

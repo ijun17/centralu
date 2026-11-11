@@ -294,14 +294,13 @@ describe('a host that was off a long while', () => {
 })
 
 describe('the turn a wake begins (§8.2, D17)', () => {
-  it('a wake carries one task: its turn is that task’s, started by it, and reported to its sender; the next task waits for the next turn', async () => {
+  it('a wake carries one task: its turn is that task’s, started by it; the next task waits for the next turn', async () => {
     const w = started()
     const t1 = w.mail.task(A, W, { text: 'first job', origin: 'start_agent', delivered: false })
     w.clock.t += 10
     const t2 = w.mail.task(A, W, { text: 'second job', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
     expect(w.to('w')).toHaveLength(1)
-    expect(w.to('w')[0]!.input).toMatchObject({ reportTo: 'a' })
     expect(w.to('w')[0]!.input.text).toContain(t1.id)
     expect(w.to('w')[0]!.input.text).not.toContain(t2.id)
     expect(w.turns.current('w')).toMatchObject({ messageId: t1.id, starter: t1.id, by: 'mail' })
@@ -312,13 +311,13 @@ describe('the turn a wake begins (§8.2, D17)', () => {
     expect(w.turns.current('w')).toMatchObject({ messageId: t2.id, starter: t2.id })
   })
 
-  it('the Assistant takes one asker per wake: its turn records the asker, and its end is reported to that session', async () => {
+  it('the Assistant takes one asker per wake: its turn records the asker, whose requests its end reports on', async () => {
     const w = started()
     const r1 = w.send(A, { to: [ORC], text: 'please check CI' })
-    w.send(C, { to: [ORC], text: 'and mine' })
+    const r2 = w.send(C, { to: [ORC], text: 'and mine' })
     await w.advance(2_000)
     expect(w.to('orc')).toHaveLength(1)
-    expect(w.to('orc')[0]!.input).toMatchObject({ reportTo: 'a' })
+    expect(w.rowOf(r2.message.id, ORC).deliveredAt).toBeNull()
     expect(w.turns.current('orc')).toMatchObject({ messageId: r1.message.id, asker: A })
   })
 
@@ -460,6 +459,25 @@ describe('the warning to the person (#2014, §7.5)', () => {
     }
     expect(hourOf(w.clock.t)).toBe(first + HOUR_MS)
     expect(warnings(w).map((m) => m.dedupeKey).sort()).toEqual([first, first + HOUR_MS].map((h) => `pairturns:${[A, B].sort().join('|')}:${h}`).sort())
+  })
+
+  it('two busy sessions trading tasks, each joining the other’s running turn, are counted as when each task started a turn: the person is warned past 20', async () => {
+    const w = started({ delivery: { minWakeGapMs: 0 } })
+    // Each in a long turn of its own (the CLI's), which every task the other gives it joins
+    for (const id of ['a', 'b']) {
+      w.turns.beginOther(id, 'cli', null)
+      w.states.set(id, { kind: 'ready', live: true, quiet: false, joins: true })
+    }
+    for (let i = 0; i < 21; i++) {
+      const [from, to] = i % 2 === 0 ? [A, B] : [B, A]
+      w.mail.task(from, to, { text: `part ${i}`, origin: 'agent_session', delivered: false })
+      await w.advance(2_000)
+    }
+    expect(w.to('a').length + w.to('b').length).toBe(21)
+    expect([...turnRows(w.store, 'a'), ...turnRows(w.store, 'b')]).toHaveLength(2)
+    const told = warnings(w)
+    expect(told).toHaveLength(1)
+    expect(told[0]!.facts.pairTurns).toEqual({ sessions: [A, B].sort(), turns: 21 })
   })
 
   it('the person’s word to either session counts the pair anew: no warning', async () => {

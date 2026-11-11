@@ -201,6 +201,9 @@ describe('restore_archived of a session whose project was deleted', () => {
 
 describe('delete_session', () => {
   const listed = async () => ((await rpc('sessions.list', {})) as SessionInfo[]).map((s) => s.id)
+  /** `giver` gave `worker` work it has not been answered on: a task, delivered, as a delegation writes it */
+  const gives = (m: ReturnType<typeof wireHostMail>, giver: string, worker: string) =>
+    m.service.task(addressOf(giver), addressOf(worker), { text: 'the work', origin: 'agent_session', delivered: true })
 
   it("moves an idle session that nobody waits on with no card, keeping what the window's delete keeps, and restore_archived brings it back (#1512)", async () => {
     const orc = await mgr.assistant()
@@ -234,8 +237,8 @@ describe('delete_session', () => {
     const orc = await mgr.assistant()
     const s = await newSession('Old work')
     const caller = await newSession('Caller')
-    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    children.markReport(s.id, caller.id)
+    const m = wireHostMail(mgr, store)
+    gives(m, caller.id, s.id)
     const denied = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'deny')
     expect(denied.question).toContain('Archive the session "Old work"?')
     expect(denied.question).toContain('The person started it themselves.')
@@ -257,27 +260,29 @@ describe('delete_session', () => {
     const one = await newSession('One')
     const two = await newSession('Two')
     const caller = await newSession('Caller')
-    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    children.markReport(one.id, caller.id)
-    children.markReport(two.id, caller.id)
+    const m = wireHostMail(mgr, store)
+    gives(m, caller.id, one.id)
+    gives(m, caller.id, two.id)
     expect((await answered(orc.id, 'delete_session', { sessionId: one.id }, 'allow')).r.isError).toBeFalsy()
     const second = await answered(orc.id, 'delete_session', { sessionId: two.id }, 'deny')
     expect(second.r.isError).toBe(true)
     expect(await listed()).toContain(two.id)
   })
 
-  it('names what the host lets go of that restoring does not bring back: a caller waiting for its report, reports its children owe it', async () => {
+  it('names what the host lets go of that restoring does not bring back: the task a caller gave it, once, and reports its children owe it', async () => {
     const orc = await mgr.assistant()
     const waited = await newSession('Waited on')
     const other = await newSession('Caller')
     const owing = await newSession('Owing')
-    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    // `Caller` waits for the report of `Waited on`, which in turn is owed one by `Owing`
-    children.markReport(waited.id, other.id)
-    children.markReport(owing.id, waited.id)
+    const m = wireHostMail(mgr, store)
+    // `Caller` waits for the answer of the work it gave `Waited on`, which in turn gave `Owing` work
+    gives(m, other.id, waited.id)
+    gives(m, waited.id, owing.id)
     const { question, r } = await answered(orc.id, 'delete_session', { sessionId: waited.id }, 'deny')
     expect(question).toContain('Restoring does not bring back what the host lets go of when it leaves:')
-    expect(question).toContain('- "Caller" is waiting for the report of the work it gave this session; that report will not come.')
+    // The caller's task is named once, by the mailbox's line (docs/plans/mailbox.md §10.6.3: the task is the only record of the work)
+    expect(question).toContain('- It was given a task it has not been reported on')
+    expect(question).not.toContain('is waiting for the report of the work it gave this session')
     expect(question).toContain('- A session it started owes it a report; it will not be told, and the report is dropped.')
     expect(r.isError).toBe(true)
     expect(await listed()).toContain(waited.id)
@@ -318,8 +323,8 @@ describe('delete_session', () => {
     const orc = await mgr.assistant()
     const s = await newSession('Mine')
     const caller = await newSession('Caller')
-    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    children.markReport(s.id, caller.id)
+    const m = wireHostMail(mgr, store)
+    gives(m, caller.id, s.id)
     const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => {
       await mgr.inputs.send(s.id, 'one more thing')
     })
@@ -335,9 +340,9 @@ describe('delete_session', () => {
     const s = await newSession('Changing')
     const first = await newSession('First caller')
     const caller = await newSession('Late caller')
-    const children = (mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    children.markReport(s.id, first.id)
-    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => void children.markReport(s.id, caller.id))
+    const m = wireHostMail(mgr, store)
+    gives(m, first.id, s.id)
+    const { r } = await answered(orc.id, 'delete_session', { sessionId: s.id }, 'allow', async () => void gives(m, caller.id, s.id))
     expect(r.isError).toBe(true)
     expect(r.text).toContain('what moving it drops changed')
     expect(await listed()).toContain(s.id)

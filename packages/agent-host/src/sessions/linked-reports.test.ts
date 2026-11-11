@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackgroundTask } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportPart, type ReportWork } from './linked-reports.js'
 import { HUB_SENDER } from './hub-sender.js'
 
@@ -220,7 +220,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     expect(delivered).toHaveLength(2)
     // verify fails; build leaves the list without saying how, which reads as completed
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'failed' }]))
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS - 1)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS - 1)
     expect(delivered).toHaveLength(2)
     await vi.advanceTimersByTimeAsync(1)
     await flush()
@@ -269,7 +269,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     await flush()
     // Only the pause: the work's end is told by the settle wait, not by a state no turn came before
     expect(delivered).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS)
     await flush()
     expect(delivered[1]).toMatchObject({ work: { settled: [{ id: 'bg-verify', status: 'completed' }] } })
   })
@@ -282,7 +282,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
     reports.observe({ type: 'error', sessionId: 'm1.w1', error: { message: 'the CLI crashed' } })
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
     await flush()
     expect(delivered.map((d) => d.ending)).toEqual(['turn_complete', 'error'])
     expect(delivered[1]).toMatchObject({ error: 'the CLI crashed' })
@@ -303,7 +303,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
     closing = true
     reports.observe(tasks('m1.w2', [], [{ ...build, status: 'completed' }]))
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
     await flush()
     expect(delivered).toHaveLength(2)
   })
@@ -315,7 +315,7 @@ describe('a pause over the session\'s own background work there (#723)', () => {
     turn('m1.w1')
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
     reports.dispose()
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
     await flush()
     expect(delivered).toHaveLength(1)
   })
@@ -370,10 +370,10 @@ describe('a turn belongs to whoever started it, on a linked machine (#1377)', ()
     reports.observe(person())
     reports.observe({ type: 'message_delta', sessionId: 'm1.w1' })
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
     expect(delivered).toHaveLength(1)
     reports.observe({ type: 'turn_complete', sessionId: 'm1.w1' })
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
     await flush()
     expect(delivered).toHaveLength(2)
     expect(delivered[1]).toMatchObject({ work: { settled: [{ id: 'bg-verify', status: 'completed' }] } })
@@ -636,7 +636,7 @@ describe('a machine whose link drops or comes back', () => {
     listing = async () => [{ sessionId: 'm1.w1', tasks: [{ ...verify, status: 'stopped' }] }]
     reports.observe({ type: 'machine_resync', machineId: 'm1' })
     await flush()
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS)
     await flush()
     expect(delivered[1]).toMatchObject({ work: { settled: [{ id: 'bg-verify', status: 'stopped' }] } })
   })
@@ -700,7 +700,7 @@ describe('a machine removed from Centralu', () => {
     turn('m1.w1')
     reports.observe(tasks('m1.w1', [], [{ ...verify, status: 'completed' }]))
     reports.observe({ type: 'session_deleted', sessionId: 'm1.w1' })
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
     status('m1', 'unreachable')
     await flush()
     expect(delivered).toHaveLength(1)

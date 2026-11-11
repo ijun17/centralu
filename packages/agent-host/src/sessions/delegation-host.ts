@@ -23,6 +23,7 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { ProjectFiles } from '../dev-services/project-files.js'
 import type { LinkedReports } from './linked-reports.js'
+import type { SelfCompaction } from './self-compaction.js'
 
 /** The tool a send to another session came through, the task's origin when it goes as mail */
 export type SendOrigin = 'agent_session' | 'ask_project' | 'send_to_session'
@@ -61,7 +62,7 @@ export type DelegationHost = {
   /** A session as Centralu's word names it to another: as read_session lists it, or its id once it is gone */
   nameOf: (sessionId: string) => string
   /** Tells a session something in its conversation, never while the host leaves, never throwing (`ChildReports.tellSession`, #428) */
-  tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean, forModel?: string, opts?: { keep?: boolean; onDelivered?: () => void }) => Promise<boolean>
+  tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean, forModel?: string) => Promise<boolean>
   /** The seat a session's tools are, which decides the form an answer names a call in (`namedCall`, tool-seats.ts) */
   toolProfileOf: (sessionId: string) => ToolProfile | null
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void, stillAllowed?: () => string | null, relayedText?: string) => Promise<void>
@@ -81,11 +82,10 @@ export type DelegationHost = {
   modelsWithin: (tool: ToolName, ms: number, fresh?: boolean) => Promise<{ models: ModelOption[]; cached: boolean; } | null>
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   ownTasksRunning: (sessionId: string) => BackgroundTask[]
-  pauseReport: (sessionId: string, running: readonly BackgroundTask[]) => void
-  pausedTasksNow: (sessionId: string) => BackgroundTask[]
+  /** Whether the session's work goes on in a turn Centralu starts for it after a compaction (#2164): its turn's end is not the work's */
+  readonly selfCompaction: Pick<SelfCompaction, 'goesOn'>
   readonly readGrants: Map<string, Set<string>>
   rename: (sessionId: string, name: string) => void
-  reportBackIfAwaited: (sessionId: string, ending: NormalizedEvent, answer?: string, settled?: readonly BackgroundTask[]) => Promise<string | undefined>
   routedCards: (sessionId: string, callerId: string) => RoutedCard[]
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   sleepSession: (sessionId: string) => Promise<boolean>

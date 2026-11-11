@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { errorMessage } from '@cc/protocol'
 import { SEND_ORIGINS } from '../dev-services/store/mail-types.js'
 import type { MailRow, MailboxRecords, RecipientRow } from '../dev-services/store/mailbox.js'
@@ -70,12 +71,16 @@ export type MailInput = {
    * wake carries nothing else. The agent reads the mail frame only
    */
   task?: { senderId: string; text: string; alone: boolean }
-  /**
-   * The turn this starts is the work of a task this session gave, or of its request to the Assistant (§7.6): the end of the turn is reported to it,
-   * as the end of any turn of work it gave is. The host owes that report from the moment the input goes in, and forgets it if the input is not taken
-   */
-  reportTo?: string
+  /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
+  id?: string
 }
+
+/**
+ * What the tool says of the inputs given it (`SessionHandle.turnInputs`, `turnStartInputs`): `took`, at a turn's end, the ids that turn took in, as
+ * `SessionHandle.turnInputs` answers (undefined also when its process went with them; `turnInputs` below files the mail of either undefined or null
+ * in that turn); `opened`, at a turn's opening, the ids it runs for
+ */
+export type TurnInputs = { took: readonly string[] | null | undefined } | { opened: readonly string[] }
 
 export type MailSessions = {
   receiver(sessionId: string): ReceiverState
@@ -138,6 +143,10 @@ export class MailDelivery {
   private readonly timers = new Map<string, () => void>()
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
+  /** Mail given into a running turn, by recipient: the input id the tool was given it under, and its messages, until that turn ends (`turnInputs`) */
+  private readonly joined = new Map<string, { id: string; ids: readonly string[] }[]>()
+  /** Mail a turn ended without taking, held queued in the tool for a turn after (Claude folds a message in only at a tool round): not in any turn yet */
+  private readonly queued = new Map<string, { id: string; ids: readonly string[] }[]>()
   /**
    * After a stop longer than `catchUpAfterMs` (§7.9): the time the host started. A session is then woken only for mail that
    * needs it, among what came due before; the rest waits for its next turn (the one other mail wakes it for), not for its process to
@@ -512,10 +521,10 @@ export class MailDelivery {
       if (turn !== undefined) this.turns?.cancel(sessionId, turn)
     }
     const delivered: { at?: number } = {}
-    const reportTo = quiet ? undefined : this.reportTarget(recipient, drained)
     const task = quiet ? undefined : this.delegatedTask(drained)
+    const inputId = joins ? randomUUID() : undefined
     try {
-      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins } : {}), ...(reportTo ? { reportTo } : {}), ...(task ? { task } : {}) }, (e) => {
+      await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(task ? { task } : {}) }, (e) => {
         cancelTurn()
         // Told after `deliver` resolved, so the time is set
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
@@ -537,6 +546,7 @@ export class MailDelivery {
       this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
       this.records.markRead(recipient, drained.inline, deliveredAt)
     })
+    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
     if (!quiet && !joins) this.lastWake.set(recipient, this.now())
     // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
     if (waiting) {
@@ -545,19 +555,46 @@ export class MailDelivery {
       if (this.crowd?.length === 0) this.crowd = null
       this.crowdChanged()
     }
-    // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done
-    if (!quiet && !joins) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
+    // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done. A join too: a task it carries is counted (`pairTurnsSince`)
+    if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
   }
 
   /**
-   * The session whose work the turn this delivery starts is, if a session's: the sender of its task (an answer to a clarification included, §9.7),
-   * or for the Assistant the session asking (§7.6). Its end is that session's to hear
+   * What the tool said of the inputs given the recipient (docs/plans/mailbox.md §10.6.3). At a turn's end, mail given into it that the turn did not take
+   * is still queued in the tool, to run as a turn after: its rows leave that turn (no turn yet), so neither that turn's last response nor its stop
+   * answers or releases it, and a queued one a later turn takes in is that turn's. At an opening, the queued mail it runs for is the new turn's, and
+   * that mail started it, as a wake does: its starter is that mail's (`starterOf`), which the pair's warning counts (§7.5)
    */
-  private reportTarget(recipient: string, drained: Pick<DrainResult, 'workMessage' | 'asker'>): string | undefined {
-    const work = drained.workMessage === null ? undefined : this.records.message(drained.workMessage)
-    const from = drained.asker ?? (work?.kind === 'task' && this.records.recipient(work.id, recipient) ? work.sender : undefined)
-    const party = from === undefined ? undefined : parseAddress(from)
-    return party?.kind === 'session' ? party.sessionId : undefined
+  turnInputs(recipient: string, turn: TurnInputs): void {
+    const party = parseAddress(recipient)
+    const sessionId = party?.kind === 'session' ? party.sessionId : null
+    const current = sessionId === null ? null : (this.turns?.current(sessionId)?.turnSeq ?? null)
+    const queued = this.queued.get(recipient) ?? []
+    const named = 'opened' in turn ? turn.opened : turn.took
+    if ('took' in turn) {
+      const given = this.joined.get(recipient) ?? []
+      this.joined.delete(recipient)
+      // Taken all (or none can be told): nothing waits in the tool any more
+      if (!Array.isArray(named)) return void this.queued.delete(recipient)
+      const left = given.filter((g) => !named.includes(g.id))
+      if (left.length > 0) this.records.fileInTurn(recipient, left.flatMap((g) => g.ids), null)
+      queued.push(...left)
+    }
+    const ran = queued.filter((q) => named?.includes(q.id))
+    const ids = ran.flatMap((q) => q.ids)
+    if (ids.length > 0) this.records.fileInTurn(recipient, ids, current)
+    if (ids.length > 0 && 'opened' in turn && sessionId !== null) {
+      const workMessage = ids.find((id) => this.records.message(id)?.kind === 'task') ?? null
+      this.turns?.openedFor(sessionId, { workMessage, starter: this.starterOf({ workMessage, messageIds: ids }) })
+    }
+    const still = queued.filter((q) => !ran.includes(q))
+    if (still.length > 0) this.queued.set(recipient, still)
+    else this.queued.delete(recipient)
+  }
+
+  /** The messages given the recipient that its tool holds queued for a turn after (`turnInputs`): no turn's last response answers them yet */
+  queuedFor(recipient: string): ReadonlySet<string> {
+    return new Set((this.queued.get(recipient) ?? []).flatMap((q) => q.ids))
   }
 
   /** The work a wake starts when a delegation tool sent it (`MailInput.task`) */

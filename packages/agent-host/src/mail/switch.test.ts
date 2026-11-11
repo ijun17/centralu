@@ -6,7 +6,6 @@
 import type Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { reportRecorder } from './delegation.js'
 import { at, hostWorld, NOW } from './host-mail.test-helpers.js'
 import { oldThread, type OldReceipt } from './v61.test-helpers.js'
 import { turnsOf } from '../dev-services/store/mailbox-turns.test-helpers.js'
@@ -165,8 +164,7 @@ describe('an update’s stop and continue mid mail-started turn (§8.2 step 6, #
   it('the request settles at the continued turn’s end, reported to the asker as its request turn', async () => {
     const { next, request } = await continued()
     next.endTurn('orc')
-    const as = reportRecorder(next.service, next.store.mailbox, next.turns)('a', 'orc', { outcome: 'finished', body: 'x', then: 'review', delivery: 'wake' })
-    expect(as).toBe('mailed')
+    next.hooks.requestTurnEnded!('orc')
     expect(next.row(request, ORC)!.settled).toBe('reported')
     expect(next.store.mailbox.reportsOn(request)[0]!.body).toContain('ended its turn on your request')
   })
@@ -252,7 +250,7 @@ describe('delivery and turns, turn end and settling', () => {
     const q = w.mail.send(A, { to: [ORC], text: 'can you?', needsReply: true })
     await w.advance(2_000)
     w.endTurn('orc')
-    reportRecorder(w.service, w.store.mailbox, w.turns)('a', 'orc', { outcome: 'finished', body: 'x', then: 'review', delivery: 'wake' })
+    w.hooks.requestTurnEnded!('orc')
     expect(w.row(q.message.id, ORC)).toMatchObject({ settled: 'reported' })
     expect(w.store.mailbox.watchedTo(ORC)).toEqual([])
   })
@@ -322,8 +320,8 @@ describe('a seeded model of delivery, turns and settling', () => {
             const mine = w.store.mailbox.watchedTo(at(from))[0]
             if (mine) w.mail.done(at(from), mine.messageId)
           } else if (roll < 0.88) {
-            const task = w.store.mailbox.newestTask(at(to), at(from))
-            if (task) reportRecorder(w.service, w.store.mailbox, w.turns)(to, from, { outcome: r() < 0.3 ? 'paused' : 'finished', paused: 1, body: 'b', then: r() < 0.3 ? 'running' : 'review', delivery: 'wake' })
+            // `from` at rest answers the tasks it did not reply to with its last response (§10.6.3)
+            w.mail.lastResponse(at(from), { body: () => 'b', answer: `last ${step}`, released: r() < 0.5, answers: () => true })
           }
         } catch {
           // A guard refused it (rate, pair rate, repeat): the model goes on

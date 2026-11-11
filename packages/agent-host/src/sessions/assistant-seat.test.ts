@@ -381,27 +381,31 @@ describe('a session recalls its own conversation from before its compaction (#97
 })
 
 describe('what a send leaves', () => {
-  it('a session at rest runs the turn this seat gave it, and owes the report asked for', async () => {
+  it('a session at rest runs the turn this seat gave it, and the report asked for is a task from this seat', async () => {
+    const delegated = vi.spyOn(children, 'delegated')
     const r = await centraluToolsFor(host, 'orch').sendToSession('a', 'do it', true)
     expect(r).toEqual({ ok: true })
     expect(host.send).toHaveBeenCalledWith('a', 'do it', undefined, { sessionId: 'orch', name: 'Assistant' })
     expect(children.turnOwners.get('a')?.callerId).toBe('orch')
-    expect(children.awaitingReport.get('a')).toBe('orch')
+    // The task is the request: its reply or the session's last response answers it (docs/plans/mailbox.md §10.6.3)
+    expect(delegated).toHaveBeenCalledWith('orch', 'a', 'send_to_session', 'do it')
   })
 
   it('a send that fails lets go of the turn it took', async () => {
     host.send = vi.fn(async () => {
       throw new Error('no process')
     })
+    const delegated = vi.spyOn(children, 'delegated')
     expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'do it', true)).toEqual({ ok: false, error: 'no process' })
     expect(children.turnOwners.has('a')).toBe(false)
-    expect(children.awaitingReport.has('a')).toBe(false)
+    expect(delegated).not.toHaveBeenCalled()
   })
 
-  it('a new instruction without a report drops this seat’s earlier request', async () => {
-    children.markReport('a', 'orch')
-    await centraluToolsFor(host, 'orch').sendToSession('a', 'again')
-    expect(children.awaitingReport.has('a')).toBe(false)
+  it('an instruction without a report is silent: it writes no task, so nothing comes back for it', async () => {
+    const delegated = vi.spyOn(children, 'delegated')
+    expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'again')).toEqual({ ok: true })
+    expect(host.send).toHaveBeenCalledWith('a', 'again', undefined, { sessionId: 'orch', name: 'Assistant' })
+    expect(delegated).not.toHaveBeenCalled()
   })
 
   it("a linked machine's session keeps the earlier report request when the send there fails", async () => {

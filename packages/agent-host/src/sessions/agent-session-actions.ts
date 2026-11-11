@@ -23,7 +23,7 @@ import { staleSessionHint } from './stale-session-id.js'
 export type AgentSessionDelegations = Pick<StartAgentDelegations, 'agentWorking' | 'awaitAgent' | 'handedOverAnswer' | 'startDelegation'> &
   Pick<DelegationWaits, 'agentAsking' | 'agentAtRest' | 'handedOverReply' | 'untilHandedOver'> &
   Pick<ObservedTurns, 'observeTurn'> &
-  Pick<BackgroundStops, 'restingWork' | 'stopOwnWork' | 'stopPausedWork'> &
+  Pick<BackgroundStops, 'restingWork' | 'stopOwnWork'> &
   Pick<DelegationForks, 'forkFor'> & { readonly starts: AgentStartFlow; readonly remote: RemoteAgents }
 
 
@@ -148,7 +148,7 @@ export class AgentSessionActions {
           // The cards of the turn it gave are what the owner reads first (#676)
           const cards = d && !d.settled && !observing ? this.host.routedCards(child.id, callerId) : []
           if (d && cards.length) return this.flow.agentAsking(d, cards)
-          if (d && !d.settled) return this.flow.agentWorking(d, false, observing)
+          if (d && !d.settled) return this.flow.agentWorking(d, observing)
           return d ? await this.flow.awaitAgent(key, d, signal, observing) : this.flow.agentAtRest(child, callerId)
         }
         case 'wait':
@@ -159,15 +159,10 @@ export class AgentSessionActions {
           if ((!d || d.settled) && withdrawn > 0) {
             return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
           }
-          // A report paused over its own background work (#721): stop ends that wait
-          if ((!d || d.settled) && !observing && this.host.children.pausedReports.has(child.id) && this.host.children.awaitingReport.get(child.id) === callerId) {
-            return this.flow.stopPausedWork(child)
-          }
           // Its turn over, only its own background work left (#718): that is what is running, and what delete waits on
           const resting = (!d || d.settled) && !observing ? this.flow.restingWork(child, callerId) : []
-          if (resting.length) return this.flow.stopOwnWork(child, resting, false)
+          if (resting.length) return this.flow.stopOwnWork(child, resting)
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
-          if (!observing && this.host.children.awaitingReport.get(child.id) === callerId) this.host.children.clearReport(child.id)
           d.stop('the session that started it stopped it')
           await d.outcome
           if (!observing) this.host.children.dropDelegation(key, d)

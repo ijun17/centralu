@@ -1,13 +1,11 @@
 /**
- * A stop notice that waits for an older report path (docs/plans/turn-owned-by-no-one.md §4.1, `StopNotices.sessionStopped`'s `held`), and what a
- * stop notice quotes of the stopped session's cut turn (`StopNotices.quotes`, security-boundaries/inter-agent-content.md): one stop of a pair held at a time, a hold
- * that never ends rescued after the wait, the words taken when the turn was cut, and nothing quoted unless each part of that rule holds.
+ * What a stop notice quotes of the stopped session's cut turn (`StopNotices.quotes`, security-boundaries/inter-agent-content.md): nothing is quoted
+ * unless each part of that rule holds.
  */
 import { describe, expect, it } from 'vitest'
 import { parseAddress } from './address.js'
 import { MessageService } from './messages.js'
-import { OLD_PATH_WAIT_MS } from './stop-notices.js'
-import { A, B, C, HOST, W, world } from './messages.test-helpers.js'
+import { A, B, C, HOST, world } from './messages.test-helpers.js'
 
 /** A message service over the helpers' store with the stop notice's hooks under the test's control; `noInputs`: with no `turnInputs` */
 function stops(o: { noInputs?: boolean } = {}) {
@@ -36,53 +34,13 @@ function stops(o: { noInputs?: boolean } = {}) {
       .pendingFor(to, w.clock.t + 60_000)
       .filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
       .map((p) => ({ ids: (p.message.facts.unanswered as { id: string }[]).map((u) => u.id), body: p.message.body }))
-  return { w, mail, words, reads, entered, askInTurn, notices }
+  return { w, mail, reads, entered, askInTurn, notices }
 }
 
 const idOf = (address: string) => {
   const p = parseAddress(address)
   return p?.kind === 'session' ? p.sessionId : ''
 }
-
-describe('a stop notice held for an older report path', () => {
-  it('a second stop while the first is held is told at once; the first is told when its path ends without telling, and only once', () => {
-    const { w, mail, askInTurn, notices } = stops()
-    const first = askInTurn(A, B)
-    mail.stops.sessionStopped(B, 'limit', { turnSeq: first.seq, held: [A] })
-    expect(notices(A)).toEqual([])
-    w.clock.t += 1_000
-    const second = askInTurn(A, B)
-    mail.stops.sessionStopped(B, 'limit', { turnSeq: second.seq, held: [A] })
-    expect(notices(A).map((n) => n.ids)).toEqual([[second.q.id]])
-    mail.stops.oldPathEnded(B, A, false)
-    expect(notices(A).map((n) => n.ids)).toEqual([[second.q.id], [first.q.id]])
-    // A late second end of the same path adds nothing
-    mail.stops.oldPathEnded(B, A, false)
-    expect(notices(A)).toHaveLength(2)
-  })
-
-  it('a hold whose path never reports is listed by the sender’s next notice once the wait is over', () => {
-    const { w, mail, askInTurn, notices } = stops()
-    const held = askInTurn(A, B)
-    mail.stops.sessionStopped(B, 'limit', { turnSeq: held.seq, held: [A] })
-    w.clock.t += OLD_PATH_WAIT_MS + 60_000
-    const other = askInTurn(A, W)
-    mail.stops.sessionStopped(W, 'limit', { turnSeq: other.seq })
-    expect(notices(A).map((n) => n.ids.sort())).toEqual([[held.q.id, other.q.id].sort()])
-  })
-
-  it('quotes the words the session had when its turn was cut, not what it says by the time the path ends', () => {
-    const { mail, words, askInTurn, notices } = stops()
-    const { seq } = askInTurn(A, B)
-    words.now = 'Stopped while rebasing onto main.'
-    mail.stops.sessionStopped(B, 'stopped', { turnSeq: seq, held: [A] })
-    words.now = 'Something said later, in no turn of the asker.'
-    mail.stops.oldPathEnded(B, A, false)
-    const [notice] = notices(A)
-    expect(notice?.body).toContain('> Stopped while rebasing onto main.')
-    expect(notice?.body).not.toContain('Something said later')
-  })
-})
 
 describe('what a stop notice quotes of the cut turn', () => {
   const QUOTED = '> Rebased onto main; running the tests.'

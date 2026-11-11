@@ -131,14 +131,14 @@ describe('archiving a session that looks idle', () => {
     expect(listed()).toContain(worker.id)
   })
 
-  it('asks for what the report marks hold too, and does not move a session that is not at rest', async () => {
+  it('names a task a session gave it once, as its mailbox does, and does not move a session that is not at rest', async () => {
     const waited = await create()
     const caller = await create()
-    const children = (world.mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children
-    children.markReport(waited.id, caller.id)
+    task(caller, waited, 'Write the docs')
     const r = await archive(waited.id)
     expect(r.archived).toBe(false)
-    expect(r.asks?.join(' ')).toContain('is waiting for the report of the work it gave this session')
+    // The task is the caller's only record of the work (docs/plans/mailbox.md §10.6.3): one line for it, not a second about its report
+    expect(r.asks).toEqual(['It was given a task it has not been reported on ("Write the docs"); whoever gave it is told the work stopped.'])
 
     const busy = await create()
     ;(world.mgr as unknown as { meta: Map<string, { state: string }> }).meta.get(busy.id)!.state = 'working'
@@ -157,11 +157,11 @@ describe('archiving a session that looks idle', () => {
     const t = task(giver, worker, 'Land #13')
     const waited = await create()
     const caller = await create()
-    ;(world.mgr as unknown as { children: { markReport(sessionId: string, callerId: string): void } }).children.markReport(waited.id, caller.id)
+    task(caller, waited, 'Write the docs')
 
     // The same lines the move itself would answer with
     expect((await losses(worker.id)).asks).toEqual([expect.stringContaining('task it has not been reported on ("Land #13")')])
-    expect((await losses(waited.id)).asks.join(' ')).toContain('is waiting for the report of the work it gave this session')
+    expect((await losses(waited.id)).asks).toEqual([expect.stringContaining('task it has not been reported on ("Write the docs")')])
     expect((await losses(worker.id)).asks).toEqual((await archive(worker.id)).asks)
     expect(listed()).toEqual(expect.arrayContaining([clean.id, worker.id, waited.id]))
     expect(read.taskRow(t.id, worker.id)).toMatchObject({ settled: null })

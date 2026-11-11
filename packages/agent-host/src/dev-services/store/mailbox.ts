@@ -456,6 +456,11 @@ export class MailboxRecords {
     this.update('held = NULL, delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END, attempt_at = NULL, attempts = 0', [], recipient, ids)
   }
 
+  /** The turn the rows were taken in changed (docs/plans/mailbox.md §10.6.3): `turnSeq`, or none yet (the tool holds them queued for a turn after) */
+  fileInTurn(recipient: string, ids: readonly string[], turnSeq: number | null): void {
+    this.update('turn_seq = ?', [turnSeq], recipient, ids)
+  }
+
   /** Read, keeping an earlier read time */
   markRead(recipient: string, ids: readonly string[], at: number): number {
     return this.update('read_at = COALESCE(read_at, ?)', [at], recipient, ids)
@@ -614,30 +619,17 @@ export class MailboxRecords {
   }
 
   /**
-   * The task rows whose cause is `causeId`, not settled and not held: the work handed on in that task (§9.4), each with its sender and recipient
+   * The task rows whose cause is `causeId` still open (not settled, not held, not released by a stop): the work handed on in that task (§9.4), whose
+   * answer the task waits for (docs/plans/mailbox.md §10.6.3)
    */
-  handedOn(causeId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
+  handedOn(causeId: string): { messageId: string; sender: string; recipient: string }[] {
     return this.db
-      .prepare<[string], { message_id: string; sender: string; recipient: string; delivered_at: number | null }>(
-        `SELECT r.message_id, m.sender, r.recipient, r.delivered_at FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-          WHERE m.cause_id = ? AND m.kind = 'task' AND r.settled IS NULL AND (r.held IS NULL OR r.held = 'released') ORDER BY m.created_at, m.id`,
+      .prepare<[string], { message_id: string; sender: string; recipient: string }>(
+        `SELECT r.message_id, m.sender, r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE m.cause_id = ? AND m.kind = 'task' AND r.settled IS NULL AND r.released_at IS NULL AND (r.held IS NULL OR r.held = 'released') ORDER BY m.created_at, m.id`,
       )
       .all(causeId)
-      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient, delivered: r.delivered_at !== null }))
-  }
-
-  /**
-   * The work handed on in the newest unsettled task from session `ownerId` to session `childId` (`handedOn`), from the two sessions' ids alone: for
-   * the host's start, which knows no address yet (an address ends in `/<session id>`)
-   */
-  handedOnBySessions(ownerId: string, childId: string): { messageId: string; sender: string; recipient: string; delivered: boolean }[] {
-    const task = this.messages(
-      `m.sender LIKE ? AND m.kind = 'task' AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient LIKE ? AND r.settled IS NULL)
-       ORDER BY m.created_at DESC, m.id DESC LIMIT 1`,
-      `session:%/${ownerId}`,
-      `session:%/${childId}`,
-    )[0]
-    return task ? this.handedOn(task.id) : []
+      .map((r) => ({ messageId: r.message_id, sender: r.sender, recipient: r.recipient }))
   }
 
   /**
@@ -799,16 +791,20 @@ export class MailboxRecords {
   }
 
   /**
-   * Turns of `a` started or joined by `b`'s mail, and of `b` by `a`'s, delivered since `since` (the pair's warning, §7.5). Only turns a session's
-   * message started: one the person started, by their words or their message, counts toward no warning (Q-M3a-12)
+   * What the mail between `a` and `b` set going since `since` (the pair's warning, §7.5): the turns of one that a session's message started and that
+   * carried the other's mail, and each task of one that joined a turn of the other's it did not start (docs/plans/mailbox.md §10.6.3: a task joins a
+   * running turn, where it started a turn of its own before). A turn the person started, by their words or their message, counts toward no warning
+   * (Q-M3a-12); a task that joined it does
    */
   pairTurnsSince(a: string, b: string, since: number): number {
+    const pair = `((r.recipient = @a AND m.sender = @b) OR (r.recipient = @b AND m.sender = @a)) AND r.turn_seq IS NOT NULL AND r.delivered_at >= @since`
+    const turnOf = `r.recipient LIKE 'session:%/' || t.session_id AND t.turn_seq = r.turn_seq`
     return this.count(
-      `SELECT COUNT(DISTINCT r.recipient || ':' || r.turn_seq) AS n FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-        WHERE ((r.recipient = @a AND m.sender = @b) OR (r.recipient = @b AND m.sender = @a)) AND r.turn_seq IS NOT NULL
-          AND r.delivered_at >= @since
-          AND EXISTS (SELECT 1 FROM mail_turns t JOIN mail s ON s.id = t.starter_id
-                       WHERE r.recipient LIKE 'session:%/' || t.session_id AND t.turn_seq = r.turn_seq AND t.started_by = 'mail' AND s.sender LIKE 'session:%')`,
+      `SELECT (SELECT COUNT(DISTINCT r.recipient || ':' || r.turn_seq) FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+                WHERE ${pair} AND EXISTS (SELECT 1 FROM mail_turns t JOIN mail s ON s.id = t.starter_id
+                                           WHERE ${turnOf} AND t.started_by = 'mail' AND s.sender LIKE 'session:%'))
+            + (SELECT COUNT(*) FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+                WHERE ${pair} AND m.kind = 'task' AND NOT EXISTS (SELECT 1 FROM mail_turns t WHERE ${turnOf} AND t.starter_id = m.id)) AS n`,
       { a, b, since },
     )
   }

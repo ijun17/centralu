@@ -4,7 +4,7 @@ import type { ChildRunResult, LinkedSessions } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { AGENT_DEPTH_SETTING, agentDepthKey } from './agent-depth.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
 import { ProjectRegistry, type ProjectRegistryHost } from './project-registry.js'
@@ -1056,11 +1056,11 @@ describe('a child paused on its background work when the link drops (#1523)', ()
       await pausedThenDown()
       endsWhileDown()
       await linkUp()
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
       expect(hub.delivered).toHaveLength(2)
       expect(hub.delivered[1]).toContain('SELF-ANSWER')
       expect(hub.children.linkedReports.has(CHILD)).toBe(false)
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
       expect(hub.delivered).toHaveLength(2)
     } finally {
       vi.useRealTimers()
@@ -1089,7 +1089,7 @@ describe('a child paused on its background work when the link drops (#1523)', ()
       linkDown()
       machine.selfTurnEnds()
       await linkUp()
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
       expect(hub.delivered).toHaveLength(2)
       expect(hub.told.filter((t) => t.includes('The link to Box dropped'))).toHaveLength(1)
     } finally {

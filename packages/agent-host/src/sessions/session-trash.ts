@@ -229,18 +229,16 @@ export class SessionTrash {
 
   /**
    * What moving the session to the session archive drops that restoring does not bring back, in words for a card (see the lines of
-   * `trashSessionOnce` that let go of what the session held): a caller waiting for its report, work it waits on, reports its
+   * `trashSessionOnce` that let go of what the session held): work it waits on, reports its
    * children owe it, the start_agent cards it raised, what the person allowed it to read or start
    */
   lossesOf(sessionId: string): string[] {
     const c = this.host.children
     const name = (id: string) => plainQuoted(this.host.meta.get(id)?.name ?? id, 60)
     const out: string[] = []
-    const caller = c.awaitingReport.get(sessionId)
-    if (caller) out.push(`${name(caller)} is waiting for the report of the work it gave this session; that report will not come.`)
     const waiting = [...c.delegations.values()].filter((d) => d.sessionId === sessionId && !d.settled)
     if (waiting.length) out.push(`${waiting.length === 1 ? 'A session is' : `${waiting.length} sessions are`} waiting for its answer (${[...new Set(waiting.map((d) => name(d.callerId)))].join(', ')}); the answer will not come.`)
-    const owe = [...c.awaitingReport].filter(([, to]) => to === sessionId).length
+    const owe = c.openTasks(sessionId, 'from').length
     if (owe) out.push(`${owe === 1 ? 'A session it started owes' : `${owe} sessions it started owe`} it a report; ${owe === 1 ? 'it' : 'they'} will not be told, and the report is dropped.`)
     const asked = [...c.delegations.values()].filter((d) => d.callerId === sessionId && !d.settled)
     if (asked.length) out.push(`It waits on ${asked.length === 1 ? 'a session' : `${asked.length} sessions`} of other projects it asked; the wait and what the person allowed for it are dropped.`)
@@ -419,11 +417,8 @@ export class SessionTrash {
     this.host.prCheckedAt.delete(sessionId)
     // Kept until its turn ends, which a deleted session's never does (#392)
     this.host.restartPolicy.appsRestartAfterTurn.delete(sessionId)
-    this.host.children.clearReport(sessionId)
     // What was kept of its turns for a hub that followed it (#1604)
     this.host.children.forgetTurns(sessionId)
-    // Nobody is left to tell: the reports its children owed it go too
-    for (const [child, caller] of [...this.host.children.awaitingReport]) if (caller === sessionId) this.host.children.clearReport(child)
     // The same for a delegated turn's link (#676), either way
     this.host.children.releaseTurn(sessionId)
     for (const [child, owner] of [...this.host.children.turnOwners]) if (owner.callerId === sessionId) this.host.children.releaseTurn(child)

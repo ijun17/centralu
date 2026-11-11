@@ -140,6 +140,21 @@ export class MailTurns {
   }
 
   /**
+   * The tool opened the running turn for mail a turn before did not take (`MailDelivery.turnInputs`, docs/plans/mailbox.md §10.6.3): mail started it,
+   * as a wake does, so it is the mailbox's from here, with that mail's work message (a task, when it carries one) and starter. Recorded first as the
+   * CLI's own, since the tool named no input of the session's own rows
+   */
+  openedFor(sessionId: string, turn: { workMessage: string | null; starter: string | null }): void {
+    const open = this.open.get(sessionId)
+    if (!open || open.by === 'mail') return
+    open.by = 'mail'
+    open.messageId = turn.workMessage ?? open.messageId
+    open.starter = turn.starter
+    delete open.owner
+    this.records.restateTurn(sessionId, open.seq, { messageId: open.messageId, starterId: open.starter, startedBy: 'mail' })
+  }
+
+  /**
    * The task of a turn a caller's message started is written only after the task went in and the turn began: the running turn of that kind is
    * that task's from here, and the task is its starter (§9.1)
    */

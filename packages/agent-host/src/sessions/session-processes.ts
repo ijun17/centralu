@@ -1,5 +1,5 @@
 import type { PermissionPreset, RebuildCause, SessionInfo, ToolName } from '@cc/protocol'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, pausedOnBackground } from '@cc/protocol'
 import type { EventSink, SessionHandle } from '../adapters/contract.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { rpcError, sessionNotFound } from '../rpc-error.js'
@@ -318,18 +318,18 @@ export class SessionProcesses {
 
   /**
    * The sessions whose running work this one waits on (#568, the sleep rule in sleep.ts): a child it started with
-   * `start_agent`, or a session handling its ask_project task, while the turn it gave them runs, and a session that owes
-   * it a report (`reportBack`, `awaitingReport`). Their answer is about to come back to it. A report held over the
-   * child's own background work (#721) counts only while the child is in a turn: that work may run for minutes or
-   * for good (a dev server), and the report wakes the caller when it comes.
+   * `start_agent`, or a session handling its ask_project task, while the turn it gave them runs, and a session with a task of
+   * its open (docs/plans/mailbox.md §10.6.3). Their answer is about to come back to it. One paused on its own background
+   * work (#721) counts only while it is in a turn: that work may run for minutes or for good (a dev server), and the
+   * answer wakes the caller when it comes.
    */
   waitsOn(sessionId: string): string[] {
     const ids = new Set<string>()
     for (const d of this.host.children.delegations.values()) if (d.callerId === sessionId && !d.settled) ids.add(d.sessionId)
-    for (const [child, caller] of this.host.children.awaitingReport) {
-      // A child paused on its own background work (#721) does not hold its caller awake: its report wakes it
+    for (const child of this.host.children.openTasks(sessionId, 'from')) {
+      // A child paused on its own background work (#721) does not hold its caller awake: its answer wakes it
       const at = this.host.meta.get(child)
-      if (caller === sessionId && at && (!this.host.children.pausedReports.has(child) || inTurn(at.state))) ids.add(child)
+      if (at && (!pausedOnBackground(at) || inTurn(at.state))) ids.add(child)
     }
     /*
      * A session it owns (#561 part 3): a child it started, or a worktree session a former worktree manager held (store

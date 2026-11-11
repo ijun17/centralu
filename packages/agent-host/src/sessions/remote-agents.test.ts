@@ -3,7 +3,7 @@ import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import type { LinkedSessions, OrchestratedSession } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { eventually } from '../../../../tooling/test-timing.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedReportsHost } from './linked-reports.js'
 import { RemoteAgents, REMOTE_AGENTS_KEY, type RemoteAgentsHost } from './remote-agents.js'
 
@@ -148,7 +148,7 @@ it("leaves a restored held report to the link's resync, so a link slow to come u
     store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ ...child, owed: { paused: [task] } }]))
     // Wired as the host wires a restored report's settle wait
     agents({ linkedReportRestored: (id: string) => reports.restored(id) }).restore()
-    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 5_000)
+    await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 5_000)
     expect(delivered).toEqual([])
     expect(children.linkedReports.get(child.sessionId)?.paused).toEqual([task])
   } finally {

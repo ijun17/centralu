@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { PAUSED_REPORT_SETTLE_MS } from '../sessions/child-ownership.js'
+import { OWN_WORK_SETTLE_MS } from '../sessions/child-ownership.js'
 import { SessionManager } from '../sessions/manager.js'
 import { runCentraluTool } from '../sessions/centralu-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
@@ -1163,14 +1163,14 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       expect(h.reports()).toHaveLength(1)
       // The person stops it there by hand: no turn follows
       h.mgr.linkedHost.observeLinked(tasks([], [{ ...verify, status: 'stopped' }]))
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS - 1_000)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS - 1_000)
       expect(h.reports()).toHaveLength(1)
       await vi.advanceTimersByTimeAsync(2_000)
       await flush(2)
       expect(h.reports()[1]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished")
       // Settled: the turn that comes late is not reported again
       turn(h)
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
       expect(h.reports()).toHaveLength(2)
     })
 
@@ -1186,7 +1186,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       await flush(1)
       h.mgr.linkedHost.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
       h.mgr.linkedHost.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS * 2)
       expect(h.reports()).toHaveLength(1)
       h.mgr.linkedHost.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
       await flush(2)
@@ -1336,7 +1336,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       h.whileSending(() => h.mgr.linkedHost.observeLinked(tasks([], [{ ...verify, status: 'completed' }])))
       h.failNext()
       await h.send(true)
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
       await flush(2)
       expect(h.reports()[1]).toContain("background work ended (pnpm verify: completed) and no turn followed")
     })

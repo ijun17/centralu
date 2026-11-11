@@ -8,7 +8,7 @@ import { answersFrom, decisionFrom } from './delegated-cards.js'
 import { SessionManager } from './manager.js'
 import { runCentraluTool } from './centralu-tools.js'
 import type { HostMail } from '../mail/host-mail.js'
-import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
+import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * Cards in a delegated turn (#676): when a session works on a turn another session gave it (start_agent,
@@ -153,17 +153,22 @@ describe('cards in a delegated turn (#676)', () => {
   })
 
   it('returns the question from a parent\'s wait instead of a notice', async () => {
+    // The host's mail: the task's answer is its report
+    wireHostMail(w.mgr, w.store)
+    const read = mailReader(w.store)
     const { parent, child, cards } = await parentAndChild()
+    const [task] = read.tasks(addressOf(parent), child)
     const waiting = w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
     await new Promise((r) => setTimeout(r, 20))
     cards.ask('q-1')
     expect(await waiting).toMatchObject({ ok: true, state: 'asking', cards: [{ requestId: 'q-1' }] })
     await new Promise((r) => setTimeout(r, 20))
     expect(notices(parent, child)).toEqual([])
-    // Answered, the turn goes on and the parent is still told when it ends
+    // Answered, the turn goes on, and its last response still answers the parent's task when it ends
     await w.mgr.agentSession(parent, { sessionId: child, action: 'answer', card: await handleIn(parent, child, 'q-1'), text: 'Postgres' })
     handleOf(child).answer('schema written')
-    await w.until(() => notices(parent, child).some((m) => JSON.stringify(m.payload).includes('The session ended its turn')))
+    await w.until(() => read.reportsOn(task!.id).length === 1)
+    expect(read.reportsOn(task!.id)[0]!.facts.answer).toBe('schema written')
   })
 
   it('tells the parent of an approval but refuses its answer unless the parent is auto when it answers', async () => {
@@ -188,11 +193,12 @@ describe('cards in a delegated turn (#676)', () => {
   it('does not route a card from a later turn the person started', async () => {
     const { parent, child, cards } = await parentAndChild()
     handleOf(child).answer('schema written')
-    await w.until(() => notices(parent, child).length === 1)
+    await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
+    const before = notices(parent, child).length
     await w.mgr.inputs.send(child, 'now also add an index')
     cards.ask('q-person')
     await new Promise((r) => setTimeout(r, 30))
-    expect(notices(parent, child)).toHaveLength(1)
+    expect(notices(parent, child)).toHaveLength(before)
     expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'status' })).not.toMatchObject({ state: 'asking' })
     expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'answer', text: 'x' })).toMatchObject({ ok: false })
     expect(cards.answered).toEqual([])
@@ -359,10 +365,10 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const cards = answering(handleOf(target))
       await w.mgr.inputs.send(target, "the person's own work")
-      // The task goes as mail, which waits for the person's turn to end (docs/plans/mailbox.md §10.6.2)
+      // The task goes as mail, and joins the person's turn (docs/plans/mailbox.md §10.6.3): that turn is still not the caller's
       expect(await w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this' })).toMatchObject({ ok: true, state: 'mailed' })
       await due(target)
-      expect(handleOf(target).sent).toHaveLength(1)
+      expect(handleOf(target).sent).toHaveLength(2)
       cards.ask('q-person')
       cards.approval('a-person')
       await new Promise((r) => setTimeout(r, 30))
@@ -386,10 +392,10 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       await w.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
       const before = toldOf(parent, child).length
       await w.mgr.inputs.send(child, "the person's own work")
-      // The note goes as mail, which waits for the person's turn to end
+      // The note goes as mail, and joins the person's turn (docs/plans/mailbox.md §10.6.3): that turn is still not the parent's
       expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'a note' })).toMatchObject({ ok: true, state: 'mailed' })
       await due(child)
-      expect(handleOf(child).sent.some((t) => t.includes('a note'))).toBe(false)
+      expect(handleOf(child).sent.some((t) => t.includes('a note'))).toBe(true)
       const cards = answering(handleOf(child))
       cards.approval('a-person')
       await new Promise((r) => setTimeout(r, 30))

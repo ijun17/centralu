@@ -1,10 +1,10 @@
 /**
- * A turn's end told as mail (docs/plans/mailbox.md §9.2, §9.3), over the real manager: the report is Centralu's, replies to the task the turn was
- * the work of, and settles it; the mailbox tells the owner when it can read mail, and the old way tells when there is no task or the owner cannot.
+ * A turn's end told as mail (docs/plans/mailbox.md §9.2, §9.3, §10.6.3), over the real manager: the report is Centralu's, carries the session's
+ * last response, replies to the task it answers and settles it, and the mailbox tells the owner. A stop is the stop notice's, and a task whose
+ * work was handed on stays open until that work is done.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailRow } from '../dev-services/store/mailbox.js'
-import type { ChildReports } from './child-reports.js'
 import { hostMail, mailSessionsOf, type HostMail } from '../mail/host-mail.js'
 import { crossWorld, type CrossHandle, type CrossWorld } from './cross-project.test-helpers.js'
 import { addressOf as addr, MAIL_HOST, mailReader, wireHostMail } from './host-mail.test-helpers.js'
@@ -36,7 +36,6 @@ const askAgents = () => w.store.permissions.setProjectConsent(w.caller.id, w.cal
 /** The mailbox as it reads once a report is due: the message service of this host with a clock 10 s ahead (the manager keeps the test's hooks) */
 const later = () =>
   hostMail(w.store, mailSessionsOf(w.mgr, () => true), { hostId: MAIL_HOST, now: () => Date.now() + 10_000, delivery: { schedule: () => () => {} } }).service
-const reports = () => (w.mgr as unknown as { reports: ChildReports }).reports
 /**
  * The mail waiting for `sessionId` is delivered once, as the mailbox would once it is due: a delivery of this host with a clock a minute ahead,
  * started (its first sweep awaited, so nothing of it is left running when the store closes), then the session looked at, then stopped
@@ -55,7 +54,6 @@ const deliverDue = async (sessionId: string) => {
     sweep.mockRestore()
   }
 }
-const children = () => (w.mgr as unknown as { children: { awaitingReport: Map<string, string>; pausedReports: Map<string, unknown> } }).children
 
 /** A parent that started a child without waiting, told it will hear when the child's turn ends */
 async function parentAndChild() {
@@ -70,12 +68,6 @@ const turnEnds = async (child: string, text: string) => {
   await w.until(() => w.mgr.sessionInfo(child)?.state !== 'working')
   await new Promise((r) => setTimeout(r, 10))
 }
-/** The owner's seat cannot read mail */
-const scoped = (parent: string) => {
-  const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
-  vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
-}
-
 describe('a turn ends, the owner reads mail', () => {
   it('the report replies to the task, the task is reported, and the mailbox tells the owner: the old message is not sent', async () => {
     const { parent, child } = await parentAndChild()
@@ -115,123 +107,14 @@ describe('a turn ends, the owner reads mail', () => {
     expect(wake.text).not.toContain('outcome="finished"')
   })
 
-  it('a turn that failed says so: the outcome and the kind of error are facts, the task is reported', async () => {
-    const { parent, child } = await parentAndChild()
-    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'rate limit reached, retry later', retryable: false } })
-    await w.until(() => reportsIn(parent, child).length === 1)
-    const [report] = reportsIn(parent, child)
-    expect(report?.facts).toMatchObject({ outcome: 'failed', about: { session: addr(child) } })
-    // The kind, as one word: the error's own words are its tool's, and reach nothing but the session's record (#1186)
-    expect(report?.facts.error).toBe('usage_limit')
-    expect(report?.body).toContain('by kind: usage limit')
-    expect(report?.body).not.toContain('rate limit reached')
-    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-  })
-
-  it('a turn that ends with the child’s own background work running is a pause: the report says how many tasks, and the task stays open', async () => {
-    const { parent, child } = await parentAndChild()
-    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
-    await turnEnds(child, 'watcher started')
-    const [report] = reportsIn(parent, child)
-    expect(report?.facts).toMatchObject({ outcome: 'paused', paused: 1 })
-    expect(report?.facts.quiet).toBeUndefined()
-    expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    expect(oldReports(parent, child)).toEqual([])
-  })
-
-  it('a later turn with a new answer while still paused is an update (#1540): a report of its own that wakes, and the task stays open', async () => {
-    const { parent, child } = await parentAndChild()
-    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
-    await turnEnds(child, 'watcher started')
-    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-    await turnEnds(child, 'verdict: the change is correct')
-    const reports = reportsIn(parent, child)
-    expect(reports).toHaveLength(2)
-    expect(reports[1]?.facts).toMatchObject({ outcome: 'paused', paused: 1, answer: 'verdict: the change is correct' })
-    expect(reports[1]?.facts.quiet).toBeUndefined()
-    expect(reports[1]?.body).toContain('An update on the assigned work, which is still paused')
-    expect(reports[1]?.body).not.toContain('pnpm dev')
-    expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    expect(oldReports(parent, child)).toEqual([])
-  })
-
-  /*
-   * #1540 review: every worded turn of a paused child made an update that woke its owner, so a child watching its work with a Monitor woke its
-   * parent at each look. An update the owner has not read takes the newer words and count in its place, and wakes nobody again
-   */
-  it("a pause's updates wake their owner once until it reads them: the unread one holds the newest words and task count", async () => {
-    const { parent, child } = await parentAndChild()
-    const dev = { id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }
-    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev] })
-    await turnEnds(child, 'watcher started')
-    m.service.read(addr(parent))
-    for (let i = 1; i <= 10; i++) {
-      if (i === 10) handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev, { ...dev, id: 't2', description: 'pnpm test' }] })
-      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      await turnEnds(child, `look ${i}: still running`)
-    }
-    const updates = () => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
-    expect(updates()).toHaveLength(1)
-    expect(updates()[0]?.facts).toMatchObject({ outcome: 'paused', paused: 2, answer: 'look 10: still running' })
-    expect(updates()[0]?.facts.quiet).toBeUndefined()
-    expect(read.row(updates()[0]!.id, addr(parent))).toMatchObject({ readAt: null })
-    // Read, the next update is a report of its own, which wakes again
-    m.service.read(addr(parent))
-    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-    await turnEnds(child, 'look 11: verdict written')
-    expect(updates()).toHaveLength(2)
-    expect(updates()[1]?.facts).toMatchObject({ answer: 'look 11: verdict written' })
-    expect(updates()[1]?.facts.quiet).toBeUndefined()
-    expect(taskRow(parent, child)).toMatchObject({ settled: null })
-  })
-
-  /*
-   * #1540 review: an update was keyed by the clock when no answer was stored, then by the turn the mail read as latest when the report was
-   * written, which is the next turn once that has begun; and a replayed older turn's end wrote its older words over a newer unread update
-   */
-  describe("a pause's update is named by where the turn that ended began", () => {
-    const dev = { id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }
-    const updates = (parent: string, child: string) => reportsIn(parent, child).filter((r) => r.facts.update !== undefined)
-    /** The end of a turn of the child's that began at `since`, told again (a replay after a restart) with `words` */
-    const toldAgain = (parent: string, child: string, since: number, words: string) =>
-      reports().deliverReport(parent, child, 'child', 'p', words, { type: 'turn_complete' }, { paused: [dev], stoppable: true, update: { since } })
-    async function pausedWithUpdate() {
-      const { parent, child } = await parentAndChild()
-      handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [dev] })
-      await turnEnds(child, 'watcher started')
-      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      await turnEnds(child, 'verdict: correct')
-      expect(updates(parent, child)).toHaveLength(1)
-      return { parent, child, since: updates(parent, child)[0]!.facts.update! }
-    }
-
-    it("the same turn's end told again, once read, is no second update, though the child's next turn has begun", async () => {
-      const { parent, child, since } = await pausedWithUpdate()
-      m.service.read(addr(parent))
-      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
-      await toldAgain(parent, child, since, 'verdict: correct')
-      expect(updates(parent, child)).toHaveLength(1)
-    })
-
-    it("an older turn's end told again does not take the place of a newer update that is not read", async () => {
-      const { parent, child, since } = await pausedWithUpdate()
-      handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-      await turnEnds(child, 'verdict: correct, and the docs too')
-      expect(updates(parent, child)).toHaveLength(1)
-      const newer = updates(parent, child)[0]!.facts.update!
-      expect(newer).toBeGreaterThan(since)
-      await toldAgain(parent, child, since, 'verdict: correct')
-      expect(updates(parent, child)[0]?.facts).toMatchObject({ update: newer, answer: 'verdict: correct, and the docs too' })
-    })
-  })
-
   it('the person writing into the turn is a fact of the report, never their words', async () => {
     const { parent, child } = await parentAndChild()
-    await w.mgr.inputs.send(child, 'also use Chromium, said the person')
+    // The person types it, after the task was delivered
+    await new Promise((r) => setTimeout(r, 5))
+    await w.mgr.inputs.send(child, 'also use Chromium, said the person', undefined, undefined, true)
     await turnEnds(child, 'all merged')
     const [report] = reportsIn(parent, child)
-    expect(report?.facts).toMatchObject({ outcome: 'finished', personNote: true })
+    expect(report?.facts).toMatchObject({ outcome: 'finished', personSince: true })
     expect(report?.body).not.toContain('also use Chromium')
   })
 
@@ -277,32 +160,8 @@ describe('an owner in a turn is told by the mail alone (3.9)', () => {
   })
 })
 
-describe('the old way tells when the mailbox cannot', () => {
-  it('an owner that cannot read mail is told as before, and the report is recorded as told', async () => {
-    const { parent, child } = await parentAndChild()
-    scoped(parent)
-    await turnEnds(child, 'all merged')
-    expect(oldReports(parent, child)).toHaveLength(1)
-    const [report] = reportsIn(parent, child)
-    expect(report).toMatchObject({ facts: { outcome: 'finished' } })
-    expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
-    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-    expect(later().drain(addr(parent), {}).messageIds).toEqual([])
-  })
-
-  it('work with no task (the mark alone) is told as before', async () => {
-    askAgents()
-    const parent = await w.callerSession()
-    const child = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', askedBy: parent })).id
-    ;(w.mgr as unknown as { children: { markReport(c: string, o: string): void } }).children.markReport(child, parent)
-    await w.mgr.inputs.send(child, 'a task nobody wrote down', undefined, { sessionId: parent, name: 'parent' })
-    handleOf(child)!.answer('done')
-    await w.until(() => oldReports(parent, child).length === 1)
-    expect(tasksOf(parent, child)).toEqual([])
-    expect(w.store.mailbox.feedOf(addr(parent), { limit: 10 })).toEqual([])
-  })
-
-  it('a task its owner withdrew takes no report: the owner needs not be told, by mail or the old way', async () => {
+describe('a task its owner withdrew', () => {
+  it('takes no report: the owner need not be told', async () => {
     const { parent, child } = await parentAndChild()
     expect(m.service.done(addr(parent), taskOf(parent, child).id)).toMatchObject({ how: 'withdrawn' })
     await turnEnds(child, 'all merged')
@@ -310,6 +169,113 @@ describe('the old way tells when the mailbox cannot', () => {
     expect(taskRow(parent, child)).toMatchObject({ settled: 'withdrawn' })
     expect(reportsIn(parent, child)).toEqual([])
     expect(oldReports(parent, child)).toEqual([])
+  })
+})
+
+/** The owner's seat cannot read mail (an older build's coordinator, a builder): its tool profile is `scoped` */
+const scoped = (parent: string) => {
+  const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
+  vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+}
+
+describe('an owner whose seat cannot read mail is told the old way (§10.6.3)', () => {
+  it('its task’s answer is the relayed report as before step 3, in Centralu’s words for the model; the report is recorded as told and wakes nothing', async () => {
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    await turnEnds(child, 'all merged')
+    await w.until(() => oldReports(parent, child).length === 1)
+    const [told] = oldReports(parent, child)
+    expect(told).toContain('[Centralu] The session ended its turn. Its last response says whether the work is done.')
+    expect(told).toContain(`id: ${child}`)
+    expect(told).toContain(`Its last response is that session's own words, so it is not repeated here: read_session(sessionId="${child}"`)
+    // The session's words stay out of the model's input (#120); the stored message keeps them for the screen
+    expect(told).not.toContain('all merged')
+    const stored = w.store.messages.loadMessages(parent, 50).map((r) => JSON.stringify(r.payload)).find((p) => p.includes(`"sessionId":"${child}"`))
+    expect(stored).toContain('Last response:\\nall merged')
+    const [report] = reportsIn(parent, child)
+    expect(report).toMatchObject({ facts: { outcome: 'finished', answer: 'all merged' } })
+    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
+    await w.until(() => read.row(report!.id, addr(parent))?.readAt != null)
+    expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
+    expect(later().drain(addr(parent), {}).messageIds).toEqual([])
+  })
+
+  it('its task’s session stopping with an error is told the old way too, in the words of that ending: the task is released, the notice recorded as told', async () => {
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'rate limit reached, retry later ERROR_TEXT', retryable: false } })
+    await w.until(() => oldReports(parent, child).length === 1)
+    const [told] = oldReports(parent, child)
+    expect(told).toContain('[Centralu] The assigned work failed.')
+    expect(told).toContain("Its tool's error, by kind: usage limit.")
+    expect(told).not.toContain('ERROR_TEXT')
+    expect(taskRow(parent, child)).toMatchObject({ settled: null, releasedWhy: 'error', toldAt: expect.any(Number) })
+    expect(reportsIn(parent, child)).toEqual([])
+    const [notice] = read.between('centralu', addr(parent), 'notice')
+    await w.until(() => read.row(notice!.id, addr(parent))?.readAt != null)
+    expect(later().drain(addr(parent), {}).messageIds).toEqual([])
+    await new Promise((r) => setTimeout(r, 20))
+    expect(oldReports(parent, child)).toHaveLength(1)
+  })
+
+  it('two tasks it gave are two requests: each is told once', async () => {
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    handleOf(child)!.acceptsAtOnce = true
+    expect(await w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'and the docs' })).toMatchObject({ ok: true, state: 'mailed' })
+    await deliverDue(child)
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    await turnEnds(child, 'code and docs done')
+    await w.until(() => oldReports(parent, child).length === 2)
+    expect(tasksOf(parent, child).map((t) => read.taskRow(t.id, child)?.settled)).toEqual(['reported', 'reported'])
+    await new Promise((r) => setTimeout(r, 20))
+    expect(oldReports(parent, child)).toHaveLength(2)
+  })
+
+  it('a notice that could not go in is kept for its next message: nothing else will tell it, and it is told once then', async () => {
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    vi.spyOn(handleOf(parent)!, 'send').mockImplementationOnce(() => {
+      throw new Error('the process is gone')
+    })
+    await turnEnds(child, 'all merged')
+    expect(oldReports(parent, child)).toEqual([])
+    const [report] = reportsIn(parent, child)
+    expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: null })
+    await w.mgr.inputs.send(parent, 'an ordinary message of the person’s')
+    await w.until(() => oldReports(parent, child).length === 1)
+    await w.until(() => read.row(report!.id, addr(parent))?.deliveredAt != null)
+    expect(oldReports(parent, child)).toHaveLength(1)
+  })
+
+  it('in a turn of its own, it is told into that turn', async () => {
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    await w.mgr.inputs.send(parent, 'a long job of the owner’s own')
+    expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
+    await turnEnds(child, 'all merged')
+    await w.until(() => oldReports(parent, child).length === 1)
+    expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
+  })
+
+  it('work its child handed on holds the answer: told nothing while that work is open, then once, when the turn that ends it ends', async () => {
+    w.mgr.prefs.setUiPreferences({ agentDepth: 3 })
+    const { parent, child } = await parentAndChild()
+    scoped(parent)
+    const helper = await w.mgr.startAgent(child, { task: 'write the tests', wait: false })
+    if (!helper.ok) throw new Error(helper.error)
+    await turnEnds(child, 'handed the tests on')
+    expect(oldReports(parent, child)).toEqual([])
+    // The helper's answer is mail to the session, which wakes it; the turn it starts ends the work
+    await turnEnds(helper.sessionId, 'tests written')
+    await w.until(() => read.taskRow(taskOf(child, helper.sessionId).id, helper.sessionId)?.settled === 'reported')
+    expect(oldReports(parent, child)).toEqual([])
+    await deliverDue(child)
+    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
+    await turnEnds(child, 'all done now')
+    await w.until(() => oldReports(parent, child).length === 1)
+    expect(oldReports(parent, child)[0]).toContain('The session ended its turn.')
+    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
   })
 })
 
@@ -339,56 +305,28 @@ describe('what the owner reads with the tool', () => {
   })
 })
 
-describe('a last response that was not read', () => {
-  it('is Centralu’s placeholder and not the session’s words: it is not put on the report as the session’s answer', async () => {
-    const { parent, child } = await parentAndChild()
-    const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
-    await reports.deliverReport(parent, child, 'name', 'project', "(not read: the session's last turn was the person's; read_session shows it)", { type: 'turn_complete' })
-    expect(reportsIn(parent, child)).toHaveLength(1)
-    expect(reportsIn(parent, child)[0]!.facts.answer).toBeUndefined()
-  })
-})
-
-describe('a last response that could not be read because its machine is out of reach (#1186)', () => {
-  it('is not kept as the session’s answer, and the report says it could not be read and how to read it', async () => {
+describe("a linked machine's child whose last response could not be read because its machine is out of reach (#1186)", () => {
+  it('is told so in the relayed report, with how to read it, and no mail report is written', async () => {
     const { parent, child } = await parentAndChild()
     const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
     const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
     await reports.deliverReport(parent, child, 'name', 'project', '(not read: its machine could not be reached)', { type: 'turn_complete' }, { linkLost: 'Box', paused })
-    const [report] = reportsIn(parent, child)
-    expect(report?.facts.answer).toBeUndefined()
-    expect(report?.body).toContain('Its last response could not be read: its machine could not be reached.')
-    expect(report?.body).toContain(`read_session(sessionId="${child}") reads it once that machine is back.`)
-    expect(report?.body).not.toContain('is the message above in this thread')
+    const [told] = oldReports(parent, child)
+    expect(told).toContain('Its last response could not be read: its machine could not be reached.')
+    expect(told).toContain(`read_session(sessionId="${child}") reads it once that machine is back.`)
+    expect(reportsIn(parent, child)).toEqual([])
   })
 })
 
-describe('a last response read before its machine went out of reach (#1186)', () => {
-  it('stays on the report as the session’s answer, and the report says it is what was last read there', async () => {
+describe("a linked machine's child whose last response was read before its machine went out of reach (#1186)", () => {
+  it('is told in the relayed report as what was last read there, and its words do not reach the model', async () => {
     const { parent, child } = await parentAndChild()
     const reports = (w.mgr as unknown as { reports: { deliverReport(...a: unknown[]): Promise<void> } }).reports
     const paused = [{ id: 't1', kind: 'shell', description: 'pnpm verify', status: 'running' }]
     await reports.deliverReport(parent, child, 'name', 'project', 'the verify is at step 3', { type: 'turn_complete' }, { linkLost: 'Box', paused, asRead: true })
-    const [report] = reportsIn(parent, child)
-    expect(report?.facts.answer).toBe('the verify is at step 3')
-    expect(report?.body).toContain('as it was last read there, before its machine went out of reach')
-    expect(report?.body).not.toContain('the verify is at step 3')
-  })
-})
-
-describe('an owner whose seat cannot read mail', () => {
-  it('has a notice that could not be sent kept for its next message: nothing else will tell it, and it is told once then', async () => {
-    const { parent, child } = await parentAndChild()
-    scoped(parent)
-    vi.spyOn(handleOf(parent)!, 'send').mockImplementationOnce(() => {
-      throw new Error('the process is gone')
-    })
-    await turnEnds(child, 'all merged')
-    expect(oldReports(parent, child)).toEqual([])
-    await w.mgr.inputs.send(parent, 'an ordinary message of the person’s')
-    await w.until(() => oldReports(parent, child).length === 1)
-    const [report] = reportsIn(parent, child)
-    expect(read.row(report!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number) })
+    const [told] = oldReports(parent, child)
+    expect(told).toContain('as it was last read there, before its machine went out of reach')
+    expect(told).not.toContain('the verify is at step 3')
   })
 })
 
@@ -410,82 +348,27 @@ describe('work handed on', () => {
     expect(tasksOf(child, grandchild)).toEqual([expect.objectContaining({ body: 'write the tests', causeId: work.id })])
   })
 
-  it('a turn that ends while it is owed says waiting: the owner is told once, the task stays open, and the report stays owed for the turn that ends it', async () => {
+  it('a turn that ends while the work it handed on is open answers nothing: the task stays open for the turn that ends the work', async () => {
     const { parent, child } = await handOn()
     await turnEnds(child, 'handed the tests on')
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'waiting', waitingOn: 1 })])
+    expect(asReports(parent, child)).toEqual([])
     expect(oldReports(parent, child)).toEqual([])
-    expect(w.mgr.sessionInfo(child)).toBeDefined()
-    expect(children().awaitingReport.get(child)).toBe(parent)
-    // The owner is woken with a count
-    expect(later().drain(addr(parent), {}).text).toContain('waitingOn="1"')
   })
 
-  it('a helper archived while the work waited for it does not hold the work: its next turn is reported as finished, the mark is closed', async () => {
+  it('a helper archived while the work waited for it does not hold the work: its next turn answers the task as finished', async () => {
     const { parent, child, grandchild } = await handOn()
     await turnEnds(child, 'handed the tests on')
-    expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'waiting' })])
+    expect(asReports(parent, child)).toEqual([])
     await w.mgr.trash.trashSession(grandchild)
     expect(read.taskRow(taskOf(child, grandchild).id, grandchild)).toMatchObject({ settled: 'gone' })
     // It wrote the files itself, in a turn the owner started
     await w.mgr.inputs.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     handleOf(child)!.answer('wrote the tests myself')
-    await w.until(() => asReports(parent, child).length === 2)
-    expect(asReports(parent, child)[1]).toMatchObject({ outcome: 'finished' })
+    await w.until(() => asReports(parent, child).length === 1)
+    expect(asReports(parent, child)[0]).toMatchObject({ outcome: 'finished', answer: 'wrote the tests myself' })
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-    expect(children().awaitingReport.has(child)).toBe(false)
-  })
-
-  it('a second pause tells an owner that cannot read mail nothing: it is quiet, and would start a turn the pause was not to', async () => {
-    const { parent, child } = await handOn()
-    scoped(parent)
-    await turnEnds(child, 'handed the tests on')
-    expect(oldReports(parent, child)).toHaveLength(1)
-    // The notice started a turn of the owner's, which ends: it is at rest again
-    handleOf(parent)!.answer('noted')
-    await w.until(() => w.mgr.sessionInfo(parent)?.state !== 'working')
-    // The session goes on in a turn the owner started, hands a second helper on, and ends its turn
-    await w.mgr.inputs.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
-    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
-    const second = await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
-    expect(second.ok).toBe(true)
-    handleOf(child)!.answer('handed the docs on')
-    await w.until(() => asReports(parent, child).length === 2)
-    expect(asReports(parent, child).map((f) => [f.outcome, f.quiet ?? false])).toEqual([
-      ['waiting', false],
-      ['waiting', true],
-    ])
-    await new Promise((r) => setTimeout(r, 20))
-    expect(oldReports(parent, child)).toHaveLength(1)
-  })
-
-  it('an owner that cannot read mail and is in a turn is told the second pause: the notice joins the turn and starts none', async () => {
-    const { parent, child } = await handOn()
-    scoped(parent)
-    await turnEnds(child, 'handed the tests on')
-    expect(oldReports(parent, child)).toHaveLength(1)
-    // The first notice started a turn of the owner's, which is still going
-    expect(w.mgr.sessionInfo(parent)?.state).toBe('working')
-    await w.mgr.inputs.send(child, 'and the docs', undefined, { sessionId: parent, name: 'parent' })
-    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
-    await w.mgr.startAgent(child, { task: 'write the docs', wait: false })
-    handleOf(child)!.answer('handed the docs on')
-    await w.until(() => oldReports(parent, child).length === 2)
-  })
-
-  it('the same, told the old way to an owner that cannot read mail', async () => {
-    const { parent, child, grandchild } = await handOn()
-    scoped(parent)
-    await turnEnds(child, 'handed the tests on')
-    await w.mgr.trash.trashSession(grandchild)
-    await w.mgr.inputs.send(child, 'carry on yourself', undefined, { sessionId: parent, name: 'parent' })
-    await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
-    handleOf(child)!.answer('wrote the tests myself')
-    await w.until(() => oldReports(parent, child).length === 2)
-    expect(oldReports(parent, child)[0]).toContain('paused')
-    expect(oldReports(parent, child)[1]).toContain('The session ended its turn.')
   })
 
   it('a helper sent more in the work is that work’s: the owner is not told finished while it works', async () => {
@@ -518,42 +401,36 @@ describe('work handed on', () => {
     await sentMore
   })
 
-  it('its own background work ending while a helper still works is not the work’s end: the settled report waits too', async () => {
+  it('its own background work ending while a helper still works is not the work’s end: the settle answers nothing either', async () => {
     const { parent, child } = await handOn()
+    const running = { id: 't1', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const }
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [running] })
     await turnEnds(child, 'handed the tests on')
-    const reports = (w.mgr as unknown as { reports: { reportBackIfAwaited(...a: unknown[]): Promise<void>; pauseReport(id: string, running: unknown[]): void } }).reports
-    // It had also paused on its own background work, which has ended with no turn after it
-    reports.pauseReport(child, [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }])
-    expect(children().pausedReports.has(child)).toBe(true)
-    await reports.reportBackIfAwaited(child, { type: 'turn_complete', sessionId: child }, undefined, [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'completed' }])
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      // Its own work ends with no turn after it: settled, it is at rest, but the work it handed on is still open
+      handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...running, status: 'completed' }] })
+      await vi.advanceTimersByTimeAsync(61_000)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    expect(asReports(parent, child).map((f) => f.outcome)).not.toContain('finished')
-    expect(children().awaitingReport.get(child)).toBe(parent)
-    expect(children().pausedReports.has(child)).toBe(false)
+    expect(asReports(parent, child)).toEqual([])
   })
 
-  it('a turn that failed is not a pause: it is reported as it ended, and the task is reported', async () => {
+  it('a turn that failed goes through the stop notice though the work it handed on is open: the task is released and its owner told, with no report', async () => {
     const { parent, child, grandchild } = await handOn()
-    // The helper's task is caused by this work: a turn that finished would be a pause
+    // The helper's task is caused by this work: a turn that finished would leave the task open
     expect(taskOf(child, grandchild)).toMatchObject({ causeId: taskOf(parent, child).id })
-    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'rate limit reached, retry later', retryable: false } })
-    await w.until(() => reportsIn(parent, child).length === 1)
-    expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'failed' })])
-    expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-    expect(children().awaitingReport.has(child)).toBe(false)
+    handleOf(child)!.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'the tool broke', retryable: false } })
+    await w.until(() => taskRow(parent, child)?.releasedAt != null)
+    expect(taskRow(parent, child)).toMatchObject({ releasedWhy: 'error', settled: null })
+    const notices = read.between('centralu', addr(parent), 'notice')
+    expect(notices.some((n) => n.facts.unanswered?.some((u) => u.id === taskOf(parent, child).id))).toBe(true)
+    expect(asReports(parent, child)).toEqual([])
   })
 
-  it('an owner that cannot read mail is told the old way, in the words of Centralu: how many handed on, nothing of theirs', async () => {
-    const { parent, child } = await handOn()
-    scoped(parent)
-    await turnEnds(child, 'handed the tests on')
-    const told = oldReports(parent, child)
-    expect(told).toHaveLength(1)
-    expect(told[0]).toContain('paused: its turn ended while 1 thread it handed on is still going')
-    expect(told[0]).not.toContain('write the tests')
-  })
-
-  it('a call that returns the answer while it is owed does not end the work either: still open, still the one report', async () => {
+  it('a call that returns the answer while the work handed on is open does not end the work either: still open, and no report', async () => {
     const { parent, child } = await handOn()
     await turnEnds(child, 'handed the tests on')
     const again = w.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'status?' })
@@ -561,10 +438,10 @@ describe('work handed on', () => {
     handleOf(child)!.answer('still waiting on the tests')
     expect(await again).toMatchObject({ ok: true, answer: 'still waiting on the tests' })
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
-    expect(asReports(parent, child)).toHaveLength(1)
+    expect(asReports(parent, child)).toEqual([])
   })
 
-  it('the turn that ends it, once the task handed on is reported, is the work’s final report, and the mark is closed with it', async () => {
+  it('the turn that ends it, once the task handed on is reported, answers the work, once', async () => {
     const { parent, child, grandchild } = await handOn()
     await turnEnds(child, 'handed the tests on')
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
@@ -577,7 +454,7 @@ describe('work handed on', () => {
     await w.until(() => (handleOf(child)?.sent.length ?? 0) >= 2)
     await turnEnds(child, 'all done now')
     expect(taskRow(parent, child)).toMatchObject({ settled: 'reported' })
-    expect(children().awaitingReport.has(child)).toBe(false)
+    expect(asReports(parent, child)).toEqual([expect.objectContaining({ outcome: 'finished', answer: 'all done now' })])
   })
 })
 
@@ -591,14 +468,14 @@ describe('the work ends with the session that did it', () => {
     expect(reportsIn(parent, child).map((x) => x.facts.outcome)).toEqual(['finished'])
   })
 
-  it('the person archiving a child whose work paused on its background tasks: the task is gone, and no report says it finished', async () => {
+  it('the person archiving a child whose own background work runs: the task is gone, and no report answers it', async () => {
     const { parent, child } = await parentAndChild()
     handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
     await turnEnds(child, 'watcher started')
     expect(taskRow(parent, child)).toMatchObject({ settled: null })
     await w.mgr.trash.trashSession(child)
     expect(taskRow(parent, child)).toMatchObject({ settled: 'gone' })
-    expect(reportsIn(parent, child).map((x) => x.facts.outcome)).toEqual(['paused'])
+    expect(reportsIn(parent, child)).toEqual([])
   })
 
   it('archiving a child at work stops its turn, and that end is not reported as the work finished: the task is gone', async () => {

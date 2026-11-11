@@ -97,7 +97,7 @@ export class AgentStartFlow {
     this.gates = new AgentStartGates(host, (projectId) => flow.remote.workingIn(projectId))
     this.consents = new AgentConsents(host)
     this.choices = new AgentChoices(host)
-    this.requests = new AgentStartRequests(host, flow, this)
+    this.requests = new AgentStartRequests(host, this)
   }
 
   /** `AgentConsents.agentConsents` (agent-consents.ts), kept on the flow for its callers */
@@ -149,7 +149,7 @@ export class AgentStartFlow {
         /*
          * **A card is not withdrawn at the bound (#673).** The person may be away; the card stays in the caller's
          * session, the call answers "pending" with the request as a handle, and the setup goes on in the background:
-         * an approval starts the child with its report armed (below), a refusal is told to the caller as a message
+         * an approval starts the child with its task written, a refusal is told to the caller as a message
          */
         const standing = progress.stage === 'asking' && progress.requestId ? this.host.children.agentStarts.get(progress.requestId) : undefined
         if (standing && !standing.ended) {
@@ -160,7 +160,7 @@ export class AgentStartFlow {
         }
         ctl.abort()
         const d = progress.stage === 'created' ? progress.d : undefined
-        // The child exists and its run is registered: answered as the normal path does, with the report armed
+        // The child exists and its run is registered: answered as the normal path does, its task written
         if (d) {
           const notice = [progress.unchecked, this.host.handles.get(d.sessionId)?.delegationNotice?.()].filter(Boolean).join('; ')
           const working = this.flow.agentWorking(d)
@@ -176,14 +176,8 @@ export class AgentStartFlow {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
     }
-    if ('done' in set) {
-      /*
-       * A start still in flight past the bound is not left without its report: if the session does come up, the
-       * caller is told when its turn ends, as for any child that outlives the call
-       */
-      void setup.then((r) => { if ('key' in r) this.flow.agentWorking(r.d) }, () => {})
-      return set.done
-    }
+    // A start still in flight past the bound is not left without its answer: the task is written as its session takes it (`createReservedChild`)
+    if ('done' in set) return set.done
     const { key, d, notice } = set
     // What the setup used comes off the wait, so the whole call ends inside the bridge's bound
     const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
@@ -311,7 +305,7 @@ export class AgentStartFlow {
     /*
      * Memory (#686): allowed, but the machine has no room for another agent now. Queued, not refused (owner decision
      * 2026-10-15): the call answers "pending" with a handle at once, the person reads why in this session, and the
-     * child starts when memory recovers, with its report armed. A start that had no card gets a request of its own here.
+     * child starts when memory recovers, with its task written. A start that had no card gets a request of its own here.
      */
     const short = await this.memoryShort()
     if (short) {
@@ -332,10 +326,7 @@ export class AgentStartFlow {
      * ends; the call that asked hears where it went instead of the child's answer
      */
     if (request && request.callerId !== callerId) {
-      if ('key' in r) {
-        this.host.children.recordHandedOver(r.d.sessionId, callerId, request.callerId)
-        this.flow.agentWorking(r.d)
-      }
+      if ('key' in r) this.host.children.recordHandedOver(r.d.sessionId, callerId, request.callerId)
       return done(this.flow.handedOverAnswer(callerId, request.requestId) ?? { ok: false, error: 'The request was handed over to another session.' })
     }
     return r
@@ -500,18 +491,22 @@ export class AgentStartFlow {
     // The delegation counts the child now
     release()
     progress.d = d
+    /*
+     * The mailbox writes the task down as a thread the caller owns (docs/plans/mailbox.md §8.1, §10.6.3): the caller's own words, not the frame. Before
+     * they go in, which can outlast the call's bound: a host that goes meanwhile leaves the task to the next one, whose start answers it
+     */
+    const withdraw = this.host.children.delegated(callerId, child.id, 'start_agent', choice.task)
     try {
       // The project's instructions for started agents (#1161 item 2), read now: a card may have stood while they changed
       const instructions = project.id === ASSISTANT_PLACE ? '' : this.host.store.projects.agentInstructions(project.id)
       await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems, instructions, canMailParent(child, callerId)), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
     } catch (e) {
+      withdraw()
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)
       this.host.children.releaseTurn(child.id, callerId)
       return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
     }
-    // The mailbox writes the task down as a thread the caller owns (docs/plans/mailbox.md §8.1): the caller's own words, not the frame
-    this.host.children.delegated(callerId, child.id, 'start_agent', choice.task)
     const notice = this.host.handles.get(child.id)?.delegationNotice?.()
     return { key, d, notice: [unchecked, forkNote, notice].filter(Boolean).join('; ') || undefined }
   }

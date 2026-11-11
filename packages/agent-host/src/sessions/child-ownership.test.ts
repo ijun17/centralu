@@ -1,14 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import type { MailSessions } from '../mail/delivery.js'
-import { hostMail, type HostMailSessions } from '../mail/host-mail.js'
-import { ChildOwnership, pausedReportKey, reportTurnKey, type Delegation } from './child-ownership.js'
+import { ChildOwnership, personPausedKey, reportTurnKey, type Delegation } from './child-ownership.js'
 import type { AgentStartRecord } from './agent-start-record.js'
 
 /*
  * The ownership state on its own (#428): each change writes its store mirror, and an owner change moves every map in
- * one call. The session manager's tests (handoff-children, report-marks, busy-requests, delegated-cards) cover the
+ * one call. The session manager's tests (handoff-children, busy-requests, delegated-cards) cover the
  * same state through the tools.
  */
 
@@ -20,7 +18,6 @@ beforeEach(() => {
   own = new ChildOwnership(store)
 })
 afterEach(() => {
-  own.stopSettling()
   store.close()
   vi.useRealTimers()
 })
@@ -47,48 +44,24 @@ const seedSession = () => {
   })
 }
 
-describe('report marks', () => {
-  it('a mark is stored with it, and clearing takes both down', () => {
-    own.markReport('child', 'caller')
-    expect(own.awaitingReport.get('child')).toBe('caller')
-    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
-    own.clearReport('child')
-    expect(own.awaitingReport.has('child')).toBe(false)
-    expect(store.children.listReportMarks()).toEqual([])
-  })
-
-  it('a pause is stored once per new task, and a new mark drops it', () => {
-    own.markReport('child', 'caller')
-    own.pauseReport('child', [{ id: 't1', description: 'dev server' }])
-    own.pauseReport('child', [{ id: 't1', description: 'dev server' }, { id: 't2', description: 'watcher' }])
-    expect(own.pausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
-    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([
+describe("the person's paused report (#721, #1463)", () => {
+  it('is stored once per new task, read back by the next host, and unpausing takes it down', () => {
+    own.pausePersonReport('child', [{ id: 't1', description: 'dev server' }])
+    own.pausePersonReport('child', [{ id: 't1', description: 'dev server' }, { id: 't2', description: 'watcher' }])
+    expect(own.personPausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
+    expect(JSON.parse(store.settings.appSetting(personPausedKey('child'))!)).toEqual([
       { id: 't1', description: 'dev server' },
       { id: 't2', description: 'watcher' },
     ])
-    own.markReport('child', 'caller')
-    expect(own.pausedReports.has('child')).toBe(false)
-    expect(store.settings.appSetting(pausedReportKey('child'))).toBeNull()
-    expect(own.awaitingReport.get('child')).toBe('caller')
-  })
-
-  it('adopting a mark the previous host left writes nothing', () => {
-    own.adoptReport('child', 'caller', [{ id: 't1', description: 'd' }])
-    expect(own.awaitingReport.get('child')).toBe('caller')
-    expect(own.pausedReports.get('child')).toEqual([{ id: 't1', description: 'd' }])
-    expect(store.children.listReportMarks()).toEqual([])
-  })
-
-  it('unpausing ends the settle timer, and stopSettling ends them all', () => {
-    vi.useFakeTimers()
-    const fired: string[] = []
-    own.pauseReport('a', [])
-    own.settleAfter('a', setTimeout(() => fired.push('a'), 10))
-    own.settleAfter('b', setTimeout(() => fired.push('b'), 10))
-    own.unpauseReport('a')
-    own.stopSettling()
-    vi.advanceTimersByTime(20)
-    expect(fired).toEqual([])
+    // The next host reads it back; one whose turn does not go on under it is returned, to be reported as ended
+    const next = new ChildOwnership(store)
+    const sessions = new Map([['child', { id: 'child', state: 'idle' } as SessionInfo]])
+    expect(next.restorePersonPaused(sessions, new Set(['child']))).toEqual([])
+    expect(next.personPausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
+    expect(new ChildOwnership(store).restorePersonPaused(sessions, new Set())).toEqual(['child'])
+    own.unpausePersonReport('child')
+    expect(own.personPausedReports.has('child')).toBe(false)
+    expect(store.settings.appSetting(personPausedKey('child'))).toBeNull()
   })
 })
 
@@ -113,41 +86,28 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
     return turns
   }
 
-  it('says whose the turn is, and the caller it is the work of: the one whose turn it is with a delegation going, else the one a report is owed to', () => {
+  it('says whose the turn is, and the caller whose turn it was given as, a delegation going or not; none for a turn nobody gave', () => {
     const turns = heard()
     own.ownTurn('a', 'caller', false)
     own.setDelegation('caller>a', delegation('caller', 'a'))
     own.noteMessage('a', 'work', false, false)
     own.turnStarted('a')
-    own.markReport('b', 'owner')
+    // The Assistant's send_to_session: the turn is its task's, until the turn ends
+    own.ownTurn('b', 'orchestrator', true)
     own.noteMessage('b', 'work', false, false)
     own.turnStarted('b')
     own.noteMessage('c', 'work', false, false)
     own.turnStarted('c')
     expect(turns).toEqual([
       { sessionId: 'a', by: 'work', cli: false, source: 'caller', ownerId: 'caller' },
-      { sessionId: 'b', by: 'work', cli: false, source: 'caller', ownerId: 'owner' },
+      { sessionId: 'b', by: 'work', cli: false, source: 'caller', ownerId: 'orchestrator' },
       { sessionId: 'c', by: 'work', cli: false, source: 'caller' },
     ])
   })
 
-  it('names no caller for a turn given with no report asked for: it is nobody’s work to report', () => {
-    const turns = heard()
-    // The Assistant’s send_to_session with reportBack false: it owns the turn’s cards, and no mark or delegation is left
-    own.ownTurn('a', 'orchestrator', true)
-    own.noteMessage('a', 'work', false, false)
-    own.turnStarted('a')
-    // And a delegation that has settled is over
-    own.ownTurn('b', 'caller', false)
-    own.setDelegation('caller>b', delegation('caller', 'b', { settled: true }))
-    own.noteMessage('b', 'work', false, false)
-    own.turnStarted('b')
-    expect(turns.map((t) => t.ownerId)).toEqual([undefined, undefined])
-  })
-
   it('says a turn no message started is the CLI’s own, and the person’s message is theirs', () => {
     const turns = heard()
-    own.markReport('a', 'owner')
+    own.ownTurn('a', 'owner', true)
     own.turnStarted('a')
     own.noteMessage('b', 'person', false, false)
     own.turnStarted('b')
@@ -232,27 +192,26 @@ describe('the mailbox hears that a session is done with work it gave', () => {
   })
 })
 
-describe('the mailbox counts the work a session handed on', () => {
-  it('is asked for the owner and the session, is 0 without a mailbox, and never breaks a report when the mailbox fails', () => {
-    expect(own.waitingOn('caller', 'child')).toBe(0)
+describe('the mailbox reads the tasks open with a session (docs/plans/mailbox.md §10.6.3)', () => {
+  it('is asked for the session and the side, is none without a mailbox, and never breaks the caller when the mailbox fails', () => {
+    expect(own.openTasks('child', 'to')).toEqual([])
     const seen: unknown[] = []
-    own.onWaitingOn((ownerId, childId) => {
-      seen.push([ownerId, childId])
-      return 2
+    own.onOpenTasks((sessionId, side) => {
+      seen.push([sessionId, side])
+      return side === 'to' ? ['caller'] : ['helper']
     })
-    expect(own.waitingOn('caller', 'child')).toBe(2)
-    expect(seen).toEqual([['caller', 'child']])
-    own.onWaitingOn(() => {
+    expect(own.openTasks('child', 'to')).toEqual(['caller'])
+    expect(own.openTasks('child', 'from')).toEqual(['helper'])
+    expect(seen).toEqual([['child', 'to'], ['child', 'from']])
+    own.onOpenTasks(() => {
       throw new Error('the store is busy')
     })
-    expect(own.waitingOn('caller', 'child')).toBe(0)
+    expect(own.openTasks('child', 'to')).toEqual([])
   })
 })
 
 describe('moveOwner', () => {
   it('moves every map for the moving children, and leaves what is not theirs', () => {
-    own.markReport('c1', 'from')
-    own.markReport('stays', 'from')
     own.ownTurn('c1', 'from', false)
     own.ownTurn('stays', 'from', false)
     const d1 = delegation('from', 'c1', { agent: true })
@@ -267,9 +226,8 @@ describe('moveOwner', () => {
     own.addAgentStart(made)
     own.addAgentStart(open)
 
-    own.moveOwner('from', 'to', { sessions: ['c1', 'c2'], armReports: ['c2'], starts: [open] }, () => {})
+    own.moveOwner('from', 'to', { sessions: ['c1', 'c2'], starts: [open] }, () => {})
 
-    expect([...own.awaitingReport]).toEqual([['c1', 'to'], ['stays', 'from'], ['c2', 'to']])
     expect(own.turnOwners.get('c1')?.callerId).toBe('to')
     expect(own.turnOwners.get('stays')?.callerId).toBe('from')
     expect([...own.delegations.keys()].sort()).toEqual(['from>stays', 'to>c1', 'to>proj>c2'])
@@ -293,7 +251,7 @@ describe('moveOwner', () => {
     own.setDelegation('from>c1', d)
     const open = start('r-open', 'from', { leaving: new Set([() => order.push('start wait ended')]) })
     own.addAgentStart(open)
-    own.moveOwner('from', 'to', { sessions: ['c1'], armReports: [], starts: [open] }, () => {
+    own.moveOwner('from', 'to', { sessions: ['c1'], starts: [open] }, () => {
       order.push(`cards: delegation ${own.delegations.has('to>c1') ? 'moved' : 'not moved'}, handover ${own.handedOver.size}`)
     })
     expect(order).toEqual(['cards: delegation moved, handover 0', 'delegation wait ended', 'start wait ended'])
@@ -332,139 +290,6 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
   ])
   const kept = new Set(['kept-working', 'kept-paused', 'kept-idle'])
 
-  it("keeps the report marks a kept session still owes, a paused one's too, and drops the rest from the store", () => {
-    for (const id of ['kept-working', 'kept-paused', 'kept-idle', 'gone-process']) store.children.setReportMark(id, 'caller')
-    store.children.setReportMark('kept-working-no-caller', 'nobody')
-    store.settings.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-    store.settings.setAppSetting(pausedReportKey('gone-process'), '[]')
-    own.restoreReports(sessions, kept)
-    expect([...own.awaitingReport].sort()).toEqual([['kept-paused', 'caller'], ['kept-working', 'caller']])
-    expect(own.pausedReports.get('kept-paused')).toEqual([{ id: 't1', description: 'dev server' }])
-    expect(store.children.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
-    expect(store.settings.appSetting(pausedReportKey('gone-process'))).toBeNull()
-  })
-
-  describe('a session at rest that waits for tasks it handed on (§6, §9.4)', () => {
-    const HOST = 'hub-aaaaaaaa'
-    /** What the host's mail reads of its sessions: nothing of it is asked here but the turn a task is written in */
-    const mailSessions: HostMailSessions = {
-      sessionInfo: () => undefined,
-      listSessions: () => [],
-      canReadMail: () => true,
-      assistantId: () => null,
-      assistantAsks: () => null,
-      mailCommand: () => false,
-      keptInTurn: () => false,
-      oldOwes: () => true,
-      mailSessions: () => ({ receiver: () => ({ atRest: false }), deliver: async () => {}, note: () => {} }) as unknown as MailSessions,
-      projectTrusted: () => false,
-    }
-    /**
-     * The caller gave 'kept-idle' a task; in the turn of that task, 'kept-idle' handed a part on to `helper` (a task whose cause is the caller's
-     * task), and the old path owes 'kept-idle' the helper's report (its report mark)
-     */
-    const handedOn = (helper = 'helper', text = 'Land it') => {
-      const m = hostMail(store, mailSessions, { hostId: HOST })
-      const addr = (id: string) => m.service.sessionAddress(id)
-      const work = m.service.task(addr('caller'), addr('kept-idle'), { text, origin: 'start_agent', delivered: true })
-      m.turns.beginOther('kept-idle', 'caller', work.id, 'caller')
-      const part = m.service.task(addr('kept-idle'), addr(helper), { text: `${text}: the tests`, origin: 'start_agent', delivered: true })
-      expect(part.causeId).toBe(work.id)
-      store.children.setReportMark('kept-idle', 'caller')
-      helperMarks.add(helper)
-      return { m, addr, work, part }
-    }
-    /** The helpers whose report marks the store holds before each start; a start drops the marks of sessions it does not have */
-    const helperMarks = new Set<string>()
-    beforeEach(() => helperMarks.clear())
-
-    /** Whether a fresh host, started now with these sessions kept, still owes the report */
-    let lastHost = own
-    const owed = (keptNow: ReadonlySet<string> = kept, sessionsNow: ReadonlyMap<string, SessionInfo> = sessions) => {
-      store.children.setReportMark('kept-idle', 'caller')
-      for (const helper of helperMarks) store.children.setReportMark(helper, 'kept-idle')
-      lastHost = new ChildOwnership(store)
-      lastHost.restoreReports(sessionsNow, keptNow)
-      return lastHost.awaitingReport.get('kept-idle') === 'caller'
-    }
-
-    it('keeps its mark with the swap: the tasks are in the store, and the turn their end starts ends under this host', () => {
-      handedOn()
-      for (const helper of helperMarks) store.children.setReportMark(helper, 'kept-idle')
-      own.restoreReports(sessions, kept)
-      expect(own.awaitingReport.get('kept-idle')).toBe('caller')
-      expect(store.children.listReportMarks()).toEqual([{ sessionId: 'kept-idle', callerSessionId: 'caller' }])
-    })
-
-    it('drops it when nothing is owed: the helper reported, is gone, or the old path no longer owes its report', () => {
-      const { m, part } = handedOn()
-      // Owed, it is kept
-      expect(owed()).toBe(true)
-      m.service.report(part.id, { outcome: 'finished', body: 'tests written' })
-      expect(owed()).toBe(false)
-      const other = handedOn()
-      expect(owed()).toBe(true)
-      other.m.service.stops.partyGone(other.addr('helper'))
-      expect(owed()).toBe(false)
-      handedOn('helper3')
-      expect(owed()).toBe(true)
-      // The helper's report mark went (its turn ended with no host to report it): the old path owes nothing, so the task is not waited on
-      helperMarks.clear()
-      expect(owed()).toBe(false)
-    })
-
-    it('drops it when the work itself is over, whatever its helper does', () => {
-      const { m, work } = handedOn()
-      expect(owed()).toBe(true)
-      m.service.report(work.id, { outcome: 'stopped', reason: 'taken_over', body: 'dropped' })
-      expect(owed()).toBe(false)
-    })
-
-    it('keeps it for a session with no process too (asleep, or the host was quit): the work is the helpers’, and their report wakes it', () => {
-      const { m, part } = handedOn()
-      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-      expect(owed(new Set())).toBe(true)
-      // What its process held went with it
-      expect(store.settings.appSetting(pausedReportKey('kept-idle'))).toBeNull()
-      expect(lastHost.pausedReports.has('kept-idle')).toBe(false)
-      // With nothing owed, a session whose process was not kept loses its mark as it did
-      m.service.report(part.id, { outcome: 'finished', body: 'tests written' })
-      helperMarks.clear()
-      expect(owed(new Set())).toBe(false)
-      expect(store.children.listReportMarks()).toEqual([])
-    })
-
-    it('drops it when the caller is gone: nobody is left to be told', () => {
-      handedOn()
-      expect(owed()).toBe(true)
-      const withoutCaller = new Map([...sessions].filter(([id]) => id !== 'caller'))
-      expect(owed(kept, withoutCaller)).toBe(false)
-      expect(owed(new Set(), withoutCaller)).toBe(false)
-      // A kept session's pause on its own background work is dropped with it
-      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-      expect(owed()).toBe(true)
-      store.settings.setAppSetting(pausedReportKey('kept-idle'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-      expect(owed(kept, withoutCaller)).toBe(false)
-    })
-
-    it('does not keep it for a session that is in a turn and whose process was not kept: the turn was lost with the host', () => {
-      handedOn()
-      expect(owed(new Set())).toBe(true)
-      const working = new Map(sessions).set('kept-idle', at('kept-idle', 'working'))
-      expect(owed(new Set(), working)).toBe(false)
-    })
-
-    it('reads the newest task of the pair: an old one that is reported does not hide the new one that is owed', () => {
-      const { m, work } = handedOn()
-      m.service.report(work.id, { outcome: 'finished', body: 'landed' })
-      // Its helper's task is still unsettled, but it was handed on in work that is over
-      expect(owed()).toBe(false)
-      const next = handedOn('helper2', 'More work')
-      expect(next.work.id).not.toBe(work.id)
-      expect(owed()).toBe(true)
-    })
-  })
-
   it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {
     store.children.setDelegatedTurn('kept-working', 'caller', 'turn-1')
     store.children.setDelegatedTurnTold('kept-working', ['card-1'])
@@ -478,7 +303,7 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
 
 /*
  * Whose a turn is (#1377): recorded when it starts, from the message it started with, and read when it ends. The rows are
- * the issue's table; the host-level runs (paused-reports, report-marks) go through the manager.
+ * the issue's table; the host-level runs go through the manager.
  */
 describe('whose a turn is', () => {
   it("the person at rest: the next turn is theirs; none recorded or the CLI's own: the work's", () => {
@@ -554,14 +379,13 @@ describe('whose a turn is', () => {
 
   // The messages not yet taken in are read back from their rows (#1639, the test of a host that takes the session over below)
   it("the turn's starter is kept for the next host, and a pending list a build before #1639 kept beside it is not read", () => {
-    own.markReport('s', 'caller')
     own.noteMessage('s', 'work', false, true)
     own.turnStarted('s')
     own.noteMessage('s', 'person', true, true, 'held')
     expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'work' })
     store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'work', pending: [{ id: 'held', by: 'person' }] }))
     const next = new ChildOwnership(store)
-    next.adoptReport('s', 'caller', null)
+    next.adoptStarter('s')
     expect(next.starterOf('s')).toEqual({ by: 'work' })
   })
 
@@ -574,17 +398,13 @@ describe('whose a turn is', () => {
     expect(own.turnEnded('s')).toEqual({ by: 'person' })
   })
 
-  it('is kept in the store from its start, owed a report or not (#1946), read back by the next host, and dropped when the turn ends', () => {
+  it('is kept in the store from its start (#1946), read back by the next host, and dropped when the turn ends', () => {
     own.noteMessage('s', 'person', false, true)
     own.turnStarted('s')
     expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'person' })
-    own.markReport('s', 'caller')
     const next = new ChildOwnership(store)
-    next.adoptReport('s', 'caller', null)
+    next.adoptStarter('s')
     expect(next.starterOf('s')).toEqual({ by: 'person' })
-    // A report closed mid-turn leaves whose the turn is
-    own.clearReport('s')
-    expect(JSON.parse(store.settings.appSetting(reportTurnKey('s'))!)).toEqual({ by: 'person' })
     own.turnEnded('s')
     expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
   })
@@ -612,14 +432,13 @@ describe('whose a turn is', () => {
   })
 
   it("a turn's end takes its record down, and an unreadable one reads as nothing", () => {
-    own.markReport('s', 'caller')
     own.turnStarted('s')
     expect(store.settings.appSetting(reportTurnKey('s'))).not.toBeNull()
     own.turnEnded('s')
     expect(store.settings.appSetting(reportTurnKey('s'))).toBeNull()
     store.settings.setAppSetting(reportTurnKey('t'), 'not json')
     const next = new ChildOwnership(store)
-    next.adoptReport('t', 'caller', null)
+    next.adoptStarter('t')
     expect(next.starterOf('t')).toBeUndefined()
   })
 })
@@ -955,29 +774,27 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
       ({ sessionId: 's', seq, role: 'user' as const, kind: 'text' as const, payload: { text: 't', inputId, ...(from ? { from: { sessionId: from, name: from } } : {}) }, ts: 1 })
     beforeEach(() => seedSession())
 
-    it('a work turn the person wrote into stays the work’s, with the person noted: the caller’s report is not held back', () => {
+    it('a work turn the person wrote into stays the work’s, with the person noted', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
-      own.markReport('s', 'caller')
       own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       own.turnStarted('s')
       own.turnNamed('s', ['caller-1'])
       own.noteMessage('s', 'person', true, true, 'person-1', 'caller', 2)
       const next = new ChildOwnership(store)
-      next.adoptReport('s', 'caller', null)
+      next.adoptStarter('s')
       // The CLI names both at the end: the caller's it opened from, and the person's it took in at a tool round
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
     })
 
     it('a turn a build before #1948 kept as taken over by the person is decided by the opening the new host hears named', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c')])
-      own.markReport('s', 'caller')
       own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       own.turnStarted('s')
       // What that build's "Take it over" left in the store
       store.settings.setAppSetting('turn_inputs:s', JSON.stringify({ ...JSON.parse(store.settings.appSetting('turn_inputs:s')!), takenOver: true }))
       store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'person' }))
       const next = new ChildOwnership(store)
-      next.adoptReport('s', 'caller', null)
+      next.adoptStarter('s')
       next.turnNamed('s', ['caller-1'])
       expect(next.starterOf('s')).toEqual({ by: 'work' })
     })
@@ -993,16 +810,15 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     // Recheck of #1929, N1: the new host's first call is the person's message, whose row is already stored
     it('a message given first thing on the new host is marked as given into the turn, and kept so across another swap', () => {
       store.messages.appendMessages([user(1, 'caller-1', 'c'), user(2, 'person-1')])
-      own.markReport('s', 'caller')
       own.noteMessage('s', 'work', false, false, 'caller-1', 'caller', 1)
       // A card is up at the opening: it is not named
       own.turnStarted('s')
       const next = new ChildOwnership(store)
-      next.adoptReport('s', 'caller', null)
+      next.adoptStarter('s')
       next.noteMessage('s', 'person', true, true, 'person-1', 'caller', 2)
       expect(JSON.parse(store.settings.appSetting('turn_inputs:s')!)).toMatchObject({ marks: { 'person-1': 'joined' } })
       const third = new ChildOwnership(store)
-      third.adoptReport('s', 'caller', null)
+      third.adoptStarter('s')
       // Codex names nothing at the end: the person's message went into the work's turn
       expect(third.turnEnded('s', undefined)).toEqual({ by: 'work', wrote: true })
     })
@@ -1011,7 +827,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
     it('reads once what a build before #1639 left: the running turn’s pending messages', () => {
       store.settings.setAppSetting(reportTurnKey('s'), JSON.stringify({ by: 'work', pending: [{ id: 'person-1', by: 'person' }] }))
       const next = new ChildOwnership(store)
-      next.adoptReport('s', 'caller', null)
+      next.adoptStarter('s')
       expect(next.turnEnded('s', ['caller-1', 'person-1'])).toEqual({ by: 'work', wrote: true })
       // From here this build's own record is kept: the old list is read only once
       expect(store.settings.appSetting('turn_inputs:s')).not.toBeNull()
@@ -1049,7 +865,7 @@ describe('whose a turn is, by the inputs the tool names (#1639)', () => {
 
     it("keeps what was held before a delegated task's row the mailbox wrote (#1948 option B): the tool took it as mail", () => {
       store.messages.appendMessages([user(1, 'person-1'), { ...user(2, 'x'), payload: { text: 'use Chromium', from: { sessionId: 'c', name: 'caller' }, mail: true } }])
-      own.noteMessage('s', 'person', false, false, false, 'person-1', 'caller', 1)
+      own.noteMessage('s', 'person', false, false, 'person-1', 'caller', 1)
       const next = new ChildOwnership(store)
       next.turnStarted('s')
       expect(next.starterOf('s')).toEqual({ by: 'person' })

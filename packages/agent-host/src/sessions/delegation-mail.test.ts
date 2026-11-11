@@ -253,12 +253,31 @@ describe('a fork of a busy session', () => {
 })
 
 describe('the turn a child’s report starts in its caller', () => {
-  it('is a turn of its own kind, not a caller’s send, of no task', async () => {
+  it('is a mail turn of no task: the report answers a request, and is none', async () => {
     askAgents()
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
-    // The parent cannot read mail, so the old way tells it, and the notice starts its turn
+    const [task] = read.tasks(addr(parent), child)
+    handleOf(child)!.answer('done')
+    await w.until(() => read.reportsOn(task!.id).length === 1)
+    // The report is mail to the parent: its delivery, once due, starts the parent's turn
+    const due = wireHostMail(w.mgr, w.store, { now: () => Date.now() + 60_000 })
+    due.delivery.start()
+    try {
+      await due.delivery.process(addr(parent))
+      await w.until(() => (handleOf(parent)?.sent.length ?? 0) === 1)
+    } finally {
+      due.delivery.stop()
+    }
+    expect(turnsOf(w.store, parent).map((t) => [t.startedBy, t.messageId])).toEqual([['mail', null]])
+  })
+
+  it('a caller that cannot read mail is told the old way, and the notice starts a turn of its own kind, of no task', async () => {
+    askAgents()
+    const parent = await w.callerSession()
+    const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
+    const child = started.ok ? started.sessionId : ''
     const real = w.mgr.tools.toolProfileOf.bind(w.mgr.tools)
     vi.spyOn(w.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
     handleOf(child)!.answer('done')

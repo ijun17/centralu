@@ -8,7 +8,7 @@ import type { HostMail } from '../mail/host-mail.js'
 import { createRpcHandler } from '../rpc.js'
 import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
+import { ChildOwnership, OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -115,7 +115,7 @@ describe('a script starts a session with a first message', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ ...dev, status: 'completed' }] })
-      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
     } finally {
       vi.useRealTimers()
     }
@@ -162,10 +162,8 @@ describe('a script starts a session with a first message', () => {
 
   it("a report to the person the store cannot take is said on stderr, not left to reject: nobody waits for it", async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    const unpause = ChildOwnership.prototype.unpauseReport
-    const failing = vi.spyOn(ChildOwnership.prototype, 'unpauseReport').mockImplementation(function (this: ChildOwnership, id, kind) {
-      if (kind === 'person') throw new Error('the disk is full')
-      return unpause.call(this, id, kind)
+    const failing = vi.spyOn(ChildOwnership.prototype, 'unpausePersonReport').mockImplementation(() => {
+      throw new Error('the disk is full')
     })
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const rejected: unknown[] = []
@@ -197,16 +195,20 @@ describe('a script starts a session with a first message', () => {
     expect(owes(s.id)).toBe(true)
   })
 
-  it('a session that also owes a report to another session reports to that one, not to the person', async () => {
+  it('a session with a task from another session and one from the person answers each on its own: two requests, two reports', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = await w.callerSession()
     const started = await w.mgr.startAgent(parent, { task: 'long job', wait: false })
     const child = started.ok ? started.sessionId : ''
     personTask(child)
     handleOf(child)!.answer('done')
-    await w.until(() => read.reportsOn(read.tasks(addressOf(parent), child)[0]!.id).length > 0)
-    expect(reportsOf(child)).toEqual([])
-    expect(settledOf(child)).toBeNull()
+    const asked = read.tasks(addressOf(parent), child)[0]!
+    await w.until(() => read.reportsOn(asked.id).length > 0 && reportsOf(child).length > 0)
+    expect(read.reportsOn(asked.id).map((r) => r.facts.answer)).toEqual(['done'])
+    expect(read.row(read.reportsOn(asked.id)[0]!.id, PERSON)).toBeUndefined()
+    expect(reportsOf(child).map((r) => r.facts.answer)).toEqual(['done'])
+    expect(read.row(reportsOf(child)[0]!.id, PERSON)).toBeDefined()
+    expect(settledOf(child)).toBe('reported')
   })
 
   it('a turn the person starts while the task is still open is theirs, not the work’s: nothing is reported', async () => {

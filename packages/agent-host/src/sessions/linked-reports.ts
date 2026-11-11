@@ -3,30 +3,41 @@ import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type No
 import type { LinkedSessions } from '../adapters/contract.js'
 import { isQualifiedHubSender } from './hub-sender.js'
 import { linkedTurnEnd, turnSince } from './linked-turn-end.js'
-import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
+import { OWN_WORK_SETTLE_MS, type ChildOwnership, type LinkedReport, type TurnStarter } from './child-ownership.js'
 import { IN_PAUSE_REPORT, MACHINE_UNREACHABLE, NO_WORDS } from './ask-project.js'
 import { clipPreview } from './turn-answer.js'
-import { isPauseUpdate, type LaterTurn } from './pause-update.js'
 
-/** The person's part in a turn a report tells of (#1377), and what Centralu did to it: an update cut it (#1966), or stopped its work (#1912) */
-export type ReportPart = { wrote?: true; cut?: true; stoppedByUpdate?: true }
+/** The person's part in a turn a report tells of (#1377), and what Centralu did to it: an update cut it (#1966) */
+export type ReportPart = { wrote?: true; cut?: true }
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
 export type ReportWork =
-  /**
-   * `update` (#1540): not the first pause but a later turn of the paused work, which ended with a new answer while that work still runs. `since`:
-   * where that turn began in the conversation, read where its end was seen; the mailbox names the update by it (`TurnReport.update`)
-   */
-  | { paused: readonly BackgroundTask[]; stoppable: boolean; update?: { since?: number } }
-  /** `byUpdate` (#1912): an update of Centralu stopped the work the report paused on, and no turn of the session followed */
-  | { settled: readonly BackgroundTask[]; byUpdate?: true }
+  /** `update` (#1540): not the first pause but a later turn of the paused work, which ended with a new answer while that work still runs */
+  | { paused: readonly BackgroundTask[]; stoppable: boolean; update?: true }
+  | { settled: readonly BackgroundTask[] }
   | { linkLost: string; paused: readonly BackgroundTask[]; asRead?: true }
   /** The machine was removed from Centralu: `paused`, the work its turn ended with; absent, a turn still running */
   | { machineRemoved: string; paused?: readonly BackgroundTask[]; asRead?: true }
-  /** Its turn ended while the host was handed over (#1186): whether that turn was the work given is not known */
-  | { swapped: true }
-  /** Its turn ended while threads it handed on are still going (§6): the work is paused on them, and the report stays owed */
-  | { waitingOn: number }
+
+/** A later turn of work whose report is paused on the session's own background work, as a linked machine's report knows it (#1540) */
+export type LaterTurn = {
+  /** Centralu's own turn to compact the conversation */
+  compaction?: boolean
+  /** A message no session sent went into it: the person's, an app's or a script's. Such a turn may be theirs though it reads as the work's */
+  othersWrote?: boolean
+  /** The person wrote to the session since it owed the report: which of its turns are theirs cannot always be told, and their words are not the caller's */
+  personWrote?: boolean
+}
+
+/**
+ * Whether a later turn of paused work is an update its caller hears at once (#1540): one that said something of its own, in the work's own turn.
+ * A turn with no words (a Monitor's look), Centralu's compaction, a turn others wrote into, and every turn once the person wrote to the session tell
+ * nothing; the final report still comes when the work ends. A linked machine's children's rule, until mail crosses links (#1948 step 6); this host's
+ * children answer with their last response (docs/plans/mailbox.md §10.6.3)
+ */
+export function isPauseUpdate(turn: LaterTurn, words: string): boolean {
+  return !turn.compaction && !turn.othersWrote && !turn.personWrote && words.trim() !== ''
+}
 
 /**
  * What the linked machines' reports reach (#428): the manager's members they read, with getters for its fields, so
@@ -117,11 +128,11 @@ export type LinkedEvent = {
  * The Assistant's reports from a linked machine's sessions (#82 phase 4, `reportBack` on `send_to_session`), and
  * the work a session there ends its turn with (#723).
  *
- * The end of a turn the Assistant waits on is its report, once, as `reportBackIfAwaited` does for this host's own
- * sessions. A turn that **completes** while the session's own background work still runs there (the machine's
+ * The end of a turn the Assistant waits on is its report, once, as this host's own sessions' reports were before #1948
+ * step 3 (this host's are now the mailbox's, docs/plans/mailbox.md §10.6.3; this path stays until mail crosses links). A turn that **completes** while the session's own background work still runs there (the machine's
  * `background_tasks`, timers left out) is a pause, by the same rules as here (#721): the Assistant is told once that
  * the work paused, and the report stays owed until a turn ends with none of that work left. If the work ends and no turn
- * follows within `PAUSED_REPORT_SETTLE_MS`, the report goes out with how each task ended; if the machine's link drops
+ * follows within `OWN_WORK_SETTLE_MS`, the report goes out with how each task ended; if the machine's link drops
  * or the machine is removed first, it goes out saying so, since the hub would not see the work's end.
  */
 export class LinkedReports {
@@ -247,7 +258,7 @@ export class LinkedReports {
       this.host.children.setLinkedReport(sessionId, wait)
       // Told already: a later turn with a new answer is an update, at once (#1540), by the rule this host's own children follow (`isPauseUpdate`)
       const later: LaterTurn | undefined = told ? { compaction: compacted(e.turn), othersWrote: !!turn.wrote, personWrote: this.personWrote.has(wait) } : undefined
-      if (!(told && callTook)) void this.report(sessionId, wait.assistantId, e, { paused: running, stoppable: false, ...(told ? { update: {} } : {}) }, undefined, partOf(turn), false, wait, later)
+      if (!(told && callTook)) void this.report(sessionId, wait.assistantId, e, { paused: running, stoppable: false, ...(told ? { update: true as const } : {}) }, undefined, partOf(turn), false, wait, later)
       return
     }
     this.drop(sessionId)
@@ -352,7 +363,7 @@ export class LinkedReports {
 
   /**
    * A paused report whose work has ended with no turn running there: the turn that ending starts reports it, and if
-   * none starts within `PAUSED_REPORT_SETTLE_MS` the report goes out as the work's end. Each change of the work starts
+   * none starts within `OWN_WORK_SETTLE_MS` the report goes out as the work's end. Each change of the work starts
    * the wait again.
    */
   private settleLater(sessionId: string, wait: LinkedReport): void {
@@ -364,7 +375,7 @@ export class LinkedReports {
       if (!quiet() || this.host.closing) return
       console.error(stamped(`[links] ${sessionId}: its background work ended and no turn followed; reporting the work as ended`))
       this.settle(sessionId, wait)
-    }, PAUSED_REPORT_SETTLE_MS)
+    }, OWN_WORK_SETTLE_MS)
     timer.unref?.()
     this.settling.set(sessionId, timer)
   }

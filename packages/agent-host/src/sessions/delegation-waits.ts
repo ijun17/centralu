@@ -17,7 +17,7 @@ export type TurnWait =
   | { kind: 'handedOver'; owner: string }
   /** Cards wait on the caller (#676) */
   | { kind: 'asking'; cards: RoutedCard[] }
-  /** Woken by a card that is no longer standing */
+  /** Woken by a card that is no longer standing, or the turn ended asking to compact with a next step: the work goes on */
   | { kind: 'working' }
   | { kind: 'bound' }
   /** The call was cancelled: the turn was stopped, or left running when it was another's or the person's */
@@ -34,11 +34,10 @@ export class DelegationWaits {
   constructor(private readonly host: DelegationHost) {}
 
   /**
-   * "Working": the caller is told when the turn ends (#561), through the report the Assistant's reportBack uses, unless
-   * a call is waiting on it by then (`awaitAgent` takes the marker down while it waits)
+   * "Working": the caller's task stays open, and the child's reply or its last response answers it once it is at rest (#561, docs/plans/mailbox.md
+   * §10.6.3), unless a call reads the answer first
    */
-  agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {
-    if (arm && !observing) this.host.children.markReport(d.sessionId, d.callerId)
+  agentWorking(d: Delegation, observing = false): ChildRunResult {
     const notice = d.notice()
     const progress = progressOf(this.host.store.messages, d.sessionId)
     return {
@@ -47,7 +46,7 @@ export class DelegationWaits {
       sessionId: d.sessionId,
       sessionName: this.host.meta.get(d.sessionId)?.name ?? d.sessionId,
       tool: this.host.meta.get(d.sessionId)?.tool ?? '',
-      reported: !observing && this.host.children.awaitingReport.get(d.sessionId) === d.callerId,
+      reported: !observing,
       ...(notice ? { notice } : {}),
       ...(progress ? { progress } : {}),
     }
@@ -55,8 +54,6 @@ export class DelegationWaits {
 
   /** The owner's view of its delegated turn waiting on cards (#676), for start_agent and agent_session */
   agentAsking(d: Delegation, cards: RoutedCard[]): ChildRunResult {
-    // Told when it ends, as a wait past its bound is: the answer to the card lets the turn go on without this call
-    this.host.children.markReport(d.sessionId, d.callerId)
     return { ok: true, state: 'asking', sessionId: d.sessionId, sessionName: this.host.meta.get(d.sessionId)?.name ?? d.sessionId, tool: this.host.meta.get(d.sessionId)?.tool ?? '', cards }
   }
 
@@ -65,7 +62,7 @@ export class DelegationWaits {
     return clipAnswer(answer, name, answerAt(this.host.store.messages, sessionId, answer))
   }
 
-  /** A child with nothing of the caller's running: its last final answer (#561), and a report it still owes (#721) */
+  /** A child with nothing of the caller's running: its last final answer (#561), and its own background work still running (#721) */
   agentAtRest(child: SessionInfo, callerId?: string): ChildRunResult {
     const notice = callerId ? this.pausedNotice(child.id, callerId) : undefined
     // It reads the last answer: the reports of that turn the mailbox holds for the caller are read with it
@@ -85,18 +82,15 @@ export class DelegationWaits {
   }
 
   /**
-   * What the caller reads of a child whose report is held over its own background work (#721): the answer it has is
-   * from a turn that paused, and the end is still to be told.
+   * What the caller reads of a child whose own background work still runs (#721): the answer it has is from a turn that ended while that work
+   * runs, and its last response answers the caller's task only once that work has ended (docs/plans/mailbox.md §10.6.3)
    */
   private pausedNotice(childId: string, callerId: string): string | undefined {
-    if (!this.host.children.pausedReports.has(childId) || this.host.children.awaitingReport.get(childId) !== callerId) return undefined
     const running = this.host.ownTasksRunning(childId)
-    if (!running.length) {
-      return `The background work its turn ended with has ended (${taskList(this.host.pausedTasksNow(childId), true)}); a final report follows when a turn ends the work, or within a minute.`
-    }
+    if (!running.length) return undefined
     return (
       `Its own background work is still running (${taskList(running)}). If that work is a server or watcher it leaves running, ` +
-      'this answer may be its final one; a final report follows only if that work ends. ' +
+      'this answer may be its final one; its last response answers your task only once that work ends. ' +
       `${namedCall(this.host.toolProfileOf(callerId), 'agent_session', { action: 'stop' })} on it stops that work and ends the wait.`
     )
   }
@@ -137,6 +131,8 @@ export class DelegationWaits {
       if (r === 'bound') return { kind: 'bound' }
       if (!observing) this.host.children.dropDelegation(key, d)
       if (!r.ok) return { kind: 'failed', error: r.error }
+      // A turn that asked to compact with a next step is not the work's end (#2164): the step's turn goes on with it, and answers as at rest (§10.6.3)
+      if (this.host.selfCompaction.goesOn(d.sessionId)) return { kind: 'working' }
       return { kind: 'done', answer: r.answer ?? turnAnswer(this.host.store.messages.loadMessages(d.sessionId, 50)) }
     } finally {
       card?.done()
@@ -161,11 +157,7 @@ export class DelegationWaits {
 
   /** Waits on a child's turn up to the bound (#561), as `awaitTurn` does, and reads its outcome for the caller */
   async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false, boundMs = ASK_WAIT_MS): Promise<ChildRunResult> {
-    // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
-    // A report held over the child's own background work (#721) is the work's end, still to come: reading the paused
-    // turn's answer does not take it
-    if (!observing && this.host.children.awaitingReport.get(d.sessionId) === d.callerId && !this.host.children.pausedReports.has(d.sessionId)) this.host.children.clearReport(d.sessionId)
-    const endedBefore = d.settled
+    // Only the owner consumes its answer and grants. Auto observers have their own bound and cancellation
     const name = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
     const r = await this.awaitTurn(key, d, { signal, boundMs, observing, stopWhy: 'the call that started it was cancelled' })
     switch (r.kind) {
@@ -174,11 +166,11 @@ export class DelegationWaits {
       case 'asking':
         return this.agentAsking(d, r.cards)
       case 'working':
-        return this.agentWorking(d)
+        return this.agentWorking(d, observing)
       case 'cancelled':
         return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
       case 'bound':
-        return this.agentWorking(d, !observing, observing)
+        return this.agentWorking(d, observing)
       case 'failed':
         if (!observing) this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
         return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
@@ -188,19 +180,10 @@ export class DelegationWaits {
       tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: this.clipped(d.sessionId, r.answer, name()), readable: [], outside: [],
     }
     const { granted, outside } = this.grantReads(d.callerId, r.answer, d.target.path)
-    /*
-     * The turn this call saw end left background work of the child's own running (#721): the caller reads the answer
-     * now, and the report is held for the work's end, with no separate notice of the pause
-     */
-    const left = this.host.ownTasksRunning(d.sessionId)
-    if (!endedBefore && !this.host.children.pausedReports.has(d.sessionId) && left.length) {
-      this.host.children.markReport(d.sessionId, d.callerId)
-      this.host.pauseReport(d.sessionId, left)
-    }
     const notice = this.pausedNotice(d.sessionId, d.callerId)
     const child = this.host.meta.get(d.sessionId)
-    // The call returned the answer: it is the report, unless the turn left the child's own background work running (that report is still to come)
-    this.host.children.answered(d.callerId, d.sessionId, this.host.children.pausedReports.has(d.sessionId) ? undefined : { ok: true, text: r.answer })
+    // The call returned the answer: it answers the task, unless the turn left the child's own background work running (its last response answers it once that work ends)
+    this.host.children.answered(d.callerId, d.sessionId, notice ? undefined : { ok: true, text: r.answer })
     return {
       ok: true,
       state: 'done',
