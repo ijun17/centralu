@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './fixtures/control.js'
 
 /**
- * The prompt cache in the usage gauge (docs/agent-host.md §6.1): one line in the donut's tooltip, and the breakdown in
+ * The prompt cache in the usage gauge (docs/agent-host/prompt-cache.md): one line in the donut's tooltip, and the breakdown in
  * the dropdown its click opens. The figures are the mock's, as a host would answer them; how a host counts them is
  * unit-tested where it is done (`cache-ledger.test.ts`, the adapters' normalize tests).
  */

@@ -1238,7 +1238,7 @@ gap, retries, the crowd after a long stop, `MailNotAtRest` and `ReceiverState` a
      3. the rest.
    - At most one task per wake, and for the orchestrator one asker. The other work waits for the next turn.
    - **Not a wake of the mailbox:** the note an update's stop makes the next host send, to continue a cut turn or to tell a session
-     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host.md §4.8), goes in through
+     at rest which background tasks the stop ended (`continueCutTurns`, docs/agent-host/lifecycle/continue-after-update.md), goes in through
      `deliverMail` and not through `drain`, so it is not mail-started: no `MailTurns.begin`, no `turn_seq` on any row, and the
      tool starts the turn it runs on its own, so it is recorded as the CLI's own turn (`turnStarted`, `cli: true`), not as a mail's (#1902).
      Everything else rides along.
@@ -2082,7 +2082,7 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 
 - A test that a slice adds for a behaviour change fails on main. The slice says which.
 - `pnpm verify` passes.
-- Documents change in the same PR: `docs/domain-model.md` §2.5, `docs/stored-shapes.md`, `docs/agent-host.md`,
+- Documents change in the same PR: `docs/domain-model.md` §2.5, `docs/stored-shapes.md`, `docs/agent-host/lifecycle/turn-endings-and-mail.md`,
   `docs/security-boundaries.md`, `docs/tool-cost.md` §13 and `docs/protocol.md`, wherever the slice changes what they
   say.
 - Code comments that cite this file's old section numbers are updated to these.
@@ -2547,7 +2547,7 @@ and passes on its own; the stack lands together.
   mock (`platform/src/mock/mail.ts`, served from a message list).
 - **Documents:** `security-boundaries.md`, the mailbox paragraph (reach, the one hold, the refused delegations, the
   guards, and §1.6's accepted gaps);
-  `agent-host.md` (delegations write tasks; the old paths are the truth until M8); `domain-model.md` §2.5.
+  `agent-host/lifecycle/turn-endings-and-mail.md` (delegations write tasks; the old paths are the truth until M8); `domain-model.md` §2.5.
 
 **`MailToolHost`** (in `tool.ts`, implemented by the manager in `main.ts`):
 

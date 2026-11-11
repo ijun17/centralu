@@ -32,7 +32,7 @@ const ADAPTERS = join(ROOT, 'packages/agent-host/src/adapters')
  * cheapest model), and between them every kind of frame a session lives on and every kind the adapter branches on that a short
  * run brings: a plain turn, a tool call the person approves, the model's thinking or reasoning, an interrupt, a background
  * agent (`system:task_*`, `system:background_tasks_changed`), a compaction (`system:compact_boundary`) and an app's MCP server
- * in the host (`control_request:mcp_message`). docs/agent-host.md §3 says what no canary scenario brings
+ * in the host (`control_request:mcp_message`). docs/agent-host/adapters/adding-a-tool.md says what no canary scenario brings
  */
 export const CANARY: Record<string, readonly string[]> = {
   claude: ['basic', 'approval', 'thinking', 'interrupt', 'background-agent', 'compact', 'mcp-app'],

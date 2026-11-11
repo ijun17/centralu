@@ -116,7 +116,7 @@ describe('CacheLedger', () => {
 })
 
 /*
- * Why each rebuild happened (docs/agent-host.md §6.1): from what the host was told between the conversation's last
+ * Why each rebuild happened (docs/agent-host/prompt-cache.md): from what the host was told between the conversation's last
  * request and this one, strongest evidence first, then the idle time against the lifetime the API reported.
  */
 describe('CacheLedger rebuild causes', () => {

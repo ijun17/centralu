@@ -337,7 +337,7 @@ export const sessionsParams = {
    */
   'agents.models': z.object({ tool: ToolName, ...machineParam }),
   /**
-   * Limit readings and tokens over time, as this host stored them (docs/agent-host.md §6.2): each window's percent per
+   * Limit readings and tokens over time, as this host stored them (docs/agent-host/usage.md "Usage over time"): each window's percent per
    * tool and account, and the hourly token buckets summed by day or hour and by session, project, model or tool.
    * Read-only. The hub asks a linked machine with `machine`; each host keeps its own record.
    */

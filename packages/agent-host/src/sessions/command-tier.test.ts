@@ -206,7 +206,7 @@ describe('the commands tier', () => {
   })
 })
 
-describe('usage_history (docs/agent-host.md §6.2)', () => {
+describe('usage_history (docs/agent-host/usage.md "Usage over time")', () => {
   const history = { by: 'session' as const, readings: [], rows: [] }
 
   it('is a rare command of the Assistant alone: listed in centralu_commands, not a tool in every request', async () => {

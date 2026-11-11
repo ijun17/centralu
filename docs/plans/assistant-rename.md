@@ -24,7 +24,7 @@ Measured on 2026-11-09 at 05e8f7a: 5,751 occurrences in about 530 files (327 in 
 ## 2. The rule this follows
 
 - **Stored values.** A rename of a column, key or stored value is a contract step: it lands one release after the
-  code stopped reading and writing the old form ([agent-host.md](../agent-host.md) §5.1). Before that, an expand step can
+  code stopped reading and writing the old form ([agent-host/store-migrations.md](../agent-host/store-migrations.md#migration-steps-expand-then-contract-292)). Before that, an expand step can
   add the new form. The code reads both forms and keeps writing the old one, so the previous release still finds
   what it knows.
 - **Wire values.** The protocol takes additions only. A linked machine of an earlier release parses `SessionKind` with

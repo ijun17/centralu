@@ -10,7 +10,7 @@ Centralu session runs it, how its stream maps onto our events, how approvals rea
 ask, and how it is tested from recorded frames (#1498). `agy` has no Agent Client Protocol (ACP) surface, so it gets
 its own adapter; it takes the tool-neutral parts of the ACP work ([acp-adapter.md](acp-adapter.md), branch
 `feat/acp-cursor`) instead of designing them again ([§11](#11-what-is-taken-from-the-acp-work)). A record like the rest
-of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) §2–3 gains the lasting parts in the same pull
+of `plans/`, so not mirrored in Korean; [agent-host/adapters/README.md](../agent-host/adapters/README.md) gains the lasting parts in the same pull
 request as the code.
 
 Owner rule (2026-10-26, #59): Centralu runs only the official CLI and never reads, copies or reuses its login. The
@@ -224,7 +224,7 @@ the "not logged in" case; real turns run against the person's real `agy` state.
 adapters/agy/
   index.ts          AgyAdapter implements AgentAdapter: detect, models, usage, capabilities
   session.ts        AgySession implements SessionHandle: the process, the input queue, interrupt, resume, teardown
-  stream.ts         stream-json lines → our own narrow types (anti-corruption, agent-host.md §2)
+  stream.ts         stream-json lines → our own narrow types (anti-corruption, agent-host/adapters/contract.md)
   normalize.ts      step_update / result / stderr → NormalizedEvent (a small per-turn context)
   gate.ts           the host side of the PreToolUse gate: hook request → approval card → decision
   plugin-root.ts    writes the per-session --add-dir root (§3.2)
@@ -472,7 +472,7 @@ text has a path (open question 4).
 
 | | Why |
 |---|---|
-| Import and history (`listExternalSessions`, `readExternalHistory`) | the only sources are `agy`'s own files (`conversation_summaries.db`, `brain/<id>/…/transcript_full.jsonl`); agent-host.md §8.1 rules out parsing a tool's undocumented files. No CLI command lists or reads conversations |
+| Import and history (`listExternalSessions`, `readExternalHistory`) | the only sources are `agy`'s own files (`conversation_summaries.db`, `brain/<id>/…/transcript_full.jsonl`); agent-host/importing-sessions.md "Principle: use only official APIs" rules out parsing a tool's undocumented files. No CLI command lists or reads conversations |
 | `deleteExternalConversation` | no CLI command |
 | Reasoning text | not streamed; `thinking_tokens` only |
 | Sleep (`sleep`) | resume works, but whether a resumed process reads the prompt cache was not measured (a resumed turn showed `cache_read_tokens: 0`); false until measured |
@@ -604,7 +604,7 @@ so it is run by hand before an `agy` bump, not on a schedule. The weekly surface
       with each preset proved by a live run; its inbound path is the front door's gate route (§5.1, stacked on the core's PR 3) and its card on
       PR 5 and 8.
 
-   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host.md §2–3.
+   Then the session wiring, detect and usage, `agy-gate.mjs` in the bundle, and agent-host/adapters/README.md.
 2. **Models and effort, sub-agent progress, nudges** through `PreInvocation`, if measured useful.
 3. **Windows**: launch, `cmd /c` hooks, paths in the plugin root; measured on the Windows machine with its own login.
 4. **The drift check** in the weekly surface run.

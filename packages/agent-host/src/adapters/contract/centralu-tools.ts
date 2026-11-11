@@ -825,7 +825,7 @@ export type CentraluTools = {
   ): Promise<HandoffResult>
   /**
    * What this computer stored of the limit windows and of the tokens per hour over the last `days` days (usage
-   * over time, docs/agent-host.md §6.2), by session, project, model or tool. The Assistant's; counts only.
+   * over time, docs/agent-host/usage.md "Usage over time"), by session, project, model or tool. The Assistant's; counts only.
    */
   usageHistory?(spec: { days: number; by: 'session' | 'project' | 'model' | 'tool' }): Promise<UsageHistory>
   /**

@@ -487,7 +487,7 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   with its `sandbox` set first, then gives it the app's HTML through `srcdoc`. Under the keeper the
   address names the front door's port and a secret derived from the keeper's token, and open
   instances are handed to the next host, so a view stays as it was across a build switch
-  ([agent-host.md](agent-host.md) §4.2). A linked machine's view is served the same way by the hub,
+  ([agent-host/lifecycle/front-door.md](agent-host/lifecycle/front-door.md)). A linked machine's view is served the same way by the hub,
   from the machine's raw document and with the hub's own per-app origin ports, so storage stays
   apart per app and per machine in the one window that renders them all
   ([plans/remote-hub.md](plans/remote-hub.md) §11).
@@ -964,7 +964,7 @@ Attachments count only while the session holds the reader set, which every ordin
 Settings switch that took it away, and with it the attached apps and the ones allowed "once" (#382), is gone (owner
 decision 2026-10-20, always on).
 
-**The tools** (a project's ordinary session, beside the reader set; agent-host.md §1.1; the Assistant's as commands):
+**The tools** (a project's ordinary session, beside the reader set; agent-host/tool-profiles.md; the Assistant's as commands):
 
 | Tool | Does | Result names |
 |---|---|---|

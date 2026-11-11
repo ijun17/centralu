@@ -50,7 +50,7 @@ function resolveSchemaPath(): string {
 const SCHEMA_PATH = resolveSchemaPath()
 
 /**
- * The dev-only store (docs/agent-host.md §5). Replaced by rusqlite once the app moves to
+ * The dev-only store (docs/agent-host/store-migrations.md). Replaced by rusqlite once the app moves to
  * Tauri; the schema file (protocol/src/schema/schema.sql) is shared as-is.
  */
 export class Store extends MigrationRunner {
@@ -77,7 +77,7 @@ export class Store extends MigrationRunner {
   /** Mail without threads: messages and each recipient's row (#1684, v65). Read by nothing yet (docs/plans/mailbox.md M1) */
   readonly mailbox: MailboxRecords
   readonly machines: LinkedMachineRecords
-  /** Limit readings and tokens per hour, kept for the usage history (docs/agent-host.md §6.2) */
+  /** Limit readings and tokens per hour, kept for the usage history (docs/agent-host/usage.md "Usage over time") */
   readonly usage: UsageRecords
   /** User-folder apps registered as projects in place (#1141) */
   readonly adoption: UserAppAdoptionRecords

@@ -136,7 +136,7 @@ export class ProjectRecords {
 
   /**
    * Sets the trunk, keeping the slot's session id when there is one, so an older build still finds the manager it made
-   * there (agent-host.md §5.1: the shape is expanded, not changed)
+   * there (agent-host/store-migrations.md "Migration steps: expand, then contract": the shape is expanded, not changed)
    */
   setWorktreeTrunk(projectId: string, baseBranch: string): void {
     this.setWorktreeManager(projectId, { sessionId: this.worktreeManager(projectId)?.sessionId ?? '', baseBranch })

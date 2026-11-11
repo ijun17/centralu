@@ -3,7 +3,7 @@ import { isObj } from '../json-value.js'
 import type { OsFiles } from '../os/port.js'
 
 /**
- * The terminals and Run commands an update's stop ends (#1902 part B, docs/agent-host.md §4.8), kept in the update-resume list
+ * The terminals and Run commands an update's stop ends (#1902 part B, docs/agent-host/lifecycle/continue-after-update.md), kept in the update-resume list
  * beside the turns (`update-resume.ts`) so the next host brings them back. Recorded by the stopping host in its first step, before
  * the shells are killed (`stopPlan`); they are no session's, so there is no conversation mark: the list is the host's own and is
  * taken whole, once, by the first host that starts after it (`UpdateResumeLists.takeEnded`). Only what opening them again needs is

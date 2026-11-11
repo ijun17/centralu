@@ -56,7 +56,7 @@ const RETRY_MS: [number, number] = [2_000, 5 * 60_000]
 /**
  * How many times the client dials the forward again after a drop before the link reads the connection line instead
  * (`RemoteClientOptions.redials`, #1143). From 200 ms, doubling, about 6 s in all: a blip, or a host swapped in place
- * there (about 1 s, docs/agent-host.md), is back within them and keeps the event cursor. Past them the question is
+ * there (about 1 s, docs/agent-host/remote/link-states.md), is back within them and keeps the event cursor. Past them the question is
  * whether a host still runs there, which costs an ssh command, and its answer may start one
  */
 const LINK_REDIALS = 5

@@ -4,7 +4,7 @@ import { isObj } from '../json-value.js'
 
 /**
  * What an update's stop ends in a session besides its turn, told to the agent when the next host starts (#1902,
- * docs/agent-host.md §4.8): the background tasks its process held and the cards that waited for the person. All of it dies
+ * docs/agent-host/lifecycle/continue-after-update.md): the background tasks its process held and the cards that waited for the person. All of it dies
  * with the process, and none of it is anything the person chose, so the agent is told which, in Centralu's own note, and
  * decides what to start or ask again. Kept in the update-resume list beside the turns (`update-resume.ts`).
  */

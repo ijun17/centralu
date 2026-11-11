@@ -59,6 +59,10 @@ them is what later decisions rest on.
 
 - Change the design, fix the document **in the same PR as the code.** If the document
   and the code disagree, the document is the one that is wrong.
+- A rule document stays under about 200 lines. A bigger subject is a folder of sub-documents, one per module or
+  concern, with a short `README.md` index that lists every file in it (#2179). A reference names the sub-document:
+  `docs/agent-host/usage.md "Usage over time"` in code, a link with the heading's anchor in a document; never the
+  folder's old file name. `tooling/doc-refs.test.ts` fails on one that points at nothing.
 - Every "decision" table carries its reasoning. A decision with no reasoning behind it is
   a decision to revisit.
 - Comments and docs record **why**, not what — especially anything learned by measuring,

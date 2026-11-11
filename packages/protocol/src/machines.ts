@@ -371,7 +371,7 @@ export const MachineAutostartResult = z.object({ machine: MachineInfo, autostart
 export type MachineAutostartResult = z.infer<typeof MachineAutostartResult>
 
 /**
- * What would stop if a host stopped now (the `hostBusy` rule, docs/agent-host.md): its live sessions
+ * What would stop if a host stopped now (the `hostBusy` rule, docs/agent-host/lifecycle/updates.md): its live sessions
  * that are working, waiting on an approval, asking a question, or running background work, its open
  * terminals and its running project commands. `host.activity` answers it about one host. A remote
  * host has no keeper today (plan §10.4), so stopping it ends all of these

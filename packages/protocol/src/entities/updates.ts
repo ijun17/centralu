@@ -99,7 +99,7 @@ export const AgentVersions = z.object({
 export type AgentVersions = z.infer<typeof AgentVersions>
 
 /**
- * When the host puts an idle session to sleep (#568, docs/agent-host.md §4.6.1). Each session runs its own agent process
+ * When the host puts an idle session to sleep (#568, docs/agent-host/lifecycle/agent-cli-updates.md "Putting idle sessions to sleep"). Each session runs its own agent process
  * (a Claude process was 240-300 MB after a few turns and kept growing while idle, #561); a session that has been idle
  * this long has its process ended and stays listed, asleep, until a message or its composer wakes it.
  *

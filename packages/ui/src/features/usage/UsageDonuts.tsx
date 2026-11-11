@@ -573,7 +573,7 @@ function Donut({
             </span>
           )}
           {/*
-            The prompt cache in one line (docs/agent-host.md §6.1), from the answer the donut already asked for: the
+            The prompt cache in one line (docs/agent-host/prompt-cache.md), from the answer the donut already asked for: the
             detail below the donut breaks it down. Absent when the host did not count it (one that predates it).
           */}
           {!signedOut && cacheLine && (

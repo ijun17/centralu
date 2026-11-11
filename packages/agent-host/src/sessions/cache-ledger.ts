@@ -4,7 +4,7 @@ import { cacheCost } from './cache-cost.js'
 import type { CacheSessionStats, CacheStats, CacheWindowStats, RebuildCause, RequestInput, ToolName } from '@cc/protocol'
 
 /**
- * What the prompt cache did lately, per tool (docs/agent-host.md §6.1).
+ * What the prompt cache did lately, per tool (docs/agent-host/prompt-cache.md).
  *
  * One entry per model request, as the adapters report them (`usage_update.request`). Kept **in memory**: the window
  * is hours, a restart loses only what the screen then says it does not know ("since 14:02"), and a table would be a
@@ -243,7 +243,7 @@ export class CacheLedger {
 }
 
 /**
- * The likely cause of a rebuild, strongest evidence first (docs/agent-host.md §6.1):
+ * The likely cause of a rebuild, strongest evidence first (docs/agent-host/prompt-cache.md):
  *
  * 1. what the host was told happened since the conversation's last request (`NOTED`, in that order), and a subagent's
  *    first request;

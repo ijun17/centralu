@@ -67,7 +67,7 @@ const MIRRORED_KEY = 'links.mirrored.'
  * the default, and `when_needed` for off. No new migration step: the column already holds exactly this, so a machine
  * that connected when needed reads back with the switch off, and an older build still serving during a host swap reads the
  * same value as it always did (a machine with the switch off is parked at its start there, and is connected by Connect).
- * A later release may add a column named for the switch and drop this one (add first, remove later, docs/agent-host.md)
+ * A later release may add a column named for the switch and drop this one (add first, remove later, docs/agent-host/store-migrations.md)
  */
 const connectColumn = (autoReconnect: boolean | undefined): string | null => (autoReconnect === false ? 'when_needed' : null)
 

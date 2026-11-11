@@ -100,7 +100,7 @@ export async function startDetached({ how, execPath, args, env, cwd }) {
  * `hostRunning: true` and `detach: { ok: true, how, already }`, or `{ v: 1, detach: { ok: false,
  * how, reason, message } }`. `reason` is `wmi_blocked` when WMI created nothing or created something
  * that never ran, which the hub answers with a link-bound start; `exited` and `timeout` quote the
- * end of serve.log. Exit codes do not survive Windows' ssh (agent-host.md §4.8), so the line is
+ * end of serve.log. Exit codes do not survive Windows' ssh (agent-host/remote/hub-links.md), so the line is
  * what counts; the exit code is 0 or 1 for a person at a prompt.
  *
  * `start` and the two waits are parameters so tests can stand in for WMI.

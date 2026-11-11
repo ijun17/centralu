@@ -865,7 +865,7 @@ describe('approval decision mapping (the ones we use, out of the six confirmed i
 })
 
 /*
- * Prompt cache accounting (docs/agent-host.md §6.1): the request a token usage notification closes is `last`, once.
+ * Prompt cache accounting (docs/agent-host/prompt-cache.md): the request a token usage notification closes is `last`, once.
  * Codex sends the count again with other updates; a repeat has the same `total`.
  */
 describe('CodexRequestInputs', () => {

@@ -9,7 +9,7 @@ import type { SettingsRecords } from './settings.js'
  * `_user/<id>` to `<project id>/<id>`. The files it keeps (data, logs, versions, secrets) are the app runtime's to carry
  * (`ExternalApps.carryAppState`); the host's adoption (`user-app-adoption.ts`) runs both.
  *
- * **Expand only** (docs/agent-host.md §5.1): no table or column changes, and every row a previous build reads stays
+ * **Expand only** (docs/agent-host/store-migrations.md "Migration steps: expand, then contract"): no table or column changes, and every row a previous build reads stays
  * readable to it. What it reads by the old key is copied where a copy is possible (grants, the builder map entry, the
  * view origin port, a window's span); what is one row per thing moves to the project, where the previous build still
  * reads it under that project (runs, the app's sessions, attachments, grid panels). Run twice, it changes nothing the

@@ -86,7 +86,7 @@ full tier on Linux showed.
 drain check) resolves to the project's root app (`ExternalApps.resolve`), with its trust and rules, while
 the user folder has no app of that id and the project still exists; it answered "no such app" before.
 
-**A previous build during a swap** (agent-host.md §5.1) still finds the folder in `<data>/apps/` and
+**A previous build during a swap** (agent-host/store-migrations.md "Migration steps: expand, then contract") still finds the folder in `<data>/apps/` and
 keeps working on the `_user` copies, which this build leaves in place; it shows the app's sessions under
 the new project and misses the runs moved to it. No table or column changes. Removing the `_user`
 copies is a later release's step.

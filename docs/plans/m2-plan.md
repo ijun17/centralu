@@ -232,7 +232,7 @@ Documents that went stale because of M1.5 decisions (keeping WS, deferring the g
 cleaned up together with this plan's own decisions:
 
 - The "code to throw away" comment in `dev-services/git.ts` — corrected **before starting**, since B-1 grows this file 6×
-- `docs/agent-host.md` §5 (the `--dev-services` flag does not exist; an error from describing the fs service ahead of building it)
+- `docs/agent-host/store-migrations.md` (the `--dev-services` flag does not exist; an error from describing the fs service ahead of building it)
 - `docs/platform-abstraction.md` §5, the status of steps 4–6 (mark them as deferred)
 - `docs/product-spec.md`: the FR-4 "Rust git2" implementation wording, FR-5 "M/A/U **colour**"
   (conflicts with the achromatic decision), the B-4 checkout behaviour, and the "bundled binary" comment in `sidecar.rs`

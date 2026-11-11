@@ -5,7 +5,7 @@ Protocol (ACP) client adapter in `packages/agent-host`, how Cursor CLI (`agent a
 tested from recorded frames (#1498), and how the work is split. OpenCode (`opencode acp`) is the second tool on the
 same core; Antigravity, first planned as its own `agy` adapter (stream-json, no ACP), runs on this core too since
 2026-10-27, as Google's ACP agent ([antigravity-acp.md](antigravity-acp.md)). A record like
-the rest of `plans/`, so not mirrored in Korean; [agent-host.md](../agent-host.md) §2–3 gains the lasting parts in
+the rest of `plans/`, so not mirrored in Korean; [agent-host/adapters/README.md](../agent-host/adapters/README.md) gains the lasting parts in
 the same pull request as the code.
 
 ## 0. What PR 1 settled
@@ -366,7 +366,7 @@ not the protocol; the adapter passes text through as it comes.
 ```
 adapters/acp/                    the generic core: no tool name appears here
   connection.ts                  JSON-RPC 2.0 over newline-delimited stdio; ids; requests both ways; the recorder tap
-  wire.ts                        our own narrow types for the ACP frames we read (anti-corruption, §2 of agent-host.md)
+  wire.ts                        our own narrow types for the ACP frames we read (anti-corruption, agent-host/adapters/contract.md)
   adapter.ts                     AcpAdapter implements AgentAdapter, given a profile
   session.ts                     AcpSession implements SessionHandle: open policy, turns, input queue, cancel, teardown
   normalize.ts                   session/update → NormalizedEvent (stateless per frame, a small per-turn context)
@@ -432,7 +432,7 @@ Cursor's launcher does not fit `launchFor`, so its profile resolves it itself, a
 
 It does not run `promote-staged.cmd`. That script renames version folders, and with a session holding one it waits
 for it to be free; the person's next `agent` in a terminal promotes as before. `installedVersion()` reports the newest
-folder, so a promoted update moves idle sessions to it the usual way (§4.6 of agent-host.md). **Not** `agent` on PATH
+folder, so a promoted update moves idle sessions to it the usual way (agent-host/lifecycle/agent-cli-updates.md). **Not** `agent` on PATH
 by name alone: `agent` is a generic word, and another program of that name on PATH must not be started as Cursor; the
 found path must sit in a Cursor install (a `versions` folder with `index.js` beside it).
 
@@ -663,7 +663,7 @@ instructions); ACP has no system-prompt field, so `systemPromptAppend` has no st
 
 The capability list is what orchestration code reads; nothing outside `adapters/acp/tools/` asks which tool it is.
 Values for the ACP adapter, decided per profile and, where marked, from the `initialize` answer at `detect()`
-(agent-host.md §2: a capability may be decided at detect time):
+(agent-host/adapters/contract.md: a capability may be decided at detect time):
 
 | Capability | Cursor (PR 1) | From |
 |---|---|---|
@@ -796,7 +796,7 @@ capabilities and the model list. Checked in PR 1 with the mock platform: the des
 1. **PR 1, `feat/acp-cursor`**: this document, the capability limits and `launchRefusal` with the host's gate and the
    pickers, `adapters/acp/` (connection, wire types, normalizer, session, adapter, fake peer), `adapters/frames/`
    (recorder, replayer, scenarios), `adapters/cursor-agent/` (launch, detect, surface, default model), the recordings
-   of both tools, and agent-host.md §2–3.
+   of both tools, and agent-host/adapters/README.md.
 2. **Cursor, the rest:** the model list and effort without changing the person's default (§0.2), modes, question cards
    (`cursor/ask_question`), sub-agents, import, apps, taking over a process after a swap.
 3. **OpenCode on the same core:** its profile, its permission preset through config, cost, its `/compact` boundary

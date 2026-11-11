@@ -51,7 +51,7 @@ Eight packages go to npm:
 **The platform packages are scoped (`@centralu/…`) from 0.1.0-beta.10.** The first publish of an unscoped `centralu-win32-x64` (0.1.0-beta.8) was refused with `403 … Package name triggered spam detection`; the `@centralu` scope belongs to the owner's npm organization, so nobody can take or squat a name under it. Up to 0.1.0-beta.9, macOS and Linux shipped as `centralu-darwin-arm64`, `centralu-linux-x64` and `centralu-linux-arm64`; those stay on the registry, marked deprecated, so older shims that pin them keep installing. The shim itself stays the unscoped `centralu`, because it is the name people type; it is managed by the organization through its `developers` team. Users never type a platform package's name.
 
 The Linux packages carry the bundled host a second time, unpacked, as `host/` beside the AppImage. `centralu serve`
-(the remote mode's headless host, [agent-host.md](agent-host.md) §4.7) runs it with the system Node; the copy inside
+(the remote mode's headless host, [agent-host/remote/serve.md](agent-host/remote/serve.md)) runs it with the system Node; the copy inside
 the AppImage is only reachable by mounting the AppImage (FUSE, which servers often lack) or extracting it on every
 start. It costs about 11 MB. macOS and Windows need no second copy: `Centralu.app/Contents/Resources/resources/host`
 and `Centralu\resources\host` are plain folders already. `scripts/release-npm.mts` copies it from
@@ -821,7 +821,7 @@ every OS by `tooling/launcher-platform.test.ts`):
 | `centralu` | Checks the registry for the WebView2 Runtime. If it is missing, prints the download link and exits instead of starting an exe that would end without a window. Otherwise starts `centralu.exe` **detached**, from the installed copy if there is one and from the npm package if not, and watches it for 3 s: an exe that exits nonzero in that time gets a message with the WebView2 link and the `host.log` path |
 | `centralu install` | Copies the folder to `%LOCALAPPDATA%\Programs\Centralu` and writes a Start-menu shortcut (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Centralu.lnk`). The new copy is assembled beside the old one and swapped in by two folder renames, so a failed copy leaves the working install untouched. The swap works while the app runs (the old copy, still in use, stays as `Centralu.old-<time>` until a later install sweeps it); it is refused only while a process's working directory is inside the folder |
 | `centralu update` | `npm i -g centralu@<latest>` (through the shell, because `npm` is `npm.cmd`), then refreshes the installed copy if there is one |
-| Update in the app | The same two steps run by the host without a shell ([agent-host.md](agent-host.md) §4.5), then "Restart Centralu to finish updating". Builds up to 0.1.0-beta.12 fail here with `spawn npm ENOENT`; on those, `centralu update` in a terminal once |
+| Update in the app | The same two steps run by the host without a shell ([agent-host/lifecycle/updates.md](agent-host/lifecycle/updates.md)), then "Restart Centralu to finish updating". Builds up to 0.1.0-beta.12 fail here with `spawn npm ENOENT`; on those, `centralu update` in a terminal once |
 | `centralu uninstall` | Removes the copy and the shortcut. Leaves `%USERPROFILE%\.centralu` alone |
 
 Why a copy, like macOS, rather than a shortcut into the package, like Linux: Windows will not

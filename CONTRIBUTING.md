@@ -235,7 +235,7 @@ a lower becomes the top, mark it ready (`gh pr ready <n>`): that starts its CI. 
 
 CI's full tier also runs the keeper's end-to-end scripts on macOS, the parts that need no model and
 no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
-[docs/agent-host.md](docs/agent-host.md) §4.1).
+[docs/agent-host/lifecycle/keeper.md](docs/agent-host/lifecycle/keeper.md)).
 
 CI's full tier runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
@@ -439,7 +439,7 @@ Then ask these against your change. Put anything you could not check in **Not ex
 - **Does an adapter change rest on what the tool really sends?** A fix tested on a fake's value passed
   every test and did nothing on the real Codex, which answers another status
   ([#2031](https://github.com/ijun17/centralu/pull/2031)). Add or cite a recording of a real run
-  ([agent-host.md §3](docs/agent-host.md#3-procedure-for-adding-a-new-tool-c3--the-reason-this-document-exists) step 3).
+  ([agent-host/adapters/adding-a-tool.md](docs/agent-host/adapters/adding-a-tool.md) step 3).
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
@@ -454,7 +454,7 @@ change with no behaviour (documents, a pure refactor) writes n/a.
 
 - **Two builds on one store.** An older build opens the store a newer one wrote: the person goes
   back a release, or a linked machine's update is rolled back (`Store.migrate()`,
-  [docs/agent-host.md](docs/agent-host.md)). What does each of them do with what the other wrote?
+  [docs/agent-host/store-migrations.md](docs/agent-host/store-migrations.md)). What does each of them do with what the other wrote?
 - **Link loss and reconnect.** The window, a remote or a child loses its connection in the middle
   of this and comes back. What is resent, what is lost, what is done twice?
 - **An older build reading what this one writes.** A field, a message or a file this change adds,

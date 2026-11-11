@@ -31,7 +31,7 @@ export function protocolVersionOf(entry) {
 }
 
 /**
- * The `--connection` answer. The shape is the client's interface (docs/agent-host.md §4.7).
+ * The `--connection` answer. The shape is the client's interface (docs/agent-host/remote/serve.md).
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */

@@ -5,7 +5,7 @@
  * the live one would have: measured in #561 at ~100% after 2, 6 and 10 minutes on the 1 h lifetime, +0.7 s (p50)
  * before the first token. A CLI update could change either (how resume rebuilds the request, what it caches), and
  * nothing else would notice: the session would still wake, only slower and dearer. Run this on a Claude Code update,
- * next to `pnpm drift:claude` (docs/agent-host.md §3.1).
+ * next to `pnpm drift:claude` (docs/agent-host/adapters/vendor-drift-checks.md).
  *
  * Live, on the person's own Claude login, on haiku. One host on a temporary data folder (`CC_DATA_DIR` and `--db`
  * inside it, never `~/.centralu`), auto memory and claude.ai connectors off, the host's quiet period shortened with

@@ -924,7 +924,7 @@ describe('resets, notices, retries and refusals (#304)', () => {
 })
 
 /*
- * Prompt cache accounting (docs/agent-host.md §6.1): one `request` per model request. The CLI can send one response as
+ * Prompt cache accounting (docs/agent-host/prompt-cache.md): one `request` per model request. The CLI can send one response as
  * several assistant messages, one per content block, each repeating the response's usage under the same message id.
  */
 describe('a model request, for prompt cache accounting', () => {

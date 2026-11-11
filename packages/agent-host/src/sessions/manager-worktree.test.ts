@@ -577,7 +577,7 @@ describe('worktree sessions', () => {
     // A gitignored file — the kind that git worktree add never brings along.
     writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
     store.projects.setWorktreeSetup(project.id, {
-      // The setup command runs in the platform's shell: cmd.exe on Windows, where a variable is %NAME% (agent-host.md)
+      // The setup command runs in the platform's shell: cmd.exe on Windows, where a variable is %NAME% (agent-host/host-process.md)
       command:
         process.platform === 'win32'
           ? 'echo %CENTRALU_WORKTREE%:%CENTRALU_WORKTREE_INDEX%> setup-ran.txt'

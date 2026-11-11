@@ -201,7 +201,7 @@ export const SessionInfo = z.object({
    * worktree manager's `parent_session_id` into it. Store step v55 clears the cross-project rows
    * (the host start did until #844). A window of beta.20 or before reads a start_agent child as
    * "asked by" its parent, which is now what it means; a host of beta.20 or before still writes the
-   * old meaning, and a row it writes after v55 keeps it (agent-host.md §5.1).
+   * old meaning, and a row it writes after v55 keeps it (agent-host/store-migrations.md "Migration steps: expand, then contract").
    */
   askedBy: z.string().nullable().optional(),
   /**

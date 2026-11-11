@@ -35,7 +35,7 @@ describe('agents.updateSettings — no field leaks', () => {
 })
 
 /**
- * `host.stop` (`centralu serve --stop`, docs/agent-host.md §4.7): a serve-started host ends itself in
+ * `host.stop` (`centralu serve --stop`, docs/agent-host/remote/serve.md): a serve-started host ends itself in
  * order once the answer is out; a host under the app's keeper refuses, since the app stops it and the
  * keeper would only start it again.
  */

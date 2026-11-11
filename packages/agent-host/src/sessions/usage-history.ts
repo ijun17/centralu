@@ -2,7 +2,7 @@ import type { ToolName, UsageHistory, UsageHistoryBy, UsageHistoryReadings, Usag
 import { mergeCauses, type StoredReading, type UsageBucket, type UsageRecords } from '../dev-services/store/usage-history.js'
 
 /**
- * Answers `usage.history` (docs/agent-host.md §6.2) from what `UsageRecorder` stored: the readings of the limit
+ * Answers `usage.history` (docs/agent-host/usage.md "Usage over time") from what `UsageRecorder` stored: the readings of the limit
  * windows as they are, and the hourly buckets summed by day or hour and by one key.
  */
 
@@ -148,7 +148,7 @@ export function usageHistory(usage: UsageRecords, p: HistoryParams, names: Histo
 const num = (n: number): string => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n))
 
 /**
- * The Assistant's `usage_history` (docs/agent-host.md §6.2): the top keys by tokens with their cache hit rate and
+ * The Assistant's `usage_history` (docs/agent-host/usage.md "Usage over time"): the top keys by tokens with their cache hit rate and
  * rebuilds, then how each limit window moved. A few lines: it is read to pace work, so it stays short.
  */
 export function usageHistoryText(h: UsageHistory, days: number): string {

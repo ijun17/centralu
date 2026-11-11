@@ -3,7 +3,7 @@
 //! LaunchServices to start the keeper, and read how that went (`start`). When it does not start a
 //! keeper the window starts one directly, as before, and says why (`Report`).
 //!
-//! Used by a macOS release build only (`start_plan::StartMode::ThroughShell`, docs/agent-host.md
+//! Used by a macOS release build only (`start_plan::StartMode::ThroughShell`, docs/agent-host/lifecycle/start.md
 //! §4.0). Debug builds, Linux and Windows start the keeper (or the host) as they always did.
 //!
 //! **A shell the window carries unpinned** (a local `pnpm app` build or a release rehearsal, whose

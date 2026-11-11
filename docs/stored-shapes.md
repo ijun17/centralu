@@ -1,6 +1,6 @@
 # Stored shapes another build reads (#384)
 
-The store's tables are one shape that two builds share. [agent-host.md](agent-host.md) §5.1 covers them: steps that
+The store's tables are one shape that two builds share. [agent-host/store-migrations.md](agent-host/store-migrations.md#migration-steps-expand-then-contract-292) covers them: steps that
 add first and remove later, and `min_reader_version`. Many other shapes are stored or exchanged the same way: JSON
 rows in `app_settings`, JSON columns, files in the data folder, files a person or another build writes, and the lines
 and frames between processes. An older and a newer build read each of them during a host swap (the previous host

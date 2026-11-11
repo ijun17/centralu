@@ -203,7 +203,7 @@ the `NOT_REACHABLE || NOT_CONNECTED_PHRASE` test.
 report and `ifBusy: 'queue'` (its P4, P6, P8), which are the gate, held-note and link-loss groups, 600 of the lines. A
 move of code that is about to be deleted is wasted. The records (about 175 lines), the start path (about 310) and the
 text helpers (about 120) are the three modules safe to cut, after that plan lands. The gate is security-sensitive
-(RV13); `docs/agent-host.md:797,820` name `RemoteAgents.gate` and `tookInstruction`.
+(RV13); `docs/agent-host/delegation/start-agent-linked-machine.md` names `RemoteAgents.gate` and `tookInstruction`.
 
 ## 4. Where to start, and why
 

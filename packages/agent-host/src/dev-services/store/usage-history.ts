@@ -62,7 +62,7 @@ const BUCKET_COLUMNS = `hour, session_id AS sessionId, project_id AS projectId, 
   output, rebuilds, rebuild_tokens AS rebuildTokens, causes`
 
 /**
- * What the host keeps of usage over time (docs/agent-host.md §6.2): the limit windows' readings and the tokens per
+ * What the host keeps of usage over time (docs/agent-host/usage.md "Usage over time"): the limit windows' readings and the tokens per
  * hour. Counts and percentages only, no content. Local to this computer: nothing here is synced.
  */
 export class UsageRecords {

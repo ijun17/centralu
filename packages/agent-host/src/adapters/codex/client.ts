@@ -11,7 +11,7 @@ import { lineSplitter } from '../../transport/json-lines.js'
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
  *
  * Protocol detail ends here — the only thing that leaves is a NormalizedEvent that has gone
- * through normalize.ts (anti-corruption, docs/agent-host.md §2).
+ * through normalize.ts (anti-corruption, docs/agent-host/adapters/contract.md).
  *
  * Note: this is a lightweight format with no `jsonrpc` field (confirmed in M0).
  *   request                        {id, method, params}

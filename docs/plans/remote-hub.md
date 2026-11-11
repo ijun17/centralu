@@ -225,7 +225,7 @@ the client, which reads oddly when the client is a hub; left as it is, since the
 **Probe 3 holds.** The Ubuntu server did not answer on port 22 that day; the owner's Windows 11 laptop on the
 LAN stood in, with two remote hosts: `centralu serve` of main inside WSL2 (Ubuntu 24.04) and of beta.10 on Windows
 itself, each on a temporary data folder. A hub on the Mac (the e2e harness host with the real router, links and
-`SshTunnel`) linked to both over the real `ssh` at once; numbers are in [agent-host.md](../agent-host.md) §4.8. In
+`SshTunnel`) linked to both over the real `ssh` at once; numbers are in [agent-host/remote/link-states.md](../agent-host/remote/link-states.md). In
 short: connected in 2–4 s, an RPC through the hub 5–22 ms at the median, a keystroke echoed in 8–31 ms, terminal
 output relayed as fast as the remote produced it (6.3 MB at 7.5–15 MB/s from WSL; Windows' ConPTY is slow by itself,
 10.0 s through the hub against 9.5 s straight), a 0.5 MB diff in 240–365 ms. The 64 MiB slow-reader cut was not
@@ -268,7 +268,7 @@ own update, the remote by the exact `npm i -g centralu@<version>` in phase 1, "c
 away rows dimmed and never woken, `machine_resync` handled by a recovery scoped to that machine, the per-machine
 questions passed with `machine`, and remote sessions named by machine in the inbox, notices, notifications and the
 session header (so in the grid and where approvals are answered). Remote apps are listed per machine and say their
-views open in a later version (phase 2 opened them, §11). Details: [agent-host.md](../agent-host.md) §4.8, [state-management.md](../state-management.md) §7.
+views open in a later version (phase 2 opened them, §11). Details: [agent-host/remote/link-states.md](../agent-host/remote/link-states.md), [state-management.md](../state-management.md) §7.
 
 ### 8.4 Adding a machine from the ssh config (#514, owner, 2026-10-12)
 
@@ -281,7 +281,7 @@ Windows, and on Windows which shell answers ssh and which WSL distros exist (`ma
 alias is marked and not offered again; typing a target stays, for a host not in the config and for a probe that
 cannot tell. The probe is short and shell-neutral (one `-EncodedCommand` line of about 1,640 characters, far under
 cmd.exe's 8,191, §10.9a). Measured on the Windows 11 PC of §10.9a over Tailscale: it answered in 1.15 s with cmd.exe as
-the shell and Ubuntu as the default distro. Details: [agent-host.md](../agent-host.md) §4.8.
+the shell and Ubuntu as the default distro. Details: [agent-host/remote/install-and-update.md](../agent-host/remote/install-and-update.md).
 
 ## 9. Decisions (owner, 2026-10-05)
 
@@ -306,7 +306,7 @@ Restored as decided; #410 dropped this section by mistake while §2 and the stat
 > [spikes/2026-10-remote-install/](../spikes/2026-10-remote-install/).
 
 Phase 1 asks the person to install Node and `npm i -g centralu` on the remote, run `centralu serve` and keep it running
-themselves (agent-host.md §4.7), and the version prompt can only print the command to run there. Phase 3 lets the hub
+themselves (agent-host/remote/serve.md), and the version prompt can only print the command to run there. Phase 3 lets the hub
 do all of it over the same ssh: install, start, update, roll back, uninstall, with nothing on the remote but a shell,
 `tar` and a way to download.
 
@@ -341,7 +341,7 @@ remote runs the host only.
 replaced by a rename, atomic on both systems (measured on Windows: Node's `renameSync` over an existing file replaces
 it). A launcher rewritten per version would have to be replaced while `cmd.exe` may be reading it, and cmd reads a
 batch file by offset as it runs. It lives in `<data>/remote/bin/`, not `<data>/bin/`: an npm install on the same
-machine rewrites `<data>/bin/centralu` every time its `serve` runs (agent-host.md §4.7), and the two must not fight
+machine rewrites `<data>/bin/centralu` every time its `serve` runs (agent-host/remote/serve.md), and the two must not fight
 over one file. The managed launcher sets `CENTRALU_MANAGED=1`, and a `serve` that sees it leaves `<data>/bin/` alone.
 
 **The hub's lookup** (`connectionCommand`, `links/tunnel.ts`) tries the managed launcher first, then `centralu` on
@@ -421,7 +421,7 @@ the host 143 ms later with no "shutting down" line in `host.log`. The launcher's
 kill-on-close job object (the reason `platform.mjs` starts the app detached), so the host never runs its shutdown and
 its agents are killed with it. `centralu serve --stop` therefore asks the running host to stop over its own
 WebSocket with the token from `serve.json` (an additive RPC), waits for the port to close, and only then ends the
-process. On posix, SIGTERM to the launcher stays the stop (agent-host.md §4.7).
+process. On posix, SIGTERM to the launcher stays the stop (agent-host/remote/serve.md).
 
 **In the person's Windows sign-in when someone is signed in (#1224, 2026-10-19).** A host WMI creates from the hub's
 ssh session keeps that session's logon: a key login is a network logon without the password, so DPAPI cannot unlock
@@ -442,7 +442,7 @@ minutes at most, then gives up until the next sign-in or start, and the machine'
 up (`host.handover`). Waiting rather than asking: without a keeper on Windows a stop ends what runs, and an idle host
 loses nothing.
 
-**Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host.md §4.7, written by the
+**Boot autostart is separate and optional.** Linux: the `systemd --user` unit of agent-host/remote/serve.md, written by the
 hub, plus `loginctl enable-linger`, which some distributions allow a user and others refuse without an administrator.
 Windows: a per-user scheduled task at logon (no administrator needed; not created on the test laptop, so not
 measured). WSL needs that Windows task too, since nothing inside a stopped distro runs. The rest of phase 3 needs none
@@ -474,7 +474,7 @@ through an additive call, since the hub's mirror knows sessions but not terminal
    has no keeper to hand agents over, so the person's update does not end a turn on its own. The person's `now`, and every
    update nobody approved (following the hub, #1508), do not wait (owner, 2026-10-26, #1618): the turns they end are
    continued once by the next host, from the ids the stopping host writes as it stops (`host.stop { forUpdate }`,
-   agent-host.md §4.8, "Continuing the turns an update cut"), and terminals and project commands close. Once a reading has succeeded the wait goes
+   agent-host/lifecycle/continue-after-update.md, "Continuing the turns an update cut"), and terminals and project commands close. Once a reading has succeeded the wait goes
    on through failed readings (a busy or dropped remote fails them too) and ends only on a successful reading of none, taken
    twice; a machine never read successfully is not waited for. Then stop the running host in order
    (`serve --stop`, §10.4). Without a keeper this ends its agents; their sessions resume on the new host through the stored
@@ -485,7 +485,7 @@ through an additive call, since the hub's mirror knows sessions but not terminal
 4. Start the new version (`serve --detach`) and wait for a hello whose `build.version` is the new one, at most 30 s.
 5. If it does not come: put the old line back in `current`, start the old version, and report the end of the new
    host's `host.log`. One step back is safe by the store rule: migrations only expand while the previous build may
-   still be serving (agent-host.md §5.1).
+   still be serving (agent-host/store-migrations.md "Migration steps: expand, then contract").
 6. On success, remove every version that is neither `current` nor `previous`, and every Node no kept version uses.
 
 **Coming back after a failed step (#1903).** Measured on Windows with the real launcher: a normal update stops in about
@@ -786,7 +786,7 @@ What else was seen:
   a session and process group of its own, so the keeper's group stop never reaches it: it was still running after the
   keeper's `stop` ("Quit completely") until the probe sent `ssh -O exit`. Every forward a host asks for stays on the
   master after that host is gone, so the local port moves with each swap and the same-port property app views rely on
-  (agent-host.md §4.7) is lost from the first swap on. It saves the TCP connect and authentication (about 0.3 s here),
+  (agent-host/remote/serve.md) is lost from the first swap on. It saves the TCP connect and authentication (about 0.3 s here),
   not the remote's PowerShell start and `--connection`, which dominate. Windows' OpenSSH, which a Windows hub would
   use, does not support multiplexing (not measured here).
 - **The status quo cleans up after itself**: in every run no ssh outlived its host, and none was left after the
@@ -903,11 +903,11 @@ own key in its `~/.ssh/authorized_keys` (an administrator's key goes in `adminis
 | Step | What | Estimate (agent work) |
 |---|---|---|
 | 1 | The release records the pinned Node (version and SHA-256 per platform, from a signature-checked `SHASUMS256.txt`) as `remote-runtime.json` in the host bundle; CI runs the host's tests on that Node too. **Done** | 0.5–1 day |
-| 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host.md](../agent-host.md) §4.7, §4.8) | 1.5–2 days |
-| 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host.md](../agent-host.md) §4.8; the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
-| 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows. **Done** as `machines.update`, `machines.rollback`, `machines.uninstall` and `machines.activity` (with the remote's `host.activity`), `MachineInfo.install`, `MachineInfo.operation` and the status `updating` (all additive), [agent-host.md](../agent-host.md) §4.8 (choices below); the posix path runs for real in the tests, the Windows and WSL paths **not yet run on a Windows machine** | 2–3 days |
+| 2 | `serve --detach` and `serve --stop` (setsid, WMI, WSL through WMI; the additive stop RPC), the `install` field in the connection line, the managed-launcher rules in `serve.mjs`; the link starts a host it finds not running. **Done**: `host.stop`, `MachineStatus` `starting` and `MachineInfo.hostStarted` (additive), the link-bound fallback when WMI is blocked ([agent-host/remote/serve.md](../agent-host/remote/serve.md) and [agent-host/remote/hub-links.md](../agent-host/remote/hub-links.md)) | 1.5–2 days |
+| 3 | The installer: preflight and Node per shell, the `.mjs` step, registry metadata and signatures on the hub, the layout and pointer files, the lookup order in `tunnel.ts`; tested with a fake ssh and a local registry fixture, then by hand on the laptop's Windows and WSL. **Done** as `machines.install` (additive), [agent-host/remote/install-and-update.md](../agent-host/remote/install-and-update.md); the posix scripts run for real in the tests, the Windows and WSL ones are checked as built but **not yet run on a Windows machine** (choices below) | 2–3 days |
+| 4 | Update, rollback and uninstall as `machines.*` calls (additive) with progress in `machine_status`; the version prompt's "Update <machine>" naming what stops; Settings → Machines rows. **Done** as `machines.update`, `machines.rollback`, `machines.uninstall` and `machines.activity` (with the remote's `host.activity`), `MachineInfo.install`, `MachineInfo.operation` and the status `updating` (all additive), [agent-host/remote/install-and-update.md](../agent-host/remote/install-and-update.md) (choices below); the posix path runs for real in the tests, the Windows and WSL paths **not yet run on a Windows machine** | 2–3 days |
 | 5 | (Owner decision 2) Host-only packages in the release. **Done**: `@centralu/host-linux-x64`, `-linux-arm64` and `-win32-x64` (`host/` only, 3.7 MB packed against 88 MB for the Linux platform package), published by each platform's release job before its platform package; the installer prefers them and falls back to the platform package when the registry has none at that version; the shim's `serve` finds the host in either ([releasing.md](../releasing.md) "Host-only packages"). The release itself is **not yet rehearsed** with them (choices below) | 1 day |
-| 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350. **Partly done**: boot autostart, as `centralu serve --autostart on\|off\|status` and `machines.autostart`, with `MachineInfo.autostart` and the connection line's `autostart` (all additive), [agent-host.md](../agent-host.md) §4.7, §4.8 (choices below); the unit, the task and every command are tested against fakes, **not yet run by a real Linux boot or a real Windows Task Scheduler**. The remote keeper is still open | 1 day; 3–5 days |
+| 6 | (Owner decisions 4, 5) Boot autostart; the remote keeper after #350. **Partly done**: boot autostart, as `centralu serve --autostart on\|off\|status` and `machines.autostart`, with `MachineInfo.autostart` and the connection line's `autostart` (all additive), [agent-host/remote/serve.md](../agent-host/remote/serve.md) and [agent-host/remote/install-and-update.md](../agent-host/remote/install-and-update.md) (choices below); the unit, the task and every command are tested against fakes, **not yet run by a real Linux boot or a real Windows Task Scheduler**. The remote keeper is still open | 1 day; 3–5 days |
 
 Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind phase 1's manual path, which keeps working.
 
@@ -919,7 +919,7 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   Windows (the peak of §10.7 with room).
 - **Three ssh commands**: preflight, Node, Centralu. The hub reads and checks the registry metadata between the first
   two, so a refused machine or a bad signature downloads nothing. Each answers a `CENTRALU-INSTALL` word; the hub
-  writes the sentences (exit codes do not survive Windows, §4.8 of agent-host.md).
+  writes the sentences (exit codes do not survive Windows, agent-host/remote/hub-links.md).
 - **The `.mjs` travels gzipped in base64 inside its step's script**, written to `<data>/remote/.install-<pid>.mjs` and
   removed after. A Windows step that does not fit cmd.exe's 8,191-character line (Windows OpenSSH's default shell, when
   no `DefaultShell` is set) goes as a short reader on the command line and the script on ssh's stdin (`RemoteCommand`
@@ -1365,8 +1365,8 @@ consent. As built in §12.7. The questions as they were asked:
 
 ### 12.6 Step 3, as built (#700)
 
-`ask_project` finds the projects of every linked machine, and gives the task to one of their ordinary sessions (agent-host.md
-§1.2.4 has the lookup rules and the choices). An agent on the hub had been told "No project named …" for a project
+`ask_project` finds the projects of every linked machine, and gives the task to one of their ordinary sessions (agent-host/delegation/ask-project-linked-machine.md
+has the lookup rules and the choices). An agent on the hub had been told "No project named …" for a project
 that existed on a linked machine and listed only this computer's.
 
 - **Lookup.** A unique bare name works; `<machine>/<name>` or a qualified id always does; the same name on two machines

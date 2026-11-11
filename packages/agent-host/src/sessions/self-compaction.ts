@@ -399,7 +399,7 @@ export class SelfCompaction {
    * A request held for a card: judged now if the card is closed and the session at rest, dropped if it has no process any more.
    * Returns whether it was settled. **Not asked: background work.** The held path goes on `!busy && !cardOpen` even while the session
    * runs background work, as the rule for every request made in a turn does (the request does not ask whether it runs: waiting for
-   * CI in the background is what it is for, docs/agent-host.md "Compacting at a break"); `sessionIdle`'s rule for the rest compaction is
+   * CI in the background is what it is for, docs/agent-host/context-compaction.md "Compacting at a break"); `sessionIdle`'s rule for the rest compaction is
    * stricter on purpose, so this is not to be made to match it.
    */
   private releaseHeld(id: string, m: SessionInfo): boolean {

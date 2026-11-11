@@ -232,7 +232,7 @@ export class ClaudeStreamNormalizer {
   /** The id of the model call whose chunks are streaming now (`message_start`). */
   private streamMessageId: string | undefined
   /**
-   * The model requests whose input already went out as a `request` (prompt cache accounting, docs/agent-host.md
+   * The model requests whose input already went out as a `request` (prompt cache accounting, docs/agent-host/prompt-cache.md
    * §6.1). The CLI can send one response as several assistant messages (one per content block), each carrying the
    * same usage under the same message id; counting each would multiply that request. Bounded: a subagent's messages
    * interleave with the parent's, so this holds a few recent ids, not just the last one.

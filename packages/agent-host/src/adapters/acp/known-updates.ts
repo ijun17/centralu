@@ -1,5 +1,5 @@
 /**
- * The ACP update kinds and methods this adapter maps or leaves out on purpose (agent-host.md §3.1, "unmapped types"). A
+ * The ACP update kinds and methods this adapter maps or leaves out on purpose (agent-host/adapters/vendor-drift-checks.md "The other direction, at runtime: unmapped types"). A
  * kind outside it is logged once per session (`unmapped.ts`). `current_mode_update` and `config_option_update` are left
  * out until the model and mode menus are wired (PR 2); `user_message_chunk` is our own prompt echoed back.
  */

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * The ACP frames this adapter reads, parsed at the boundary (agent-host.md §2: nothing of a tool's shape leaves
+ * The ACP frames this adapter reads, parsed at the boundary (agent-host/adapters/contract.md: nothing of a tool's shape leaves
  * `adapters/acp/`). Only the fields read are named; the rest pass through untouched (`looseObject`), since the agent
  * is another program at another version. Shapes from protocol version 1 as measured on Cursor 2026.10.22 and
  * OpenCode 1.19.4 (docs/plans/acp-adapter.md §1.1).

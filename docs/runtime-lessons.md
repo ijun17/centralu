@@ -2,7 +2,7 @@
 
 > Collected 2026-10-08 for the runtime redesign ([plans/runtime-unification.md](plans/runtime-unification.md)), at
 > main after 0.1.0-beta.13 (#456–#463). Sources: the code comments of the window, the macOS shell, the keeper crate,
-> the host's process code and the npm launcher; [agent-host.md](agent-host.md), [architecture.md](architecture.md) §4,
+> the host's process code and the npm launcher; [agent-host/lifecycle/README.md](agent-host/lifecycle/README.md), [architecture.md](architecture.md) §4,
 > [plans/](plans/) and [spikes/](spikes/); and the closed issues and pull requests they cite.
 
 The process runtime is how the window, the macOS shell, the keeper, the host, the agent CLIs, terminals, commands and
@@ -62,7 +62,7 @@ Happened: the choice was spread over `use_keeper()` and `shell_resources()` in `
 `debug_assertions` at several sites and five environment variables read where they were used (#459).
 Rule: every start site asks `start_plan::plan` for a `StartMode`, a host and a reason; the environment,
 `cfg!(target_os)` and `debug_assertions` are read only in `Env::current`, `Os::current` and `Build::current`. The table
-of modes per platform is [agent-host.md](agent-host.md) §4.0.
+of modes per platform is [agent-host/lifecycle/start.md](agent-host/lifecycle/start.md).
 Guard: `keeper/start_plan/tests.rs` `every_row_of_the_start_table`; `keeper/start_plan/tests.rs` `the_plan_is_the_code_it_replaced`.
 Platforms: all. *Changed by #459.*
 

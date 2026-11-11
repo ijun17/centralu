@@ -30,7 +30,7 @@ const render = (history: Partial<UsageHistory>, by: 'session' | 'project' = 'ses
   return { html, text: html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ') }
 }
 
-describe('HistoryView (docs/agent-host.md §6.2)', () => {
+describe('HistoryView (docs/agent-host/usage.md "Usage over time")', () => {
   it('draws the weekly window as a line with its latest percent, and names the sessions that used most with their hit rate', () => {
     const { html, text } = render({
       readings: [reading('session', '5 hours', [90]), reading('weekly_all', 'Weekly', [20, 35, 41])],

@@ -848,7 +848,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(runs).toBe(1)
   })
 
-  it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {
+  it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host/prompt-cache.md)', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     const h = adapter.handleOf(s.id)!
@@ -912,7 +912,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(store.usage.buckets(0, Date.now() + 3_600_000)).toEqual([])
   })
 
-  it('names why each rebuild happened from what the host saw in that session (docs/agent-host.md §6.1)', async () => {
+  it('names why each rebuild happened from what the host saw in that session (docs/agent-host/prompt-cache.md)', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }

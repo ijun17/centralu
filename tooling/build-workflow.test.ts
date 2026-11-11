@@ -558,7 +558,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
 describe('what a commit needs, from the files it changes (.github/scripts/ci-changes.mjs)', () => {
   const none = { bundle: false, host: false, host_tests: false, code: false }
   it.each([
-    ['documents only', ['docs/agent-host.md', 'README.md', '.github/PULL_REQUEST_TEMPLATE.md'], none],
+    ['documents only', ['docs/agent-host/README.md', 'README.md', '.github/PULL_REQUEST_TEMPLATE.md'], none],
     ['host tests only', ['packages/agent-host/src/store.test.ts', 'packages/agent-host/src/fake-exe.test-helpers.ts'], { ...none, host_tests: true, code: true }],
     ['UI scenarios only', ['e2e/control-loop.spec.ts', 'e2e/fixtures/control.ts'], { ...none, code: true }],
     ['tooling tests', ['tooling/launcher-serve.test.ts', 'vitest.config.ts'], { ...none, host_tests: true, code: true }],

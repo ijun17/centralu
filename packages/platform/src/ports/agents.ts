@@ -209,7 +209,7 @@ export interface AgentPort {
    */
   usage(tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }): Promise<UsageAnswer>
   /**
-   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host.md §6.2):
+   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host/usage.md "Usage over time"):
    * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.
    */
   usageHistory(

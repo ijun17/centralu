@@ -8,7 +8,7 @@
 
 ## 1. Why
 
-How a host starts has grown sixteen rows ([agent-host.md](../agent-host.md) §4.0): a pinned shell on a macOS release,
+How a host starts has grown sixteen rows ([agent-host/lifecycle/start.md](../agent-host/lifecycle/start.md)): a pinned shell on a macOS release,
 its fallback to the keeper beside the window, the keeper inside the window's executable in debug, Linux direct with an
 opt-in keeper, Windows direct, `centralu --keeper` for old keepers, and `centralu serve` on remotes with no keeper at
 all. Each row is a different process tree with different stop, update and crash behaviour, and each was right when it
@@ -231,7 +231,7 @@ The redesign is complete when all of these hold:
 7. **One children implementation**: the host spawns no long-lived child itself in a release; `kill-tree.ts`'s
    process-tree walking is gone.
 8. **Remotes run the same keeper** in headless mode, updated by the same switch.
-9. **The documents say so**: agent-host.md §4.0 has one row per platform and launcher; architecture.md §4 describes
+9. **The documents say so**: agent-host/lifecycle/start.md has one row per platform and launcher; architecture.md §4 describes
    the topology above; runtime-lessons.md is updated in each step's pull request.
 
 ## 8. For the owner to decide

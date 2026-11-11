@@ -28,7 +28,7 @@ const shownPath = (path: string): string => plainQuoted(path, 4096)
  *
  * What the window can do here and this does not: stopping a session's background task ends a process the session started
  * and cannot be undone, marking a session read hides a notice the person has not seen, and reordering the sidebar is the
- * person's arrangement of their own screen (docs/agent-host.md §1.4).
+ * person's arrangement of their own screen (docs/agent-host/assistant/window-parity.md "The inventory behind #1219").
  */
 export class HousekeepingFlow {
   private rpc: WindowRpc | null = null

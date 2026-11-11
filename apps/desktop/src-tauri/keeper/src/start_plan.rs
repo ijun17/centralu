@@ -1,5 +1,5 @@
 //! How the host starts: one decision, from what a process knows about itself, to one `StartMode`
-//! with its reason. docs/agent-host.md §4.0 lists every row this function returns, per platform; the
+//! with its reason. docs/agent-host/lifecycle/start.md lists every row this function returns, per platform; the
 //! table test below holds those rows.
 //!
 //! Before this module the decision was spread over `use_keeper()` and `shell_resources()` in the
@@ -266,7 +266,7 @@ pub struct Plan {
     pub reason: Reason,
 }
 
-/// How the host starts, given `f`. docs/agent-host.md §4.0 is this function as a table.
+/// How the host starts, given `f`. docs/agent-host/lifecycle/start.md is this function as a table.
 pub fn plan(f: &Facts) -> Plan {
     let release = f.build == Build::Release;
     // Never decide dev or release by the bundle's existence alone: `tauri dev`'s resource folder is

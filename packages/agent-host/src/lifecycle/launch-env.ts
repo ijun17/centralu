@@ -22,7 +22,7 @@ export type LaunchEnv = {
    */
   frontDoor: string | undefined
   /**
-   * Started by `centralu serve` (docs/agent-host.md §4.7), the one host `host.stop` may end: it has
+   * Started by `centralu serve` (docs/agent-host/remote/serve.md), the one host `host.stop` may end: it has
    * no keeper or window to stop it, and on Windows a launcher can only be killed, which skips the
    * shutdown.
    */

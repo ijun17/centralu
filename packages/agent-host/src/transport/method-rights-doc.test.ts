@@ -81,7 +81,7 @@ describe('the limited credential never runs what the Assistant asks the person f
   const calls = windowCalls()
 
   it("finds the Assistant's window calls and the cards before them (the scan reads the flows)", () => {
-    // Known carded calls (docs/agent-host.md §1.4): if the scan stops seeing them, it is the scan that broke
+    // Known carded calls (docs/agent-host/assistant/window-parity.md "The inventory behind #1219"): if the scan stops seeing them, it is the scan that broke
     const carded = new Set(calls.filter((c) => c.carded).map((c) => c.method))
     for (const m of ['trash.purge', 'trash.purgeSubagentSteps', 'trash.purgeRuns', 'projects.setTrusted', 'apps.setShared', 'prefs.set']) expect(carded, m).toContain(m)
     // And reads as uncarded what acts at once
