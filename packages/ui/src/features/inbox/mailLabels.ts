@@ -1,4 +1,4 @@
-import type { MailHeldRow, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
+import type { MailHeldRow, MailMessage, MailParty, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
  * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;
@@ -66,4 +66,16 @@ export function replyKind(messages: readonly { sender: MailParty; kind: string }
  */
 export function closeStopsWork(view: Pick<MailThreadView, 'canReply'> & { thread: Pick<MailThreadRow, 'working'> }): boolean {
   return view.canReply === undefined && view.thread.working === true
+}
+
+/** The person's answer to the question at `at`: their first answer after it, if they gave one (a choice pressed, or words of their own) */
+export function answerTo(messages: readonly MailMessage[], at: number): MailMessage | null {
+  return messages.slice(at + 1).find((m) => m.sender.kind === 'person' && m.kind === 'answer') ?? null
+}
+
+/** What the list of a question's choices says it is: to pick from, then what became of it */
+export function choicesLabel(answered: boolean, picked: boolean, open: boolean): string {
+  if (picked) return 'You chose'
+  if (answered) return 'Answered'
+  return open ? 'Choose one' : 'Not answered'
 }

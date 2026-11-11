@@ -44,6 +44,8 @@ export class MailMock {
     from: MailParty
     body: string
     kind?: string
+    /** The answers a question offers to pick from (#1630) */
+    choices?: string[]
     state?: string
     assignee?: MailParty | null
     /** A turn of the thread is going in its assignee: closing tells that session and stops nothing (C12) */
@@ -54,7 +56,7 @@ export class MailMock {
   }): string {
     const id = `mock.t_${this.clock.next()}`
     const now = this.clock.now()
-    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, createdAt: now }
+    const message: MailMessage = { id: `mock.m_${this.clock.next()}`, seq: 1, sender: spec.from, kind: spec.kind ?? 'question', urgent: false, body: spec.body, facts: {}, ...(spec.choices ? { choices: spec.choices } : {}), createdAt: now }
     const row: MailThreadRow = {
       id,
       subject: spec.subject,

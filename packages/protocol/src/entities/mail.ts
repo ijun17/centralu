@@ -23,7 +23,7 @@ export const MailParty = z.object({
 export type MailParty = z.infer<typeof MailParty>
 
 /**
- * The answers a session's question to the person offers to pick from (#1630, `facts.choices`): the sender's words, which Centralu
+ * The answers a session's question to the person offers to pick from (#1630, `MailMessage.choices`): the sender's words, which Centralu
  * checked for shape only. Picking one answers the question with its words; the person may always write their own answer instead
  */
 export const MailChoices = z.array(z.string()).min(2).max(6)
@@ -79,8 +79,10 @@ export const MailMessage = z.object({
   kind: z.string(),
   urgent: z.boolean().default(false),
   body: z.string(),
-  /** What only Centralu writes about the message (an event's change, a state move); never anything a sender wrote, but a question's `choices` (`MailChoices`) */
+  /** What only Centralu writes about the message (an event's change, a state move); never anything a sender wrote */
   facts: z.record(z.string(), z.unknown()).default({}),
+  /** On a session's question to the person: the answers it offers to pick from. A sender's words, so not in `facts`; absent from a host of an older build and on any other message */
+  choices: MailChoices.optional(),
   createdAt: z.number(),
   /** For the person's own messages: how far each receiver has taken them */
   receipts: z

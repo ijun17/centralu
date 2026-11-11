@@ -43,6 +43,44 @@ test('Mail: a question counts, lists, opens, and takes the person’s answer as 
   await expect(page.getByTestId('inbox')).toBeVisible()
 })
 
+test('Mail: a question with choices lists them, a press answers once with its words and locks the list, and the reply box still takes words of its own (#1630)', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now', 'Ask me again'] })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+
+  const choices = page.getByTestId('mail-choices-1')
+  await expect(choices).toContainText('Choose one')
+  await expect(page.getByTestId('mail-choices-1-2')).toContainText('2.Switch now')
+  await expect(page.getByTestId('mail-reply')).toBeVisible()
+
+  // Two presses in a row are one answer
+  await page.getByTestId('mail-choices-1-2').dblclick()
+  await expect(page.getByTestId('mail-message-2')).toContainText('Switch now')
+  await expect(page.getByTestId('mail-message-2')).toContainText('You · answer')
+  await expect(page.getByTestId('mail-message-3')).toHaveCount(0)
+  // Said what was chosen; no row takes another press, and the picked one stays lit
+  await expect(page.getByTestId('mail-choices-1-label')).toHaveText('You chose')
+  for (const n of [1, 2, 3]) await expect(page.getByTestId(`mail-choices-1-${n}`)).toBeDisabled()
+  await expect(page.getByTestId('mail-choices-1-2')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('mail-choices-1-1')).toHaveAttribute('aria-pressed', 'false')
+  await page.getByTestId('mail-choices-1-1').click({ force: true })
+  await expect(page.getByTestId('mail-message-3')).toHaveCount(0)
+})
+
+test('Mail: an answer in the reply box answers a question with choices too, and the list says it was answered', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-thread-${id}`).click()
+  await page.getByTestId('mail-reply').fill('Neither: ask the owner')
+  await page.getByTestId('mail-send').click()
+  await expect(page.getByTestId('mail-message-2')).toContainText('Neither: ask the owner')
+  await expect(page.getByTestId('mail-choices-1-label')).toHaveText('Answered')
+  await expect(page.getByTestId('mail-choices-1-1')).toBeDisabled()
+  await expect(page.getByTestId('mail-choices-1-1')).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('Mail: closing a thread ends the reply box, and a thread left open is not there the next time', async ({ page }) => {
   await setup(page)
   const id = await seed(page, { subject: 'Land #12', from: PARSER, body: 'ready for review', kind: 'report' })

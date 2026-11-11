@@ -174,6 +174,7 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A capsule | `Pill`: `size="bar"` (the top bar's 28px) or `"label"` (a waiting card's kind); edges `quiet`, `live`, `solid`, `dashed` |
 | A small uppercase label | `Badge` (`readout` among figures) |
 | A framed text field | `TextInput`, or `TextField` with its label, hint and problem |
+| The answers a mailed question offers | `ChoiceList` (*owner, 2026-11-11*, #1630, mock-up A): a small muted label ("Choose one"), then a numbered vertical list of rows as wide as the message, outlined in `line-strong` with no fill, so they do not read as more of the message above. A row takes `surface-selected` under the pointer; once the question is answered no row takes a press, the picked one stays on `surface-selected` and the others fade as a disabled control does, and the label says what was done ("You chose", "Answered"). Hover and the picked state change in 150ms (`transition`); the label changes in place with `.cc-setup-swap` (reduced motion: a 100ms fade) |
 
 **The guard.** The lint rule `guard/hand-made-looks` fails when a screen outside `components/` draws a
 framed button, a framed text field, a small caps label or a capsule by hand, naming the component to use

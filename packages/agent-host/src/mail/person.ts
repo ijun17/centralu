@@ -470,6 +470,8 @@ export class MailPerson {
   }
 
   private message({ m, seq }: Shown): MailMessage {
+    // The choices are the sender's words, so they go in a field of their own and `facts` stays Centralu's (#1630)
+    const { choices, ...facts } = m.facts
     return {
       id: m.id,
       seq,
@@ -477,7 +479,8 @@ export class MailPerson {
       kind: windowKind(m),
       urgent: m.urgent,
       body: m.body,
-      facts: { ...m.facts },
+      facts,
+      ...(choices ? { choices } : {}),
       createdAt: m.createdAt,
       ...(m.sender === PERSON
         ? { receipts: this.records.recipients(m.id).map((r) => ({ recipient: this.party(r.recipient), delivered: r.deliveredAt !== null, read: r.readAt !== null, handled: r.settled !== null })) }

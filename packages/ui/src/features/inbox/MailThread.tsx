@@ -3,12 +3,13 @@ import type { MailMessage } from '@cc/protocol/client'
 import { partyName } from '@cc/core'
 import { composingKey } from '../../app/keys.js'
 import { Button } from '../../components/Button.js'
+import { ChoiceList } from '../../components/ChoiceList.js'
 import { Fold } from '../../components/Fold.js'
 import { Pill } from '../../components/Pill.js'
 import { RelativeAge } from '../../components/RelativeAge.js'
 import { useStore } from '../../store/store.js'
 import { isComposerSendKey } from '../session/composerKeys.js'
-import { closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
+import { answerTo, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
  * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, as text and never as markup;
@@ -70,8 +71,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
             </Button>
           </li>
         )}
-        {view.messages.map((m) => (
-          <Message key={m.id} m={m} />
+        {view.messages.map((m, i) => (
+          <Message key={m.id} m={m} open={!done && view.canReply !== false} answer={answerTo(view.messages, i)} />
         ))}
         {view.more && <li className="text-center text-xs text-ink-faint">There are more messages. Open this again to read on.</li>}
       </ol>
@@ -124,7 +125,8 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   )
 }
 
-function Message({ m }: { m: MailMessage }) {
+/** `open`: the person can still answer in this thread. `answer`: how a question was answered, when it was (`answerTo`) */
+function Message({ m, open, answer }: { m: MailMessage; open: boolean; answer: MailMessage | null }) {
   if (m.kind === 'event') {
     return (
       <li className="text-center text-xs text-ink-faint" data-testid={`mail-event-${m.seq}`}>
@@ -142,7 +144,35 @@ function Message({ m }: { m: MailMessage }) {
         {m.urgent ? ' · urgent' : ''} · <RelativeAge when={m.createdAt} />
       </span>
       <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-field border px-3 py-2 text-md text-ink ${mine ? 'border-line-strong bg-surface-hover/40' : 'border-line'}`}>{m.body}</div>
+      {m.choices && <Choices m={m} open={open} answer={answer} />}
     </li>
+  )
+}
+
+/** A question's choices (#1630): a press posts the choice's words as the answer, once, and the rows then say which one it was */
+function Choices({ m, open, answer }: { m: MailMessage; open: boolean; answer: MailMessage | null }) {
+  const view = useStore((s) => s.mailThread)
+  const reply = useStore((s) => s.replyMail)
+  const [sending, setSending] = useState(false)
+  if (!view || !m.choices) return null
+  const picked = answer ? m.choices.indexOf(answer.body) : -1
+  const pick = async (choice: string) => {
+    if (sending) return
+    setSending(true)
+    await reply(choice, replyKind(view.messages))
+    setSending(false)
+  }
+  return (
+    <div className="w-[85%]">
+      <ChoiceList
+        choices={m.choices}
+        label={choicesLabel(answer !== null, picked >= 0, open)}
+        picked={picked >= 0 ? picked : null}
+        locked={sending || answer !== null || !open}
+        onPick={(c) => void pick(c)}
+        testId={`mail-choices-${m.seq}`}
+      />
+    </div>
   )
 }
 

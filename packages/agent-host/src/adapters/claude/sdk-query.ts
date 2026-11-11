@@ -3,8 +3,7 @@ import { hostAccessEnv } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
-import { commandsFor, profileAllows } from '../../sessions/tool-seats.js'
-import type { ToolProfile } from '../../apps/contract.js'
+import { seatHas } from '../../sessions/tool-seats.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
@@ -229,7 +228,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * dropped link, and is answered in the Inbox. The CLI's own choice tool is off for it; the mail tool's description says how to ask instead.
      * A session without mail (a builder, an app's agent) keeps the card. The profile defaults as the tools' server does (`centraluMcp`)
      */
-    ...(opts.centraluTools && holdsMail(opts.toolProfile ?? 'assistant') ? { disallowedTools: ['AskUserQuestion'] } : {}),
+    ...(opts.centraluTools && seatHas(opts.toolProfile ?? 'assistant', 'mail') ? { disallowedTools: ['AskUserQuestion'] } : {}),
     // allowedTools is never set (M0: it would shadow canUseTool).
     /*
      * **The callback is passed even in auto** (#171). It used to be omitted for auto, and
@@ -250,9 +249,4 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      */
     canUseTool,
   })
-}
-
-/** Whether the seat has the mailbox, as a tool or as a command (`seatHas(profile, 'mail')` once the seat rule has one owner, #2162) */
-function holdsMail(profile: ToolProfile): boolean {
-  return profileAllows(profile, 'mail') || (commandsFor(profile) as string[]).includes('mail')
 }
