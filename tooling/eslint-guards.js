@@ -91,7 +91,7 @@ const uiRadiusScale = guard('ui-radius-scale', { corner: '{{what}} writes a corn
 const CHILD_PROCESS = /^(?:node:)?child_process$/
 const STARTERS = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'])
 
-/** Every child the host starts is hidden (docs/runtime-lessons.md ST13, #983) */
+/** Every child the host starts is hidden (docs/runtime-lessons/who-starts-what.md ST13, #983) */
 const hiddenChildren = guard(
   'hidden-children',
   {

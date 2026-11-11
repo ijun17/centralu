@@ -1,5 +1,5 @@
 /**
- * The host's shutdown as data (docs/runtime-lessons.md HO8, HO15, #396): the order its steps run
+ * The host's shutdown as data (docs/runtime-lessons/host-contract.md HO8, HO15, #396): the order its steps run
  * in, that every one runs, and that leaving happens once.
  */
 import { describe, expect, it } from 'vitest'

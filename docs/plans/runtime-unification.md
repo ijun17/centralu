@@ -3,7 +3,7 @@
 > **Status: proposed, 2026-10-08.** The owner decided on 2026-10-08 that the process runtime gets a full redesign,
 > delivered in targeted steps: each step replaces one module wholesale with the target design, and the end result is the
 > architecture as it would be written from scratch. The precondition is that every lesson already paid for is written
-> down and guarded by a test: [../runtime-lessons.md](../runtime-lessons.md), whose work list (75 rules) this plan
+> down and guarded by a test: [../runtime-lessons/](../runtime-lessons/README.md), whose work list (75 rules) this plan
 > schedules. Refs #14, #82, #440.
 
 ## 1. Why
@@ -172,7 +172,7 @@ Each is a probe in `docs/spikes/`, run on the owner's Windows 11 laptop, before 
 ## 6. Steps
 
 Each step replaces one module wholesale behind the tests that guard its lessons. **A step starts by adding the tests for
-its rows of the [work list](../runtime-lessons.md#the-work-list-unguarded-rules)** (each failing with the rule
+its rows of the [work list](../runtime-lessons/work-list.md#the-work-list-unguarded-rules)** (each failing with the rule
 broken), and lands when those and every existing test of the lessons it names pass. Steps 2 and 3 can run in parallel.
 Estimates are agent work.
 
@@ -223,7 +223,7 @@ The redesign is complete when all of these hold:
    only under `keeper/src/os/` and in `start_plan`'s `Os::current`; `process.platform` only in the modules
    `local/platform-checks` names, with no TODO entries left. Both are enforced by tests.
 3. **Every start goes through `StartMode`**, including `serve --detach`; a release has no `Direct` row.
-4. **Every UNGUARDED lesson is guarded**: the work list of runtime-lessons.md is empty, or each remaining row says
+4. **Every UNGUARDED lesson is guarded**: the work list of runtime-lessons/work-list.md is empty, or each remaining row says
    why it can only be manual and which release checklist runs it.
 5. **Compatibility paths removed on schedule** (#461), and the snapshot and child-table fields required.
 6. **One content model**: every release keeper and host runs from verified `<data>/content/<version>/`; `<data>/hosts/`
@@ -232,7 +232,7 @@ The redesign is complete when all of these hold:
    process-tree walking is gone.
 8. **Remotes run the same keeper** in headless mode, updated by the same switch.
 9. **The documents say so**: agent-host/lifecycle/start.md has one row per platform and launcher; architecture.md §4 describes
-   the topology above; runtime-lessons.md is updated in each step's pull request.
+   the topology above; runtime-lessons/README.md is updated in each step's pull request.
 
 ## 8. For the owner to decide
 

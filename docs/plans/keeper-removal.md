@@ -198,7 +198,7 @@ for good: deleting it would leave a step owed and never run.
 
 Every PR after the doc lands only after the `keeper-holding-last` tag. Each one updates in the same PR the documents
 for what it removes: agent-host/lifecycle/README.md, architecture.md §4.1 to §4.5, domain-model.md's keeper rows,
-security-boundaries/README.md, runtime-lessons.md and the Korean mirrors. Line counts are estimates and include tests.
+security-boundaries/README.md, runtime-lessons/README.md and the Korean mirrors. Line counts are estimates and include tests.
 
 | PR | Deletes | Moves or changes | Must pass | Real-environment check | ≈ lines out |
 |---|---|---|---|---|---|

@@ -50,7 +50,7 @@ A script too long for a Windows command line (step 2's, about 17,000 characters 
 then a line holding one dot (#1360). The PowerShell reads the bytes from `[Console]::OpenStandardInput()` up to that line,
 says `CENTRALU-STDIN-READY` when it starts and `CENTRALU-STDIN-OK` when it has the script, then runs it; it does not wait for the
 end of input, and it does not use `[Console]::In`, whose `ReadToEnd()` never returned in a share of the runs on Windows OpenSSH
-(docs/runtime-lessons.md RE18). `exec` waits for the first line for 2 minutes (`stdinReadyMs`: ssh's own connecting has its allowance of six attempts,
+(docs/runtime-lessons/remotes.md RE18). `exec` waits for the first line for 2 minutes (`stdinReadyMs`: ssh's own connecting has its allowance of six attempts,
 `SSH_CONNECT_ALLOWANCE_MS`, on top of 30 s for PowerShell starting; a failure there is not retried) and for the second for 30 s
 after it (`stdinAckMs`). The reader gives itself 20 s from the first line (`STDIN_READER_MS`): past it, or when the input is cut,
 it exits with 4 and prints nothing more, also when the whole input comes late, so it is gone, or never ran the script, before the

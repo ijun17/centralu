@@ -101,7 +101,7 @@ describe('CLI search path augmentation', () => {
 })
 
 /**
- * The login-shell probe against shells the test writes (docs/runtime-lessons.md PA1, PA2, PA6), so
+ * The login-shell probe against shells the test writes (docs/runtime-lessons/finding-programs.md PA1, PA2, PA6), so
  * it asserts something on every machine, CI included, where the real shell knows no tool.
  */
 // The shells here are sh scripts, which Windows cannot run; that Windows asks none is the last test, by parameter

@@ -459,7 +459,7 @@ setting.
 | 8 | Windows: the keeper's handoff (W1, W2, W5; runtime-unification step 5 on the OS layer), ending the lag | the handoff script on `windows-latest` | a linked Windows PC: an update across a keeper build change keeps a turn and a terminal |
 
 Step 2 needs no keeper and ends #1614's wait on every remote; steps 3 to 5 and step 6 can run in parallel. Each step
-updates agent-host/lifecycle/start.md (its table), agent-host/remote/serve.md, agent-host/remote/install-and-update.md (its update table), remote-hub.md §10.4 and §10.5, and runtime-lessons.md
+updates agent-host/lifecycle/start.md (its table), agent-host/remote/serve.md, agent-host/remote/install-and-update.md (its update table), remote-hub.md §10.4 and §10.5, and runtime-lessons/README.md
 for the rules it guards, in its own pull request. The Windows desktop (#14) takes the keeper from step 6 on through
 `start_plan`, as runtime-unification step 9 says; that is not part of this plan.
 

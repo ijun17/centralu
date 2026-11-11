@@ -9,7 +9,7 @@ two machines on different releases.
 
 This document is the inventory: every such shape, who owns it, where it is parsed, and what an added field, a
 removed field and a broken value do **today**. It is a record of the code, kept with `file:line` so a reader can check
-it. When a line moves, the symbol named next to it still finds it. Like [runtime-lessons.md](runtime-lessons.md), it is
+it. When a line moves, the symbol named next to it still finds it. Like [runtime-lessons/](runtime-lessons/README.md), it is
 English only.
 
 ## The rules

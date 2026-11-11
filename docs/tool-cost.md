@@ -5,7 +5,7 @@ Every word of a tool definition or a server's instructions rides in every reques
 
 Decisions about how Centralu exposes its tools (#419, #512) are made on numbers. This is the one
 repeatable measurement of those numbers (#513): how to run it, how to read it, and the first baseline.
-It is a record of measurement, like [runtime-lessons.md](runtime-lessons.md), so it is not mirrored in
+It is a record of measurement, like [runtime-lessons/](runtime-lessons/README.md), so it is not mirrored in
 Korean. The design it measures is in [agent-host/tool-profiles.md](agent-host/tool-profiles.md) (who gets which tools) and
 [apps.md §9.4](apps.md) (attaching apps to a session).
 

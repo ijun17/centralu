@@ -1,9 +1,10 @@
 /**
  * `guard/doc-refs`: a reference to a section of a document points at a section that exists (#2179 step 2).
  *
- * Three forms, in any tracked text file (a code comment, a string, a document):
+ * Four forms, in any tracked text file (a code comment, a string, a document):
  *   - `<doc> §4.5`, `docs/plans/mailbox.md §10.1`, `x.md §3 and §4`: section 4.5 exists in that document (a numbered heading, or an item of a numbered list under heading 4);
  *   - `docs/releasing.md "Host-only packages"`: a heading or a bold lead-in of that document starts with the quoted text;
+ *   - `docs/runtime-lessons/host-contract.md HO4, HO6`: a rule id (two capitals and a number) that a bold lead-in of that document starts with (`**HO4. …**`);
  *   - in a Markdown file, a link `[text](../x.md#anchor)`: the file exists and, with an anchor, one of its headings has that anchor.
  * A bare name (`architecture §6.2`) counts when it is the name of a document under docs/ or at the root; other words
  * before a `§` (`plan §4`, which means the plan the comment sits in) are not read. A name written with `.md` that no document
@@ -149,6 +150,7 @@ const SECTION = String.raw`§\s?(\d+(?:\.\d+)*)`
 const GAP = '(?:`|\\]\\([^)]*\\))?,?\\s+'
 const NUMBERED = new RegExp(String.raw`(?<![\w./-])${DOC}${GAP}(${SECTION}(?:\s*(?:,|/|and|or|&|–|—|-|to)\s*${SECTION})*)`, 'g')
 const QUOTED = new RegExp(String.raw`(?<![\w./-])${DOC}\.md${GAP}["“«]([^"”»\n]{3,80})["”»]`, 'g')
+const RULE = new RegExp(String.raw`(?<![\w./-])${DOC}${GAP}([A-Z]{2}\d+(?:\s*(?:,|and|or|&)\s*[A-Z]{2}\d+)*)(?![\w-])`, 'g')
 const PLAIN = /(?<![\w./-])((?:[\w.-]+\/)*[A-Za-z][\w-]*)\.md(?![\w-])/g
 const LINK = /\]\(([^)\s#]*?\.md)?(?:#([^)\s]+))?\)/g
 
@@ -175,6 +177,13 @@ export function danglingRefs(text: string, index: DocIndex, file?: string): stri
     if (typeof doc !== 'object') continue
     const wanted = clean(title)
     if (!doc.titles.some((t) => t.startsWith(wanted))) found.push(`${lineOf(m.index)}: ${name}.md has no heading "${title}"`)
+  }
+  for (const m of text.matchAll(RULE)) {
+    const [, name = '', md = '', ids = ''] = m
+    const doc = lookup(name, index)
+    if (typeof doc === 'string') found.push(`${lineOf(m.index)}: ${doc}`)
+    if (typeof doc !== 'object') continue
+    for (const [id] of ids.matchAll(/[A-Z]{2}\d+/g)) if (!doc.titles.some((t) => t.startsWith(`${id.toLowerCase()}.`))) found.push(`${lineOf(m.index)}: ${name}${md} has no rule ${id}`)
   }
   for (const m of text.matchAll(PLAIN)) {
     const doc = lookup(m[1] ?? '', index)
@@ -214,7 +223,7 @@ export function scanRepository(root: string): { findings: string[]; read: number
     if (own.has(f)) continue
     const text = readFileSync(join(root, f), 'utf8')
     if (text.length > MAX_BYTES || !(text.includes('§') || text.includes('.md'))) continue
-    read += (text.match(NUMBERED) ?? []).length + (text.match(QUOTED) ?? []).length
+    read += (text.match(NUMBERED) ?? []).length + (text.match(QUOTED) ?? []).length + (text.match(RULE) ?? []).length
     for (const what of danglingRefs(text, index, f)) findings.push(`${f}:${what}`)
   }
   return { findings, read }

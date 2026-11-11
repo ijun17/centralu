@@ -1,4 +1,4 @@
-/** `guard/doc-refs`: a `<doc> §n`, `<doc>.md "Heading"` or Markdown link reference points at a section that exists (tooling/doc-refs.ts; #2179) */
+/** `guard/doc-refs`: a `<doc> §n`, `<doc>.md "Heading"`, `<doc>.md HO1` or Markdown link reference points at a section that exists (tooling/doc-refs.ts; #2179) */
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -63,6 +63,27 @@ describe('guard/doc-refs', () => {
       '5: docs/agent-host/usage.md has no heading #nothing',
       '5: limits.md is no document',
       '5: docs/agent-host/usage.md has no heading #gone',
+    ])
+  })
+
+  it('reads a rule id cited after the document that holds it', () => {
+    const index = indexTexts(
+      new Map([
+        ['docs/runtime-lessons/README.md', '# Lessons\n'],
+        ['docs/runtime-lessons/host-contract.md', '# Host\n\n**HO1. Stdout carries the handshake only.**\nRule: text.\n'],
+        ['docs/runtime-lessons/remotes.md', '# Remotes\n\n**RE18. A first line can be late.**\n'],
+      ]),
+    )
+    const text = [
+      'docs/runtime-lessons/host-contract.md HO1, HO2',
+      '`docs/runtime-lessons/host-contract.md` RE18',
+      'docs/runtime-lessons.md HO1',
+      'runtime-lessons/remotes.md RE18; HO9 on its own is not read',
+    ].join('\n')
+    expect(danglingRefs(text, index)).toEqual([
+      '1: docs/runtime-lessons/host-contract.md has no rule HO2',
+      '2: docs/runtime-lessons/host-contract.md has no rule RE18',
+      '3: docs/runtime-lessons.md is a folder now: cite the file under it',
     ])
   })
 })

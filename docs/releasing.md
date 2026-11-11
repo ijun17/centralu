@@ -20,7 +20,7 @@ the keeper copy in the content folder and the shell included. `build.yml` also f
 newer" warning, which a compiled object can raise without changing the file's number. 11.0 is what macos-14 produced
 (measured on a main build and in 0.1.0-beta.45), so moving to macos-15 changed no supported macOS. The Rust cache keys
 carry the runner image, so a runner move rebuilds every dependency. What CI no longer runs is macOS 14 itself (see
-runtime-lessons.md TE4 and FI8).
+runtime-lessons/testing.md TE4, runtime-lessons/files.md FI8).
 
 Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
 and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
