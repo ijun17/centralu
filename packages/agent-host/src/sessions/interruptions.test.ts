@@ -6,6 +6,7 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { PERSON } from '../mail/address.js'
+import { PERSON_TURN_ENDED } from '../mail/delegation.js'
 import { hostMail, mailSessionsOf } from '../mail/host-mail.js'
 import { MAIL_HOST, addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 import type { UpdateResumeFolder } from '../lifecycle/update-resume.js'
@@ -168,7 +169,7 @@ const stopNoticesTo = (sender: string) =>
   store.mailbox.feedOf(addressOf(sender), { limit: 500 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
 /** The parent's task to the child, as the delegation wrote it (mail wired) */
 const taskTo = (parent: string, child: string) => mailReader(store).tasks(addressOf(parent), child)[0]!
-/** What the start does on its first timer tick (an update's Continue, the person's work reported to the Inbox) has run; this waits past it */
+/** What the start does on its first timer tick (an update's Continue) has run; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /**
  * Centralu's notices to `starter` that a session it started stopped, owed it nothing (docs/plans/mailbox.md "The stop notice"): only the mailbox
@@ -372,7 +373,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 
-  it('work the person owns (a script started the session, §8.1): the next start reports the quit to their Inbox and settles the task', async () => {
+  it('work the person owns (a script started the session, §8.1): the next start gives the person the stop notice, once, and releases the task without a report', async () => {
     const a = host()
     const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
@@ -382,19 +383,21 @@ describe('a turn a quit stopped (#698)', () => {
     const task = store.mailbox.newestTask(PERSON, addressOf(s.id))!
     expect(task).toBeDefined()
 
-    const b = host()
-    // The mailbox is wired in the same tick as the host is made, before the start's first moment
-    wireHostMail(b.mgr, store)
-    const reports = () => store.mailbox.reportsOn(task.id).filter((m) => m.sender === 'centralu')
-    await eventually(() => reports().length === 1)
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'stopped', reason: 'quit' })
-    expect(reports()[0]!.body).toContain('Centralu quit or restarted during its turn')
-    expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: 'reported' })
-    expect(store.mailbox.newestTask(PERSON, addressOf(s.id))).toBeUndefined()
+    // The next start: its mail's ready step releases what the quit cut and tells the senders
+    wireHostMail(host().mgr, store).afterReady()
+    const told = () => store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
+    await eventually(() => told().length === 1)
+    // The step-1 stop notice, in the person's form: the one path for a stop
+    expect(told()[0]!.facts.unanswered).toEqual([{ id: task.id, recipient: addressOf(s.id), why: 'quit' }])
+    expect(told()[0]!.body).toContain('Centralu quit while')
+    expect(told()[0]!.body).toContain('worked on your message, so it did not answer. Send it a message when you want it to go on.')
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: null, releasedWhy: 'quit' })
     // The start after that finds the session at rest and says nothing more
-    host()
+    wireHostMail(host().mgr, store).afterReady()
     await startNoticesRan()
-    expect(reports()).toHaveLength(1)
+    expect(told()).toHaveLength(1)
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
   })
 
   // The per-request form of main's "a mark the start dropped, cut by a quit" (#1948 step 3): the open task is what the starter is owed
@@ -1010,7 +1013,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(answersTo(parent, child)[0]!.body).toContain('An update of Centralu cut this turn and Centralu continued it.')
   })
 
-  it("work the person owns is not reported to their Inbox as stopped: its one report is the continued turn's end (#1618 review D3)", async () => {
+  it("work the person owns gets no stop notice: the continued turn's end answers it, once, with the update's line (#1618 review D3, #1966)", async () => {
     const f = folder()
     const a = host({ updateResume: f })
     const project = await a.mgr.projectCreation.addProject(root)
@@ -1028,10 +1031,11 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     await startNoticesRan()
     expect(reports()).toHaveLength(0)
     expect(store.mailbox.newestTask(PERSON, addressOf(s.id))?.id).toBe(task.id)
+    expect(store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.facts.unanswered !== undefined)).toEqual([])
     b.claude.handles.get(s.id)!.answer('done')
     await eventually(() => reports().length === 1)
-    expect(reports()[0]!.facts).toMatchObject({ outcome: 'finished' })
-    expect(reports()[0]!.facts.reason).toBeUndefined()
+    expect(reports()[0]!.facts).toMatchObject({ outcome: 'finished', answer: 'done' })
+    expect(reports()[0]!.body).toBe(`${PERSON_TURN_ENDED}\nAn update of Centralu cut this turn and Centralu continued it.`)
   })
 
   it("one that cannot be continued ends as a quit's does: marked stopped, its parent told by the stop notice, and it leaves the list", async () => {

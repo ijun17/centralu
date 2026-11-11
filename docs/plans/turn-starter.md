@@ -135,8 +135,8 @@ From the review on #1639, and which way each errs:
 A turn belongs to no one (owner, 2026-11-05; docs/plans/mailbox.md §10.6.3): a request is answered by its reply or the session's last
 response, so the report no longer goes to whoever started a turn, and the engine above lost its main reader. Whose a turn is survives
 only as what a hub is told on the turn's end (`turn: { by, wrote?, cut? }`, read by `LinkedReports` until mail crosses links), the hub's
-message a turn ran for (`origin`, #1604), the mailbox's `mail_turns.started_by` (the pair's warning count, C8), and the person's own
-work's Inbox report, which skips the person's turn. None of these needs the record of every message given the tool, so it went:
+message a turn ran for (`origin`, #1604) and the mailbox's `mail_turns.started_by` (the pair's warning count, C8); the person's own work's
+Inbox report, which skipped the person's turn, went when the person's task came to be answered as any task (mailbox.md §10.6.3). None of these needs the record of every message given the tool, so it went:
 
 - **Read from the rows.** Every message given the tool is already a user row with its `inputId`, `from`, `fromApp`, `fromScript` and
   `relayed` (§2 item 1). When the tool names the inputs a turn opened from (`turnNamed`, once per turn), the rows with those ids, looked

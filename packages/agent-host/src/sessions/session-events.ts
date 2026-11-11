@@ -307,8 +307,6 @@ export class SessionEvents {
       this.host.mailRequestTurnEnded(e.sessionId)
       this.host.reports.turnEndedAtRest(e.sessionId, !!owned?.cut)
     }
-    // Work the person owns (a script or the RPC started the session with a first message) is reported to their Inbox when no call reads it (§8.1)
-    if (endedTurn && e.sessionId && !waited) this.host.reports.reportToPersonIfOwed(e.sessionId, e, runOpen ? run?.completedAnswer : undefined, turnBy)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.host.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.host.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.host.children.releaseTurn(e.sessionId)

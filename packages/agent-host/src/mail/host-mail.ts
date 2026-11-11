@@ -8,7 +8,7 @@ import type { MailHooks } from '../sessions/mail-sessions.js'
 import { PERSON, parseAddress, sessionAddress } from './address.js'
 import { leaveForEarlierBuild, takeOverFromEarlierBuild } from './adoption.js'
 import { askedBy, askerFacts, type AskedByHost } from './asked-by.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskRepointer, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personWorkRecorder, personWorkWithdrawer, requestTurnRecorder, taskRepointer, taskSender, taskWithdrawer, turnRecorder } from './delegation.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
 import { MessageService, type HandedOverMessage } from './messages.js'
@@ -272,17 +272,17 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     sendTask: taskSender(service),
     withdrawTasks: taskWithdrawer(service, store.mailbox),
     answered: answerRecorder(service, store.mailbox),
-    // A session a script or the RPC started with a first message: the person's task, whose turn is reported to their Inbox (§9.6)
-    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox), owes: personOwes(service, store.mailbox), report: personReportRecorder(service, store.mailbox) },
-    // A session at rest answers the tasks it did not answer by a reply with its last response (§10.6.3); the person's own work keeps its report (§8.1)
+    // A session a script or the RPC started with a first message: the person's task, answered as any task is (§9.6, §10.6.3)
+    personWork: { started: personWorkRecorder(service), withdrawn: personWorkWithdrawer(service, store.mailbox) },
+    // A session at rest answers the tasks it did not answer by a reply with its last response (§10.6.3): a session's and the person's alike
     lastResponse: (id, { relay, ...last }) => {
       const answered = service.lastResponse(addressOf(id), {
         ...last,
         body: (sender) => {
           const party = parseAddress(sender)
-          return last.body(party?.kind === 'session' ? party.sessionId : sender)
+          return last.body(party?.kind === 'session' ? party.sessionId : null)
         },
-        answers: (sender) => parseAddress(sender)?.kind === 'session',
+        answers: (sender) => sender === PERSON || parseAddress(sender)?.kind === 'session',
         queued: delivery.queuedFor(addressOf(id)),
       })
       // A sender whose seat cannot read mail (an older build's coordinator, a builder) is refused it (`no_mailbox`): it is told in its conversation, as
@@ -389,13 +389,16 @@ function openWork(service: MessageService, store: Store, address: string): { una
   return { unanswered, owed }
 }
 
-/** The sessions with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`), or its own tasks' receivers (`from`) */
+/**
+ * The sessions with a task open between them and `address` (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's own
+ * work), or its own tasks' receivers (`from`)
+ */
 function openTaskParties(records: MailboxRecords, address: string, side: 'to' | 'from'): string[] {
   const rows = side === 'to' ? records.watchedTo(address) : records.watchedFrom(address)
   return [...new Set(rows.flatMap((r) => {
     const m = r.deliveredAt === null || r.releasedAt !== null ? undefined : records.message(r.messageId)
     const other = m?.kind === 'task' ? parseAddress(side === 'to' ? m.sender : r.recipient) : null
-    return other?.kind === 'session' ? [other.sessionId] : []
+    return other?.kind === 'session' ? [other.sessionId] : other?.kind === 'person' ? [PERSON] : []
   }))]
 }
 

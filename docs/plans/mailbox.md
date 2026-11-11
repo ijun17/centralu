@@ -1458,7 +1458,7 @@ Neither starts a turn nor wakes anyone. A crash between the old path's write and
 | `answerRecorder` (a call returned the answer: reports read, thread to `review`) | the reports replying to the task are marked read for the caller. No state | M3a |
 | `closingRecorder` (closing a thread stops its turn, #1511) | gone. `agent_session stop` is the way, and it withdraws the task | M3a |
 | `finishRecorder` (deleting the child closes the thread) | `partyGone` settles the child's rows | M3a |
-| `personWorkRecorder`, `personReportRecorder` (script-started work reports to the Inbox) | a task from `person`, and its report to `person` | M3a |
+| `personWorkRecorder`, `personReportRecorder` (script-started work reports to the Inbox) | a task from `person`, answered as any task (§10.6.3 "The person's own work"); `personReportRecorder` went in #1948 step 3 | M3a |
 | `adoptMark`, `reconcileFinished` | §9.5 | M3a |
 | `report_marks`, `pausedReports`, `delegated_turns`, `queued_requests`, `ChildReports.held`, `ReportedAs` | unchanged and the truth (§9.5) | M8 |
 | `LinkedReports`, `endOwed` (`remote-agents.ts:224`), the `owed` field of `remote_agents` | unchanged | when mail crosses links (§14) |
@@ -1692,7 +1692,8 @@ mail to the Assistant's role follows the role (D15).
 answered (the person's too), and every open task a session gave it and that reached it, whichever turn it came in (one still queued
 was never its work). The person's Stop releases only the tasks of the turn it stopped (delivered into it, or the work it was for): the
 session can still answer the others, so their givers are not told (owner, 2026-11-11). A stop that leaves it unable to answer (an error, a
-usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. Not the person's tasks: their work is reported to their Inbox (`reportToPersonIfOwed`). The rows stay open, so a
+usage limit, the network, its tool's interrupt, a quit, a cut turn not continued) releases them all. The person's own tasks are released and told the same way
+(§10.6.3 "The person's own work"). The rows stay open, so a
 reply after the person continues the session still answers them, and the start's adoption of older report marks does not settle a
 released task as reported.
 
@@ -1827,7 +1828,7 @@ cannot answer, and the last response below when it ends its turn without answeri
 a sender (the owner, 2026-11-05): when a session is at rest after a turn that ended as turns do, every task to it that is still open gets its
 own report, replying to it and settling it `reported`, with the response as `facts.answer` (600 characters) beside Centralu's words. Two tasks
 from one sender are two requests and get two reports; nothing covers another task (`covers` is gone, and with it F4/K3's sweep of a sender's
-older tasks). Which tasks: delivered, not settled, not held, from a session (the person's own work keeps its Inbox report, below), not held in
+older tasks). Which tasks: delivered, not settled, not held, from a session or the person (the person's own work, below), not held in
 the tool for a turn after (below), and with no task the session handed on in that work still open (`handedOn`: that work is not done; the turn
 that work's answer starts answers it). The response is the words of the session's latest turn (`ChildReports.turnWords`, the one definition a
 stop notice quotes too), never the run's: a turn that wrote nothing answers with none ("It wrote no response"), not the turn before's. The
@@ -1896,9 +1897,26 @@ joins, and each is answered on its own, by a reply or by the last response at re
 path (`held`, `oldPathEnded`, `OLD_PATH_WAIT_MS`, `mailStopTold`) and the starter's `reportOwed` branch are gone with the report marks: the starter
 told of a quit is the session that gave the turn, else the one that started it (`HostTenure.quitStarter`).
 
-**What the person sees.** Nothing changes on screen but the composer's choice, which goes (C1): the person's message is a message, as "Just
-asking" was. The person's own work (a task from the person, a script's or the RPC's first message) keeps its Inbox report, paused report and
-stop report until the owner rules on their look (the separate commit, mock-ups `1948-step3-*`).
+**What the person sees.** The composer's choice goes (C1): the person's message is a message, as "Just asking" was. The person's own work changes
+as below (mock-ups `1948-step3-*`, the last commit of step 3, which can be dropped on its own).
+
+**The person's own work** (a task from the person: a script's or the RPC's first message, §9.6) is a request like any other, answered by the same
+rule and stopped by the same notice; its own report path (`reportToPersonIfOwed`) goes. Three cases, by what the person's Inbox thread shows:
+
+| Case | Before | Now | Thread |
+|---|---|---|---|
+| Finished: the turn ended and the session is at rest | "[Centralu] The session you started finished its turn." | the last response answers the task, one report replying to it, settled `reported`, with the response as `facts.answer` and Centralu's one line "[Centralu] The session you started ended its turn. Its last response says whether the work is done." (`PERSON_TURN_ENDED`, the person form of `TURN_ENDED`; the update's line after it when an update cut the turn and Centralu continued it; no read_session line, no `personSince`). A turn that wrote nothing still says the line, with no answer | In review |
+| Paused: its turn ended while its own background work runs | "[Centralu] The session you started paused: its turn ended while its own background work is still running (1 task).", then a settled report | nothing while the work runs; the turn its end starts answers, or, when none follows, the 60 s settle (`settleAtRest`) does, with the Finished line | Running, then In review |
+| Stopped: an error, a usage limit, the network, its tool's interrupt, a quit or shutdown, a cut turn not continued | "[Centralu] The session you started stopped before finishing: …", one line per cause, settled `reported` | the stop notice (§10.6.1) in its person form, e.g. "Parser's tool interrupted its turn before it answered your message. Send it a message to go on."; no report; the task is released and stays open, so the next turn's last response answers it | Open |
+
+Why: one rule for every request (a report attaches to a request, the owner's rule of 2026-11-05), and one path for a stop (§10.6.1). Centralu does
+not say "finished" for a turn (#1902): only the session's last response says whether the work is done. A stopped task was not answered, so its thread is
+not In review: `MailPerson`'s row reads a task a stop released and nothing settled as not running, and the thread is `open` (the person can send the
+session a message to go on, as the notice says). Gone with it: `personReportLine`, `personOutcome`, `reportToPersonIfOwed`, the person's paused report
+(`ChildOwnership.personPausedReports`, `pausePersonReport`, `unpausePersonReport`, `restorePersonPaused`, `person_report_paused:<session>`,
+`ChildReports.pausedTasksNow`), the quit's report of it (`HostTenure.reportQuitPersonWork`), `personReportRecorder`, `PersonReportDraft`, `personOwes` and
+the hooks `personWork.owes` / `.report`. `personWork.started` / `.withdrawn` stay: the task is still written before the first message and withdrawn
+when it could not go in. A linked machine's copy (`LinkedReports`) reports to a session, never to the person, and is unchanged.
 
 | Removed | What replaces it |
 |---|---|
@@ -1909,14 +1927,17 @@ stop report until the owner rules on their look (the separate commit, mock-ups `
 | A report covering a sender's other tasks (`facts.covers`, F4/K3), a pause's update in place (`update`, `personNote`, `updateInPlace`), `startedAt` on a report | one report per task; nothing is sent while the work runs |
 | Adoption step 2 (tasks no mark owes, `settleReported`) | nothing: no older path owes anything |
 | The composer's choice: `ReportChoice`, `agents.reportOwed`, `SendIntent`, `user_message.intent`, `takeTurn`, `personTookOver`, `took_over`, `LinkedReports.choosing` | nothing: a person's message is a message |
+| The person's own report path: `reportToPersonIfOwed`, `personReportLine`, the person's paused report and `person_report_paused:`, `personReportRecorder`, `personOwes` | the last response and the stop notice, as for any task |
 
 **Handoff** (step 5 moves it onto `handOver`): until then the smallest shim keeps a moved child's answer with the successor: its open tasks from
 the original are withdrawn and one task from the successor, with the same words, is written delivered (`MessageService.repointTasks`), where
 the report mark moved before.
 
 **Restart, swap and older builds.** No store step (v71 stays free). This build neither reads nor writes `report_paused`, `report_turn`,
-`turn_inputs` or `input_origins` (the contract step drops them, turn-owned-by-no-one.md §6; every `ready` deletes the last three for every
-session, so beta.57 after a rollback reads no stale value, turn-starter.md "After #1948 step 3"), and ignores `user_message.intent` on old rows. At
+`turn_inputs`, `input_origins` or `person_report_paused` (the contract step drops them, turn-owned-by-no-one.md §6; every `ready` deletes all five for
+every session (`RETIRED_SESSION_KEYS`), so beta.57 after a rollback reads no stale value, turn-starter.md "After #1948 step 3": a `report_paused` left
+standing would hold the mark below as paused there; a person's task an older build left paused is answered by the settle at that start), and ignores
+`user_message.intent` on old rows. At
 every `ready`, an earlier build's report mark whose caller has no open task to its session becomes a delivered task (`ADOPTED_TASK`), and every
 mark is then deleted. An earlier build (beta.57) after a rollback reports a turn's end by a report mark only, keeps a mark only for a session whose
 turn goes on under it, and settles every task no mark owes at its start: so this build, as it leaves (`leaveForEarlierBuild`), writes one mark for

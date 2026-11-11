@@ -352,17 +352,19 @@ describe('a session stops without answering a question', () => {
     expect(w.noticesTo(A)).toHaveLength(1)
   })
 
-  it("releases every open task a session gave the stopped one, whichever turn it came in; not the person's, whose work is reported to their Inbox, nor one still queued", () => {
+  it("releases every open task a session or the person gave the stopped one, whichever turn it came in, each sender told; not one still queued", () => {
     const w = stopWorld()
     const task = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
+    // The person's own work is a request like any other (mailbox.md §10.6.3): the stop notice is its one path for a stop
     const mine = w.mail.task(PERSON, B, { text: 'my work', origin: 'create_session', delivered: true })
     const queued = w.mail.task(C, B, { text: 'later work', origin: 'send_to_session', delivered: false })
-    expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(1)
+    expect(w.stops.sessionStopped(B, 'quit', { turnSeq: null })).toBe(2)
     expect(w.rowOf(task.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
-    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedAt: null })
+    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedWhy: 'quit', toldAt: w.clock.t, settled: null })
     expect(w.rowOf(queued.id, B)).toMatchObject({ releasedAt: null })
     expect(w.noticesTo(C)).toEqual([])
     expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: task.id, recipient: B, why: 'quit' }]])
-    expect(w.noticesTo(PERSON)).toEqual([])
+    expect(w.noticesTo(PERSON).map((n) => n.message.facts.unanswered)).toEqual([[{ id: mine.id, recipient: B, why: 'quit' }]])
+    expect(w.noticesTo(PERSON)[0]!.message.body).toBe('Centralu quit while beta worked on your message, so it did not answer. Send it a message when you want it to go on.')
   })
 })

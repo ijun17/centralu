@@ -323,7 +323,7 @@ export function createRpcHandler(
   }
 
   const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
-    // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, reported to their Inbox (§8.1)
+    // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, a task answered in their Inbox (docs/plans/mailbox.md §10.6.3)
     'agents.createSession': async (p, ctx) => {
       // Where a worktree forked from (#1488): in the answer, as a linked computer's hub has no other way to read it
       let worktreeBase: string | undefined

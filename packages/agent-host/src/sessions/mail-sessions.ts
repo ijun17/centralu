@@ -11,7 +11,6 @@ import type { TurnInputs } from '../mail/delivery.js'
 import type { Asker } from '../mail/asked-by.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import type { PersonReportDraft } from '../mail/delegation.js'
 import type { ChildReports, SessionLastResponse } from './child-reports.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { DelegationCall, DelegationTarget, SendOrigin } from './delegation-host.js'
@@ -52,18 +51,16 @@ export type MailHooks = {
   sendTask?(callerId: string, childId: string, origin: ThreadOrigin, task: string): string
   /** The caller's tasks to the session that are not delivered yet are withdrawn (`agent_session stop`); how many */
   withdrawTasks?(callerId: string, childId: string): number
-  /** A script or the RPC started a session with a first message: the work is the person's (§8.1) */
+  /** A script or the RPC started a session with a first message: the work is the person's (§8.1), a task answered as any task is */
   personWork?: {
     started(sessionId: string, text: string, fromScript?: { credential: string }): void
     withdrawn(sessionId: string): void
-    owes(sessionId: string): boolean
-    report(sessionId: string, draft: PersonReportDraft): boolean
   }
   /** A session deleted the session that did work it gave (§3.3): a thread whose work was reported is closed */
   finishedWith?(callerId: string, childId: string): void
   /** A session at rest answers the tasks it did not reply to with its last response (docs/plans/mailbox.md §10.6.3); `body` is for a session id, or null for the person */
   lastResponse?(sessionId: string, last: SessionLastResponse): void
-  /** The sessions with a task open between them and the session (delivered, not settled, not released): its tasks' senders (`to`), or its own tasks' receivers (`from`) */
+  /** The sessions with a task open between them and the session (delivered, not settled, not released): its tasks' senders (`to`, `PERSON` for the person's), or its own tasks' receivers (`from`) */
   openTasks?(sessionId: string, side: 'to' | 'from'): string[]
   /** What the tool said of the inputs given it (`MailDelivery.turnInputs`): which the turn that ended took, or which the turn opening runs for */
   turnInputs?(sessionId: string, turn: TurnInputs): void

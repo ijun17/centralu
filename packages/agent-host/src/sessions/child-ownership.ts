@@ -4,11 +4,10 @@ import type { BackgroundTask, SessionInfo, StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
-import { readJsonObjects } from '../dev-services/store/json.js'
 import { asObj, tryParseJson } from '../json-value.js'
 import { isHubSender } from './hub-sender.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import type { AnswerGiven, PersonReportDraft } from '../mail/delegation.js'
+import type { AnswerGiven } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
 import type { AgentStartRecord } from './agent-start-record.js'
 
@@ -39,19 +38,6 @@ export type Delegation = {
   waiters?: number
   /** The owner's calls waiting on it now, ended when a handoff gives it to another session (#693) */
   leaving?: Set<() => void>
-}
-
-/**
- * The store's record that the person's report of work they own (#1463) is held over the session's own background work (#721), kept across a restart.
- * A build before #1948 step 3 also kept a caller's in `report_paused:<session>`; it is not read (docs/plans/mailbox.md §10.6.3)
- */
-export const personPausedKey = (sessionId: string) => `person_report_paused:${sessionId}`
-/** A task a paused report waits on (#721), as kept in `person_report_paused:<session>` */
-export type PausedTask = { id: string; description: string }
-/** The tasks of a stored pause, or null when there is none (an unreadable value is a pause on nothing known) */
-export function readPausedTasks(raw: string | null): PausedTask[] | null {
-  if (raw === null) return null
-  return readJsonObjects<PausedTask>(raw, (t) => typeof t.id === 'string' && typeof t.description === 'string')
 }
 
 /**
@@ -154,7 +140,7 @@ export type OwnerMove = {
 type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'messages'>
 
 /**
- * Who owns a child session's work (#428): the turn another session gave it, the person's report paused over its own background work, the
+ * Who owns a child session's work (#428): the turn another session gave it, the
  * delegations and start requests a session made, and what a handoff gave away. What a session owes the sessions that gave it work is the
  * mailbox's open tasks (`openTasks`, docs/plans/mailbox.md §10.6.3). Each change that has a store mirror writes it here, so
  * memory and store do not drift apart; reads go through the read-only maps.
@@ -164,12 +150,6 @@ type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'message
  * sessions' state.
  */
 export class ChildOwnership {
-  /**
-   * The person's report of work they own (#1463) held over the session's own background work (#721): a turn ended while work it started still ran.
-   * Holds the tasks it paused on, mirrored in `person_report_paused:<session>` so a restart keeps it
-   */
-  private readonly personPaused = new Map<string, PausedTask[]>()
-  readonly personPausedReports: ReadonlyMap<string, PausedTask[]> = this.personPaused
   /**
    * Whose the running turn is, by session (#1377): guessed as it starts (`turnStarted`), decided by the inputs the tool names (`turnNamed`),
    * read at its end. Memory only: a host that takes a session over mid-turn reads its turn as the work's
@@ -242,7 +222,8 @@ export class ChildOwnership {
 
   /**
    * The sessions with a task open between them and `sessionId` (delivered, not settled, not released): the senders of its tasks (`to`, whom it
-   * owes an answer), or the receivers of its own (`from`, whose answer it waits for). None with no mailbox. Never throws
+   * owes an answer; `PERSON` for the person's own work), or the receivers of its own (`from`, whose answer it waits for). None with no mailbox.
+   * Never throws
    */
   openTasks(sessionId: string, side: 'to' | 'from'): string[] {
     try {
@@ -255,12 +236,10 @@ export class ChildOwnership {
 
   /**
    * The mailbox's way of keeping work the person owns (§8.1): a session a script or the RPC started with a first message. `started` writes it down
-   * before the message goes in, `owes` says whether the person has work with the session whose turns are reported, `report` posts a turn's end in
-   * the person's thread. Set by the host when it has a mailbox
+   * before the message goes in, `withdrawn` takes it back when the message could not go in. The task is answered as any task is (mailbox.md §10.6.3).
+   * Set by the host when it has a mailbox
    */
-  private personWork:
-    | { started(sessionId: string, text: string, fromScript?: { credential: string }): void; withdrawn(sessionId: string): void; owes(sessionId: string): boolean; report(sessionId: string, draft: PersonReportDraft): boolean }
-    | undefined
+  private personWork: { started(sessionId: string, text: string, fromScript?: { credential: string }): void; withdrawn(sessionId: string): void } | undefined
   onPersonWork(hooks: ChildOwnership['personWork']): void {
     this.personWork = hooks
   }
@@ -271,32 +250,21 @@ export class ChildOwnership {
    */
   firstMessage(sessionId: string, text: string, fromScript: { credential: string } | undefined, send: () => void): void {
     if (!fromScript) return send()
-    this.personCall('write down the work for the person started in', sessionId, undefined, (w) => w.started(sessionId, text, fromScript))
+    this.personCall('write down the work for the person started in', sessionId, (w) => w.started(sessionId, text, fromScript))
     try {
       send()
     } catch (e) {
-      this.personCall('withdraw the work for the person started in', sessionId, undefined, (w) => w.withdrawn(sessionId))
+      this.personCall('withdraw the work for the person started in', sessionId, (w) => w.withdrawn(sessionId))
       throw e
     }
   }
 
-  /** Whether the person has work with `sessionId` whose turn is reported to them; false with no mailbox. Never throws */
-  personOwes(sessionId: string): boolean {
-    return this.personCall('read the work of the person in', sessionId, false, (w) => w.owes(sessionId))
-  }
-
-  /** The end of a turn of work the person owns, in their thread; false when it was not taken. Never throws */
-  reportedToPerson(sessionId: string, draft: PersonReportDraft): boolean {
-    return this.personCall('report to the person the work of', sessionId, false, (w) => w.report(sessionId, draft))
-  }
-
-  /** A call into the mailbox's person work: what it gives without a mailbox, or when it failed, which is logged */
-  private personCall<T>(what: string, sessionId: string, none: T, call: (w: NonNullable<ChildOwnership['personWork']>) => T): T {
+  /** A call into the mailbox's person work, none without a mailbox; a failure is logged */
+  private personCall(what: string, sessionId: string, call: (w: NonNullable<ChildOwnership['personWork']>) => void): void {
     try {
-      return this.personWork ? call(this.personWork) : none
+      if (this.personWork) call(this.personWork)
     } catch (e) {
       console.error(`[mail] could not ${what} ${sessionId.slice(0, 8)} (${errorMessage(e)})`)
-      return none
     }
   }
 
@@ -358,18 +326,6 @@ export class ChildOwnership {
     }
   }
 
-  /**
-   * At startup (#1463): the person's paused reports, all read back. Returns the ones whose work went with the last host's process (any but the
-   * sessions whose turn goes on under this host), to be reported as ended
-   */
-  restorePersonPaused(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): string[] {
-    for (const id of sessions.keys()) {
-      const tasks = readPausedTasks(this.store.settings.appSetting(personPausedKey(id)))
-      if (tasks) this.personPaused.set(id, tasks)
-    }
-    return [...this.personPaused.keys()].filter((id) => !goingOn.has(id))
-  }
-
   /** At startup (#676): the delegated turns of the sessions whose turn goes on under this host (`goingOn`); any other row is dropped */
   restoreTurns(sessions: ReadonlyMap<string, SessionInfo>, goingOn: ReadonlySet<string>): void {
     /*
@@ -387,26 +343,12 @@ export class ChildOwnership {
     }
   }
 
-  /** Holds the person's report of work they own over the session's own background work (#721, #1463) */
-  pausePersonReport(sessionId: string, running: readonly PausedTask[]): void {
-    const held = this.personPaused.get(sessionId) ?? []
-    const added = running.filter((t) => !held.some((h) => h.id === t.id)).map((t) => ({ id: t.id, description: t.description }))
-    if (!this.personPaused.has(sessionId) || added.length) {
-      const next = [...held, ...added]
-      this.personPaused.set(sessionId, next)
-      this.store.settings.setAppSetting(personPausedKey(sessionId), JSON.stringify(next))
-    }
-  }
-  unpausePersonReport(sessionId: string): void {
-    if (this.personPaused.delete(sessionId)) this.store.settings.deleteAppSetting(personPausedKey(sessionId))
-  }
-  /** The session is deleted: nothing kept of its turns (for a hub that followed them, the person's paused report) is kept (`purgeSession` removes the same keys by their shape) */
+  /** The session is deleted: nothing kept of its turns (for a hub that followed them) is kept (`purgeSession` removes the same keys by their shape) */
   forgetTurns(sessionId: string): void {
     this.store.settings.deleteAppSetting(turnSpanKey(sessionId))
     this.store.settings.deleteAppSetting(questionAnsweredKey(sessionId))
     this.starters.delete(sessionId)
     this.named.delete(sessionId)
-    this.unpausePersonReport(sessionId)
   }
   /**
    * A turn began after row `seq` of the session's record: the turn's own text is every row after it (#1604). Kept for every session, not only

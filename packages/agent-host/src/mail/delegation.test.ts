@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { PERSON } from './address.js'
-import { answerRecorder, delegationRecorder, linkedGoneRecorder, personOwes, personReportRecorder, personWorkRecorder, requestTurnRecorder, turnRecorder } from './delegation.js'
+import { answerRecorder, delegationRecorder, linkedGoneRecorder, personWorkRecorder, requestTurnRecorder, turnRecorder } from './delegation.js'
 import { A, B, ORC, W, world } from './messages.test-helpers.js'
 import { MessageService } from './messages.js'
 import { MailTurns } from './turns.js'
@@ -153,25 +153,6 @@ describe('a call that returned the answer (§9.6)', () => {
     const t2 = w.mail.task(A, W, { text: 'again', origin: 'agent_session', delivered: true })
     answerRecorder(w.mail, w.store.mailbox)('a', 'w', { ok: true, text: 'x'.repeat(700) })
     expect(w.store.mailbox.reportsOn(t2.id)[0]!.facts.answer).toHaveLength(601)
-  })
-})
-
-describe('the person’s work (§9.6)', () => {
-  it('is a task from the person, delivered; the person is owed its turn’s report until it is reported, and a pause leaves it owed', () => {
-    const w = turnWorld()
-    personWorkRecorder(w.mail)('w', 'Sort the photos', { credential: 'cred-1' })
-    const task = w.store.mailbox.newestTask(PERSON, W)!
-    expect(task).toMatchObject({ kind: 'task', origin: 'script' })
-    const owes = personOwes(w.mail, w.store.mailbox)
-    const report = personReportRecorder(w.mail, w.store.mailbox)
-    expect(owes('w')).toBe(true)
-    expect(report('w', { outcome: 'paused', body: 'paused', paused: 1, then: 'running' })).toBe(true)
-    expect(owes('w')).toBe(true)
-    expect(report('w', { outcome: 'finished', body: 'done', answer: 'sorted', then: 'review' })).toBe(true)
-    expect(owes('w')).toBe(false)
-    expect(w.store.mailbox.reportsOn(task.id).map((r) => r.facts.outcome)).toEqual(['paused', 'finished'])
-    // Nothing more to report
-    expect(report('w', { outcome: 'finished', body: 'again', then: 'review' })).toBe(false)
   })
 })
 

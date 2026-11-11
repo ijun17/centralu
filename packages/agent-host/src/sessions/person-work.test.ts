@@ -1,14 +1,18 @@
 /**
  * A session a script or the RPC started with a first message (docs/plans/mailbox.md §8.1, slice 3), over the real manager: nobody is waiting for it, so
- * the work is the person's and the end of its first turn is a report in their Inbox. A window's own session is the person's typing, not work.
+ * the work is the person's, a task from the person answered in their Inbox as any task is (§10.6.3): by the last response at rest, or by the stop
+ * notice when its turn stops. A window's own session is the person's typing, not work.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
+import { inTurn } from '../idle.js'
 import { PERSON } from '../mail/address.js'
+import { PERSON_TURN_ENDED } from '../mail/delegation.js'
 import type { HostMail } from '../mail/host-mail.js'
+import { MailPerson } from '../mail/person.js'
 import { createRpcHandler } from '../rpc.js'
 import { CrossHandle, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { SessionManager } from './manager.js'
-import { ChildOwnership, OWN_WORK_SETTLE_MS } from './child-ownership.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { addressOf, mailReader, wireHostMail } from './host-mail.test-helpers.js'
 
 let w: CrossWorld
@@ -46,7 +50,26 @@ const taskOf = (id: string) => read.tasks(PERSON, id).at(-1)
 const reportsOf = (id: string) => read.reportsOn(taskOf(id)!.id)
 /** The task row: open (null) while the work goes on, `reported` once its end was reported */
 const settledOf = (id: string) => read.taskRow(taskOf(id)!.id, id)?.settled
-const owes = (id: string) => m.hooks.personWork!.owes(id)
+/** The state of the person's thread of their task to the session, as their window lists it (main.ts wires `MailPerson` the same way) */
+const threadState = (id: string) =>
+  new MailPerson(m.service, w.store.mailbox, m.delivery, {
+    session: (sid) => {
+      const s = w.mgr.sessionInfo(sid)
+      return s ? { name: s.name, state: s.state } : undefined
+    },
+    legacyChain: () => [],
+    projectLabel: (pid) => pid,
+    untrusted: () => false,
+    turnOn: (sid) => {
+      const s = w.mgr.sessionInfo(sid)
+      const turn = s && inTurn(s.state) ? m.turns.current(sid) : undefined
+      return turn && { work: turn.messageId ?? turn.starter }
+    },
+    tellsNow: () => false,
+    tell: async () => {},
+  }).list().threads.find((t) => t.id === taskOf(id)!.id)?.state
+/** The stop notices the person was given */
+const stopNotices = () => w.store.mailbox.feedOf(PERSON, { limit: 50 }).filter((x) => x.kind === 'notice' && x.facts.unanswered)
 /** The person's task, as a script's or the RPC's first message writes it */
 const personTask = (id: string, text = 'Run the export') => m.service.task(PERSON, addressOf(id), { text, origin: 'create_session', delivered: true })
 const personTasks = () => w.store.mailbox.feedOf(PERSON, { limit: 50 }).filter((x) => x.kind === 'task' && x.sender === PERSON)
@@ -61,19 +84,30 @@ describe('a script starts a session with a first message', () => {
     expect(taskAtFirstWork.get(s.id)).toBe(true)
   })
 
-  it('its first turn is reported in the person’s Inbox, Centralu’s words with the session’s own beside them, and the task is reported', async () => {
+  it('its task is answered at rest as any task is: one report replying to it, Centralu’s one line with the last response as its answer, settled reported', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.answer('Exported 12 files')
     await w.until(() => reportsOf(s.id).length === 1)
     const [report] = reportsOf(s.id)
     expect(report).toMatchObject({ sender: 'centralu', kind: 'report', replyTo: taskOf(s.id)!.id, facts: { outcome: 'finished', answer: 'Exported 12 files' } })
-    expect(report!.body).toContain('finished its turn')
-    expect(report!.body).not.toContain('Exported')
+    // The person form of the session's words: nothing to call, no read_session, and no line that the person wrote since
+    expect(report!.body).toBe(PERSON_TURN_ENDED)
+    expect(report!.facts.personSince).toBeUndefined()
     expect(read.row(report!.id, PERSON)).toMatchObject({ readAt: null })
+    expect(settledOf(s.id)).toBe('reported')
+    expect(threadState(s.id)).toBe('review')
+  })
+
+  it('a turn that wrote nothing still answers with the one line, and no answer', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    handleOf(s.id)!.event({ type: 'turn_complete', sessionId: s.id })
+    await w.until(() => reportsOf(s.id).length === 1)
+    expect(reportsOf(s.id)[0]!.body).toBe(PERSON_TURN_ENDED)
+    expect(reportsOf(s.id)[0]!.facts.answer).toBeUndefined()
     expect(settledOf(s.id)).toBe('reported')
   })
 
-  it('the turns after it are the person’s own: typing into the session reports nothing', async () => {
+  it('once answered, the turns after it answer nothing: typing into the session reports nothing', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.answer('Exported 12 files')
     await w.until(() => settledOf(s.id) === 'reported')
@@ -84,69 +118,59 @@ describe('a script starts a session with a first message', () => {
     expect(read.tasks(PERSON, s.id)).toHaveLength(1)
   })
 
-  it('a failed turn is reported as it ended, by the kind of its error', async () => {
+  it('a stop is the step-1 stop notice: no report, the task released and open, and the thread open', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    handleOf(s.id)!.event({ type: 'error', sessionId: s.id, error: { code: 'internal', message: 'rate limit reached, retry later', retryable: false } })
+    handleOf(s.id)!.event({ type: 'state_change', sessionId: s.id, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
+    await w.until(() => stopNotices().length === 1)
+    expect(stopNotices()[0]!.body).toBe("New session's tool interrupted its turn before it answered your message. Send it a message to go on.")
+    expect(stopNotices()[0]!.facts.unanswered).toEqual([{ id: taskOf(s.id)!.id, recipient: addressOf(s.id), why: 'interrupted' }])
+    expect(reportsOf(s.id)).toEqual([])
+    expect(read.taskRow(taskOf(s.id)!.id, s.id)).toMatchObject({ settled: null, releasedWhy: 'interrupted' })
+    expect(threadState(s.id)).toBe('open')
+    // The person sends it a message to go on: that turn's last response answers the task
+    await w.mgr.inputs.send(s.id, 'go on')
+    handleOf(s.id)!.answer('Exported 12 files')
+    await w.until(() => reportsOf(s.id).length === 1)
+    expect(reportsOf(s.id)[0]!.facts.answer).toBe('Exported 12 files')
+    expect(threadState(s.id)).toBe('review')
+  })
+
+  it('a turn that left its own background work running sends nothing; the turn that work’s end starts answers, once', async () => {
+    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
+    const job = { id: 't1', kind: 'shell', description: 'pnpm export', status: 'running' } as const
+    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [job] })
+    handleOf(s.id)!.answer('Started the export')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reportsOf(s.id)).toEqual([])
+    expect(settledOf(s.id)).toBeNull()
+    expect(threadState(s.id)).toBe('running')
+    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ ...job, status: 'completed' }] })
+    handleOf(s.id)!.answer('Exported 12 files')
     await w.until(() => reportsOf(s.id).length > 0)
-    const [report] = reportsOf(s.id)
-    expect(report!.facts).toMatchObject({ outcome: 'failed', error: 'usage_limit' })
-    expect(report!.body).not.toContain('rate limit reached')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reportsOf(s.id).map((r) => [r.body, r.facts.answer])).toEqual([[PERSON_TURN_ENDED, 'Exported 12 files']])
     expect(settledOf(s.id)).toBe('reported')
   })
 
-  it('a turn that left its own background work running is a pause: the task stays open, and the report says how many tasks', async () => {
+  it('background work that ends with no turn after it: the settle answers with the last response, once', async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [{ id: 't1', kind: 'shell', description: 'pnpm dev', status: 'running' }] })
-    handleOf(s.id)!.answer('Started the server')
-    await w.until(() => reportsOf(s.id).length > 0)
-    const [report] = reportsOf(s.id)
-    expect(report!.facts).toMatchObject({ outcome: 'paused', paused: 1 })
-    expect(report!.body).not.toContain('pnpm dev')
-    expect(settledOf(s.id)).toBeNull()
-    expect(owes(s.id)).toBe(true)
-  })
-
-  it('background work that ends with no turn after it is reported as ended, and the task is reported (#1463)', async () => {
-    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    const dev = { id: 't1', kind: 'shell', description: 'pnpm export', status: 'running' } as const
-    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [dev] })
+    const job = { id: 't1', kind: 'shell', description: 'pnpm export', status: 'running' } as const
+    handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [job] })
     handleOf(s.id)!.answer('Started the export')
-    await w.until(() => reportsOf(s.id).length > 0)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reportsOf(s.id)).toEqual([])
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ ...dev, status: 'completed' }] })
-      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS + 1_000)
+      handleOf(s.id)!.event({ type: 'background_tasks', sessionId: s.id, live: [], ended: [{ ...job, status: 'completed' }] })
+      await vi.advanceTimersByTimeAsync(OWN_WORK_SETTLE_MS - 1_000)
+      expect(reportsOf(s.id)).toEqual([])
+      await vi.advanceTimersByTimeAsync(2_000)
     } finally {
       vi.useRealTimers()
     }
-    await w.until(() => reportsOf(s.id).length > 1)
-    expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }), body: expect.stringContaining('has ended, and no turn followed it') })
+    await w.until(() => reportsOf(s.id).length > 0)
+    expect(reportsOf(s.id).map((r) => [r.body, r.facts.answer])).toEqual([[PERSON_TURN_ENDED, 'Started the export']])
     expect(settledOf(s.id)).toBe('reported')
-    expect(owes(s.id)).toBe(false)
-  })
-
-  it('a pause the host quit over is reported at the next start as the work’s end, its tasks stopped; a deleted session leaves no pause (#1463)', async () => {
-    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    const gone = await start({ initialPrompt: 'Run the import' }, 'limited')
-    for (const [id, description] of [[s.id, 'pnpm export'], [gone.id, 'pnpm import']] as const) {
-      handleOf(id)!.event({ type: 'background_tasks', sessionId: id, live: [{ id: 't1', kind: 'shell', description, status: 'running' }] })
-      handleOf(id)!.answer('Started it')
-      await w.until(() => reportsOf(id).length > 0)
-    }
-    await w.mgr.trash.trashSession(gone.id)
-    expect(w.store.settings.appSetting(`person_report_paused:${gone.id}`)).toBeNull()
-    await w.mgr.tenure.disposeAll()
-    // The next start: the work went with the process, and no turn will end it
-    const next = new SessionManager(w.store, w.adapters, () => {})
-    wireHostMail(next, w.store)
-    try {
-      await w.until(() => reportsOf(s.id).length > 1)
-      expect(reportsOf(s.id)[1]).toMatchObject({ facts: expect.objectContaining({ outcome: 'finished', reason: 'settled' }) })
-      expect(settledOf(s.id)).toBe('reported')
-      expect(w.store.settings.appSetting(`person_report_paused:${s.id}`)).toBeNull()
-    } finally {
-      await next.tenure.disposeAll()
-    }
   })
 
   it('a first message that could not go in withdraws the task: no work began, and the Inbox does not show it running (#1463)', async () => {
@@ -160,28 +184,7 @@ describe('a script starts a session with a first message', () => {
     expect(w.store.mailbox.recipients(task.id)[0]).toMatchObject({ settled: 'withdrawn' })
   })
 
-  it("a report to the person the store cannot take is said on stderr, not left to reject: nobody waits for it", async () => {
-    const s = await start({ initialPrompt: 'Run the export' }, 'limited')
-    const failing = vi.spyOn(ChildOwnership.prototype, 'unpausePersonReport').mockImplementation(() => {
-      throw new Error('the disk is full')
-    })
-    const said = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const rejected: unknown[] = []
-    const onRejection = (e: unknown) => rejected.push(e)
-    process.on('unhandledRejection', onRejection)
-    try {
-      handleOf(s.id)!.answer('Done')
-      await w.until(() => said.mock.calls.some((c) => String(c[0]).includes("could not write the person's report")))
-      await new Promise((r) => setImmediate(r))
-      expect(rejected).toEqual([])
-    } finally {
-      process.off('unhandledRejection', onRejection)
-      failing.mockRestore()
-      said.mockRestore()
-    }
-  })
-
-  it('work it handed on in the turn keeps the task open: the turn’s end is a pause, not the work’s end', async () => {
+  it('work it handed on in the turn keeps the task open: the turn’s end answers nothing while that work is open', async () => {
     w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     const started = await w.mgr.startAgent(s.id, { task: 'long job', wait: false })
@@ -189,10 +192,9 @@ describe('a script starts a session with a first message', () => {
     // The task it handed on is caused by the person's task, the work of the turn it was given in (§9.4)
     expect(read.tasks(addressOf(s.id), child)[0]?.causeId).toBe(taskOf(s.id)!.id)
     handleOf(s.id)!.answer('Handed it on')
-    await w.until(() => reportsOf(s.id).length > 0)
-    expect(reportsOf(s.id)[0]?.facts).toMatchObject({ outcome: 'waiting', waitingOn: 1 })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reportsOf(s.id)).toEqual([])
     expect(settledOf(s.id)).toBeNull()
-    expect(owes(s.id)).toBe(true)
   })
 
   it('a session with a task from another session and one from the person answers each on its own: two requests, two reports', async () => {
@@ -211,14 +213,15 @@ describe('a script starts a session with a first message', () => {
     expect(settledOf(child)).toBe('reported')
   })
 
-  it('a turn the person starts while the task is still open is theirs, not the work’s: nothing is reported', async () => {
+  it('a turn the person starts while the task is still open answers it too: a report attaches to the request, not to whose the turn is', async () => {
     const s = await start({}, 'limited')
     personTask(s.id)
     await w.mgr.inputs.send(s.id, 'what is the state?')
     handleOf(s.id)!.answer('Still going')
-    await new Promise((r) => setTimeout(r, 30))
-    expect(reportsOf(s.id)).toEqual([])
-    expect(settledOf(s.id)).toBeNull()
+    await w.until(() => reportsOf(s.id).length === 1)
+    expect(reportsOf(s.id)[0]!.body).toBe(PERSON_TURN_ENDED)
+    expect(reportsOf(s.id)[0]!.facts.answer).toBe('Still going')
+    expect(settledOf(s.id)).toBe('reported')
   })
 
   it('a message sent into the first turn joins it: the turn is still the work’s, and reported', async () => {

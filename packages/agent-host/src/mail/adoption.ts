@@ -11,13 +11,13 @@ export type AdoptedSession = { askedBy?: string | null; state: SessionInfo['stat
 
 /**
  * What a build before #1948 step 3 kept per session (`<name>:<sessionId>`) of whose a turn is: the messages given the tool (`turn_inputs`), the
- * running turn's starter (`report_turn`) and the hub's messages held (`input_origins`); and a caller's report paused over the session's own background
- * work (`report_paused`). This build neither reads nor writes them: whose a turn is is read from the store's rows (docs/plans/turn-starter.md "After
- * #1948 step 3"), and a task is answered by its reply or the last response once the session is at rest (docs/plans/mailbox.md §10.6.3). A
- * `report_paused` left standing would hold the mark `leaveForEarlierBuild` writes as paused in that build. Gone with the keys in the contract step
- * (docs/plans/turn-owned-by-no-one.md §6)
+ * running turn's starter (`report_turn`) and the hub's messages held (`input_origins`); and a report paused over the session's own background work,
+ * a caller's (`report_paused`) and the person's (`person_report_paused`). This build neither reads nor writes them: whose a turn is is read from the
+ * store's rows (docs/plans/turn-starter.md "After #1948 step 3"), and a task is answered by its reply or the last response once the session is at rest
+ * (docs/plans/mailbox.md §10.6.3). A `report_paused` left standing would hold the mark `leaveForEarlierBuild` writes as paused in that build. Gone with
+ * the keys in the contract step (docs/plans/turn-owned-by-no-one.md §6)
  */
-const RETIRED_TURN_KEYS = ['turn_inputs', 'report_turn', 'input_origins', 'report_paused']
+const RETIRED_SESSION_KEYS = ['turn_inputs', 'report_turn', 'input_origins', 'report_paused', 'person_report_paused']
 
 /**
  * What the host that becomes the active one does with what an earlier build left (docs/plans/mailbox.md §10.6.3), after the pending thread mail moved
@@ -29,8 +29,8 @@ const RETIRED_TURN_KEYS = ['turn_inputs', 'report_turn', 'input_origins', 'repor
  * 1. **Report marks.** A mark whose caller has no unsettled task to its session gets one, delivered (the earlier build delivered the work), with the
  *    origin the mark implies (`start_agent` when the caller started the session, else `send_to_session`). Then every mark goes: this build reads none
  *    (`leaveForEarlierBuild` writes them again for a build that does).
- * 2. **Whose a turn is, as an earlier build kept it** (`RETIRED_TURN_KEYS`): deleted for every session, so that build, after a rollback, reads no
- *    value this build left stale.
+ * 2. **Whose a turn is and the paused reports, as an earlier build kept them** (`RETIRED_SESSION_KEYS`): deleted for every session, so that
+ *    build, after a rollback, reads no value this build left stale.
  *
  * None starts a turn or wakes anyone. A crash between them is mended at the next `ready` the same way.
  */
@@ -74,7 +74,7 @@ export function takeOverFromEarlierBuild(
       console.error(`[mail] could not adopt the report mark of ${mark.sessionId.slice(0, 8)} (${errorMessage(e)})`)
     }
   }
-  store.settings.deleteSessionSettings(RETIRED_TURN_KEYS)
+  store.settings.deleteSessionSettings(RETIRED_SESSION_KEYS)
   return { queued, adopted }
 }
 

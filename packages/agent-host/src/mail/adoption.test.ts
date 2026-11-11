@@ -54,31 +54,11 @@ describe('a task no mark owes (§10.6.3)', () => {
   })
 })
 
-describe('what this build leaves for an earlier one as it leaves (§10.6.3)', () => {
-  it('a session in a turn gets one mark: the sender of the task its turn is the work of, not of a newer task that joined it', () => {
-    const w = setup()
-    const work = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    w.mail.task(B, W, { text: 'joined later', origin: 'send_to_session', delivered: true })
-    w.store.mailbox.startTurn({ sessionId: 'w', turnSeq: 1, messageId: work.id, starterId: work.id, startedBy: 'caller', startedAt: 1 })
-    leaveForEarlierBuild(w.mail, w.store, ['w'])
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: 'w', callerSessionId: 'a' }])
-  })
-
-  it('a turn that is no session’s task leaves the mark of the newest open task’s sender', () => {
-    const w = setup()
-    w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })
-    w.mail.task(B, W, { text: 'joined later', origin: 'send_to_session', delivered: true })
-    w.store.mailbox.startTurn({ sessionId: 'w', turnSeq: 1, messageId: null, starterId: null, startedBy: 'person', startedAt: 1 })
-    leaveForEarlierBuild(w.mail, w.store, ['w'])
-    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: 'w', callerSessionId: 'b' }])
-  })
-})
-
-describe('what an earlier build kept of whose a turn is (docs/plans/turn-starter.md "After #1948 step 3") and of a caller’s paused report (mailbox.md §10.6.3)', () => {
+describe('what an earlier build kept of whose a turn is (docs/plans/turn-starter.md "After #1948 step 3") and of the paused reports (mailbox.md §10.6.3)', () => {
   it('is deleted for every session at the start, so that build after a rollback reads nothing stale; other keys of a session stay', () => {
     const w = setup()
-    const old = ['turn_inputs:a', 'report_turn:a', 'input_origins:a', 'turn_inputs:w', 'report_turn:gone', 'report_paused:w']
-    const others = ['turn_span:a', 'question_answered:a', 'person_report_paused:w', 'turn_inputs', 'report_paused']
+    const old = ['turn_inputs:a', 'report_turn:a', 'input_origins:a', 'turn_inputs:w', 'report_turn:gone', 'report_paused:w', 'report_paused:gone', 'person_report_paused:w', 'person_report_paused:gone']
+    const others = ['turn_span:a', 'question_answered:a', 'turn_inputs', 'report_paused', 'person_report_paused']
     for (const key of [...old, ...others]) w.store.settings.setAppSetting(key, '{}')
     w.take()
     expect(old.filter((key) => w.store.settings.appSetting(key) !== null)).toEqual([])

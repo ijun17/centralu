@@ -390,9 +390,11 @@ describe('closing a chain a session works on, and its state, as on main (owner d
     // Written as the mail it is, delivered and read already, quiet, naming the chain and what was withdrawn
     expect(notices(w, B)).toMatchObject([{ body: words, facts: { quiet: true, chainClosed: { root: task.id, outcome: 'dropped', withdrawn: [task.id] } }, deliveredAt: expect.any(Number), readAt: expect.any(Number) }])
     expect(w.row(task.id, B)?.settled).toBe('withdrawn')
-    // The turn goes on: Centralu did not end it. Its end owes the person no report, so nothing opens the chain again
+    // The turn goes on: Centralu did not end it. Its last response answers no withdrawn task, so nothing opens the chain again
     expect(w.turns.current('b')).toBeDefined()
-    expect(w.hooks.personWork?.report('b', { outcome: 'finished', body: 'It finished.', then: 'review' })).toBe(false)
+    w.endTurn('b')
+    w.hooks.lastResponse?.('b', { body: () => 'It ended its turn.', relay: () => {}, released: true })
+    expect(w.store.mailbox.reportsOn(task.id)).toEqual([])
     expect(rowOf(w, task.id)).toMatchObject({ state: 'done', outcome: 'dropped' })
   })
 
@@ -621,14 +623,30 @@ describe('closing a chain a session works on, and its state, as on main (owner d
   it('a task reported and not closed is in review; Mark done closes it as finished', () => {
     const w = ready(hostWorld())
     const task = working(w)
-    expect(w.hooks.personWork?.report('b', { outcome: 'finished', body: '[Centralu] The work finished.', then: 'review' })).toBe(true)
     w.endTurn('b')
+    // Answered as any task is: by the session's last response at rest (§10.6.3)
+    w.hooks.lastResponse?.('b', { body: () => 'It ended its turn.', relay: () => {}, answer: 'parsed', released: true })
+    expect(w.store.mailbox.reportsOn(task.id)).toHaveLength(1)
     expect(rowOf(w, task.id)).toMatchObject({ state: 'review', working: false })
     w.person.close(task.id)
     expect(rowOf(w, task.id)).toMatchObject({ state: 'done', outcome: 'finished' })
     // Reported: nothing of the person’s is open in it, so nobody is told
     expect(w.told).toEqual([])
     expect(notices(w, B)).toEqual([])
+  })
+
+  it('a task a stop released and nothing settled is open, not running: the session no longer works on it; one still delivered and open is running', () => {
+    const w = ready(hostWorld())
+    const task = working(w)
+    const seq = w.turns.current('b')!.turnSeq
+    w.endTurn('b')
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'running', working: false })
+    w.mail.stops.sessionStopped(B, 'interrupted', { turnSeq: seq })
+    expect(w.row(task.id, B)).toMatchObject({ settled: null, releasedWhy: 'interrupted' })
+    expect(rowOf(w, task.id)).toMatchObject({ state: 'open', working: false })
+    // A second task, given after the stop, is open and delivered: the chain it starts is running
+    const next = working(w)
+    expect(rowOf(w, next.id)).toMatchObject({ state: 'running' })
   })
 })
 

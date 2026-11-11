@@ -62,8 +62,6 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
 export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
 
-  /** Sessions this start found mid-turn with no process: the person is told of the ones whose work is theirs (§8.1), once the mailbox is wired */
-  private quitPersonWork: string[] = []
   /**
    * The session told of each turn a quit cut that this start found (#698, `HostMail.afterReady`): the one that gave the turn, else the one that
    * started it; the first that still exists. Read before the start drops those rows; a later start finds none
@@ -116,14 +114,11 @@ export class HostTenure {
     this.host.emit(change)
     // The turn is over: so is a hub task's depth for it, as at any end of a turn (#2020)
     this.host.events.endHubAsk(m.id)
-    // Whose the turn was (#1377): the person's is reported to nobody
     // This host did not see it begin, and the tool cannot say what it took: it reads as the work's
-    const turnBy = this.host.children.turnEnded(m.id, null)
-    // Centralu cut this turn and could not continue it: the senders of what it left open, and the session that started it, are told (mailbox.md
-    // "The stop notice")
+    this.host.children.turnEnded(m.id, null)
+    // Centralu cut this turn and could not continue it: the senders of what it left open (the person for their own work), and the session that
+    // started it, are told (mailbox.md "The stop notice")
     this.host.mail.mailStopped(m.id, 'uncontinued', { starter: this.host.children.turnOwners.get(m.id)?.callerId ?? m.askedBy ?? null })
-    // The work the person owns: the same end, in their Inbox (§8.1)
-    this.host.reports.reportToPersonIfOwed(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' }, undefined, turnBy)
   }
 
   /**
@@ -222,15 +217,6 @@ export class HostTenure {
   /** The turns this host continues after an update cut them (#1618), for the hello a linked hub reads */
   updateContinued(): { sessionId: string; at: number }[] {
     return [...this.continuedAfterUpdate]
-  }
-
-  /** The work the person owns (a script started the session, §8.1) whose turn a quit cut: reported to their Inbox as it ended, once */
-  private reportQuitPersonWork(): void {
-    // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
-    if (this.disposing) return
-    const person = this.quitPersonWork
-    this.quitPersonWork = []
-    for (const id of person) if (this.host.meta.has(id)) this.host.reports.reportToPersonIfOwed(id, { type: 'state_change', sessionId: id, state: 'idle' })
   }
 
   /**
@@ -411,7 +397,6 @@ export class HostTenure {
     for (const id of lists?.ids() ?? []) if (!cutByUpdate.some((s) => s.id === id) && !stoppedBy.has(id)) this.updateLists?.done(id)
     /** What the start takes over as going on: the turns an update cut (#1618) */
     const goingOn = new Set(cutByUpdate.map((s) => s.id))
-    this.quitPersonWork = stoppedByQuit.map((s) => s.id)
     const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
       const starter = [turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && this.host.meta.has(id))
@@ -425,15 +410,11 @@ export class HostTenure {
     ]
     // No process outlives its host, so no card the previous host left standing is still asked (#428): every rest it wrote goes
     this.host.cardRests.restore(() => false)
-    const ended = this.host.children.restorePersonPaused(this.host.meta, goingOn)
-    // The person's reports paused on work that went with the last host's process (#1463): told now as that work's end, each task stopped
-    if (ended.length) setTimeout(() => ended.forEach((id) => this.host.reports.reportToPersonIfOwed(id, { type: 'turn_complete', sessionId: id }, undefined, undefined, this.host.reports.pausedTasksNow(id, true))), 0)
     this.host.delegationFlow.starts.restoreAgentStarts()
     // The reports owed of children on linked machines (#1038): each settles once its machine says where it stands
     this.host.delegationFlow.remote.restore()
     this.host.children.restoreTurns(this.host.meta, goingOn)
     this.keptAtStart = goingOn
-    if (this.quitPersonWork.length) setTimeout(() => this.reportQuitPersonWork(), 0)
     if (this.updateCuts.length) setTimeout(() => void this.continueCutTurns(), 0)
   }
 }

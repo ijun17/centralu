@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { ChildOwnership, personPausedKey, type Delegation } from './child-ownership.js'
+import { ChildOwnership, type Delegation } from './child-ownership.js'
 import type { AgentStartRecord } from './agent-start-record.js'
 
 /*
@@ -64,27 +64,6 @@ function begins(id: string): void {
   own.turnStarted(id)
   own.noteTurnStart(id, store.messages.nextSeq(id) - 1)
 }
-
-describe("the person's paused report (#721, #1463)", () => {
-  it('is stored once per new task, read back by the next host, and unpausing takes it down', () => {
-    own.pausePersonReport('child', [{ id: 't1', description: 'dev server' }])
-    own.pausePersonReport('child', [{ id: 't1', description: 'dev server' }, { id: 't2', description: 'watcher' }])
-    expect(own.personPausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
-    expect(JSON.parse(store.settings.appSetting(personPausedKey('child'))!)).toEqual([
-      { id: 't1', description: 'dev server' },
-      { id: 't2', description: 'watcher' },
-    ])
-    // The next host reads it back; one whose turn does not go on under it is returned, to be reported as ended
-    const next = new ChildOwnership(store)
-    const sessions = new Map([['child', { id: 'child', state: 'idle' } as SessionInfo]])
-    expect(next.restorePersonPaused(sessions, new Set(['child']))).toEqual([])
-    expect(next.personPausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
-    expect(new ChildOwnership(store).restorePersonPaused(sessions, new Set())).toEqual(['child'])
-    own.unpausePersonReport('child')
-    expect(own.personPausedReports.has('child')).toBe(false)
-    expect(store.settings.appSetting(personPausedKey('child'))).toBeNull()
-  })
-})
 
 describe('delegated turns', () => {
   it('a turn is stored, released only by its own caller when one is named, and told cards are stored', () => {

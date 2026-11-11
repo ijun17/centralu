@@ -113,11 +113,11 @@ original's things is in this table; the bullets below say how.
   nothing moves and the note lists nothing. A delegation's end releases its turn by the delegation's owner at that
   time, not the one that started it.
 - **Where the state lives**: `ChildOwnership` (`sessions/child-ownership.ts`, #428) holds who owns a child's work:
-  the person's paused reports, delegated turns, delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
+  delegated turns, delegations, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
-  its own rows back (`restorePersonPaused`, `restoreTurns`), as the manager's constructor did; the
+  its own rows back (`restoreTurns`), as the manager's constructor did; the
   standing start_agent requests are `AgentStartFlow.restoreAgentStarts`.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.

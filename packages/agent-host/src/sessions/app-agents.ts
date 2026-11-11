@@ -42,10 +42,8 @@ export class AgentRunWait {
   readonly done: Promise<{ output?: unknown; answer?: string }>
   private settle!: { resolve: (v: { output?: unknown; answer?: string }) => void; reject: (e: Error) => void }
   private settled = false
-  private ending?: { output?: unknown; answer?: string }
 
   get finished(): boolean { return this.settled }
-  get completedAnswer(): string | undefined { return this.ending?.answer }
 
   constructor(
     private notify: (message: string) => void,
@@ -80,12 +78,10 @@ export class AgentRunWait {
       this.stoppedByPerson = false
       return
     }
-    if (e.type === 'message_delta' || (e.type === 'state_change' && e.state === 'working')) this.ending = undefined
     switch (e.type) {
       case 'turn_complete':
         if (this.stoppedByPerson) return this.fail(new Error('the person stopped the agent before it finished'))
-        this.ending = { ...(e.output === undefined ? {} : { output: e.output }), ...(this.readAnswer ? { answer: this.readAnswer() } : {}) }
-        return this.finish(this.ending)
+        return this.finish({ ...(e.output === undefined ? {} : { output: e.output }), ...(this.readAnswer ? { answer: this.readAnswer() } : {}) })
       case 'error':
         return this.fail(new Error(this.stoppedByPerson ? 'the person stopped the agent before it finished' : `the agent's turn failed: ${e.error.message}`))
       case 'limit_reached':

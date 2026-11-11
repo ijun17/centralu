@@ -394,7 +394,8 @@ depends on a turn owner:
 | `delegated_turns` (v51) | table | P5 | P5 + one release | same |
 | `queued_requests` | table | P8 | P8 + one release | same |
 | `report_turn:<s>` | `app_settings` | P6 | P7 | delete keys in the contract step |
-| `report_paused:<s>` | `app_settings` | P6 | P6 + one release (an older build reads it to keep a paused report) | same |
+| `report_paused:<s>` | `app_settings` | P6 | P6 (#1948 step 3, mailbox.md §10.6.3); every `ready` deletes it, so an older build after a rollback does not hold the mark this build leaves as paused | same |
+| `person_report_paused:<s>` | `app_settings` | P6 (#1948 step 3, mailbox.md §10.6.3) | P6; every `ready` deletes it, so an older build after a rollback finds no stale pause | same |
 | `turn_inputs:<s>` | `app_settings` | P7 | P7 | same |
 | `input_origins:<s>` (A5) | `app_settings` | not read since #1929 except `legacyHeld` | P7 | same |
 | `user_message.intent` | transcript payload | P3 (the host ignores it) | P3 | never: old rows keep it, harmless |

@@ -2,7 +2,6 @@ import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON } from './address.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
-import type { TurnReport } from './turn-report.js'
 import { refusalReason } from './rules.js'
 import type { MailTurns, TurnStart } from './turns.js'
 
@@ -56,8 +55,8 @@ function delegationOrigin(origin: string | null): DelegationOrigin {
 }
 
 /**
- * A session a script or the RPC started with a first message (§9.6): the work is the person's, a task from the person whose report lands in their
- * Inbox. Written before the first message goes in, so the turn it starts is reported
+ * A session a script or the RPC started with a first message (§9.6): the work is the person's, a task from the person, answered in their Inbox as any
+ * task is (docs/plans/mailbox.md §10.6.3). Written before the first message goes in, so the turn it starts is that task's
  */
 export function personWorkRecorder(mail: MessageService): (sessionId: string, text: string, fromScript?: { credential: string }) => void {
   return (sessionId, text, fromScript) => {
@@ -73,49 +72,14 @@ export function personWorkWithdrawer(mail: MessageService, records: MailboxRecor
   }
 }
 
-/** Whether the person has work with the session whose turn is reported to them: an unsettled task from the person */
-export function personOwes(mail: MessageService, records: MailboxRecords): (sessionId: string) => boolean {
-  return (sessionId) => records.newestTask(PERSON, mail.sessionAddress(sessionId)) !== undefined
-}
-
-/** The end of a turn of work the person owns, as the mailbox takes it (§8.1): Centralu's words, the session's own beside them, and where the thread goes */
-export type PersonReportDraft = { outcome: string; body: string; answer?: string; error?: string; paused?: number; then: 'review' | 'running' }
-
-/**
- * The end of a turn of work the person owns: Centralu's report on the person's task (§9.6); false when there is no such task or it was refused. A
- * turn that finished while work it handed on is open is `waiting` on it (§9.4)
- */
-export function personReportRecorder(mail: MessageService, records: MailboxRecords): (sessionId: string, draft: PersonReportDraft) => boolean {
-  return (sessionId, draft) => {
-    const task = records.newestTask(PERSON, mail.sessionAddress(sessionId))
-    if (!task) return false
-    const owed = draft.then === 'review' && draft.outcome === 'finished' ? records.handedOn(task.id).length : 0
-    try {
-      mail.report(task.id, personReport(owed > 0 ? { ...draft, then: 'running' } : draft, owed))
-      return true
-    } catch (e) {
-      if (refusalReason(e) !== undefined) return false
-      throw e
-    }
-  }
-}
-
-/** A person's draft as the report the message service writes (§5.4): the old outcome word as a report's, and the word as the reason when they differ */
-function personReport(draft: PersonReportDraft, waitingOn: number): TurnReport {
-  const base = { body: draft.body, ...(draft.answer ? { answer: draft.answer } : {}), ...(draft.error ? { error: draft.error } : {}) }
-  if (draft.then === 'running' && draft.paused) return { ...base, outcome: 'paused', paused: draft.paused }
-  if (draft.then === 'running') return { ...base, outcome: 'waiting', waitingOn: Math.max(1, waitingOn) }
-  const word = draft.outcome
-  const outcome: TurnReport['outcome'] = word === 'finished' || word === 'settled' ? 'finished' : word === 'failed' || word === 'limit_reached' ? 'failed' : 'stopped'
-  return { ...base, outcome, ...(word !== outcome ? { reason: word } : {}) }
-}
-
 /**
  * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is for the session's own
  * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
  * words, and the report must not contradict them
  */
 export const TURN_ENDED = "[Centralu] The session ended its turn. Its last response says whether the work is done."
+/** The same line for the person, on their own work: one line, with nothing to call (§10.6.3) */
+export const PERSON_TURN_ENDED = '[Centralu] The session you started ended its turn. Its last response says whether the work is done.'
 
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }

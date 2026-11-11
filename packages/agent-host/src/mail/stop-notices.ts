@@ -61,8 +61,8 @@ export class StopNotices {
   /**
    * A session stopped without answering (mailbox.md "The stop notice"): an error, a usage limit, the network, its tool's interrupt, a Stop, a quit
    * or shutdown of Centralu, or a cut turn Centralu could not continue. What it owes an answer is released with the cause: each question delivered
-   * into the cut turn `turnSeq` and not answered (a `needsReply` message, the person's too; none without a turn), and every open task a session gave
-   * it. Each sender is told once, in one notice, and woken: it is owed a reply (`standing`: in a turn it reads it when that turn ends; one a quit
+   * into the cut turn `turnSeq` and not answered (a `needsReply` message, the person's too; none without a turn), and every open task a session or the
+   * person gave it. Each sender is told once, in one notice, and woken: it is owed a reply (`standing`: in a turn it reads it when that turn ends; one a quit
    * cut reads it at its next turn). `starter`, the session that started the stopped one, is told too when it is owed nothing and the turn was not
    * the person's, woken only from a turn. The rows stay open, so a reply or a last response after the person continues the session still answers
    * them. A question delivered in an earlier turn is not this stop's: it was read, and the session may have answered it in conversation.
@@ -165,8 +165,8 @@ export class StopNotices {
    * What a stopped session owes and its stop releases (mailbox.md §10.6.1), the one definition for a stop (`sessionsStopped`) and a deletion
    * (`partyGone`, `gone`):
    * - the questions of the cut turn `turnSeq` (`cutQuestions`; none without a turn), or, deleted, every one it has not answered;
-   * - the open tasks a session gave it, not the person's, whose work is reported to their Inbox. Delivered ones only (one still queued was never
-   *   its work), except when it is deleted: then nothing of it will run. A stop that leaves it unable to answer (an error, a limit, the network,
+   * - the open tasks a session or the person gave it (the person's own work is a request like any other, §10.6.3). Delivered ones only (one still
+   *   queued was never its work), except when it is deleted: then nothing of it will run. A stop that leaves it unable to answer (an error, a limit, the network,
    *   a quit) releases them all; the person's Stop only those of the turn it stopped (delivered into it, or the work it was for): the session can
    *   still answer the rest.
    * A deleted session leaves out mail to the Assistant's role, which follows the role (D15)
@@ -178,7 +178,8 @@ export class StopNotices {
     const questions = why === 'gone' ? this.cutQuestions(address, null) : turnSeq === null ? [] : this.cutQuestions(address, turnSeq)
     const tasks = this.d.records.watchedTo(address).flatMap((row) => {
       const message = row.releasedAt === null && (why === 'gone' || row.deliveredAt !== null) && stopped(row) ? this.d.records.message(row.messageId) : undefined
-      return message?.kind === 'task' && parseAddress(message.sender)?.kind === 'session' && message.sender !== address ? [{ row, message }] : []
+      const by = message?.kind === 'task' ? parseAddress(message.sender)?.kind : undefined
+      return message && (by === 'session' || by === 'person') && message.sender !== address ? [{ row, message }] : []
     })
     return why === 'gone' ? [...questions, ...tasks].filter(({ row }) => !isRoleVia(row.via)) : [...questions, ...tasks]
   }
