@@ -101,7 +101,6 @@ export function targets(text: string): Doc {
   const numbers = new Set<string>()
   const titles: string[] = []
   const anchors = new Set<string>()
-  const seen = new Map<string, number>()
   let under = ''
   for (const line of unfenced(text).split('\n')) {
     const heading = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line)
@@ -111,17 +110,13 @@ export function targets(text: string): Doc {
       under = num?.[1] ?? ''
       if (num) numbers.add(under)
       titles.push(clean(num ? text.slice(num[0].length) : text))
-      const anchor = anchorOf(text)
-      const n = seen.get(anchor) ?? 0
-      seen.set(anchor, n + 1)
-      anchors.add(n ? `${anchor}-${n}` : anchor)
+      anchors.add(anchorOf(text))
       continue
     }
     const item = under ? /^(\d+)\. /.exec(line) : null
     if (item) numbers.add(`${under}.${item[1]}`)
     const lead = /^\s*(?:[-*] |\d+\. )?\*\*(.+?)\.?\*\*/.exec(line)
     if (lead) titles.push(clean(lead[1] ?? ''))
-    for (const [, id = ''] of line.matchAll(/<a (?:name|id)="([^"]+)"/g)) anchors.add(id)
   }
   return { numbers, titles, anchors }
 }
