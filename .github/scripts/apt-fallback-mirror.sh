@@ -8,7 +8,7 @@
 #   apt-fallback-mirror.sh   write the sources and the apt setting that makes every later `apt-get` of this machine use them
 #
 # What it writes: a list of mirrors (`fallback-mirrors.txt`, read by apt's `mirror+file:` method, which goes on to the next when one
-# does not answer, as the runners' own list does), one sources file with the four pockets of the machine's Ubuntu release (release,
+# does not answer, as the runners' own list does, in the order given: OCF first), one sources file with the four pockets of the machine's Ubuntu release (release,
 # -updates, -backports, -security) on that list, and one apt.conf.d snippet that replaces the machine's sources with that file (an
 # `apt-get` started by `playwright install-deps` reads the snippet too, which is why this is a setting of the machine and not an option of
 # one call). It stays for the rest of the job: a mirror that failed once is not asked again. Writing it twice changes nothing.
@@ -22,6 +22,9 @@
 # trust too, and apt checks every `InRelease` against it, then every package list and every .deb against the sizes and hashes
 # in that signed file. A mirror that serves anything else fails `apt-get update` (a list) or the download (a .deb); it can be slow
 # or behind, never wrong.
+#
+# The list only gets past a mirror that fails fast (refuses, or answers with an error): one that times out costs its full timeout for every file
+# apt asks of it, so a later mirror helps with a dead host, not with a slow one.
 #
 # The mirrors are mirrors.ocf.berkeley.edu (the Open Computing Facility of UC Berkeley, the one that answered during the outage),
 # mirrors.mit.edu and mirror.leaseweb.com: official Ubuntu mirrors that answer over HTTPS for both `ubuntu` (amd64) and `ubuntu-ports`
@@ -57,7 +60,9 @@ sources="$etc/fallback-mirror.list"
 # shellcheck disable=SC2086 # $sudo_cmd is empty or one word, $mirrors a list of words
 write() {
   $sudo_cmd mkdir -p "$etc/apt.conf.d" || return 1
-  for base in $mirrors; do echo "$base/$archive/"; done | $sudo_cmd tee "$list" >/dev/null || return 1
+  # A priority on each: without one apt asks the mirrors in random order (apt-transport-mirror(1)), so the first named would not be the first asked
+  n=0
+  for base in $mirrors; do n=$((n + 1)); printf '%s/%s/\tpriority:%s\n' "$base" "$archive" "$n"; done | $sudo_cmd tee "$list" >/dev/null || return 1
   for pocket in "$codename" "$codename-updates" "$codename-backports" "$codename-security"; do
     echo "deb [signed-by=$keyring] mirror+file:$list $pocket main restricted universe multiverse"
   done | $sudo_cmd tee "$sources" >/dev/null || return 1

@@ -166,7 +166,7 @@ describe('the rules for public text', () => {
     }
     // A list is rewritten, so what stays is not left alone by a rewrite that matches everything
     expect(fill('Closes #1 #2')).toEqual({ closes: 'Closes #1\nCloses #2', warnings: [] })
-    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```', '~~~md\nCloses #3 #4'])
+    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```', '~~~md\nCloses #3 #4', '`Closes #1 #2` closes the first only', 'the form ``Fixes #3, #4`` is read by GitHub as one'])
       expect(fill(same)).toEqual({ closes: same, warnings: [] })
     // A keyword before two or more references that is not a clause of its own: GitHub closes the first only, so it is said
     for (const [same, quoted] of [
@@ -189,6 +189,9 @@ describe('the rules for public text', () => {
     expect(multiClosingWarnings('Fixes #1 #2 (both) and Resolves #3, #4 in one go')).toHaveLength(2)
     expect(multiClosingWarnings(`Closes ${URL(1)} ${URL(2)}`)[0]).toContain(`GitHub closes only ${URL(1)}, not ${URL(2)}.`)
     expect(multiClosingWarnings('```\nCloses #1 #2\n```\nCloses #3')).toEqual([])
+    // Nor one quoted in an inline code span, one tick or two; the same line's own keyword is still read
+    expect(multiClosingWarnings('`Closes #1 #2` and ``Fixes #3, #4`` are the forms')).toEqual([])
+    expect(multiClosingWarnings('`Closes #1` then Closes #2 #3')).toHaveLength(1)
   })
 
   it.each([undefined, '', '  ', 'N/A', 'n/a', '-', 'TBD', 'none'])('refuses "Not exercised" given as %j', (value) => {

@@ -106,8 +106,8 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
     expect(lines.slice(0, first + 1).some((l) => l.includes('sees:'))).toBe(false)
     expect(lines.slice(first + 1, second).filter((l) => l.startsWith('  sees:'))).toHaveLength(1)
     expect(lines[second + 1]).toBe(`  sees: deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] mirror+file:${etc}/fallback-mirrors.txt noble main restricted universe multiverse`)
-    // The mirrors in the order given, one after the other when one does not answer; the four pockets; the machine's own sources are left out
-    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe(`https://one.example/${archive}/\nhttps://two.example/${archive}/\n`)
+    // The mirrors in the order given, each with a priority (a list without them is asked in random order), one after the other when one does not answer; the four pockets; the machine's own sources are left out
+    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe(`https://one.example/${archive}/\tpriority:1\nhttps://two.example/${archive}/\tpriority:2\n`)
     const list = readFileSync(join(etc, 'fallback-mirror.list'), 'utf8').trim().split('\n')
     expect(list.map((l) => l.split(' ')[3])).toEqual(['noble', 'noble-updates', 'noble-backports', 'noble-security'])
     expect(readFileSync(join(etc, 'apt.conf.d', '99fallback-mirror'), 'utf8')).toContain('Dir::Etc::sourceparts "-";')
@@ -116,7 +116,7 @@ describe.skipIf(!hasCoreutils)('apt-install.sh: a stuck mirror costs a retry, no
   it('names Berkeley, MIT and Leaseweb when no mirrors are given', async () => {
     const { dir, log, etc } = standIn((n) => (n === 1 ? 'exit 100' : 'exit 0'))
     expect((await run(dir, log, etc)).status).toBe(0)
-    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe('https://mirrors.ocf.berkeley.edu/ubuntu/\nhttps://mirrors.mit.edu/ubuntu/\nhttps://mirror.leaseweb.com/ubuntu/\n')
+    expect(readFileSync(join(etc, 'fallback-mirrors.txt'), 'utf8')).toBe('https://mirrors.ocf.berkeley.edu/ubuntu/\tpriority:1\nhttps://mirrors.mit.edu/ubuntu/\tpriority:2\nhttps://mirror.leaseweb.com/ubuntu/\tpriority:3\n')
   })
 
   it('does not touch the mirrors when the first try works', async () => {
