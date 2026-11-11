@@ -1,6 +1,6 @@
 /**
  * A stop notice that waits for an older report path (docs/plans/turn-owned-by-no-one.md §4.1, `StopNotices.sessionStopped`'s `held`), and what a
- * stop notice quotes of the stopped session's cut turn (`StopNotices.quotes`, security-boundaries.md): one stop of a pair held at a time, a hold
+ * stop notice quotes of the stopped session's cut turn (`StopNotices.quotes`, security-boundaries/inter-agent-content.md): one stop of a pair held at a time, a hold
  * that never ends rescued after the wait, the words taken when the turn was cut, and nothing quoted unless each part of that rule holds.
  */
 import { describe, expect, it } from 'vitest'

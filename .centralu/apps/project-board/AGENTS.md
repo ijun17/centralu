@@ -12,7 +12,7 @@ length). Those are plain, non-secret values; change them there, not in code.
 - **GitHub is the only copy.** `github.mjs` reaches GitHub only through the person's own `gh` CLI
   (`gh api graphql` for the board, `gh api repos/…`, `gh pr` and `gh issue` for CI, run with
   `execFile`, never a shell). An app server runs as the person, with
-  their processes and network (docs/security-boundaries.md, "App servers"), so no Centralu
+  their processes and network (docs/security-boundaries/app-servers.md), so no Centralu
   capability is declared: `uses` and `secrets` stay empty, and no token is read, stored or
   printed. `gh` keeps its own login in the system keychain.
 - **Cache:** one board in memory for `cacheSeconds`; a write forgets it, and a read that started

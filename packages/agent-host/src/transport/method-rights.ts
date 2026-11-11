@@ -28,7 +28,7 @@ import { isRecord, type RpcMethodName } from '@cc/protocol'
  *
  * The table is keyed by `RpcMethodName` with no default, as `ROUTES` is (`links/routes.ts`): a method
  * added to the protocol does not compile until someone decides what the limited credential does with
- * it. The classification and its rule are in docs/security-boundaries.md ("Who holds full power").
+ * it. The classification and its rule are in docs/security-boundaries/credentials.md ("Who holds full power").
  */
 export type Rights =
   | 'everyday'

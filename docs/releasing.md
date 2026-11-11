@@ -547,8 +547,7 @@ the re-run rule above then finishes the job once the token is fixed.
 
 The darwin job also stages the bundle's host and its `centralu-keeper` into
 `apps/desktop/src-tauri/target/release/content/` and writes a signed `content-manifest.json` there
-(`scripts/content-manifest.mts`, formats in [security-boundaries.md](security-boundaries.md) "Signed
-content"). That folder is then copied into the bundle as `Contents/Resources/content/`, which the shell
+(`scripts/content-manifest.mts`, formats in [security-boundaries/signed-content.md](security-boundaries/signed-content.md)). That folder is then copied into the bundle as `Contents/Resources/content/`, which the shell
 verifies and starts the keeper from ([plans/thin-shell.md](plans/thin-shell.md) §10.2, next section).
 
 - A rehearsal signs with a key generated in memory. A publish runs with `--require-content-key`, signs
@@ -625,7 +624,7 @@ not a reviewed source checkout. Approval is exercised with the owner's `gh` toke
 reviewed environment has one required reviewer, allows self-review, and lets administrators
 bypass protection: dispatch and approval can use the same token. A local signature is not
 machine-bound and verifies with the matching files on any `darwin-arm64` machine trusting
-the same key whose highest-seen version is lower. See [Signed content](security-boundaries.md#local-content-signing-610)
+the same key whose highest-seen version is lower. See [Signed content](security-boundaries/signed-content.md#local-content-signing-610)
 for this trust boundary.
 
 The command prints the run URL and waits; it never approves itself. The maintainer or their

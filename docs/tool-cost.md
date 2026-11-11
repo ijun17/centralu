@@ -368,7 +368,7 @@ changes.
 The Assistant carries about 3,200 tokens of its own in every request, and three tools it rarely calls
 (`create_app`, `propose_skill`, `propose_mcp_server`) are a third of the characters. #512 asked whether a seat
 should discover such commands like a CLI rather than carry them. A prototype behind a switch (since removed)
-(agent-host/tool-profiles.md, security-boundaries.md; C became the default, see the decision at the end of this section)
+(agent-host/tool-profiles.md, security-boundaries/tool-matrix.md; C became the default, see the decision at the end of this section)
 gives three arms on the same prompts:
 
 - **A** `resident`: today.

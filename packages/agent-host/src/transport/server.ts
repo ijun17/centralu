@@ -401,7 +401,7 @@ export class HostServer {
   }
 
   /**
-   * The origin boundary (docs/security-boundaries.md).
+   * The origin boundary (docs/security-boundaries/local-data-and-transport.md "Local transport").
    *
    * **Letting a missing or empty Origin through is a decision, not an oversight.** A browser always
    * attaches Origin to a cross-origin request, so a connection with no header at all is not a

@@ -580,7 +580,7 @@ export type CentraluTools = {
   ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
   /**
    * Whether `readSession` reads this session of this host for the seat: the one read rule (#984, #1941), which a stop notice's quote of a session's
-   * words asks too (security-boundaries.md). Absent: it reads none
+   * words asks too (security-boundaries/inter-agent-content.md). Absent: it reads none
    */
   mayRead?(sessionId: string): boolean
   /** Sessions this app currently manages (excludes the Assistant itself and archived sessions); `project` narrows by name or id */

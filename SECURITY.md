@@ -34,7 +34,7 @@ the latest release or `main` before reporting.
 
 ## Scope
 
-[docs/security-boundaries.md](docs/security-boundaries.md) describes what Centralu promises to
+[docs/security-boundaries/](docs/security-boundaries/README.md) describes what Centralu promises to
 keep apart, and the limits it states openly. A way around one of those promises is in scope. For
 example:
 

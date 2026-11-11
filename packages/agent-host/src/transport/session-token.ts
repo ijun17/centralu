@@ -11,7 +11,7 @@ import { sameSecret } from './http.js'
  * undone raises the person's card. What it adds is attribution: the card says which session's process asked.
  *
  * **Attribution, not proof.** An agent's environment is readable by every process of the same user for as long as it
- * runs (docs/security-boundaries.md, "The front door"), so a process can present another session's credential. Its
+ * runs (docs/security-boundaries/keeper.md "The front door"), so a process can present another session's credential. Its
  * rights are the same either way: all it can fake is the name on the card, which says "says it runs under".
  *
  * Derived like the bridge's (`bridge-token.ts`): an HMAC of the session id keyed by the host's token (a serve host's

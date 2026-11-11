@@ -5,7 +5,7 @@
  * same bundled host the app runs (`resources/host/main.mjs`, on the system Node), with no window
  * and no keeper, bound to 127.0.0.1 only. The app on the person's own computer reaches it through
  * an SSH local forward, so nothing ever listens on a public interface. The design and its limits
- * are in docs/agent-host/remote/serve.md; the trust argument in docs/security-boundaries.md.
+ * are in docs/agent-host/remote/serve.md; the trust argument in docs/security-boundaries/remote-host.md.
  *
  * `centralu serve --connection` is the one question the client asks over `ssh <target>`: where to
  * forward and how to authenticate. It answers with one JSON line on stdout and nothing else.

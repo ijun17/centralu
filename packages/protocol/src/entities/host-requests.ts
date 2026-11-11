@@ -3,7 +3,7 @@ import { z } from 'zod'
 /**
  * A host request (#1405): a call made with the limited credential that cannot be undone or widens what runs without
  * asking, waiting for the person to allow it in a window. Not tied to a session: the program that asked holds no
- * session's rights, so its card is the host's own (docs/security-boundaries.md, "Who holds full power").
+ * session's rights, so its card is the host's own (docs/security-boundaries/credentials.md).
  *
  * `question` is the whole card: what will happen, named (the trash's rows by name and size, as the Assistant's own
  * card names them), and that it cannot be undone. `client` is the name the program gave itself in its hello, never

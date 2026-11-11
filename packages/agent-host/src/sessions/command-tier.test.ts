@@ -19,7 +19,7 @@ import { residentCost } from './tool-cost.js'
 /**
  * The `commands` tier (#512): the Assistant's rare commands leave its tool list and are reached through
  * centralu_commands / centralu_help / centralu_run. It changes how a seat reaches a command, never which
- * commands it may run: the tool matrix (docs/security-boundaries.md, tool-matrix.test.ts) still decides.
+ * commands it may run: the tool matrix (docs/security-boundaries/tool-matrix.md, tool-matrix.test.ts) still decides.
  */
 
 const PROFILES: ToolProfile[] = ['assistant', 'scoped', 'builder', 'reader']

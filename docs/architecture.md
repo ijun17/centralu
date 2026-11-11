@@ -222,7 +222,7 @@ Tauri app (window)  ──attach──▶  keeper (centralu-keeper, own session)
 
 The host's long-lived children are its own (§4.3): a host restart ends them, and an update stops them for
 an update, which the next host continues. The control socket, its protocol and its trust rule are in [agent-host/lifecycle/keeper.md](agent-host/lifecycle/keeper.md) and
-[security-boundaries.md](security-boundaries.md).
+[security-boundaries/keeper.md](security-boundaries/keeper.md).
 
 ### 4.2 The front door (#280, option C step 3)
 

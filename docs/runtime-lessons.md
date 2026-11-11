@@ -1653,8 +1653,8 @@ unverified"). The pull request's **Not exercised** field names them.
 
 Not fixed here; each belongs to the pull request that next touches its document.
 
-- thin-shell.md §10.2 ("An unpinned shell" row), releasing.md "The macOS shell" and security-boundaries.md "Signed
-  content" say releases start their keeper directly until shell v1 is pinned; #450 pinned it.
+- thin-shell.md §10.2 ("An unpinned shell" row), releasing.md "The macOS shell" and security-boundaries/signed-content.md
+  say releases start their keeper directly until shell v1 is pinned; #450 pinned it.
 - `links/tunnel.ts` says the first ssh "falls back to `~/.centralu/bin/centralu` on exit 127"; the fallback is decided
   on the remote (RE3).
 

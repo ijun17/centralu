@@ -1,4 +1,4 @@
-/** What the limited credential may call (#1405, docs/security-boundaries.md "Who holds full power") */
+/** What the limited credential may call (#1405, docs/security-boundaries/credentials.md) */
 import { describe, expect, it } from 'vitest'
 import { RpcMethods } from '@cc/protocol'
 import { METHOD_RIGHTS, limitedRefusal, limitedRight, type RightsHost } from './method-rights.js'

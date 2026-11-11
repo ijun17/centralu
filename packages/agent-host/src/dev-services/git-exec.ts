@@ -43,7 +43,7 @@ import { rpcError } from '../rpc-error.js'
  * system configuration, and nothing here sets it), `core.pager` (never started: stdout is a pipe),
  * `core.editor` (no read opens one), and the network settings (`core.sshCommand`,
  * `credential.helper`), which only a push reads. Writes the person asks for (stage, commit,
- * switch, push) run as plain git does — docs/security-boundaries.md says what that leaves open.
+ * switch, push) run as plain git does — docs/security-boundaries/project-trust.md says what that leaves open.
  */
 
 /**

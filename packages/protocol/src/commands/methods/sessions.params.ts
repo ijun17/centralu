@@ -264,7 +264,7 @@ export const sessionsParams = {
    * A local image an agent wrote into a reply as Markdown (`![alt](/path/to/shot.png)`). The window cannot load
    * a file path itself (its origin is the app, and its CSP takes images from `data:` and `blob:` only), so the host
    * reads it: wherever it is on that machine, but only a path that appears in one of this session's own replies, only
-   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries.md,
+   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries/desktop.md,
    * "Images a reply names"). `path` is the string as the reply wrote it: `~`, a path relative to the session's folder
    * and a `file://` URL are resolved by the host.
    */

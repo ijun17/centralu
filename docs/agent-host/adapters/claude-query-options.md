@@ -24,7 +24,7 @@ every outbound send to a known peer if the gate changes. A process started befor
 The `auto` launch fingerprint is version 3, so a host that finds such an `auto` process restarts it once through the
 normal launch-settings path (#589): at once when it is idle, after its current turn otherwise. Since #1895 step 4 PR 1
 no process outlives its host, so every process a host runs it started itself. Nothing needs to be restarted by hand.
-See [security-boundaries.md](../../security-boundaries.md).
+See [security-boundaries/inter-agent-content.md](../../security-boundaries/inter-agent-content.md).
 
 The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
 start and resume across trust and permission presets; adapter tests check merging and the keeper

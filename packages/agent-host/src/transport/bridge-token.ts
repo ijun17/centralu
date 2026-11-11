@@ -10,7 +10,7 @@ import { sameSecret } from './http.js'
  * credential in its environment. The environment a process started with stays readable by every
  * other process of the same user: on macOS 27.0.1 `ps eww -p <pid>` and `sysctl kern.procargs2`
  * printed a marker variable of another process, also after that process had deleted it from
- * `process.env` (docs/security-boundaries.md, "The front door"). So a command any session runs could
+ * `process.env` (docs/security-boundaries/keeper.md "The front door"). So a command any session runs could
  * read the bridge's credential. When that credential was the front door's token, it opened every RPC:
  * setting a session's preset to auto, trusting a project. This one opens only what the bridge itself
  * does, for the one session it was made for (`bridgeRefusal`).

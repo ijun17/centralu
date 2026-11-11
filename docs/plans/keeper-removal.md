@@ -151,7 +151,7 @@ measured releases).
 
 Linux has no permission model to keep, so the shell's reason for the keeper does not apply. A Linux window runs from
 its AppImage's mount, whose path changes at every launch, so the window check can accept only the window that started
-the keeper ([security-boundaries.md](../security-boundaries.md), "The keeper's control socket"), and the keeper would
+the keeper ([security-boundaries/keeper.md](../security-boundaries/keeper.md)), and the keeper would
 need its carried copy and AppImage code to outlive the mount. The Linux keeper never ran by default on a desktop. Moving
 it there would add a path for a feature no Linux user has today. If background mode is ever wanted on Linux, the small
 keeper is the place, from a known point.
@@ -198,7 +198,7 @@ for good: deleting it would leave a step owed and never run.
 
 Every PR after the doc lands only after the `keeper-holding-last` tag. Each one updates in the same PR the documents
 for what it removes: agent-host/lifecycle/README.md, architecture.md §4.1 to §4.5, domain-model.md's keeper rows,
-security-boundaries.md, runtime-lessons.md and the Korean mirrors. Line counts are estimates and include tests.
+security-boundaries/README.md, runtime-lessons.md and the Korean mirrors. Line counts are estimates and include tests.
 
 | PR | Deletes | Moves or changes | Must pass | Real-environment check | ≈ lines out |
 |---|---|---|---|---|---|

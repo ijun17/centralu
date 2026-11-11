@@ -52,7 +52,7 @@ consent card does (`askHost`). Nothing is made until the person chooses Create; 
 allow and nothing is remembered; deny, or the call stopping, makes nothing. The target is checked
 before the card (a refusal costs the person nothing) and again after it. A project made this way is
 announced with `projects_changed`, which every window answers by re-reading the project list. It is
-the Assistant's alone (security-boundaries.md), and it makes projects on this computer only: the
+the Assistant's alone (security-boundaries/tool-matrix.md), and it makes projects on this computer only: the
 hub's Assistant does not see the linked machines; their projects are made from Add project, by picking the machine. A
 clone also says "Cloning … into …" in the Assistant's conversation once Create is chosen, while the call runs. The
 swap left the Assistant's resident set smaller than before (`residentCost`, Claude: 11,798 → 11,620 characters, and

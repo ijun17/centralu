@@ -134,7 +134,7 @@ things, but deleting for good, trusting, installing and answering the app's own 
 app window's. Such a click raises a card in the app's window, or is refused. A loopback port is
 not per user: on a machine with other users, any of them can read the credential from the page
 and every conversation with it, so use this on a single-user machine only. See
-[security boundaries](docs/security-boundaries.md#local-transport).
+[security boundaries](docs/security-boundaries/local-data-and-transport.md#local-transport).
 
 For the real app rather than the browser:
 
@@ -474,9 +474,9 @@ read, or a skipped `pnpm pre-pr` make it deep.
 
 | Tier | What falls in it | Review, inside the author's loop |
 |---|---|---|
-| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries.md`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
+| auto | only harmless kinds, listed by extension: documents and images under `docs/**` (`.md`, `.txt`, images; not `security-boundaries/`), fixture data (`.json`, `.txt`, `.sql`, `.csv`, `.yaml`, …), UI icons, images and fonts; any other file there (code, a script, a binary, a Makefile, anything unknown) is light | none beyond the checks; it lands without a pull request of yours, through the board's `integrate` ([how](#what-has-to-pass-before-you-send-it)) |
 | light | everything no rule names, and anything in an auto folder of a kind its rule does not list: ordinary code and its tests, UI scenarios, CSS, copy inside `.tsx` | one review by another model in the author's session: a sub-agent reads the diff against the self-check above |
-| deep | the store and migrations, `docs/security-boundaries.md`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
+| deep | the store and migrations, `docs/security-boundaries/`, trust and permission code and its tests, links, keeper and `centralu serve`, releases, `packages/protocol`, `tooling/**` guards, what CI runs the UI scenarios with, dependencies, `.github/**` and the board's merge gates | a separate review session that runs real-environment cases (packaged app, remote, Windows, a swap) |
 | person | never by path: the label `tier:person`, set by hand for product direction or trust policy | the owner decides on the board |
 
 The author runs that review before saying done and fixes what it finds; nobody relays review

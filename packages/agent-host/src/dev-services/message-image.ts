@@ -10,7 +10,7 @@ import { IMAGE_PREVIEW_MAX_BYTES, type MessageImage, type MessageImageRefusal } 
 import { DRIVE_PATH, walkLinks } from './link-walk.js'
 
 /**
- * A local image an agent wrote into a reply (`messages.image`, docs/security-boundaries.md "Images a reply names").
+ * A local image an agent wrote into a reply (`messages.image`, docs/security-boundaries/desktop.md "Images a reply names").
  *
  * The window cannot load `![shot](/Users/me/out/shot.png)` itself: its origin is the app and its CSP takes images from
  * `data:` and `blob:` only, so WKWebView drew a broken-image mark. The host reads the file instead, and since that file

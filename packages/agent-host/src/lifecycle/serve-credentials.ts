@@ -21,7 +21,7 @@ export { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE }
  * What this protects: the full credentials are no longer written down anywhere. A process of this user that reads the
  * file gets the key (the limited credential, as `--connection` prints it) and the verifiers, neither of which opens
  * the host whole. It can still ask the launcher for a credential of its own (`--pair`), which the hub's machine row
- * then names: the honest limit, docs/security-boundaries.md "The remote host".
+ * then names: the honest limit, docs/security-boundaries/remote-host.md.
  */
 
 /**

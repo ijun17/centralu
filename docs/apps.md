@@ -13,7 +13,7 @@ Code: runtime `packages/agent-host/src/apps/external/`, view hosting `packages/a
 session attachment `sessions/session-apps.ts`, inline views `inline-views.ts`, template
 `packages/agent-host/app-template/`, UI `packages/ui/src/features/{app-frame,pinned-app}/` and
 `session/InlineView.tsx`. These are the only apps: the compiled built-in app framework and its one app,
-the control rail (#81), were removed in #372 (decided in #97). Security reasoning: [security-boundaries.md](security-boundaries.md).
+the control rail (#81), were removed in #372 (decided in #97). Security reasoning: [security-boundaries/](security-boundaries/README.md).
 
 ## 1. What an app is
 
@@ -191,7 +191,7 @@ either to act.
 | | Trusted project | Untrusted project |
 |---|---|---|
 | Apps | Start when needed; attached to the project's sessions | Listed as `untrusted`; never started, never attached, every call refused. No app is created there (`create_app`, `apps.create`) and no builder session is made |
-| Repository settings | Apply as before | Do not apply: see security-boundaries.md, "Repository configuration and project trust" |
+| Repository settings | Apply as before | Do not apply: see security-boundaries/project-trust.md |
 
 - **Asking**: a newly registered project starts untrusted, except one Centralu made itself as a new empty
   folder (below, #655), and the sidebar asks once with a card
@@ -380,7 +380,7 @@ ext-apps examples here, from their published npm packages, with a minimal manife
 - **Pin** opens the app's pinned view.
 - **`ui/message`** from an inline view asks first (*<app> wants to send this to this conversation*,
   Cancel or Send). Sent text goes only to that conversation, is shown as "<app> app ⤷", and reaches
-  the agent framed as the app's text (security-boundaries.md, "Text an app sends").
+  the agent framed as the app's text (security-boundaries/untrusted-text.md "Text an app sends").
 
 ### 6.2 Pinned, in the main area (Centralu's way, within the standard)
 
@@ -480,7 +480,7 @@ shows "Changed · Reload" and waits for the person.
 
 ### 6.4 How a view is hosted
 
-A summary; the reasoning is in security-boundaries.md, "App views".
+A summary; the reasoning is in security-boundaries/app-views.md.
 
 - The UI asks the host for a frame address (`apps.viewFrame`). The host serves a **sandbox proxy**
   page on its loopback port, behind a secret made at every launch. The proxy creates the inner frame
@@ -896,7 +896,7 @@ not by a logged-in run: the approval-mode values, the configuration field names,
 `_meta` key, and whether the MCP configuration sent with `thread/resume` takes effect (spikes S-3
 and S-7 wait for a login). `normal` follows the person's own policy for an app's write tools, as
 Claude does: with `approval_policy = "never"`, which would refuse a tool that asks, the bridges are
-loaded with `approve` instead (#382, [security-boundaries.md](security-boundaries.md)).
+loaded with `approve` instead (#382, [security-boundaries/approvals.md](security-boundaries/approvals.md)).
 
 ### 9.3 Long calls and cancellation
 
@@ -1072,7 +1072,7 @@ gate happens in one place, the broker desk (`desk.ts`).
   never the Assistant folder's files. The tool is `tool` if declared, else the default (the
   project's default tool; for a user-folder app, the Assistant's). A tool that is not installed
   or not logged in is refused before a session is created, in the tool's words. The prompt reaches
-  the agent framed as the app's text (security-boundaries.md, "Text an app sends"). The request
+  the agent framed as the app's text (security-boundaries/untrusted-text.md "Text an app sends"). The request
   waits for the turn and returns the final answer: the agent's text after its last tool call. With
   `schema` (a JSON Schema whose top level is an object), Claude receives it as `outputFormat` when
   the query starts and Codex as the turn's `outputSchema`; the host validates the answer against

@@ -245,7 +245,7 @@ not a default member, so app builds never build it. What the plan left open, and
 | The data folder | The window's: the shell refuses a missing one and never creates or migrates it; a `--content` under `<data>/content/` is refused | Migration rules in pinned bytes could never change. The copy is removed and redone when it does not verify, which must never reach the source |
 | Usage descriptions | Camera, microphone, Bluetooth, contacts, calendars, reminders, photos, speech recognition, Apple Events, protected folders, network volumes, removable volumes, local network | macOS asks the responsible app (the shell) and ends the asking process when its description is missing; adding one later is a new shell version |
 | The icon | `icons/icon.icns` as it is when the shell version is built | Shown next to "Centralu" in System Settings; a later icon change reaches it only with a new shell version |
-| Test keys | One extra key only behind the `test-key` feature, refused at compile time without `debug_assertions` | The integration test needs a shell that trusts a throwaway key; the shell people install trusts keys.json alone (security-boundaries.md "Signed content") |
+| Test keys | One extra key only behind the `test-key` feature, refused at compile time without `debug_assertions` | The integration test needs a shell that trusts a throwaway key; the shell people install trusts keys.json alone (security-boundaries/signed-content.md) |
 
 Left for later steps: the window opening the shell and reading `shell-status.json` (step 4, §10.2), removing old
 `<data>/content/<version>/` folders and leftover `.partial-*` folders, and moving the keeper's host copies

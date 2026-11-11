@@ -118,7 +118,7 @@ the person did not remove what the hub installed there, neither side runs a loca
 - **Not covered.** A machine on another protocol is held at `versions_differ`, where neither its hello nor what runs there
   can be read, so it stays the person's to update (no protocol bump has happened yet: `PROTOCOL_VERSION` is 1).
 - **An agent's call.** A limited caller's `machines.update` with `when` `idle` or absent runs without a card when
-  `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries.md "Who holds full power"); the
+  `followsHub` holds (transport/method-rights.ts `RightsHost`, security-boundaries/credentials.md); the
   transport judges it once and tells the handler (`RpcContext.covered`), and the Assistant's `install_machine` (update) goes without its card on the same check; both run `unasked`.
 
 **The desktop copy follows the host** (#1736). The hub's update brings the host-only package, which has no desktop
